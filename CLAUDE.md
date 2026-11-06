@@ -1,6 +1,6 @@
 # Working in this repository
 
-Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/App-Consistency-Whitepaper.md,
+Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Vergence-Whitepaper.md,
 the current milestone is docs/milestone-1.md, status is in README.md.
 
 - **Not started on purpose.** Dave, 2026-11-05: set up on Control, but build

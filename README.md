@@ -6,8 +6,8 @@ every toolkit converge on one answer, so every application is the right size,
 in the right place and readable, on any monitor setup, for every user.
 
 The design is in
-[docs/App-Consistency-Whitepaper.md](docs/App-Consistency-Whitepaper.md)
-(PDF beside it), written while the project was still called "App
+[docs/Vergence-Whitepaper.md](docs/Vergence-Whitepaper.md)
+(the PDF beside it is still Draft 0.3, from before the rename, until it is rebuilt), written while the project was still called "App
 Consistency"; it was named Vergence on 2026-11-05.
 
 **Status (2026-11-05): set up, not started.** The first build waits for real

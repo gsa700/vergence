@@ -1,19 +1,21 @@
 ---
-title: "App Consistency"
+title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "5 November 2026 — Draft 0.3"
+date: "5 November 2026 — Draft 0.4"
 ---
 
-# App Consistency
+# Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.3 · 5 November 2026
+David Erickson (AB0R), with Claude · Draft 0.4 · 5 November 2026
 
 ---
 
 ## Abstract
+
+*Vergence: the movement of both eyes converging on one point so that you see one clear image. Here, every monitor and every toolkit converge on one answer. (The project was called App Consistency until Draft 0.4.)*
 
 On today's Unix-like desktops, an application's size on screen depends on which monitor it happens to be on, which toolkit it was written with, and which environment variables were set when it started. Where it appears depends on whether the window system lets it choose, and on whether anything remembers where you last put it. Usually nothing does.
 
@@ -154,10 +156,11 @@ Three monitors in a row. Physical sizes are **assumed** for the calculation.
 | | M1 | M2 | M3 |
 |---|---|---|---|
 | Rendered at | 5120×2880 | 3840×2160 | 6016×3384 |
-| `xrandr --scale` | 0.75 | 0.5 | 1.0 |
+| `xrandr --scale` | 1.333×1.333 | 2×2 | 1×1 |
 
 - **Virtual screen:** 14,976 × 3,384 pixels, just under the common 16,384-pixel X/GPU limit. A fourth monitor would exceed it.
 - **GPU load:** about 43 Mpx rendered versus 31 Mpx native, roughly 40% more.
+- `xrandr --scale` takes the rendered size divided by the panel's native size, so a value above 1 shrinks the picture onto the panel: M1 shows its 5120×2880 render on 3840×2160 (shown at 0.75 size), M2 shows 3840×2160 on 1920×1080 (shown at half size).
 - **M1** is slightly soft, because 0.75 is not a whole-number scale.
 - **M2** text is softer than true 1080p, because it's drawn at 2× and halved, which loses font hinting.
 - **Old Xlib/Tk applications** draw at 1× and are small everywhere, but at least consistently small.
@@ -298,7 +301,7 @@ On a typical desktop, any program running as the user can already read the user'
 
 Why one language:
 
-1. **FreeBSD from day one.** Rust and Slint build natively on FreeBSD today. .NET works on FreeBSD (AlbumWall runs there natively, and a test application was built as Native AOT with the FreeBSD port's own ILCompiler), but only through the FreeBSD ports' .NET 9, a version behind what our apps target and outside Microsoft's official platforms. System components of the desktop itself should not depend on that.
+1. **FreeBSD from day one.** Rust and Slint build natively on FreeBSD today. .NET works on FreeBSD (AlbumWall, Deadwax and Marginal all run there as Native AOT builds made with the FreeBSD port's own ILCompiler), but only through the FreeBSD ports' .NET 9, a version behind what our apps target and outside Microsoft's official platforms. System components of the desktop itself should not depend on that.
 2. **System components must be small and start instantly.** Settings panels and tray indicators are part of the desktop, not applications, and are packaged with it.
 3. **One codebase.** Profile and EDID logic, the configuration format and the protocol types are shared between daemon, server and tools, with no second toolchain or cross-language bindings.
 
@@ -318,7 +321,7 @@ The author's existing applications (AlbumWall, Deadwax, Marginal, the W2 and LP-
 2. **Live updates with the daemon.** A small .NET helper library reads the daemon's published state (the root-window property, §4.2), so the applications follow monitor and profile changes live without restarting.
 3. **Native backend: Avalonia as the first adopting toolkit.** Avalonia's platform layer is pluggable, so an Avalonia backend can speak the server's native protocol directly: placement requests with stable window identity (Contract 2), the accessibility tree from Avalonia's automation peers (Contract 3), and display-list surfaces converted from Avalonia's scene into the server's validated format (§6.6). This is a contained, highly visible piece of work, and it makes Avalonia the proof that the protocol works for a real cross-platform toolkit with real users, not just for the server's own Rust tools.
 
-On FreeBSD, our .NET applications already run (AlbumWall natively on a FreeBSD 15.1 test machine, November 2026), and Native AOT is proven there with a test application built by the FreeBSD port's own ILCompiler, with no Linux compatibility libraries. Shipping them waits for the FreeBSD ports to reach .NET 10, so all platforms run the same .NET. The desktop itself does not wait.
+On FreeBSD, our .NET applications already run: AlbumWall, Deadwax and Marginal all run as Native AOT builds on a FreeBSD 15.1 test machine (November 2026), made by the FreeBSD port's own ILCompiler, with no Linux compatibility libraries. Shipping them waits for the FreeBSD ports to reach .NET 10, so all platforms run the same .NET. The desktop itself does not wait.
 
 ### 8.2 Major third-party applications: Firefox and Thunderbird
 
