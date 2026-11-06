@@ -115,6 +115,24 @@ recording can stand in for the server.
 For milestone 1 itself, (1), (2) and (5) apply: acceptance tests 2 and 3
 above become scripts, run over the EDID database and overnight sleep cycles.
 
+## Found on Hubble (FreeBSD 15.1, Intel UHD 630), 2026-11-06
+
+- **Fake monitors work.** lindebugfs mounts and drm-kmod has `force` and
+  `edid_override` on every connector. Write the EDID in one `dd` (`cat` fails
+  with "Operation not supported"), then `force` = `on`. After a re-probe, X
+  shows the output as connected, with the fake EDID in the RandR property.
+  Forcing does not send a hot-plug event, so the harness re-probes
+  (`RRGetScreenResources`) after each change.
+- **Real hot-plug stops at devd.** Unplugging and replugging a real HDMI
+  cable gives the kernel event
+  `!system=DRM subsystem=CONNECTOR type=HOTPLUG cdev=dri/card0 connector=115`
+  on `/var/run/devd.pipe`, but Xorg (with libudev-devd installed) does not
+  re-probe and sends no RandR event. So on FreeBSD `vergd watch` also
+  listens on `/var/run/devd.seqpacket.pipe` for DRM HOTPLUG events and calls
+  `RRGetScreenResources` itself; X then sends the usual RandR notifies. This
+  is a FreeBSD-only path and is marked as such in the code. On Debian, Xorg
+  re-probes by itself through udev.
+
 ## Questions to settle on the real hardware
 
 - Which monitors report a physical size of zero or something wrong
