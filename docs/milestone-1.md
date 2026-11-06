@@ -5,9 +5,10 @@ monitors into a profile key, and log hot-plug events. Nothing is changed on
 the desktop yet: this milestone only observes, so it is safe to run on a
 machine in daily use.
 
-**Not started.** It is built and tested on real hardware (a Debian 13 X11
-machine with real monitors), not in a VM: QEMU's synthetic EDIDs and its
-hot-plug behaviour would be worked around instead of the real thing.
+**Not started.** It is built and tested on real hardware (a FreeBSD X11
+machine with real monitors; Debian 13 second), not in a VM: QEMU's synthetic
+EDIDs and its hot-plug behaviour would be worked around instead of the real
+thing. FreeBSD became the primary platform on 2026-11-06.
 
 ## What it does
 
@@ -46,8 +47,7 @@ position.
    monitor uses.
 3. `vergd watch` logs unplug and replug of each monitor, and sleep/wake, with
    the right key each time.
-4. The same build passes 1-3 on FreeBSD with real hardware, or on canary
-   with what QEMU offers if no FreeBSD machine has monitors.
+4. The same build passes 1-3 on Debian 13 with real hardware.
 5. No network socket, no files written (whitepaper §7.3, phase 1 row).
 
 ## Test automation
@@ -105,9 +105,12 @@ recording can stand in for the server.
 - Dave's judgment of "the right size", once, as the calibration for (3).
 - Real docks and KVM switches now and then: they do things a script won't
   predict, and a recording only captures what happened once.
-- **FreeBSD:** whether drm-kmod offers `force` and `edid_override` (or an
-  equivalent) is unknown. If it doesn't, FreeBSD gets real cables plus the
-  replayed recordings from (5).
+- **FreeBSD (now the primary platform):** whether drm-kmod offers `force`
+  and `edid_override` through lindebugfs (`mount -t lindebugfs`) is unknown,
+  and FreeBSD has no `rtcwake`; both are the first things to check on the
+  machine. If they are missing, the automated sweeps (1) and sleep loops (2)
+  run on a Debian machine, and FreeBSD gets real cables plus the replayed
+  recordings from (5).
 
 For milestone 1 itself, (1), (2) and (5) apply: acceptance tests 2 and 3
 above become scripts, run over the EDID database and overnight sleep cycles.
@@ -119,6 +122,7 @@ above become scripts, run over the EDID database and overnight sleep cycles.
 - Identical monitors: are serial numbers present? If not, how stable is the
   connector name as a tiebreak across reboots and docks?
 - What does a KVM switch or a dock do to EDID and hot-plug events?
-- Which machine and monitors: to be decided (the Techlab workstation). The
-  M910q (i5-7500T, Intel HD 630, i915) is a good test machine either way:
-  its driver has the debugfs connector controls the test harness uses.
+- Which machine and monitors: Dave is setting up the FreeBSD machine
+  (2026-11-06). Prefer an Intel or AMD GPU (drm-kmod). The M910q
+  (i5-7500T, Intel HD 630, i915) is a good test machine either way: on
+  Debian its driver has the debugfs connector controls the test harness uses.

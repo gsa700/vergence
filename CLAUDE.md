@@ -11,9 +11,12 @@ the current milestone is docs/milestone-1.md, status is in README.md.
 - **Rust throughout** (whitepaper §8): x11rb for phase 1, Smithay for the
   server, Slint (or iced) for tools, Vello for display lists. EDID, profile and
   rules logic live in library crates the server reuses.
-- **Debian 13 (X11, XFCE) first, FreeBSD second, both at every phase.**
-  Nothing Linux-only where FreeBSD has an equivalent; if something must
-  differ, say so in the code and the docs.
+- **FreeBSD first (bare hardware, X11), Debian 13 (X11, XFCE) second, both
+  at every phase.** Dave, 2026-11-06: development happens on FreeBSD; it was
+  Debian first until then. Stay with the X protocol (RandR) rather than
+  kernel or Linux interfaces (udev, systemd, /sys); if something must
+  differ, say so in the code and the docs. VMs (canary) are for build checks
+  only.
 - **Phase 1 security rules** (whitepaper §7.3): no network socket, no
   unauthenticated control interface, saved state owner-only (0600).
 - **Local repository only, no remote yet.** If it ever goes on GitHub, the
