@@ -22,10 +22,10 @@ toc = md.toc
 css = """
 @page { size: Letter; margin: 22mm 20mm 20mm 20mm; }
 :root { --ink:#1b1f24; --muted:#5b6470; --accent:#1f4e79; --rule:#d5dbe2; --band:#f3f6f9; }
-html { font-size: 10.6pt; }
+html { font-size: 10.6pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 body { font-family: "Cambria", "Georgia", serif; font-variant-numeric: lining-nums; color: var(--ink); line-height: 1.5; margin: 0; }
 h1, h2, h3, .sub, .byline, th, .toc, .label { font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
-.cover { height: 235mm; display: flex; flex-direction: column; justify-content: center; page-break-after: always;
+.cover { height: 218mm; display: flex; flex-direction: column; justify-content: center; page-break-after: always;
          border-left: 6px solid var(--accent); padding-left: 14mm; }
 .cover .label { text-transform: uppercase; letter-spacing: .18em; color: var(--accent); font-size: 9pt; font-weight: 600; }
 .cover h1 { font-size: 40pt; margin: 6mm 0 4mm; color: var(--ink); letter-spacing: -.01em; }

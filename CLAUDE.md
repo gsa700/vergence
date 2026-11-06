@@ -20,6 +20,9 @@ the current milestone is docs/milestone-1.md, status is in README.md.
   rules of the app repos apply: author email is the no-reply address
   (298062495+gsa700@users.noreply.github.com), no LAN addresses, no personal
   email, keys or tokens in any file or commit.
-- **The whitepaper** is edited here (docs/). The PDF is made by
-  docs/build-pdf.py, which renders HTML that Edge prints to PDF (Mobilenode
-  made the first one).
+- **The whitepaper** is edited here (docs/Vergence-Whitepaper.md). After an
+  edit, rebuild the PDF with docs/make-pdf.sh on Control: build-pdf.py makes
+  the HTML (python-markdown in a throwaway venv), html2pdf.swift prints it
+  with WebKit. No Homebrew. On Windows, Edge can print build-pdf.py's HTML.
+  Look at the pages before committing (a cover too tall for the page spills
+  onto a blank page 2).

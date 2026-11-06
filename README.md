@@ -7,7 +7,7 @@ in the right place and readable, on any monitor setup, for every user.
 
 The design is in
 [docs/Vergence-Whitepaper.md](docs/Vergence-Whitepaper.md)
-(the PDF beside it is still Draft 0.3, from before the rename, until it is rebuilt), written while the project was still called "App
+(PDF beside it; `docs/make-pdf.sh` rebuilds it on a Mac), written while the project was still called "App
 Consistency"; it was named Vergence on 2026-11-05.
 
 **Status (2026-11-05): set up, not started.** The first build waits for real

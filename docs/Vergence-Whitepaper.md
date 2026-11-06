@@ -180,7 +180,7 @@ Three monitors in a row. Physical sizes are **assumed** for the calculation.
 
 ### 4.7 First milestone
 
-Read EDIDs, hash each setup into a profile key, and log RandR hot-plug events. Small, safe, and the foundation for everything else. It can begin on a FreeBSD virtual machine (QEMU provides synthetic EDIDs) and move to real monitors on the Debian workstation.
+Read EDIDs, hash each setup into a profile key, and log RandR hot-plug events. Small, safe, and the foundation for everything else. It is built and tested on real hardware from the start, on the Debian workstation with real monitors, with FreeBSD alongside: a virtual machine's synthetic EDIDs and hot-plug behaviour would only be worked around, not learned from.
 
 ---
 
