@@ -50,6 +50,68 @@ position.
    with what QEMU offers if no FreeBSD machine has monitors.
 5. No network socket, no files written (whitepaper §7.3, phase 1 row).
 
+## Test automation
+
+Writing the daemon takes about a week of sessions; testing it on real
+hardware would take weeks by hand. Most of that testing can be automated.
+The harness below starts with milestone 1 and grows with phase 1 (profiles,
+scaling, layout memory). It is a separate test tool: the harness may need
+root, the daemon never does.
+
+**1. Plug and unplug without touching a cable (Linux).** The kernel's DRM
+layer gives every connector two debugfs files (DRM core, so any KMS driver,
+the M910q's Intel HD 630 included):
+
+- `/sys/kernel/debug/dri/<N>/<connector>/force`: `on` / `off` / `unspecified`
+  makes the connector look plugged in or unplugged, with the hot-plug event
+  that goes with it.
+- `/sys/kernel/debug/dri/<N>/<connector>/edid_override`: write an EDID blob
+  and the connector reports it; write `reset` to go back to the real one.
+
+With these, a script can run the daemon against thousands of real monitors'
+EDIDs from the public linuxhw EDID database (github.com/linuxhw/EDID), broken
+ones included (zero or wrong physical size, missing serials, identical
+twins). That covers whitepaper §10 item 3 far better than a shelf of
+monitors. The exact behaviour (whether `force` produces the same RandR
+events as a real unplug) is the first thing to check on the machine.
+
+**2. Sleep and wake, overnight.** `rtcwake -m mem -s 30` suspends and wakes
+the machine after 30 s. A loop checks after every cycle that the profile key
+is unchanged and (later) that the layout survived.
+
+**3. Same physical size everywhere (scaling milestones).** Small test
+programs in each toolkit (GTK, Qt, Avalonia, Electron, Java) each draw a box
+of a known logical size. The harness screenshots each monitor, measures the
+box in pixels and converts to millimetres with the EDID's physical size. Pass:
+every toolkit's box is the same physical size on every monitor, within a
+tolerance. Dave's eye is needed once, to calibrate what "the right size" is,
+not on every run.
+
+**4. Layout memory (layout milestones).** The harness opens windows, Firefox
+with several windows and Thunderbird included, places them, fakes an unplug
+and replug (1), restarts the apps and compares every window's monitor,
+position and size with what was saved. A drift check catches a window
+creeping a few pixels per restore (GTK client-side decoration shadows,
+`_GTK_FRAME_EXTENTS`).
+
+**5. Record and replay.** The first runs on real monitors, a dock and a KVM
+switch record every RandR event and EDID the daemon sees. The recordings
+become ordinary tests that run anywhere, Control and CI included, with no
+monitors attached. The daemon's X11 access sits behind an interface so a
+recording can stand in for the server.
+
+**What stays manual:**
+
+- Dave's judgment of "the right size", once, as the calibration for (3).
+- Real docks and KVM switches now and then: they do things a script won't
+  predict, and a recording only captures what happened once.
+- **FreeBSD:** whether drm-kmod offers `force` and `edid_override` (or an
+  equivalent) is unknown. If it doesn't, FreeBSD gets real cables plus the
+  replayed recordings from (5).
+
+For milestone 1 itself, (1), (2) and (5) apply: acceptance tests 2 and 3
+above become scripts, run over the EDID database and overnight sleep cycles.
+
 ## Questions to settle on the real hardware
 
 - Which monitors report a physical size of zero or something wrong
@@ -57,4 +119,6 @@ position.
 - Identical monitors: are serial numbers present? If not, how stable is the
   connector name as a tiebreak across reboots and docks?
 - What does a KVM switch or a dock do to EDID and hot-plug events?
-- Which machine and monitors: to be decided (the Techlab workstation).
+- Which machine and monitors: to be decided (the Techlab workstation). The
+  M910q (i5-7500T, Intel HD 630, i915) is a good test machine either way:
+  its driver has the debugfs connector controls the test harness uses.
