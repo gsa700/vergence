@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "5 November 2026 — Draft 0.4"
+date: "5 November 2026 — Draft 0.5"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.4 · 5 November 2026
+David Erickson (AB0R), with Claude · Draft 0.5 · 5 November 2026
 
 ---
 
@@ -181,6 +181,18 @@ Three monitors in a row. Physical sizes are **assumed** for the calculation.
 ### 4.7 First milestone
 
 Read EDIDs, hash each setup into a profile key, and log RandR hot-plug events. Small, safe, and the foundation for everything else. It is built and tested on real hardware from the start, on the Debian workstation with real monitors, with FreeBSD alongside: a virtual machine's synthetic EDIDs and hot-plug behaviour would only be worked around, not learned from.
+
+### 4.8 Testing on real hardware, automated
+
+Real-hardware testing is the slow part of phase 1 (§9), so most of it is scripted. The test harness is a separate tool; it may need root, the daemon never does.
+
+1. **Plug and unplug without touching a cable.** On Linux, the kernel's DRM layer gives every connector two debugfs controls: `force` makes it look plugged in or unplugged, with the hot-plug event that goes with it, and `edid_override` makes it report any EDID. The daemon can then be run against thousands of real monitors' EDIDs from the public linuxhw EDID database, including broken ones (zero or wrong physical size, missing serial numbers, identical twins).
+2. **Sleep and wake, overnight.** `rtcwake` suspends and wakes the machine in a loop; after every cycle the profile and the layout must be unchanged.
+3. **Same physical size, measured.** Small test programs in GTK, Qt, Avalonia, Electron and Java each draw a box of known logical size; the harness screenshots every monitor and measures each box in millimetres using the EDID's physical size. The user's judgment of "the right size" is needed once, as a calibration, not on every run.
+4. **Layout memory, scripted.** Windows (several Firefox windows and Thunderbird included) are placed, a monitor is unplugged and replugged through (1), the applications restart, and every window's position and size is compared with what was saved, with a check for drift of a few pixels per restore.
+5. **Record and replay.** Every RandR event and EDID seen on real monitors, docks and KVM switches is recorded once; the recordings become tests that run anywhere, with no monitors attached.
+
+What stays manual: the one-time size calibration, occasional real docks and KVM switches, and FreeBSD if its DRM drivers lack the debugfs controls (then real cables plus the replayed recordings). The details are in the milestone 1 plan.
 
 ---
 
@@ -358,7 +370,7 @@ Firefox and Thunderbird are GTK applications on Linux and FreeBSD with mature na
 
 **Where the real costs are.** Writing the code is not the bottleneck. The bottlenecks are:
 
-- **real-hardware testing:** GPUs, monitors with unusual EDIDs, docks, sleep and wake;
+- **real-hardware testing:** GPUs, monitors with unusual EDIDs, docks, sleep and wake. Most of it can be automated (§4.8), which turns weeks of manual testing into overnight runs; what remains manual is real docks, KVM switches and FreeBSD hardware;
 - **the user's time and judgment:** what "the right size" means to their eyes;
 - for phases 3–4, **toolkit adoption**, which only a working demonstration can start.
 
