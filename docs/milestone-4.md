@@ -1,0 +1,163 @@
+# Milestone 4: the right size on every monitor
+
+Whitepaper §4.2, §4.3, §4.6. Milestones 2 and 3 put monitors and windows
+back. Milestone 4 makes things **the right size**: a window, its text and
+the pointer are the same physical size on every monitor, and every toolkit
+gets the same answer.
+
+**Status (2026-11-06): plan, waiting for Dave's decisions.** Most of it can
+be built and tested with fake monitors of different densities (a fake EDID
+can claim any physical size). Only "does it look right" needs real monitors:
+the one-time size calibration and the final check (acceptance 8).
+
+## What Hubble has (checked 2026-11-06)
+
+- **ASUS VS229:** 1920x1080, 475 x 267 mm, so about 102 ppi. The fake
+  (`VERGE FAKE 1`) claims 48 x 27 cm, about the same density. Two more fakes
+  are needed: a 27" 4K (60 x 34 cm, about 163 ppi; 3840x2160 at 30 Hz, the
+  most HDMI 1.4 carries) and a 24" 1080p (53 x 30 cm, about 92 ppi). Together
+  these are the whitepaper's worked example (§4.6).
+- **Screen limit:** X reports 16384 x 16384 maximum.
+- **XSETTINGS is owned by Xfce** (`xfsettingsd`, from the xfconf `xsettings`
+  channel: `Gdk/WindowScalingFactor` 1, `Xft/DPI` 96, cursor size 0).
+  `Xft.dpi` in the X resources is 96. A second XSETTINGS manager would fight
+  Xfce (decision 2).
+- **Xfce has its own per-monitor Scale** (Display settings, xfconf
+  `displays` channel, `/Default/HDMI-2/Scale` 1.0), using the same RandR
+  transform as Mode A. vergd and Xfce must not both set it; vergd acts last
+  (as in milestone 2), and the plan says to leave Xfce's at 1.
+- **Toolkits installed:** GTK 3 and 4 (with `gtk3-demo`, `gtk4-demo`,
+  widget factories), Qt 6 (`qt6-base`; no Qt app yet), Xlib (`xterm`,
+  `xclock`). **Available as packages:** Qt apps (`featherpad`, `qterminal`,
+  `kcalc`), Java (`openjdk21`), Electron (`electron42`), .NET 9 (`dotnet`)
+  for a small Avalonia test app (decision 6).
+
+## The scale of a monitor (derived, not guessed)
+
+From the whitepaper (§3 principle 1, §6.3): the unit is the **CSS
+reference pixel**, the size one pixel at 96 dpi appears from 71 cm (28 in).
+
+    scale = (ppi / 96) x (viewing distance / 71 cm) x preference
+
+- **ppi** from the EDID's physical size (milestone 1 parses it; the
+  whitepaper's §10 item 3 covers missing or wrong sizes: then 96 ppi, scale
+  1, and vergd says so).
+- **Viewing distance** from a preset per monitor: desktop 71 cm (default),
+  laptop 50 cm, TV 250 cm; editable per monitor in the profile.
+- **Preference:** one number for "how big I like things" (1.0 = the web's
+  reference size), set once by calibration (acceptance 8).
+- **Rounded to steps of 0.25.** Examples at the desktop distance: ASUS 102
+  ppi -> 1.06 -> **1.0**; 24" 1080p 92 ppi -> 0.96 -> **1.0**; 27" 4K 163 ppi
+  -> 1.70 -> **1.75**.
+
+A profile can override the derived value per monitor.
+
+## Mode A, "Uniform" (macOS approach)
+
+Render the whole desktop at a whole-number scale **R** (GTK only takes whole
+numbers): R = the largest monitor scale, rounded up. Each monitor is
+rendered at R and RandR shrinks it onto the panel by R / its scale:
+
+| ASUS + 27" 4K | ASUS (1.0) | 4K (1.75) |
+|---|---|---|
+| R | 2 | 2 |
+| RandR scale (rendered / native) | 2.0 | 1.143 |
+| Rendered size | 3840x2160 | 4389x2469 |
+
+- Every toolkit gets R: GTK window scale R, `Xft/DPI` and `Xft.dpi` 96 x R,
+  cursor size 24 x R, Java/Electron the same at launch. Everything is the
+  same physical size everywhere, in every toolkit.
+- **Costs:** more GPU work, and monitors scaled by a non-whole factor are a
+  little soft (here the ASUS, drawn at 2 and halved). With only monitors of
+  scale 1 (Hubble today), R = 1 and **nothing changes**.
+- **Limits:** the rendered screen must fit in 16384 x 16384; vergd refuses a
+  setup that doesn't and says why (whitepaper pass criterion 3).
+- **Edge alignment:** monitors' logical heights now differ; positions are
+  stored in the profile as in milestone 2, and vergd's default for a new
+  arrangement is top-aligned.
+- **Window memory** (milestone 3) works in logical pixels, so it is
+  unchanged as long as a setup keeps its scale; a scale change for a setup
+  rescales the remembered places by the same factor.
+
+## Mode B, "Native" (sharpest)
+
+No RandR transform; each monitor at native resolution. Per-monitor factors
+go to toolkits that can use them (Qt: `QT_SCREEN_SCALE_FACTORS`; Avalonia:
+`AVALONIA_SCREEN_SCALE_FACTORS`); GTK, Electron, Java and Xlib get one
+global value, so they are the wrong size on some monitor. Useful when every
+monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
+
+## How the settings reach applications
+
+| What | Read by | When it takes effect |
+|---|---|---|
+| XSETTINGS `Gdk/WindowScalingFactor`, `Xft/DPI`, `Gtk/CursorThemeSize` | GTK 3/4 (Firefox, Thunderbird, Xfce) | **live** |
+| `Xft.dpi`, `Xcursor.size` (X resources) | Qt, Electron, Xlib fonts | new apps |
+| `GDK_SCALE`, `QT_SCREEN_SCALE_FACTORS`, `AVALONIA_SCREEN_SCALE_FACTORS`, Java's `-Dsun.java2d.uiScale` | Java, Qt, Avalonia, some Electron | **next login** (decision 5) |
+| `_VERGENCE_SCALES` root-window property (documented) | apps that opt in (our .NET helper, §8.1) | live |
+
+## Decisions for Dave
+
+1. **Scope.** (a) Mode A and the toolkit settings first, then Mode B as the
+   second half of this milestone. *(recommended: Mode A is the default and
+   the only one that is right for every toolkit)* (b) Both at once.
+2. **Where the settings go on Xfce.** (a) Through Xfce's own settings
+   (xfconf `xsettings` channel), which `xfsettingsd` then publishes; vergd
+   runs its own XSETTINGS manager only when no desktop owns it (bare
+   Openbox and the like). *(recommended: works with Xfce, not against it)*
+   (b) vergd takes XSETTINGS over from Xfce.
+3. **Where the scale comes from.** (a) Derived from the EDID size, viewing
+   distance and one preference, as above, with a per-monitor override.
+   *(recommended: whitepaper principle 1)* (b) A percentage per monitor per
+   profile, set by hand, as Windows does.
+4. **When it is on.** (a) Off until `vergd scale on`; then every setup,
+   new ones included, gets the derived scale, and `vergd scale off` puts
+   everything back to 1:1. *(recommended: Mode A changes the whole
+   desktop's rendering, so it starts as an explicit choice)* (b) On by
+   default.
+5. **Launch-time variables** (`GDK_SCALE`, `QT_SCREEN_SCALE_FACTORS`...).
+   (a) vergd writes them to `~/.config/vergence/session.env`, sourced at
+   login (one line in `~/.xprofile`, which LightDM reads; to be confirmed
+   on FreeBSD), so they apply from the next login; the live parts go
+   through XSETTINGS and X resources. *(recommended)* (b) Leave them out;
+   live settings only.
+6. **Test applications on Hubble.** (a) Install `featherpad` (Qt),
+   `openjdk21` (Java), `electron42` (Electron) and `dotnet` (.NET 9, for a
+   small Avalonia test app), so all six toolkit rows of whitepaper §4.5 are
+   tested. *(recommended; Electron is a large package)* (b) GTK, Qt and Xlib
+   only.
+
+## Acceptance (Hubble, fake monitors of different densities unless noted)
+
+1. `vergd probe` prints each monitor's ppi and derived scale; missing or
+   impossible sizes fall back to 1 and say so (with database EDIDs from the
+   milestone 1 harness).
+2. **Mode A:** ASUS + fake 27" 4K: R = 2, RandR scales 2.0 and 1.143,
+   toolkit settings at 2; `vergd scale off` puts it all back to 1:1.
+3. **Same physical size, measured** (whitepaper §4.8.3): a box of known
+   logical size drawn by a GTK 3, GTK 4, Qt, Xlib, Java, Electron and
+   Avalonia test program on each monitor is screenshotted; its size in mm
+   (from the transform and the EDID size) differs by under 5% across
+   monitors and toolkits.
+4. **Per setup:** ASUS alone, ASUS + 4K, ASUS + 4K + 24": each keeps its
+   own scale; unplug/replug puts the right scale and transform back, and
+   milestone 3's window memory still restores every window (no drift).
+5. **Limits:** a setup whose rendered screen would exceed 16384 px (the ASUS
+   and three fakes) is refused, with the reason in the log.
+6. **Xfce:** Xfce's Display settings or `xfsettingsd` changing the scale or
+   DPI back is noticed and put back (vergd acts last), and nothing loops.
+7. **Mode B:** Qt and Avalonia get per-monitor factors and are the same
+   size on each monitor; GTK gets one value (documented as expected).
+8. **Real monitors (cables):** Dave calibrates the preference once ("this
+   box looks the size of a credit card"); then 3 and 4 again, and his
+   judgment of the result.
+
+## Risks
+
+- Softness in Mode A on monitors scaled by non-whole factors; the reason
+  Mode B exists.
+- The UHD 630's GPU cost of large rendered screens; measured in 2 and 4.
+- Xfce panels and the desktop at scale 2: Xfce 4.20 supports it; to watch.
+- HDMI fakes at 4K are 30 Hz only; DP connectors would do 60 Hz but a
+  forced DP connector with no monitor may fail link training (not needed
+  for the tests).
