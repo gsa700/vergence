@@ -139,6 +139,15 @@ name = "vergence-edid"
 version = "0.1.0"
 
 [[package]]
+name = "vergence-harness"
+version = "0.1.0"
+dependencies = [
+ "vergence-edid",
+ "vergence-profile",
+ "x11rb",
+]
+
+[[package]]
 name = "vergence-profile"
 version = "0.1.0"
 dependencies = [

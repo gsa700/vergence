@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/vergence-edid", "crates/vergence-profile", "crates/vergd"]
+members = ["crates/vergence-edid", "crates/vergence-profile", "crates/vergd", "crates/vergence-harness"]
 
 [workspace.package]
 version = "0.1.0"

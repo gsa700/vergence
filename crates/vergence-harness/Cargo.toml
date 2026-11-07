@@ -1,0 +1,12 @@
+[package]
+name = "vergence-harness"
+description = "Test harness for Vergence: EDID database sweeps, offline and through debugfs fake monitors"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+vergence-edid.workspace = true
+vergence-profile.workspace = true
+x11rb = { version = "0.13", features = ["randr"] }
