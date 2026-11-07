@@ -121,6 +121,18 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
    the selection over), and tell Dave before changing his session. Clean
    tests run in a nested X server (Xephyr) with a bare window manager,
    without touching his session.
+   **Checked on Hubble (22:15):** XSETTINGS carries 30 settings, not just
+   the scale: GTK theme, icon theme, fonts, cursor theme, double-click
+   time... so vergd publishes the **full set**: imported once from the
+   current owner's `_XSETTINGS_SETTINGS` property (X protocol, no xfconf),
+   kept in `~/.config/vergence/settings.toml`, with the scale values
+   computed on top. When another program takes the selection,
+   `xfsettingsd` 4.20.5 **keeps running** (keyboard layout, pointer and
+   display parts unaffected) and does **not** take it back, even on an Xfce
+   settings change. Consequences: Xfce's Appearance dialog no longer has an
+   effect while vergd holds XSETTINGS (accepted: Hubble is a project
+   machine, Dave 22:13); while nobody holds it, new GTK apps get plain
+   defaults, so vergd takes it at start and keeps it.
 3. **Where the scale comes from.** (a) Derived from the EDID size, viewing
    distance and one preference, as above, with a per-monitor override.
    *(recommended: whitepaper principle 1)* (b) A percentage per monitor per
