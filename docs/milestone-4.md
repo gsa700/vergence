@@ -126,6 +126,25 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
   `Gtk/FontName` (Sans 10 to 14) was published within 2 s and Dave saw
   every GTK app switch live, without a restart; put back to 10.
 
+- **Mode A** (22:30): `vergd scale on|off|status`. Profiles store each
+  monitor's RandR factor; `repack` lays monitors out again in a row or
+  column (mirrored ones are refused); the running vergd applies the
+  settings within 2 s of `scale on/off`, on every setup change and at
+  login. Toolkits: XSETTINGS overlay (`Gdk/WindowScalingFactor`,
+  `Gdk/UnscaledDPI`, `Xft/DPI`, cursor size), `Xft.dpi` and `Xcursor.size`
+  in the X resources, `session.env` (Java `-Dsun.java2d.uiScale`,
+  `AVALONIA_GLOBAL_SCALE_FACTOR`) sourced from `~/.xprofile`. GDK_SCALE is
+  deliberately not set: it would pin GTK to one scale and stop it following
+  XSETTINGS live. **Live on Hubble, ASUS + fake 27" 4K:** render 2; ASUS
+  drawn 3840x2160 and shrunk x2.000, 4K drawn 4389x2469 at +3840 and shrunk
+  x1.143; screen 8229x2469; toolkits 2. Unplug: ASUS alone back to 1.
+  Replug: Mode A back from the profile. `scale off`: 1:1 again.
+- **Still to do:** the same-size measurement with test programs in all six
+  toolkits (acceptance 3); window memory when a setup's scale changes
+  (remembered places are in the old scale's pixels); the 16384 limit and
+  three-monitor setups (4, 5); Xfce reacting (6); Mode B (7); confirming
+  that LightDM on FreeBSD reads `~/.xprofile`.
+
 ## Decisions for Dave
 
 1. **Scope.** (a) Mode A and the toolkit settings first, then Mode B as the
