@@ -140,9 +140,9 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
   drawn 3840x2160 and shrunk x2.000, 4K drawn 4389x2469 at +3840 and shrunk
   x1.143; screen 8229x2469; toolkits 2. Unplug: ASUS alone back to 1.
   Replug: Mode A back from the profile. `scale off`: 1:1 again.
-- **Still to do:** Java on FreeBSD (check on Debian); a longer look at
-  Xfce reacting (6, with its Display dialog); Mode B (7); real monitors
-  and the calibration (8).
+- **Still to do:** Java on FreeBSD (check on Debian); Mode B (7); real
+  monitors and the calibration (8); Dave trying the Display dialog by hand
+  in Mode A once real monitors are here.
 - **Window memory across scale changes (23:05):** places are now kept in
   panel pixels (X pixels / the monitor's RandR factor) and sizes in app
   units (X pixels / the render scale); when the scale of the current setup
@@ -175,6 +175,21 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
 - **Xfce reacting (acceptance 6, first look):** right after vergd scaled a
   new setup, Xfce changed it back; vergd logged "the desktop reacting,
   putting the profile back", applied once, and it stayed.
+- **Xfce's Display dialog (acceptance 6, 23:18-23:21),** driven the way the
+  dialog does it (layout written to the `displays` channel, then
+  `/Schemes/Apply`), in Mode A with ASUS + 4K:
+  - *4K moved to the left of the ASUS:* xfsettingsd left the 4K's transform
+    at x=0 and put the unscaled ASUS at x=250, overlapping. vergd first
+    refused to scale an overlap, and could not fall back to 1:1 either, so
+    the desktop stayed half scaled with GTK at 2. **Fixed:** partly
+    overlapping monitors are laid out in the order of their left (or top)
+    edges; only identical positions count as mirrored. Now: one apply, 4K
+    left and ASUS right, both scaled, nothing loops. **Pass.**
+  - *Xfce's own Scale 1.5 on the ASUS:* learned, then Mode A put back over
+    it (vergd's scale wins, as planned; leave Xfce's at 1). No loop.
+  - *Appearance DPI 120:* xfsettingsd no longer touches `Xft.dpi` or
+    XSETTINGS; vergd's 192 stayed. The Appearance dialog has no effect, as
+    decided.
 - **Login checked (22:36):** LightDM's Xsession on FreeBSD sources
   `~/.xprofile` (`VERGENCE_SCALE=1` from `session.env` was in the new
   session's environment); at login vergd took XSETTINGS over from

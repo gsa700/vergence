@@ -173,6 +173,11 @@ pub fn same_arrangement(a: &[OutputSetting], b: &[OutputSetting]) -> bool {
 /// that place monitors (`xrandr --right-of`, found 2026-11-06) use the mode
 /// size even when the picture is scaled, so scaled sizes can overlap a
 /// neighbour that the user put side by side.
+///
+/// Monitors that overlap only partly (Xfce's display settings left one at
+/// x=0 and the other at x=250 on 2026-11-06) are laid out in the order of
+/// their left edges, or failing that their top edges; only monitors at the
+/// same position (mirrored) are refused.
 pub fn repack(current: &[OutputSetting], factors: &[u32]) -> Result<Vec<OutputSetting>, String> {
     assert_eq!(current.len(), factors.len());
     let lit: Vec<usize> = (0..current.len()).filter(|&i| current[i].enabled).collect();
@@ -183,24 +188,38 @@ pub fn repack(current: &[OutputSetting], factors: &[u32]) -> Result<Vec<OutputSe
     };
     let mut row = true;
     let mut col = true;
+    let mut overlap = false;
     for (n, &a) in lit.iter().enumerate() {
         for &b in &lit[n + 1..] {
             let (ax0, ay0, ax1, ay1) = span(a);
             let (bx0, by0, bx1, by1) = span(b);
-            let apart_x = ax1 <= bx0 || bx1 <= ax0;
-            let apart_y = ay1 <= by0 || by1 <= ay0;
-            if !apart_x && !apart_y {
+            if (ax0, ay0) == (bx0, by0) {
                 return Err(format!(
-                    "{} and {} overlap (mirrored?); arrange them side by side first",
+                    "{} and {} are at the same place (mirrored); arrange them side by side first",
                     current[a].name, current[b].name
                 ));
             }
+            let apart_x = ax1 <= bx0 || bx1 <= ax0;
+            let apart_y = ay1 <= by0 || by1 <= ay0;
+            overlap |= !apart_x && !apart_y;
             row &= apart_x;
             col &= apart_y;
         }
     }
-    if !row && !col {
-        return Err("monitors are neither in one row nor in one column; not supported yet".into());
+    if overlap || (!row && !col) {
+        // Go by order: left edges if they all differ, else top edges.
+        let distinct = |f: &dyn Fn(usize) -> i16| {
+            let mut v: Vec<i16> = lit.iter().map(|&i| f(i)).collect();
+            v.sort_unstable();
+            v.windows(2).all(|w| w[0] != w[1])
+        };
+        if distinct(&|i| current[i].x) {
+            row = true;
+        } else if distinct(&|i| current[i].y) {
+            row = false;
+        } else {
+            return Err("monitors overlap and share edges; arrange them side by side first".into());
+        }
     }
     let mut out: Vec<OutputSetting> = current.to_vec();
     for (o, &f) in out.iter_mut().zip(factors) {
@@ -412,6 +431,14 @@ mod tests {
         let r = repack(&[a3, k3, t], &[122_573, 76963, 136_533]).unwrap();
         assert_eq!(r[1].x, r[0].extent().0 as i16);
         assert_eq!(r[2].x, r[1].x + r[1].extent().0 as i16);
+        // Partly overlapping (Xfce left the 4K at 0 and the ASUS at 250): a
+        // row in the order of the left edges.
+        let mut kk = k.clone();
+        kk.x = 0;
+        let mut aa = asus.clone();
+        aa.x = 250;
+        let r = repack(&[aa, kk], &[2 * FIXED_ONE, 74898]).unwrap();
+        assert_eq!((r[1].x, r[0].x), (0, 4389));
         // Mirrored: refused.
         assert!(repack(&[asus.clone(), out("m", "DP-1", 0)], &[FIXED_ONE, FIXED_ONE]).is_err());
         // Disabled monitors are carried along untouched.
