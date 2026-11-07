@@ -148,6 +148,31 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
   session's environment); at login vergd took XSETTINGS over from
   xfsettingsd, from its own file. Logging out restarts X with LightDM.
 
+- **Measured (22:40-22:50), acceptance 3,** with `tools/sizebox` (a
+  200 x 200 box in each toolkit's own units; 52.9 mm at the reference size)
+  and `vergence-harness measure`, ASUS (103 ppi) + fake 27" 4K (163 ppi):
+
+  | Toolkit | off: ASUS | off: 4K | Mode A: ASUS | Mode A: 4K |
+  |---|---|---|---|---|
+  | GTK 3, GTK 4, Qt 6, Electron 42 | 49.5 mm | 31.1 mm | 49.5 mm | 54.4 mm |
+  | Xlib | 49.5 | 31.1 | 24.7 | 27.2 |
+  | Java 21 | 49.5 | 31.1 | 24.7 | 27.2 |
+
+  - Without scaling the box is 37% smaller on the 4K. In Mode A the four
+    scaled toolkits are identical to each other on each monitor.
+  - **The 10% left between the monitors is the rounding to 0.25 steps**
+    (ASUS exactly 1.07 -> 1, 4K exactly 1.70 -> 1.75). With exact scales
+    both would be 52.9 mm (decision 7 below).
+  - **Xlib** draws in device pixels: consistently small, as expected.
+  - **Java 21 on FreeBSD ignores every HiDPI switch** (`-Dsun.java2d.uiScale`,
+    `sun.java2d.uiScale.enabled`, `GDK_SCALE`, `J2D_UISCALE`): no scaling at
+    all, even when passed directly. Probably Linux-only code in the port; to
+    check on Debian.
+  - **Electron 42 on X11 scales its content but not its window**: at scale 2
+    a 240 px window cut its content off. It reads the scale from XSETTINGS,
+    not `Xft.dpi`. Real Electron apps would open too small at scale 2.
+  - Avalonia not measured yet (needs a .NET test app and NuGet packages).
+
 ## Decisions for Dave
 
 1. **Scope.** (a) Mode A and the toolkit settings first, then Mode B as the

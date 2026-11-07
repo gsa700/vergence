@@ -16,10 +16,15 @@
 //!   vergence-harness fake --name N --product 0x9902 --serial 2
 //!                         --mode 4k30|1080p60 --size-mm WxH --out FILE
 //!       Write a fake monitor's EDID (milestone 4: fakes of other densities).
+//!
+//!   vergence-harness measure <window title>...
+//!       Find each size box (tools/sizebox) and print its size on the panel
+//!       in millimetres (milestone 4, acceptance 3).
 
 mod db;
 mod fake;
 mod live;
+mod measure;
 mod parse;
 
 use std::path::PathBuf;
@@ -31,7 +36,8 @@ fn usage() -> ExitCode {
          vergence-harness live <edid-db> --conn <debugfs connector> --output <X output> \
          [--sample N] [--vergd PATH]\n       \
          vergence-harness fake --name N --product 0xNNNN --serial N --mode 4k30|1080p60 \
-         --size-mm WxH --out FILE"
+         --size-mm WxH --out FILE\n       \
+         vergence-harness measure <window title>..."
     );
     ExitCode::from(2)
 }
@@ -45,6 +51,7 @@ fn main() -> ExitCode {
             None => return usage(),
         },
         Some("fake") => fake::run(&args[1..]),
+        Some("measure") if args.len() >= 2 => measure::run(&args[1..]),
         _ => return usage(),
     };
     match result {
