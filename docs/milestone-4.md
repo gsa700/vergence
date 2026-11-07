@@ -132,8 +132,9 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
   settings within 2 s of `scale on/off`, on every setup change and at
   login. Toolkits: XSETTINGS overlay (`Gdk/WindowScalingFactor`,
   `Gdk/UnscaledDPI`, `Xft/DPI`, cursor size), `Xft.dpi` and `Xcursor.size`
-  in the X resources, `session.env` (Java `-Dsun.java2d.uiScale`,
-  `AVALONIA_GLOBAL_SCALE_FACTOR`) sourced from `~/.xprofile`. GDK_SCALE is
+  in the X resources, `session.env` (Java `-Dsun.java2d.uiScale`; at first
+  also `AVALONIA_GLOBAL_SCALE_FACTOR`, dropped after the measurement below)
+  sourced from `~/.xprofile`. GDK_SCALE is
   deliberately not set: it would pin GTK to one scale and stop it following
   XSETTINGS live. **Live on Hubble, ASUS + fake 27" 4K:** render 2; ASUS
   drawn 3840x2160 and shrunk x2.000, 4K drawn 4389x2469 at +3840 and shrunk
