@@ -334,7 +334,11 @@ Techbench's monitor before the LG 6K. Expected, with typical panel sizes
   14" at laptop distance). The real-hardware case for the desktop-size wall
   (whitepaper §5) and for Mode B, which has no such limit.
 - Hubble's HDMI port does 4K at 30 Hz only; the 4K monitors belong on the
-  DisplayPort outputs.
+  DisplayPort outputs. Cabling (Dave, 23:24): ASUS on HDMI (it also has VGA
+  and DVI); 32" 4K by DisplayPort (it has DP and HDMI); 14" 4K (mini HDMI
+  only) by a DP to mini-HDMI cable rated for 8K. If that cable is active it
+  shows as a DP output at 4K 60 Hz; if passive (dual-mode DP), as HDMI-1 or
+  HDMI-3 at 4K 30 Hz. `vergd probe` tells which.
 
 ## Risks
 
