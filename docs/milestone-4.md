@@ -5,8 +5,10 @@ back. Milestone 4 makes things **the right size**: a window, its text and
 the pointer are the same physical size on every monitor, and every toolkit
 gets the same answer.
 
-**Status (2026-11-06): plan. Decided: 1 (a) Mode A first; 2 changed to
-"vergd is the XSETTINGS manager" (below). Waiting on 3 to 6.**
+**Status (2026-11-06): plan, all decided (Dave, 22:09-22:11): 1 (a) Mode A
+first; 2 changed to "vergd is the XSETTINGS manager" (below); 3 (a)
+derived scale; 4 (a) off until `vergd scale on`; 5 (a) session file read at
+login; 6 (a) test apps for all six toolkits.**
 
 **Separate from the desktop (Dave, 2026-11-06 22:09).** Xfce stays the
 desktop on Hubble until the display server replaces it, but it is only a
