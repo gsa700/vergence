@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/vergence-edid", "crates/vergence-profile", "crates/vergd", "crates/vergence-harness"]
+members = ["crates/vergence-edid", "crates/vergence-profile", "crates/vergence-xsettings", "crates/vergd", "crates/vergence-harness"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,3 +11,4 @@ publish = false
 [workspace.dependencies]
 vergence-edid = { path = "crates/vergence-edid" }
 vergence-profile = { path = "crates/vergence-profile" }
+vergence-xsettings = { path = "crates/vergence-xsettings" }

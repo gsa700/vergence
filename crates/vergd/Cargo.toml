@@ -9,5 +9,6 @@ publish.workspace = true
 [dependencies]
 vergence-edid.workspace = true
 vergence-profile.workspace = true
+vergence-xsettings.workspace = true
 x11rb = { version = "0.13", features = ["randr"] }
 libc = "0.2"

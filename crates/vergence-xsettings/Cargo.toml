@@ -1,0 +1,9 @@
+[package]
+name = "vergence-xsettings"
+description = "The XSETTINGS wire format, for Vergence's settings manager and display server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]

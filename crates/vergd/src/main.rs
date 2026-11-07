@@ -20,6 +20,7 @@ mod store;
 mod watch;
 mod windows;
 mod x11;
+mod xsettings;
 
 use vergence_profile::scaling::Distance;
 use std::process::ExitCode;
@@ -31,7 +32,7 @@ use x11::Setup;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: vergd probe\n       vergd watch [--observe-only] [--no-windows]\n       vergd profiles\n       vergd windows\n       \
+        "usage: vergd probe\n       vergd watch [--observe-only] [--no-windows]\n       vergd profiles\n       vergd windows\n       vergd xsettings\n       \
          vergd forget <key-prefix>\n       vergd apply [--dry-run]"
     );
     ExitCode::from(2)
@@ -46,6 +47,7 @@ fn main() -> ExitCode {
             watch::watch(flags.contains(&"--observe-only"), flags.contains(&"--no-windows"))
         }
         ["windows"] => store::load_windows().map(|s| windows::print_store(&s)).map_err(Into::into),
+        ["xsettings"] => xsettings::print_current(),
         ["profiles"] => profiles(),
         ["forget", prefix] => forget(prefix),
         ["apply"] => apply_now(false),
