@@ -39,8 +39,10 @@ the current milestone is docs/milestone-4.md (scaling; earlier ones in docs/mile
   the server replaces it.
 - **Phase 1 security rules** (whitepaper §7.3): no network socket, no
   unauthenticated control interface, saved state owner-only (0600).
-- **Local repository only, no remote yet.** If it ever goes on GitHub, the
-  rules of the app repos apply: author email is the no-reply address
+- **GitHub: private `gsa700/vergence`** (origin, created 2026-11-06 at
+  Dave's go). Push after committing. Going public is Dave's call (needs
+  license files; the whitepaper byline has his callsign, the ASUS test EDID
+  its serial). The rules of the app repos apply: author email is the no-reply address
   (298062495+gsa700@users.noreply.github.com), no LAN addresses, no personal
   email, keys or tokens in any file or commit.
 - **The whitepaper** is edited here (docs/Vergence-Whitepaper.md). After an
