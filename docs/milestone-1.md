@@ -157,6 +157,15 @@ above become scripts, run over the EDID database and overnight sleep cycles.
   fault. Dave saw no flicker on the logged-in Xfce desktop: each fake is
   gone again in about 0.1 s.
 
+- **Sleep and wake, by hand (acceptance 3, first run).** S3 works on the
+  M920q under FreeBSD 15.1 (`zzz`, woken with the power button; uptime kept,
+  the GPU and em0 came back). `vergd watch` ran through it and logged no
+  change: same monitor, same mode, same key. For the test the power button
+  was set to do nothing (`hw.acpi.power_button_state=NONE`), so the waking
+  press could not be taken as "power off" after resume; set back to S5
+  afterwards. An automated loop still needs a FreeBSD way to wake on a
+  timer.
+
 ## Questions to settle on the real hardware
 
 - Which monitors report a physical size of zero or something wrong
