@@ -8,6 +8,11 @@ the current milestone is docs/milestone-1.md, status is in README.md.
   dev box: copy the tree over SSH without .git and target, then run
   `cargo test` and `DISPLAY=:0 target/debug/vergd probe` there. Fake monitors
   for tests: docs/milestone-1.md, "Found on Hubble".
+- **vergd runs in Dave's Xfce session on Hubble** (tools/install-autostart.sh:
+  ~/.local/bin/vergd, log ~/.local/state/vergence/vergd.log, profiles
+  ~/.config/vergence/profiles.toml). Before a test that plugs fake monitors,
+  stop it or expect it to act; after rebuilding, rerun the install script to
+  update the running copy.
 - **Names:** the project and its crates are `vergence` / `vergence-*`; the
   phase 1 daemon is `vergd`. "Verge" for short in conversation.
 - **Rust throughout** (whitepaper §8): x11rb for phase 1, Smithay for the

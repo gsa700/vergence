@@ -140,5 +140,9 @@ hand.
    Pass.
 
 Still to do: 3 by hand in Xfce Display settings, 4 (suspend and wake, log
-out and in), 7 (real monitors). vergd does not start by itself yet: an Xfce
-autostart entry (or an rc script) is the next small step.
+out and in), 7 (real monitors). Autostart: `tools/install-autostart.sh` (no
+root) copies the release build to `~/.local/bin/vergd`, writes
+`~/.config/autostart/vergd.desktop` and logs to
+`~/.local/state/vergence/vergd.log`; `remove` undoes it. Installed and
+running on Hubble since 2026-11-06 19:12; starting at login is not yet
+proved (the next log out and in, which is also acceptance 4).
