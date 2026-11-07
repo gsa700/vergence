@@ -5,7 +5,16 @@ back. Milestone 4 makes things **the right size**: a window, its text and
 the pointer are the same physical size on every monitor, and every toolkit
 gets the same answer.
 
-**Status (2026-11-06): plan, waiting for Dave's decisions.** Most of it can
+**Status (2026-11-06): plan. Decided: 1 (a) Mode A first; 2 changed to
+"vergd is the XSETTINGS manager" (below). Waiting on 3 to 6.**
+
+**Separate from the desktop (Dave, 2026-11-06 22:09).** Xfce stays the
+desktop on Hubble until the display server replaces it, but it is only a
+host: nothing new is built on Xfce's internals (xfconf, xfsettingsd), and
+everything must work under any EWMH window manager. Milestones 2 and 3
+already do (RandR and EWMH only). Pieces that the phase 2 server needs
+anyway are written so they carry over; the XSETTINGS manager is the first:
+the server must provide XSETTINGS to X11 apps under Xwayland. Most of it can
 be built and tested with fake monitors of different densities (a fake EDID
 can claim any physical size). Only "does it look right" needs real monitors:
 the one-time size calibration and the final check (acceptance 8).
@@ -20,8 +29,8 @@ the one-time size calibration and the final check (acceptance 8).
 - **Screen limit:** X reports 16384 x 16384 maximum.
 - **XSETTINGS is owned by Xfce** (`xfsettingsd`, from the xfconf `xsettings`
   channel: `Gdk/WindowScalingFactor` 1, `Xft/DPI` 96, cursor size 0).
-  `Xft.dpi` in the X resources is 96. A second XSETTINGS manager would fight
-  Xfce (decision 2).
+  `Xft.dpi` in the X resources is 96. Two XSETTINGS managers would fight,
+  so vergd taking the role (decision 2) means `xfsettingsd` gives it up.
 - **Xfce has its own per-monitor Scale** (Display settings, xfconf
   `displays` channel, `/Default/HDMI-2/Scale` 1.0), using the same RandR
   transform as Mode A. vergd and Xfce must not both set it; vergd acts last
@@ -101,11 +110,15 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
 1. **Scope.** (a) Mode A and the toolkit settings first, then Mode B as the
    second half of this milestone. *(recommended: Mode A is the default and
    the only one that is right for every toolkit)* (b) Both at once.
-2. **Where the settings go on Xfce.** (a) Through Xfce's own settings
-   (xfconf `xsettings` channel), which `xfsettingsd` then publishes; vergd
-   runs its own XSETTINGS manager only when no desktop owns it (bare
-   Openbox and the like). *(recommended: works with Xfce, not against it)*
-   (b) vergd takes XSETTINGS over from Xfce.
+2. **Where the settings go.** ~~(a) Through Xfce's own settings.~~
+   **Decided (Dave, 22:09): vergd is the XSETTINGS manager itself**, on any
+   window manager (see "Separate from the desktop" above). On Hubble,
+   Xfce's `xfsettingsd` holds the XSETTINGS selection today; it also does
+   keyboard, display and other settings, so the first step is to find out
+   exactly what is lost when its XSETTINGS part is off (or when vergd takes
+   the selection over), and tell Dave before changing his session. Clean
+   tests run in a nested X server (Xephyr) with a bare window manager,
+   without touching his session.
 3. **Where the scale comes from.** (a) Derived from the EDID size, viewing
    distance and one preference, as above, with a per-monitor override.
    *(recommended: whitepaper principle 1)* (b) A percentage per monitor per

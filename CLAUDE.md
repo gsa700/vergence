@@ -24,6 +24,11 @@ the current milestone is docs/milestone-2.md (milestone 1 in docs/milestone-1.md
   kernel or Linux interfaces (udev, systemd, /sys); if something must
   differ, say so in the code and the docs. VMs (canary) are for build checks
   only.
+- **Xfce is only a host** (Dave, 2026-11-06): nothing new is built on
+  Xfce's internals (xfconf, xfsettingsd); everything works under any EWMH
+  window manager, and pieces the phase 2 server needs (e.g. the XSETTINGS
+  manager) are written to carry over. Xfce stays the desktop on Hubble until
+  the server replaces it.
 - **Phase 1 security rules** (whitepaper §7.3): no network socket, no
   unauthenticated control interface, saved state owner-only (0600).
 - **Local repository only, no remote yet.** If it ever goes on GitHub, the
