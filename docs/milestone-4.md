@@ -333,12 +333,18 @@ Techbench's monitor before the LG 6K. Expected, with typical panel sizes
 - **All three: render 4, about 22,600 px: refused** (18,400 px even with the
   14" at laptop distance). The real-hardware case for the desktop-size wall
   (whitepaper §5) and for Mode B, which has no such limit.
-- Hubble's HDMI port does 4K at 30 Hz only; the 4K monitors belong on the
-  DisplayPort outputs. Cabling (Dave, 23:24): ASUS on HDMI (it also has VGA
-  and DVI); 32" 4K by DisplayPort (it has DP and HDMI); 14" 4K (mini HDMI
-  only) by a DP to mini-HDMI cable rated for 8K. If that cable is active it
-  shows as a DP output at 4K 60 Hz; if passive (dual-mode DP), as HDMI-1 or
-  HDMI-3 at 4K 30 Hz. `vergd probe` tells which.
+- **Hubble's ports** (Dave, 23:26): one HDMI and **one** DisplayPort on the
+  back, plus a **VGA** expansion module. Intel lists each display interface
+  as both DP and HDMI, so X shows HDMI-2 (the rear HDMI, the ASUS today),
+  DP-1/HDMI-1 (the rear DP) and DP-2/HDMI-3 (the VGA module, a DP-to-VGA
+  bridge). HDMI does 4K at 30 Hz only.
+- **Cabling:** ASUS on the **VGA** module (it has VGA, HDMI and DVI; also a
+  test of an EDID read through a VGA bridge); 14" 4K (mini HDMI only) on the
+  rear **DP** with Dave's DP to mini-HDMI cable rated for 8K (an active
+  cable shows as DP-1 at 4K 60 Hz, a passive one as HDMI-1 at 4K 30 Hz);
+  32" 4K (DP, HDMI and one more) on the rear **HDMI** at 4K 30 Hz. To run
+  the 32" at 60 Hz instead, swap: 32" on DP, 14" on HDMI with an HDMI to
+  mini-HDMI cable.
 
 ## Risks
 
