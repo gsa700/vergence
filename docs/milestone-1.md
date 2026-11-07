@@ -133,6 +133,18 @@ above become scripts, run over the EDID database and overnight sleep cycles.
   is a FreeBSD-only path and is marked as such in the code. On Debian, Xorg
   re-probes by itself through udev.
 
+- **A fresh X server hides the EDID.** Right after boot (or any Xorg
+  restart), Xorg reads every EDID (it prints them in Xorg.0.log) but does not
+  publish the RandR `EDID` output property until the first re-probe, so a
+  RandR client sees "connected, no EDID". `vergd` re-probes once
+  (`RRGetScreenResources`) when a connected output has no EDID, then reads
+  again. Not yet checked whether Debian's Xorg does the same.
+- **Acceptance 2, reboot:** the key after a reboot of Hubble is the same as
+  before (`8ec9c14b…` for the ASUS VS229 alone).
+- **Acceptance 5:** under `truss`, `vergd watch` through a fake plug cycle
+  opens only local Unix sockets (X, and devd's pipe), no IP sockets, and no
+  file for writing; it reads only `/etc/localtime` and the X authority file.
+
 ## Questions to settle on the real hardware
 
 - Which monitors report a physical size of zero or something wrong

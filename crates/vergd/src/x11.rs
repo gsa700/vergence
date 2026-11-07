@@ -98,8 +98,14 @@ fn mode_of(info: &randr::ModeInfo) -> Mode {
     Mode { width: info.width, height: info.height, refresh_hz: hz }
 }
 
-/// Read every output of the default screen. Uses
-/// RRGetScreenResourcesCurrent, which does not make the server re-probe.
+/// Read every output of the default screen.
+///
+/// Uses RRGetScreenResourcesCurrent, which does not make the server
+/// re-probe. Exception: if a connected output has no EDID property, the
+/// server is asked to re-probe once (RRGetScreenResources) and the setup is
+/// read again. Found on Hubble 2026-11-06: Xorg (modesetting, FreeBSD) reads
+/// the EDID at start-up but does not publish the RandR EDID property until
+/// the first re-probe.
 pub fn read_setup() -> Result<Setup, Box<dyn std::error::Error>> {
     let (conn, screen_num) = x11rb::connect(None)?;
     let root = conn.setup().roots[screen_num].root;
@@ -113,6 +119,19 @@ pub fn read_setup() -> Result<Setup, Box<dyn std::error::Error>> {
         .into());
     }
 
+    let setup = read_outputs(&conn, root)?;
+    if setup.outputs.iter().any(|o| o.connected && o.edid.is_none()) {
+        conn.randr_get_screen_resources(root)?.reply()?;
+        return read_outputs(&conn, root);
+    }
+    Ok(setup)
+}
+
+fn read_outputs(
+    conn: &impl x11rb::connection::Connection,
+    root: u32,
+) -> Result<Setup, Box<dyn std::error::Error>> {
+    // Looked up each time: the atom only exists once a server has set an EDID.
     let edid_atom = conn.intern_atom(true, b"EDID")?.reply()?.atom;
     let res = conn.randr_get_screen_resources_current(root)?.reply()?;
     let mode = |id: u32| res.modes.iter().find(|m| m.id == id).map(mode_of);
