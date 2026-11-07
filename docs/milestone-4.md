@@ -333,6 +333,15 @@ Techbench's monitor before the LG 6K. Expected, with typical panel sizes
 - **All three: render 4, about 22,600 px: refused** (18,400 px even with the
   14" at laptop distance). The real-hardware case for the desktop-size wall
   (whitepaper §5) and for Mode B, which has no such limit.
+- **The two 4K monitors together** (Dave's suggestion, 23:28): the purest
+  test, same 3840x2160 pixels at ~315 and ~138 ppi. Unscaled, a 200 px box
+  is ~16 mm on the 14" and ~37 mm on the 32"; in Mode A (render 4, factors
+  ~1.22 and ~2.80) it should be 52.9 mm on both, and a window dragged from
+  one to the other should keep its size (harness, and Dave with a ruler).
+  Costs to watch: a rendered desktop of ~15,400 x 6,000 (~93 Mpx for 16.6
+  Mpx of panels) on the UHD 630, just under the 16,384 limit; with the 14"
+  at laptop distance, render 3 and ~59 Mpx. Also the best case to compare
+  Mode B with (GTK right on only one of the two).
 - **Hubble's ports** (Dave, 23:26): one HDMI and **one** DisplayPort on the
   back, plus a **VGA** expansion module. Intel lists each display interface
   as both DP and HDMI, so X shows HDMI-2 (the rear HDMI, the ASUS today),
