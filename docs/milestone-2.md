@@ -139,8 +139,22 @@ hand.
    apply, no learning, the profile file unchanged, final arrangement right.
    Pass.
 
-Still to do: 3 by hand in Xfce Display settings, 4 (suspend and wake, log
-out and in), 7 (real monitors). Autostart: `tools/install-autostart.sh` (no
+3. **By hand in Xfce Display settings** (Dave, 19:29): the fake moved below
+   the ASUS (+0+1080) and applied; vergd learned it ("learned your
+   arrangement") and did not fight it; after unplug and replug it came back
+   below (Xfce had saved it too; vergd found it "already as saved"). Pass.
+4. **Reboot and login** (Dave restarted Hubble, 19:18): vergd started from
+   the autostart, read the EDID on the fresh X, "already as saved". Pass for
+   this half; suspend and wake with vergd acting is still to do.
+
+Found during 3: the running daemon kept the profiles in memory, so a
+`vergd forget` (or a hand edit) would have been written back over at the
+next change. vergd now re-reads the file before every decision; checked by
+forgetting a profile while vergd ran and plugging again ("learned new
+setup"). Cosmetic: a change made by Xfce itself (its mirror right after a
+new plug) is also logged as "your arrangement".
+
+Still to do: 4 (suspend and wake with vergd acting), 7 (real monitors). Autostart: `tools/install-autostart.sh` (no
 root) copies the release build to `~/.local/bin/vergd`, writes
 `~/.config/autostart/vergd.desktop` and logs to
 `~/.local/state/vergence/vergd.log`; `remove` undoes it. Installed and

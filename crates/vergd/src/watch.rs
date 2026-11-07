@@ -119,6 +119,10 @@ impl Memory {
         if self.observe_only || now.edids().is_empty() {
             return Ok(now);
         }
+        // The file is the truth: `vergd forget` and hand edits may have
+        // changed it since the last change. A file that no longer parses
+        // stops vergd rather than being overwritten.
+        self.store = crate::store::load()?;
         let key = now.key();
         let known = self.store.get(&key).is_some();
         let guarded = self.guard_until.is_some_and(|t| Instant::now() < t);

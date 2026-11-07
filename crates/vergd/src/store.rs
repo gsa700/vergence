@@ -44,8 +44,9 @@ pub fn save(store: &Store) -> Result<(), String> {
 
     let tmp = dir.join(format!(".profiles.toml.{}", std::process::id()));
     let text = format!(
-        "# Vergence monitor-setup profiles. Written by vergd; safe to edit while\n\
-         # vergd is stopped. See docs/milestone-2.md.\n\n{}",
+        "# Vergence monitor-setup profiles. Written by vergd, which re-reads this\n\
+         # file before every change, so it can be edited at any time.\n\
+         # See docs/milestone-2.md.\n\n{}",
         store.to_toml()
     );
     let write = || -> std::io::Result<()> {
