@@ -10,8 +10,8 @@ opens where it was last time on this setup.
 scaling milestone 4. Window memory needs no new hardware and is tested with
 the fake monitor; scaling waits for real monitors of different densities.
 
-**Status (2026-11-06): built; acceptance 1, 2 (ports: not yet), 4, 5, 6, 7
-and app start pass on Hubble; 3 (Firefox, Thunderbird) and 8 still to do.**
+**Status (2026-11-06): built; acceptance 1, 2 (ports: not yet), 3, 4, 5, 6,
+7 and app start pass on Hubble; 8 (real monitors) still to do.**
 Dave decided all four on 2026-11-06, as
 recommended: (1a) restore on monitor changes and at app start, with an
 opt-out list; (2a) never store titles; (3a) remember workspaces; (4a)
@@ -141,6 +141,29 @@ opened at its remembered place, with one entry in the file.
 
 Test tools installed on Hubble: wmctrl-fork (placing and maximising windows
 from scripts) and Thunderbird.
+
+## Acceptance 3 on Hubble (2026-11-06 21:15): Firefox and Thunderbird
+
+Three Firefox windows (fake/workspace 1; ASUS/workspace 2; fake/workspace 3
+maximised) and Thunderbird (fake/workspace 2). Firefox set to restore its
+session (`browser.startup.page = 3` in the test profile's user.js).
+
+- **Unplug:** windows.toml unchanged. On the ASUS-alone setup vergd moved
+  Firefox #1 to the place it had there before.
+- **Replug:** all four back on their monitor, place, size, maximised state
+  and workspace, including the windows on workspaces not being shown.
+  Pass.
+- **Quit and restart both:** Firefox restored three windows; vergd placed
+  them and Thunderbird; the set of places afterwards was identical to before
+  (monitor, place, size, state, workspace). Pass. Windows of one app are
+  told apart by opening order only (decision 2a); with blank pages it can't
+  be seen whether Firefox reopened them in the same order.
+
+**Found: a window can be stranded on unplug.** Thunderbird, on a workspace
+not being shown and with no remembered place on the ASUS-alone setup, was
+left by xfwm4 at x=1901 on the 1920-wide screen: 19 px visible. Both
+unplugs did the same. Fix to make: when a setup has no place for a window
+and it is mostly off every monitor, move it fully onto the nearest one.
 
 ## Known limitation: the jump at app start (Dave, 2026-11-06 19:56)
 
