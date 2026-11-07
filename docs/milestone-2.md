@@ -29,10 +29,11 @@ In:
 
 Out (later milestones):
 
-- Scaling, both modes and every toolkit (§4.2, §4.3): milestone 3. It
+- Scaling, both modes and every toolkit (§4.2, §4.3): milestone 4. It
   needs the arrangement to be stable first, and Mode A changes the RandR
   transform, which this milestone leaves alone.
-- Window layout memory (§4.4): milestone 4.
+- Window layout memory (§4.4): milestone 3 (order swapped with scaling
+  on 2026-11-06: see docs/milestone-3.md).
 - Edge alignment as a setting (§4.6): comes with scaling, where logical
   heights start to differ.
 
@@ -47,7 +48,7 @@ Out (later milestones):
 3. **A setup never seen before.** (a) Leave X's and Xfce's choice alone,
    then learn from what the user does. *(recommended for this milestone)*
    (b) Compute a default from the EDIDs (native modes, side by side, sizes
-   matched): that belongs with scaling in milestone 3.
+   matched): that belongs with scaling in milestone 4.
 4. **Xfce's own display profiles.** Xfce can also re-apply saved display
    setups on hot-plug (xfconf channel `displays`, `/AutoEnableProfiles`,
    `/Notify`). Two programs arranging the screens fight. (a) Turn Xfce's

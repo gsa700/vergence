@@ -20,7 +20,7 @@ Crates: `vergence-edid` (EDID parser), `vergence-profile` (profile key),
 
 | Phase | What | Status |
 |---|---|---|
-| 1 | X11 consistency daemon: EDID profiles, scaling modes, layout memory | Milestone 1 done except real monitors and an automated sleep loop ([docs/milestone-1.md](docs/milestone-1.md)); milestone 2 built and running on Hubble ([docs/milestone-2.md](docs/milestone-2.md)) |
+| 1 | X11 consistency daemon: EDID profiles, scaling modes, layout memory | Milestone 1 done except real monitors and an automated sleep loop ([docs/milestone-1.md](docs/milestone-1.md)); milestone 2 built and running on Hubble ([docs/milestone-2.md](docs/milestone-2.md)); milestone 3, window memory, planned ([docs/milestone-3.md](docs/milestone-3.md)); scaling is milestone 4 |
 | 2 | Display server (Smithay) | Design only |
 | 3 | Accessibility contract, display-list surfaces, Avalonia backend | Research |
 | 4 | Remote display over display lists | Research |
