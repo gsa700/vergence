@@ -1,7 +1,7 @@
 # Working in this repository
 
 Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Vergence-Whitepaper.md,
-the current milestone is docs/milestone-2.md (milestone 1 in docs/milestone-1.md), status is in README.md.
+the current milestone is docs/milestone-4.md (scaling; earlier ones in docs/milestone-1.md to -3.md), status is in README.md.
 
 - **Started 2026-11-06** (Dave's go). The source lives here on Control (the
   only git copy; Control has no Rust). Build and test on Hubble, the FreeBSD
@@ -10,9 +10,17 @@ the current milestone is docs/milestone-2.md (milestone 1 in docs/milestone-1.md
   for tests: docs/milestone-1.md, "Found on Hubble".
 - **vergd runs in Dave's Xfce session on Hubble** (tools/install-autostart.sh:
   ~/.local/bin/vergd, log ~/.local/state/vergence/vergd.log, profiles
-  ~/.config/vergence/profiles.toml). Before a test that plugs fake monitors,
-  stop it or expect it to act; after rebuilding, rerun the install script to
-  update the running copy.
+  ~/.config/vergence/profiles.toml, windows.toml, settings.toml,
+  session.env). Before a test that plugs fake monitors, stop it or expect it
+  to act; after rebuilding, rerun the install script to update the running
+  copy. It is the XSETTINGS manager (Xfce's Appearance dialog no longer
+  applies); run `xfconf-query` only with the session's
+  DBUS_SESSION_BUS_ADDRESS, or a stray xfconfd appears.
+- **Hubble is a project machine** (Dave, 2026-11-06): breaking its session
+  for the project is fine; his accounts and data still need care. Fake
+  EDIDs: `vergence-harness fake` (in /tmp on Hubble: fake1, fake4k, fake24,
+  fake13). Avalonia on FreeBSD needs the natives in ~/vergence-native
+  (BsdProbe's libSkiaSharp 119, libc-epoll, HarfBuzz link).
 - **Names:** the project and its crates are `vergence` / `vergence-*`; the
   phase 1 daemon is `vergd`. "Verge" for short in conversation.
 - **Rust throughout** (whitepaper §8): x11rb for phase 1, Smithay for the
