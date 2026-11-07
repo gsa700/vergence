@@ -15,6 +15,13 @@
 //!   the window manager's frame and GTK's shadow (`_GTK_FRAME_EXTENTS`, part
 //!   of the client window) do not shift a window a few pixels per restore.
 //! - **No titles** are read or stored (Dave, 2026-11-06).
+//! - **Units that survive scaling** (milestone 4): positions are kept in
+//!   the monitor's **panel pixels** (X pixels divided by the monitor's
+//!   RandR factor), sizes in **app units** (X pixels divided by the render
+//!   scale, which is how the apps size themselves). Turning Mode A on or
+//!   off then keeps every window at the same place on its panel, at its
+//!   app's own size. Unscaled, both units are plain X pixels, so memory
+//!   recorded before milestone 4 means the same.
 //! - **Rescue:** after a monitor change, a window with no place on the new
 //!   setup that the window manager left mostly off-screen (xfwm4 does this
 //!   to windows on other workspaces) is moved fully onto the nearest monitor.
@@ -235,19 +242,21 @@ fn monitors(setup: &Setup) -> Vec<(String, String, i32, i32, i32, i32)> {
 
 /// Where a window is, as the store keeps it; None if its centre is on no
 /// lit monitor.
-fn setting_of(w: &Win, setup: &Setup) -> Option<WindowSetting> {
+fn setting_of(w: &Win, setup: &Setup, render: u32) -> Option<WindowSetting> {
     let cx = w.x + w.w as i32 / 2;
     let cy = w.y + w.h as i32 / 2;
     let (mon, _, mx, my, _, _) = monitors(setup)
         .into_iter()
         .find(|(_, _, x, y, mw, mh)| cx >= *x && cx < x + mw && cy >= *y && cy < y + mh)?;
+    let f = factor_of(setup, &mon);
+    let r = render.max(1) as f64;
     Some(WindowSetting {
         id: w.id.clone(),
+        x: ((w.x - mx) as f64 / f).round() as i32,
+        y: ((w.y - my) as f64 / f).round() as i32,
+        width: (w.w as f64 / r).round() as u32,
+        height: (w.h as f64 / r).round() as u32,
         monitor: mon,
-        x: w.x - mx,
-        y: w.y - my,
-        width: w.w,
-        height: w.h,
         max_horz: w.max_h,
         max_vert: w.max_v,
         fullscreen: w.fs,
@@ -271,15 +280,27 @@ const SOURCE_TOOL: u32 = 2;
 
 /// Move `w` to `s`. Returns false if it is already there or its monitor is
 /// not lit.
-fn place(conn: &RustConnection, root: u32, a: &Atoms, w: &Win, s: &WindowSetting, setup: &Setup) -> Res<bool> {
+fn place(
+    conn: &RustConnection,
+    root: u32,
+    a: &Atoms,
+    w: &Win,
+    s: &WindowSetting,
+    setup: &Setup,
+    render: u32,
+) -> Res<bool> {
     let Some((_, _, mx, my, _, _)) = monitors(setup).into_iter().find(|m| m.0 == s.monitor) else {
         return Ok(false);
     };
-    let (tx, ty) = (mx + s.x, my + s.y);
+    // Back from panel pixels and app units to X pixels (see the top).
+    let f = factor_of(setup, &s.monitor);
+    let tx = mx + (s.x as f64 * f).round() as i32;
+    let ty = my + (s.y as f64 * f).round() as i32;
+    let (tw, th) = (s.width * render.max(1), s.height * render.max(1));
     let same = w.x == tx
         && w.y == ty
-        && w.w == s.width
-        && w.h == s.height
+        && w.w == tw
+        && w.h == th
         && w.max_h == s.max_horz
         && w.max_v == s.max_vert
         && w.fs == s.fullscreen
@@ -302,7 +323,7 @@ fn place(conn: &RustConnection, root: u32, a: &Atoms, w: &Win, s: &WindowSetting
         root,
         w.xid,
         a.moveresize,
-        [flags, tx as u32, ty as u32, s.width, s.height],
+        [flags, tx as u32, ty as u32, tw, th],
     )?;
     if let Some(d) = s.desktop {
         if w.desktop != Some(d) {
@@ -405,6 +426,17 @@ fn rescue(conn: &RustConnection, root: u32, a: &Atoms, w: &Win, setup: &Setup) -
     Ok(Some(areas[i].0.clone()))
 }
 
+/// The RandR scale factor of the monitor with this ID (1 if unscaled).
+fn factor_of(setup: &Setup, id: &str) -> f64 {
+    setup
+        .outputs
+        .iter()
+        .find(|o| o.connected && o.monitor() == id)
+        .and_then(|o| o.current.as_ref())
+        .map(|c| c.factor as f64 / vergence_profile::arrangement::FIXED_ONE as f64)
+        .unwrap_or(1.0)
+}
+
 fn monitor_name(setup: &Setup, id: &str) -> String {
     monitors(setup).into_iter().find(|m| m.0 == id).map(|m| m.1).unwrap_or_else(|| id.to_string())
 }
@@ -418,6 +450,8 @@ pub struct WindowMemory {
     unstable_at: Instant,
     dirty: bool,
     last_write: Option<Instant>,
+    /// The render scale the toolkits have now (milestone 4), for app units.
+    render: u32,
 }
 
 impl WindowMemory {
@@ -432,6 +466,7 @@ impl WindowMemory {
             unstable_at: Instant::now(),
             dirty: true,
             last_write: None,
+            render: 1,
         };
         if enabled {
             conn.change_window_attributes(root, &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE))?
@@ -452,6 +487,12 @@ impl WindowMemory {
                 c.ignore_error();
             }
         }
+    }
+
+    /// The toolkits' render scale changed (Mode A on or off).
+    pub fn set_render(&mut self, render: u32) {
+        self.render = render.max(1);
+        self.mark_unstable();
     }
 
     /// The monitor setup changed (or vergd moved windows): hold recording.
@@ -512,7 +553,7 @@ impl WindowMemory {
                 continue;
             }
             if let Some(s) = prof.get(&w.id) {
-                if place(conn, self.root, &self.atoms, &w, s, setup)? {
+                if place(conn, self.root, &self.atoms, &w, s, setup, self.render)? {
                     println!(
                         "{} opened {}: placed on {} {}",
                         stamp(),
@@ -548,7 +589,7 @@ impl WindowMemory {
             }
             match prof.and_then(|p| p.get(&w.id)).filter(|s| lit.contains(&s.monitor)) {
                 Some(s) => {
-                    if place(conn, self.root, &self.atoms, &w, s, setup)? {
+                    if place(conn, self.root, &self.atoms, &w, s, setup, self.render)? {
                         println!(
                             "{}   moved {} to {} {}",
                             stamp(),
@@ -587,7 +628,7 @@ impl WindowMemory {
             if !w.eligible || skipped {
                 continue;
             }
-            if let Some(s) = setting_of(w, setup) {
+            if let Some(s) = setting_of(w, setup, self.render) {
                 changed |= prof.put(s);
             }
         }

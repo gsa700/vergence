@@ -259,6 +259,8 @@ fn ensure_scale(
         }
         scale::set_resources(conn, root, t.render, base_cursor)?;
         crate::store::save_session_env(&scale::session_env(t.render))?;
+        let was = sc.render;
+        wm.set_render(t.render);
         if sc.render.is_some() || t.render > 1 {
             println!(
                 "{} toolkits: scale {} (GTK and Electron now; Qt, Avalonia and Xlib fonts in new apps; Java from the next login)",
@@ -267,6 +269,15 @@ fn ensure_scale(
             );
         }
         sc.render = Some(t.render);
+        // The scale changed on this setup (not at start, where open windows
+        // are left alone): let the apps resize to the new scale, then put
+        // every window back at its place on its panel.
+        if was.is_some() && wm.enabled {
+            drain(conn, WINDOW_SETTLE)?;
+            let cur = x11::read_setup_on(conn, root)?;
+            wm.restore_all(conn, &cur)?;
+            changed = Some(cur);
+        }
     }
     Ok(changed)
 }

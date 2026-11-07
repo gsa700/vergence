@@ -140,10 +140,20 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
   drawn 3840x2160 and shrunk x2.000, 4K drawn 4389x2469 at +3840 and shrunk
   x1.143; screen 8229x2469; toolkits 2. Unplug: ASUS alone back to 1.
   Replug: Mode A back from the profile. `scale off`: 1:1 again.
-- **Still to do:** the same-size measurement with test programs in all six
-  toolkits (acceptance 3); window memory when a setup's scale changes
-  (remembered places are in the old scale's pixels); the 16384 limit and
-  three-monitor setups (4, 5); Xfce reacting (6); Mode B (7).
+- **Still to do:** Java on FreeBSD (check on Debian); the 16384 limit and
+  three-monitor setups (4, 5); Xfce reacting (6); Mode B (7); real
+  monitors and the calibration (8).
+- **Window memory across scale changes (23:05):** places are now kept in
+  panel pixels (X pixels / the monitor's RandR factor) and sizes in app
+  units (X pixels / the render scale); when the scale of the current setup
+  changes, vergd waits for the apps to resize and puts every window back.
+  Memory recorded unscaled means the same as before. **Checked:** three
+  xfce4-terminals on the ASUS and the 4K (one maximised), three cycles of
+  `scale on` / `scale off`: scaled, each stays at the same place on its
+  panel (305,229 and 585,329) at twice its X size; unscaled, every window
+  is back on the same pixel; no drift between cycles. Known wrinkle: a
+  maximised window's remembered size alternates between its maximised size
+  at each scale (harmless: it is maximised again either way).
 - **Login checked (22:36):** LightDM's Xsession on FreeBSD sources
   `~/.xprofile` (`VERGENCE_SCALE=1` from `session.env` was in the new
   session's environment); at login vergd took XSETTINGS over from

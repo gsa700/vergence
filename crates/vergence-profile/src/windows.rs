@@ -40,9 +40,13 @@ pub struct WindowSetting {
     pub id: WindowId,
     /// Monitor ID (see `crate::monitor_id`) the window's centre was on.
     pub monitor: String,
-    /// Position of the client window relative to the monitor's top-left.
+    /// Position of the client window relative to the monitor's top-left,
+    /// in the monitor's panel pixels (X pixels divided by its RandR scale
+    /// factor; the same as X pixels when unscaled).
     pub x: i32,
     pub y: i32,
+    /// Size in app units: X pixels divided by the render scale (milestone 4
+    /// Mode A; the same as X pixels when unscaled).
     pub width: u32,
     pub height: u32,
     #[serde(default)]
