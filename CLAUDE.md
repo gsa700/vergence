@@ -1,7 +1,7 @@
 # Working in this repository
 
 Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Vergence-Whitepaper.md,
-the current milestone is docs/milestone-1.md, status is in README.md.
+the current milestone is docs/milestone-2.md (milestone 1 in docs/milestone-1.md), status is in README.md.
 
 - **Started 2026-11-06** (Dave's go). The source lives here on Control (the
   only git copy; Control has no Rust). Build and test on Hubble, the FreeBSD
