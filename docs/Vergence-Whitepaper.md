@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "6 November 2026 — Draft 0.7"
+date: "7 November 2026 — Draft 0.8"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.7 · 6 November 2026
+David Erickson (AB0R), with Claude · Draft 0.8 · 7 November 2026
 
 ---
 
@@ -212,6 +212,22 @@ A second wall is **the size of the desktop**. X keeps the whole desktop as **one
 
 On X11, removing the input wall would need a compositing window manager **plus a new X server extension**; the actively developed XLibre fork of Xorg is the most plausible home for one. The desktop-size wall is part of X's design and has no such fix. The long-term architecture below removes both a different way: **its server owns input routing**, and **it keeps one buffer per monitor**, sized to that panel, so the only limit is what one panel needs.
 
+### 5.1 Worked example: a twelve-monitor wall on three GPUs
+
+Nothing in the design limits the number of monitors. A monitor setup is a list of EDIDs of any length, and window places are stored per setup, so twelve monitors are simply a larger profile. Every subset that appears (one panel unplugged, one card's four panels switched off) becomes a profile of its own, with its own remembered layout. The limits come from elsewhere. Take a workstation with three NVIDIA RTX 3060 cards: each drives up to four displays, twelve in all.
+
+**Telling twelve monitors apart.** A profile can only put a window back on "the third panel from the left" if it recognises that panel. A monitor whose EDID carries a serial number is recognised whichever port it is plugged into. Many low-cost panels report serial 0, so twelve of the same model have identical EDIDs; the daemon then tells them apart by connector, as it already does for identical twins. Layouts survive restarts and hot-plugs, but swapping two cables swaps their layouts. The new server can do no better: identity can only come from the panel or from the port.
+
+**Phase 1 (X11).** Three walls apply.
+
+- **Desktop size.** The whole desktop is one picture (§5). NVIDIA's buffer limit is well above Intel's 16,384, so the X protocol's cap of 32,767 is the one that applies. Twelve 1080p panels in a 4 × 3 grid make a desktop of 7,680 × 3,240, and twelve 4K panels in the same grid 15,360 × 6,480: both fit. Twelve 4K panels in one row (46,080 wide) do not, and Mode A multiplies the desktop by its render scale, so a wall that mixes densities reaches the cap sooner. The daemon refuses a setup that does not fit and says why, as it does today.
+- **One desktop across three GPUs.** X11 can join GPUs into one desktop in two ways, and neither suits the daemon. *Xinerama* joins separate X screens, but on the NVIDIA driver it turns off RandR's per-output interface, which is how the daemon sees monitors and hot-plugs. Alternatively one GPU renders the whole desktop and the others only scan out their part of it (*PRIME output sinks*); that copies every frame across PCIe and depends on driver support. Leaving each GPU as its own X screen works, but windows cannot move between X screens, which defeats the purpose.
+- **Driver.** On FreeBSD an RTX 3060 needs NVIDIA's proprietary driver (drm-kmod covers Intel and AMD). How it behaves with several cards, and whether it can act as an output sink, has to be checked on hardware (§10).
+
+So in phase 1 the dependable form is **one GPU with up to four panels**; a wall across several GPUs is an experiment.
+
+**Phase 2 (the new server).** The server opens every GPU through DRM/KMS and keeps one buffer per monitor, so there is no single picture and no desktop-size cap, and because it owns input routing, three cards make one desktop. What remains is hardware: four displays per card, GPU memory for twelve buffers, and a copy between cards whenever a window drawn on one GPU is shown on a panel of another (a window straddling two cards is drawn once and copied). Display-list surfaces (§6.6) help here: the server can render such a window on each card instead of copying pixels. Whether NVIDIA's FreeBSD driver provides the DRM/KMS interface the server needs is also on the list to verify; AMD and Intel cards provide it through drm-kmod.
+
 ---
 
 ## 6. The long-term architecture: one authority, three contracts
@@ -392,6 +408,7 @@ Firefox and Thunderbird are GTK applications on Linux and FreeBSD with mature na
 8. Slint versus iced for the tools, decided by a small prototype of the profile editor on both FreeBSD and Debian.
 9. The scope of the native Avalonia backend: which parts of Avalonia's platform interfaces it must implement, and how its automation peers map to Contract 3.
 10. Firefox and Thunderbird: confirm that Firefox on X11 has no per-monitor scaling; check whether Mozilla implements (or plans) the Wayland session-restore protocol; how well heuristics match several Firefox windows to saved layouts; the scope of an AT-SPI bridge into Contract 3.
+11. Many monitors on several GPUs (§5.1): NVIDIA's FreeBSD driver with more than one card (Xinerama versus PRIME output sinks for phase 1; its DRM/KMS support for phase 2); how many monitors report a real EDID serial number (the linuxhw database can answer this), since identical panels without one are told apart only by port.
 
 ---
 
