@@ -2,3 +2,5 @@ target/
 *.swp
 .DS_Store
 tools/sizebox/bin/
+tools/sizebox/avalonia/bin/
+tools/sizebox/avalonia/obj/

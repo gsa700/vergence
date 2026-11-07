@@ -261,7 +261,7 @@ fn ensure_scale(
         crate::store::save_session_env(&scale::session_env(t.render))?;
         if sc.render.is_some() || t.render > 1 {
             println!(
-                "{} toolkits: scale {} (GTK now; Qt, Electron and Xlib fonts in new apps; Java and Avalonia from the next login)",
+                "{} toolkits: scale {} (GTK and Electron now; Qt, Avalonia and Xlib fonts in new apps; Java from the next login)",
                 stamp(),
                 t.render
             );

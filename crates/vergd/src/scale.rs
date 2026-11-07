@@ -4,8 +4,10 @@
 //! profile's override); everything is rendered at the whole-number scale
 //! `render` and RandR shrinks each monitor's picture onto its panel. The
 //! toolkits all get `render`: GTK through XSETTINGS (live), Qt, Electron and
-//! Xlib fonts through `Xft.dpi` (new apps), Java and Avalonia through
+//! Avalonia and Xlib fonts through `Xft.dpi` (new apps), Java through
 //! `session.env` (next login). With scaling off, everything goes back to 1.
+//! Avalonia must not also get `AVALONIA_GLOBAL_SCALE_FACTOR`: it multiplies
+//! with the `Xft.dpi` scale (measured 2026-11-06: drawn at 4x).
 
 use std::collections::BTreeMap;
 
@@ -173,7 +175,6 @@ pub fn session_env(render: u32) -> String {
     t.push_str(&format!("export VERGENCE_SCALE={render}\n"));
     if render > 1 {
         t.push_str(&format!("export _JAVA_OPTIONS=\"-Dsun.java2d.uiScale={render}\"\n"));
-        t.push_str(&format!("export AVALONIA_GLOBAL_SCALE_FACTOR={render}\n"));
     } else {
         t.push_str("unset _JAVA_OPTIONS AVALONIA_GLOBAL_SCALE_FACTOR\n");
     }
@@ -211,7 +212,9 @@ mod tests {
 
     #[test]
     fn session_env_text() {
-        assert!(session_env(2).contains("uiScale=2") && session_env(2).contains("AVALONIA_GLOBAL_SCALE_FACTOR=2"));
+        assert!(session_env(2).contains("uiScale=2"));
+        // Avalonia reads Xft.dpi itself; its variable would scale it twice.
+        assert!(!session_env(2).contains("export AVALONIA"));
         assert!(session_env(1).contains("unset"));
     }
 }

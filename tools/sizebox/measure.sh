@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # Every size box on every lit monitor (run on Hubble, in the X session).
-# Usage: sh measure.sh [toolkit...]   (default: gtk3 gtk4 qt xlib java electron)
+# Usage: sh measure.sh [toolkit...]   (default: gtk3 gtk4 qt xlib java electron avalonia)
 set -u
 export DISPLAY=${DISPLAY:-:0} XAUTHORITY=${XAUTHORITY:-$HOME/.Xauthority}
 cd "$(dirname "$0")"
 H=${H:-$HOME/src/vergence/target/release/vergence-harness}
 # As at a fresh login: the launch-time variables vergd wrote (decision 5).
 [ -r "$HOME/.config/vergence/session.env" ] && . "$HOME/.config/vergence/session.env"
-kits=${*:-gtk3 gtk4 qt xlib java electron}
+kits=${*:-gtk3 gtk4 qt xlib java electron avalonia}
 cmd() {
     case $1 in
         gtk3|gtk4|qt|xlib) echo "bin/$1" ;;
         java) echo "java Box.java" ;;
         electron) echo "electron42 --no-sandbox electron" ;;
+        avalonia) echo "bin/avalonia/SizeBox" ;;
     esac
 }
 # name x y of each lit monitor

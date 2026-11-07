@@ -171,12 +171,19 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
   - **Electron 42 on X11 scales its content but not its window**: at scale 2
     a 240 px window cut its content off. It reads the scale from XSETTINGS,
     not `Xft.dpi`. Real Electron apps would open too small at scale 2.
-  - Avalonia not measured yet (needs a .NET test app and NuGet packages).
+  - **Avalonia 12.1.5** (23:00, `tools/sizebox/avalonia`, .NET 9 with
+    BsdProbe's FreeBSD workarounds: our libSkiaSharp 119, the libc-epoll
+    glue, a HarfBuzz symlink): at first **drawn at 4x** (105.9 mm), because
+    Avalonia reads `Xft.dpi` itself (2) and multiplied it by vergd's
+    `AVALONIA_GLOBAL_SCALE_FACTOR=2`. Without that variable: **52.9 mm on
+    both monitors**. vergd no longer sets it; Avalonia gets its scale like
+    Qt, from `Xft.dpi` when it starts.
   - **With exact scales (decision 7, 22:53): GTK 3, GTK 4, Qt 6 and
     Electron are 52.9 x 52.9 mm on both monitors**, the reference size
     exactly. ASUS drawn 400 px, shrunk x1.87 to 214 panel px; 4K drawn 400
     px, shrunk x1.176 to 340 panel px; screen 8105x2540. **Acceptance 3
-    passes for these four toolkits.**
+    passes for these four toolkits, and Avalonia (five of the six; Java
+    open).**
 
 ## Decisions for Dave
 
