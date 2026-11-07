@@ -15,6 +15,9 @@
 //!   the window manager's frame and GTK's shadow (`_GTK_FRAME_EXTENTS`, part
 //!   of the client window) do not shift a window a few pixels per restore.
 //! - **No titles** are read or stored (Dave, 2026-11-06).
+//! - **Rescue:** after a monitor change, a window with no place on the new
+//!   setup that the window manager left mostly off-screen (xfwm4 does this
+//!   to windows on other workspaces) is moved fully onto the nearest monitor.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -54,6 +57,8 @@ struct Atoms {
     hidden: u32,
     desktop: u32,
     moveresize: u32,
+    workarea: u32,
+    frame_extents: u32,
 }
 
 impl Atoms {
@@ -72,6 +77,8 @@ impl Atoms {
             hidden: a(b"_NET_WM_STATE_HIDDEN")?,
             desktop: a(b"_NET_WM_DESKTOP")?,
             moveresize: a(b"_NET_MOVERESIZE_WINDOW")?,
+            workarea: a(b"_NET_WORKAREA")?,
+            frame_extents: a(b"_NET_FRAME_EXTENTS")?,
         })
     }
 }
@@ -160,7 +167,26 @@ pub fn stable_role(role: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::stable_role;
+    use super::{rescue_target, stable_role};
+
+    #[test]
+    fn rescue_targets() {
+        let asus = (0, 27, 1920, 1053);
+        let fake = (1920, 0, 1920, 1080);
+        // Thunderbird left at x=1896 on a 1920-wide screen: moved left just enough.
+        assert_eq!(rescue_target((1896, 300, 1300, 880), &[asus]), Some((0, 620, 200)));
+        // Half or more visible: left alone.
+        assert_eq!(rescue_target((1000, 300, 1300, 800), &[asus]), None);
+        // Straddling two monitors, all visible: left alone.
+        assert_eq!(rescue_target((1500, 300, 1000, 800), &[asus, fake]), None);
+        // Off every monitor: the nearest one, here the fake.
+        assert_eq!(rescue_target((4000, 100, 800, 600), &[asus, fake]), Some((1, 3040, 100)));
+        // Above the panel: pushed below it.
+        assert_eq!(rescue_target((100, -700, 800, 720), &[asus]), Some((0, 100, 27)));
+        // Larger than the monitor: top-left corner on screen.
+        assert_eq!(rescue_target((3000, 500, 2500, 1200), &[asus]), Some((0, 0, 27)));
+        assert_eq!(rescue_target((10, 10, 100, 100), &[]), None);
+    }
 
     #[test]
     fn serial_roles_dropped() {
@@ -295,6 +321,90 @@ fn place(conn: &RustConnection, root: u32, a: &Atoms, w: &Win, s: &WindowSetting
     Ok(true)
 }
 
+/// A rectangle: x, y, width, height.
+type Rect = (i32, i32, i32, i32);
+
+fn overlap(a: Rect, b: Rect) -> i64 {
+    let w = (a.0 + a.2).min(b.0 + b.2) - a.0.max(b.0);
+    let h = (a.1 + a.3).min(b.1 + b.3) - a.1.max(b.1);
+    if w > 0 && h > 0 { w as i64 * h as i64 } else { 0 }
+}
+
+/// Where to move a window (its frame, `r`) so it is fully on one of
+/// `areas`, or None if at least half of it is visible already. The area it
+/// overlaps most wins, else the one nearest its centre; the window moves as
+/// little as it can, and keeps its top-left corner on screen if it is
+/// larger than the area.
+fn rescue_target(r: Rect, areas: &[Rect]) -> Option<(usize, i32, i32)> {
+    if areas.is_empty() || r.2 <= 0 || r.3 <= 0 {
+        return None;
+    }
+    let visible: i64 = areas.iter().map(|a| overlap(r, *a)).sum();
+    if visible * 2 >= r.2 as i64 * r.3 as i64 {
+        return None;
+    }
+    let (cx, cy) = (r.0 as i64 + r.2 as i64 / 2, r.1 as i64 + r.3 as i64 / 2);
+    let dist = |a: &Rect| {
+        let dx = (a.0 as i64 + a.2 as i64 / 2) - cx;
+        let dy = (a.1 as i64 + a.3 as i64 / 2) - cy;
+        dx * dx + dy * dy
+    };
+    let i = (0..areas.len()).max_by_key(|&i| (overlap(r, areas[i]), -dist(&areas[i])))?;
+    let a = areas[i];
+    let fit = |pos: i32, len: i32, start: i32, size: i32| {
+        if len >= size { start } else { pos.clamp(start, start + size - len) }
+    };
+    Some((i, fit(r.0, r.2, a.0, a.2), fit(r.1, r.3, a.1, a.3)))
+}
+
+/// Each lit monitor's usable area on `desktop`: the monitor cut to the
+/// window manager's work area (which leaves out panels).
+fn usable_areas(conn: &RustConnection, root: u32, a: &Atoms, setup: &Setup, desktop: Option<u32>) -> Vec<(String, Rect)> {
+    let d = match desktop {
+        Some(d) if d != vergence_profile::windows::ALL_DESKTOPS => d as usize,
+        _ => 0,
+    };
+    let wa = prop32(conn, root, a.workarea, 4096).unwrap_or_default();
+    let work: Option<Rect> = wa.get(d * 4..d * 4 + 4).map(|v| (v[0] as i32, v[1] as i32, v[2] as i32, v[3] as i32));
+    monitors(setup)
+        .into_iter()
+        .map(|(_, name, x, y, w, h)| {
+            let m = (x, y, w, h);
+            let r = match work {
+                Some(k) if overlap(m, k) > 0 => {
+                    let x0 = x.max(k.0);
+                    let y0 = y.max(k.1);
+                    (x0, y0, (x + w).min(k.0 + k.2) - x0, (y + h).min(k.1 + k.3) - y0)
+                }
+                _ => m,
+            };
+            (name, r)
+        })
+        .collect()
+}
+
+/// Move `w` fully onto a monitor if it is mostly off every one. Returns
+/// the monitor's name if it moved it.
+fn rescue(conn: &RustConnection, root: u32, a: &Atoms, w: &Win, setup: &Setup) -> Res<Option<String>> {
+    if w.max_h || w.max_v || w.fs {
+        return Ok(None); // the window manager fits those to a monitor itself
+    }
+    let fe = prop32(conn, w.xid, a.frame_extents, 4)?;
+    let (l, r, t, b) = match fe[..] {
+        [l, r, t, b] => (l as i32, r as i32, t as i32, b as i32),
+        _ => (0, 0, 0, 0),
+    };
+    let frame = (w.x - l, w.y - t, w.w as i32 + l + r, w.h as i32 + t + b);
+    let areas = usable_areas(conn, root, a, setup, w.desktop);
+    let rects: Vec<Rect> = areas.iter().map(|x| x.1).collect();
+    let Some((i, fx, fy)) = rescue_target(frame, &rects) else { return Ok(None) };
+    // Position only (bits 8, 9), static gravity: the client's own corner.
+    let flags = 10 | (0x3 << 8) | (SOURCE_TOOL << 12);
+    client_message(conn, root, w.xid, a.moveresize, [flags, (fx + l) as u32, (fy + t) as u32, 0, 0])?;
+    conn.flush()?;
+    Ok(Some(areas[i].0.clone()))
+}
+
 fn monitor_name(setup: &Setup, id: &str) -> String {
     monitors(setup).into_iter().find(|m| m.0 == id).map(|m| m.1).unwrap_or_else(|| id.to_string())
 }
@@ -421,29 +531,39 @@ impl WindowMemory {
         Ok(())
     }
 
-    /// Put every open window back where it was on this setup.
+    /// Put every open window back where it was on this setup; bring the
+    /// ones with no place here fully on screen if they are mostly off it.
     pub fn restore_all(&mut self, conn: &RustConnection, setup: &Setup) -> Res<()> {
         if !self.enabled || setup.edids().is_empty() {
             return Ok(());
         }
         let store = crate::store::load_windows()?;
         let key = setup.key();
-        let Some(prof) = store.get(&key) else { return Ok(()) };
+        let prof = store.get(&key);
+        let lit: Vec<String> = monitors(setup).into_iter().map(|m| m.0).collect();
         let mut n = 0;
         for w in list(conn, self.root, &self.atoms)? {
             if !w.eligible || store.skips(&w.id) {
                 continue;
             }
-            if let Some(s) = prof.get(&w.id) {
-                if place(conn, self.root, &self.atoms, &w, s, setup)? {
-                    println!(
-                        "{}   moved {} to {} {}",
-                        stamp(),
-                        w.id.describe(),
-                        monitor_name(setup, &s.monitor),
-                        s.describe_place()
-                    );
-                    n += 1;
+            match prof.and_then(|p| p.get(&w.id)).filter(|s| lit.contains(&s.monitor)) {
+                Some(s) => {
+                    if place(conn, self.root, &self.atoms, &w, s, setup)? {
+                        println!(
+                            "{}   moved {} to {} {}",
+                            stamp(),
+                            w.id.describe(),
+                            monitor_name(setup, &s.monitor),
+                            s.describe_place()
+                        );
+                        n += 1;
+                    }
+                }
+                None => {
+                    if let Some(m) = rescue(conn, self.root, &self.atoms, &w, setup)? {
+                        println!("{}   brought {} fully onto {} (it was mostly off-screen)", stamp(), w.id.describe(), m);
+                        n += 1;
+                    }
                 }
             }
         }

@@ -162,8 +162,18 @@ session (`browser.startup.page = 3` in the test profile's user.js).
 **Found: a window can be stranded on unplug.** Thunderbird, on a workspace
 not being shown and with no remembered place on the ASUS-alone setup, was
 left by xfwm4 at x=1901 on the 1920-wide screen: 19 px visible. Both
-unplugs did the same. Fix to make: when a setup has no place for a window
-and it is mostly off every monitor, move it fully onto the nearest one.
+unplugs did the same.
+
+**Fixed (21:21): rescue.** After every monitor change, a window with no
+place on the new setup (none remembered, or its monitor is not lit) that is
+less than half visible is moved fully onto the monitor it overlaps most, or
+else the nearest one, inside the work area (clear of the panel) and allowing
+for its title bar; it moves as little as it can. Maximised and fullscreen
+windows (xfwm4 fits those itself) and skipped apps are left alone. Checked
+on Hubble: Thunderbird's ASUS-alone entry removed, fake plugged and
+unplugged; log: "brought Mail/thunderbird (3pane) #1 fully onto ASUS VS229
+(it was mostly off-screen)", window at x=620, its right edge on the
+screen's edge. The rescued place is then remembered like any other.
 
 ## Known limitation: the jump at app start (Dave, 2026-11-06 19:56)
 
