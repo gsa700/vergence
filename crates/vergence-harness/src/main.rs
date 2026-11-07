@@ -12,8 +12,13 @@
 //!       force the connector on, make X re-probe, and check that X shows the
 //!       same bytes and that `vergd probe` prints the expected profile key.
 //!       Then unplug the fake again.
+//!
+//!   vergence-harness fake --name N --product 0x9902 --serial 2
+//!                         --mode 4k30|1080p60 --size-mm WxH --out FILE
+//!       Write a fake monitor's EDID (milestone 4: fakes of other densities).
 
 mod db;
+mod fake;
 mod live;
 mod parse;
 
@@ -24,7 +29,9 @@ fn usage() -> ExitCode {
     eprintln!(
         "usage: vergence-harness parse <edid-db>\n       \
          vergence-harness live <edid-db> --conn <debugfs connector> --output <X output> \
-         [--sample N] [--vergd PATH]"
+         [--sample N] [--vergd PATH]\n       \
+         vergence-harness fake --name N --product 0xNNNN --serial N --mode 4k30|1080p60 \
+         --size-mm WxH --out FILE"
     );
     ExitCode::from(2)
 }
@@ -37,6 +44,7 @@ fn main() -> ExitCode {
             Some(o) => live::run(&o),
             None => return usage(),
         },
+        Some("fake") => fake::run(&args[1..]),
         _ => return usage(),
     };
     match result {

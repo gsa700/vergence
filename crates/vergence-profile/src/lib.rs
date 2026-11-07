@@ -17,9 +17,11 @@
 //!
 //! Milestone 2 adds [`arrangement`]: what each profile remembers (modes,
 //! positions, primary) and the file that holds the profiles. Milestone 3
-//! adds [`windows`]: where each window was on each setup.
+//! adds [`windows`]: where each window was on each setup. Milestone 4 adds
+//! [`scaling`]: each monitor's scale from its physical size, and Mode A.
 
 pub mod arrangement;
+pub mod scaling;
 pub mod windows;
 
 use sha2::{Digest, Sha256};

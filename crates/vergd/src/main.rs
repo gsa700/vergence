@@ -21,6 +21,7 @@ mod watch;
 mod windows;
 mod x11;
 
+use vergence_profile::scaling::Distance;
 use std::process::ExitCode;
 
 use vergence_edid::{Edid, MadeIn};
@@ -174,6 +175,15 @@ pub fn print_setup(setup: &Setup) {
         }
         if let Some(m) = &o.native {
             line.push_str(&format!("\n          native  {m}"));
+        }
+        if let Some(d) = o.derived_scale(Distance::Desktop, 1.0) {
+            match (d.ppi, d.note) {
+                (Some(ppi), _) => line.push_str(&format!(
+                    "\n          scale   {} ({ppi:.0} ppi at desk distance, exactly {:.2})",
+                    d.scale, d.exact
+                )),
+                (None, note) => line.push_str(&format!("\n          scale   1 ({})", note.unwrap_or("no size"))),
+            }
         }
         match &o.current {
             Some(c) => line.push_str(&format!("\n          current {} at +{}+{}", c.mode, c.x, c.y)),

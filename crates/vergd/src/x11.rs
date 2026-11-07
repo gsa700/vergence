@@ -4,6 +4,7 @@
 //! recorded setups can stand in for a live server later (milestone 1, test
 //! automation (5)).
 
+use vergence_profile::scaling::{self, Derived, Distance};
 use std::fmt;
 
 use x11rb::connection::Connection as _;
@@ -126,6 +127,21 @@ impl Output {
             }
             None => format!("connected {who} off"),
         }
+    }
+}
+
+impl Output {
+    /// This monitor's derived scale (milestone 4), from its EDID's physical
+    /// size and native resolution; None without a native mode.
+    pub fn derived_scale(&self, distance: Distance, preference: f64) -> Option<Derived> {
+        let n = self.native.as_ref()?;
+        let mm = self
+            .edid
+            .as_deref()
+            .and_then(|r| vergence_edid::Edid::parse(r).ok())
+            .and_then(|e| e.physical_size_mm())
+            .map(|(w, h)| (w as u32, h as u32));
+        Some(scaling::derive((n.width as u32, n.height as u32), mm, distance, preference))
     }
 }
 
