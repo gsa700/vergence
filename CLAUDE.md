@@ -5,7 +5,7 @@ the current milestone is docs/milestone-4.md (scaling; earlier ones in docs/mile
 
 - **Started 2026-11-06** (Dave's go). The source lives here on Control (the
   main git copy, pushed to GitHub; Control has no Rust). Build and test on Hubble, the FreeBSD
-  dev box: copy the tree over SSH without .git and target, then run
+  dev box: `tools/sync-hubble.sh` (rsync; keeps Hubble's build output), then run
   `cargo test` and `DISPLAY=:0 target/debug/vergd probe` there. Fake monitors
   for tests: docs/milestone-1.md, "Found on Hubble".
 - **vergd runs in Dave's Xfce session on Hubble** (tools/install-autostart.sh:
