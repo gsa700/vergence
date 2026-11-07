@@ -250,12 +250,24 @@ pub fn repack(current: &[OutputSetting], factors: &[u32]) -> Result<Vec<OutputSe
     Ok(out)
 }
 
+/// Mode A (render at one scale, RandR shrinks each monitor) or Mode B
+/// (native pixels, per-monitor factors to the toolkits that take them).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScaleMode {
+    #[default]
+    A,
+    B,
+}
+
 /// Scaling settings (milestone 4, docs/milestone-4.md).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScalingConfig {
     /// Off until `vergd scale on` (decision 4).
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
+    pub mode: ScaleMode,
     /// "How big I like things", in percent (100 = the reference size).
     #[serde(default = "hundred")]
     pub preference: u32,
@@ -266,7 +278,7 @@ pub struct ScalingConfig {
 
 impl Default for ScalingConfig {
     fn default() -> Self {
-        ScalingConfig { enabled: false, preference: 100, monitors: Vec::new() }
+        ScalingConfig { enabled: false, mode: ScaleMode::A, preference: 100, monitors: Vec::new() }
     }
 }
 

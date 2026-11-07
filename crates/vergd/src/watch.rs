@@ -32,7 +32,7 @@ use x11rb::protocol::randr::{ConnectionExt as _, NotifyMask};
 use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
 
-use vergence_profile::arrangement::{same_arrangement, Profile, Store};
+use vergence_profile::arrangement::{same_arrangement, Profile, ScaleMode, Store};
 
 use crate::apply::{self, Outcome};
 use crate::scale;
@@ -186,10 +186,12 @@ impl Memory {
     }
 }
 
-/// Mode A bookkeeping (milestone 4).
+/// Scaling bookkeeping (milestone 4).
 struct Scaler {
     /// The render scale the toolkits were last given.
     render: Option<u32>,
+    /// Everything the toolkits were last given ([`scale::toolkit_key`]).
+    key: Option<String>,
     /// The last "cannot scale" message, so it is said once.
     note: Option<String>,
     mtime: Option<std::time::SystemTime>,
@@ -232,7 +234,10 @@ fn ensure_scale(
         if t.changes {
             match apply::apply(&t.want, false)? {
                 Outcome::Applied(steps) => {
-                    println!("{} scaling: rendering at {}x", stamp(), t.render);
+                    match t.mode {
+                        ScaleMode::A => println!("{} scaling: rendering at {}x", stamp(), t.render),
+                        ScaleMode::B => println!("{} scaling: Mode B, native pixels", stamp()),
+                    }
                     for m in &t.monitors {
                         println!("{}   {} ({}): scale {:.2} ({})", stamp(), m.name, m.connector, m.exact, m.why);
                     }
@@ -267,27 +272,40 @@ fn ensure_scale(
     }
     sc.note = note;
     let Some(t) = t else { return Ok(None) };
-    if sc.render != Some(t.render) {
+    let key = scale::toolkit_key(&t);
+    if sc.key.as_deref() != Some(key.as_str()) {
         let base_cursor = xs.as_ref().and_then(|m| m.base_int("Gtk/CursorThemeSize")).unwrap_or(0);
         if let Some(m) = xs {
             m.set_overlay(conn, scale::xsettings_overlay(t.render, base_cursor))?;
         }
-        scale::set_resources(conn, root, t.render, base_cursor)?;
-        crate::store::save_session_env(&scale::session_env(t.render))?;
+        // Mode B keeps Xft.dpi at 96: Qt and Avalonia take their per-monitor
+        // factors from session.env and would multiply a DPI scale in.
+        let dpi = if t.mode == ScaleMode::B { 1 } else { t.render };
+        scale::set_resources(conn, root, dpi, t.render, base_cursor)?;
+        crate::store::save_session_env(&scale::session_env(t.render, &t.per_monitor))?;
         let was = sc.render;
         wm.set_render(t.render);
-        if sc.render.is_some() || t.render > 1 {
-            println!(
-                "{} toolkits: scale {} (GTK and Electron now; Qt, Avalonia and Xlib fonts in new apps; Java from the next login)",
-                stamp(),
-                t.render
-            );
+        if sc.key.is_some() || t.render > 1 || !t.per_monitor.is_empty() {
+            match t.mode {
+                ScaleMode::A => println!(
+                    "{} toolkits: scale {} (GTK and Electron now; Qt, Avalonia and Xlib fonts in new apps; Java from the next login)",
+                    stamp(),
+                    t.render
+                ),
+                ScaleMode::B => println!(
+                    "{} toolkits (Mode B): GTK, Electron and Java scale {}; Qt and Avalonia per monitor {} (from the next login)",
+                    stamp(),
+                    t.render,
+                    scale::per_monitor_text(&t.per_monitor)
+                ),
+            }
         }
+        sc.key = Some(key);
         sc.render = Some(t.render);
         // The scale changed on this setup (not at start, where open windows
         // are left alone): let the apps resize to the new scale, then put
         // every window back at its place on its panel.
-        if was.is_some() && wm.enabled {
+        if was.is_some() && was != Some(t.render) && wm.enabled {
             drain(conn, WINDOW_SETTLE)?;
             let cur = x11::read_setup_on(conn, root)?;
             wm.restore_all(conn, &cur)?;
@@ -346,7 +364,7 @@ pub fn watch(observe_only: bool, no_windows: bool, no_xsettings: bool) -> Result
     // already open are tracked, not moved.
     last = mem.react(&conn, root, last, true)?;
     wm.mark_unstable();
-    let mut sc = Scaler { render: None, note: None, mtime: crate::store::mtime(), last_check: Instant::now() };
+    let mut sc = Scaler { render: None, key: None, note: None, mtime: crate::store::mtime(), last_check: Instant::now() };
     if let Some(s) = ensure_scale(&mut mem, &mut sc, &conn, root, &last, xs.as_mut(), &mut wm)? {
         last = s;
     }

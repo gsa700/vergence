@@ -140,9 +140,9 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
   drawn 3840x2160 and shrunk x2.000, 4K drawn 4389x2469 at +3840 and shrunk
   x1.143; screen 8229x2469; toolkits 2. Unplug: ASUS alone back to 1.
   Replug: Mode A back from the profile. `scale off`: 1:1 again.
-- **Still to do:** Java on FreeBSD (check on Debian); Mode B (7); real
-  monitors and the calibration (8); Dave trying the Display dialog by hand
-  in Mode A once real monitors are here.
+- **Still to do:** Qt's window size on the second monitor in Mode B; Java's
+  scale source (and Debian); real monitors and the calibration (8); Dave
+  trying the Display dialog by hand in Mode A once real monitors are here.
 - **Window memory across scale changes (23:05):** places are now kept in
   panel pixels (X pixels / the monitor's RandR factor) and sizes in app
   units (X pixels / the render scale); when the scale of the current setup
@@ -190,6 +190,28 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
   - *Appearance DPI 120:* xfsettingsd no longer touches `Xft.dpi` or
     XSETTINGS; vergd's 192 stayed. The Appearance dialog has no effect, as
     decided.
+- **Mode B (23:30-23:36), acceptance 7:** `vergd scale mode a|b`. No
+  transforms; Qt and Avalonia get exact per-monitor factors in session.env
+  (`QT_SCREEN_SCALE_FACTORS`, `AVALONIA_SCREEN_SCALE_FACTORS`,
+  "HDMI-1=1.70;HDMI-2=1.07"), `Xft.dpi` stays 96 so they don't multiply it
+  in; GTK, Electron and Java get one whole-number scale, from the primary
+  monitor or else the physically largest (here the 4K: 1.70 -> 2); cursor
+  follows it. Measured, ASUS + fake 4K:
+
+  | Toolkit | ASUS | 4K | |
+  |---|---|---|---|
+  | Avalonia | 52.9 mm | 52.9 mm | per monitor, exact |
+  | Qt 6.11 | 52.9 | 34.7 | draws at 1.70 on the 4K but sizes its window with the first monitor's 1.07, so the box is cut off, even when opened on the 4K |
+  | GTK 3/4, Electron | 99.0 | 62.2 | one scale (2), as expected |
+  | Java 21 | 99.0 | 62.2 | follows GTK's scale in Mode B (not in Mode A; uiScale still ignored) |
+  | Xlib | 49.5 | 31.1 | unscaled |
+
+  **Avalonia passes; Qt draws right but sizes its window wrong on the
+  second monitor (a Qt/X11 issue, to look into); GTK, Electron and Java are
+  right on one monitor only, which is Mode B's documented limit.** The
+  per-monitor factors reach Qt and Avalonia from the next login (session.env),
+  for the setup active then. Java's scale source is still unclear: it drew
+  at 2 in Mode B with `Xft.dpi` 96 or 192, but at 1 in Mode A with GTK at 2.
 - **Login checked (22:36):** LightDM's Xsession on FreeBSD sources
   `~/.xprofile` (`VERGENCE_SCALE=1` from `session.env` was in the new
   session's environment); at login vergd took XSETTINGS over from

@@ -33,7 +33,7 @@ use x11::Setup;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: vergd probe\n       vergd watch [--observe-only] [--no-windows] [--no-xsettings]\n       vergd profiles\n       vergd windows\n       vergd xsettings\n       vergd scale [on|off|status]\n       \
+        "usage: vergd probe\n       vergd watch [--observe-only] [--no-windows] [--no-xsettings]\n       vergd profiles\n       vergd windows\n       vergd xsettings\n       vergd scale [on|off|status|mode a|mode b]\n       \
          vergd forget <key-prefix>\n       vergd apply [--dry-run]"
     );
     ExitCode::from(2)
@@ -58,6 +58,7 @@ fn main() -> ExitCode {
         ["scale"] | ["scale", "status"] => scale_status(),
         ["scale", "on"] => scale_set(true),
         ["scale", "off"] => scale_set(false),
+        ["scale", "mode", m] if ["a", "b"].contains(m) => scale_mode(m),
         ["profiles"] => profiles(),
         ["forget", prefix] => forget(prefix),
         ["apply"] => apply_now(false),
@@ -271,8 +272,9 @@ fn scale_status() -> Result<(), Box<dyn std::error::Error>> {
     let st = store::load()?;
     let cfg = &st.scaling;
     println!(
-        "scaling {}, preference {}%",
+        "scaling {}, Mode {:?}, preference {}%",
         if cfg.enabled { "ON" } else { "off (vergd scale on)" },
+        cfg.mode,
         cfg.preference
     );
     for m in scale::monitor_scales(&setup, &cfg.clone()) {
@@ -288,7 +290,14 @@ fn scale_status() -> Result<(), Box<dyn std::error::Error>> {
     }
     match scale::target(&setup, cfg) {
         Ok(t) => {
-            println!("render scale {}", t.render);
+            match t.mode {
+                vergence_profile::arrangement::ScaleMode::A => println!("render scale {}", t.render),
+                vergence_profile::arrangement::ScaleMode::B => println!(
+                    "GTK, Electron and Java scale {}; Qt and Avalonia per monitor: {}",
+                    t.render,
+                    scale::per_monitor_text(&t.per_monitor)
+                ),
+            }
             if t.changes {
                 println!("vergd will change the arrangement to:");
                 for o in &t.want {
@@ -314,5 +323,19 @@ fn scale_set(on: bool) -> Result<(), Box<dyn std::error::Error>> {
         println!("added a line to ~/.xprofile so the next login reads ~/.config/vergence/session.env");
     }
     println!("the running vergd applies it within 2 s (see its log)");
+    Ok(())
+}
+
+/// `vergd scale mode a|b`.
+fn scale_mode(m: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use vergence_profile::arrangement::ScaleMode;
+    let mut st = store::load()?;
+    st.scaling.mode = if m == "b" { ScaleMode::B } else { ScaleMode::A };
+    store::save(&st)?;
+    println!(
+        "Mode {:?} in ~/.config/vergence/profiles.toml (scaling is {}); the running vergd applies it within 2 s",
+        st.scaling.mode,
+        if st.scaling.enabled { "on" } else { "off" }
+    );
     Ok(())
 }
