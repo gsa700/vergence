@@ -10,7 +10,7 @@ The design is in
 (PDF beside it; `docs/make-pdf.sh` rebuilds it on a Mac), written while the project was still called "App
 Consistency"; it was named Vergence on 2026-11-05.
 
-**Status (2026-11-06): milestone 1 started.** `vergd probe` and `vergd watch`
+**Status (2026-11-06): milestone 2 built.** `vergd probe` and `vergd watch`
 work on real hardware, a FreeBSD 15.1 X11 machine (Intel UHD 630) with real monitors and
 debugfs fake monitors, not a virtual machine. Next: the rest of the milestone 1 acceptance runs and the test harness. Debian 13
 is tested alongside at every phase.
@@ -20,7 +20,7 @@ Crates: `vergence-edid` (EDID parser), `vergence-profile` (profile key),
 
 | Phase | What | Status |
 |---|---|---|
-| 1 | X11 consistency daemon: EDID profiles, scaling modes, layout memory | Milestone 1 done except real monitors and an automated sleep loop ([docs/milestone-1.md](docs/milestone-1.md)); milestone 2 planned ([docs/milestone-2.md](docs/milestone-2.md)) |
+| 1 | X11 consistency daemon: EDID profiles, scaling modes, layout memory | Milestone 1 done except real monitors and an automated sleep loop ([docs/milestone-1.md](docs/milestone-1.md)); milestone 2 built and running on Hubble ([docs/milestone-2.md](docs/milestone-2.md)) |
 | 2 | Display server (Smithay) | Design only |
 | 3 | Accessibility contract, display-list surfaces, Avalonia backend | Research |
 | 4 | Remote display over display lists | Research |
