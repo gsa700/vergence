@@ -1,0 +1,10 @@
+[package]
+name = "vergence-profile"
+description = "Monitor-set profile keys for Vergence"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sha2 = "0.10"

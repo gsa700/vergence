@@ -3,9 +3,11 @@
 Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Vergence-Whitepaper.md,
 the current milestone is docs/milestone-1.md, status is in README.md.
 
-- **Not started on purpose.** Dave, 2026-11-05: set up on Control, but build
-  on real hardware later, so the work isn't spent around QEMU's quirks. Don't
-  start writing the daemon until he says so.
+- **Started 2026-11-06** (Dave's go). The source lives here on Control (the
+  only git copy; Control has no Rust). Build and test on Hubble, the FreeBSD
+  dev box: copy the tree over SSH without .git and target, then run
+  `cargo test` and `DISPLAY=:0 target/debug/vergd probe` there. Fake monitors
+  for tests: docs/milestone-1.md, "Found on Hubble".
 - **Names:** the project and its crates are `vergence` / `vergence-*`; the
   phase 1 daemon is `vergd`. "Verge" for short in conversation.
 - **Rust throughout** (whitepaper §8): x11rb for phase 1, Smithay for the
