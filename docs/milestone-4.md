@@ -314,6 +314,28 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
    box looks the size of a credit card"); then 3 and 4 again, and his
    judgment of the result.
 
+## Real monitors for acceptance 8 (Dave, 2026-11-06 23:21)
+
+When the cables arrive: the **ASUS VS229** (22" 1080p, in use), the **14"
+4K** used for the Pi 5 PoE kiosk tests, and the **32" 4K** that was
+Techbench's monitor before the LG 6K. Expected, with typical panel sizes
+(310 x 174 mm, 708 x 398 mm; the EDIDs will say):
+
+| | ppi | exact scale (desk) |
+|---|---|---|
+| ASUS 22" 1080p | 103 | 1.07 |
+| 32" 4K | ~138 | ~1.43 |
+| 14" 4K | ~315 | ~3.28 (~2.3 at laptop distance) |
+
+- ASUS + 32": render 2, about 8,960 px wide. The everyday case.
+- ASUS + 14": render 4, about 11,860 px (the ASUS drawn at nearly 4x).
+- 14" + 32": render 4, about 15,420 px, just under the limit.
+- **All three: render 4, about 22,600 px: refused** (18,400 px even with the
+  14" at laptop distance). The real-hardware case for the desktop-size wall
+  (whitepaper §5) and for Mode B, which has no such limit.
+- Hubble's HDMI port does 4K at 30 Hz only; the 4K monitors belong on the
+  DisplayPort outputs.
+
 ## Risks
 
 - Softness in Mode A on monitors scaled by non-whole factors; the reason
