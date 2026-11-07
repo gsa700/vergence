@@ -26,5 +26,5 @@ Crates: `vergence-edid` (EDID parser), `vergence-profile` (profile key),
 | 4 | Remote display over display lists | Research |
 
 Language: Rust throughout (whitepaper §8). Platforms: FreeBSD first, Debian
-second, both from day one (FreeBSD made primary 2026-11-06; the whitepaper
-still says Debian first until its next draft).
+second, both from day one (FreeBSD made primary 2026-11-06, whitepaper
+Draft 0.6).

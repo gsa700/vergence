@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "5 November 2026 — Draft 0.5"
+date: "6 November 2026 — Draft 0.6"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.5 · 5 November 2026
+David Erickson (AB0R), with Claude · Draft 0.6 · 6 November 2026
 
 ---
 
@@ -21,7 +21,7 @@ On today's Unix-like desktops, an application's size on screen depends on which 
 
 This paper proposes a path to **app consistency**: every application the right size, in the right place and readable, on any monitor setup, for every user, including users who depend on accessibility tools. It starts with something buildable in days on an ordinary X11 desktop: a daemon that recognises monitor setups by their EDIDs, applies consistent scaling across toolkits, and remembers window layouts per setup. It ends with a long-term design for a new display server. That server rests on one authority and three contracts: geometry in visual size, placement owned by the server but negotiated with apps, and accessibility built into the protocol. Optional vector "display-list" surfaces revive the best idea of NeXTSTEP's Display PostScript.
 
-The design targets **Debian** as the primary platform and **FreeBSD** as a second platform, tested at every phase.
+The design targets **FreeBSD** as the primary development platform and **Debian** as the second, tested at every phase.
 
 ---
 
@@ -90,7 +90,7 @@ X11 had a Display PostScript extension (DPS/X) on Sun, DEC and SGI workstations,
 3. **Every phase stands alone.** Each phase delivers value even if nobody else ever adopts it.
 4. **Compatibility at the edges.** Existing X11 and Wayland applications keep working; new capabilities are optional upgrades.
 5. **Accessibility and security are part of the design**, not afterthoughts, and neither is allowed to break the other.
-6. **Two platforms from day one:** Debian and FreeBSD.
+6. **Two platforms from day one:** FreeBSD first, Debian second. Starting on FreeBSD keeps the code on the X protocol and away from Linux-only interfaces.
 
 ---
 
@@ -180,19 +180,21 @@ Three monitors in a row. Physical sizes are **assumed** for the calculation.
 
 ### 4.7 First milestone
 
-Read EDIDs, hash each setup into a profile key, and log RandR hot-plug events. Small, safe, and the foundation for everything else. It is built and tested on real hardware from the start, on the Debian workstation with real monitors, with FreeBSD alongside: a virtual machine's synthetic EDIDs and hot-plug behaviour would only be worked around, not learned from.
+Read EDIDs, hash each setup into a profile key, and log RandR hot-plug events. Small, safe, and the foundation for everything else. It is built and tested on real hardware from the start, on a FreeBSD workstation with real monitors, with Debian alongside: a virtual machine's synthetic EDIDs and hot-plug behaviour would only be worked around, not learned from.
+
+The first real machine (FreeBSD 15.1, Intel UHD 630) turned up two things a Linux-first build would have missed. Xorg on FreeBSD does not re-probe its outputs when a monitor is plugged in, although the kernel reports the plug to devd; so on FreeBSD the daemon listens to devd and asks X to re-probe, and X then sends its usual RandR events. And a freshly started Xorg reads every EDID but does not publish the RandR EDID property until the first re-probe, so the daemon re-probes once when a connected output has no EDID.
 
 ### 4.8 Testing on real hardware, automated
 
 Real-hardware testing is the slow part of phase 1 (§9), so most of it is scripted. The test harness is a separate tool; it may need root, the daemon never does.
 
-1. **Plug and unplug without touching a cable.** On Linux, the kernel's DRM layer gives every connector two debugfs controls: `force` makes it look plugged in or unplugged, with the hot-plug event that goes with it, and `edid_override` makes it report any EDID. The daemon can then be run against thousands of real monitors' EDIDs from the public linuxhw EDID database, including broken ones (zero or wrong physical size, missing serial numbers, identical twins).
-2. **Sleep and wake, overnight.** `rtcwake` suspends and wakes the machine in a loop; after every cycle the profile and the layout must be unchanged.
+1. **Plug and unplug without touching a cable.** The kernel's DRM layer gives every connector two debugfs controls, on Linux and on FreeBSD (drm-kmod, through lindebugfs): `force` makes it look plugged in or unplugged, and `edid_override` makes it report any EDID. Forcing sends no hot-plug event, so the harness makes X re-probe after each change. The daemon can then be run against thousands of real monitors' EDIDs from the public linuxhw EDID database, including broken ones (zero or wrong physical size, missing serial numbers, identical twins). First results: all 174,759 EDIDs in the database parse without fault, and 2,000 of them run as fake monitors in under five minutes.
+2. **Sleep and wake, overnight.** The machine suspends and wakes in a loop (`rtcwake` on Linux; FreeBSD has no equivalent yet, so the method there is still open); after every cycle the profile and the layout must be unchanged.
 3. **Same physical size, measured.** Small test programs in GTK, Qt, Avalonia, Electron and Java each draw a box of known logical size; the harness screenshots every monitor and measures each box in millimetres using the EDID's physical size. The user's judgment of "the right size" is needed once, as a calibration, not on every run.
 4. **Layout memory, scripted.** Windows (several Firefox windows and Thunderbird included) are placed, a monitor is unplugged and replugged through (1), the applications restart, and every window's position and size is compared with what was saved, with a check for drift of a few pixels per restore.
 5. **Record and replay.** Every RandR event and EDID seen on real monitors, docks and KVM switches is recorded once; the recordings become tests that run anywhere, with no monitors attached.
 
-What stays manual: the one-time size calibration, occasional real docks and KVM switches, and FreeBSD if its DRM drivers lack the debugfs controls (then real cables plus the replayed recordings). The details are in the milestone 1 plan.
+What stays manual: the one-time size calibration, and occasional real monitors, docks and KVM switches, which do things no script predicts. The details are in the milestone 1 plan.
 
 ---
 
@@ -323,7 +325,7 @@ Why one language:
 - **X11 applications** run through rootless Xwayland. Because the server owns input routing, legacy windows can be **scaled per monitor with correct input mapping**, which removes the X11 wall from §5 without any X extension.
 - The server speaks Wayland and X11 at the edges, but placement, memory, units, accessibility and security follow this design.
 
-**Platforms.** Debian (13, X11, XFCE as the stable session; Xephyr for nested development) is the primary development platform. FreeBSD is tested alongside at every phase.
+**Platforms.** FreeBSD (15, X11, Xfce as the stable session) is the primary development platform, on real hardware. Debian (13, X11, Xfce; Xephyr for nested development) is tested alongside at every phase. Where the two must differ, as with hot-plug events (§4.7), the code and the documents say so.
 
 ### 8.1 Running our .NET/Avalonia applications
 
@@ -363,14 +365,14 @@ Firefox and Thunderbird are GTK applications on Linux and FreeBSD with mature na
 
 | Phase | Deliverable | Value on its own | Estimated effort |
 |---|---|---|---|
-| **1** | X11 consistency daemon: EDID profiles, scaling modes A/B, toolkit settings, layout memory | Fixes daily annoyances on any X11 desktop, Debian and FreeBSD | Days to weeks |
+| **1** | X11 consistency daemon: EDID profiles, scaling modes A/B, toolkit settings, layout memory | Fixes daily annoyances on any X11 desktop, FreeBSD and Debian | Days to weeks |
 | **2** | Display server, first nested in a window, then on real hardware: native per-monitor rendering, placement memory, reference-unit scaling, per-window scaling of X11 apps with correct input | A usable personal desktop that beats X11 and Wayland on consistency | Months |
 | **3** | Accessibility contract and display-list surfaces: Rust/Vello reference implementation, then the native Avalonia backend (§8.1) | Sharp magnification, sharp straddling windows, accessibility by design | Research |
 | **4** | Remote display over display lists | Efficient, sharp remote desktops | Research |
 
 **Where the real costs are.** Writing the code is not the bottleneck. The bottlenecks are:
 
-- **real-hardware testing:** GPUs, monitors with unusual EDIDs, docks, sleep and wake. Most of it can be automated (§4.8), which turns weeks of manual testing into overnight runs; what remains manual is real docks, KVM switches and FreeBSD hardware;
+- **real-hardware testing:** GPUs, monitors with unusual EDIDs, docks, sleep and wake. Most of it can be automated (§4.8), which turns weeks of manual testing into overnight runs; what remains manual is real docks and KVM switches;
 - **the user's time and judgment:** what "the right size" means to their eyes;
 - for phases 3–4, **toolkit adoption**, which only a working demonstration can start.
 
@@ -380,12 +382,12 @@ Firefox and Thunderbird are GTK applications on Linux and FreeBSD with mature na
 
 1. Exact live-update behaviour of Qt 6 and Chromium scaling on X11.
 2. Avalonia 12's X11 per-screen scaling variables and behaviour.
-3. Reliability of EDID physical-size data across real monitors (some report zero or wrong sizes), and the fallback when it is missing.
+3. Reliability of EDID physical-size data across real monitors, and the fallback when it is missing. In the linuxhw database 0.3% report no size at all, 0.4% an implausible one, and 6.6% give a millimetre size more than 2 cm away from their own centimetre size.
 4. How to capture viewing distance simply (presets: laptop, desktop, TV; or a one-time calibration).
 5. Status of Wayland session-restore and placement protocols, and whether the server should implement them for compatibility.
 6. Display-list format: the minimal validated command set (paths, fills, strokes, gradients, images, text runs with font references, clips, layers), and how text is shipped (glyph runs plus font identity, so the server can re-render text sharply at any density).
-7. FreeBSD specifics: DRM/KMS driver coverage for the target GPUs; libinput and seat management.
-8. Slint versus iced for the tools, decided by a small prototype of the profile editor on both Debian and FreeBSD.
+7. FreeBSD specifics: DRM/KMS driver coverage for the target GPUs beyond Intel; libinput and seat management; a suspend-and-wake loop for testing.
+8. Slint versus iced for the tools, decided by a small prototype of the profile editor on both FreeBSD and Debian.
 9. The scope of the native Avalonia backend: which parts of Avalonia's platform interfaces it must implement, and how its automation peers map to Contract 3.
 10. Firefox and Thunderbird: confirm that Firefox on X11 has no per-monitor scaling; check whether Mozilla implements (or plans) the Wayland session-restore protocol; how well heuristics match several Firefox windows to saved layouts; the scope of an AT-SPI bridge into Contract 3.
 
