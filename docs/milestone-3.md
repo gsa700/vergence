@@ -141,3 +141,16 @@ opened at its remembered place, with one entry in the file.
 
 Test tools installed on Hubble: wmctrl-fork (placing and maximising windows
 from scripts) and Thunderbird.
+
+## Known limitation: the jump at app start (Dave, 2026-11-06 19:56)
+
+Opening a terminal that was closed earlier: it appears where xfwm4 puts it
+(top left), then about 0.7 s later jumps to its remembered place. On X11
+the window manager owns placement, so a separate daemon only sees a window
+after it is shown and always acts second. Dave: acceptable for now, as long
+as the plan gets rid of it. Ways out, in order: (1) place the window before
+it is shown (set the position and USPosition on the still-unmapped window
+once its WM_CLASS appears; a race, with the current move as fallback);
+(2) shorten the delay; and for good: our own window manager (the NeXT-model
+step) and then the display server, where placement happens before a window
+is ever drawn (whitepaper §6.4, Contract 2).
