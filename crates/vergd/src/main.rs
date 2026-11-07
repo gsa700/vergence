@@ -1,10 +1,12 @@
 //! vergd, the Vergence daemon.
 //!
 //!   vergd probe                 print each output and the profile key, then exit
-//!   vergd watch [--observe-only]
+//!   vergd watch [--observe-only] [--no-windows]
 //!                               the same, then one block per change (plug, mode,
 //!                               wake); remembers and restores each setup's
-//!                               arrangement unless --observe-only (milestone 2)
+//!                               arrangement (milestone 2) and its windows
+//!                               (milestone 3) unless switched off
+//!   vergd windows               list the remembered window places
 //!   vergd profiles              list the remembered setups
 //!   vergd forget <key-prefix>   drop a remembered setup
 //!   vergd apply [--dry-run]     restore the current setup's profile now
@@ -16,6 +18,7 @@
 mod apply;
 mod store;
 mod watch;
+mod windows;
 mod x11;
 
 use std::process::ExitCode;
@@ -27,7 +30,7 @@ use x11::Setup;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: vergd probe\n       vergd watch [--observe-only]\n       vergd profiles\n       \
+        "usage: vergd probe\n       vergd watch [--observe-only] [--no-windows]\n       vergd profiles\n       vergd windows\n       \
          vergd forget <key-prefix>\n       vergd apply [--dry-run]"
     );
     ExitCode::from(2)
@@ -38,8 +41,10 @@ fn main() -> ExitCode {
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
     let result = match a.as_slice() {
         ["probe"] => x11::read_setup().map(|s| print_setup(&s)),
-        ["watch"] => watch::watch(false),
-        ["watch", "--observe-only"] => watch::watch(true),
+        ["watch", flags @ ..] if flags.iter().all(|f| ["--observe-only", "--no-windows"].contains(f)) => {
+            watch::watch(flags.contains(&"--observe-only"), flags.contains(&"--no-windows"))
+        }
+        ["windows"] => store::load_windows().map(|s| windows::print_store(&s)).map_err(Into::into),
         ["profiles"] => profiles(),
         ["forget", prefix] => forget(prefix),
         ["apply"] => apply_now(false),
@@ -82,7 +87,11 @@ fn forget(prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
         0 => println!("no profile starts with {prefix}"),
         1 => {
             store::save(&s)?;
-            println!("forgot {}", short(&gone[0]));
+            let mut w = store::load_windows()?;
+            if w.forget(&gone[0]) > 0 {
+                store::save_windows(&w)?;
+            }
+            println!("forgot {} (arrangement and windows)", short(&gone[0]));
         }
         n => {
             return Err(format!("{n} profiles start with {prefix}; give more of the key").into());

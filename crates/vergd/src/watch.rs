@@ -29,11 +29,13 @@ use std::time::{Duration, Instant};
 
 use x11rb::connection::Connection as _;
 use x11rb::protocol::randr::{ConnectionExt as _, NotifyMask};
+use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
 
 use vergence_profile::arrangement::{same_arrangement, Profile, Store};
 
 use crate::apply::{self, Outcome};
+use crate::windows::WindowMemory;
 use crate::x11::{self, Setup};
 use crate::{key_line, now_string, print_setup, short, stamp};
 
@@ -45,6 +47,8 @@ const PLUG_SETTLE: Duration = Duration::from_millis(2000);
 /// After an apply, how long changes count as the desktop reacting.
 const GUARD: Duration = Duration::from_secs(6);
 const MAX_REAPPLY: u32 = 2;
+/// After a plug, extra quiet before windows are put back.
+const WINDOW_SETTLE: Duration = Duration::from_millis(800);
 
 /// Wait until the server has sent nothing for `quiet`.
 fn drain(conn: &RustConnection, quiet: Duration) -> Result<(), Box<dyn std::error::Error>> {
@@ -176,7 +180,7 @@ impl Memory {
     }
 }
 
-pub fn watch(observe_only: bool) -> Result<(), Box<dyn std::error::Error>> {
+pub fn watch(observe_only: bool, no_windows: bool) -> Result<(), Box<dyn std::error::Error>> {
     let (conn, root) = x11::connect()?;
     conn.randr_select_input(
         root,
@@ -193,31 +197,74 @@ pub fn watch(observe_only: bool) -> Result<(), Box<dyn std::error::Error>> {
     let store = if observe_only { Store::default() } else { crate::store::load()? };
     let mut mem =
         Memory { store, observe_only, guard_until: None, reapplied: 0, new_setup_until: None };
+    let mut wm = WindowMemory::new(&conn, root, !observe_only && !no_windows)?;
 
     let mut last = x11::read_setup_on(&conn, root)?;
     println!(
         "{} watching{}",
         stamp(),
-        if observe_only { " (observe only)" } else { "; profiles in ~/.config/vergence/profiles.toml" }
+        if observe_only {
+            " (observe only)"
+        } else if no_windows {
+            " (monitors only, no window memory); profiles in ~/.config/vergence/"
+        } else {
+            "; profiles and window memory in ~/.config/vergence/"
+        }
     );
     print_setup(&last);
-    // At start: a known setup is restored, an unknown one learned.
+    // At start: a known setup is restored, an unknown one learned. Windows
+    // already open are tracked, not moved.
     last = mem.react(&conn, root, last, true)?;
+    wm.mark_unstable();
 
+    // Events are collected until the server has been quiet for SETTLE, then
+    // handled by kind: RandR (monitors) and everything else (windows).
+    let mut randr_seen = false;
+    let mut windows_seen = false;
+    let mut last_event: Option<Instant> = None;
     loop {
-        conn.wait_for_event()?;
-        drain(&conn, SETTLE)?;
-        let now = x11::read_setup_on(&conn, root)?;
-        let changes = diff(&last, &now);
-        if changes.is_empty() {
-            continue;
+        while let Some(ev) = conn.poll_for_event()? {
+            match ev {
+                Event::RandrScreenChangeNotify(_) | Event::RandrNotify(_) => randr_seen = true,
+                Event::Error(_) => {} // a window vanished while we looked at it
+                _ => windows_seen = true,
+            }
+            last_event = Some(Instant::now());
         }
-        for c in &changes {
-            println!("{} {c}", stamp());
+
+        if last_event.is_some_and(|t| t.elapsed() >= SETTLE) {
+            last_event = None;
+            if randr_seen {
+                randr_seen = false;
+                let now = x11::read_setup_on(&conn, root)?;
+                let changes = diff(&last, &now);
+                if !changes.is_empty() {
+                    for c in &changes {
+                        println!("{} {c}", stamp());
+                    }
+                    println!("{} {}", stamp(), key_line(&now));
+                    let plugged = now.key() != last.key();
+                    last = mem.react(&conn, root, now, plugged)?;
+                    wm.mark_unstable();
+                    if plugged && wm.enabled {
+                        // Let the monitors and the window manager settle,
+                        // then put the windows back for this setup.
+                        drain(&conn, WINDOW_SETTLE)?;
+                        last = x11::read_setup_on(&conn, root)?;
+                        wm.restore_all(&conn, &last)?;
+                    }
+                    // drain() swallowed window events; look again.
+                    windows_seen = true;
+                }
+            }
+            if windows_seen {
+                windows_seen = false;
+                wm.on_window_events(&conn)?;
+            }
         }
-        println!("{} {}", stamp(), key_line(&now));
-        let plugged = now.key() != last.key();
-        last = mem.react(&conn, root, now, plugged)?;
+
+        wm.tick(&conn, &last)?;
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 

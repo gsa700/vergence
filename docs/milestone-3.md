@@ -10,7 +10,9 @@ opens where it was last time on this setup.
 scaling milestone 4. Window memory needs no new hardware and is tested with
 the fake monitor; scaling waits for real monitors of different densities.
 
-**Status: planned, not started.** Dave decided all four on 2026-11-06, as
+**Status (2026-11-06): built; acceptance 1, 2 (ports: not yet), 4, 5, 6, 7
+and app start pass on Hubble; 3 (Firefox, Thunderbird) and 8 still to do.**
+Dave decided all four on 2026-11-06, as
 recommended: (1a) restore on monitor changes and at app start, with an
 opt-out list; (2a) never store titles; (3a) remember workspaces; (4a)
 install Thunderbird on Hubble for the tests.
@@ -106,3 +108,36 @@ taskbar.
    unplug/replug.
 7. No titles in windows.toml (decision 2a).
 8. With the real monitors: 1 and 3 again.
+
+## Results on Hubble (2026-11-06, fake monitor right of the ASUS)
+
+Two xfce4-terminals (one maximised), xclock and Mousepad on the fake.
+
+- **5, evacuation not learned:** on unplug xfwm4 moved all four onto the
+  ASUS; windows.toml was byte for byte unchanged. Pass.
+- **1, back on replug:** all four back with the same position, size and
+  maximised state. Pass.
+- **4, drift:** 10 more unplug/replug cycles; not one pixel moved. Pass.
+- **6, moved by hand:** Mousepad moved on the fake, then unplug/replug: back
+  at its new place. Pass.
+- **App start (decision 1):** xclock closed and started again with no
+  position: opened at its remembered place. Pass.
+- **7, no titles:** windows.toml holds class, role, order and places only.
+  Pass.
+
+**What xfwm4 does by itself:** on replug it moved the three normal windows
+back to the fake on its own; vergd's log shows it moved only the
+**maximised** terminal (which xfwm4 leaves on the remaining screen) on every
+cycle. The result is right either way; vergd's own part is the maximised
+window, not learning the evacuation, hand-moved places, and app start
+(xfwm4 does neither of the last two).
+
+**Fixed during the run:** xfce4-terminal gives every window a unique role
+("xfce4-terminal-1794016006-744545988"), which would never match after a
+restart and would add an entry for every terminal ever opened. A role with
+a run of 6 or more digits is now dropped (`stable_role`); the window is
+known by class and order. Checked: a terminal closed and started again
+opened at its remembered place, with one entry in the file.
+
+Test tools installed on Hubble: wmctrl-fork (placing and maximising windows
+from scripts) and Thunderbird.

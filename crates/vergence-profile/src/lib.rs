@@ -16,9 +16,11 @@
 //! [`duplicate_count`] reports that case so `vergd` can say so.
 //!
 //! Milestone 2 adds [`arrangement`]: what each profile remembers (modes,
-//! positions, primary) and the file that holds the profiles.
+//! positions, primary) and the file that holds the profiles. Milestone 3
+//! adds [`windows`]: where each window was on each setup.
 
 pub mod arrangement;
+pub mod windows;
 
 use sha2::{Digest, Sha256};
 
