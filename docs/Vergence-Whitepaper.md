@@ -324,7 +324,7 @@ Why one language:
 **Compatibility at the edges.**
 
 - **Wayland applications** connect through a standard Wayland front end.
-- **X11 applications** run through rootless Xwayland. Because the server owns input routing, legacy windows can be **scaled per monitor with correct input mapping**, which removes the X11 wall from §5 without any X extension.
+- **X11 applications** run through rootless Xwayland. Because the server owns input routing, legacy windows can be **scaled per monitor with correct input mapping**, which removes the input wall from §5 without any X extension.
 - The server speaks Wayland and X11 at the edges, but placement, memory, units, accessibility and security follow this design.
 
 **Platforms.** FreeBSD (15, X11, Xfce as the stable session) is the primary development platform, on real hardware. Debian (13, X11, Xfce; Xephyr for nested development) is tested alongside at every phase. Where the two must differ, as with hot-plug events (§4.7), the code and the documents say so.
