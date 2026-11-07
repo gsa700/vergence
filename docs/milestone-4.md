@@ -123,7 +123,8 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
   when it changes. `vergd watch --no-xsettings` turns it off;
   `vergd xsettings` shows what is published. On Hubble: imported Xfce's 30
   settings, took over from xfsettingsd (which keeps running), and an edit of
-  `Gtk/FontName` was published within 2 s (serial 31).
+  `Gtk/FontName` (Sans 10 to 14) was published within 2 s and Dave saw
+  every GTK app switch live, without a restart; put back to 10.
 
 ## Decisions for Dave
 
