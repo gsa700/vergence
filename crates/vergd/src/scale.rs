@@ -1,0 +1,194 @@
+//! Mode A scaling (milestone 4, docs/milestone-4.md).
+//!
+//! With scaling on, every lit monitor gets its derived scale (or the
+//! profile's override); everything is rendered at the whole-number scale
+//! `render` and RandR shrinks each monitor's picture onto its panel. The
+//! toolkits all get `render`: GTK through XSETTINGS (live), Qt, Electron and
+//! Xlib fonts through `Xft.dpi` (new apps), Java and Avalonia through
+//! `session.env` (next login). With scaling off, everything goes back to 1.
+
+use std::collections::BTreeMap;
+
+use x11rb::connection::Connection as _;
+use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, PropMode};
+use x11rb::rust_connection::RustConnection;
+
+use vergence_profile::arrangement::{repack, same_arrangement, OutputSetting, ScalingConfig, FIXED_ONE};
+use vergence_profile::scaling::{factor_fixed, render_scale};
+use vergence_xsettings::Value;
+
+use crate::x11::Setup;
+
+type Res<T> = Result<T, Box<dyn std::error::Error>>;
+
+/// The scale one monitor should have, and why.
+pub struct MonitorScale {
+    pub connector: String,
+    pub name: String,
+    pub scale: f64,
+    pub why: String,
+}
+
+/// What the arrangement should be under `cfg`.
+pub struct Target {
+    pub render: u32,
+    pub monitors: Vec<MonitorScale>,
+    /// The arrangement to apply; equal to the current one if nothing changes.
+    pub want: Vec<OutputSetting>,
+    pub changes: bool,
+}
+
+/// Each lit monitor's scale under `cfg` (all 1 when scaling is off).
+pub fn monitor_scales(setup: &Setup, cfg: &ScalingConfig) -> Vec<MonitorScale> {
+    setup
+        .outputs
+        .iter()
+        .filter(|o| o.connected && o.current.is_some())
+        .map(|o| {
+            let id = o.monitor();
+            let name = match o.monitor_name() {
+                n if n.is_empty() => o.name.clone(),
+                n => n,
+            };
+            let m = cfg.monitor(&id);
+            let distance = m.map(|m| m.distance).unwrap_or_default();
+            let (scale, why) = if !cfg.enabled {
+                (1.0, "scaling off".to_string())
+            } else if let Some(p) = m.and_then(|m| m.scale) {
+                (p as f64 / 100.0, "set in profiles.toml".to_string())
+            } else {
+                match o.derived_scale(distance, cfg.preference as f64 / 100.0) {
+                    Some(d) => match d.ppi {
+                        Some(ppi) => (d.scale, format!("{ppi:.0} ppi, {distance:?} distance").to_lowercase()),
+                        None => (1.0, d.note.unwrap_or("no size").to_string()),
+                    },
+                    None => (1.0, "no native mode".to_string()),
+                }
+            };
+            MonitorScale { connector: o.name.clone(), name, scale, why }
+        })
+        .collect()
+}
+
+pub fn target(setup: &Setup, cfg: &ScalingConfig) -> Result<Target, String> {
+    let monitors = monitor_scales(setup, cfg);
+    let render = render_scale(&monitors.iter().map(|m| m.scale).collect::<Vec<_>>());
+    let current = setup.arrangement();
+    let factors: Vec<u32> = current
+        .iter()
+        .map(|o| match monitors.iter().find(|m| m.connector == o.connector) {
+            Some(m) if o.enabled => factor_fixed(render, m.scale),
+            _ => FIXED_ONE,
+        })
+        .collect();
+    let same = current.iter().zip(&factors).all(|(o, f)| o.factor == *f);
+    let want = if same { current.clone() } else { repack(&current, &factors)? };
+    let changes = !same_arrangement(&current, &want);
+    Ok(Target { render, monitors, want, changes })
+}
+
+/// The XSETTINGS laid over the user's for `render` (none at 1). GTK takes
+/// the window scale; `Gdk/UnscaledDPI` keeps its fonts from being scaled
+/// twice (as GNOME's settings daemon does).
+pub fn xsettings_overlay(render: u32, base_cursor: i32) -> BTreeMap<String, Value> {
+    let mut m = BTreeMap::new();
+    if render > 1 {
+        let r = render as i32;
+        m.insert("Gdk/WindowScalingFactor".into(), Value::Int(r));
+        m.insert("Gdk/UnscaledDPI".into(), Value::Int(96 * 1024));
+        m.insert("Xft/DPI".into(), Value::Int(96 * 1024 * r));
+        m.insert("Gtk/CursorThemeSize".into(), Value::Int(cursor(base_cursor) * r));
+    }
+    m
+}
+
+fn cursor(base: i32) -> i32 {
+    if base > 0 { base } else { 24 }
+}
+
+/// Set `Xft.dpi` and `Xcursor.size` in the root window's X resources (read
+/// by Qt, Electron and Xlib programs when they start), keeping every other
+/// line.
+pub fn set_resources(conn: &RustConnection, root: u32, render: u32, base_cursor: i32) -> Res<()> {
+    let rm = conn.intern_atom(false, b"RESOURCE_MANAGER")?.reply()?.atom;
+    let p = conn.get_property(false, root, rm, AtomEnum::STRING, 0, 1 << 20)?.reply()?;
+    let old = String::from_utf8_lossy(&p.value).into_owned();
+    let new = resources_text(&old, render, base_cursor);
+    if new != old {
+        conn.change_property(PropMode::REPLACE, root, rm, AtomEnum::STRING, 8, new.len() as u32, new.as_bytes())?;
+        conn.flush()?;
+    }
+    Ok(())
+}
+
+fn resources_text(old: &str, render: u32, base_cursor: i32) -> String {
+    let mut lines: Vec<&str> = old
+        .lines()
+        .filter(|l| !l.starts_with("Xft.dpi:") && !l.starts_with("Xcursor.size:"))
+        .collect();
+    let dpi = format!("Xft.dpi:\t{}", 96 * render);
+    let size = if render > 1 || base_cursor > 0 {
+        Some(format!("Xcursor.size:\t{}", cursor(base_cursor) * render as i32))
+    } else {
+        None
+    };
+    lines.push(&dpi);
+    if let Some(s) = &size {
+        lines.push(s);
+    }
+    let mut t = lines.join("\n");
+    t.push('\n');
+    t
+}
+
+/// The launch-time variables for toolkits that read their scale only when
+/// they start (decision 5), for `~/.config/vergence/session.env`.
+pub fn session_env(render: u32) -> String {
+    let mut t = String::from(
+        "# Written by vergd (milestone 4): the scale for toolkits that read it\n\
+         # only when they start. Sourced at login from ~/.xprofile.\n",
+    );
+    if render > 1 {
+        t.push_str(&format!("export _JAVA_OPTIONS=\"-Dsun.java2d.uiScale={render}\"\n"));
+        t.push_str(&format!("export AVALONIA_GLOBAL_SCALE_FACTOR={render}\n"));
+    } else {
+        t.push_str("unset _JAVA_OPTIONS AVALONIA_GLOBAL_SCALE_FACTOR\n");
+    }
+    t
+}
+
+/// The line that makes the login read session.env.
+pub const XPROFILE_LINE: &str = "[ -r \"$HOME/.config/vergence/session.env\" ] && . \"$HOME/.config/vergence/session.env\"  # vergence";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlay_only_above_one() {
+        assert!(xsettings_overlay(1, 0).is_empty());
+        let o = xsettings_overlay(2, 0);
+        assert_eq!(o["Gdk/WindowScalingFactor"], Value::Int(2));
+        assert_eq!(o["Xft/DPI"], Value::Int(196608));
+        assert_eq!(o["Gdk/UnscaledDPI"], Value::Int(98304));
+        assert_eq!(o["Gtk/CursorThemeSize"], Value::Int(48));
+        assert_eq!(xsettings_overlay(2, 32)["Gtk/CursorThemeSize"], Value::Int(64));
+    }
+
+    #[test]
+    fn resources_keep_other_lines() {
+        let old = "Xft.dpi:\t96\nXcursor.theme:\t\nXcursor.size:\t0\nXcursor.theme_core:\t1\n";
+        let two = resources_text(old, 2, 0);
+        assert!(two.contains("Xft.dpi:\t192\n") && two.contains("Xcursor.size:\t48\n"), "{two}");
+        assert!(two.contains("Xcursor.theme_core:\t1"));
+        assert_eq!(two.matches("Xft.dpi").count(), 1);
+        let one = resources_text(&two, 1, 0);
+        assert!(one.contains("Xft.dpi:\t96\n") && !one.contains("Xcursor.size"), "{one}");
+    }
+
+    #[test]
+    fn session_env_text() {
+        assert!(session_env(2).contains("uiScale=2") && session_env(2).contains("AVALONIA_GLOBAL_SCALE_FACTOR=2"));
+        assert!(session_env(1).contains("unset"));
+    }
+}

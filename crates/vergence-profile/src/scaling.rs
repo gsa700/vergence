@@ -120,15 +120,27 @@ pub struct ModeAMonitor {
     pub rendered: (u32, u32),
 }
 
+/// The whole-number scale everything is rendered at: the largest monitor
+/// scale, rounded up (GTK takes whole numbers only).
+pub fn render_scale(scales: &[f64]) -> u32 {
+    scales.iter().copied().fold(1.0, f64::max).ceil() as u32
+}
+
+/// The RandR factor `render / scale` in 16.16 fixed point.
+pub fn factor_fixed(render: u32, scale: f64) -> u32 {
+    (render as f64 / scale * crate::arrangement::FIXED_ONE as f64).round() as u32
+}
+
 /// `monitors`: (native resolution, scale) for each lit monitor.
 pub fn mode_a(monitors: &[((u32, u32), f64)]) -> ModeA {
-    let top = monitors.iter().map(|m| m.1).fold(1.0, f64::max);
-    let render = top.ceil() as u32;
+    let scales: Vec<f64> = monitors.iter().map(|m| m.1).collect();
+    let render = render_scale(&scales);
     let monitors = monitors
         .iter()
         .map(|&((w, h), s)| {
-            let factor = render as f64 / s;
-            ModeAMonitor { factor, rendered: ((w as f64 * factor).round() as u32, (h as f64 * factor).round() as u32) }
+            let f = factor_fixed(render, s);
+            let len = |x: u32| crate::arrangement::scaled_len(x as u16, f) as u32;
+            ModeAMonitor { factor: f as f64 / crate::arrangement::FIXED_ONE as f64, rendered: (len(w), len(h)) }
         })
         .collect();
     ModeA { render, monitors }
@@ -198,7 +210,7 @@ mod tests {
         assert_eq!(m.render, 2);
         assert_eq!(m.monitors[0].factor, 2.0);
         assert_eq!(m.monitors[0].rendered, (3840, 2160));
-        assert!((m.monitors[1].factor - 1.142857).abs() < 1e-5);
+        assert!((m.monitors[1].factor - 1.142857).abs() < 1e-4);
         assert_eq!(m.monitors[1].rendered, (4389, 2469));
         // Only scale-1 monitors: render 1, nothing changes.
         let one = mode_a(&[((1920, 1080), 1.0), ((1920, 1080), 1.0)]);

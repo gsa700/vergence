@@ -58,6 +58,40 @@ pub fn save_settings(body: &str) -> Result<(), String> {
     )
 }
 
+/// When profiles.toml last changed (scaling settings are in it).
+pub fn mtime() -> Option<std::time::SystemTime> {
+    fs::metadata(path().ok()?).and_then(|m| m.modified()).ok()
+}
+
+/// Write `~/.config/vergence/session.env` (milestone 4, decision 5).
+pub fn save_session_env(text: &str) -> Result<(), String> {
+    let p = dir()?.join("session.env");
+    write(&p, "", text)?;
+    // Sourced by the login shell: readable by the user only, like the rest.
+    Ok(())
+}
+
+/// Make the login read session.env: append [`crate::scale::XPROFILE_LINE`]
+/// to ~/.xprofile unless it is there. Returns true if it was added.
+pub fn ensure_xprofile_line() -> Result<bool, String> {
+    let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
+    let p = PathBuf::from(home).join(".xprofile");
+    let old = read(&p)?.unwrap_or_default();
+    if old.lines().any(|l| l.ends_with("# vergence")) {
+        return Ok(false);
+    }
+    let mut f = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o644)
+        .open(&p)
+        .map_err(|e| format!("{}: {e}", p.display()))?;
+    let sep = if old.is_empty() || old.ends_with('\n') { "" } else { "\n" };
+    f.write_all(format!("{sep}{}\n", crate::scale::XPROFILE_LINE).as_bytes())
+        .map_err(|e| format!("{}: {e}", p.display()))?;
+    Ok(true)
+}
+
 /// When the settings file last changed, if it exists.
 pub fn settings_mtime() -> Option<std::time::SystemTime> {
     fs::metadata(settings_path().ok()?).and_then(|m| m.modified()).ok()
@@ -84,7 +118,7 @@ fn write(p: &PathBuf, header: &str, body: &str) -> Result<(), String> {
 
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("file");
     let tmp = dir.join(format!(".{name}.{}", std::process::id()));
-    let text = format!("{header}\n{body}");
+    let text = if header.is_empty() { body.to_string() } else { format!("{header}\n{body}") };
     let go = || -> std::io::Result<()> {
         let mut f = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
         f.write_all(text.as_bytes())?;

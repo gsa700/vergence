@@ -221,6 +221,14 @@ impl Manager {
         Ok(m)
     }
 
+    /// An integer from the user's settings (the file), if set.
+    pub fn base_int(&self, name: &str) -> Option<i32> {
+        match self.base.get(name) {
+            Some(Value::Int(i)) => Some(*i),
+            _ => None,
+        }
+    }
+
     /// Lay `values` over the file's settings (replacing the previous overlay)
     /// and publish if anything changed.
     pub fn set_overlay(&mut self, conn: &RustConnection, values: BTreeMap<String, Value>) -> Res<()> {

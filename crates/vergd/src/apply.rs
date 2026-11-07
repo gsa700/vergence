@@ -18,7 +18,7 @@ use x11rb::protocol::randr::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::ConnectionExt as _;
 use x11rb::rust_connection::RustConnection;
 
-use vergence_profile::arrangement::{same_arrangement, OutputSetting, REFRESH_TOLERANCE_MHZ};
+use vergence_profile::arrangement::{same_arrangement, OutputSetting, FIXED_ONE, REFRESH_TOLERANCE_MHZ};
 
 use crate::x11::{self, Output, Setup};
 
@@ -33,6 +33,8 @@ pub struct CrtcSet {
     pub x: i16,
     pub y: i16,
     pub rotation: u16,
+    /// RandR scale factor, 16.16 fixed point (milestone 4).
+    pub factor: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -63,8 +65,13 @@ impl Plan {
         }
         for s in &self.set {
             let rot = if s.rotation != 0 { format!(" rotated {}", s.rotation) } else { String::new() };
+            let scaled = if s.factor != FIXED_ONE {
+                format!(" scaled x{:.3}", s.factor as f64 / FIXED_ONE as f64)
+            } else {
+                String::new()
+            };
             out.push(format!(
-                "{:<9} {} at +{}+{}{rot} on CRTC {:#x}",
+                "{:<9} {} at +{}+{}{rot}{scaled} on CRTC {:#x}",
                 s.output_name, s.mode_text, s.x, s.y, s.crtc
             ));
         }
@@ -208,6 +215,7 @@ pub fn plan(setup: &Setup, want: &[OutputSetting]) -> Result<Plan, String> {
             x: w.x,
             y: w.y,
             rotation: w.rotation,
+            factor: w.factor,
         })
         .collect();
 
@@ -245,6 +253,21 @@ fn execute(conn: &RustConnection, setup: &Setup, p: &Plan) -> Result<(), Box<dyn
                 .check()?;
         }
         for s in &p.set {
+            // The transform is pending until the CRTC is next configured.
+            let f = s.factor as i32;
+            let t = x11rb::protocol::render::Transform {
+                matrix11: f,
+                matrix12: 0,
+                matrix13: 0,
+                matrix21: 0,
+                matrix22: f,
+                matrix23: 0,
+                matrix31: 0,
+                matrix32: 0,
+                matrix33: FIXED_ONE as i32,
+            };
+            let filter: &[u8] = if s.factor == FIXED_ONE { b"nearest" } else { b"bilinear" };
+            conn.randr_set_crtc_transform(s.crtc, t, filter, &[])?.check()?;
             let r = conn
                 .randr_set_crtc_config(
                     s.crtc,

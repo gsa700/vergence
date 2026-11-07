@@ -35,6 +35,8 @@ use x11rb::rust_connection::RustConnection;
 use vergence_profile::arrangement::{same_arrangement, Profile, Store};
 
 use crate::apply::{self, Outcome};
+use crate::scale;
+use crate::xsettings::Manager;
 use crate::windows::WindowMemory;
 use crate::x11::{self, Setup};
 use crate::{key_line, now_string, print_setup, short, stamp};
@@ -184,6 +186,91 @@ impl Memory {
     }
 }
 
+/// Mode A bookkeeping (milestone 4).
+struct Scaler {
+    /// The render scale the toolkits were last given.
+    render: Option<u32>,
+    /// The last "cannot scale" message, so it is said once.
+    note: Option<String>,
+    mtime: Option<std::time::SystemTime>,
+    last_check: Instant,
+}
+
+/// Bring the arrangement and the toolkit settings in line with the scaling
+/// settings. Returns the new setup if vergd changed the arrangement.
+fn ensure_scale(
+    mem: &mut Memory,
+    sc: &mut Scaler,
+    conn: &RustConnection,
+    root: u32,
+    setup: &Setup,
+    xs: Option<&mut Manager>,
+    wm: &mut WindowMemory,
+) -> Result<Option<Setup>, Box<dyn std::error::Error>> {
+    if mem.observe_only || setup.edids().is_empty() {
+        return Ok(None);
+    }
+    mem.store = crate::store::load()?;
+    let t = match scale::target(setup, &mem.store.scaling) {
+        Ok(t) => t,
+        Err(e) => {
+            let note = format!("scaling not applied to this arrangement: {e}");
+            if sc.note.as_deref() != Some(note.as_str()) {
+                println!("{} {note}", stamp());
+                sc.note = Some(note);
+            }
+            return Ok(None);
+        }
+    };
+    sc.note = None;
+    let mut changed = None;
+    if t.changes {
+        match apply::apply(&t.want, false)? {
+            Outcome::Applied(steps) => {
+                println!("{} scaling: rendering at {}x", stamp(), t.render);
+                for m in &t.monitors {
+                    println!("{}   {} ({}): scale {} ({})", stamp(), m.name, m.connector, m.scale, m.why);
+                }
+                for s in steps {
+                    println!("{}   {s}", stamp());
+                }
+                let key = setup.key();
+                mem.store.put(Profile { key, updated: now_string(), outputs: t.want.clone() });
+                crate::store::save(&mem.store)?;
+                mem.guard_until = Some(Instant::now() + GUARD);
+                wm.mark_unstable();
+                changed = Some(x11::read_setup_on(conn, root)?);
+            }
+            Outcome::AlreadyThere => {}
+            Outcome::Refused(why) => {
+                println!("{} scaling NOT applied: {why}", stamp());
+                return Ok(None);
+            }
+            Outcome::Reverted(why) => {
+                println!("{} scaling FAILED: {why}", stamp());
+                return Ok(None);
+            }
+        }
+    }
+    if sc.render != Some(t.render) {
+        let base_cursor = xs.as_ref().and_then(|m| m.base_int("Gtk/CursorThemeSize")).unwrap_or(0);
+        if let Some(m) = xs {
+            m.set_overlay(conn, scale::xsettings_overlay(t.render, base_cursor))?;
+        }
+        scale::set_resources(conn, root, t.render, base_cursor)?;
+        crate::store::save_session_env(&scale::session_env(t.render))?;
+        if sc.render.is_some() || t.render > 1 {
+            println!(
+                "{} toolkits: scale {} (GTK now; Qt, Electron and Xlib fonts in new apps; Java and Avalonia from the next login)",
+                stamp(),
+                t.render
+            );
+        }
+        sc.render = Some(t.render);
+    }
+    Ok(changed)
+}
+
 pub fn watch(observe_only: bool, no_windows: bool, no_xsettings: bool) -> Result<(), Box<dyn std::error::Error>> {
     let (conn, root) = x11::connect()?;
     conn.randr_select_input(
@@ -233,6 +320,10 @@ pub fn watch(observe_only: bool, no_windows: bool, no_xsettings: bool) -> Result
     // already open are tracked, not moved.
     last = mem.react(&conn, root, last, true)?;
     wm.mark_unstable();
+    let mut sc = Scaler { render: None, note: None, mtime: crate::store::mtime(), last_check: Instant::now() };
+    if let Some(s) = ensure_scale(&mut mem, &mut sc, &conn, root, &last, xs.as_mut(), &mut wm)? {
+        last = s;
+    }
 
     // Events are collected until the server has been quiet for SETTLE, then
     // handled by kind: RandR (monitors) and everything else (windows).
@@ -263,6 +354,9 @@ pub fn watch(observe_only: bool, no_windows: bool, no_xsettings: bool) -> Result
                     let plugged = now.key() != last.key();
                     last = mem.react(&conn, root, now, plugged)?;
                     wm.mark_unstable();
+                    if let Some(s) = ensure_scale(&mut mem, &mut sc, &conn, root, &last, xs.as_mut(), &mut wm)? {
+                        last = s;
+                    }
                     if wm.enabled {
                         // Let the monitors and the window manager settle,
                         // then put the windows back for this setup. Also
@@ -298,6 +392,18 @@ pub fn watch(observe_only: bool, no_windows: bool, no_xsettings: bool) -> Result
         wm.tick(&conn, &last)?;
         if let Some(m) = xs.as_mut() {
             m.tick(&conn)?;
+        }
+        // `vergd scale on/off` and hand edits change profiles.toml.
+        if sc.last_check.elapsed() >= Duration::from_secs(2) {
+            sc.last_check = Instant::now();
+            let m = crate::store::mtime();
+            if m != sc.mtime {
+                sc.mtime = m;
+                if let Some(s) = ensure_scale(&mut mem, &mut sc, &conn, root, &last, xs.as_mut(), &mut wm)? {
+                    last = s;
+                }
+                sc.mtime = crate::store::mtime(); // ensure_scale may have saved it
+            }
         }
         std::thread::sleep(Duration::from_millis(20));
     }

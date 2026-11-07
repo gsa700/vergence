@@ -4,6 +4,7 @@
 //! recorded setups can stand in for a live server later (milestone 1, test
 //! automation (5)).
 
+use vergence_profile::arrangement::FIXED_ONE;
 use vergence_profile::scaling::{self, Derived, Distance};
 use std::fmt;
 
@@ -43,6 +44,8 @@ pub struct Current {
     pub y: i16,
     /// Degrees: 0, 90, 180 or 270.
     pub rotation: u16,
+    /// RandR scale factor, 16.16 fixed point (65536 = not scaled).
+    pub factor: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -177,6 +180,7 @@ impl Setup {
                     y: 0,
                     rotation: 0,
                     primary: false,
+                    factor: FIXED_ONE,
                 };
                 if let Some(c) = &o.current {
                     s.enabled = true;
@@ -186,6 +190,7 @@ impl Setup {
                     s.x = c.x;
                     s.y = c.y;
                     s.rotation = c.rotation;
+                    s.factor = c.factor;
                     s.primary = o.id == self.primary;
                 }
                 s
@@ -268,9 +273,25 @@ fn read_outputs(conn: &RustConnection, root: u32) -> Result<Setup, Box<dyn std::
 
     let mut crtcs = Vec::new();
     let mut crtc_rot = std::collections::HashMap::new();
+    let mut crtc_factor = std::collections::HashMap::new();
     for &c in &res.crtcs {
         let ci = conn.randr_get_crtc_info(c, res.config_timestamp)?.reply()?;
         crtc_rot.insert(c, rotation_degrees(ci.rotation));
+        if ci.mode != 0 {
+            // Mode A scales with a uniform transform; anything else (or none)
+            // counts as not scaled.
+            let t = conn.randr_get_crtc_transform(c)?.reply()?.current_transform;
+            let uniform = t.matrix11 == t.matrix22
+                && t.matrix12 == 0
+                && t.matrix21 == 0
+                && t.matrix13 == 0
+                && t.matrix23 == 0
+                && t.matrix31 == 0
+                && t.matrix32 == 0
+                && t.matrix33 == FIXED_ONE as i32;
+            let f = if uniform && t.matrix11 > 0 { t.matrix11 as u32 } else { FIXED_ONE };
+            crtc_factor.insert(c, f);
+        }
         crtcs.push(Crtc { id: c, mode: ci.mode, x: ci.x, y: ci.y, width: ci.width, height: ci.height });
     }
 
@@ -304,6 +325,7 @@ fn read_outputs(conn: &RustConnection, root: u32) -> Result<Setup, Box<dyn std::
                     x: c.x,
                     y: c.y,
                     rotation: crtc_rot.get(&c.id).copied().unwrap_or(0),
+                    factor: crtc_factor.get(&c.id).copied().unwrap_or(FIXED_ONE),
                 })
             });
 

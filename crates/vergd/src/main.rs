@@ -16,6 +16,7 @@
 //! devd's local pipe (see watch.rs).
 
 mod apply;
+mod scale;
 mod store;
 mod watch;
 mod windows;
@@ -32,7 +33,7 @@ use x11::Setup;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: vergd probe\n       vergd watch [--observe-only] [--no-windows] [--no-xsettings]\n       vergd profiles\n       vergd windows\n       vergd xsettings\n       \
+        "usage: vergd probe\n       vergd watch [--observe-only] [--no-windows] [--no-xsettings]\n       vergd profiles\n       vergd windows\n       vergd xsettings\n       vergd scale [on|off|status]\n       \
          vergd forget <key-prefix>\n       vergd apply [--dry-run]"
     );
     ExitCode::from(2)
@@ -54,6 +55,9 @@ fn main() -> ExitCode {
         }
         ["windows"] => store::load_windows().map(|s| windows::print_store(&s)).map_err(Into::into),
         ["xsettings"] => xsettings::print_current(),
+        ["scale"] | ["scale", "status"] => scale_status(),
+        ["scale", "on"] => scale_set(true),
+        ["scale", "off"] => scale_set(false),
         ["profiles"] => profiles(),
         ["forget", prefix] => forget(prefix),
         ["apply"] => apply_now(false),
@@ -259,4 +263,56 @@ fn describe(e: &Edid, len: usize) -> String {
         }
     }
     s
+}
+
+/// `vergd scale [status]`: each monitor's scale, and what vergd would do.
+fn scale_status() -> Result<(), Box<dyn std::error::Error>> {
+    let setup = x11::read_setup()?;
+    let st = store::load()?;
+    let cfg = &st.scaling;
+    println!(
+        "scaling {}, preference {}%",
+        if cfg.enabled { "ON" } else { "off (vergd scale on)" },
+        cfg.preference
+    );
+    for m in scale::monitor_scales(&setup, &cfg.clone()) {
+        println!("  {:<9} {:<16} scale {:<5} ({})", m.connector, m.name, m.scale, m.why);
+    }
+    // What it would be when on, for the off case.
+    let mut on = cfg.clone();
+    on.enabled = true;
+    if !cfg.enabled {
+        for m in scale::monitor_scales(&setup, &on) {
+            println!("  {:<9} {:<16} would be {} when on ({})", m.connector, m.name, m.scale, m.why);
+        }
+    }
+    match scale::target(&setup, cfg) {
+        Ok(t) => {
+            println!("render scale {}", t.render);
+            if t.changes {
+                println!("vergd will change the arrangement to:");
+                for o in &t.want {
+                    println!("  {}", o.describe());
+                }
+            } else {
+                println!("the arrangement already matches");
+            }
+        }
+        Err(e) => println!("cannot scale this arrangement: {e}"),
+    }
+    Ok(())
+}
+
+/// `vergd scale on|off`: switch scaling in profiles.toml; the running vergd
+/// applies it within 2 s.
+fn scale_set(on: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let mut st = store::load()?;
+    st.scaling.enabled = on;
+    store::save(&st)?;
+    println!("scaling {} in ~/.config/vergence/profiles.toml", if on { "ON" } else { "off" });
+    if on && store::ensure_xprofile_line()? {
+        println!("added a line to ~/.xprofile so the next login reads ~/.config/vergence/session.env");
+    }
+    println!("the running vergd applies it within 2 s (see its log)");
+    Ok(())
 }
