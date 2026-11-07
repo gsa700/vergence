@@ -29,6 +29,9 @@ pub struct Options {
     pub output: String,
     pub sample: usize,
     pub vergd: PathBuf,
+    /// A file listing database paths (relative), one per line, to run
+    /// instead of the even sample.
+    pub only: Option<PathBuf>,
 }
 
 impl Options {
@@ -39,6 +42,7 @@ impl Options {
             output: String::new(),
             sample: 200,
             vergd: PathBuf::from("target/debug/vergd"),
+            only: None,
         };
         let mut it = args[1..].iter();
         while let Some(a) = it.next() {
@@ -47,6 +51,7 @@ impl Options {
                 "--output" => o.output = it.next()?.clone(),
                 "--sample" => o.sample = it.next()?.parse().ok()?,
                 "--vergd" => o.vergd = PathBuf::from(it.next()?),
+                "--only" => o.only = Some(PathBuf::from(it.next()?)),
                 _ => return None,
             }
         }
@@ -62,7 +67,10 @@ impl Options {
 enum Outcome {
     /// X shows the same bytes and vergd's key matches.
     Ok,
-    /// X shows the output connected but with no EDID (kernel refused it).
+    /// The kernel refused the override (EINVAL): drm validates every block
+    /// and the declared length, as it does for a real monitor's EDID.
+    KernelRefused,
+    /// X shows the output connected but with no EDID.
     KernelDropped,
     /// X shows different bytes (kernel or X changed the EDID).
     KernelChanged,
@@ -72,6 +80,8 @@ enum Outcome {
     VergdWrongKey,
     /// vergd failed or printed no key.
     VergdFailed,
+    /// The harness itself failed (debugfs write, X request); see the message.
+    HarnessError,
 }
 
 struct Fake<'a> {
@@ -172,17 +182,32 @@ pub fn run(o: &Options) -> Result<bool, Box<dyn std::error::Error>> {
         return Err(format!("{} is already connected; pick a free connector", o.output).into());
     }
 
-    let all = db::files(&o.db)?;
-    let step = (all.len() / o.sample).max(1);
+    let all: Vec<PathBuf> = match &o.only {
+        Some(list) => std::fs::read_to_string(list)?
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(|l| o.db.join(l))
+            .collect(),
+        None => db::files(&o.db)?,
+    };
+    let step = if o.only.is_some() { 1 } else { (all.len() / o.sample).max(1) };
     let picks: Vec<&PathBuf> = all.iter().step_by(step).take(o.sample).collect();
     println!("{} of {} EDIDs, every {}th, on {} / {}", picks.len(), all.len(), step, o.conn, o.output);
 
     let started = Instant::now();
     let mut results: Vec<(Outcome, &PathBuf)> = Vec::new();
     for (i, path) in picks.iter().enumerate() {
-        let Some(edid) = db::read_edid(path)? else { continue };
+        let Some(raw) = db::read_edid(path)? else { continue };
+        // Inject what a monitor sends: the blocks its base block declares.
+        // Database files often carry more (wrap-around reads, a second
+        // EDID), which drm rejects with EINVAL.
+        let edid = vergence_profile::canonical(&raw).to_vec();
         let outcome = (|| -> Result<Outcome, Box<dyn std::error::Error>> {
-            fake.plug(&edid)?;
+            match fake.plug(&edid) {
+                Err(e) if e.raw_os_error() == Some(22) => return Ok(Outcome::KernelRefused),
+                r => r?,
+            }
             x.reprobe()?;
             let outs = x.outputs()?;
             let Some((_, connected, shown)) = outs.iter().find(|(n, _, _)| n == &o.output) else {
@@ -211,9 +236,15 @@ pub fn run(o: &Options) -> Result<bool, Box<dyn std::error::Error>> {
         let _ = x.reprobe();
         output_off(&o.output);
 
-        let outcome = outcome.unwrap_or(Outcome::VergdFailed);
-        if outcome != Outcome::Ok {
-            let rel = path.strip_prefix(&o.db).unwrap_or(path);
+        let rel = path.strip_prefix(&o.db).unwrap_or(path);
+        let outcome = match outcome {
+            Ok(oc) => oc,
+            Err(e) => {
+                println!("  HarnessError: {} ({} B): {e}", rel.display(), edid.len());
+                Outcome::HarnessError
+            }
+        };
+        if !matches!(outcome, Outcome::Ok | Outcome::HarnessError) {
             println!("  {:?}: {} ({} B)", outcome, rel.display(), edid.len());
         }
         results.push((outcome, path));
@@ -237,8 +268,8 @@ pub fn run(o: &Options) -> Result<bool, Box<dyn std::error::Error>> {
     if left {
         println!("WARNING: {} still shows connected after the run", o.output);
     }
-    let vergd_bad = results
-        .iter()
-        .any(|(oc, _)| matches!(oc, Outcome::VergdWrongKey | Outcome::VergdFailed));
+    let vergd_bad = results.iter().any(|(oc, _)| {
+        matches!(oc, Outcome::VergdWrongKey | Outcome::VergdFailed | Outcome::HarnessError)
+    });
     Ok(!vergd_bad && !left)
 }

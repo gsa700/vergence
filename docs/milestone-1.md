@@ -145,6 +145,18 @@ above become scripts, run over the EDID database and overnight sleep cycles.
   opens only local Unix sockets (X, and devd's pipe), no IP sockets, and no
   file for writing; it reads only `/etc/localtime` and the X authority file.
 
+- **EDID database sweep (`vergence-harness`).** Offline, all 174,759
+  EDIDs of linuxhw/EDID parse in 2.9 s with no panic. 47% carry bytes past
+  the blocks they declare (12.9% a wrap-around copy of the base block, 34.1%
+  a second EDID appended), so the profile key hashes only the declared
+  blocks. Live, 2,000 EDIDs (every 87th) as fake monitors on HDMI-A-1 in
+  286 s: 1,984 shown by X byte for byte with `vergd probe`'s key right,
+  14 refused by drm (EINVAL: drm validates every block and the declared
+  length, as for a real monitor), 1 never shown as connected (a Valve VR
+  headset: drm marks it non-desktop, which is right for vergd). No vergd
+  fault. Dave saw no flicker on the logged-in Xfce desktop: each fake is
+  gone again in about 0.1 s.
+
 ## Questions to settle on the real hardware
 
 - Which monitors report a physical size of zero or something wrong
