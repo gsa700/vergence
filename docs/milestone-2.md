@@ -9,10 +9,11 @@ login).
 **This is the first milestone where `vergd` changes the desktop.** So it is
 small on purpose, it can always be undone, and every change is logged.
 
-**Status: planned, not started.** Dave decided 1 to 4 on 2026-11-06, all
-as recommended: (1a) arrangement only, (2a) learn automatically, (3a) leave
-new setups alone and learn, (4a) turn Xfce's auto-apply off. Decision 5
-(file location) goes with the recommendation unless he says otherwise.
+**Status (2026-11-06): built; acceptance 1, 2, 5 and 6 pass on Hubble.**
+Dave decided 1 to 3 as recommended: (1a) arrangement only, (2a) learn
+automatically, (3a) leave new setups alone and learn. Decision 4 changed
+after testing (below): vergd acts last instead of turning Xfce off.
+Decision 5 (file location) went with the recommendation.
 
 ## Scope
 
@@ -57,6 +58,17 @@ Out (later milestones):
 5. **Where profiles live.** `~/.config/vergence/profiles.toml`, one file,
    owner-only (0600, directory 0700), human-readable and hand-editable.
    *(recommended)* Alternative: one file per profile.
+
+**Decision 4, revised (Dave, 2026-11-06).** Setting Xfce 4.20.5's
+`/Notify` to 0, 1, 2 or 3 gave inconsistent results on Hubble (one run every
+value did nothing, the next every value mirrored the new monitor and opened
+Xfce's display dialog), so Xfce's hot-plug handling could not be switched off
+reliably; `/Notify` was put back to unset. Instead **vergd acts last**: after
+a plug it waits for 2 s of quiet (Xfce reacts about 1 s after a plug, as a
+separate burst), then applies the saved profile; for 6 s after an apply, a
+change on the same setup is taken as the desktop reacting late and the
+profile is put back (at most twice) instead of learned. A new setup keeps
+Xfce's choice, and vergd learns it.
 
 ## How
 
@@ -105,3 +117,28 @@ Out (later milestones):
 
 The harness gets the plug/unplug sequences (1, 2, 6); 3 and 7 are partly by
 hand.
+
+## Results on Hubble (2026-11-06, with the debugfs fake monitor)
+
+1. **Learn and restore:** ASUS alone learned; the fake plugged in (Xfce
+   mirrors it, learned as the new setup's arrangement); moved right of the
+   ASUS with `xrandr` (learned as "your arrangement", not fought); unplugged
+   and replugged: back on the right. Pass, but Xfce also remembers this, so
+   the next test makes them disagree.
+2. **Monitors, not ports:** the same fake on HDMI-3 instead of HDMI-1 came
+   back right of the ASUS. Pass.
+3. (vergd vs Xfce) **Profile edited to put the fake LEFT** while Xfce
+   remembers it on the right: on replug vergd logged "applied profile",
+   fake at +0+0, ASUS at +1920+0 and primary. Only vergd could produce
+   this. Pass. After the unplug the screen shrank back to 1920x1080 and the
+   one-monitor setup was "already as saved".
+5. **Refused profile** (edited to 1600x900@75, a mode the fake doesn't
+   offer): "NOT applying profile …: HDMI-1 offers no 1600x900@75.00 mode";
+   nothing changed, Xfce's choice stood. Pass.
+6. **Flapping:** 50 plug/unplug cycles in 16 s, then left plugged: one
+   apply, no learning, the profile file unchanged, final arrangement right.
+   Pass.
+
+Still to do: 3 by hand in Xfce Display settings, 4 (suspend and wake, log
+out and in), 7 (real monitors). vergd does not start by itself yet: an Xfce
+autostart entry (or an rc script) is the next small step.

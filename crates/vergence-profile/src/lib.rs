@@ -14,8 +14,20 @@
 //! numbers have identical EDIDs. The key still differs from a one-monitor
 //! setup (both blobs are hashed), but swapping them cannot be told apart.
 //! [`duplicate_count`] reports that case so `vergd` can say so.
+//!
+//! Milestone 2 adds [`arrangement`]: what each profile remembers (modes,
+//! positions, primary) and the file that holds the profiles.
+
+pub mod arrangement;
 
 use sha2::{Digest, Sha256};
+
+/// A short, stable ID for one monitor: the first 16 hex digits of SHA-256
+/// over its canonical EDID. Profiles name monitors by this, not by port.
+pub fn monitor_id(edid: &[u8]) -> String {
+    let d = Sha256::digest(canonical(edid));
+    d.iter().take(8).map(|x| format!("{x:02x}")).collect()
+}
 
 /// Version of the key format, hashed first so a future change of format
 /// never collides with an old key.

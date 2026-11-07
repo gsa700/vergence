@@ -1,11 +1,20 @@
-//! vergd, the Vergence daemon. Milestone 1: observe only.
+//! vergd, the Vergence daemon.
 //!
-//!   vergd probe   print each output and the profile key, then exit
-//!   vergd watch   the same, then one block per change (plug, mode, wake)
+//!   vergd probe                 print each output and the profile key, then exit
+//!   vergd watch [--observe-only]
+//!                               the same, then one block per change (plug, mode,
+//!                               wake); remembers and restores each setup's
+//!                               arrangement unless --observe-only (milestone 2)
+//!   vergd profiles              list the remembered setups
+//!   vergd forget <key-prefix>   drop a remembered setup
+//!   vergd apply [--dry-run]     restore the current setup's profile now
 //!
-//! No network socket, no files written (whitepaper §7.3, phase 1). On FreeBSD
-//! `watch` also reads devd's local pipe (see watch.rs).
+//! No network socket (whitepaper §7.3, phase 1). The only file written is
+//! the profile file (store.rs), owner-only. On FreeBSD `watch` also reads
+//! devd's local pipe (see watch.rs).
 
+mod apply;
+mod store;
 mod watch;
 mod x11;
 
@@ -17,15 +26,24 @@ use vergence_profile::{duplicate_count, profile_key};
 use x11::Setup;
 
 fn usage() -> ExitCode {
-    eprintln!("usage: vergd probe | vergd watch");
+    eprintln!(
+        "usage: vergd probe\n       vergd watch [--observe-only]\n       vergd profiles\n       \
+         vergd forget <key-prefix>\n       vergd apply [--dry-run]"
+    );
     ExitCode::from(2)
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let result = match (args.first().map(String::as_str), args.len()) {
-        (Some("probe"), 1) => x11::read_setup().map(|s| print_setup(&s)),
-        (Some("watch"), 1) => watch::watch(),
+    let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    let result = match a.as_slice() {
+        ["probe"] => x11::read_setup().map(|s| print_setup(&s)),
+        ["watch"] => watch::watch(false),
+        ["watch", "--observe-only"] => watch::watch(true),
+        ["profiles"] => profiles(),
+        ["forget", prefix] => forget(prefix),
+        ["apply"] => apply_now(false),
+        ["apply", "--dry-run"] => apply_now(true),
         _ => return usage(),
     };
     match result {
@@ -34,6 +52,99 @@ fn main() -> ExitCode {
             eprintln!("vergd: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn profiles() -> Result<(), Box<dyn std::error::Error>> {
+    let s = store::load()?;
+    if s.profiles.is_empty() {
+        println!("no profiles in {}", store::path()?.display());
+        return Ok(());
+    }
+    let current = x11::read_setup().ok().map(|s| s.key());
+    for p in &s.profiles {
+        let here = if current.as_deref() == Some(p.key.as_str()) { "  (connected now)" } else { "" };
+        println!("{}  {}{here}", short(&p.key), p.updated);
+        for o in &p.outputs {
+            println!("    {}", o.describe());
+        }
+    }
+    Ok(())
+}
+
+fn forget(prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if prefix.len() < 4 {
+        return Err("give at least 4 characters of the key".into());
+    }
+    let mut s = store::load()?;
+    let gone = s.forget(prefix);
+    match gone.len() {
+        0 => println!("no profile starts with {prefix}"),
+        1 => {
+            store::save(&s)?;
+            println!("forgot {}", short(&gone[0]));
+        }
+        n => {
+            return Err(format!("{n} profiles start with {prefix}; give more of the key").into());
+        }
+    }
+    Ok(())
+}
+
+fn apply_now(dry_run: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let setup = x11::read_setup()?;
+    let key = setup.key();
+    let s = store::load()?;
+    let Some(p) = s.get(&key) else {
+        println!("no profile for the current setup {}", short(&key));
+        return Ok(());
+    };
+    match apply::apply(&p.outputs, dry_run)? {
+        apply::Outcome::AlreadyThere => println!("already as saved"),
+        apply::Outcome::Applied(steps) => {
+            println!("{}:", if dry_run { "would do" } else { "applied" });
+            for st in steps {
+                println!("  {st}");
+            }
+        }
+        apply::Outcome::Refused(why) => return Err(format!("not applying: {why}").into()),
+        apply::Outcome::Reverted(why) => return Err(format!("apply failed: {why}").into()),
+    }
+    Ok(())
+}
+
+/// The first 8 hex digits of a key, for people.
+pub fn short(key: &str) -> String {
+    format!("{}…", &key[..key.len().min(8)])
+}
+
+fn local_tm() -> Option<libc::tm> {
+    let t = unsafe { libc::time(std::ptr::null_mut()) };
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&t, &mut tm) }.is_null() { None } else { Some(tm) }
+}
+
+/// Local time as HH:MM:SS.
+pub fn stamp() -> String {
+    match local_tm() {
+        Some(tm) => format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec),
+        None => "--:--:--".into(),
+    }
+}
+
+/// Local date and time, YYYY-MM-DD HH:MM:SS.
+pub fn now_string() -> String {
+    match local_tm() {
+        Some(tm) => format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            tm.tm_year + 1900,
+            tm.tm_mon + 1,
+            tm.tm_mday,
+            tm.tm_hour,
+            tm.tm_min,
+            tm.tm_sec
+        ),
+        None => String::new(),
     }
 }
 

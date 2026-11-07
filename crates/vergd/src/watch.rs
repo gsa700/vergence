@@ -1,10 +1,22 @@
-//! `vergd watch`: print the setup, then one block per change.
+//! `vergd watch`: print the setup, then one block per change; since
+//! milestone 2 also remember and restore each setup's arrangement.
 //!
 //! One X connection listens for RandR events. A single plug or mode change
 //! makes the server send a burst of events (screen, output, CRTC, and more as
 //! the desktop reacts), so events are collected until the server has been
 //! quiet for [`SETTLE`], then the setup is read again and compared with the
-//! last one. Only real differences are printed.
+//! last one.
+//!
+//! Remembering (decisions in docs/milestone-2.md):
+//! - Key unchanged, arrangement changed: the user changed it; learn it.
+//! - Key changed to a known setup: wait a little longer ([`PLUG_SETTLE`]) so
+//!   the desktop (Xfce) has reacted first, then apply the saved arrangement.
+//!   vergd acts last.
+//! - Key changed to an unknown setup: leave it as X and the desktop made it,
+//!   and learn it.
+//! - For [`GUARD`] after an apply, a change on the same setup is the desktop
+//!   reacting late, not the user: put the profile back (at most
+//!   [`MAX_REAPPLY`] times) instead of learning it.
 //!
 //! FreeBSD only: Xorg does not re-probe outputs when a monitor is plugged in
 //! (libudev-devd passes input devices, not DRM hot-plug; found on Hubble
@@ -16,16 +28,138 @@ use std::time::{Duration, Instant};
 
 use x11rb::connection::Connection as _;
 use x11rb::protocol::randr::{ConnectionExt as _, NotifyMask};
+use x11rb::rust_connection::RustConnection;
 
+use vergence_profile::arrangement::{same_arrangement, Profile, Store};
+
+use crate::apply::{self, Outcome};
 use crate::x11::{self, Setup};
-use crate::{key_line, print_setup};
+use crate::{key_line, now_string, print_setup, short, stamp};
 
 /// How long the server must be quiet before a burst counts as finished.
 const SETTLE: Duration = Duration::from_millis(400);
+/// After a plug or unplug, how long to wait for quiet before applying, so
+/// the desktop's own reaction (Xfce: about a second) comes first.
+const PLUG_SETTLE: Duration = Duration::from_millis(2000);
+/// After an apply, how long changes count as the desktop reacting.
+const GUARD: Duration = Duration::from_secs(6);
+const MAX_REAPPLY: u32 = 2;
 
-pub fn watch() -> Result<(), Box<dyn std::error::Error>> {
-    let (conn, screen_num) = x11rb::connect(None)?;
-    let root = conn.setup().roots[screen_num].root;
+/// Wait until the server has sent nothing for `quiet`.
+fn drain(conn: &RustConnection, quiet: Duration) -> Result<(), Box<dyn std::error::Error>> {
+    let mut since = Instant::now();
+    while since.elapsed() < quiet {
+        if conn.poll_for_event()?.is_some() {
+            since = Instant::now();
+        } else {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    Ok(())
+}
+
+struct Memory {
+    store: Store,
+    observe_only: bool,
+    guard_until: Option<Instant>,
+    reapplied: u32,
+}
+
+impl Memory {
+    fn learn(&mut self, setup: &Setup, why: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let key = setup.key();
+        let arr = setup.arrangement();
+        if let Some(p) = self.store.get(&key) {
+            if same_arrangement(&p.outputs, &arr) {
+                return Ok(());
+            }
+        }
+        self.store.put(Profile { key: key.clone(), updated: now_string(), outputs: arr.clone() });
+        crate::store::save(&self.store)?;
+        println!("{} learned {} for {}:", stamp(), why, short(&key));
+        for o in &arr {
+            println!("{}   {}", stamp(), o.describe());
+        }
+        Ok(())
+    }
+
+    /// Apply the saved profile for this setup; returns true if it changed
+    /// anything.
+    fn restore(&mut self, setup: &Setup) -> Result<bool, Box<dyn std::error::Error>> {
+        let key = setup.key();
+        let Some(p) = self.store.get(&key).cloned() else { return Ok(false) };
+        match apply::apply(&p.outputs, false)? {
+            Outcome::AlreadyThere => {
+                println!("{} known setup {}: already as saved", stamp(), short(&key));
+                Ok(false)
+            }
+            Outcome::Applied(steps) => {
+                println!("{} applied profile {}:", stamp(), short(&key));
+                for s in steps {
+                    println!("{}   {s}", stamp());
+                }
+                self.guard_until = Some(Instant::now() + GUARD);
+                Ok(true)
+            }
+            Outcome::Refused(why) => {
+                println!("{} NOT applying profile {}: {why}", stamp(), short(&key));
+                Ok(false)
+            }
+            Outcome::Reverted(why) => {
+                println!("{} applying profile {} FAILED: {why}", stamp(), short(&key));
+                self.guard_until = Some(Instant::now() + GUARD);
+                Ok(true)
+            }
+        }
+    }
+
+    /// Decide what a settled change means. `plugged` = the key changed.
+    fn react(&mut self, conn: &RustConnection, root: u32, now: Setup, plugged: bool)
+        -> Result<Setup, Box<dyn std::error::Error>> {
+        if self.observe_only || now.edids().is_empty() {
+            return Ok(now);
+        }
+        let key = now.key();
+        let known = self.store.get(&key).is_some();
+        let guarded = self.guard_until.is_some_and(|t| Instant::now() < t);
+
+        if plugged {
+            self.reapplied = 0;
+            if !known {
+                self.learn(&now, "new setup")?;
+                return Ok(now);
+            }
+            // Let the desktop react first, then act last.
+            drain(conn, PLUG_SETTLE)?;
+            let now = x11::read_setup_on(conn, root)?;
+            if now.key() != key {
+                return Ok(now); // changed again; the next burst handles it
+            }
+            if self.restore(&now)? {
+                return Ok(x11::read_setup_on(conn, root)?);
+            }
+            return Ok(now);
+        }
+
+        // Same setup, different arrangement.
+        if guarded && known {
+            if self.reapplied < MAX_REAPPLY {
+                self.reapplied += 1;
+                println!("{} change right after an apply: the desktop reacting, putting the profile back", stamp());
+                if self.restore(&now)? {
+                    return Ok(x11::read_setup_on(conn, root)?);
+                }
+                return Ok(now);
+            }
+            println!("{} still changing after {MAX_REAPPLY} re-applies; leaving it and learning it", stamp());
+        }
+        self.learn(&now, "your arrangement")?;
+        Ok(now)
+    }
+}
+
+pub fn watch(observe_only: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let (conn, root) = x11::connect()?;
     conn.randr_select_input(
         root,
         NotifyMask::SCREEN_CHANGE
@@ -38,30 +172,33 @@ pub fn watch() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "freebsd")]
     devd::spawn();
 
-    let mut last = x11::read_setup()?;
-    println!("{} watching", stamp());
+    let store = if observe_only { Store::default() } else { crate::store::load()? };
+    let mut mem = Memory { store, observe_only, guard_until: None, reapplied: 0 };
+
+    let mut last = x11::read_setup_on(&conn, root)?;
+    println!(
+        "{} watching{}",
+        stamp(),
+        if observe_only { " (observe only)" } else { "; profiles in ~/.config/vergence/profiles.toml" }
+    );
     print_setup(&last);
+    // At start: a known setup is restored, an unknown one learned.
+    last = mem.react(&conn, root, last, true)?;
 
     loop {
         conn.wait_for_event()?;
-        // Collect the rest of the burst.
-        let mut quiet_since = Instant::now();
-        while quiet_since.elapsed() < SETTLE {
-            if conn.poll_for_event()?.is_some() {
-                quiet_since = Instant::now();
-            } else {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-        }
-        let now = x11::read_setup()?;
+        drain(&conn, SETTLE)?;
+        let now = x11::read_setup_on(&conn, root)?;
         let changes = diff(&last, &now);
-        if !changes.is_empty() {
-            for c in &changes {
-                println!("{} {c}", stamp());
-            }
-            println!("{} {}", stamp(), key_line(&now));
+        if changes.is_empty() {
+            continue;
         }
-        last = now;
+        for c in &changes {
+            println!("{} {c}", stamp());
+        }
+        println!("{} {}", stamp(), key_line(&now));
+        let plugged = now.key() != last.key();
+        last = mem.react(&conn, root, now, plugged)?;
     }
 }
 
@@ -81,17 +218,10 @@ fn diff(old: &Setup, new: &Setup) -> Vec<String> {
             out.push(format!("{:<9} gone", o.name));
         }
     }
-    out
-}
-
-/// Local time as HH:MM:SS.
-fn stamp() -> String {
-    let t = unsafe { libc::time(std::ptr::null_mut()) };
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    if unsafe { libc::localtime_r(&t, &mut tm) }.is_null() {
-        return "--:--:--".into();
+    if out.is_empty() && old.primary != new.primary {
+        out.push("primary output changed".into());
     }
-    format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec)
+    out
 }
 
 #[cfg(target_os = "freebsd")]
