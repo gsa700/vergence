@@ -1,4 +1,4 @@
-# Milestone 2: remember each monitor setup (DRAFT, for Dave's review)
+# Milestone 2: remember each monitor setup
 
 Whitepaper §4.1. Milestone 1 recognises a monitor setup by its profile key.
 Milestone 2 makes the setup's arrangement stick: each profile stores which
@@ -9,8 +9,10 @@ login).
 **This is the first milestone where `vergd` changes the desktop.** So it is
 small on purpose, it can always be undone, and every change is logged.
 
-**Status: draft, not started.** The decisions below are Dave's; the
-recommended answer is listed first.
+**Status: planned, not started.** Dave decided 1 to 4 on 2026-11-06, all
+as recommended: (1a) arrangement only, (2a) learn automatically, (3a) leave
+new setups alone and learn, (4a) turn Xfce's auto-apply off. Decision 5
+(file location) goes with the recommendation unless he says otherwise.
 
 ## Scope
 
@@ -33,7 +35,7 @@ Out (later milestones):
 - Edge alignment as a setting (§4.6): comes with scaling, where logical
   heights start to differ.
 
-## Decisions for Dave
+## Decisions (Dave, 2026-11-06)
 
 1. **Scope.** (a) Arrangement only, as above. *(recommended: the first
    change to the desktop should be the simplest one)* (b) Arrangement and
