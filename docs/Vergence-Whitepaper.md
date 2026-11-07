@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "6 November 2026 — Draft 0.6"
+date: "6 November 2026 — Draft 0.7"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.6 · 6 November 2026
+David Erickson (AB0R), with Claude · Draft 0.7 · 6 November 2026
 
 ---
 
@@ -158,7 +158,7 @@ Three monitors in a row. Physical sizes are **assumed** for the calculation.
 | Rendered at | 5120×2880 | 3840×2160 | 6016×3384 |
 | `xrandr --scale` | 1.333×1.333 | 2×2 | 1×1 |
 
-- **Virtual screen:** 14,976 × 3,384 pixels, just under the common 16,384-pixel X/GPU limit. A fourth monitor would exceed it.
+- **Virtual screen:** 14,976 × 3,384 pixels, just under the common 16,384-pixel limit on one X screen (§5). A fourth monitor would exceed it.
 - **GPU load:** about 43 Mpx rendered versus 31 Mpx native, roughly 40% more.
 - `xrandr --scale` takes the rendered size divided by the panel's native size, so a value above 1 shrinks the picture onto the panel: M1 shows its 5120×2880 render on 3840×2160 (shown at 0.75 size), M2 shows 3840×2160 on 1920×1080 (shown at half size).
 - **M1** is slightly soft, because 0.75 is not a whole-number scale.
@@ -198,7 +198,7 @@ What stays manual: the one-time size calibration, and occasional real monitors, 
 
 ---
 
-## 5. Native per-monitor rendering, and the X11 wall
+## 5. Native per-monitor rendering, and the X11 walls
 
 The ideal is to **separate the logical space** (where windows live, where the pointer moves, where layouts are saved) **from each monitor's native resolution**, so every monitor always shows native pixels. Windows and Wayland both work this way.
 
@@ -208,7 +208,9 @@ On X11 this works in tiers:
 2. **Other applications** can be drawn at one scale and have a compositing window manager scale **just their windows** to suit each monitor. This is Windows' approach.
 3. **The wall is input.** If the compositor shows a window at 0.75 size, X still routes clicks by the window's real geometry, so clicks land in the wrong place. X11 has no per-window input transformation. It was prototyped (Sun's Looking Glass input redirection, Compiz experiments) but never merged.
 
-On X11, removing the wall would need a compositing window manager **plus a new X server extension**; the actively developed XLibre fork of Xorg is the most plausible home for one. The long-term architecture below removes the wall a different way: **its server owns input routing**.
+A second wall is **the size of the desktop**. X keeps the whole desktop as **one picture**: a single framebuffer, the "screen", in which every monitor shows its own rectangle. That picture must fit in one buffer the GPU can draw and scan out, so its size has a hardware limit (16,384 × 16,384 on Intel UHD 630; often 8,192 on older or smaller GPUs), and the X protocol's 16-bit coordinates cap it at 32,767 whatever the hardware. Mode A multiplies the desktop by its render scale, so it reaches the limit quickly: on the phase 1 test machine, a 13.3″ 4K panel (332 ppi, needing 4×) beside two ordinary monitors would have made a desktop 19,651 pixels wide, and the daemon refused it (§4.6, pass criterion 3).
+
+On X11, removing the input wall would need a compositing window manager **plus a new X server extension**; the actively developed XLibre fork of Xorg is the most plausible home for one. The desktop-size wall is part of X's design and has no such fix. The long-term architecture below removes both a different way: **its server owns input routing**, and **it keeps one buffer per monitor**, sized to that panel, so the only limit is what one panel needs.
 
 ---
 
@@ -223,7 +225,7 @@ On X11, removing the wall would need a compositing window manager **plus a new X
 
 ### 6.2 One authority
 
-A single display server owns all outputs and all input, like NeXT's Window Server. It knows each panel from its EDID: physical size, subpixel layout, colour gamut, refresh capabilities.
+A single display server owns all outputs and all input, like NeXT's Window Server. It knows each panel from its EDID: physical size, subpixel layout, colour gamut, refresh capabilities. It composes **each monitor in its own buffer**, at that panel's native resolution, so no single picture of the whole desktop exists and X's desktop-size limit (§5) does not apply.
 
 ### 6.3 Contract 1: geometry in visual size
 
