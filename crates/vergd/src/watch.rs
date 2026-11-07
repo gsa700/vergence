@@ -184,7 +184,7 @@ impl Memory {
     }
 }
 
-pub fn watch(observe_only: bool, no_windows: bool) -> Result<(), Box<dyn std::error::Error>> {
+pub fn watch(observe_only: bool, no_windows: bool, no_xsettings: bool) -> Result<(), Box<dyn std::error::Error>> {
     let (conn, root) = x11::connect()?;
     conn.randr_select_input(
         root,
@@ -202,6 +202,19 @@ pub fn watch(observe_only: bool, no_windows: bool) -> Result<(), Box<dyn std::er
     let mut mem =
         Memory { store, observe_only, guard_until: None, reapplied: 0, new_setup_until: None };
     let mut wm = WindowMemory::new(&conn, root, !observe_only && !no_windows)?;
+    // Milestone 4: vergd is the XSETTINGS manager. A failure here is
+    // reported and vergd carries on without it.
+    let mut xs = if observe_only || no_xsettings {
+        None
+    } else {
+        match crate::xsettings::Manager::start(&conn, root) {
+            Ok(m) => Some(m),
+            Err(e) => {
+                println!("{} XSETTINGS manager not started: {e}", stamp());
+                None
+            }
+        }
+    };
 
     let mut last = x11::read_setup_on(&conn, root)?;
     println!(
@@ -283,6 +296,9 @@ pub fn watch(observe_only: bool, no_windows: bool) -> Result<(), Box<dyn std::er
         }
 
         wm.tick(&conn, &last)?;
+        if let Some(m) = xs.as_mut() {
+            m.tick(&conn)?;
+        }
         std::thread::sleep(Duration::from_millis(20));
     }
 }

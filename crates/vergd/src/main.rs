@@ -1,7 +1,7 @@
 //! vergd, the Vergence daemon.
 //!
 //!   vergd probe                 print each output and the profile key, then exit
-//!   vergd watch [--observe-only] [--no-windows]
+//!   vergd watch [--observe-only] [--no-windows] [--no-xsettings]
 //!                               the same, then one block per change (plug, mode,
 //!                               wake); remembers and restores each setup's
 //!                               arrangement (milestone 2) and its windows
@@ -32,7 +32,7 @@ use x11::Setup;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: vergd probe\n       vergd watch [--observe-only] [--no-windows]\n       vergd profiles\n       vergd windows\n       vergd xsettings\n       \
+        "usage: vergd probe\n       vergd watch [--observe-only] [--no-windows] [--no-xsettings]\n       vergd profiles\n       vergd windows\n       vergd xsettings\n       \
          vergd forget <key-prefix>\n       vergd apply [--dry-run]"
     );
     ExitCode::from(2)
@@ -43,8 +43,14 @@ fn main() -> ExitCode {
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
     let result = match a.as_slice() {
         ["probe"] => x11::read_setup().map(|s| print_setup(&s)),
-        ["watch", flags @ ..] if flags.iter().all(|f| ["--observe-only", "--no-windows"].contains(f)) => {
-            watch::watch(flags.contains(&"--observe-only"), flags.contains(&"--no-windows"))
+        ["watch", flags @ ..]
+            if flags.iter().all(|f| ["--observe-only", "--no-windows", "--no-xsettings"].contains(f)) =>
+        {
+            watch::watch(
+                flags.contains(&"--observe-only"),
+                flags.contains(&"--no-windows"),
+                flags.contains(&"--no-xsettings"),
+            )
         }
         ["windows"] => store::load_windows().map(|s| windows::print_store(&s)).map_err(Into::into),
         ["xsettings"] => xsettings::print_current(),

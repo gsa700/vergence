@@ -2,6 +2,7 @@
 //!
 //! - profiles.toml: the monitor arrangement per setup (milestone 2)
 //! - windows.toml:  where windows were per setup (milestone 3)
+//! - settings.toml: the XSETTINGS vergd publishes (milestone 4)
 //!
 //! Owner-only: the directory 0700, the files 0600 (whitepaper §7.3).
 //! Written atomically (a temp file in the same directory, then renamed), so
@@ -34,6 +35,32 @@ pub fn path() -> Result<PathBuf, String> {
 
 pub fn windows_path() -> Result<PathBuf, String> {
     Ok(dir()?.join("windows.toml"))
+}
+
+pub fn settings_path() -> Result<PathBuf, String> {
+    Ok(dir()?.join("settings.toml"))
+}
+
+/// The settings file's text, or None if there is none yet.
+pub fn load_settings() -> Result<Option<String>, String> {
+    read(&settings_path()?)
+}
+
+pub fn save_settings(body: &str) -> Result<(), String> {
+    write(
+        &settings_path()?,
+        "# Vergence XSETTINGS: what vergd publishes to GTK apps (theme, icons,\n\
+         # fonts, cursor...). Imported once from the desktop's settings manager.\n\
+         # Edit freely: vergd re-reads this file within 2 s. Scaling values\n\
+         # (window scale, DPI, cursor size) are laid over these by vergd.\n\
+         # See docs/milestone-4.md.\n",
+        body,
+    )
+}
+
+/// When the settings file last changed, if it exists.
+pub fn settings_mtime() -> Option<std::time::SystemTime> {
+    fs::metadata(settings_path().ok()?).and_then(|m| m.modified()).ok()
 }
 
 /// The file's text, or None if it does not exist.

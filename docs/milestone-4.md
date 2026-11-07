@@ -107,6 +107,24 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
 | `GDK_SCALE`, `QT_SCREEN_SCALE_FACTORS`, `AVALONIA_SCREEN_SCALE_FACTORS`, Java's `-Dsun.java2d.uiScale` | Java, Qt, Avalonia, some Electron | **next login** (decision 5) |
 | `_VERGENCE_SCALES` root-window property (documented) | apps that opt in (our .NET helper, §8.1) | live |
 
+## Built so far
+
+- **Scale and Mode A numbers** (`vergence-profile::scaling`), shown by
+  `vergd probe`. Checked with fakes: 27" 4K 1.75 (163 ppi), ASUS 1 (103),
+  24" 1 (92).
+- **Fake monitors of any density:** `vergence-harness fake`. A 4K fake needs
+  an HDMI vendor block, or Intel's driver caps the port at 165 MHz; with it,
+  3840x2160 at 30 Hz lights on HDMI.
+- **XSETTINGS manager** (22:20): `vergence-xsettings` (wire format) and
+  vergd's manager. On start vergd imports the running manager's settings
+  once into `settings.toml` (0600), takes the selection with a real
+  timestamp, publishes, and announces itself; it checks every 2 s that it
+  still owns the selection (its waits swallow events) and re-reads the file
+  when it changes. `vergd watch --no-xsettings` turns it off;
+  `vergd xsettings` shows what is published. On Hubble: imported Xfce's 30
+  settings, took over from xfsettingsd (which keeps running), and an edit of
+  `Gtk/FontName` was published within 2 s (serial 31).
+
 ## Decisions for Dave
 
 1. **Scope.** (a) Mode A and the toolkit settings first, then Mode B as the
