@@ -151,8 +151,9 @@ Found during 3: the running daemon kept the profiles in memory, so a
 `vergd forget` (or a hand edit) would have been written back over at the
 next change. vergd now re-reads the file before every decision; checked by
 forgetting a profile while vergd ran and plugging again ("learned new
-setup"). Cosmetic: a change made by Xfce itself (its mirror right after a
-new plug) is also logged as "your arrangement".
+setup"). Log wording (fixed the same evening): a change in the first 6 s
+after a new setup is logged as "the desktop's change to the new setup", any
+other as "an arrangement change"; vergd cannot see who made a change.
 
 Still to do: 4 (suspend and wake with vergd acting), 7 (real monitors). Autostart: `tools/install-autostart.sh` (no
 root) copies the release build to `~/.local/bin/vergd`, writes

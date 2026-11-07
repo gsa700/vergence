@@ -8,7 +8,8 @@
 //! last one.
 //!
 //! Remembering (decisions in docs/milestone-2.md):
-//! - Key unchanged, arrangement changed: the user changed it; learn it.
+//! - Key unchanged, arrangement changed: the user (or the desktop) changed
+//!   it; learn it.
 //! - Key changed to a known setup: wait a little longer ([`PLUG_SETTLE`]) so
 //!   the desktop (Xfce) has reacted first, then apply the saved arrangement.
 //!   vergd acts last.
@@ -63,6 +64,9 @@ struct Memory {
     observe_only: bool,
     guard_until: Option<Instant>,
     reapplied: u32,
+    /// Until when a change counts as the desktop finishing a new setup
+    /// (only used for the log wording).
+    new_setup_until: Option<Instant>,
 }
 
 impl Memory {
@@ -129,8 +133,10 @@ impl Memory {
 
         if plugged {
             self.reapplied = 0;
+            self.new_setup_until = None;
             if !known {
                 self.learn(&now, "new setup")?;
+                self.new_setup_until = Some(Instant::now() + GUARD);
                 return Ok(now);
             }
             // Let the desktop react first, then act last.
@@ -157,7 +163,15 @@ impl Memory {
             }
             println!("{} still changing after {MAX_REAPPLY} re-applies; leaving it and learning it", stamp());
         }
-        self.learn(&now, "your arrangement")?;
+        // vergd cannot see who made a change. Right after a new setup it is
+        // almost always the desktop (Xfce mirrors a new monitor ~1 s after
+        // the plug); otherwise say nothing about who.
+        let why = if self.new_setup_until.is_some_and(|t| Instant::now() < t) {
+            "the desktop's change to the new setup"
+        } else {
+            "an arrangement change"
+        };
+        self.learn(&now, why)?;
         Ok(now)
     }
 }
@@ -177,7 +191,8 @@ pub fn watch(observe_only: bool) -> Result<(), Box<dyn std::error::Error>> {
     devd::spawn();
 
     let store = if observe_only { Store::default() } else { crate::store::load()? };
-    let mut mem = Memory { store, observe_only, guard_until: None, reapplied: 0 };
+    let mut mem =
+        Memory { store, observe_only, guard_until: None, reapplied: 0, new_setup_until: None };
 
     let mut last = x11::read_setup_on(&conn, root)?;
     println!(
