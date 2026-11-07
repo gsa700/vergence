@@ -4,7 +4,7 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
 the current milestone is docs/milestone-4.md (scaling; earlier ones in docs/milestone-1.md to -3.md), status is in README.md.
 
 - **Started 2026-11-06** (Dave's go). The source lives here on Control (the
-  only git copy; Control has no Rust). Build and test on Hubble, the FreeBSD
+  main git copy, pushed to GitHub; Control has no Rust). Build and test on Hubble, the FreeBSD
   dev box: copy the tree over SSH without .git and target, then run
   `cargo test` and `DISPLAY=:0 target/debug/vergd probe` there. Fake monitors
   for tests: docs/milestone-1.md, "Found on Hubble".
