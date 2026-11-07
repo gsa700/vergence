@@ -1,4 +1,4 @@
-# Milestone 3: remember where windows go (DRAFT, for Dave's review)
+# Milestone 3: remember where windows go
 
 Whitepaper §4.4. Milestone 2 puts the monitors back the way they were for
 each setup. Milestone 3 puts the **windows** back: when a monitor comes back
@@ -10,8 +10,10 @@ opens where it was last time on this setup.
 scaling milestone 4. Window memory needs no new hardware and is tested with
 the fake monitor; scaling waits for real monitors of different densities.
 
-**Status: draft, not started.** Decisions below are Dave's; the
-recommended answer is listed first.
+**Status: planned, not started.** Dave decided all four on 2026-11-06, as
+recommended: (1a) restore on monitor changes and at app start, with an
+opt-out list; (2a) never store titles; (3a) remember workspaces; (4a)
+install Thunderbird on Hubble for the tests.
 
 ## What xfwm4 offers (checked on Hubble)
 
@@ -69,7 +71,7 @@ taskbar.
   `--no-windows` switch turns this milestone off on its own; every restore
   is logged ("moved firefox #1 to ASUS VS229 +100+50 1200x900").
 
-## Decisions for Dave
+## Decisions (Dave, 2026-11-06)
 
 1. **When to restore.** (a) On monitor changes **and** when an app starts,
    with an opt-out list for apps that place themselves. *(recommended)*
