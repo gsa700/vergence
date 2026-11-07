@@ -172,6 +172,11 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
     a 240 px window cut its content off. It reads the scale from XSETTINGS,
     not `Xft.dpi`. Real Electron apps would open too small at scale 2.
   - Avalonia not measured yet (needs a .NET test app and NuGet packages).
+  - **With exact scales (decision 7, 22:53): GTK 3, GTK 4, Qt 6 and
+    Electron are 52.9 x 52.9 mm on both monitors**, the reference size
+    exactly. ASUS drawn 400 px, shrunk x1.87 to 214 panel px; 4K drawn 400
+    px, shrunk x1.176 to 340 panel px; screen 8105x2540. **Acceptance 3
+    passes for these four toolkits.**
 
 ## Decisions for Dave
 
@@ -219,6 +224,16 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
    small Avalonia test app), so all six toolkit rows of whitepaper §4.5 are
    tested. *(recommended; Electron is a large package)* (b) GTK, Qt and Xlib
    only.
+
+7. **Rounding in Mode A** (added 22:52 after the first measurement).
+   **Decided (Dave): exact.** Mode A uses each monitor's exact scale, so a
+   window is the same physical size on every monitor (both 52.9 mm instead
+   of 49.5 / 54.4); no monitor gets a whole-number factor, so all are a
+   little soft; a per-monitor override (`scale = 100`) gives one back a
+   crisp factor. Rounded scales still decide whether a setup needs scaling
+   at all: with no monitor above 1 (e.g. the ASUS alone, exactly 1.07)
+   everything stays 1:1 rather than drawing the desktop at 2x for a 7%
+   correction.
 
 ## Acceptance (Hubble, fake monitors of different densities unless noted)
 

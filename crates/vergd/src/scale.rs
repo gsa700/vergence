@@ -25,7 +25,10 @@ type Res<T> = Result<T, Box<dyn std::error::Error>>;
 pub struct MonitorScale {
     pub connector: String,
     pub name: String,
+    /// Rounded to 0.25 steps: decides whether the setup needs scaling.
     pub scale: f64,
+    /// The exact scale: what Mode A uses (decision 7, Dave 2026-11-06).
+    pub exact: f64,
     pub why: String,
 }
 
@@ -52,32 +55,50 @@ pub fn monitor_scales(setup: &Setup, cfg: &ScalingConfig) -> Vec<MonitorScale> {
             };
             let m = cfg.monitor(&id);
             let distance = m.map(|m| m.distance).unwrap_or_default();
-            let (scale, why) = if !cfg.enabled {
-                (1.0, "scaling off".to_string())
+            let (scale, exact, why) = if !cfg.enabled {
+                (1.0, 1.0, "scaling off".to_string())
             } else if let Some(p) = m.and_then(|m| m.scale) {
-                (p as f64 / 100.0, "set in profiles.toml".to_string())
+                let v = p as f64 / 100.0;
+                (v, v, "set in profiles.toml".to_string())
             } else {
                 match o.derived_scale(distance, cfg.preference as f64 / 100.0) {
                     Some(d) => match d.ppi {
-                        Some(ppi) => (d.scale, format!("{ppi:.0} ppi, {distance:?} distance").to_lowercase()),
-                        None => (1.0, d.note.unwrap_or("no size").to_string()),
+                        Some(ppi) => (
+                            d.scale,
+                            d.exact,
+                            format!("exactly {:.2}; {ppi:.0} ppi, {distance:?} distance", d.exact).to_lowercase(),
+                        ),
+                        None => (1.0, 1.0, d.note.unwrap_or("no size").to_string()),
                     },
-                    None => (1.0, "no native mode".to_string()),
+                    None => (1.0, 1.0, "no native mode".to_string()),
                 }
             };
-            MonitorScale { connector: o.name.clone(), name, scale, why }
+            MonitorScale { connector: o.name.clone(), name, scale, exact, why }
         })
         .collect()
 }
 
+/// Mode A uses each monitor's **exact** scale, so a window is the same
+/// physical size on every monitor (decision 7). But a setup scales only if
+/// some monitor needs it (its rounded scale is above 1): with no
+/// high-density monitor everything stays 1:1, rather than drawing the whole
+/// desktop at 2x to correct a few percent.
 pub fn target(setup: &Setup, cfg: &ScalingConfig) -> Result<Target, String> {
-    let monitors = monitor_scales(setup, cfg);
-    let render = render_scale(&monitors.iter().map(|m| m.scale).collect::<Vec<_>>());
+    let mut monitors = monitor_scales(setup, cfg);
+    if monitors.iter().all(|m| m.scale <= 1.0) {
+        for m in &mut monitors {
+            if m.exact != 1.0 {
+                m.why = format!("{}; no monitor here needs scaling", m.why);
+            }
+            m.exact = 1.0;
+        }
+    }
+    let render = render_scale(&monitors.iter().map(|m| m.exact).collect::<Vec<_>>());
     let current = setup.arrangement();
     let factors: Vec<u32> = current
         .iter()
         .map(|o| match monitors.iter().find(|m| m.connector == o.connector) {
-            Some(m) if o.enabled => factor_fixed(render, m.scale),
+            Some(m) if o.enabled => factor_fixed(render, m.exact),
             _ => FIXED_ONE,
         })
         .collect();

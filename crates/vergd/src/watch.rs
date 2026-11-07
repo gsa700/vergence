@@ -229,7 +229,7 @@ fn ensure_scale(
             Outcome::Applied(steps) => {
                 println!("{} scaling: rendering at {}x", stamp(), t.render);
                 for m in &t.monitors {
-                    println!("{}   {} ({}): scale {} ({})", stamp(), m.name, m.connector, m.scale, m.why);
+                    println!("{}   {} ({}): scale {:.2} ({})", stamp(), m.name, m.connector, m.exact, m.why);
                 }
                 for s in steps {
                     println!("{}   {s}", stamp());
