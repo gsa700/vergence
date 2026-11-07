@@ -148,6 +148,8 @@ pub fn session_env(render: u32) -> String {
         "# Written by vergd (milestone 4): the scale for toolkits that read it\n\
          # only when they start. Sourced at login from ~/.xprofile.\n",
     );
+    // Shows in every program's environment that the login read this file.
+    t.push_str(&format!("export VERGENCE_SCALE={render}\n"));
     if render > 1 {
         t.push_str(&format!("export _JAVA_OPTIONS=\"-Dsun.java2d.uiScale={render}\"\n"));
         t.push_str(&format!("export AVALONIA_GLOBAL_SCALE_FACTOR={render}\n"));
