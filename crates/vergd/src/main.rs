@@ -1,39 +1,44 @@
 //! vergd, the Vergence daemon. Milestone 1: observe only.
 //!
 //!   vergd probe   print each output and the profile key, then exit
+//!   vergd watch   the same, then one block per change (plug, mode, wake)
 //!
-//! No network socket, no files written (whitepaper §7.3, phase 1).
+//! No network socket, no files written (whitepaper §7.3, phase 1). On FreeBSD
+//! `watch` also reads devd's local pipe (see watch.rs).
 
+mod watch;
 mod x11;
 
 use std::process::ExitCode;
 
-use vergence_edid::Edid;
+use vergence_edid::{Edid, MadeIn};
 use vergence_profile::{duplicate_count, profile_key};
 
+use x11::Setup;
+
 fn usage() -> ExitCode {
-    eprintln!("usage: vergd probe");
+    eprintln!("usage: vergd probe | vergd watch");
     ExitCode::from(2)
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.first().map(String::as_str) {
-        Some("probe") if args.len() == 1 => match probe() {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("vergd: {e}");
-                ExitCode::FAILURE
-            }
-        },
-        _ => usage(),
+    let result = match (args.first().map(String::as_str), args.len()) {
+        (Some("probe"), 1) => x11::read_setup().map(|s| print_setup(&s)),
+        (Some("watch"), 1) => watch::watch(),
+        _ => return usage(),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("vergd: {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 
-fn probe() -> Result<(), Box<dyn std::error::Error>> {
-    let setup = x11::read_setup()?;
-    let mut edids: Vec<&[u8]> = Vec::new();
-
+/// The full report: every output, then the key line.
+pub fn print_setup(setup: &Setup) {
     for o in &setup.outputs {
         if !o.connected {
             println!("{:<9} disconnected", o.name);
@@ -42,16 +47,13 @@ fn probe() -> Result<(), Box<dyn std::error::Error>> {
         let mut line = format!("{:<9} connected", o.name);
         match &o.edid {
             None => line.push_str("  no EDID"),
-            Some(raw) => {
-                edids.push(raw);
-                match Edid::parse(raw) {
-                    Err(e) => line.push_str(&format!("  bad EDID ({} B): {e}", raw.len())),
-                    Ok(e) => line.push_str(&describe(&e, raw.len())),
-                }
-            }
+            Some(raw) => match Edid::parse(raw) {
+                Err(e) => line.push_str(&format!("  bad EDID ({} B): {e}", raw.len())),
+                Ok(e) => line.push_str(&describe(&e, raw.len())),
+            },
         }
         if let Some(m) = &o.native {
-            line.push_str(&format!("\n          native  {}", m));
+            line.push_str(&format!("\n          native  {m}"));
         }
         match &o.current {
             Some(c) => line.push_str(&format!("\n          current {} at +{}+{}", c.mode, c.x, c.y)),
@@ -62,21 +64,27 @@ fn probe() -> Result<(), Box<dyn std::error::Error>> {
         }
         println!("{line}");
     }
+    println!("{}", key_line(setup));
+}
 
+/// "profile key <hex> (N monitors with EDID)", plus a warning line for
+/// identical twins.
+pub fn key_line(setup: &Setup) -> String {
+    let edids = setup.edids();
     let n = edids.len();
-    println!(
+    let mut s = format!(
         "profile key {} ({n} monitor{} with EDID)",
         profile_key(&edids),
         if n == 1 { "" } else { "s" }
     );
     let dups = duplicate_count(&edids);
     if dups > 0 {
-        println!(
-            "warning: {dups} monitor(s) have an EDID identical to another; \
+        s.push_str(&format!(
+            "\nwarning: {dups} monitor(s) have an EDID identical to another; \
              the key cannot tell which port each is in"
-        );
+        ));
     }
-    Ok(())
+    s
 }
 
 fn describe(e: &Edid, len: usize) -> String {
@@ -98,9 +106,9 @@ fn describe(e: &Edid, len: usize) -> String {
         s.push_str(&format!(" (base block {}x{} cm)", e.size_cm.0, e.size_cm.1));
     }
     let made = match e.made {
-        vergence_edid::MadeIn::Week { week: 0, year } => format!("{year}"),
-        vergence_edid::MadeIn::Week { week, year } => format!("week {week} {year}"),
-        vergence_edid::MadeIn::ModelYear(y) => format!("model year {y}"),
+        MadeIn::Week { week: 0, year } => format!("{year}"),
+        MadeIn::Week { week, year } => format!("week {week} {year}"),
+        MadeIn::ModelYear(y) => format!("model year {y}"),
     };
     s.push_str(&format!(
         "\n          EDID    {len} B, v{}.{}, {made}",

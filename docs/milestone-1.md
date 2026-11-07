@@ -5,7 +5,7 @@ monitors into a profile key, and log hot-plug events. Nothing is changed on
 the desktop yet: this milestone only observes, so it is safe to run on a
 machine in daily use.
 
-**In progress (2026-11-06): `vergd probe` done, `vergd watch` next.** It is built and tested on real hardware (a FreeBSD X11
+**In progress (2026-11-06): `vergd probe` and `vergd watch` done; acceptance runs next.** It is built and tested on real hardware (a FreeBSD X11
 machine with real monitors; Debian 13 second), not in a VM: QEMU's synthetic
 EDIDs and its hot-plug behaviour would be worked around instead of the real
 thing. FreeBSD became the primary platform on 2026-11-06.

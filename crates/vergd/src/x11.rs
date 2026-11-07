@@ -48,9 +48,42 @@ pub struct Output {
     pub mm: (u32, u32),
 }
 
+impl Output {
+    /// One line describing what matters for change detection: connection,
+    /// which monitor, and the current mode and position.
+    pub fn summary(&self) -> String {
+        if !self.connected {
+            return "disconnected".into();
+        }
+        let who = match self.edid.as_deref().map(vergence_edid::Edid::parse) {
+            None => "no EDID".to_string(),
+            Some(Err(e)) => format!("bad EDID ({e})"),
+            Some(Ok(e)) => {
+                let name = e.name.as_deref().unwrap_or("unnamed");
+                format!("\"{name}\" ({} {:#06x})", e.manufacturer, e.product_code)
+            }
+        };
+        match &self.current {
+            Some(c) => format!("connected {who} {} at +{}+{}", c.mode, c.x, c.y),
+            None => format!("connected {who} off"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Setup {
     pub outputs: Vec<Output>,
+}
+
+impl Setup {
+    /// The raw EDIDs of the connected outputs.
+    pub fn edids(&self) -> Vec<&[u8]> {
+        self.outputs
+            .iter()
+            .filter(|o| o.connected)
+            .filter_map(|o| o.edid.as_deref())
+            .collect()
+    }
 }
 
 fn mode_of(info: &randr::ModeInfo) -> Mode {

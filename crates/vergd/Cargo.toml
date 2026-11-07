@@ -10,3 +10,4 @@ publish.workspace = true
 vergence-edid.workspace = true
 vergence-profile.workspace = true
 x11rb = { version = "0.13", features = ["randr"] }
+libc = "0.2"
