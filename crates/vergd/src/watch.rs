@@ -145,9 +145,13 @@ impl Memory {
             }
             // Let the desktop react first, then act last.
             drain(conn, PLUG_SETTLE)?;
+            let before = now;
             let now = x11::read_setup_on(conn, root)?;
             if now.key() != key {
-                return Ok(now); // changed again; the next burst handles it
+                // Plugged again while waiting. Keep the setup we reacted to:
+                // the main loop sees the new one differs and handles it as a
+                // plug (adopting it here would hide the plug).
+                return Ok(before);
             }
             if self.restore(&now)? {
                 return Ok(x11::read_setup_on(conn, root)?);
@@ -246,12 +250,27 @@ pub fn watch(observe_only: bool, no_windows: bool) -> Result<(), Box<dyn std::er
                     let plugged = now.key() != last.key();
                     last = mem.react(&conn, root, now, plugged)?;
                     wm.mark_unstable();
-                    if plugged && wm.enabled {
+                    if wm.enabled {
                         // Let the monitors and the window manager settle,
-                        // then put the windows back for this setup.
+                        // then put the windows back for this setup. Also
+                        // when only the arrangement changed (a monitor
+                        // moved, no plug): positions are kept relative to
+                        // each monitor, so windows follow their monitor;
+                        // the window manager leaves them where they were
+                        // on screen, i.e. on whatever monitor is there now.
                         drain(&conn, WINDOW_SETTLE)?;
-                        last = x11::read_setup_on(&conn, root)?;
-                        wm.restore_all(&conn, &last)?;
+                        let cur = x11::read_setup_on(&conn, root)?;
+                        if cur.key() == last.key() {
+                            last = cur;
+                            wm.restore_all(&conn, &last)?;
+                        }
+                    }
+                    // A monitor plugged or unplugged while vergd waited above
+                    // (its events were drained): handle it now, as a plug,
+                    // against the setup vergd last acted on.
+                    if x11::read_setup_on(&conn, root)?.key() != last.key() {
+                        randr_seen = true;
+                        last_event = Some(Instant::now());
                     }
                     // drain() swallowed window events; look again.
                     windows_seen = true;

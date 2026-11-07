@@ -10,8 +10,8 @@ opens where it was last time on this setup.
 scaling milestone 4. Window memory needs no new hardware and is tested with
 the fake monitor; scaling waits for real monitors of different densities.
 
-**Status (2026-11-06): built; acceptance 1, 2 (ports: not yet), 3, 4, 5, 6,
-7 and app start pass on Hubble; 8 (real monitors) still to do.**
+**Status (2026-11-06): built; acceptance 1 to 7 and app start pass on
+Hubble; 8 (real monitors) still to do.**
 Dave decided all four on 2026-11-06, as
 recommended: (1a) restore on monitor changes and at app start, with an
 opt-out list; (2a) never store titles; (3a) remember workspaces; (4a)
@@ -174,6 +174,34 @@ on Hubble: Thunderbird's ASUS-alone entry removed, fake plugged and
 unplugged; log: "brought Mail/thunderbird (3pane) #1 fully onto ASUS VS229
 (it was mostly off-screen)", window at x=620, its right edge on the
 screen's edge. The rescued place is then remembered like any other.
+
+## Acceptance 2 on Hubble (2026-11-06 21:49-21:56): ports and arrangement
+
+Two xfce4-terminals and a maximised third on the fake (right of the ASUS),
+positions compared relative to the fake's corner.
+
+- **2a, port:** fake unplugged from HDMI-1 and plugged into HDMI-3: profile
+  applied (fake on the right, now on HDMI-3), all three windows back. Pass
+  from the first run.
+- **2b, arrangement:** fake moved to the left of the ASUS with xrandr (no
+  unplug). **Failed at first:** xfwm4 leaves windows where they are on
+  screen, so they were then on the ASUS, and vergd recorded them there,
+  losing their places on the fake. **Fixed:** a change of arrangement on the
+  same setup now restores windows too (not only a plug); places are relative
+  to each monitor, so the windows follow it.
+- **2c, replug after the move:** **failed at first, a race:** the replug
+  came while vergd waited 0.8 s for windows to settle after the unplug;
+  vergd's re-read after the wait already saw the fake and adopted it
+  silently, so the plug was never handled as one, and the desktop's
+  placement of the fake (below the ASUS) was learned as an arrangement
+  change. **Fixed:** when a re-read after a wait shows a different set of
+  monitors, vergd keeps the setup it acted on and handles the new one as a
+  plug (the same mistake in the profile code's "changed again" path fixed
+  too).
+- **After both fixes, two full runs:** 2a, 2b, 2c pass; every window on its
+  monitor at the same relative place. The maximised window's y changes from
+  24 to 51 when the fake is at x=0, because the Xfce panel moves to it;
+  maximised windows fill the space below the panel, as they should.
 
 ## Known limitation: the jump at app start (Dave, 2026-11-06 19:56)
 
