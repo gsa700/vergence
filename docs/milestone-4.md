@@ -142,8 +142,11 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
 - **Still to do:** the same-size measurement with test programs in all six
   toolkits (acceptance 3); window memory when a setup's scale changes
   (remembered places are in the old scale's pixels); the 16384 limit and
-  three-monitor setups (4, 5); Xfce reacting (6); Mode B (7); confirming
-  that LightDM on FreeBSD reads `~/.xprofile`.
+  three-monitor setups (4, 5); Xfce reacting (6); Mode B (7).
+- **Login checked (22:36):** LightDM's Xsession on FreeBSD sources
+  `~/.xprofile` (`VERGENCE_SCALE=1` from `session.env` was in the new
+  session's environment); at login vergd took XSETTINGS over from
+  xfsettingsd, from its own file. Logging out restarts X with LightDM.
 
 ## Decisions for Dave
 
