@@ -326,13 +326,15 @@ pub enum Outcome {
 pub fn apply(want: &[OutputSetting], dry_run: bool) -> Result<Outcome, Box<dyn std::error::Error>> {
     let (conn, root) = x11::connect()?;
     let before = x11::read_setup_on(&conn, root)?;
-    if same_arrangement(&before.arrangement(), want) && stray_crtcs(&before).is_empty() {
-        return Ok(Outcome::AlreadyThere);
-    }
     let p = match plan(&before, want) {
         Ok(p) => p,
         Err(why) => return Ok(Outcome::Refused(why)),
     };
+    // The screen size counts too: X leaves the screen large when a monitor
+    // goes, so the pointer could wander off the monitors.
+    if same_arrangement(&before.arrangement(), want) && stray_crtcs(&before).is_empty() && p.screen == before.screen {
+        return Ok(Outcome::AlreadyThere);
+    }
     let steps = p.describe(&before);
     if dry_run {
         return Ok(Outcome::Applied(steps));

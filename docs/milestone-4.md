@@ -140,9 +140,9 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
   drawn 3840x2160 and shrunk x2.000, 4K drawn 4389x2469 at +3840 and shrunk
   x1.143; screen 8229x2469; toolkits 2. Unplug: ASUS alone back to 1.
   Replug: Mode A back from the profile. `scale off`: 1:1 again.
-- **Still to do:** Java on FreeBSD (check on Debian); the 16384 limit and
-  three-monitor setups (4, 5); Xfce reacting (6); Mode B (7); real
-  monitors and the calibration (8).
+- **Still to do:** Java on FreeBSD (check on Debian); a longer look at
+  Xfce reacting (6, with its Display dialog); Mode B (7); real monitors
+  and the calibration (8).
 - **Window memory across scale changes (23:05):** places are now kept in
   panel pixels (X pixels / the monitor's RandR factor) and sizes in app
   units (X pixels / the render scale); when the scale of the current setup
@@ -154,6 +154,27 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
   is back on the same pixel; no drift between cycles. Known wrinkle: a
   maximised window's remembered size alternates between its maximised size
   at each scale (harmless: it is maximised again either way).
+- **Three monitors and the limit (23:10-23:12), acceptance 4 and 5,**
+  with scaling on: ASUS alone 1:1 (scale 1); + 27" 4K: 8105x2540, scale 2;
+  + 24": 12121x2540, scale 2 (24" shrunk x2.09). Each setup came back with
+  its own scale through every unplug and replug. **Pass.** Swapping the 27"
+  for a fake **13.3" 4K** (332 ppi, needs 4x): refused, "screen 19651x4518
+  exceeds this server's maximum 16384x16384; this setup stays at 1:1",
+  toolkits back to 1. **Pass.** Fixed on the way:
+  - `xrandr --right-of` places a monitor next to its neighbour's
+    **unscaled** size, so scaled sizes overlapped and vergd refused a row
+    the user had made; rows and columns are now detected from unscaled
+    sizes.
+  - "Already as saved" now also needs the right screen size: after an
+    unplug X had left the screen at 8897x3774 for two monitors.
+  - A refusal (mirrored, too large) falls back to 1:1 for monitors and
+    toolkits alike; before, the toolkits could stay scaled on an unscaled
+    desktop.
+  - X keeps a CRTC's transform when another monitor is plugged into the
+    port; vergd sets every factor itself, so it is cleared.
+- **Xfce reacting (acceptance 6, first look):** right after vergd scaled a
+  new setup, Xfce changed it back; vergd logged "the desktop reacting,
+  putting the profile back", applied once, and it stayed.
 - **Login checked (22:36):** LightDM's Xsession on FreeBSD sources
   `~/.xprofile` (`VERGENCE_SCALE=1` from `session.env` was in the new
   session's environment); at login vergd took XSETTINGS over from

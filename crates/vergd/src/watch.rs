@@ -211,47 +211,62 @@ fn ensure_scale(
         return Ok(None);
     }
     mem.store = crate::store::load()?;
-    let t = match scale::target(setup, &mem.store.scaling) {
-        Ok(t) => t,
-        Err(e) => {
-            let note = format!("scaling not applied to this arrangement: {e}");
-            if sc.note.as_deref() != Some(note.as_str()) {
-                println!("{} {note}", stamp());
-                sc.note = Some(note);
-            }
-            return Ok(None);
-        }
-    };
-    sc.note = None;
+    // Scaling that can't be applied (mirrored monitors, a screen too large
+    // for X) falls back to 1:1 for the monitors and the toolkits alike, so
+    // the toolkits never stay scaled on an unscaled desktop.
+    let mut cfg = mem.store.scaling.clone();
     let mut changed = None;
-    if t.changes {
-        match apply::apply(&t.want, false)? {
-            Outcome::Applied(steps) => {
-                println!("{} scaling: rendering at {}x", stamp(), t.render);
-                for m in &t.monitors {
-                    println!("{}   {} ({}): scale {:.2} ({})", stamp(), m.name, m.connector, m.exact, m.why);
+    let mut note: Option<String> = None;
+    let t = loop {
+        let t = match scale::target(setup, &cfg) {
+            Ok(t) => t,
+            Err(e) => {
+                note = Some(format!("scaling not applied to this arrangement: {e}"));
+                if cfg.enabled {
+                    cfg.enabled = false;
+                    continue;
                 }
-                for s in steps {
-                    println!("{}   {s}", stamp());
+                break None;
+            }
+        };
+        if t.changes {
+            match apply::apply(&t.want, false)? {
+                Outcome::Applied(steps) => {
+                    println!("{} scaling: rendering at {}x", stamp(), t.render);
+                    for m in &t.monitors {
+                        println!("{}   {} ({}): scale {:.2} ({})", stamp(), m.name, m.connector, m.exact, m.why);
+                    }
+                    for s in steps {
+                        println!("{}   {s}", stamp());
+                    }
+                    mem.store.put(Profile { key: setup.key(), updated: now_string(), outputs: t.want.clone() });
+                    crate::store::save(&mem.store)?;
+                    mem.guard_until = Some(Instant::now() + GUARD);
+                    wm.mark_unstable();
+                    changed = Some(x11::read_setup_on(conn, root)?);
                 }
-                let key = setup.key();
-                mem.store.put(Profile { key, updated: now_string(), outputs: t.want.clone() });
-                crate::store::save(&mem.store)?;
-                mem.guard_until = Some(Instant::now() + GUARD);
-                wm.mark_unstable();
-                changed = Some(x11::read_setup_on(conn, root)?);
-            }
-            Outcome::AlreadyThere => {}
-            Outcome::Refused(why) => {
-                println!("{} scaling NOT applied: {why}", stamp());
-                return Ok(None);
-            }
-            Outcome::Reverted(why) => {
-                println!("{} scaling FAILED: {why}", stamp());
-                return Ok(None);
+                Outcome::AlreadyThere => {}
+                Outcome::Refused(why) | Outcome::Reverted(why) => {
+                    note = Some(format!("scaling not applied: {why}"));
+                    if cfg.enabled {
+                        cfg.enabled = false;
+                        continue;
+                    }
+                    break None;
+                }
             }
         }
+        break Some(t);
+    };
+    match &note {
+        Some(n) if sc.note.as_deref() != Some(n.as_str()) => {
+            let tail = if t.is_some() { "; this setup stays at 1:1" } else { "" };
+            println!("{} {n}{tail}", stamp());
+        }
+        _ => {}
     }
+    sc.note = note;
+    let Some(t) = t else { return Ok(None) };
     if sc.render != Some(t.render) {
         let base_cursor = xs.as_ref().and_then(|m| m.base_int("Gtk/CursorThemeSize")).unwrap_or(0);
         if let Some(m) = xs {

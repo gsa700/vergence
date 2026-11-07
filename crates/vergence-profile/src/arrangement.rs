@@ -168,12 +168,17 @@ pub fn same_arrangement(a: &[OutputSetting], b: &[OutputSetting]) -> bool {
 /// `factors` are the new scale factors, in the order of `current`. Mirrored
 /// or overlapping monitors are refused: they can't keep their places when
 /// their sizes differ.
+///
+/// Row or column is decided from the monitors' **unscaled** sizes: tools
+/// that place monitors (`xrandr --right-of`, found 2026-11-06) use the mode
+/// size even when the picture is scaled, so scaled sizes can overlap a
+/// neighbour that the user put side by side.
 pub fn repack(current: &[OutputSetting], factors: &[u32]) -> Result<Vec<OutputSetting>, String> {
     assert_eq!(current.len(), factors.len());
     let lit: Vec<usize> = (0..current.len()).filter(|&i| current[i].enabled).collect();
     let span = |i: usize| {
         let o = &current[i];
-        let (w, h) = o.extent();
+        let (w, h) = if o.rotation == 90 || o.rotation == 270 { (o.height, o.width) } else { (o.width, o.height) };
         (o.x as i32, o.y as i32, o.x as i32 + w as i32, o.y as i32 + h as i32)
     };
     let mut row = true;
@@ -395,6 +400,18 @@ mod tests {
         // Back to 1: positions shrink again.
         let r = repack(&r, &[FIXED_ONE, FIXED_ONE]).unwrap();
         assert_eq!((r[1].x, r[1].y), (0, 1080));
+        // Placed by xrandr --right-of a scaled monitor: next to its unscaled
+        // size, so overlapping its scaled one. Still a row.
+        let mut k3 = k.clone();
+        k3.x = 3590;
+        k3.factor = 76963;
+        let mut a3 = asus.clone();
+        a3.factor = 122_573;
+        let mut t = out("t", "HDMI-3", 3590 + 3840);
+        t.factor = FIXED_ONE;
+        let r = repack(&[a3, k3, t], &[122_573, 76963, 136_533]).unwrap();
+        assert_eq!(r[1].x, r[0].extent().0 as i16);
+        assert_eq!(r[2].x, r[1].x + r[1].extent().0 as i16);
         // Mirrored: refused.
         assert!(repack(&[asus.clone(), out("m", "DP-1", 0)], &[FIXED_ONE, FIXED_ONE]).is_err());
         // Disabled monitors are carried along untouched.
