@@ -9,6 +9,8 @@ mod state;
 mod winit;
 mod drm;
 mod cursor;
+mod focus;
+mod decor;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;
@@ -33,8 +35,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // than the host compositor
     unsafe { std::env::set_var("WAYLAND_DISPLAY", &state.socket_name) };
 
-    // Spawn a test client, that will run under Server
-    spawn_client();
+    // X11 apps through Xwayland; the first app starts once it is ready (or failed),
+    // so it inherits DISPLAY.
+    state.start_xwayland(spawn_client);
 
     event_loop.run(None, &mut state, move |_| {
         // Server is running

@@ -37,7 +37,6 @@ use smithay::{
         session::{Event as SessionEvent, Session, libseat::LibSeatSession},
         udev::{UdevBackend, all_gpus, primary_gpu},
     },
-    desktop::space::{SpaceRenderElements, space_render_elements},
     output::{Mode as WlMode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{EventLoop, timer::{TimeoutAction, Timer}},
@@ -55,7 +54,7 @@ use crate::Server;
 
 smithay::backend::renderer::element::render_elements! {
     pub OutputElements<=GlesRenderer>;
-    Space = SpaceRenderElements<GlesRenderer, WaylandSurfaceRenderElement<GlesRenderer>>,
+    Scene = crate::decor::SceneElement,
     PointerTheme = MemoryRenderBufferRenderElement<GlesRenderer>,
     PointerSurface = WaylandSurfaceRenderElement<GlesRenderer>,
 }
@@ -279,8 +278,15 @@ fn lay_out(state: &mut Server) {
 }
 
 fn render(state: &mut Server, crtc: crtc::Handle) {
+    // The backend is taken out of the state for the frame, so the scene can be
+    // built from the state with the backend's renderer.
+    let Some(mut backend) = state.backend.take() else { return };
+    render_with(state, &mut backend, crtc);
+    state.backend = Some(backend);
+}
+
+fn render_with(state: &mut Server, b: &mut Backend, crtc: crtc::Handle) {
     let pointer_at = state.seat.get_pointer().map(|p| p.current_location()).unwrap_or_default();
-    let Some(b) = state.backend.as_mut() else { return };
     let Some(s) = b.surfaces.get_mut(&crtc) else { return };
     let output = s.output.clone();
     let Some(geo) = state.space.output_geometry(&output) else { return };
@@ -297,10 +303,7 @@ fn render(state: &mut Server, crtc: crtc::Handle) {
             });
         }
     }
-    match space_render_elements::<_, smithay::desktop::Window, _>(&mut b.renderer, [&state.space], &output, 1.0) {
-        Ok(space) => elements.extend(space.into_iter().map(OutputElements::Space)),
-        Err(e) => tracing::warn!("render elements: {e:?}"),
-    }
+    elements.extend(state.scene(&mut b.renderer, &output, s.scale).into_iter().map(OutputElements::Scene));
 
     match s.drm_output.render_frame(&mut b.renderer, &elements, [0.1, 0.1, 0.1, 1.0], FrameFlags::DEFAULT) {
         Ok(r) if !r.is_empty => {

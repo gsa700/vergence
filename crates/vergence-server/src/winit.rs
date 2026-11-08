@@ -17,7 +17,6 @@ use smithay::{
         renderer::{
             Bind, Color32F, Frame, Offscreen, Renderer,
             damage::OutputDamageTracker,
-            element::surface::WaylandSurfaceRenderElement,
             gles::{GlesRenderer, GlesTexture},
         },
         winit::{self, WinitEvent},
@@ -100,20 +99,10 @@ pub fn init_winit(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Res
                     v.texture = Some(renderer.create_buffer(Fourcc::Abgr8888, want).expect("texture"));
                     v.damage = OutputDamageTracker::from_output(&v.output);
                 }
+                let scene = state.scene(renderer, &v.output, v.output.current_scale().fractional_scale());
                 let texture = v.texture.as_mut().unwrap();
                 let mut fb = renderer.bind(texture).expect("bind texture");
-                smithay::desktop::space::render_output::<_, WaylandSurfaceRenderElement<GlesRenderer>, _, _>(
-                    &v.output,
-                    renderer,
-                    &mut fb,
-                    1.0,
-                    0,
-                    [&state.space],
-                    &[],
-                    &mut v.damage,
-                    [0.1, 0.1, 0.1, 1.0],
-                )
-                .expect("render output");
+                v.damage.render_output(renderer, &mut fb, 0, &scene, [0.1, 0.1, 0.1, 1.0]).expect("render output");
             }
 
             // Then side by side in the host window.

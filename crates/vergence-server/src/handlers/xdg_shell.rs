@@ -22,6 +22,8 @@ use smithay::{
     },
 };
 
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
+
 use crate::{
     Server,
     grabs::{MoveSurfaceGrab, ResizeSurfaceGrab},
@@ -33,8 +35,36 @@ impl XdgShellHandler for Server {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
+        // Near the top left of the monitor under the pointer, below where a title bar goes.
+        let at = self.seat.get_pointer().map(|p| p.current_location()).unwrap_or_default();
+        let out = self
+            .space
+            .outputs()
+            .filter_map(|o| self.space.output_geometry(o))
+            .find(|g| g.to_f64().contains(at))
+            .or_else(|| self.space.outputs().next().and_then(|o| self.space.output_geometry(o)))
+            .unwrap_or_default();
+        let gap = crate::decor::TITLE_H * 2;
         let window = Window::new_wayland_window(surface);
-        self.space.map_element(window, (0, 0), false);
+        self.space.map_element(window, (out.loc.x + gap, out.loc.y + gap), false);
+    }
+
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        let found = self.space.elements().find(|w| w.toplevel() == Some(&surface)).cloned();
+        if let Some(w) = found
+            && !self.restore.contains_key(&w)
+        {
+            self.toggle_maximize(&w);
+        }
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        let found = self.space.elements().find(|w| w.toplevel() == Some(&surface)).cloned();
+        if let Some(w) = found
+            && self.restore.contains_key(&w)
+        {
+            self.toggle_maximize(&w);
+        }
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -63,7 +93,7 @@ impl XdgShellHandler for Server {
             let window = self
                 .space
                 .elements()
-                .find(|w| w.toplevel().unwrap().wl_surface() == wl_surface)
+                .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == wl_surface))
                 .unwrap()
                 .clone();
             let initial_window_location = self.space.element_location(&window).unwrap();
@@ -95,7 +125,7 @@ impl XdgShellHandler for Server {
             let window = self
                 .space
                 .elements()
-                .find(|w| w.toplevel().unwrap().wl_surface() == wl_surface)
+                .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == wl_surface))
                 .unwrap()
                 .clone();
             let initial_window_location = self.space.element_location(&window).unwrap();
@@ -151,7 +181,7 @@ pub fn handle_commit(popups: &mut PopupManager, space: &Space<Window>, surface: 
     // Handle toplevel commits.
     if let Some(window) = space
         .elements()
-        .find(|w| w.toplevel().unwrap().wl_surface() == surface)
+        .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
         .cloned()
     {
         let initial_configure_sent = with_states(surface, |states| {
@@ -193,7 +223,7 @@ impl Server {
         let Some(window) = self
             .space
             .elements()
-            .find(|w| w.toplevel().unwrap().wl_surface() == &root)
+            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == &root))
         else {
             return;
         };
@@ -211,5 +241,28 @@ impl Server {
         popup.with_pending_state(|state| {
             state.geometry = state.positioner.get_unconstrained_geometry(target);
         });
+    }
+}
+
+// Server-side title bars for apps that ask for them (or leave it to us); an app
+// that asks to draw its own gets that.
+impl smithay::wayland::shell::xdg::decoration::XdgDecorationHandler for Server {
+    fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+        set_decoration(&toplevel, DecorationMode::ServerSide);
+    }
+
+    fn request_mode(&mut self, toplevel: ToplevelSurface, mode: DecorationMode) {
+        set_decoration(&toplevel, mode);
+    }
+
+    fn unset_mode(&mut self, toplevel: ToplevelSurface) {
+        set_decoration(&toplevel, DecorationMode::ServerSide);
+    }
+}
+
+fn set_decoration(toplevel: &ToplevelSurface, mode: DecorationMode) {
+    toplevel.with_pending_state(|s| s.decoration_mode = Some(mode));
+    if toplevel.is_initial_configure_sent() {
+        toplevel.send_pending_configure();
     }
 }

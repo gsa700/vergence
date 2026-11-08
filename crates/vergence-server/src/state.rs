@@ -2,7 +2,7 @@
 use std::{ffi::OsString, sync::Arc};
 
 use smithay::{
-    desktop::{PopupManager, Space, Window, WindowSurfaceType},
+    desktop::{PopupManager, Space, Window},
     input::{Seat, SeatState},
     reexports::{
         calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, generic::Generic},
@@ -50,6 +50,17 @@ pub struct Server {
     pub viewporter_state: smithay::wayland::viewporter::ViewporterState,
     pub fractional_scale_manager_state: smithay::wayland::fractional_scale::FractionalScaleManagerState,
     pub cursor_shape_manager_state: smithay::wayland::cursor_shape::CursorShapeManagerState,
+    pub xwayland_shell_state: smithay::wayland::xwayland_shell::XWaylandShellState,
+    /// Xwayland's window manager, once Xwayland is ready.
+    pub xwm: Option<smithay::xwayland::X11Wm>,
+    pub xdisplay: Option<u32>,
+    pub xdg_decoration_state: smithay::wayland::shell::xdg::decoration::XdgDecorationState,
+    /// Title bars: per-window ids for damage tracking (decor.rs).
+    pub decor: std::collections::HashMap<Window, crate::decor::Decor>,
+    /// Where maximised windows go back to.
+    pub restore: std::collections::HashMap<Window, smithay::utils::Rectangle<i32, Logical>>,
+    /// The last press on a title bar, for double-click to maximise.
+    pub last_title_press: Option<(Window, std::time::Instant)>,
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
@@ -94,6 +105,10 @@ impl Server {
         // Apps name the pointer shape they want (wp-cursor-shape-v1); the server draws it
         // from the theme at each monitor's scale, so it is the same size everywhere.
         let cursor_shape_manager_state = smithay::wayland::cursor_shape::CursorShapeManagerState::new::<Self>(&dh);
+        // X11 apps: Xwayland ties its X windows to Wayland surfaces with xwayland-shell-v1.
+        let xwayland_shell_state = smithay::wayland::xwayland_shell::XWaylandShellState::new::<Self>(&dh);
+        // Title bars by the server for apps that ask (decor.rs).
+        let xdg_decoration_state = smithay::wayland::shell::xdg::decoration::XdgDecorationState::new::<Self>(&dh);
 
         // A seat is a group of keyboards, pointer and touch devices.
         // A seat typically has a pointer and maintains a keyboard focus and a pointer focus.
@@ -137,6 +152,13 @@ impl Server {
             viewporter_state,
             fractional_scale_manager_state,
             cursor_shape_manager_state,
+            xwayland_shell_state,
+            xwm: None,
+            xdisplay: None,
+            xdg_decoration_state,
+            decor: Default::default(),
+            restore: Default::default(),
+            last_title_press: None,
             popups,
             seat,
             regions: Vec::new(),
@@ -187,12 +209,82 @@ impl Server {
         socket_name
     }
 
-    pub fn surface_under(&self, pos: Point<f64, Logical>) -> Option<(WlSurface, Point<f64, Logical>)> {
-        self.space.element_under(pos).and_then(|(window, location)| {
-            window
-                .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
-                .map(|(s, p)| (s, (p + location).to_f64()))
-        })
+    /// The app surface under the pointer, if any (title bars and resize bands cover
+    /// what is behind them); off a surface, the pointer shape for what it is over.
+    pub fn surface_under(&mut self, pos: Point<f64, Logical>) -> Option<(WlSurface, Point<f64, Logical>)> {
+        use crate::decor::{Hit, edge_icon};
+        use smithay::input::pointer::{CursorImageStatus, CursorIcon};
+        match self.hit(pos) {
+            Hit::Surface(_, s, p) => return Some((s, p)),
+            Hit::Edge(_, e) => self.pointer_image.status = CursorImageStatus::Named(edge_icon(e)),
+            _ => self.pointer_image.status = CursorImageStatus::Named(CursorIcon::Default),
+        }
+        None
+    }
+}
+
+impl Server {
+    /// Rootless Xwayland for X11 apps. When it is ready: its window manager, the
+    /// X default pointer, DISPLAY for children, then `ready` (starts the first app).
+    pub fn start_xwayland(&mut self, ready: impl FnOnce() + 'static) {
+        use smithay::xwayland::{X11Wm, XWayland, XWaylandEvent};
+        // FreeBSD has no abstract sockets: the /tmp/.X11-unix socket only.
+        let spawned = XWayland::spawn(
+            &self.display_handle,
+            None,
+            std::iter::empty::<(String, String)>(),
+            std::iter::empty::<String>(),
+            cfg!(target_os = "linux"),
+            std::process::Stdio::null(),
+            std::process::Stdio::inherit(),
+            |_| (),
+        );
+        let (xwayland, client) = match spawned {
+            Ok(x) => x,
+            Err(e) => {
+                tracing::warn!("Xwayland not started: {e}");
+                return ready();
+            }
+        };
+        let dh = self.display_handle.clone();
+        let mut ready = Some(ready);
+        let res = self.loop_handle.insert_source(xwayland, move |event, _, state| match event {
+            XWaylandEvent::Ready { x11_socket, display_number } => {
+                // One scale for all X clients for now (per-monitor X scaling: next step).
+                let scale = std::env::var("VERGENCE_XWAYLAND_SCALE").ok().and_then(|s| s.parse::<f64>().ok()).unwrap_or(1.0);
+                {
+                    use smithay::wayland::compositor::CompositorHandler;
+                    state.client_compositor_state(&client).set_client_scale(scale);
+                }
+                match X11Wm::start_wm(state.loop_handle.clone(), &dh, x11_socket, client.clone()) {
+                    Ok(mut wm) => {
+                        let px = (state.pointer_image.size_points() as f64 * scale).round() as u32;
+                        if let Some((pixels, w, h, hx, hy)) = state.pointer_image.x_default(px)
+                            && let Err(e) = wm.set_cursor(&pixels, (w, h).into(), (hx, hy).into())
+                        {
+                            tracing::warn!("Xwayland default pointer: {e}");
+                        }
+                        state.xwm = Some(wm);
+                    }
+                    Err(e) => tracing::warn!("Xwayland window manager: {e}"),
+                }
+                state.xdisplay = Some(display_number);
+                unsafe { std::env::set_var("DISPLAY", format!(":{display_number}")) };
+                tracing::info!("Xwayland ready on DISPLAY=:{display_number}, X client scale {scale}");
+                if let Some(r) = ready.take() {
+                    r();
+                }
+            }
+            XWaylandEvent::Error => {
+                tracing::warn!("Xwayland failed to start");
+                if let Some(r) = ready.take() {
+                    r();
+                }
+            }
+        });
+        if let Err(e) = res {
+            tracing::warn!("Xwayland event source: {e}");
+        }
     }
 }
 

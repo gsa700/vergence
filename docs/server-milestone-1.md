@@ -105,3 +105,27 @@ accessibility (Contract 3); display-list surfaces.
   1:1. (2) Smithay's MemoryRenderBufferRenderElement crops the source to the
   logical size when only a size is given; pass the whole buffer as `src`.
   Dave: "looks right now, same on both".
+- **Xwayland (2026-11-07):** rootless Xwayland started by the server
+  (FreeBSD: no abstract socket; the first app starts when it is ready, so it
+  inherits DISPLAY, :1 on Hubble beside Xorg's :0). X windows share the
+  Space with Wayland windows, open centred on the monitor under the pointer,
+  and take keyboard focus through an X11-aware focus target (X input focus /
+  WM_TAKE_FOCUS, `focus.rs`); clipboard bridged. One client scale for all of
+  Xwayland (VERGENCE_XWAYLAND_SCALE, default 1): X apps are the right size
+  but upscaled (soft) on the 14" until per-monitor X scaling (next step).
+  Xwayland renders in software (no wl_drm/dmabuf from the server yet).
+  Alt+left drag moves and Alt+right drag resizes any window. Smithay gives
+  Xwayland's client its own client data (XWaylandClientData): the
+  compositor handler must look for both. Nested testing stalls while Xorg's
+  VT is switched away (its EGL clients block); test on the real monitors.
+  Dave: xterm and xclock run, Alt+drag works.
+- **Title bars (2026-11-07):** drawn by the server (`decor.rs`) for X
+  windows that do not decorate themselves and Wayland apps that ask for
+  server-side decorations (xdg-decoration; foot does). 24 points tall, same
+  physical height on every monitor, solid colours (sharp at any scale),
+  edges rounded like window positions so bar and content meet without a
+  seam; maximise and close buttons; drag to move, double-click or the button
+  to maximise on the monitor the window is mostly on, drag a maximised
+  window to restore it; invisible 6-point resize band with resize pointer
+  shapes. The scene is built per window front to back, so a bar stacks with
+  its window. No title text yet. Dave: "looks right".

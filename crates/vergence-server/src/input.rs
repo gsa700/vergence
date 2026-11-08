@@ -8,11 +8,13 @@ use smithay::{
         keyboard::FilterResult,
         pointer::{AxisFrame, ButtonEvent, MotionEvent},
     },
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::SERIAL_COUNTER,
 };
 
-use crate::state::Server;
+use crate::{focus::KeyboardFocus, grabs::resize_grab::ResizeEdge, state::Server};
+
+const BTN_LEFT: u32 = 0x110;
+const BTN_RIGHT: u32 = 0x111;
 
 /// What a key does before any app sees it.
 enum KeyAction {
@@ -78,10 +80,6 @@ impl Server {
                 }
                 let serial = SERIAL_COUNTER.next_serial();
                 let under = self.surface_under(pos);
-                // Over the bare background no client owns the pointer: the arrow again.
-                if under.is_none() {
-                    self.pointer_image.status = smithay::input::pointer::CursorImageStatus::default_named();
-                }
                 pointer.motion(self, under, &MotionEvent { location: pos, serial, time: Event::time(&event) });
                 pointer.frame(self);
             }
@@ -130,29 +128,77 @@ impl Server {
 
                 let button_state = event.state();
 
+                // (window, Some(edges) = resize / None = move)
+                let mut grab_with: Option<(smithay::desktop::Window, Option<ResizeEdge>)> = None;
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
-                    if let Some((window, _loc)) = self
-                        .space
-                        .element_under(pointer.current_location())
-                        .map(|(w, l)| (w.clone(), l))
-                    {
-                        self.space.raise_element(&window, true);
-                        keyboard.set_focus(
-                            self,
-                            Some(window.toplevel().unwrap().wl_surface().clone()),
-                            serial,
-                        );
-                        self.space.elements().for_each(|window| {
-                            window.toplevel().unwrap().send_pending_configure();
-                        });
-                    } else {
+                    use crate::decor::Hit;
+                    let at = pointer.current_location();
+                    let hit = self.hit(at);
+                    let left = button == BTN_LEFT;
+                    match &hit {
+                        Hit::Surface(w, ..) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Edge(w, _) => {
+                            self.focus_window(&w.clone(), serial)
+                        }
+                        Hit::Nothing => {}
+                    }
+                    match hit {
+                        // Alt+left drag moves, Alt+right drag resizes any window.
+                        Hit::Surface(w, ..) if keyboard.modifier_state().alt && (left || button == BTN_RIGHT) => {
+                            let edges = (!left).then(|| self.nearest_edges(&w, at));
+                            grab_with = Some((w, edges));
+                        }
+                        Hit::Surface(..) => {}
+                        Hit::Title(w) if left => {
+                            let now = std::time::Instant::now();
+                            let double = self
+                                .last_title_press
+                                .as_ref()
+                                .is_some_and(|(lw, t)| *lw == w && now.duration_since(*t).as_millis() < 400);
+                            if double {
+                                self.last_title_press = None;
+                                self.toggle_maximize(&w);
+                            } else {
+                                self.last_title_press = Some((w.clone(), now));
+                                grab_with = Some((w, None));
+                            }
+                        }
+                        Hit::Close(w) if left => self.close_window(&w),
+                        Hit::Maximize(w) if left => self.toggle_maximize(&w),
+                        Hit::Edge(w, e) if left => grab_with = Some((w, Some(e))),
+                        Hit::Title(_) | Hit::Close(_) | Hit::Maximize(_) | Hit::Edge(..) => {}
+                        Hit::Nothing => {
                         self.space.elements().for_each(|window| {
                             window.set_activated(false);
-                            window.toplevel().unwrap().send_pending_configure();
+                            if let Some(t) = window.toplevel() {
+                                t.send_pending_configure();
+                            }
                         });
-                        keyboard.set_focus(self, Option::<WlSurface>::None, serial);
+                        keyboard.set_focus(self, Option::<KeyboardFocus>::None, serial);
+                        }
                     }
                 };
+
+                if let Some((window, resize)) = grab_with {
+                    // The press goes to the grab, not the app. Moving a maximised window
+                    // takes it out of maximised (back to its size, under the pointer).
+                    let start = smithay::input::pointer::GrabStartData { focus: None, button, location: pointer.current_location() };
+                    match resize {
+                        Some(edges) => self.start_resize(window, edges, Some(start)),
+                        None => {
+                            if let Some(old) = self.restore.get(&window).copied() {
+                                self.toggle_maximize(&window);
+                                let x = (start.location.x - old.size.w as f64 / 2.0).round() as i32;
+                                let y = start.location.y.round() as i32 + crate::decor::TITLE_H / 2;
+                                self.space.map_element(window.clone(), (x, y), true);
+                                if let Some(xs) = window.x11_surface() {
+                                    let _ = xs.configure(smithay::utils::Rectangle::new((x, y).into(), old.size));
+                                }
+                            }
+                            self.start_move(window, Some(start));
+                        }
+                    }
+                    return;
+                }
 
                 pointer.button(
                     self,
@@ -206,5 +252,48 @@ impl Server {
             }
             _ => {}
         }
+    }
+}
+
+impl Server {
+    /// Raise a window and give it the keyboard (X11 windows: X focus and stacking too).
+    pub fn focus_window(&mut self, window: &smithay::desktop::Window, serial: smithay::utils::Serial) {
+        self.space.raise_element(window, true);
+        let focus = match window.x11_surface() {
+            Some(x) => {
+                if let Some(wm) = self.xwm.as_mut() {
+                    let _ = wm.raise_window(x);
+                }
+                KeyboardFocus::X11(x.clone())
+            }
+            None => KeyboardFocus::Wayland(window.toplevel().unwrap().wl_surface().clone()),
+        };
+        for w in self.space.elements() {
+            w.set_activated(w == window);
+            if let Some(t) = w.toplevel() {
+                t.send_pending_configure();
+            }
+        }
+        if let Some(k) = self.seat.get_keyboard() {
+            k.set_focus(self, Some(focus), serial);
+        }
+    }
+
+    /// The edges to resize from: the window's nearest third in each direction.
+    fn nearest_edges(&self, window: &smithay::desktop::Window, at: smithay::utils::Point<f64, smithay::utils::Logical>) -> ResizeEdge {
+        let Some(g) = self.space.element_geometry(window) else { return ResizeEdge::BOTTOM_RIGHT };
+        let (fx, fy) = ((at.x - g.loc.x as f64) / g.size.w.max(1) as f64, (at.y - g.loc.y as f64) / g.size.h.max(1) as f64);
+        let mut e = ResizeEdge::empty();
+        if fx < 1.0 / 3.0 {
+            e |= ResizeEdge::LEFT;
+        } else if fx > 2.0 / 3.0 {
+            e |= ResizeEdge::RIGHT;
+        }
+        if fy < 1.0 / 3.0 {
+            e |= ResizeEdge::TOP;
+        } else if fy > 2.0 / 3.0 {
+            e |= ResizeEdge::BOTTOM;
+        }
+        if e.is_empty() { ResizeEdge::BOTTOM_RIGHT } else { e }
     }
 }

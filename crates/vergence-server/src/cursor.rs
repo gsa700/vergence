@@ -180,6 +180,25 @@ impl Pointer {
     }
 }
 
+impl Pointer {
+    pub fn size_points(&self) -> u32 {
+        self.size
+    }
+
+    /// The arrow for Xwayland's root window (X apps that set no pointer of their
+    /// own), shrunk to `px` pixels like the server's own: RGBA, size, hotspot.
+    pub fn x_default(&mut self, px: u32) -> Option<(Vec<u8>, u16, u16, u16, u16)> {
+        let icon = self.resolve(CursorIcon::Default);
+        let first = &self.sources.get(&icon)?.as_ref()?.frames[0];
+        let f = px.max(1) as f64 / first.size as f64;
+        let (w, h) = (((first.width as f64 * f).round() as usize).max(1), ((first.height as f64 * f).round() as usize).max(1));
+        let pixels = shrink(&first.pixels_rgba, first.width as usize, first.height as usize, w, h);
+        let hx = (first.xhot as f64 * w as f64 / first.width as f64).round() as u16;
+        let hy = (first.yhot as f64 * h as f64 / first.height as f64).round() as u16;
+        Some((pixels, w as u16, h as u16, hx, hy))
+    }
+}
+
 /// The frame of an animation to show at `time` (the first if still).
 fn pick(frames: &[Scaled], time: Duration) -> &Scaled {
     let total: u32 = frames.iter().map(|f| f.delay).sum();

@@ -16,6 +16,7 @@ use smithay::{
 };
 
 use super::xdg_shell;
+use smithay::wayland::seat::WaylandFocus;
 
 impl CompositorHandler for Server {
     fn compositor_state(&mut self) -> &mut CompositorState {
@@ -23,6 +24,10 @@ impl CompositorHandler for Server {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
+        // Xwayland's client is created by Smithay with its own client data.
+        if let Some(x) = client.get_data::<smithay::xwayland::XWaylandClientData>() {
+            return &x.compositor_state;
+        }
         &client.get_data::<ClientState>().unwrap().compositor_state
     }
 
@@ -36,7 +41,7 @@ impl CompositorHandler for Server {
             if let Some(window) = self
                 .space
                 .elements()
-                .find(|w| w.toplevel().unwrap().wl_surface() == &root)
+                .find(|w| w.wl_surface().as_deref() == Some(&root))
             {
                 window.on_commit();
             }
