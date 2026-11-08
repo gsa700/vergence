@@ -35,6 +35,11 @@ impl Server {
         self.space.outputs().filter_map(|o| self.space.output_geometry(o)).map(|g| content_area(g, titled)).collect()
     }
 
+    /// Does `rect` (content) lie wholly on one monitor, below its title bar if titled?
+    pub fn fits_a_monitor(&self, rect: Rectangle<i32, Logical>, titled: bool) -> bool {
+        self.content_areas(titled).iter().any(|a| a.contains_rect(rect))
+    }
+
     /// Place a new X11 window: returns its content rectangle.
     pub fn place_x11(&self, x: &X11Surface) -> Rectangle<i32, Logical> {
         let titled = !x.is_override_redirect() && !x.is_decorated();

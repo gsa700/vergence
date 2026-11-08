@@ -67,6 +67,9 @@ pub struct Server {
     pub title_font: Option<crate::text::TextFont>,
     /// Wayland windows already placed (place.rs: on their first sized commit).
     pub placed: std::collections::HashSet<Window>,
+    /// When X11 windows were mapped (a move soon after is the app restoring its place).
+    /// ... and the size the app asked for then (before fitting).
+    pub mapped_at: std::collections::HashMap<Window, (std::time::Instant, smithay::utils::Size<i32, Logical>)>,
     /// linux-dmabuf (DRM backend): apps' GPU buffers.
     pub dmabuf: Option<(smithay::wayland::dmabuf::DmabufState, smithay::wayland::dmabuf::DmabufGlobal)>,
     /// The process exit status (control.rs: 75 = restart me).
@@ -172,6 +175,7 @@ impl Server {
             shot_pending: Vec::new(),
             title_font: crate::text::TextFont::load(),
             placed: Default::default(),
+            mapped_at: Default::default(),
             dmabuf: None,
             exit_code: 0,
             popups,

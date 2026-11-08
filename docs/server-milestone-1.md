@@ -188,3 +188,11 @@ accessibility (Contract 3); display-list surfaces.
   mouse); now `configure_with_sync` (_NET_WM_SYNC_REQUEST, Avalonia supports
   it): the window settles ~225 ms after the mouse stops. Dave: "much better.
   may still need work". Remaining cost is AlbumWall's own layout per size.
+- **Apps restoring their place (2026-11-07):** a move request within 1.5 s
+  of an X window mapping is the app restoring where it was (Spindle's
+  WindowPlacement sets Position ~60 ms after the window opens); honoured if
+  the window then lies wholly on a monitor, with the size it asked for when
+  it opened (fitted to the pointer's monitor at map, so AlbumWall's 1264 x
+  931 comes back on the ASUS). Later moves stay the server's. Fixed: the
+  monitor cap on a mapped window's resize request was applied before the
+  requested size replaced the old one.

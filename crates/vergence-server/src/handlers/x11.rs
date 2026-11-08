@@ -57,11 +57,14 @@ impl XwmHandler for Server {
             return tracing::warn!("X11 map: {e}");
         }
         // On a monitor and fitting it (place.rs).
+        let asked_size = window.geometry().size;
         let rect = self.place_x11(&window);
         let loc = rect.loc;
         let _ = window.configure(rect);
-        tracing::info!("X11 window {:?} {:?} at {:?}", window.title(), window.class(), rect);
+        tracing::info!("X11 window {:?} {:?} at {:?} (asked {:?})", window.title(), window.class(), rect, asked_size);
         let w = Window::new_x11_window(window);
+        self.mapped_at.insert(w.clone(), (std::time::Instant::now(), asked_size));
+        self.mapped_at.retain(|w, (t, _)| smithay::utils::IsAlive::alive(w) && t.elapsed().as_secs() < 10);
         self.space.map_element(w, loc, true);
     }
 
@@ -93,32 +96,52 @@ impl XwmHandler for Server {
         _reorder: Option<Reorder>,
     ) {
         tracing::debug!("X11 configure request {:?}: x {x:?} y {y:?} w {w:?} h {h:?}", window.title());
-        // Size as asked; position only before it is mapped (the server places windows).
-        // Once mapped, from where the server has it: X may not have caught up with
-        // our last configure yet (AlbumWall snapped back to 0,0 on its first resize).
         let mut geo = window.geometry();
-        if let Some(w) = self.window_for_x11(&window)
-            && let Some(g) = self.space.element_geometry(&w)
-        {
-            geo.loc = g.loc;
-            // Never larger than the monitor it is mostly on (AlbumWall restored a
-            // saved 1222 x 922 after being fitted to the 14"'s 1170 x 658).
-            if let Some(room) = self.room_for(&w) {
-                geo.size = crate::place::fit(geo.size, room, window.min_size());
-            }
-        }
         if let Some(w) = w {
             geo.size.w = w as i32;
         }
         if let Some(h) = h {
             geo.size.h = h as i32;
         }
-        if self.window_for_x11(&window).is_none() {
+        let Some(mapped) = self.window_for_x11(&window) else {
+            // Not mapped yet: as asked; place_x11 decides when it maps.
             if let Some(x) = x {
                 geo.loc.x = x;
             }
             if let Some(y) = y {
                 geo.loc.y = y;
+            }
+            let _ = window.configure(geo);
+            return;
+        };
+        // Mapped: from where the server has it, not X's last report (X may not have
+        // caught up with our configure; AlbumWall snapped back to 0,0), and never
+        // larger than the monitor it is mostly on (AlbumWall restored a saved
+        // 1222 x 922 onto the 14"'s 1170 x 658).
+        if let Some(g) = self.space.element_geometry(&mapped) {
+            geo.loc = g.loc;
+        }
+        if let Some(room) = self.room_for(&mapped) {
+            geo.size = crate::place::fit(geo.size, room, window.min_size());
+        }
+        // A move just after mapping is the app restoring where it was (Spindle's
+        // WindowPlacement sets the position ~60 ms after the window opens): honoured
+        // if the window then lies wholly on a monitor. Later moves are the server's.
+        // On that monitor it gets back the size it asked for when it opened (fitted
+        // to the monitor under the pointer then), capped to the new monitor.
+        let fresh = self.mapped_at.get(&mapped).copied().filter(|(t, _)| t.elapsed() < std::time::Duration::from_millis(1500));
+        if let Some((_, asked_size)) = fresh
+            && (x.is_some() || y.is_some())
+        {
+            let titled = self.has_title(&mapped);
+            let loc: smithay::utils::Point<i32, Logical> = (x.unwrap_or(geo.loc.x), y.unwrap_or(geo.loc.y)).into();
+            let target = [Rectangle::new(loc, asked_size), Rectangle::new(loc, geo.size)]
+                .into_iter()
+                .find(|r| self.fits_a_monitor(*r, titled));
+            if let Some(r) = target {
+                tracing::info!("X11 {:?} restores its place {:?}", window.title(), r);
+                geo = r;
+                self.space.map_element(mapped.clone(), geo.loc, false);
             }
         }
         let _ = window.configure(geo);
