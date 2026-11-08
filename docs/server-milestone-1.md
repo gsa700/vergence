@@ -282,3 +282,7 @@ accessibility (Contract 3); display-list surfaces.
   (560 x 315 px, sharp at 3.28) rendered on a thread and filled in as they
   come (SVG by resvg, PNG/JPEG resized to fill); click selects, double-click
   applies.
+- **Popups on the right monitor (2026-11-07):** xdg popups were constrained to
+  the first output, so Firefox's menus on the ASUS opened on the 14". Now the
+  monitor under the popup's anchor (else the one the window is mostly on).
+  Dave: works.

@@ -239,14 +239,31 @@ impl Server {
             return;
         };
 
-        let output = self.space.outputs().next().unwrap();
-        let output_geo = self.space.output_geometry(output).unwrap();
-        let window_geo = self.space.element_geometry(window).unwrap();
+        let Some(window_geo) = self.space.element_geometry(window) else { return };
+        let parent_offset = get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
+
+        // Kept on the monitor where the popup is anchored (the menu's button), else
+        // the one the window is mostly on. (It used the first monitor: Firefox's
+        // menus on the ASUS opened on the 14", 2026-11-07.)
+        let anchor = popup.with_pending_state(|s| s.positioner.anchor_rect);
+        let centre: smithay::utils::Point<i32, smithay::utils::Logical> = (anchor.size.w / 2, anchor.size.h / 2).into();
+        let at = window_geo.loc + parent_offset + anchor.loc + centre;
+        let geos: Vec<smithay::utils::Rectangle<i32, smithay::utils::Logical>> =
+            self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
+        let Some(output_geo) = geos.iter().copied().find(|g| g.contains(at)).or_else(|| {
+            geos.iter()
+                .copied()
+                .filter_map(|g| g.intersection(window_geo).map(|i| (i.size.w as i64 * i.size.h as i64, g)))
+                .max_by_key(|(a, _)| *a)
+                .map(|(_, g)| g)
+        }) else {
+            return;
+        };
 
         // The target geometry for the positioner should be relative to its parent's geometry, so
         // we will compute that here.
         let mut target = output_geo;
-        target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
+        target.loc -= parent_offset;
         target.loc -= window_geo.loc;
 
         popup.with_pending_state(|state| {
