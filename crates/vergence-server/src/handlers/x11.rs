@@ -56,16 +56,31 @@ impl XwmHandler for Server {
         if let Err(e) = window.set_mapped(true) {
             return tracing::warn!("X11 map: {e}");
         }
-        // On a monitor and fitting it (place.rs).
+        // Where memory had it on this setup (memory.rs), else on a monitor and
+        // fitting it (place.rs).
         let asked_size = window.geometry().size;
-        let rect = self.place_x11(&window);
+        let w = Window::new_x11_window(window.clone());
+        let remembered = self.remembered_place(&w);
+        let rect = remembered.map(|(r, _)| r).unwrap_or_else(|| self.place_x11(&window));
         let loc = rect.loc;
         let _ = window.configure(rect);
-        tracing::info!("X11 window {:?} {:?} at {:?} (asked {:?})", window.title(), window.class(), rect, asked_size);
-        let w = Window::new_x11_window(window);
-        self.mapped_at.insert(w.clone(), (std::time::Instant::now(), asked_size));
+        tracing::info!(
+            "X11 window {:?} {:?} at {:?} ({}, asked {:?})",
+            window.title(),
+            window.class(),
+            rect,
+            if remembered.is_some() { "remembered" } else { "placed" },
+            asked_size
+        );
         self.mapped_at.retain(|w, (t, _)| smithay::utils::IsAlive::alive(w) && t.elapsed().as_secs() < 10);
-        self.space.map_element(w, loc, true);
+        // The app's own restore (a move just after mapping) only when memory had nothing.
+        if remembered.is_none() {
+            self.mapped_at.insert(w.clone(), (std::time::Instant::now(), asked_size));
+        }
+        self.space.map_element(w.clone(), loc, true);
+        if remembered.is_some_and(|(_, max)| max) {
+            self.toggle_maximize(&w);
+        }
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
@@ -76,6 +91,9 @@ impl XwmHandler for Server {
 
     fn unmapped_window(&mut self, _xwm: XwmId, window: X11Surface) {
         if let Some(w) = self.window_for_x11(&window) {
+            if !window.is_override_redirect() {
+                self.remember(&w);
+            }
             self.space.unmap_elem(&w);
         }
         if !window.is_override_redirect() {
@@ -149,7 +167,11 @@ impl XwmHandler for Server {
 
     fn configure_notify(&mut self, _xwm: XwmId, window: X11Surface, geometry: Rectangle<i32, Logical>, _above: Option<u32>) {
         if let Some(w) = self.window_for_x11(&window) {
-            self.space.map_element(w, geometry.loc, false);
+            self.space.map_element(w.clone(), geometry.loc, false);
+            // Its place now, unless a drag is still going (recorded when it ends).
+            if !self.seat.get_pointer().is_some_and(|p| p.is_grabbed()) && !window.is_override_redirect() {
+                self.remember(&w);
+            }
         }
     }
 

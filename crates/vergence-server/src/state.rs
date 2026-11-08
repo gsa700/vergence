@@ -71,6 +71,8 @@ pub struct Server {
     /// ... and the size the app asked for then (before fitting).
     pub mapped_at: std::collections::HashMap<Window, (std::time::Instant, smithay::utils::Size<i32, Logical>)>,
     /// linux-dmabuf (DRM backend): apps' GPU buffers.
+    /// Where windows were, per monitor setup (memory.rs).
+    pub memory: crate::memory::Memory,
     pub dmabuf: Option<(smithay::wayland::dmabuf::DmabufState, smithay::wayland::dmabuf::DmabufGlobal)>,
     /// The process exit status (control.rs: 75 = restart me).
     pub exit_code: i32,
@@ -177,6 +179,7 @@ impl Server {
             placed: Default::default(),
             mapped_at: Default::default(),
             dmabuf: None,
+            memory: crate::memory::Memory::load(),
             exit_code: 0,
             popups,
             seat,

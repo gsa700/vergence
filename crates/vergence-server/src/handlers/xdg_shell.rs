@@ -52,6 +52,14 @@ impl XdgShellHandler for Server {
         self.space.map_element(window, (out.loc.x + gap, out.loc.y + gap), false);
     }
 
+    fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        // Remember where it was when it closed (memory.rs).
+        let found = self.space.elements().find(|w| w.toplevel() == Some(&surface)).cloned();
+        if let Some(w) = found {
+            self.remember(&w);
+        }
+    }
+
     fn maximize_request(&mut self, surface: ToplevelSurface) {
         let found = self.space.elements().find(|w| w.toplevel() == Some(&surface)).cloned();
         if let Some(w) = found

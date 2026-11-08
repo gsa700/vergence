@@ -79,11 +79,15 @@ pub fn init_winit(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Res
                 },
             );
             let _global = output.create_global::<Server>(&state.display_handle);
+            output.user_data().insert_if_missing(|| crate::memory::MonitorId(format!("nested:{}", output.name())));
             Virtual { damage: OutputDamageTracker::from_output(&output), output, scale, texture: None, region: Rectangle::default() }
         })
         .collect();
 
     lay_out(&mut virtuals, state, backend.window_size());
+    // Nested: the virtual panels stand in for EDIDs in the setup key.
+    let names: Vec<Vec<u8>> = virtuals.iter().map(|v| format!("nested:{}", v.output.name()).into_bytes()).collect();
+    state.set_setup(&names);
 
     event_loop.handle().insert_source(winit, move |event, _, state| match event {
         WinitEvent::Resized { size, .. } => lay_out(&mut virtuals, state, size),

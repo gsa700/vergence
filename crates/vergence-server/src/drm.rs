@@ -67,6 +67,8 @@ struct Surface {
     drm_output: Out,
     connector: String,
     scale: f64,
+    /// The monitor's EDID (or its connector name when it has none): its identity.
+    edid: Vec<u8>,
 }
 
 pub struct Backend {
@@ -202,6 +204,8 @@ fn scan(state: &mut Server) {
         }
     }
     lay_out(state);
+    let edids: Vec<Vec<u8>> = state.backend.as_ref().map(|b| b.surfaces.values().map(|s| s.edid.clone()).collect()).unwrap_or_default();
+    state.set_setup(&edids);
 }
 
 fn connect(state: &mut Server, conn: connector::Info, crtc: crtc::Handle) {
@@ -236,6 +240,8 @@ fn connect(state: &mut Server, conn: connector::Info, crtc: crtc::Handle) {
         },
     );
     let _global = output.create_global::<Server>(&dh);
+    let identity = edid.clone().unwrap_or_else(|| name.clone().into_bytes());
+    output.user_data().insert_if_missing(|| crate::memory::MonitorId(vergence_profile::monitor_id(&identity)));
     output.set_preferred(wl_mode);
     output.change_current_state(Some(wl_mode), Some(Transform::Normal), Some(Scale::Fractional(scale)), None);
 
@@ -252,7 +258,7 @@ fn connect(state: &mut Server, conn: connector::Info, crtc: crtc::Handle) {
         Ok(o) => o,
         Err(e) => return tracing::warn!("{name}: cannot initialise: {e:?}"),
     };
-    b.surfaces.insert(crtc, Surface { output, drm_output, connector: name, scale });
+    b.surfaces.insert(crtc, Surface { output, drm_output, connector: name, scale, edid: identity });
 }
 
 /// The EDID blob DRM keeps for a connector.

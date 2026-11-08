@@ -15,6 +15,7 @@ mod xsettings;
 mod control;
 mod text;
 mod place;
+mod memory;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;

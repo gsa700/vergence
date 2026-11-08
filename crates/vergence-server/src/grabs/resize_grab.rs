@@ -192,6 +192,7 @@ impl PointerGrab<Server> for ResizeSurfaceGrab {
         if !pressed.contains(&BTN_LEFT) && !pressed.contains(&BTN_RIGHT) {
             // No more buttons are pressed, release the grab.
             handle.unset_grab(self, data, event.serial, event.time, true);
+            data.remember(&self.window);
 
             let Some(xdg) = self.window.toplevel() else { return };
             xdg.with_pending_state(|state| {

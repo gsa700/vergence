@@ -196,3 +196,19 @@ accessibility (Contract 3); display-list surfaces.
   931 comes back on the ASUS). Later moves stay the server's. Fixed: the
   monitor cap on a mapped window's resize request was applied before the
   requested size replaced the old one.
+- **Window placement memory (2026-11-07, Contract 2):** `memory.rs`. The
+  server remembers where each window was per monitor setup and puts it back
+  when it opens again. Setup key and monitor IDs from the EDIDs, the same as
+  vergd's (Hubble's desk: 8b4a39a2..., ASUS a48cece3b53cb939); identity =
+  class (X11 WM_CLASS, Wayland app_id) + index among open windows of that
+  class, no titles; menus and X transients left out. Positions relative to
+  the monitor in points, sizes in points, maximised kept with its restore
+  size. Recorded at the end of a move or resize, on maximise/restore, on X
+  configure (outside drags) and when the window closes; a remembered place
+  decides before the defaults and before the app's own restore, when its
+  monitor is there and the window fits. ~/.config/vergence/server-windows.toml
+  (0600, atomic write, the shared WindowStore format; `skip` honoured).
+  Tested over the control socket: xterm dragged to the ASUS, closed, reopened
+  from the 14" -> back on the ASUS; foot moved, maximised, closed, reopened
+  -> maximised on the ASUS. Not yet: moving windows when the setup changes
+  during a session (with hotplug).

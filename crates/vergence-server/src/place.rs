@@ -81,6 +81,18 @@ impl Server {
         if size.w <= 0 || size.h <= 0 || !self.placed.insert(w.clone()) {
             return;
         }
+        // Where memory had it on this setup (memory.rs).
+        if let Some((r, max)) = self.remembered_place(w) {
+            if r.size != size {
+                t.with_pending_state(|s| s.size = Some(r.size));
+                t.send_pending_configure();
+            }
+            self.space.map_element(w.clone(), r.loc, false);
+            if max {
+                self.toggle_maximize(w);
+            }
+            return;
+        }
         let Some(out) = self.output_at_pointer() else { return };
         let area = content_area(out, self.has_title(w));
         let fitted = fit(size, area.size, None);

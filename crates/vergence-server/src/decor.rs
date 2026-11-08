@@ -302,6 +302,7 @@ impl Server {
     pub fn toggle_maximize(&mut self, w: &Window) {
         if let Some(old) = self.restore.remove(w) {
             self.set_window_rect(w, old, false);
+            self.remember(w);
             return;
         }
         let Some(geo) = self.space.element_geometry(w) else { return };
@@ -321,6 +322,7 @@ impl Server {
         let rect = Rectangle::new((out.loc.x, out.loc.y + top).into(), (out.size.w, out.size.h - top).into());
         self.restore.insert(w.clone(), geo);
         self.set_window_rect(w, rect, true);
+        self.remember(w);
     }
 
     fn set_window_rect(&mut self, w: &Window, rect: Rectangle<i32, Logical>, maximized: bool) {
