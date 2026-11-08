@@ -1,0 +1,7 @@
+#!/bin/sh
+# Talk to a running vergence-server's control socket (src/control.rs):
+#   vctl shot | windows | spawn <command> | move <i> <x> <y> | focus <i> | restart | quit
+# Same user only (the socket is 0600 and checks the peer's uid).
+sock=${XDG_RUNTIME_DIR:-/tmp/xdg-$(id -u)}/vergence-control
+[ -S "$sock" ] || { echo "no vergence-server control socket at $sock" >&2; exit 1; }
+printf '%s\n' "$*" | nc -U -N "$sock"

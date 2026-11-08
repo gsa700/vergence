@@ -16,6 +16,14 @@ the current milestone is docs/milestone-4.md (scaling; earlier ones in docs/mile
   copy. It is the XSETTINGS manager (Xfce's Appearance dialog no longer
   applies); run `xfconf-query` only with the session's
   DBUS_SESSION_BUS_ADDRESS, or a stray xfconfd appears.
+- **The phase 2 server on Hubble's real monitors** runs from the console
+  (Ctrl+Alt+F2) with `~/run-vergence-drm.sh` (= tools/run-server-drm.sh, log
+  ~/vergence-drm.log). Over SSH, `~/bin/vctl` (tools/vctl; needs
+  XDG_RUNTIME_DIR=/tmp/xdg-1001) drives it: `vctl shot` then copy
+  ~/vergence-shots/*.png back to look, `vctl windows`, `vctl spawn
+  tools/xtest.sh`, `vctl move`, and `vctl restart` after a rebuild (no hand at
+  the console needed). Window indices are the stacking order (they change on
+  focus).
 - **Hubble is a project machine** (Dave, 2026-11-06): breaking its session
   for the project is fine; his accounts and data still need care. Fake
   EDIDs: `vergence-harness fake` (in /tmp on Hubble: fake1, fake4k, fake24,

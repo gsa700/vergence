@@ -48,7 +48,7 @@ struct Scaled {
 
 pub struct Pointer {
     theme: CursorTheme,
-    theme_name: String,
+    pub theme_name: String,
     /// The pointer's size in points.
     size: u32,
     pub status: CursorImageStatus,

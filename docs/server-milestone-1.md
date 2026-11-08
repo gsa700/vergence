@@ -129,3 +129,28 @@ accessibility (Contract 3); display-list surfaces.
   window to restore it; invisible 6-point resize band with resize pointer
   shapes. The scene is built per window front to back, so a bar stacks with
   its window. No title text yet. Dave: "looks right".
+- **Sharp X apps (2026-11-07):** Xwayland's client scale is the densest
+  monitor's (3.2833 on Hubble; VERGENCE_XWAYLAND_SCALE=<n> overrides), so X
+  apps draw at the 14"'s pixels and the server scales each X window down on
+  the ASUS. X apps learn the density from XSETTINGS served by the server
+  (`xsettings.rs`: the user's settings.toml, parser now shared in
+  vergence-xsettings, with Gdk/WindowScalingFactor 3, Gdk/UnscaledDPI for
+  exact text, Xft/DPI, Gtk/CursorThemeSize) and X resources (Xft.dpi 315,
+  Xcursor.size 79, via xrdb). Two bugs found: Xwayland bound the outputs
+  before its client scale was set, so it saw 1170 x 658 screens (fix: an empty
+  output state change re-sends them in client pixels: 3840 / 5910 wide); and
+  Avalonia MULTIPLIES AVALONIA_GLOBAL_SCALE_FACTOR with its Xft.dpi scale
+  (10.77 = 3.28^2), so the server clears AVALONIA_*_SCALE_FACTOR(S).
+  Measured from screenshots (Qt size box): 655 px = 52.9 mm on the 14", 212
+  px = 52.4 mm on the ASUS. GTK 3 boxes are 9% small (integer window scale
+  on X11). AlbumWall: right size, crisp on the 14", clean on the ASUS (small
+  text slightly grainy: 3x linear minification; mipmaps later). Apps that
+  ignore DPI (xclock, bitmap-font xterm) come out about 1/3.28 size. Open:
+  2 px gap between the outputs in X pixels (3842 vs 3840); Avalonia uses
+  315/96 = 3.281.
+- **Control socket (2026-11-07):** `$XDG_RUNTIME_DIR/vergence-control`
+  (0600 in the private runtime dir, peer uid checked: owner-only, no network)
+  with `tools/vctl`: `shot` (PNG of each monitor as shown, rendered once more
+  offscreen, to ~/vergence-shots/), `windows`, `spawn`, `move`, `focus`,
+  `restart` (exit 75; `tools/run-server-drm.sh` loops on it), `quit`. Lets
+  the session on the real monitors be seen and driven over SSH.

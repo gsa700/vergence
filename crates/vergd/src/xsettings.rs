@@ -74,48 +74,13 @@ pub fn read_current(conn: &RustConnection, a: &Atoms) -> Res<Option<(u32, Settin
 
 // ---- the settings file ----
 
-/// The settings as TOML: `"Net/ThemeName" = "Adwaita"`, integers as
-/// integers, colours as `[red, green, blue, alpha]`.
+/// The settings file format lives in vergence-xsettings (the server reads it too).
 pub fn to_toml(s: &Settings) -> String {
-    let mut t = toml::Table::new();
-    for (name, v) in &s.settings {
-        let x = match &v.value {
-            Value::Int(i) => toml::Value::Integer(*i as i64),
-            Value::Str(s) => toml::Value::String(s.clone()),
-            Value::Color(r, g, b, a) => {
-                toml::Value::Array([r, g, b, a].iter().map(|c| toml::Value::Integer(**c as i64)).collect())
-            }
-        };
-        t.insert(name.clone(), x);
-    }
-    let mut top = toml::Table::new();
-    top.insert("settings".into(), toml::Value::Table(t));
-    toml::to_string(&top).expect("settings serialize")
+    vergence_xsettings::to_toml(s)
 }
 
 pub fn from_toml(text: &str) -> Res<Settings> {
-    let top: toml::Table = text.parse()?;
-    let mut s = Settings::default();
-    let Some(t) = top.get("settings") else { return Ok(s) };
-    let t = t.as_table().ok_or("[settings] must be a table")?;
-    for (name, x) in t {
-        let v = match x {
-            toml::Value::Integer(i) => Value::Int(i32::try_from(*i).map_err(|_| format!("{name}: {i} is too large"))?),
-            toml::Value::Boolean(b) => Value::Int(*b as i32),
-            toml::Value::String(v) => Value::Str(v.clone()),
-            toml::Value::Array(a) if a.len() == 4 => {
-                let c: Vec<u16> = a
-                    .iter()
-                    .map(|c| c.as_integer().and_then(|i| u16::try_from(i).ok()))
-                    .collect::<Option<_>>()
-                    .ok_or_else(|| format!("{name}: a colour is four numbers 0-65535"))?;
-                Value::Color(c[0], c[1], c[2], c[3])
-            }
-            _ => return Err(format!("{name}: must be a number, text, or [r, g, b, a]").into()),
-        };
-        s.set(name, v);
-    }
-    Ok(s)
+    Ok(vergence_xsettings::from_toml(text)?)
 }
 
 // ---- the manager ----

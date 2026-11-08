@@ -61,6 +61,10 @@ pub struct Server {
     pub restore: std::collections::HashMap<Window, smithay::utils::Rectangle<i32, Logical>>,
     /// The last press on a title bar, for double-click to maximise.
     pub last_title_press: Option<(Window, std::time::Instant)>,
+    /// Monitors (connector names) still to capture for the control socket's `shot`.
+    pub shot_pending: Vec<String>,
+    /// The process exit status (control.rs: 75 = restart me).
+    pub exit_code: i32,
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
@@ -159,6 +163,8 @@ impl Server {
             decor: Default::default(),
             restore: Default::default(),
             last_title_press: None,
+            shot_pending: Vec::new(),
+            exit_code: 0,
             popups,
             seat,
             regions: Vec::new(),
@@ -250,11 +256,22 @@ impl Server {
         let mut ready = Some(ready);
         let res = self.loop_handle.insert_source(xwayland, move |event, _, state| match event {
             XWaylandEvent::Ready { x11_socket, display_number } => {
-                // One scale for all X clients for now (per-monitor X scaling: next step).
-                let scale = std::env::var("VERGENCE_XWAYLAND_SCALE").ok().and_then(|s| s.parse::<f64>().ok()).unwrap_or(1.0);
+                // One scale for all X clients: the densest monitor's (or a number from
+                // VERGENCE_XWAYLAND_SCALE), so X apps draw sharp there and are scaled
+                // down elsewhere (xsettings.rs).
+                let densest = state.space.outputs().map(|o| o.current_scale().fractional_scale()).fold(1.0_f64, f64::max);
+                let scale = match std::env::var("VERGENCE_XWAYLAND_SCALE").ok().as_deref() {
+                    None | Some("max") => densest,
+                    Some(v) => v.parse::<f64>().ok().filter(|s| *s > 0.0).unwrap_or(densest),
+                };
                 {
                     use smithay::wayland::compositor::CompositorHandler;
                     state.client_compositor_state(&client).set_client_scale(scale);
+                }
+                // Xwayland bound the outputs before it had a client scale; an empty
+                // state change re-sends them in its pixels (14": 3840 wide, not 1170).
+                for o in state.space.outputs() {
+                    o.change_current_state(None, None, None, None);
                 }
                 match X11Wm::start_wm(state.loop_handle.clone(), &dh, x11_socket, client.clone()) {
                     Ok(mut wm) => {
@@ -269,7 +286,14 @@ impl Server {
                     Err(e) => tracing::warn!("Xwayland window manager: {e}"),
                 }
                 state.xdisplay = Some(display_number);
-                unsafe { std::env::set_var("DISPLAY", format!(":{display_number}")) };
+                crate::xsettings::publish(display_number, scale, state.pointer_image.size_points(), &state.pointer_image.theme_name);
+                unsafe {
+                    std::env::set_var("DISPLAY", format!(":{display_number}"));
+                    // Avalonia takes its scale from Xft.dpi; its env factors MULTIPLY
+                    // that (AVALONIA_GLOBAL_SCALE_FACTOR=3.28 gave 10.77, 2026-11-07).
+                    std::env::remove_var("AVALONIA_GLOBAL_SCALE_FACTOR");
+                    std::env::remove_var("AVALONIA_SCREEN_SCALE_FACTORS");
+                }
                 tracing::info!("Xwayland ready on DISPLAY=:{display_number}, X client scale {scale}");
                 if let Some(r) = ready.take() {
                     r();

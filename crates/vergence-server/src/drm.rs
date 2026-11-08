@@ -305,6 +305,16 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: crtc::Handle) {
     }
     elements.extend(state.scene(&mut b.renderer, &output, s.scale).into_iter().map(OutputElements::Scene));
 
+    // The control socket's `shot`: this monitor's frame, rendered once more offscreen.
+    if let Some(i) = state.shot_pending.iter().position(|n| *n == s.connector) {
+        state.shot_pending.remove(i);
+        let size = output.current_mode().map(|m| m.size).unwrap_or_default();
+        match capture(&mut b.renderer, &elements, size, s.scale) {
+            Ok(rgba) => crate::control::save_png(s.connector.clone(), size.w as u32, size.h as u32, rgba),
+            Err(e) => tracing::warn!("shot {}: {e}", s.connector),
+        }
+    }
+
     match s.drm_output.render_frame(&mut b.renderer, &elements, [0.1, 0.1, 0.1, 1.0], FrameFlags::DEFAULT) {
         Ok(r) if !r.is_empty => {
             if let Err(e) = s.drm_output.queue_frame(()) {
@@ -352,6 +362,27 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: crtc::Handle) {
     state.space.refresh();
     state.popups.cleanup();
     let _ = state.display_handle.flush_clients();
+}
+
+/// Render `elements` into an offscreen buffer the size of the monitor and read it back
+/// (R, G, B, A bytes, top row first).
+fn capture(
+    renderer: &mut GlesRenderer,
+    elements: &[OutputElements],
+    size: smithay::utils::Size<i32, smithay::utils::Physical>,
+    scale: f64,
+) -> Result<Vec<u8>, String> {
+    use smithay::backend::renderer::{Bind, ExportMem, Offscreen, damage::OutputDamageTracker, gles::GlesTexture};
+    let buf = smithay::utils::Size::<i32, smithay::utils::Buffer>::from((size.w, size.h));
+    let mut tex: GlesTexture = renderer.create_buffer(Fourcc::Abgr8888, buf).map_err(|e| e.to_string())?;
+    let mut fb = renderer.bind(&mut tex).map_err(|e| e.to_string())?;
+    let mut damage = OutputDamageTracker::new(size, scale, Transform::Normal);
+    damage.render_output(renderer, &mut fb, 0, elements, [0.1, 0.1, 0.1, 1.0]).map_err(|e| format!("{e:?}"))?;
+    let mapping = renderer
+        .copy_framebuffer(&fb, smithay::utils::Rectangle::from_size(buf), Fourcc::Abgr8888)
+        .map_err(|e| e.to_string())?;
+    let bytes = renderer.map_texture(&mapping).map_err(|e| e.to_string())?;
+    Ok(bytes.to_vec())
 }
 
 impl Server {

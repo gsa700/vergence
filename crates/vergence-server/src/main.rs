@@ -11,6 +11,8 @@ mod drm;
 mod cursor;
 mod focus;
 mod decor;
+mod xsettings;
+mod control;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;
@@ -35,6 +37,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // than the host compositor
     unsafe { std::env::set_var("WAYLAND_DISPLAY", &state.socket_name) };
 
+    // The development control socket (owner-only; control.rs).
+    crate::control::listen(&mut state);
+
     // X11 apps through Xwayland; the first app starts once it is ready (or failed),
     // so it inherits DISPLAY.
     state.start_xwayland(spawn_client);
@@ -43,6 +48,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Server is running
     })?;
 
+    if let Some(p) = crate::control::socket_path() {
+        let _ = std::fs::remove_file(p);
+    }
+    if state.exit_code != 0 {
+        std::process::exit(state.exit_code);
+    }
     Ok(())
 }
 
