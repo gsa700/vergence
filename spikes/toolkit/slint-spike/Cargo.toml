@@ -1,0 +1,13 @@
+[package]
+name = "slint-spike"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+slint = { version = "1.18", features = ["unstable-winit-030"] }
+
+[profile.release]
+strip = true
