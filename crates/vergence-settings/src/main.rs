@@ -37,17 +37,36 @@ slint::slint! {
     export struct Entry { name: string, folder: bool, picked: bool }
     struct Swatch { name: string, hex: string, color: color }
 
-    // A line in the sidebar: the page's name; the selected one darker than the
-    // sidebar, edged and in a heavier weight (the family's Preferences format).
+    // THE COLOURS (Dave, 2026-11-08, from a macOS System Settings screenshot:
+    // "the left gray right lighter model. The current window is REALLY white"):
+    // a warm grey sidebar the full height of the window, a lighter page beside
+    // it, groups as soft grey cards without outlines, the selected page filled
+    // with the accent. The same layers in dark greys for the dark style.
+    export global Theme {
+        // The desktop's accent (desktop.toml [appearance] accent), set from Rust
+        // and on every change; without one, the toolkit's own.
+        in-out property <bool> has-accent: false;
+        in-out property <color> accent-color: #3b82f6;
+        out property <color> accent: has-accent ? accent-color : Palette.accent-background;
+        out property <color> on-accent: has-accent ? (accent-color.to-hsv().value > 0.85 && accent-color.to-hsv().saturation < 0.5 ? #1d1d1f : #ffffff) : Palette.accent-foreground;
+        out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+        out property <color> sidebar: dark ? #262628 : #e7e5e2;
+        out property <color> page: dark ? #1c1c1e : #f7f7f6;
+        out property <color> card: dark ? #2c2c2e : #ecebea;
+        out property <color> line: dark ? #3a3a3c : #d9d8d6;
+        out property <color> hover: dark ? #ffffff14 : #0000000d;
+        out property <color> dim: dark ? #a1a1a6 : #6e6e73;
+    }
+
+    // A line in the sidebar: the page's name; the selected one filled with the
+    // accent (macOS), in a heavier weight.
     component SidebarItem inherits Rectangle {
         in property <string> text;
         in property <bool> selected;
         callback clicked;
         height: 30px;
         border-radius: 5px;
-        border-width: 1px;
-        border-color: root.selected ? Palette.border : transparent;
-        background: root.selected ? Palette.alternate-background.darker(0.08) : (touch.has-hover ? Palette.alternate-background.darker(0.04) : transparent);
+        background: root.selected ? Theme.accent : (touch.has-hover ? Theme.hover : transparent);
         accessible-role: list-item;
         accessible-label: root.text;
         HorizontalLayout {
@@ -58,24 +77,30 @@ slint::slint! {
                 vertical-alignment: center;
                 font-size: 13px;
                 font-weight: root.selected ? 600 : 400;
-                color: Palette.foreground;
+                color: root.selected ? Theme.on-accent : Palette.foreground;
             }
         }
         touch := TouchArea { clicked => { root.clicked(); } }
     }
 
-    // A page's heading and the sentence under it.
-    component PageTitle inherits VerticalLayout {
+    // A page's heading and the sentence under it, centred in a card at the top
+    // of the page (macOS).
+    component PageTitle inherits Rectangle {
         in property <string> title;
         in property <string> description;
-        spacing: 6px;
-        Text { text: root.title; font-size: 18px; font-weight: 600; color: Palette.foreground; }
-        if root.description != "": Text {
-            text: root.description;
-            font-size: 13px;
-            wrap: word-wrap;
-            color: Palette.foreground;
-            opacity: 0.65;
+        background: Theme.card;
+        border-radius: 10px;
+        VerticalLayout {
+            padding: 18px;
+            spacing: 6px;
+            Text { text: root.title; font-size: 20px; font-weight: 700; horizontal-alignment: center; color: Palette.foreground; }
+            if root.description != "": Text {
+                text: root.description;
+                font-size: 13px;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+                color: Theme.dim;
+            }
         }
     }
 
@@ -83,12 +108,10 @@ slint::slint! {
     component Group inherits VerticalLayout {
         in property <string> heading;
         spacing: 6px;
-        if root.heading != "": Text { text: root.heading; font-size: 12px; font-weight: 600; color: Palette.foreground; opacity: 0.7; }
+        if root.heading != "": Text { text: root.heading; font-size: 12px; font-weight: 600; color: Theme.dim; }
         Rectangle {
-            background: Palette.background;
-            border-radius: 8px;
-            border-width: 1px;
-            border-color: Palette.border;
+            background: Theme.card;
+            border-radius: 10px;
             VerticalLayout {
                 padding: 2px;
                 @children
@@ -103,7 +126,7 @@ slint::slint! {
         in property <string> detail;
         in property <bool> first: false;
         min-height: 44px;
-        if !root.first: Rectangle { x: 12px; y: 0; width: parent.width - 24px; height: 1px; background: Palette.border; opacity: 0.6; }
+        if !root.first: Rectangle { x: 12px; y: 0; width: parent.width - 24px; height: 1px; background: Theme.line; }
         HorizontalLayout {
             padding-left: 12px;
             padding-right: 12px;
@@ -116,7 +139,7 @@ slint::slint! {
                 Text { text: root.label; font-size: 13px; color: Palette.foreground; }
                 // One line, cut with an ellipsis: in a row, a wrapped line's height
                 // isn't known, and the text ran out of its box (2026-11-08).
-                if root.detail != "": Text { text: root.detail; font-size: 11px; overflow: elide; color: Palette.foreground; opacity: 0.6; }
+                if root.detail != "": Text { text: root.detail; font-size: 11px; overflow: elide; color: Theme.dim; }
             }
             HorizontalLayout {
                 alignment: end;
@@ -132,7 +155,7 @@ slint::slint! {
         preferred-height: 600px;
         min-width: 640px;
         min-height: 480px;
-        background: Palette.alternate-background;
+        background: Theme.page;
 
         // The pages, in sidebar order; About is the last index, set apart.
         in property <[string]> pages: ["Appearance", "Wallpaper"];
@@ -189,12 +212,17 @@ slint::slint! {
         in property <string> session;
 
         HorizontalLayout {
-            padding: 12px;
-            spacing: 12px;
-
             // THE PAGES, as a list: Up and Down move through it and the page follows.
+            // The sidebar runs the full height, edge to edge, in its own grey.
+            Rectangle {
+                width: 200px;
+                background: Theme.sidebar;
+                Rectangle { x: parent.width - 1px; width: 1px; background: Theme.line; }
             sidebar := FocusScope {
-                width: 168px;
+                x: 10px;
+                y: 12px;
+                width: parent.width - 20px;
+                height: parent.height - 24px;
                 key-pressed(event) => {
                     if (event.text == Key.UpArrow) {
                         root.page = Math.max(0, root.page - 1);
@@ -223,14 +251,12 @@ slint::slint! {
                     }
                 }
             }
+            }
 
-            // THE PAGE, in a framed panel; each page scrolls on its own.
+            // THE PAGE, on the lighter ground; each page scrolls on its own.
             Rectangle {
                 horizontal-stretch: 1;
-                background: Palette.background.mix(Palette.alternate-background, 0.5);
-                border-radius: 6px;
-                border-width: 1px;
-                border-color: Palette.border;
+                background: Theme.page;
 
                 if root.page == 0: ScrollView {
                     VerticalLayout {
@@ -360,7 +386,7 @@ slint::slint! {
                                     height: parent.height - 34px;
                                     border-radius: 6px;
                                     border-width: root.selected == i ? 3px : 1px;
-                                    border-color: root.selected == i ? Palette.accent-background : Palette.border;
+                                    border-color: root.selected == i ? Theme.accent : Palette.border;
                                     clip: true;
                                     Image {
                                         x: 3px; y: 3px;
@@ -692,6 +718,22 @@ fn show_browser(ui: &Settings, st: &mut State) {
     ui.set_picked_count(st.browse_picked.len() as i32);
 }
 
+/// Tell the window the desktop's accent ("#rrggbb", or none).
+fn show_accent(ui: &Settings, hex: &str) {
+    let rgb = hex
+        .strip_prefix('#')
+        .filter(|h| h.len() == 6)
+        .and_then(|h| u32::from_str_radix(h, 16).ok());
+    let theme = ui.global::<Theme>();
+    match rgb {
+        Some(v) => {
+            theme.set_accent_color(slint::Color::from_rgb_u8((v >> 16) as u8, (v >> 8) as u8, v as u8));
+            theme.set_has_accent(true);
+        }
+        None => theme.set_has_accent(false),
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let desktop = read_desktop();
     let appearance = desktop.get("appearance").and_then(|a| a.as_table()).cloned().unwrap_or_default();
@@ -730,6 +772,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let text = |k: &str| appearance.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
     ui.set_scheme_index(SCHEMES.iter().position(|s| *s == text("color-scheme")).unwrap_or(0) as i32);
     ui.set_accent(text("accent").into());
+    show_accent(&ui, &text("accent"));
     ui.set_high_contrast(text("contrast") == "high");
     ui.set_reduced_motion(appearance.get("reduced-motion").and_then(|v| v.as_bool()).unwrap_or(false));
 
@@ -746,10 +789,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut t = toml::Table::new();
         t.insert("color-scheme".into(), SCHEMES[ui.get_scheme_index().clamp(0, 2) as usize].into());
         if !accent.is_empty() {
-            t.insert("accent".into(), accent.into());
+            t.insert("accent".into(), accent.clone().into());
         }
         t.insert("contrast".into(), if ui.get_high_contrast() { "high" } else { "normal" }.into());
         t.insert("reduced-motion".into(), ui.get_reduced_motion().into());
+        show_accent(&ui, &accent);
         let res = update_desktop(|d| {
             d.insert("appearance".into(), toml::Value::Table(t));
         });
