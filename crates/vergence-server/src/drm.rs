@@ -433,7 +433,7 @@ fn connect(state: &mut Server, conn: connector::Info, crtc: crtc::Handle) {
     let scales = crate::displays::load().scale_for(&id, &name, (w as u32, h as u32), mm);
     let (scale, how) = (scales.shown, scales.how.clone());
     let label = parsed.as_ref().and_then(|e| e.name.clone()).unwrap_or_else(|| name.clone());
-    tracing::info!("{name}: {label:?} {w}x{h} {:?} mm -> scale {:.4} ({}/120), {how}", mm, scale, (scale * 120.0).round());
+    tracing::info!("{name}: {label:?} {w}x{h} at {} Hz {:?} mm -> scale {:.4} ({}/120), {how}", drm_mode.vrefresh(), mm, scale, (scale * 120.0).round());
     state.scale_notes.insert(name.clone(), scales);
     let Some(b) = state.backend.as_mut() else { return };
 
@@ -518,10 +518,37 @@ fn render(state: &mut Server, crtc: crtc::Handle) {
     let Some(mut backend) = state.backend.take() else { return };
     let t = std::time::Instant::now();
     render_with(state, &mut backend, crtc);
-    if t.elapsed().as_millis() > 20 {
-        tracing::warn!("slow: frame {} ms", t.elapsed().as_millis());
+    let ms = t.elapsed().as_millis();
+    if ms > 20 {
+        tracing::warn!("slow: frame {ms} ms");
+    }
+    // A frame that blocks for seconds was waiting on a GPU hang (the kernel resets
+    // the engine after ~7 s). The reset leaves this GL context drawing nothing but
+    // black (on screen) or white (offscreen) for good, while every call succeeds
+    // (Hubble, UHD 630, 2026-11-08), and Smithay's context is not robust, so it
+    // cannot ask. Start over with a new context; textures are cached per context
+    // and upload again.
+    if ms > 2000 {
+        renew_renderer(&mut backend);
     }
     state.backend = Some(backend);
+}
+
+/// Replace the renderer with one on a new EGL context, and draw every monitor in full.
+fn renew_renderer(b: &mut Backend) {
+    let display = b.renderer.egl_context().display().clone();
+    let context = match EGLContext::new(&display) {
+        Ok(c) => c,
+        Err(e) => return tracing::error!("GPU hang: cannot make a new EGL context: {e:?}"),
+    };
+    match unsafe { GlesRenderer::new(context) } {
+        Ok(r) => {
+            b.renderer = r;
+            b.redraw_all();
+            tracing::warn!("GPU hang suspected (frame blocked); drawing with a new GL context");
+        }
+        Err(e) => tracing::error!("GPU hang: cannot make a new renderer: {e:?}"),
+    }
 }
 
 fn render_with(state: &mut Server, b: &mut Backend, crtc: crtc::Handle) {
