@@ -218,6 +218,7 @@ impl Server {
         let pointer = self.seat.get_pointer().unwrap();
         let serial = SERIAL_COUNTER.next_serial();
         self.menu_hover(pos);
+        self.notify_hover(pos);
         let under = self.surface_under(pos);
         pointer.motion(self, under, &MotionEvent { location: pos, serial, time });
         pointer.frame(self);

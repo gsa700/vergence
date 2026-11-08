@@ -172,7 +172,7 @@ impl Server {
                 };
                 let t = smithay::backend::input::InputTime::now();
                 self.handle_button(button, state, t);
-                format!("{cmd}ed {:#x}", button)
+                format!("{} {:#x}", if cmd == "press" { "pressed" } else { "released" }, button)
             }
             "restart" => {
                 self.exit_code = RESTART;

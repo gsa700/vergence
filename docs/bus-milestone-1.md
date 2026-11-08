@@ -153,7 +153,9 @@ color-scheme ("prefer-dark") to gdbus monitor, and the same three as one
   dark from the color-scheme setting; a red edge for critical ones. A click
   runs the "default" action (if any) or a button's action, then closes the
   card. Timeouts: the app's, 5 s when it leaves it to the server, never for
-  critical ones; at most 5 cards (the oldest closes as expired).
+  critical ones; at most 5 cards (the oldest closes as expired). Cards with
+  buttons get 10 s; while the pointer is over any card every countdown
+  pauses (at least 2 s left when it resumes).
 - Ownership: only the connection that made a notification can replace or
   close it, and only it receives NotificationClosed / ActionInvoked
   (unicast; never broadcast).
@@ -164,6 +166,11 @@ color-scheme ("prefer-dark") to gdbus monitor, and the same three as one
   CloseNotification). Body markup and icons are not drawn yet (not
   advertised, so apps send plain text).
 - `vctl notes` lists the cards.
+
+Live on Hubble 2026-11-08: three cards (normal, critical, with buttons)
+sharp on the 14" at 3.28; a card clicked through the control socket and one
+clicked by Dave ("Later") reported the right action to notify-send; hover
+paused a countdown at 8.5 s and it resumed on leaving.
 
 Tested nested: gdbus GetCapabilities/GetServerInformation; `notify-send -w`
 returned when its card expired at 5.08 s (the unicast NotificationClosed

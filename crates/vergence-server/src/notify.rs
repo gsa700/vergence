@@ -13,8 +13,9 @@
 // rasterised at each monitor's own pixels. Light or dark follows the
 // color-scheme setting. A click on a card runs its "default" action (if it has
 // one) and closes it; other actions are buttons under the text. Cards expire
-// after their timeout (5 s when the app leaves it to the server; critical ones
-// stay until clicked).
+// after their timeout (when the app leaves it to the server: 5 s, 10 s for a
+// card with buttons, and critical ones stay until clicked). While the pointer
+// is over any card, every countdown pauses, and resumes when it leaves.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -46,6 +47,10 @@ const MAX_BODY_LINES: usize = 4;
 const MAX_SHOWN: usize = 5;
 const BUTTON_H: i32 = 24;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+/// For cards with buttons: time to read them and reach for one.
+const BUTTONS_TIMEOUT: Duration = Duration::from_secs(10);
+/// After a pause, at least this long is left.
+const MIN_AFTER_PAUSE: Duration = Duration::from_secs(2);
 
 /// Reasons in NotificationClosed (the Desktop Notifications specification's numbers).
 pub const EXPIRED: u32 = 1;
@@ -83,6 +88,8 @@ struct Note {
     urgency: u8,
     actions: Vec<(String, String)>,
     expires: Option<Instant>,
+    /// While paused: the time that was left (and `expires` is None).
+    left: Option<Duration>,
     /// Laid out: the card, its text lines and its buttons (logical).
     rect: Rectangle<i32, Logical>,
     lines: Vec<(String, Rectangle<i32, Logical>, bool)>,
@@ -99,6 +106,8 @@ pub struct Notifications {
     /// The monitor the stack is on (its top-left), while there is a stack.
     anchor: Option<Rectangle<i32, Logical>>,
     timer_running: bool,
+    /// The pointer is over a card: countdowns are paused.
+    paused: bool,
     /// A press on a card: its button's release is swallowed.
     pub swallow: Option<u32>,
 }
@@ -172,12 +181,14 @@ pub fn wrap(text: &str, max: f32, max_lines: usize, width: &dyn Fn(&str) -> f32)
 impl Server {
     /// A new notification (or a replacement for one this origin made); its id.
     pub fn notify(&mut self, origin: Origin, req: Request) -> u32 {
+        let buttons = req.actions.iter().any(|(k, _)| !k.is_empty() && k != "default");
         let timeout = match req.timeout_ms {
-            t if t < 0 => (req.urgency < 2).then_some(DEFAULT_TIMEOUT),
+            t if t < 0 => (req.urgency < 2).then_some(if buttons { BUTTONS_TIMEOUT } else { DEFAULT_TIMEOUT }),
             0 => None,
             t => Some(Duration::from_millis(t as u64)),
         };
-        let expires = timeout.map(|t| Instant::now() + t);
+        // Paused (pointer over the stack): the countdown starts when it leaves.
+        let (expires, left) = if self.notes.paused { (None, timeout) } else { (timeout.map(|t| Instant::now() + t), None) };
         let replacing = (req.replaces != 0).then(|| self.notes.notes.iter().position(|n| n.id == req.replaces && n.origin == origin)).flatten();
         let id = match replacing {
             Some(i) => self.notes.notes[i].id,
@@ -196,6 +207,7 @@ impl Server {
             urgency: req.urgency.min(2),
             actions,
             expires,
+            left,
             rect: Rectangle::default(),
             lines: Vec::new(),
             buttons: Vec::new(),
@@ -246,6 +258,8 @@ impl Server {
     fn notify_layout(&mut self) {
         if self.notes.notes.is_empty() {
             self.notes.anchor = None;
+            // No cards, nothing to hover: the next card's countdown runs.
+            self.notes.paused = false;
             self.redraw_all();
             return;
         }
@@ -332,6 +346,25 @@ impl Server {
         }
     }
 
+    /// Pointer motion: over a card, every countdown pauses; off them, they resume.
+    pub fn notify_hover(&mut self, pos: Point<f64, Logical>) {
+        let over = self.notify_at(pos);
+        if over == self.notes.paused {
+            return;
+        }
+        self.notes.paused = over;
+        let now = Instant::now();
+        for n in self.notes.notes.iter_mut() {
+            if over {
+                if let Some(e) = n.expires.take() {
+                    n.left = Some(e.saturating_duration_since(now));
+                }
+            } else if let Some(l) = n.left.take() {
+                n.expires = Some(now + l.max(MIN_AFTER_PAUSE));
+            }
+        }
+    }
+
     /// Is there a card under `pos`?
     pub fn notify_at(&self, pos: Point<f64, Logical>) -> bool {
         self.notes.notes.iter().any(|n| n.rect.to_f64().contains(pos))
@@ -354,6 +387,9 @@ impl Server {
         }
         self.notify_tell_closed(n.origin, n.id, DISMISSED);
         self.notify_layout();
+        // The cards moved up: the pointer may be over the next one, or none
+        // (then the others' countdowns resume).
+        self.notify_hover(pos);
     }
 
     /// The cards' elements for an output, front to back.
@@ -429,7 +465,11 @@ impl Server {
             .notes
             .iter()
             .map(|n| {
-                let left = n.expires.map(|e| format!("{:.1} s left", e.saturating_duration_since(Instant::now()).as_secs_f64())).unwrap_or_else(|| "stays".into());
+                let left = match (n.expires, n.left) {
+                    (Some(e), _) => format!("{:.1} s left", e.saturating_duration_since(Instant::now()).as_secs_f64()),
+                    (None, Some(l)) => format!("paused, {:.1} s left", l.as_secs_f64()),
+                    _ => "stays".into(),
+                };
                 format!("#{} {:?} {} {:?} {:?} urgency {} actions {:?} {left} at {:?}", n.id, n.origin, n.app, n.summary, n.body, n.urgency, n.actions, n.rect)
             })
             .collect::<Vec<_>>()
