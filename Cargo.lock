@@ -1465,6 +1465,7 @@ dependencies = [
  "smithay",
  "tracing",
  "tracing-subscriber",
+ "vergence-profile",
 ]
 
 [[package]]

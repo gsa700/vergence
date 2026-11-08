@@ -32,11 +32,22 @@ impl Server {
             }
             InputEvent::PointerMotion { .. } => {}
             InputEvent::PointerMotionAbsolute { event, .. } => {
-                let output = self.space.outputs().next().unwrap();
-
-                let output_geo = self.space.output_geometry(output).unwrap();
-
-                let pos = event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
+                // The position in the host window, mapped through the output it is over
+                // (1c): its left edge in logical space plus the offset at its scale.
+                let w = self.window_px;
+                let px = event.position_transformed((w.w, w.h).into());
+                let pos = self
+                    .regions
+                    .iter()
+                    .find(|r| px.x >= r.window.loc.x && px.x < r.window.loc.x + r.window.size.w)
+                    .or(self.regions.last())
+                    .map(|r| {
+                        smithay::utils::Point::<f64, smithay::utils::Logical>::from((
+                            r.logical_x + (px.x - r.window.loc.x) / r.scale,
+                            px.y / r.scale,
+                        ))
+                    })
+                    .unwrap_or(px);
 
                 let serial = SERIAL_COUNTER.next_serial();
 

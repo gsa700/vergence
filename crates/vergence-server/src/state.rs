@@ -23,6 +23,15 @@ use smithay::{
     },
 };
 
+/// Where a virtual output sits in the nested window, for mapping the pointer (1c).
+pub struct OutputRegion {
+    /// Its part of the host window, in window pixels.
+    pub window: smithay::utils::Rectangle<f64, smithay::utils::Physical>,
+    /// Its left edge in the server's logical space.
+    pub logical_x: f64,
+    pub scale: f64,
+}
+
 pub struct Server {
     pub start_time: std::time::Instant,
     pub socket_name: OsString,
@@ -43,6 +52,9 @@ pub struct Server {
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
+    /// The nested window's outputs, left to right (1c).
+    pub regions: Vec<OutputRegion>,
+    pub window_px: smithay::utils::Size<i32, smithay::utils::Physical>,
 }
 
 impl Server {
@@ -116,6 +128,8 @@ impl Server {
             fractional_scale_manager_state,
             popups,
             seat,
+            regions: Vec::new(),
+            window_px: (1, 1).into(),
         }
     }
 

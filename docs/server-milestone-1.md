@@ -60,3 +60,21 @@ the UHD 630, and serves foot as a Wayland client. Xfce sets
 DRM/KMS on the real monitors, libinput and seats (stage 2); Xwayland for X11
 apps; window placement memory (Contract 2, moved over from vergd);
 accessibility (Contract 3); display-list surfaces.
+
+## Progress
+
+- **1a, 1b done (2026-11-07):** foot draws natively at 1.64 (preferred_scale
+  197, a 1144 x 775 buffer for about 697 x 472 points through wp-viewporter).
+- **1c done (2026-11-07):** two virtual outputs side by side in the nested
+  window, scales derived through vergence-profile from the panels' EDID
+  sizes ("14in 4K" 1920x1080, 310 x 174 mm: 1.64; "ASUS VS229" 1920x1080,
+  475 x 267 mm: 1.07; `VERGENCE_OUTPUTS` overrides). Each output renders into
+  a texture of its own at its own scale; the textures are composed side by
+  side. Each window gets the preferred scale of the output most of it is on,
+  every frame; the pointer maps through the output it is over. Dave on
+  Hubble: "it is as it should be" (two halves, the right way up, foot larger
+  on the 1.64 side, switching as it crosses, pointer accurate on both).
+- **1d:** Smithay draws a straddling window on both outputs, each at its own
+  scale. Nested, both outputs are on one host monitor, so "the same physical
+  size the whole way" is proved on the real panels in stage 2.
+
