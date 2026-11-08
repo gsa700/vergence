@@ -66,6 +66,8 @@ struct Surface {
     output: Output,
     drm_output: Out,
     connector: String,
+    /// When this monitor was last drawn (the watchdog, below).
+    last: std::time::Instant,
     scale: f64,
     /// For working the scale out again (displays.rs): the monitor's id, its
     /// mode in pixels and its size in millimetres.
@@ -159,6 +161,37 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
             render(state, crtc);
         }
         DrmEvent::Error(e) => tracing::error!("drm: {e:?}"),
+    })?;
+
+    // THE WATCHDOG (2026-11-08: the whole desktop froze, pointer and all, with
+    // the server idle and nothing logged): drawing is driven by VBlank events,
+    // so a lost one, or a frame that ended without arranging the next, stops a
+    // monitor for good. Any monitor not drawn for 2 s while the session is
+    // active is drawn again, and it is logged.
+    event_loop.handle().insert_source(Timer::from_duration(Duration::from_secs(1)), |_, _, state| {
+        let stalled: Vec<(crtc::Handle, String, u128)> = state
+            .backend
+            .as_ref()
+            .filter(|_| state.session.as_ref().is_none_or(|s| s.is_active()))
+            .map(|b| {
+                b.surfaces
+                    .iter()
+                    .filter(|(_, s)| s.last.elapsed() > Duration::from_secs(2))
+                    .map(|(c, s)| (*c, s.connector.clone(), s.last.elapsed().as_millis()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (crtc, name, ms) in stalled {
+            tracing::warn!("watchdog: {name} not drawn for {ms} ms (VBlank lost?); drawing it again");
+            if let Some(b) = state.backend.as_mut()
+                && let Some(s) = b.surfaces.get_mut(&crtc)
+            {
+                let _ = s.drm_output.frame_submitted();
+                s.drm_output.reset_buffers();
+            }
+            render(state, crtc);
+        }
+        TimeoutAction::ToDuration(Duration::from_secs(1))
     })?;
 
     // Console switches.
@@ -432,7 +465,7 @@ fn connect(state: &mut Server, conn: connector::Info, crtc: crtc::Handle) {
         Ok(o) => o,
         Err(e) => return tracing::warn!("{name}: cannot initialise: {e:?}"),
     };
-    b.surfaces.insert(crtc, Surface { output, drm_output, connector: name, scale, id, px: (w as u32, h as u32), mm, edid: identity, global });
+    b.surfaces.insert(crtc, Surface { output, drm_output, connector: name, last: std::time::Instant::now(), scale, id, px: (w as u32, h as u32), mm, edid: identity, global });
 }
 
 /// The EDID blob DRM keeps for a connector.
@@ -494,6 +527,7 @@ fn render(state: &mut Server, crtc: crtc::Handle) {
 fn render_with(state: &mut Server, b: &mut Backend, crtc: crtc::Handle) {
     let pointer_at = state.seat.get_pointer().map(|p| p.current_location()).unwrap_or_default();
     let Some(s) = b.surfaces.get_mut(&crtc) else { return };
+    s.last = std::time::Instant::now();
     let output = s.output.clone();
     let Some(geo) = state.space.output_geometry(&output) else { return };
     let scale = smithay::utils::Scale::from(s.scale);
@@ -526,6 +560,10 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: crtc::Handle) {
         Ok(r) if !r.is_empty => {
             if let Err(e) = s.drm_output.queue_frame(()) {
                 tracing::warn!("queue frame: {e:?}");
+                let _ = state.loop_handle.insert_source(Timer::from_duration(Duration::from_millis(100)), move |_, _, st| {
+                    render(st, crtc);
+                    TimeoutAction::Drop
+                });
             }
         }
         Ok(_) => {
@@ -535,7 +573,15 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: crtc::Handle) {
                 TimeoutAction::Drop
             });
         }
-        Err(e) => tracing::warn!("render: {e:?}"),
+        Err(e) => {
+            // Try again shortly: without a frame no VBlank comes, and drawing
+            // would stop for good.
+            tracing::warn!("render: {e:?}");
+            let _ = state.loop_handle.insert_source(Timer::from_duration(Duration::from_millis(100)), move |_, _, st| {
+                render(st, crtc);
+                TimeoutAction::Drop
+            });
+        }
     }
 
     // Each window draws at the scale of the output most of it is on; frame callbacks.

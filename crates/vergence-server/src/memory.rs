@@ -109,6 +109,10 @@ impl Server {
                     .and_then(|d| d.lock().unwrap().app_id.clone())
                     .unwrap_or_default()
             });
+            // No app_id (iced and Slint set none on FreeBSD): the program's name,
+            // from the client's process (2026-11-08: the terminal and the settings
+            // app had no memory).
+            let app = if app.is_empty() { program_of(&self.display_handle, t.wl_surface()).unwrap_or_default() } else { app };
             (app.clone(), app)
         };
         if instance.is_empty() && class.is_empty() {
@@ -200,6 +204,19 @@ impl Server {
             self.memory.setup = key;
         }
     }
+}
+
+/// The name of the program a surface's client runs, from its process id.
+fn program_of(dh: &smithay::reexports::wayland_server::DisplayHandle, surface: &smithay::reexports::wayland_server::protocol::wl_surface::WlSurface) -> Option<String> {
+    use smithay::reexports::wayland_server::Resource;
+    let client = surface.client()?;
+    let pid = client.get_credentials(dh).ok()?.pid;
+    #[cfg(target_os = "linux")]
+    if let Ok(s) = std::fs::read_to_string(format!("/proc/{pid}/comm")) {
+        return Some(s.trim().to_string()).filter(|s| !s.is_empty());
+    }
+    let out = std::process::Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).output().ok()?;
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|s| !s.is_empty())
 }
 
 fn now() -> String {
