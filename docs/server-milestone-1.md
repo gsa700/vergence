@@ -162,3 +162,12 @@ accessibility (Contract 3); display-list surfaces.
   buttons; re-rasterised only when title, width, focus or scale changes.
   Kerning, no shaping (Latin titles; real text stack later). Checked from
   screenshots on both monitors.
+- **Placement (2026-11-07):** new windows open on the monitor under the
+  pointer and fit it (`place.rs`): no larger than the monitor below a title
+  bar (when the server draws one), centred; an X app that asks for a
+  position (USPosition/PPosition) gets it if the window then lies wholly on a
+  monitor. Wayland windows get configure_bounds up front and are fitted and
+  centred on their first sized commit. Fixed: an X window's resize request
+  was answered with the position X last reported, not where the server had
+  just put it (AlbumWall snapped back to 0,0). AlbumWall (1131 x 710 saved)
+  now opens at 1131 x 658 on the 14", all on screen.

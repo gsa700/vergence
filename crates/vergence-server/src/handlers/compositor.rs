@@ -38,12 +38,13 @@ impl CompositorHandler for Server {
             while let Some(parent) = get_parent(&root) {
                 root = parent;
             }
-            if let Some(window) = self
-                .space
-                .elements()
-                .find(|w| w.wl_surface().as_deref() == Some(&root))
-            {
+            let found = self.space.elements().find(|w| w.wl_surface().as_deref() == Some(&root)).cloned();
+            if let Some(window) = found {
                 window.on_commit();
+                // A new Wayland window is placed once it has a size (place.rs).
+                if window.toplevel().is_some() {
+                    self.place_wayland(&window);
+                }
             }
         };
 

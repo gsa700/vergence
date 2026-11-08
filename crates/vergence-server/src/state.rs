@@ -65,6 +65,8 @@ pub struct Server {
     pub shot_pending: Vec<String>,
     /// The desktop font for title text (None: titles without text).
     pub title_font: Option<crate::text::TextFont>,
+    /// Wayland windows already placed (place.rs: on their first sized commit).
+    pub placed: std::collections::HashSet<Window>,
     /// The process exit status (control.rs: 75 = restart me).
     pub exit_code: i32,
     pub popups: PopupManager,
@@ -167,6 +169,7 @@ impl Server {
             last_title_press: None,
             shot_pending: Vec::new(),
             title_font: crate::text::TextFont::load(),
+            placed: Default::default(),
             exit_code: 0,
             popups,
             seat,

@@ -42,20 +42,6 @@ impl Server {
     pub fn window_for_x11(&self, x: &X11Surface) -> Option<Window> {
         self.space.elements().find(|w| w.x11_surface() == Some(x)).cloned()
     }
-
-    /// The monitor the pointer is on (else the first).
-    fn output_geometry_at_pointer(&self) -> Option<Rectangle<i32, Logical>> {
-        let at = self.seat.get_pointer()?.current_location();
-        let mut first = None;
-        for o in self.space.outputs() {
-            let g = self.space.output_geometry(o)?;
-            if g.to_f64().contains(at) {
-                return Some(g);
-            }
-            first.get_or_insert(g);
-        }
-        first
-    }
 }
 
 impl XwmHandler for Server {
@@ -70,21 +56,9 @@ impl XwmHandler for Server {
         if let Err(e) = window.set_mapped(true) {
             return tracing::warn!("X11 map: {e}");
         }
-        // Centred on the monitor under the pointer, kept on it.
-        // (Below a title bar's height, so the server's bar stays on the monitor.)
-        let size = window.geometry().size;
-        let top = crate::decor::TITLE_H;
-        let loc = self
-            .output_geometry_at_pointer()
-            .map(|o| {
-                (
-                    o.loc.x + ((o.size.w - size.w) / 2).max(0),
-                    o.loc.y + ((o.size.h - size.h) / 2).max(top),
-                )
-                    .into()
-            })
-            .unwrap_or_default();
-        let rect = Rectangle::new(loc, size);
+        // On a monitor and fitting it (place.rs).
+        let rect = self.place_x11(&window);
+        let loc = rect.loc;
         let _ = window.configure(rect);
         tracing::info!("X11 window {:?} {:?} at {:?}", window.title(), window.class(), rect);
         let w = Window::new_x11_window(window);
@@ -119,7 +93,14 @@ impl XwmHandler for Server {
         _reorder: Option<Reorder>,
     ) {
         // Size as asked; position only before it is mapped (the server places windows).
+        // Once mapped, from where the server has it: X may not have caught up with
+        // our last configure yet (AlbumWall snapped back to 0,0 on its first resize).
         let mut geo = window.geometry();
+        if let Some(w) = self.window_for_x11(&window)
+            && let Some(g) = self.space.element_geometry(&w)
+        {
+            geo.loc = g.loc;
+        }
         if let Some(w) = w {
             geo.size.w = w as i32;
         }
@@ -160,7 +141,7 @@ impl XwmHandler for Server {
     }
 
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        if let (Some(w), Some(o)) = (self.window_for_x11(&window), self.output_geometry_at_pointer()) {
+        if let (Some(w), Some(o)) = (self.window_for_x11(&window), self.output_at_pointer()) {
             let _ = window.set_fullscreen(true);
             let _ = window.configure(o);
             self.space.map_element(w, o.loc, true);
