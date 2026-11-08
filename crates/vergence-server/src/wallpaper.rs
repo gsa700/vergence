@@ -115,10 +115,14 @@ impl Server {
         let _ = self.loop_handle.insert_source(
             smithay::reexports::calloop::timer::Timer::from_duration(std::time::Duration::from_secs(1)),
             |_, _, state| {
+                let t = std::time::Instant::now();
                 if let Some(w) = state.wallpaper.as_mut()
                     && w.reload_if_changed()
                 {
                     state.redraw_all();
+                }
+                if t.elapsed().as_millis() > 20 {
+                    tracing::warn!("slow: wallpaper check {} ms", t.elapsed().as_millis());
                 }
                 smithay::reexports::calloop::timer::TimeoutAction::ToDuration(std::time::Duration::from_secs(1))
             },

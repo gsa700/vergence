@@ -192,12 +192,23 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
             scan(state, false);
         }
     })?;
-    event_loop.handle().insert_source(Timer::from_duration(Duration::from_secs(2)), |_, _, state| {
-        if state.session.as_ref().is_some_and(|s| s.is_active()) {
-            scan(state, false);
-        }
-        TimeoutAction::ToDuration(Duration::from_secs(2))
-    })?;
+    // FreeBSD: libudev-devd passes input devices, not DRM hotplug, and every way of
+    // asking DRM for connector state probes the monitors (EDID over DDC: 327 ms with
+    // the server blocked; polling every 2 s froze dragged windows, 2026-11-07). The
+    // kernel tells devd, so a thread reads devd's pipe (as vergd does) and the
+    // scan, with its probe, runs only when a monitor really came or went.
+    #[cfg(target_os = "freebsd")]
+    {
+        let (tx, rx) = smithay::reexports::calloop::channel::channel::<()>();
+        std::thread::spawn(move || devd_hotplug(tx));
+        event_loop.handle().insert_source(rx, |event, _, state| {
+            if let smithay::reexports::calloop::channel::Event::Msg(()) = event
+                && state.session.as_ref().is_some_and(|s| s.is_active())
+            {
+                scan(state, false);
+            }
+        })?;
+    }
     scan(state, true);
     let crtcs: Vec<crtc::Handle> = state.backend.as_ref().map(|b| b.surfaces.keys().copied().collect()).unwrap_or_default();
     for c in crtcs {
@@ -274,6 +285,49 @@ fn scan(state: &mut Server, startup: bool) {
     }
     if changed {
         setup_changed(state, anchors);
+    }
+}
+
+/// devd's DRM connector hotplug events (FreeBSD), one message each, for as long as
+/// devd runs: `!system=DRM subsystem=CONNECTOR type=HOTPLUG cdev=dri/card0 ...`.
+#[cfg(target_os = "freebsd")]
+fn devd_hotplug(tx: smithay::reexports::calloop::channel::Sender<()>) {
+    use std::io::BufRead;
+    const PIPE: &str = "/var/run/devd.pipe";
+    loop {
+        match std::os::unix::net::UnixStream::connect(PIPE) {
+            Ok(stream) => {
+                for line in std::io::BufReader::new(stream).lines() {
+                    let Ok(line) = line else { break };
+                    if is_drm_hotplug(&line) {
+                        tracing::info!("devd: {line}");
+                        if tx.send(()).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+            Err(e) => tracing::warn!("{PIPE}: {e}"),
+        }
+        std::thread::sleep(Duration::from_secs(5));
+    }
+}
+
+#[cfg_attr(not(target_os = "freebsd"), allow(dead_code))]
+fn is_drm_hotplug(line: &str) -> bool {
+    line.strip_prefix('!').is_some_and(|rest| {
+        let mut w = rest.split_whitespace();
+        rest.contains("system=DRM") && w.any(|x| x == "type=HOTPLUG")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn devd_drm_hotplug() {
+        assert!(super::is_drm_hotplug("!system=DRM subsystem=CONNECTOR type=HOTPLUG cdev=dri/card0 connector=115"));
+        assert!(!super::is_drm_hotplug("!system=USB subsystem=DEVICE type=ATTACH"));
+        assert!(!super::is_drm_hotplug("+uhid0 at bus=0"));
     }
 }
 
@@ -388,7 +442,11 @@ fn render(state: &mut Server, crtc: crtc::Handle) {
     // The backend is taken out of the state for the frame, so the scene can be
     // built from the state with the backend's renderer.
     let Some(mut backend) = state.backend.take() else { return };
+    let t = std::time::Instant::now();
     render_with(state, &mut backend, crtc);
+    if t.elapsed().as_millis() > 20 {
+        tracing::warn!("slow: frame {} ms", t.elapsed().as_millis());
+    }
     state.backend = Some(backend);
 }
 

@@ -1,0 +1,15 @@
+[package]
+name = "vergence-settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Vergence's settings app (prototype): wallpaper and common desktop settings"
+
+# Slint (whitepaper §8: the tools' toolkit; open question 8, Slint or iced, is
+# decided by this prototype). Slint is GPLv3 or its royalty-free license (asks
+# for attribution): to settle before Vergence is published.
+[dependencies]
+slint = "1.18"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

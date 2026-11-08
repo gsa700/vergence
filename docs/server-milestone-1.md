@@ -252,3 +252,21 @@ accessibility (Contract 3); display-list surfaces.
   on the session's VT (~1000 log lines a second; stopped by restarting
   lightdm). greetd is not packaged for FreeBSD. Hubble now logs in on the text
   console: `vergence` or `xfce`. Restarts work from the console.
+- **Hotplug without stalls (2026-11-07):** dragged windows froze for a moment
+  every few seconds (Dave). libinput: "event processing lagging behind by
+  400 ms". Cause: the 2 s hotplug poll. Smithay's DrmScanner forces a probe of
+  every connector, and on FreeBSD even the non-forcing GETCONNECTOR (drm-ffi's
+  one-mode dummy) took 327 ms each time, the server blocked. Now a thread reads
+  devd's pipe (as vergd does) and the scan runs only on `!system=DRM
+  subsystem=CONNECTOR type=HOTPLUG`; no polling. Control-socket round trips
+  over 8 s: p95 240 ms -> 0.2 ms. The server now warns of any frame or timer
+  over 20 ms ("slow: ..."). To re-check: unplug/replug on devd events.
+- **Settings app prototype (2026-11-07):** `crates/vergence-settings`, Slint
+  1.18 (whitepaper §8; answers open question 8 for Slint): builds on FreeBSD
+  (~3.5 min first build), runs under the server as a native Wayland client
+  (server title bar, fractional scale). Wallpaper page lists
+  /usr/local/share/backgrounds and ~/Pictures, mode and colour, Apply writes
+  desktop.toml; the server renders it (round trip checked). Known: Slint's
+  winit backend sends no app_id (set_xdg_app_id has no effect; needs its winit
+  attributes hook), Fluent light style, no D-Bus session bus warning, Slint's
+  licence (GPLv3 or royalty-free with attribution) to settle before publishing.
