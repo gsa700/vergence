@@ -77,4 +77,18 @@ accessibility (Contract 3); display-list surfaces.
 - **1d:** Smithay draws a straddling window on both outputs, each at its own
   scale. Nested, both outputs are on one host monitor, so "the same physical
   size the whole way" is proved on the real panels in stage 2.
+- **Stage 2, first light (2026-11-07):** `vergence-server --drm` from a text
+  console on Hubble (libseat/seatd, udev, libinput; one GPU, GBM + EGL, one
+  `DrmOutputManager`), adapted from anvil's backend. Each monitor's EDID is
+  read from DRM, parsed by vergence-edid and derived by vergence-profile:
+  HDMI-A-2 the 14" at native 3840x2160 -> 3.28 (left), HDMI-A-1 the ASUS
+  1920x1080 -> 1.07 (right; order from `VERGENCE_LEFT_TO_RIGHT`). Needs the
+  vendored drm-rs FreeBSD fix (patches/README.md); smithay-drm-extras without
+  libdisplay-info. Scales are rounded to 120ths, the unit wp-fractional-scale-v1
+  gives apps, so outputs match what apps draw at: the ASUS at its exact 1.0703
+  was soft (apps drew at 128/120), at 128/120 it is sharp. Dave: "looks really
+  good", text size right on both, window and mouse as expected, "snappy";
+  after the 120ths fix, the ASUS "sharp and clear as it should be".
+  Ctrl+Alt+Backspace quits, Ctrl+Alt+Fn switches consoles. Launcher on Hubble:
+  ~/run-vergence-drm.sh.
 

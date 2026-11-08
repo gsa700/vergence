@@ -55,10 +55,14 @@ pub struct Server {
     /// The nested window's outputs, left to right (1c).
     pub regions: Vec<OutputRegion>,
     pub window_px: smithay::utils::Size<i32, smithay::utils::Physical>,
+    /// Stage 2: the DRM backend and the libseat session (None when nested).
+    pub backend: Option<crate::drm::Backend>,
+    pub session: Option<smithay::backend::session::libseat::LibSeatSession>,
+    pub loop_handle: smithay::reexports::calloop::LoopHandle<'static, Server>,
 }
 
 impl Server {
-    pub fn new(event_loop: &mut EventLoop<Self>, display: Display<Self>) -> Self {
+    pub fn new(event_loop: &mut EventLoop<'static, Self>, display: Display<Self>) -> Self {
         let start_time = std::time::Instant::now();
 
         let dh = display.handle();
@@ -130,6 +134,9 @@ impl Server {
             seat,
             regions: Vec::new(),
             window_px: (1, 1).into(),
+            backend: None,
+            session: None,
+            loop_handle: event_loop.handle(),
         }
     }
 

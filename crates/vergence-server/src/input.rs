@@ -14,6 +14,12 @@ use smithay::{
 
 use crate::state::Server;
 
+/// What a key does before any app sees it.
+enum KeyAction {
+    Quit,
+    Vt(i32),
+}
+
 impl Server {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         match event {
@@ -21,16 +27,60 @@ impl Server {
                 let serial = SERIAL_COUNTER.next_serial();
                 let time = Event::time(&event);
 
-                self.seat.get_keyboard().unwrap().input::<(), _>(
+                // Ctrl+Alt+Backspace quits; Ctrl+Alt+Fn switches consoles (stage 2).
+                let action = self.seat.get_keyboard().unwrap().input::<KeyAction, _>(
                     self,
                     event.key_code(),
                     event.state(),
                     serial,
                     time,
-                    |_, _, _| FilterResult::Forward,
+                    |_, mods, handle| {
+                        let sym = handle.modified_sym().raw();
+                        if event.state() == smithay::backend::input::KeyState::Pressed {
+                            if mods.ctrl && mods.alt && sym == smithay::input::keyboard::keysyms::KEY_BackSpace {
+                                return FilterResult::Intercept(KeyAction::Quit);
+                            }
+                            let vt1 = smithay::input::keyboard::keysyms::KEY_XF86Switch_VT_1;
+                            if (vt1..vt1 + 12).contains(&sym) {
+                                return FilterResult::Intercept(KeyAction::Vt((sym - vt1 + 1) as i32));
+                            }
+                        }
+                        FilterResult::Forward
+                    },
                 );
+                match action {
+                    Some(KeyAction::Quit) => self.loop_signal.stop(),
+                    Some(KeyAction::Vt(n)) => {
+                        if let Some(session) = self.session.as_mut() {
+                            use smithay::backend::session::Session;
+                            if let Err(e) = session.change_vt(n) {
+                                tracing::warn!("console {n}: {e:?}");
+                            }
+                        }
+                    }
+                    None => {}
+                }
             }
-            InputEvent::PointerMotion { .. } => {}
+            InputEvent::PointerMotion { event, .. } => {
+                // A mouse on the real monitors (stage 2): moved by its delta, kept on the outputs.
+                use smithay::backend::input::PointerMotionEvent;
+                let pointer = self.seat.get_pointer().unwrap();
+                let mut pos = pointer.current_location() + event.delta();
+                let mut bounds: Option<smithay::utils::Rectangle<i32, smithay::utils::Logical>> = None;
+                for o in self.space.outputs() {
+                    if let Some(g) = self.space.output_geometry(o) {
+                        bounds = Some(bounds.map_or(g, |b| b.merge(g)));
+                    }
+                }
+                if let Some(b) = bounds {
+                    pos.x = pos.x.clamp(b.loc.x as f64, (b.loc.x + b.size.w) as f64 - 1.0);
+                    pos.y = pos.y.clamp(b.loc.y as f64, (b.loc.y + b.size.h) as f64 - 1.0);
+                }
+                let serial = SERIAL_COUNTER.next_serial();
+                let under = self.surface_under(pos);
+                pointer.motion(self, under, &MotionEvent { location: pos, serial, time: Event::time(&event) });
+                pointer.frame(self);
+            }
             InputEvent::PointerMotionAbsolute { event, .. } => {
                 // The position in the host window, mapped through the output it is over
                 // (1c): its left edge in logical space plus the offset at its scale.

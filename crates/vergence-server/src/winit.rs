@@ -67,7 +67,7 @@ pub fn init_winit(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Res
     let mut virtuals: Vec<Virtual> = panels()
         .into_iter()
         .map(|p| {
-            let scale = derive(p.px, Some(p.mm), Distance::Desktop, 1.0).exact;
+            let scale = crate::scale_in_120ths(derive(p.px, Some(p.mm), Distance::Desktop, 1.0).exact);
             tracing::info!("output {:?}: {}x{} px, {}x{} mm, scale {scale:.2}", p.name, p.px.0, p.px.1, p.mm.0, p.mm.1);
             let output = Output::new(
                 p.name.clone(),
