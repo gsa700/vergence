@@ -386,3 +386,54 @@ Techbench's monitor before the LG 6K. Expected, with typical panel sizes
 - HDMI fakes at 4K are 30 Hz only; DP connectors would do 60 Hz but a
   forced DP connector with no monitor may fail link training (not needed
   for the tests).
+
+## Found with real monitors (Hubble, 2026-11-07)
+
+The cables came; the 32" waits for a VGA cable, so the first real pair was
+the **ASUS VS229** (21.5" viewable, 103 ppi) and the **14" 4K** (EDID: SGT
+0x0000 "HDMI", serial 1, 310 x 174 mm, 315 ppi). Dave's tape matched both
+EDID sizes (21.5" and 14" diagonals).
+
+**Passed**
+
+- Mode A, render 4, desktop 11861 x 4038 (under 16,384): the size boxes
+  are 52.9 to 53.0 mm on both monitors in GTK 3, Qt and Avalonia
+  (`vergence-harness measure`), and Dave's ruler read the same on both
+  screens. Text size "close": the preference stays 100%.
+- Port independence with real cables (milestone 3, 2a): both monitors
+  swapped ports and the setup was recognised and restored, every window
+  back on its monitor.
+
+**Learned**
+
+- The 14" through Dave's passive DP to mini-HDMI cable and through Hubble's
+  HDMI 1.4 port both cap 4K at 30 Hz. At 30 Hz the desktop felt laggy; at
+  1080p 60 Hz "much smoother, text a little softer but fine". The refresh
+  rate, not Mode A's rendering, was most of the lag.
+- In Mode A, xfwm4's compositor on the rendered desktop is costly (turned
+  off on Hubble), and so is a large pointer: X draws it in software when
+  outputs are scaled. The pointer is now 48 (base 12 x 4) on Hubble.
+- The panel's preferred timing (3840x2160 at 60 Hz) was not in the mode
+  list, so RandR marked no mode preferred and vergd found no native mode.
+  Fixed: the native mode is the preferred timing's resolution at the best
+  refresh offered (`native_from_edid`).
+
+**To fix**
+
+1. The Mode A factor must come from the current mode, not the native one:
+   at 1080p the 14" kept 4K's x1.219 (things twice the size, half the
+   desktop space, a dead strip before the ASUS) instead of x2.44, which was
+   set by hand for the test.
+2. A factor changed by hand (xrandr --scale) is not learned.
+3. A second edit of settings.toml went unnoticed until vergd restarted.
+4. On FreeBSD, re-probe about a second after a DRM hot-plug: the first
+   probe saw only the kernel's 800x600 fallback list for the new 14".
+5. Do not learn an arrangement in which a monitor runs no mode from its
+   EDID (vergd saved Xfce's 800x600 mirror of the new monitor).
+6. When the imported cursor theme is empty, X uses its core cursor, which
+   has one size; publish a theme (Adwaita on Hubble) so the cursor size
+   applies.
+7. xfwm4 chooses its -hdpi or -xhdpi theme only when it starts and has no
+   4x one: its title bars stay small until it is restarted.
+8. tools/sizebox/measure.sh moves a new window before vergd has placed it,
+   so vergd puts it back (the GTK 4 box was measured twice on the 14").

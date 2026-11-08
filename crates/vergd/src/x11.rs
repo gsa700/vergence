@@ -199,6 +199,21 @@ impl Setup {
     }
 }
 
+/// The native mode when RandR marks none preferred. The EDID's preferred timing
+/// can be missing from the mode list though the panel is there: the 14" 4K on
+/// Hubble's DP-2, through a passive DP-to-HDMI cable, prefers 3840x2160 at 60 Hz
+/// and gets only 30 Hz (2026-11-07), so X marks no mode preferred. The panel's
+/// native pixel grid is still the preferred timing's resolution: its best-refresh
+/// mode at that size. None without an EDID or without a mode of that size.
+fn native_from_edid(edid: Option<&[u8]>, modes: &[Mode]) -> Option<Mode> {
+    let t = vergence_edid::Edid::parse(edid?).ok()?.preferred_timing?;
+    modes
+        .iter()
+        .filter(|m| m.width == t.h_active && m.height == t.v_active)
+        .max_by_key(|m| m.refresh_mhz)
+        .cloned()
+}
+
 fn mode_of(info: &randr::ModeInfo) -> Mode {
     let total = info.htotal as u64 * info.vtotal as u64;
     let mut mhz = if total == 0 {
@@ -313,7 +328,11 @@ fn read_outputs(conn: &RustConnection, root: u32) -> Result<Setup, Box<dyn std::
         };
 
         let modes: Vec<Mode> = info.modes.iter().filter_map(|&m| mode(m)).collect();
-        let native = if info.num_preferred > 0 { modes.first().cloned() } else { None };
+        let native = if info.num_preferred > 0 {
+            modes.first().cloned()
+        } else {
+            native_from_edid(edid.as_deref(), &modes)
+        };
 
         let current = crtcs
             .iter()
@@ -354,4 +373,54 @@ fn read_outputs(conn: &RustConnection, root: u32) -> Result<Setup, Box<dyn std::
         screen: (geo.width, geo.height),
         screen_range: (range.min_width, range.min_height, range.max_width, range.max_height),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn m(id: u32, width: u16, height: u16, hz: u32) -> Mode {
+        Mode { id, width, height, refresh_mhz: hz * 1000 }
+    }
+
+    /// The 14" 4K panel's EDID as Hubble read it on 2026-11-07 (SGT, "HDMI",
+    /// preferred 3840x2160 at 60 Hz, 310 x 174 mm).
+    fn fourteen_inch_edid() -> Vec<u8> {
+        let mut e = vec![0u8; 128];
+        e[..8].copy_from_slice(&[0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]);
+        e[18] = 1;
+        e[19] = 3;
+        e[21] = 31;
+        e[22] = 17;
+        // DTD 1: 533.12 MHz, 3840x2160 (blank 160/62), 310 x 174 mm.
+        let clk = 53312u16;
+        e[54] = (clk & 0xff) as u8;
+        e[55] = (clk >> 8) as u8;
+        e[56] = (3840u16 & 0xff) as u8;
+        e[57] = 160;
+        e[58] = (((3840u16 >> 8) as u8) << 4) | 0;
+        e[59] = (2160u16 & 0xff) as u8;
+        e[60] = 62;
+        e[61] = ((2160u16 >> 8) as u8) << 4;
+        e[66] = (310u16 & 0xff) as u8;
+        e[67] = (174u16 & 0xff) as u8;
+        e[68] = (((310u16 >> 8) as u8) << 4) | ((174u16 >> 8) as u8);
+        let sum: u32 = e[..127].iter().map(|&b| b as u32).sum();
+        e[127] = ((256 - (sum % 256)) % 256) as u8;
+        e
+    }
+
+    #[test]
+    fn a_preferred_timing_the_cable_cannot_carry_still_gives_the_native_grid() {
+        let modes = [m(1, 3840, 2160, 30), m(2, 3840, 2160, 24), m(3, 2560, 1440, 60), m(4, 1920, 1080, 60)];
+        let n = native_from_edid(Some(&fourteen_inch_edid()), &modes).expect("native");
+        assert_eq!((n.width, n.height, n.refresh_mhz), (3840, 2160, 30_000));
+    }
+
+    #[test]
+    fn no_mode_of_the_preferred_size_means_no_native_mode() {
+        let modes = [m(3, 2560, 1440, 60), m(4, 1920, 1080, 60), m(5, 800, 600, 60)];
+        assert!(native_from_edid(Some(&fourteen_inch_edid()), &modes).is_none());
+        assert!(native_from_edid(None, &modes).is_none());
+    }
 }
