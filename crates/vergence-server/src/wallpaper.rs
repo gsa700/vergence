@@ -17,8 +17,13 @@
 // Each monitor gets the image rendered at its own native pixels, once per size:
 // PNG/JPEG resampled from the source (Catmull-Rom), SVG drawn at that size by resvg,
 // so it is sharp at any density. Rendering happens on a worker thread; until a
-// monitor's picture is ready it shows the colour. The file is checked every second
-// and changes apply at once.
+// monitor's picture is ready it shows the one before. The file is checked every
+// second and changes apply at once.
+//
+// Only a monitor whose own picture, fit, colour or size changed is drawn again
+// (2026-11-08: choosing a picture for one screen used to redraw both). The worker
+// keeps the last few decoded pictures, each shrunk to what the largest monitor
+// needs (an 8K JPEG is 130 MB decoded and took 1.4 s to draw again each time).
 
 use std::{
     collections::{HashMap, HashSet},
@@ -102,16 +107,29 @@ pub fn parse_color(s: &str) -> [f32; 3] {
     [((v >> 16) & 255) as f32 / 255.0, ((v >> 8) & 255) as f32 / 255.0, (v & 255) as f32 / 255.0]
 }
 
+/// What a monitor's picture is drawn from.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Look {
+    image: Option<PathBuf>,
+    mode: String,
+    color: String,
+}
+
+impl Look {
+    fn of(c: &WallpaperConfig) -> Look {
+        Look { image: c.image.clone(), mode: c.mode.clone(), color: c.color.clone() }
+    }
+}
+
 struct Job {
-    generation: u64,
-    config: WallpaperConfig,
+    look: Look,
     output: String,
     w: u32,
     h: u32,
 }
 
 struct Done {
-    generation: u64,
+    look: Look,
     output: String,
     w: u32,
     h: u32,
@@ -122,9 +140,9 @@ pub struct Wallpaper {
     pub config: WallpaperConfig,
     mtime: Option<SystemTime>,
     generation: u64,
-    /// Per output name: its picture (size, generation, pixels).
-    pictures: HashMap<String, (u32, u32, u64, MemoryRenderBuffer)>,
-    requested: HashSet<(String, u32, u32, u64)>,
+    /// Per output name: its picture (size, what it was drawn from, pixels).
+    pictures: HashMap<String, (u32, u32, Look, MemoryRenderBuffer)>,
+    requested: HashSet<(String, u32, u32, Look)>,
     jobs: std::sync::mpsc::Sender<Job>,
 }
 
@@ -167,14 +185,16 @@ impl Server {
     }
 
     fn wallpaper_done(&mut self, d: Done) {
+        let id = self.monitor_id(&d.output);
         let Some(w) = self.wallpaper.as_mut() else { return };
-        if d.generation != w.generation {
+        // Drawn for a look this monitor no longer has: drop it.
+        if d.look != Look::of(&w.config.for_monitor(&id)) {
             return;
         }
         match d.rgba {
             Some(rgba) => {
                 let buffer = MemoryRenderBuffer::from_slice(&rgba, Fourcc::Abgr8888, (d.w as i32, d.h as i32), 1, Transform::Normal, None);
-                w.pictures.insert(d.output, (d.w, d.h, d.generation, buffer));
+                w.pictures.insert(d.output, (d.w, d.h, d.look, buffer));
             }
             None => {
                 w.pictures.remove(&d.output);
@@ -217,11 +237,12 @@ impl Server {
         let config = w.config.for_monitor(&id);
         config.image.as_ref()?;
         let (pw, ph) = (px.w.max(1) as u32, px.h.max(1) as u32);
-        let current = w.pictures.get(output).filter(|(x, y, g, _)| *x == pw && *y == ph && *g == w.generation);
+        let look = Look::of(&config);
+        let current = w.pictures.get(output).filter(|(x, y, l, _)| *x == pw && *y == ph && *l == look);
         if current.is_none() {
-            let key = (output.to_string(), pw, ph, w.generation);
+            let key = (output.to_string(), pw, ph, look.clone());
             if w.requested.insert(key) {
-                let _ = w.jobs.send(Job { generation: w.generation, config, output: output.into(), w: pw, h: ph });
+                let _ = w.jobs.send(Job { look, output: output.into(), w: pw, h: ph });
             }
         }
         // The newest picture for this output, even from an older size, until the new one is ready.
@@ -263,26 +284,52 @@ impl Wallpaper {
         tracing::info!("wallpaper: {:?} {} {}", config.image, config.mode, config.color);
         self.config = config;
         self.generation += 1;
+        // Pictures stay: each monitor's is redrawn only if its own look changed.
         self.requested.clear();
         true
     }
 }
 
+/// Decoded pictures kept by the worker.
+const KEEP_SOURCES: usize = 3;
+
 fn worker(jobs: std::sync::mpsc::Receiver<Job>, done: Sender<Done>) {
-    // Decoded sources, kept while the same image is asked for.
-    let mut source: Option<(PathBuf, Source)> = None;
+    // The last few decoded pictures, newest first, each shrunk to `cover`.
+    // (path, shrunk, picture)
+    let mut sources: Vec<(PathBuf, bool, Source)> = Vec::new();
+    // The largest monitor drawn for so far: rasters are kept at the size that
+    // fills it, no bigger.
+    let mut cover = (0u32, 0u32);
     while let Ok(job) = jobs.recv() {
-        let Some(path) = job.config.image.clone() else { continue };
-        if source.as_ref().map(|(p, _)| p) != Some(&path) {
-            source = Source::load(&path).map(|s| (path.clone(), s));
-            if source.is_none() {
-                tracing::warn!("wallpaper: cannot read {}", path.display());
-            }
+        let Some(path) = job.look.image.clone() else { continue };
+        let grew = job.w > cover.0 || job.h > cover.1;
+        cover = (cover.0.max(job.w), cover.1.max(job.h));
+        if grew {
+            // Kept rasters may now be too small for this monitor.
+            sources.retain(|(_, _, s)| matches!(s, Source::Svg(_)));
         }
         let t = std::time::Instant::now();
-        let rgba = source.as_ref().map(|(_, s)| s.render(job.w, job.h, &job.config.mode, parse_color(&job.config.color)));
-        tracing::info!("wallpaper: {} at {}x{} in {} ms", job.output, job.w, job.h, t.elapsed().as_millis());
-        let _ = done.send(Done { generation: job.generation, output: job.output, w: job.w, h: job.h, rgba });
+        // "center" shows the picture at its own pixels: never from a shrunk copy.
+        let may_shrink = job.look.mode != "center";
+        let at = match sources.iter().position(|(p, shrunk, _)| *p == path && (may_shrink || !shrunk)) {
+            Some(i) => Some(i),
+            None => match Source::load(&path, cover, may_shrink) {
+                Some((s, shrunk)) => {
+                    sources.retain(|(p, _, _)| *p != path);
+                    sources.insert(0, (path.clone(), shrunk, s));
+                    sources.truncate(KEEP_SOURCES);
+                    Some(0)
+                }
+                None => {
+                    tracing::warn!("wallpaper: cannot read {}", path.display());
+                    None
+                }
+            },
+        };
+        let loaded = t.elapsed().as_millis();
+        let rgba = at.map(|i| sources[i].2.render(job.w, job.h, &job.look.mode, parse_color(&job.look.color)));
+        tracing::info!("wallpaper: {} at {}x{} in {} ms ({} ms to read)", job.output, job.w, job.h, t.elapsed().as_millis(), loaded);
+        let _ = done.send(Done { look: job.look, output: job.output, w: job.w, h: job.h, rgba });
     }
 }
 
@@ -292,14 +339,25 @@ enum Source {
 }
 
 impl Source {
-    fn load(path: &std::path::Path) -> Option<Source> {
+    /// Read a picture; a raster bigger than it needs to be to fill `cover` is
+    /// shrunk to that size at once (a triangle filter over the whole footprint:
+    /// Lanczos took a second for an 8K JPEG).
+    fn load(path: &std::path::Path, cover: (u32, u32), may_shrink: bool) -> Option<(Source, bool)> {
         let is_svg = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg") || e.eq_ignore_ascii_case("svgz"));
         if is_svg {
             let data = std::fs::read(path).ok()?;
             let opt = resvg::usvg::Options { resources_dir: path.parent().map(|p| p.to_path_buf()), ..Default::default() };
-            return resvg::usvg::Tree::from_data(&data, &opt).ok().map(Source::Svg);
+            return resvg::usvg::Tree::from_data(&data, &opt).ok().map(|t| (Source::Svg(t), false));
         }
-        image::open(path).ok().map(|i| Source::Raster(i.to_rgba8()))
+        let img = image::open(path).ok()?;
+        let (iw, ih) = (img.width() as f64, img.height() as f64);
+        let fill = (cover.0 as f64 / iw).max(cover.1 as f64 / ih);
+        if may_shrink && fill > 0.0 && fill < 0.9 {
+            let (nw, nh) = ((iw * fill).ceil() as u32, (ih * fill).ceil() as u32);
+            let small = img.resize_exact(nw.max(1), nh.max(1), image::imageops::FilterType::Triangle);
+            return Some((Source::Raster(small.to_rgba8()), true));
+        }
+        Some((Source::Raster(img.to_rgba8()), false))
     }
 
     /// The picture for a w x h output: premultiplied RGBA, the colour behind.

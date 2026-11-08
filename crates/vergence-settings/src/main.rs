@@ -20,6 +20,10 @@ use std::{
     cell::RefCell,
     path::{Path, PathBuf},
     rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
@@ -498,6 +502,42 @@ const SCHEMES: [&str; 3] = ["default", "dark", "light"];
 const THUMB_W: u32 = 560;
 const THUMB_H: u32 = 315;
 
+/// Previews are kept in ~/.cache/vergence/thumbnails, named by the picture's
+/// path, size and time, so they are drawn once (an 8K JPEG takes a second or
+/// more to decode) and the page opens with them at once.
+fn thumb_cache_path(path: &Path) -> Option<PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let meta = std::fs::metadata(path).ok()?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut h);
+    meta.len().hash(&mut h);
+    meta.modified().ok()?.hash(&mut h);
+    (THUMB_W, THUMB_H).hash(&mut h);
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join(".cache/vergence/thumbnails").join(format!("{:016x}.png", h.finish())))
+}
+
+/// A picture's preview: from the cache, else drawn and cached.
+fn cached_thumbnail(path: &Path) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+    let cache = thumb_cache_path(path);
+    if let Some(c) = &cache
+        && let Ok(img) = image::open(c)
+    {
+        let rgba = img.to_rgba8();
+        return Some(SharedPixelBuffer::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height()));
+    }
+    let px = thumbnail(path, THUMB_W, THUMB_H)?;
+    if let Some(c) = cache {
+        let _ = c.parent().map(std::fs::create_dir_all);
+        let tmp = c.with_extension("png.new");
+        // The format by name: the ".new" name says nothing (saving failed silently).
+        if image::save_buffer_with_format(&tmp, px.as_bytes(), px.width(), px.height(), image::ExtendedColorType::Rgba8, image::ImageFormat::Png).is_ok() {
+            let _ = std::fs::rename(&tmp, &c);
+        }
+    }
+    Some(px)
+}
+
 /// A w x h preview of a picture, filling (cropped), as the server draws "fill".
 fn thumbnail(path: &Path, w: u32, h: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
     let is_svg = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg"));
@@ -591,26 +631,34 @@ fn load_pictures(ui: &Settings, st: &mut State) {
         .chain(files.iter().map(|f| Source { label: f.display().to_string().into(), kind: "Picture".into() }))
         .collect();
     ui.set_sources(ModelRc::from(Rc::new(VecModel::from(sources))));
-    let list = st.files.clone();
-    let weak = ui.as_weak();
-    std::thread::spawn(move || {
-        for (i, f) in list.iter().enumerate() {
-            let Some(px) = thumbnail(f, THUMB_W, THUMB_H) else { continue };
-            let weak = weak.clone();
-            let path = f.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                let Some(ui) = weak.upgrade() else { return };
-                let m = ui.get_wallpapers();
-                // Only if the list is still the one this thread was drawing.
-                if let Some(mut row) = m.row_data(i)
-                    && row.name.as_str() == path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
-                {
-                    row.thumb = slint::Image::from_rgba8(px);
-                    m.set_row_data(i, row);
-                }
-            });
-        }
-    });
+    // Previews on a few threads at once (half the cores, at most 4), each
+    // shown as soon as it is ready.
+    let list = Arc::new(st.files.clone());
+    let next = Arc::new(AtomicUsize::new(0));
+    let threads = std::thread::available_parallelism().map(|n| (n.get() / 2).clamp(1, 4)).unwrap_or(2);
+    for _ in 0..threads {
+        let (list, next, weak) = (list.clone(), next.clone(), ui.as_weak());
+        std::thread::spawn(move || {
+            loop {
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                let Some(f) = list.get(i) else { break };
+                let Some(px) = cached_thumbnail(f) else { continue };
+                let weak = weak.clone();
+                let path = f.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = weak.upgrade() else { return };
+                    let m = ui.get_wallpapers();
+                    // Only if the list is still the one this thread was drawing.
+                    if let Some(mut row) = m.row_data(i)
+                        && row.name.as_str() == path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+                    {
+                        row.thumb = slint::Image::from_rgba8(px);
+                        m.set_row_data(i, row);
+                    }
+                });
+            }
+        });
+    }
     show_scope(ui, st);
 }
 
