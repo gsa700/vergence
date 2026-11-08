@@ -243,6 +243,17 @@ impl Server {
             self.menu_swallow = Some(button);
             return;
         }
+        // Notifications take clicks on themselves (notify.rs).
+        if button_state == ButtonState::Released && self.notes.swallow == Some(button) {
+            self.notes.swallow = None;
+            return;
+        }
+        if button_state == ButtonState::Pressed && self.notify_at(pointer.current_location()) {
+            let at = pointer.current_location();
+            self.notify_press(at);
+            self.notes.swallow = Some(button);
+            return;
+        }
 
         // (window, Some(edges) = resize / None = move)
         let mut grab_with: Option<(smithay::desktop::Window, Option<ResizeEdge>)> = None;

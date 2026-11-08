@@ -90,6 +90,8 @@ pub struct Server {
     pub dbus: crate::dbus::DBus,
     /// The desktop settings (settings.rs).
     pub settings: crate::settings::SettingsState,
+    /// Notifications on screen (notify.rs).
+    pub notes: crate::notify::Notifications,
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
@@ -202,6 +204,7 @@ impl Server {
             bus: Default::default(),
             dbus: Default::default(),
             settings: Default::default(),
+            notes: Default::default(),
             popups,
             seat,
             regions: Vec::new(),

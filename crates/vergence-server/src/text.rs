@@ -32,6 +32,25 @@ impl TextFont {
         Some(TextFont { font, points })
     }
 
+    /// Width of `text` in one line, in logical units (points at 96 per inch).
+    pub fn width(&self, text: &str) -> f32 {
+        let em = self.points as f64 * 96.0 / 72.0;
+        let units = self.font.units_per_em().unwrap_or(1000.0) as f64;
+        let px = PxScale::from((em * self.font.height_unscaled() as f64 / units) as f32);
+        let sf = self.font.as_scaled(px);
+        let mut x = 0.0;
+        let mut prev = None;
+        for c in text.chars() {
+            let g = sf.glyph_id(c);
+            if let Some(p) = prev {
+                x += sf.kern(p, g);
+            }
+            x += sf.h_advance(g);
+            prev = Some(g);
+        }
+        x
+    }
+
     /// `text` in one line, `w` x `h` premultiplied RGBA pixels, `color` (straight
     /// RGB 0-1), left aligned, centred vertically; cut with an ellipsis if too long.
     /// `scale` is the output's (physical pixels per point).

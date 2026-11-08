@@ -19,6 +19,10 @@
 // server's settings service (settings.rs), as the pseudo-connection ":1.0".
 // Other portal interfaces answer UnknownMethod, so apps fall back as before.
 //
+// Step 3: org.freedesktop.Notifications (same pseudo-connection) translated
+// into the server's own notifications (notify.rs). NotificationClosed and
+// ActionInvoked go only to the connection that made the notification.
+//
 // VERGENCE_DBUS=0 turns the edge off. Otherwise it takes over
 // DBUS_SESSION_BUS_ADDRESS when none is set, or always with VERGENCE_DBUS=1.
 
@@ -57,6 +61,8 @@ const E_LIMITS: &str = "org.freedesktop.DBus.Error.LimitsExceeded";
 const PORTAL_NAME: &str = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 const PORTAL_SETTINGS: &str = "org.freedesktop.portal.Settings";
+const NOTIFY_NAME: &str = "org.freedesktop.Notifications";
+const NOTIFY_PATH: &str = "/org/freedesktop/Notifications";
 const EDGE_UNIQUE: &str = ":1.0";
 const EDGE: u32 = 0;
 
@@ -370,7 +376,11 @@ impl Server {
             Some(dest) => match self.dbus_owner(&dest) {
                 Some(EDGE) => {
                     if m.kind == METHOD_CALL {
-                        self.dbus_portal(id, &m);
+                        if m.path.as_deref() == Some(NOTIFY_PATH) {
+                            self.dbus_notifications(id, &m);
+                        } else {
+                            self.dbus_portal(id, &m);
+                        }
                     }
                 }
                 Some(to) => self.dbus_deliver(to, &m),
@@ -424,7 +434,7 @@ impl Server {
     /// The connection that owns `name` (unique or well-known); EDGE for the
     /// services the edge provides itself.
     fn dbus_owner(&self, name: &str) -> Option<u32> {
-        if name == PORTAL_NAME || name == EDGE_UNIQUE {
+        if name == PORTAL_NAME || name == NOTIFY_NAME || name == EDGE_UNIQUE {
             return Some(EDGE);
         }
         if let Some(n) = name.strip_prefix(":1.") {
@@ -444,7 +454,7 @@ impl Server {
     /// Every name connection `id` owns, its unique name first.
     fn dbus_names_of(&self, id: u32) -> Vec<String> {
         if id == EDGE {
-            return vec![EDGE_UNIQUE.into(), PORTAL_NAME.into()];
+            return vec![EDGE_UNIQUE.into(), PORTAL_NAME.into(), NOTIFY_NAME.into()];
         }
         let mut out = vec![self.dbus_unique(id)];
         out.extend(self.dbus.names.iter().filter(|(_, q)| q.front().is_some_and(|(o, _)| *o == id)).map(|(n, _)| n.clone()));
@@ -546,7 +556,7 @@ impl Server {
                 None => err(E_INVALID_ARGS, "NameHasOwner(s)"),
             },
             (BUS_NAME, "ListNames") => {
-                let mut names = vec![BUS_NAME.to_string(), EDGE_UNIQUE.to_string(), PORTAL_NAME.to_string()];
+                let mut names = vec![BUS_NAME.to_string(), EDGE_UNIQUE.to_string(), PORTAL_NAME.to_string(), NOTIFY_NAME.to_string()];
                 names.extend(self.dbus.conns.values().filter_map(|c| c.unique.clone()));
                 names.extend(self.dbus.names.keys().cloned());
                 ok(&[Value::strings(names)])
@@ -634,7 +644,7 @@ impl Server {
 
     /// RequestName: 1 primary owner, 2 queued, 3 exists, 4 already owner.
     fn dbus_request_name(&mut self, id: u32, name: &str, flags: u32) -> Result<u32, String> {
-        if name.starts_with(':') || name == BUS_NAME || name == PORTAL_NAME || !vergence_dbus::valid_bus_name(name) {
+        if name.starts_with(':') || name == BUS_NAME || name == PORTAL_NAME || name == NOTIFY_NAME || !vergence_dbus::valid_bus_name(name) {
             return Err(format!("{name} can't be requested"));
         }
         let me = self.dbus_unique(id);
@@ -876,6 +886,65 @@ impl Server {
         }
     }
 
+    /// org.freedesktop.Notifications, translated into the server's notifications.
+    fn dbus_notifications(&mut self, id: u32, m: &Message) {
+        let args = m.args().unwrap_or_default();
+        let iface = m.interface.as_deref().unwrap_or("");
+        let member = m.member.as_deref().unwrap_or("");
+        let ok = |vals: &[Value]| Message::method_return(m, EDGE_UNIQUE, vals);
+        let err = |name: &str, text: &str| Message::error(m, EDGE_UNIQUE, name, text);
+        let reply = match (iface, member) {
+            ("org.freedesktop.DBus.Peer", "Ping") => ok(&[]),
+            ("org.freedesktop.DBus.Introspectable", "Introspect") => ok(&[Value::Str(NOTIFY_INTROSPECTION.into())]),
+            (NOTIFY_NAME, "GetCapabilities") | ("", "GetCapabilities") => ok(&[Value::strings(["body", "actions", "persistence"])]),
+            (NOTIFY_NAME, "GetServerInformation") | ("", "GetServerInformation") => ok(&[
+                Value::Str("Vergence".into()),
+                Value::Str("Vergence".into()),
+                Value::Str(env!("CARGO_PKG_VERSION").into()),
+                Value::Str("1.2".into()),
+            ]),
+            (NOTIFY_NAME, "Notify") | ("", "Notify") => match parse_notify(&args) {
+                Some(req) => {
+                    let nid = self.notify(crate::notify::Origin::DBus(id), req);
+                    ok(&[Value::U32(nid)])
+                }
+                None => err(E_INVALID_ARGS, "Notify(susssasa{sv}i)"),
+            },
+            (NOTIFY_NAME, "CloseNotification") | ("", "CloseNotification") => match args.first().and_then(Value::as_u32) {
+                Some(nid) => {
+                    if self.notify_close(crate::notify::Origin::DBus(id), nid) {
+                        ok(&[])
+                    } else {
+                        err(E_INVALID_ARGS, &format!("no notification {nid} of yours"))
+                    }
+                }
+                None => err(E_INVALID_ARGS, "CloseNotification(u)"),
+            },
+            _ => err(E_UNKNOWN_METHOD, &format!("{iface}.{member} is not provided by Vergence")),
+        };
+        if m.flags & NO_REPLY_EXPECTED == 0 {
+            self.dbus_reply(id, reply);
+        }
+    }
+
+    /// A signal from the notification service to one connection only.
+    fn dbus_notify_signal(&mut self, conn: u32, member: &str, args: &[Value]) {
+        let Some(dest) = self.dbus.conns.get(&conn).and_then(|c| c.unique.clone()) else { return };
+        let mut sig = Message::signal(EDGE_UNIQUE, NOTIFY_PATH, NOTIFY_NAME, member, args);
+        sig.destination = Some(dest);
+        sig.serial = self.dbus_next_serial();
+        let bytes = sig.serialize();
+        self.dbus_send_raw(conn, &bytes);
+    }
+
+    pub fn dbus_notification_closed(&mut self, conn: u32, id: u32, reason: u32) {
+        self.dbus_notify_signal(conn, "NotificationClosed", &[Value::U32(id), Value::U32(reason)]);
+    }
+
+    pub fn dbus_action_invoked(&mut self, conn: u32, id: u32, key: &str) {
+        self.dbus_notify_signal(conn, "ActionInvoked", &[Value::U32(id), Value::Str(key.into())]);
+    }
+
     fn dbus_log_read(&mut self, id: u32, ns: &str, key: &str) {
         if self.dbus.reads.insert((ns.to_string(), key.to_string())) {
             let program = self.dbus_who(id);
@@ -896,6 +965,61 @@ impl Server {
         }
     }
 }
+
+/// Notify(app_name s, replaces_id u, app_icon s, summary s, body s,
+/// actions as, hints a{sv}, expire_timeout i).
+fn parse_notify(args: &[Value]) -> Option<crate::notify::Request> {
+    let s = |i: usize| args.get(i).and_then(Value::as_str).map(str::to_owned);
+    let actions = match args.get(5)? {
+        Value::Array(_, items) => {
+            let flat: Vec<String> = items.iter().filter_map(Value::as_str).map(str::to_owned).collect();
+            flat.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0].clone(), c[1].clone())).collect()
+        }
+        _ => return None,
+    };
+    let mut urgency = 1;
+    if let Some(Value::Array(_, hints)) = args.get(6) {
+        for h in hints {
+            if let Value::Entry(k, v) = h
+                && k.as_str() == Some("urgency")
+                && let Value::Variant(v) = &**v
+            {
+                urgency = match **v {
+                    Value::Byte(b) => b,
+                    Value::U32(u) => u.min(2) as u8,
+                    Value::I32(i) => i.clamp(0, 2) as u8,
+                    _ => 1,
+                };
+            }
+        }
+    }
+    let timeout_ms = match args.get(7)? {
+        Value::I32(t) => *t,
+        _ => return None,
+    };
+    Some(crate::notify::Request {
+        app: s(0)?,
+        replaces: args.get(1)?.as_u32()?,
+        summary: s(3)?,
+        body: s(4)?,
+        urgency,
+        timeout_ms,
+        actions,
+    })
+}
+
+const NOTIFY_INTROSPECTION: &str = r#"<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <interface name="org.freedesktop.Notifications">
+    <method name="GetCapabilities"><arg type="as" direction="out"/></method>
+    <method name="Notify"><arg type="s" direction="in"/><arg type="u" direction="in"/><arg type="s" direction="in"/><arg type="s" direction="in"/><arg type="s" direction="in"/><arg type="as" direction="in"/><arg type="a{sv}" direction="in"/><arg type="i" direction="in"/><arg type="u" direction="out"/></method>
+    <method name="CloseNotification"><arg type="u" direction="in"/></method>
+    <method name="GetServerInformation"><arg type="s" direction="out"/><arg type="s" direction="out"/><arg type="s" direction="out"/><arg type="s" direction="out"/></method>
+    <signal name="NotificationClosed"><arg type="u"/><arg type="u"/></signal>
+    <signal name="ActionInvoked"><arg type="u"/><arg type="s"/></signal>
+  </interface>
+</node>
+"#;
 
 /// ReadAll's namespace patterns: empty means all; "org.gnome.*" a prefix.
 fn namespace_matches(patterns: &[String], ns: &str) -> bool {

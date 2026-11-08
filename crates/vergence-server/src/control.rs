@@ -11,6 +11,7 @@
 //   shot                 PNG of every monitor as shown -> ~/vergence-shots/
 //   windows              the windows: index, kind, title, class, geometry, monitor
 //   dbus                 the D-Bus edge: connections, names, every call seen
+//   notes                the notifications on screen
 //   spawn <command>      run a command (sh -c) inside the session
 //   move <i> <x> <y>     put window i's content at logical x, y
 //   focus <i>            raise window i and give it the keyboard
@@ -117,6 +118,7 @@ impl Server {
             }
             "windows" => self.describe_windows(),
             "dbus" => self.dbus_report(),
+            "notes" => self.notify_report(),
             "spawn" => {
                 let command = line["spawn".len()..].trim();
                 if command.is_empty() {
@@ -181,7 +183,7 @@ impl Server {
                 self.loop_signal.stop();
                 "quitting".into()
             }
-            _ => "commands: shot, windows, dbus, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
+            _ => "commands: shot, windows, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
         }
     }
 

@@ -205,6 +205,8 @@ impl Server {
         let windows: Vec<Window> = self.space.elements().rev().cloned().collect();
         // In front of everything: the desktop menu, if open (menu.rs).
         let mut elements = self.menu_elements(renderer, out, scale);
+        // Then notifications, in front of every window (notify.rs).
+        elements.extend(self.notify_elements(renderer, out, scale));
         for w in windows {
             let frame = self.frame_of(&w);
             let reach = frame.as_ref().map(|f| f.whole()).or_else(|| self.space.element_bbox(&w));

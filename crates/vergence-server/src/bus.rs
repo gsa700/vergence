@@ -214,6 +214,19 @@ impl Server {
                 let outputs = self.bus_outputs();
                 self.bus_send(id, ServerMsg::Outputs { serial, outputs });
             }
+            ClientMsg::Notify { serial, replaces, summary, body, urgency, timeout_ms, actions } => {
+                let app = c.app_id.clone().unwrap_or_default();
+                let req = crate::notify::Request { app, replaces, summary, body, urgency, timeout_ms, actions };
+                let nid = self.notify(crate::notify::Origin::Bus(id), req);
+                self.bus_send(id, ServerMsg::Notified { serial, id: nid });
+            }
+            ClientMsg::CloseNotification { serial, id: nid } => {
+                if self.notify_close(crate::notify::Origin::Bus(id), nid) {
+                    self.bus_send(id, ServerMsg::Done { serial });
+                } else {
+                    self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message: format!("no notification {nid} of yours") });
+                }
+            }
             ClientMsg::GetSettings { serial } => {
                 let settings = crate::settings::all(&self.settings.current);
                 self.bus_send(id, ServerMsg::Settings { serial, complete: true, settings });
@@ -347,6 +360,14 @@ impl Server {
             .collect();
         out.sort_by_key(|o| (o.x, o.y));
         out
+    }
+
+    pub fn bus_notification_closed(&mut self, client: u32, id: u32, reason: u32) {
+        self.bus_send(client, ServerMsg::NotificationClosed { id, reason });
+    }
+
+    pub fn bus_action_invoked(&mut self, client: u32, id: u32, key: &str) {
+        self.bus_send(client, ServerMsg::ActionInvoked { id, key: key.into() });
     }
 
     /// Settings changed (settings.rs): subscribers get the changed ones.

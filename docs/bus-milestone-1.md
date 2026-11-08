@@ -144,6 +144,33 @@ sent SettingChanged for accent-color, color-scheme (u 1) and the GNOME
 color-scheme ("prefer-dark") to gdbus monitor, and the same three as one
 "changed" event to `vbus watch settings`. Server tests: 3 new.
 
+## Step 3: notifications, drawn by the server (built 2026-11-08)
+
+- `vergence-server/src/notify.rs`: one notification service. Cards stack
+  down from the top-right of the monitor the pointer was on when the stack
+  started, 340 points wide, text rasterised at each monitor's pixels,
+  summary (2 lines) and body (4 lines, ellipsis), action buttons; light or
+  dark from the color-scheme setting; a red edge for critical ones. A click
+  runs the "default" action (if any) or a button's action, then closes the
+  card. Timeouts: the app's, 5 s when it leaves it to the server, never for
+  critical ones; at most 5 cards (the oldest closes as expired).
+- Ownership: only the connection that made a notification can replace or
+  close it, and only it receives NotificationClosed / ActionInvoked
+  (unicast; never broadcast).
+- Core bus: Notify, CloseNotification, Notified, NotificationClosed,
+  ActionInvoked. `vbus notify <summary> [body] [--critical] [--action k=Label]`.
+- D-Bus edge: org.freedesktop.Notifications (GetCapabilities: body,
+  actions, persistence; GetServerInformation; Notify with the urgency hint;
+  CloseNotification). Body markup and icons are not drawn yet (not
+  advertised, so apps send plain text).
+- `vctl notes` lists the cards.
+
+Tested nested: gdbus GetCapabilities/GetServerInformation; `notify-send -w`
+returned when its card expired at 5.08 s (the unicast NotificationClosed
+arrived); closing another connection's notification is refused; `vbus
+notify` got Notified and "closed (expired)". Tests: 1 new (wrapping) plus
+the new protocol messages.
+
 ## Not in this step
 
 Permissions beyond the uid check; the pid; settings and notifications

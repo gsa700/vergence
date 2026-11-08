@@ -161,8 +161,8 @@ impl Client {
 /// The serial a server message answers, if it is a reply (events have 0).
 pub fn reply_serial(m: &ServerMsg) -> Option<u32> {
     let s = match m {
-        ServerMsg::Welcome { .. } => return None,
-        ServerMsg::Pong { serial } | ServerMsg::Done { serial } => *serial,
+        ServerMsg::Welcome { .. } | ServerMsg::NotificationClosed { .. } | ServerMsg::ActionInvoked { .. } => return None,
+        ServerMsg::Pong { serial } | ServerMsg::Done { serial } | ServerMsg::Notified { serial, .. } => *serial,
         ServerMsg::Error { serial, .. } | ServerMsg::Outputs { serial, .. } | ServerMsg::Settings { serial, .. } => *serial,
     };
     (s != 0).then_some(s)

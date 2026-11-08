@@ -4,6 +4,8 @@
 //   vbus outputs              the monitors, once
 //   vbus settings             the desktop settings, once
 //   vbus watch <topic>        subscribe and print every event (Ctrl+C ends)
+//   vbus notify <summary> [body] [--critical] [--action key=Label]...
+//                             show a notification and wait until it closes
 //
 // Finds the bus from $VERGENCE_BUS, else $WAYLAND_DISPLAY in $XDG_RUNTIME_DIR.
 // --socket <path> names it directly.
@@ -66,7 +68,41 @@ fn run(socket: Option<std::path::PathBuf>, args: &[String]) -> Result<(), Box<dy
                 }
             }
         }
-        _ => return Err("usage: vbus [--socket <path>] ping | outputs | settings | watch <topic>".into()),
+        Some("notify") => {
+            let mut words = Vec::new();
+            let mut actions = Vec::new();
+            let mut urgency = 1;
+            let mut it = args[1..].iter();
+            while let Some(a) = it.next() {
+                match a.as_str() {
+                    "--critical" => urgency = 2,
+                    "--action" => {
+                        let kv = it.next().ok_or("--action key=Label")?;
+                        let (k, l) = kv.split_once('=').ok_or("--action key=Label")?;
+                        actions.push((k.to_string(), l.to_string()));
+                    }
+                    _ => words.push(a.clone()),
+                }
+            }
+            let summary = words.first().cloned().ok_or("vbus notify <summary> [body]")?;
+            let body = words.get(1).cloned().unwrap_or_default();
+            let id = match c.request(|serial| ClientMsg::Notify { serial, replaces: 0, summary, body, urgency, timeout_ms: -1, actions })? {
+                ServerMsg::Notified { id, .. } => id,
+                other => return Err(format!("unexpected {other:?}").into()),
+            };
+            println!("notification {id}");
+            loop {
+                match c.next_event()? {
+                    ServerMsg::ActionInvoked { id: i, key } if i == id => println!("action {key:?}"),
+                    ServerMsg::NotificationClosed { id: i, reason } if i == id => {
+                        println!("closed ({})", match reason { 1 => "expired", 2 => "dismissed", 3 => "closed", _ => "?" });
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => return Err("usage: vbus [--socket <path>] ping | outputs | settings | watch <topic> | notify <summary> [body]".into()),
     }
     Ok(())
 }

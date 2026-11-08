@@ -8,8 +8,9 @@
 //! to arrive with serial 0.
 //!
 //! Version 1 has the bus itself and two topics: the monitors
-//! ([`Topic::Outputs`]) and the desktop settings ([`Topic::Settings`]).
-//! Notifications come next.
+//! ([`Topic::Outputs`]) and the desktop settings ([`Topic::Settings`]); and
+//! notifications ([`ClientMsg::Notify`]), whose events go only to the client
+//! that made them.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
@@ -155,6 +156,13 @@ pub enum ClientMsg {
     GetOutputs { serial: u32 },
     /// Every setting now, as a reply (no subscription).
     GetSettings { serial: u32 },
+    /// Show a notification (or replace one of this client's: `replaces`, else
+    /// 0). `urgency` 0 low, 1 normal, 2 critical; `timeout_ms` -1 for the
+    /// server's choice, 0 to stay until clicked. `actions` are (key, label);
+    /// "default" is a click on the notification. Reply: [`ServerMsg::Notified`].
+    Notify { serial: u32, replaces: u32, summary: String, body: String, urgency: u8, timeout_ms: i32, actions: Vec<(String, String)> },
+    /// Close one of this client's notifications. Reply: Done, or an error.
+    CloseNotification { serial: u32, id: u32 },
 }
 
 /// Server to client.
@@ -171,6 +179,13 @@ pub enum ServerMsg {
     /// every setting), or an event with the ones that changed. A setting
     /// that disappeared is not sent; a later version may add removals.
     Settings { serial: u32, complete: bool, settings: Vec<Setting> },
+    /// The id of a notification just shown.
+    Notified { serial: u32, id: u32 },
+    /// One of this client's notifications closed. `reason`: 1 expired, 2
+    /// dismissed by the user, 3 closed by the client.
+    NotificationClosed { id: u32, reason: u32 },
+    /// The user chose an action on one of this client's notifications.
+    ActionInvoked { id: u32, key: String },
 }
 
 mod op {
@@ -181,6 +196,8 @@ mod op {
     pub const UNSUBSCRIBE: u16 = 4;
     pub const GET_OUTPUTS: u16 = 5;
     pub const GET_SETTINGS: u16 = 6;
+    pub const NOTIFY: u16 = 7;
+    pub const CLOSE_NOTIFICATION: u16 = 8;
     // Server to client.
     pub const WELCOME: u16 = 1;
     pub const PONG: u16 = 2;
@@ -188,6 +205,9 @@ mod op {
     pub const ERROR: u16 = 4;
     pub const OUTPUTS: u16 = 5;
     pub const SETTINGS: u16 = 6;
+    pub const NOTIFIED: u16 = 7;
+    pub const NOTIFICATION_CLOSED: u16 = 8;
+    pub const ACTION_INVOKED: u16 = 9;
 }
 
 fn put_setting_value(e: &mut Encoder, v: &SettingValue) {
@@ -258,6 +278,19 @@ impl ClientMsg {
                 e.u32(*serial);
                 e
             }
+            ClientMsg::Notify { serial, replaces, summary, body, urgency, timeout_ms, actions } => {
+                let mut e = Encoder::frame(op::NOTIFY);
+                e.u32(*serial).u32(*replaces).str(summary).str(body).u8(*urgency).i32(*timeout_ms).count(actions.len());
+                for (k, l) in actions {
+                    e.str(k).str(l);
+                }
+                e
+            }
+            ClientMsg::CloseNotification { serial, id } => {
+                let mut e = Encoder::frame(op::CLOSE_NOTIFICATION);
+                e.u32(*serial).u32(*id);
+                e
+            }
         };
         e.finish()
     }
@@ -287,6 +320,28 @@ impl ClientMsg {
             }
             op::GET_OUTPUTS => Ok(ClientMsg::GetOutputs { serial: d.u32().map_err(|e| bad(0, e))? }),
             op::GET_SETTINGS => Ok(ClientMsg::GetSettings { serial: d.u32().map_err(|e| bad(0, e))? }),
+            op::NOTIFY => {
+                let serial = d.u32().map_err(|e| bad(0, e))?;
+                let rest = (|| -> Result<ClientMsg, WireError> {
+                    let replaces = d.u32()?;
+                    let summary = d.str()?;
+                    let body = d.str()?;
+                    let urgency = d.u8()?;
+                    let timeout_ms = d.i32()?;
+                    let n = d.count(8)?;
+                    let mut actions = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        actions.push((d.str()?, d.str()?));
+                    }
+                    Ok(ClientMsg::Notify { serial, replaces, summary, body, urgency, timeout_ms, actions })
+                })();
+                rest.map_err(|e| bad(serial, e))
+            }
+            op::CLOSE_NOTIFICATION => {
+                let serial = d.u32().map_err(|e| bad(0, e))?;
+                let id = d.u32().map_err(|e| bad(serial, e))?;
+                Ok(ClientMsg::CloseNotification { serial, id })
+            }
             other => {
                 // Every request starts with its serial; answer with it if present.
                 let serial = d.u32().unwrap_or(0);
@@ -336,6 +391,21 @@ impl ServerMsg {
                 }
                 e
             }
+            ServerMsg::Notified { serial, id } => {
+                let mut e = Encoder::frame(op::NOTIFIED);
+                e.u32(*serial).u32(*id);
+                e
+            }
+            ServerMsg::NotificationClosed { id, reason } => {
+                let mut e = Encoder::frame(op::NOTIFICATION_CLOSED);
+                e.u32(*id).u32(*reason);
+                e
+            }
+            ServerMsg::ActionInvoked { id, key } => {
+                let mut e = Encoder::frame(op::ACTION_INVOKED);
+                e.u32(*id).str(key);
+                e
+            }
         };
         e.finish()
     }
@@ -376,6 +446,9 @@ impl ServerMsg {
                 }
                 ServerMsg::Settings { serial, complete, settings }
             }
+            op::NOTIFIED => ServerMsg::Notified { serial: d.u32()?, id: d.u32()? },
+            op::NOTIFICATION_CLOSED => ServerMsg::NotificationClosed { id: d.u32()?, reason: d.u32()? },
+            op::ACTION_INVOKED => ServerMsg::ActionInvoked { id: d.u32()?, key: d.str()? },
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -409,6 +482,16 @@ mod tests {
             ClientMsg::GetOutputs { serial: 12 },
             ClientMsg::GetSettings { serial: 13 },
             ClientMsg::Subscribe { serial: 14, topic: Topic::Settings },
+            ClientMsg::Notify {
+                serial: 15,
+                replaces: 0,
+                summary: "Build finished".into(),
+                body: "vergence-server, 14 s".into(),
+                urgency: 1,
+                timeout_ms: -1,
+                actions: vec![("default".into(), "Open".into()), ("log".into(), "Show log".into())],
+            },
+            ClientMsg::CloseNotification { serial: 16, id: 3 },
         ] {
             assert_eq!(ClientMsg::decode(&frame(&m.encode().unwrap())).unwrap(), m);
         }
@@ -424,6 +507,9 @@ mod tests {
             ServerMsg::Error { serial: 12, code: ErrorCode::Other(77), message: String::new() },
             ServerMsg::Outputs { serial: 0, outputs: outputs() },
             ServerMsg::Outputs { serial: 4, outputs: Vec::new() },
+            ServerMsg::Notified { serial: 15, id: 3 },
+            ServerMsg::NotificationClosed { id: 3, reason: 2 },
+            ServerMsg::ActionInvoked { id: 3, key: "log".into() },
             ServerMsg::Settings {
                 serial: 0,
                 complete: true,

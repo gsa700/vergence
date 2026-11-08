@@ -155,6 +155,7 @@ impl Server {
                     tracing::info!("settings: {} changed", diff.iter().map(|s| format!("{} {}", s.namespace, s.key)).collect::<Vec<_>>().join(", "));
                     state.bus_settings_changed(&diff);
                     state.dbus_settings_changed(&diff);
+                    state.notify_restyle();
                 }
             }
             TimeoutAction::ToDuration(std::time::Duration::from_secs(1))
