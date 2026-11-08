@@ -35,6 +35,9 @@ slint::slint! {
     export struct Wallpaper { name: string, thumb: image }
     export struct Source { label: string, kind: string }
     export struct Entry { name: string, folder: bool, picked: bool }
+    // A monitor in the little arrangement: its name, its place and size as
+    // fractions of the whole arrangement, its wallpaper's preview.
+    export struct ScreenTile { label: string, fx: float, fy: float, fw: float, fh: float, thumb: image, own: bool }
     struct Swatch { name: string, hex: string, color: color }
 
     // THE COLOURS (Dave, 2026-11-08, from a macOS System Settings screenshot:
@@ -63,19 +66,22 @@ slint::slint! {
     component SidebarItem inherits Rectangle {
         in property <string> text;
         in property <bool> selected;
+        // A screen nestled under Screens: smaller and indented.
+        in property <bool> child: false;
         callback clicked;
-        height: 30px;
+        height: root.child ? 26px : 30px;
         border-radius: 5px;
         background: root.selected ? Theme.accent : (touch.has-hover ? Theme.hover : transparent);
         accessible-role: list-item;
         accessible-label: root.text;
         HorizontalLayout {
-            padding-left: 12px;
+            padding-left: root.child ? 26px : 12px;
             padding-right: 12px;
             Text {
                 text: root.text;
                 vertical-alignment: center;
-                font-size: 13px;
+                overflow: elide;
+                font-size: root.child ? 12px : 13px;
                 font-weight: root.selected ? 600 : 400;
                 color: root.selected ? Theme.on-accent : Palette.foreground;
             }
@@ -157,10 +163,18 @@ slint::slint! {
         min-height: 480px;
         background: Theme.page;
 
-        // The pages, in sidebar order; About is the last index, set apart.
-        in property <[string]> pages: ["Appearance", "Wallpaper"];
+        // The pages, in sidebar order: Appearance (0), one per screen (1..n;
+        // "Wallpaper" alone outside a Vergence session), About last, set apart.
+        // (Dave, 2026-11-08: "making each Screen its own entry in the left menu
+        // ... if one monitor, then one settings tab".)
+        in property <[string]> screen-pages: ["Wallpaper"];
+        // "Screens" in a Vergence session, "Wallpaper" outside one; the page
+        // Screens opens (the primary's).
+        in property <string> screens-title: "Wallpaper";
+        in property <int> primary-page: 1;
         in-out property <int> page: 0;
-        property <int> about: root.pages.length;
+        property <int> about: root.screen-pages.length + 1;
+        callback page-changed();
 
         // Appearance.
         in-out property <int> scheme-index: 0;
@@ -180,13 +194,19 @@ slint::slint! {
             { name: "Graphite", hex: "#6b7280", color: #6b7280 },
         ];
 
-        // Wallpaper: the screens (All screens first), the one being edited and
-        // whether it has its own; the pictures; the user's folders and files.
-        in property <[string]> screens: ["All screens"];
-        in-out property <int> screen-index: 0;
-        in-out property <bool> own: false;
-        callback screen-changed();
+        // A screen's page: the little map of the arrangement; the screen's name;
+        // with several screens, whether it is the primary (whose wallpaper is
+        // everyone's default) and, if not, whether it follows the primary.
+        in property <[ScreenTile]> tiles;
+        // The whole arrangement's width over its height.
+        in property <float> arrangement-aspect: 2.0;
+        in property <string> screen-label: "Wallpaper";
+        in property <bool> multi: false;
+        in property <bool> is-primary: true;
+        in property <string> primary-label;
+        in-out property <bool> same-as-primary: true;
         callback own-changed();
+        callback make-primary();
         in property <[Wallpaper]> wallpapers;
         in-out property <int> selected: -1;
         in-out property <int> mode-index: 0;
@@ -226,10 +246,12 @@ slint::slint! {
                 key-pressed(event) => {
                     if (event.text == Key.UpArrow) {
                         root.page = Math.max(0, root.page - 1);
+                        root.page-changed();
                         return accept;
                     }
                     if (event.text == Key.DownArrow) {
                         root.page = Math.min(root.about, root.page + 1);
+                        root.page-changed();
                         return accept;
                     }
                     reject
@@ -237,17 +259,33 @@ slint::slint! {
                 VerticalLayout {
                     alignment: start;
                     spacing: 2px;
-                    for p[i] in root.pages: SidebarItem {
-                        text: p;
-                        selected: root.page == i;
-                        clicked => { root.page = i; sidebar.focus(); }
+                    SidebarItem {
+                        text: "Appearance";
+                        selected: root.page == 0;
+                        clicked => { root.page = 0; root.page-changed(); sidebar.focus(); }
+                    }
+                    // SCREENS leads; with several, each screen is nestled under it,
+                    // smaller (Dave, 2026-11-08). Screens itself opens the primary's page.
+                    SidebarItem {
+                        text: root.screens-title;
+                        selected: root.screen-pages.length <= 1 && root.page == 1;
+                        clicked => { root.page = root.primary-page; root.page-changed(); sidebar.focus(); }
+                    }
+                    if root.screen-pages.length > 1: VerticalLayout {
+                        spacing: 2px;
+                        for name[i] in root.screen-pages: SidebarItem {
+                            child: true;
+                            text: name;
+                            selected: root.page == i + 1;
+                            clicked => { root.page = i + 1; root.page-changed(); sidebar.focus(); }
+                        }
                     }
                     // About, set apart at the foot: a page about the desktop, not a setting.
                     Rectangle { height: 16px; }
                     SidebarItem {
                         text: "About";
                         selected: root.page == root.about;
-                        clicked => { root.page = root.about; sidebar.focus(); }
+                        clicked => { root.page = root.about; root.page-changed(); sidebar.focus(); }
                     }
                 }
             }
@@ -329,33 +367,75 @@ slint::slint! {
                     }
                 }
 
-                if root.page == 1 && !root.browsing: ScrollView {
+                if root.page >= 1 && root.page <= root.screen-pages.length && !root.browsing: ScrollView {
                     VerticalLayout {
                         padding: 22px;
                         spacing: 16px;
                         alignment: start;
                         PageTitle {
-                            title: "Wallpaper";
-                            description: "A picture is drawn at every screen's own pixels. Choose one for all screens, or give a screen its own.";
+                            title: root.screen-label;
+                            description: !root.multi ? "Its wallpaper, drawn at the screen's own pixels." : (root.is-primary ? "The primary screen: its wallpaper is the default, shown on every other screen that has none of its own." : "Shows the primary screen's wallpaper (" + root.primary-label + ") unless it has its own.");
                         }
-                        Group {
-                            Row {
-                                first: true;
-                                label: "Screen";
-                                detail: root.screen-index == 0 ? "Every screen without its own wallpaper." : (root.own ? "This screen has its own wallpaper." : "This screen shows the one for all screens.");
-                                ComboBox {
-                                    width: 300px;
-                                    model: root.screens;
-                                    current-index <=> root.screen-index;
-                                    selected => { root.screen-changed(); }
+                        // Where this screen is: the arrangement, this one framed in the
+                        // accent; a click on another goes to its page.
+                        if root.multi: Group {
+                            arr := Rectangle {
+                                height: 110px;
+                                property <length> aw: Math.min(self.width - 24px, (self.height - 20px) * root.arrangement-aspect);
+                                property <length> ah: self.aw / Math.max(0.1, root.arrangement-aspect);
+                                property <length> ox: (self.width - self.aw) / 2;
+                                property <length> oy: (self.height - self.ah) / 2;
+                                for t[i] in root.tiles: Rectangle {
+                                    x: arr.ox + t.fx * arr.aw + 3px;
+                                    y: arr.oy + t.fy * arr.ah + 3px;
+                                    width: t.fw * arr.aw - 6px;
+                                    height: t.fh * arr.ah - 6px;
+                                    border-radius: 5px;
+                                    clip: true;
+                                    background: #000000;
+                                    accessible-role: button;
+                                    accessible-label: t.label;
+                                    Image { width: parent.width; height: parent.height; source: t.thumb; image-fit: cover; }
+                                    Rectangle {
+                                        y: parent.height - 20px;
+                                        height: 20px;
+                                        background: #000000a8;
+                                        Text {
+                                            width: parent.width - 8px;
+                                            text: t.label;
+                                            color: #ffffff;
+                                            font-size: 10px;
+                                            font-weight: 600;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                    }
+                                    Rectangle {
+                                        border-radius: 5px;
+                                        border-width: root.page == i + 1 ? 3px : 1px;
+                                        border-color: root.page == i + 1 ? Theme.accent : (tta.has-hover ? Palette.foreground : Theme.line);
+                                    }
+                                    tta := TouchArea { clicked => { root.page = i + 1; root.page-changed(); } }
                                 }
                             }
-                            if root.screen-index > 0: Row {
-                                label: "Its own wallpaper";
-                                detail: "Off: the same as all screens.";
-                                Switch { checked <=> root.own; toggled => { root.own-changed(); } }
+                        }
+                        Group {
+                            if root.multi && !root.is-primary: Row {
+                                first: true;
+                                label: "Same as the primary screen";
+                                detail: root.same-as-primary ? "Shows " + root.primary-label + "'s wallpaper." : "Off: this screen has its own.";
+                                Switch { checked <=> root.same-as-primary; toggled => { root.own-changed(); } }
+                            }
+                            if root.multi: Row {
+                                first: root.is-primary;
+                                label: "Primary screen";
+                                detail: root.is-primary ? "Its wallpaper is the default for the others." : "Make this the primary: its wallpaper becomes the default.";
+                                if root.is-primary: Text { text: "Primary"; color: Theme.dim; vertical-alignment: center; }
+                                if !root.is-primary: Button { text: "Make primary"; clicked => { root.make-primary(); } }
                             }
                             Row {
+                                first: !root.multi;
                                 label: "Fit";
                                 ComboBox {
                                     width: 140px;
@@ -430,7 +510,7 @@ slint::slint! {
 
                 // THE PICTURE BROWSER (our own, 2026-11-08): folders to walk into,
                 // pictures to pick; "Add" adds the folder shown, or the pictures picked.
-                if root.page == 1 && root.browsing: VerticalLayout {
+                if root.browsing && root.page >= 1 && root.page <= root.screen-pages.length: VerticalLayout {
                     padding: 22px;
                     spacing: 12px;
                     PageTitle {
@@ -594,11 +674,77 @@ fn thumbnail(path: &Path, w: u32, h: u32) -> Option<SharedPixelBuffer<Rgba8Pixel
     Some(SharedPixelBuffer::clone_from_slice(&px, w, h))
 }
 
-/// A screen as the Screen list names it.
+/// A screen's name on its tile: the EDID's name, or the connector when the
+/// EDID only names the port type ("HDMI" on the 14", 2026-11-08).
 fn screen_label(o: &OutputInfo) -> String {
-    let px = |v: i32| (v as f64 * o.scale).round() as i64;
-    let desc = if o.description.is_empty() { "Monitor" } else { o.description.as_str() };
-    format!("{desc} \u{2014} {}, {}\u{d7}{}", o.name, px(o.width), px(o.height))
+    let port_type = o.name.split('-').next().unwrap_or("");
+    if o.description.is_empty() || o.description == port_type {
+        o.name.clone()
+    } else {
+        o.description.clone()
+    }
+}
+
+/// A picture's preview if it is already in the cache (never drawn here).
+fn thumbnail_if_cached(path: &Path) -> Option<slint::Image> {
+    let img = image::open(thumb_cache_path(path)?).ok()?.to_rgba8();
+    Some(slint::Image::from_rgba8(SharedPixelBuffer::clone_from_slice(img.as_raw(), img.width(), img.height())))
+}
+
+/// The arrangement: each monitor's tile with its wallpaper's preview. A
+/// preview not yet drawn is drawn on a thread, then the tiles are refreshed.
+fn refresh_tiles(ui: &Settings, st: &State) {
+    let desktop = read_desktop();
+    let (mut x0, mut y0, mut x1, mut y1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    for o in &st.outputs {
+        x0 = x0.min(o.x);
+        y0 = y0.min(o.y);
+        x1 = x1.max(o.x + o.width);
+        y1 = y1.max(o.y + o.height);
+    }
+    let (bw, bh) = ((x1 - x0).max(1) as f32, (y1 - y0).max(1) as f32);
+    let mut missing = Vec::new();
+    let tiles: Vec<ScreenTile> = st
+        .outputs
+        .iter()
+        .map(|o| {
+            let shown = wall::shown(&desktop, Some(&o.id));
+            let thumb = shown.image.as_deref().and_then(|p| {
+                let t = thumbnail_if_cached(p);
+                // Each picture is tried once: one that can't be drawn stays blank
+                // instead of being tried again forever.
+                if t.is_none() && TRIED.with(|tried| tried.borrow_mut().insert(p.to_path_buf())) {
+                    missing.push(p.to_path_buf());
+                }
+                t
+            });
+            ScreenTile {
+                label: screen_label(o).into(),
+                fx: (o.x - x0) as f32 / bw,
+                fy: (o.y - y0) as f32 / bh,
+                fw: o.width as f32 / bw,
+                fh: o.height as f32 / bh,
+                thumb: thumb.unwrap_or_default(),
+                own: shown.own,
+            }
+        })
+        .collect();
+    ui.set_arrangement_aspect(if st.outputs.is_empty() { 2.0 } else { bw / bh });
+    ui.set_tiles(ModelRc::from(Rc::new(VecModel::from(tiles))));
+    if !missing.is_empty() {
+        let weak = ui.as_weak();
+        std::thread::spawn(move || {
+            for p in missing {
+                let _ = cached_thumbnail(&p);
+            }
+            let _ = slint::invoke_from_event_loop(move || {
+                if let (Some(ui), Some(st)) = (weak.upgrade(), SHARED.with(|s| s.borrow().clone())) {
+                    // Only once: drawn now, so this refresh finds them all.
+                    refresh_tiles(&ui, &st.borrow());
+                }
+            });
+        });
+    }
 }
 
 /// The page's state behind the widgets.
@@ -617,10 +763,26 @@ struct State {
 
 type Shared = Rc<RefCell<State>>;
 
-/// The screen being edited: None for all screens.
+/// The screen whose page is open, if any.
+fn current_output<'a>(ui: &Settings, st: &'a State) -> Option<&'a OutputInfo> {
+    let i = usize::try_from(ui.get_page()).ok()?.checked_sub(1)?;
+    st.outputs.get(i)
+}
+
+/// The primary screen's id.
+fn primary_of(desktop: &toml::Table, st: &State) -> Option<String> {
+    let ids: Vec<String> = st.outputs.iter().map(|o| o.id.clone()).collect();
+    wall::primary(desktop, &ids)
+}
+
+/// Where the open page's wallpaper is kept: None for the primary (and the
+/// only) screen, whose wallpaper is the default; else (id, label) of its own.
 fn screen_id(ui: &Settings, st: &State) -> Option<(String, String)> {
-    let i = usize::try_from(ui.get_screen_index()).ok()?.checked_sub(1)?;
-    st.outputs.get(i).map(|o| (o.id.clone(), o.description.clone()))
+    let o = current_output(ui, st)?;
+    if primary_of(&read_desktop(), st).as_deref() == Some(o.id.as_str()) {
+        return None;
+    }
+    Some((o.id.clone(), screen_label(o)))
 }
 
 /// Show the edited screen's wallpaper (or all screens').
@@ -628,10 +790,18 @@ fn show_scope(ui: &Settings, st: &State) {
     let desktop = read_desktop();
     let id = screen_id(ui, st);
     let s = wall::shown(&desktop, id.as_ref().map(|(i, _)| i.as_str()));
-    ui.set_own(s.own);
+    ui.set_same_as_primary(!s.own);
+    let primary = primary_of(&desktop, st);
+    ui.set_multi(st.outputs.len() > 1);
+    ui.set_is_primary(id.is_none());
+    ui.set_primary_label(st.outputs.iter().find(|o| Some(&o.id) == primary.as_ref()).map(screen_label).unwrap_or_default().into());
+    let primary_index = st.outputs.iter().position(|o| Some(&o.id) == primary.as_ref()).unwrap_or(0);
+    ui.set_primary_page(primary_index as i32 + 1);
+    ui.set_screen_label(current_output(ui, st).map(screen_label).unwrap_or_else(|| "Wallpaper".into()).into());
     ui.set_selected(s.image.as_ref().and_then(|c| st.files.iter().position(|f| f == c)).map(|i| i as i32).unwrap_or(-1));
     ui.set_mode_index(wall::MODES.iter().position(|m| *m == s.mode).unwrap_or(0) as i32);
     ui.set_bg_color(s.color.into());
+    refresh_tiles(ui, st);
 }
 
 /// The pictures on offer (system and the user's), with previews drawn on a
@@ -688,15 +858,53 @@ fn load_pictures(ui: &Settings, st: &mut State) {
     show_scope(ui, st);
 }
 
+/// The screens changed (the bus's outputs): one sidebar page each, named so
+/// that identical monitors are told apart by their port.
 fn set_screens(ui: &Settings, st: &mut State, outputs: Vec<OutputInfo>) {
-    let current = screen_id(ui, st).map(|(id, _)| id);
+    let page = ui.get_page();
+    let old_count = st.outputs.len().max(1) as i32;
+    let on_screen = page >= 1 && page <= old_count;
+    let current = current_output(ui, st).map(|o| o.id.clone());
     st.outputs = outputs;
-    let mut names: Vec<SharedString> = vec!["All screens".into()];
-    names.extend(st.outputs.iter().map(|o| SharedString::from(screen_label(o))));
-    ui.set_screens(ModelRc::from(Rc::new(VecModel::from(names))));
-    // Keep editing the same screen if it is still there.
-    let index = current.and_then(|id| st.outputs.iter().position(|o| o.id == id)).map(|i| i as i32 + 1).unwrap_or(0);
-    ui.set_screen_index(index);
+    let labels: Vec<String> = st.outputs.iter().map(screen_label).collect();
+    let names: Vec<SharedString> = if st.outputs.is_empty() {
+        vec!["Wallpaper".into()]
+    } else {
+        st.outputs
+            .iter()
+            .zip(&labels)
+            .map(|(o, l)| {
+                let twins = labels.iter().filter(|x| *x == l).count() > 1;
+                SharedString::from(if twins && *l != o.name { format!("{l} \u{2014} {}", o.name) } else { l.clone() })
+            })
+            .collect()
+    };
+    let count = names.len() as i32;
+    ui.set_screen_pages(ModelRc::from(Rc::new(VecModel::from(names))));
+    ui.set_screens_title(if st.outputs.is_empty() { "Wallpaper" } else { "Screens" }.into());
+    // The primary's wallpaper is the default: if it has an entry of its own
+    // (from before there was a primary), that becomes the default instead,
+    // which changes nothing on screen.
+    let desktop = read_desktop();
+    if let Some(p) = primary_of(&desktop, st)
+        && wall::shown(&desktop, Some(&p)).own
+        && let Err(e) = update_desktop(|d| wall::make_primary(d, None, &p))
+    {
+        ui.set_status(format!("Could not save: {e}").into());
+    }
+    if on_screen {
+        // The same screen's page if it is still there, else the primary's.
+        let desktop = read_desktop();
+        let want = current.or_else(|| primary_of(&desktop, st));
+        let i = want.and_then(|id| st.outputs.iter().position(|o| o.id == id)).or_else(|| {
+            let p = primary_of(&desktop, st)?;
+            st.outputs.iter().position(|o| o.id == p)
+        });
+        ui.set_page(i.map(|i| i as i32 + 1).unwrap_or(1));
+    } else if page > old_count {
+        // About moves with the number of screens.
+        ui.set_page(count + 1);
+    }
     show_scope(ui, st);
 }
 
@@ -822,23 +1030,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => format!("Could not save: {e}").into(),
         });
         if id.is_some() {
-            ui.set_own(true);
+            ui.set_same_as_primary(false);
         }
+        refresh_tiles(&ui, &st);
     });
 
     let (weak, s2) = (ui.as_weak(), st.clone());
-    ui.on_screen_changed(move || {
+    ui.on_page_changed(move || {
         let Some(ui) = weak.upgrade() else { return };
+        ui.set_browsing(false);
         show_scope(&ui, &s2.borrow());
     });
 
-    // Its own wallpaper on: start from what it shows now; off: back to all screens'.
+    // Same as the primary off: its own, starting from what it shows now; on:
+    // back to the primary's.
     let (weak, s2) = (ui.as_weak(), st.clone());
     ui.on_own_changed(move || {
         let Some(ui) = weak.upgrade() else { return };
         let st = s2.borrow();
         let Some((id, label)) = screen_id(&ui, &st) else { return };
-        let on = ui.get_own();
+        let on = !ui.get_same_as_primary();
         let shown = wall::shown(&read_desktop(), Some(&id));
         let res = update_desktop(|d| {
             if on {
@@ -847,6 +1058,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 wall::clear_own(d, &id);
             }
         });
+        if let Err(e) = res {
+            ui.set_status(format!("Could not save: {e}").into());
+        }
+        show_scope(&ui, &st);
+    });
+
+    // Make primary: this screen's wallpaper becomes the default; the old
+    // primary keeps its picture as its own; nothing on screen changes.
+    let (weak, s2) = (ui.as_weak(), st.clone());
+    ui.on_make_primary(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let st = s2.borrow();
+        let Some(new) = current_output(&ui, &st).map(|o| o.id.clone()) else { return };
+        let desktop = read_desktop();
+        let old = primary_of(&desktop, &st).and_then(|p| st.outputs.iter().find(|o| o.id == p).map(|o| (o.id.clone(), screen_label(o))));
+        let res = update_desktop(|d| wall::make_primary(d, old.as_ref().map(|(i, l)| (i.as_str(), l.as_str())), &new));
         if let Err(e) = res {
             ui.set_status(format!("Could not save: {e}").into());
         }
@@ -956,4 +1183,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 thread_local! {
     /// The page state, for callbacks queued from other threads.
     static SHARED: RefCell<Option<Shared>> = const { RefCell::new(None) };
+    /// Pictures whose previews the tiles have asked to be drawn.
+    static TRIED: RefCell<std::collections::HashSet<PathBuf>> = RefCell::new(Default::default());
 }

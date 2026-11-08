@@ -6,6 +6,9 @@
 //     [[wallpaper.monitor]]       one screen's own; unset fields come from above
 //     id = "<EDID hash>"  label = "ASUS VS229"  image = "..."  mode = "fit"
 //
+//     [displays]                  which screen is the primary: its wallpaper is
+//     primary = "<EDID hash>"     [wallpaper], every other screen's default
+//
 //     [pictures]                  the settings app's own: where to find pictures
 //     folders = ["/home/me/Pictures/Walls"]  files = ["/home/me/photo.jpg"]
 //
@@ -118,6 +121,32 @@ pub fn clear_own(desktop: &mut Table, id: &str) {
             wall.remove("monitor");
         }
     }
+}
+
+/// The primary screen among `ids` (in arrangement order): the one recorded in
+/// [displays], if it is connected, else the first.
+pub fn primary(desktop: &Table, ids: &[String]) -> Option<String> {
+    let recorded = desktop.get("displays").and_then(|d| d.get("primary")).and_then(Value::as_str);
+    match recorded {
+        Some(r) if ids.iter().any(|i| i == r) => Some(r.to_string()),
+        _ => ids.first().cloned(),
+    }
+}
+
+/// Make `new` the primary instead of `old` with nothing on screen changing:
+/// `new`'s wallpaper becomes the default ([wallpaper]) and `old` keeps what it
+/// showed as its own.
+pub fn make_primary(desktop: &mut Table, old: Option<(&str, &str)>, new: &str) {
+    let base = shown(desktop, None);
+    let theirs = shown(desktop, Some(new));
+    if let Some((old_id, old_label)) = old
+        && old_id != new
+    {
+        set(desktop, Some(old_id), old_label, base.image.as_deref(), &base.mode, &base.color);
+    }
+    clear_own(desktop, new);
+    set(desktop, None, "", theirs.image.as_deref(), &theirs.mode, &theirs.color);
+    table_mut(desktop, "displays").insert("primary".into(), new.into());
 }
 
 /// The folders and files the user added.
@@ -241,6 +270,22 @@ mod tests {
         let text = toml::to_string(&d).unwrap();
         assert!(text.contains("[[wallpaper.monitor]]"), "{text}");
         assert_eq!(shown(&t(&text), Some("m1")).image, Some("/b.png".into()));
+    }
+
+    #[test]
+    fn primary_and_making_another_primary() {
+        let ids = vec!["left".to_string(), "right".to_string()];
+        let mut d = t("[wallpaper]\nimage = \"/a.svg\"\nmode = \"fill\"\ncolor = \"#111111\"\n");
+        assert_eq!(primary(&d, &ids).as_deref(), Some("left"));
+        set(&mut d, Some("right"), "R", Some(Path::new("/b.png")), "fit", "#000000");
+        make_primary(&mut d, Some(("left", "L")), "right");
+        assert_eq!(primary(&d, &ids).as_deref(), Some("right"));
+        // Nothing changed on screen: right's picture is now the default, left keeps its own.
+        assert_eq!(shown(&d, None).image, Some("/b.png".into()));
+        assert_eq!(shown(&d, Some("right")), Shown { image: Some("/b.png".into()), mode: "fit".into(), color: "#000000".into(), own: false });
+        assert_eq!(shown(&d, Some("left")), Shown { image: Some("/a.svg".into()), mode: "fill".into(), color: "#111111".into(), own: true });
+        // A recorded primary that isn't connected: the first is.
+        assert_eq!(primary(&d, &["other".to_string()]).as_deref(), Some("other"));
     }
 
     #[test]
