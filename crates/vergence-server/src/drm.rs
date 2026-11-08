@@ -29,8 +29,7 @@ use smithay::{
         renderer::{
             ImportDma, ImportMemWl,
             element::{
-                Kind,
-                solid::{SolidColorBuffer, SolidColorRenderElement},
+                memory::MemoryRenderBufferRenderElement,
                 surface::WaylandSurfaceRenderElement,
             },
             gles::GlesRenderer,
@@ -57,7 +56,8 @@ use crate::Server;
 smithay::backend::renderer::element::render_elements! {
     pub OutputElements<=GlesRenderer>;
     Space = SpaceRenderElements<GlesRenderer, WaylandSurfaceRenderElement<GlesRenderer>>,
-    Pointer = SolidColorRenderElement,
+    PointerTheme = MemoryRenderBufferRenderElement<GlesRenderer>,
+    PointerSurface = WaylandSurfaceRenderElement<GlesRenderer>,
 }
 
 type Manager = DrmOutputManager<GbmAllocator<DrmDeviceFd>, GbmFramebufferExporter<DrmDeviceFd>, (), DrmDeviceFd>;
@@ -75,7 +75,6 @@ pub struct Backend {
     manager: Manager,
     scanner: DrmScanner,
     surfaces: HashMap<crtc::Handle, Surface>,
-    pointer: SolidColorBuffer,
 }
 
 pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(), Box<dyn std::error::Error>> {
@@ -115,7 +114,6 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
         manager,
         scanner: DrmScanner::new(),
         surfaces: HashMap::new(),
-        pointer: SolidColorBuffer::new((10, 10), [1.0, 1.0, 1.0, 1.0]),
     });
     state.session = Some(session.clone());
 
@@ -290,8 +288,14 @@ fn render(state: &mut Server, crtc: crtc::Handle) {
 
     let mut elements: Vec<OutputElements> = Vec::new();
     if geo.to_f64().contains(pointer_at) {
-        let at = (pointer_at - geo.loc.to_f64()).to_physical(scale).to_i32_round();
-        elements.push(OutputElements::Pointer(SolidColorRenderElement::from_buffer(&b.pointer, at, scale, 1.0, Kind::Cursor)));
+        let at = (pointer_at - geo.loc.to_f64()).to_physical(scale);
+        let time = state.start_time.elapsed();
+        for d in state.pointer_image.elements(&mut b.renderer, at, s.scale, time) {
+            elements.push(match d {
+                crate::cursor::Drawn::Theme(e) => OutputElements::PointerTheme(e),
+                crate::cursor::Drawn::Surface(e) => OutputElements::PointerSurface(e),
+            });
+        }
     }
     match space_render_elements::<_, smithay::desktop::Window, _>(&mut b.renderer, [&state.space], &output, 1.0) {
         Ok(space) => elements.extend(space.into_iter().map(OutputElements::Space)),
@@ -333,6 +337,14 @@ fn render(state: &mut Server, crtc: crtc::Handle) {
                 window.send_frame(o, start, Some(Duration::ZERO), |_, _| Some(o.clone()));
             }
         }
+    }
+    // A client's own cursor surface (animated ones wait for this).
+    if let smithay::input::pointer::CursorImageStatus::Surface(cs) = &state.pointer_image.status
+        && geo.to_f64().contains(pointer_at)
+    {
+        smithay::desktop::utils::send_frames_surface_tree(cs, &output, start, Some(Duration::ZERO), |_, _| {
+            Some(output.clone())
+        });
     }
     state.space.refresh();
     state.popups.cleanup();

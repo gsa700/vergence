@@ -8,6 +8,7 @@ mod input;
 mod state;
 mod winit;
 mod drm;
+mod cursor;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;

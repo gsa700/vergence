@@ -1674,6 +1674,7 @@ dependencies = [
  "tracing-subscriber",
  "vergence-edid",
  "vergence-profile",
+ "xcursor",
 ]
 
 [[package]]

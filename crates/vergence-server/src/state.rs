@@ -49,6 +49,7 @@ pub struct Server {
     pub data_device_state: DataDeviceState,
     pub viewporter_state: smithay::wayland::viewporter::ViewporterState,
     pub fractional_scale_manager_state: smithay::wayland::fractional_scale::FractionalScaleManagerState,
+    pub cursor_shape_manager_state: smithay::wayland::cursor_shape::CursorShapeManagerState,
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
@@ -59,6 +60,8 @@ pub struct Server {
     pub backend: Option<crate::drm::Backend>,
     pub session: Option<smithay::backend::session::libseat::LibSeatSession>,
     pub loop_handle: smithay::reexports::calloop::LoopHandle<'static, Server>,
+    /// The pointer image: themed shapes at each output's scale, or a client's surface.
+    pub pointer_image: crate::cursor::Pointer,
 }
 
 impl Server {
@@ -88,6 +91,9 @@ impl Server {
         let viewporter_state = smithay::wayland::viewporter::ViewporterState::new::<Self>(&dh);
         let fractional_scale_manager_state =
             smithay::wayland::fractional_scale::FractionalScaleManagerState::new::<Self>(&dh);
+        // Apps name the pointer shape they want (wp-cursor-shape-v1); the server draws it
+        // from the theme at each monitor's scale, so it is the same size everywhere.
+        let cursor_shape_manager_state = smithay::wayland::cursor_shape::CursorShapeManagerState::new::<Self>(&dh);
 
         // A seat is a group of keyboards, pointer and touch devices.
         // A seat typically has a pointer and maintains a keyboard focus and a pointer focus.
@@ -130,6 +136,7 @@ impl Server {
             data_device_state,
             viewporter_state,
             fractional_scale_manager_state,
+            cursor_shape_manager_state,
             popups,
             seat,
             regions: Vec::new(),
@@ -137,6 +144,7 @@ impl Server {
             backend: None,
             session: None,
             loop_handle: event_loop.handle(),
+            pointer_image: crate::cursor::Pointer::load(),
         }
     }
 

@@ -78,6 +78,10 @@ impl Server {
                 }
                 let serial = SERIAL_COUNTER.next_serial();
                 let under = self.surface_under(pos);
+                // Over the bare background no client owns the pointer: the arrow again.
+                if under.is_none() {
+                    self.pointer_image.status = smithay::input::pointer::CursorImageStatus::default_named();
+                }
                 pointer.motion(self, under, &MotionEvent { location: pos, serial, time: Event::time(&event) });
                 pointer.frame(self);
             }

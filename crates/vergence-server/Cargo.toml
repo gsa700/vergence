@@ -13,6 +13,7 @@ description = "Vergence's Wayland server (phase 2): one authority over the scree
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 bitflags = "2.2.1"
+xcursor = "0.3"
 vergence-profile.workspace = true
 vergence-edid.workspace = true
 

@@ -30,7 +30,9 @@ impl SeatHandler for Server {
         &mut self.seat_state
     }
 
-    fn cursor_image(&mut self, _seat: &Seat<Self>, _image: smithay::input::pointer::CursorImageStatus) {}
+    fn cursor_image(&mut self, _seat: &Seat<Self>, image: smithay::input::pointer::CursorImageStatus) {
+        self.pointer_image.status = image;
+    }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         let dh = &self.display_handle;
@@ -40,6 +42,11 @@ impl SeatHandler for Server {
 }
 
 impl PointerConstraintsHandler for Server {}
+
+// Needed by wp-cursor-shape-v1 (shapes for tablet tools too); no tablets yet.
+impl smithay::input::tablet::TabletSeatHandler for Server {
+    type ToolFocus = WlSurface;
+}
 
 //
 // Wl Data Device

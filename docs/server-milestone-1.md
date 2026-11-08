@@ -92,3 +92,16 @@ accessibility (Contract 3); display-list surfaces.
   Ctrl+Alt+Backspace quits, Ctrl+Alt+Fn switches consoles. Launcher on Hubble:
   ~/run-vergence-drm.sh.
 
+- **Pointer image (2026-11-07):** themed shapes in place of the white square
+  (`cursor.rs`). XCURSOR_SIZE (default 24) is in points; XCURSOR_THEME
+  defaults to Adwaita. Apps name shapes with wp-cursor-shape-v1 (foot does);
+  a client's own cursor surface is drawn at the output's scale with its
+  hotspot; over the bare background it goes back to the arrow. Two findings:
+  (1) themes draw different designs per size (Adwaita: a thin, hinted arrow
+  at 24/32 px, a fat outlined one at 48-96 px), so picking the nearest image
+  per monitor showed a different arrow on each. Each shape is now taken from
+  the theme's largest image only, shrunk on the CPU by area averaging to
+  exactly the output's pixels (79 px on the 14", 26 px on the ASUS) and drawn
+  1:1. (2) Smithay's MemoryRenderBufferRenderElement crops the source to the
+  logical size when only a size is given; pass the whole buffer as `src`.
+  Dave: "looks right now, same on both".
