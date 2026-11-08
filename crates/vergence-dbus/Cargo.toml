@@ -1,0 +1,11 @@
+[package]
+name = "vergence-dbus"
+description = "Vergence's own implementation of the D-Bus wire protocol, for the session bus's compatibility edge (whitepaper §6.8)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Our own code only (whitepaper §8, "Our own parts"): no dependencies. Written
+# from the D-Bus specification (dbus.freedesktop.org/doc/dbus-specification.html).
+[dependencies]

@@ -25,7 +25,8 @@ arrangements, window memory, scaling), `vergence-xsettings` (XSETTINGS wire
 format), `vergd` (the daemon), `vergence-harness` (EDID sweeps, fake
 monitors, size measurement), `vergence-server` (the phase 2 server),
 `vergence-protocol` (the native protocol: session bus messages, wire format,
-the `vbus` tool), `vergence-settings` (settings app prototype). `tools/sizebox`: one size-box program per
+the `vbus` tool), `vergence-dbus` (our own D-Bus wire protocol, for the bus's
+D-Bus edge), `vergence-settings` (settings app prototype). `tools/sizebox`: one size-box program per
 toolkit.
 
 | Phase | What | Status |

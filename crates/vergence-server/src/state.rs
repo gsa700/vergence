@@ -86,6 +86,8 @@ pub struct Server {
     pub control_owned: bool,
     /// The session bus (bus.rs).
     pub bus: crate::bus::Bus,
+    /// The D-Bus edge (dbus.rs).
+    pub dbus: crate::dbus::DBus,
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
@@ -196,6 +198,7 @@ impl Server {
             exit_code: 0,
             control_owned: false,
             bus: Default::default(),
+            dbus: Default::default(),
             popups,
             seat,
             regions: Vec::new(),

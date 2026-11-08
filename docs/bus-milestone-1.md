@@ -73,6 +73,40 @@ end written by the project sits at the edge. All our own code (whitepaper §8,
    up). One event per change: the server calls in from both the removal
    and the layout, and the unchanged-list check sends it once.
 
+## Step 2a: a logging D-Bus edge (built 2026-11-08)
+
+`crates/vergence-dbus` (our own D-Bus wire protocol from the specification,
+no dependencies: SASL EXTERNAL, values in both byte orders, messages, match
+rules; 14 tests) and `crates/vergence-server/src/dbus.rs`:
+
+- Socket `$XDG_RUNTIME_DIR/vergence-dbus-<wayland socket>`, 0600, peer uid
+  checked, the client's claimed uid checked against it. No fd passing yet
+  (NEGOTIATE_UNIX_FD answered ERROR).
+- The server sets `DBUS_SESSION_BUS_ADDRESS` to it when none is set
+  (`VERGENCE_DBUS=1` always, `=0` turns the edge off).
+- org.freedesktop.DBus: Hello, RequestName (queueing, replacement),
+  ReleaseName, GetNameOwner, NameHasOwner, ListNames, ListActivatableNames,
+  ListQueuedOwners, AddMatch/RemoveMatch, GetConnectionUnixUser/
+  UnixProcessID/Credentials, GetId, StartServiceByName (never starts
+  anything), UpdateActivationEnvironment (ignored), Peer, Introspectable,
+  Properties. Signals NameOwnerChanged, NameAcquired, NameLost.
+- Routing: method calls and replies to names a connection owns; signals by
+  match rule only (no eavesdropping); calls to names nobody owns get
+  ServiceUnknown ("not provided by this session"), never an activation.
+- Every call is counted per destination and method (`vctl dbus`), and
+  logged the first time with the calling program (pid from LOCAL_PEERCRED).
+
+Tested nested on Hubble 2026-11-08: dbus-send (libdbus) and gdbus (GLib)
+ListNames, GetId, GetNameOwner; notify-send gets ServiceUnknown; a second
+xfce4-terminal's Launch call reached the first instance, which owned
+org.xfce.Terminal5 (routing works). First calls seen from xfce4-terminal:
+org.gtk.vfs.Daemon (gvfs), org.a11y.Bus.GetAddress (AT-SPI), org.xfce.Xfconf
+(~150 property reads, Xfce's settings daemon).
+
+Next (2b): run the live session on it with the everyday apps (Firefox,
+Thunderbird, AlbumWall, the settings app) for a while, then read `vctl dbus`
+to choose what the edge translates first.
+
 ## Not in this step
 
 Permissions beyond the uid check; the pid; settings and notifications
