@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "7 November 2026 — Draft 0.8"
+date: "8 November 2026 — Draft 0.9"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.8 · 7 November 2026
+David Erickson (AB0R), with Claude · Draft 0.9 · 8 November 2026
 
 ---
 
@@ -280,6 +280,41 @@ The reference implementation is in Rust, rendering with Vello, and the server's 
 - **Pointer:** a cursor that is the same physical size on every monitor, and pointer speed consistent in physical distance across mixed-density monitors.
 - **Accessibility settings in one place:** reduced motion, high contrast, large cursor, sticky keys, all honoured by the server.
 
+### 6.8 The session bus: our own core, D-Bus at the edge
+
+A desktop carries more than windows: notifications, settings that apply live, launching and activating applications, accessibility, media keys. On Linux and FreeBSD that traffic goes over the **D-Bus session bus**, a separate daemon through which any program can call any other. It has the same flaws as the window systems in §6.1:
+
+- **It is a side channel.** It knows nothing about windows, monitors or which application the user is looking at. Accessibility (AT-SPI) travels this way, which is why it is an add-on (§1).
+- **It trusts every caller.** Any program on the bus can call any service, and broadcast signals go to whoever asks for them.
+- **Services start themselves.** D-Bus activation launches a service the first time anyone calls its name. In the first phase 2 session on real hardware, Firefox found no session bus, started a private one, and a notification call activated Xfce's notification daemon, which appeared as an ordinary window in the middle of the desktop.
+
+Vergence uses the same pattern for the bus as for windows: **the core is its own, and compatibility lives at the edge.**
+
+**Core: the server is the bus.** Session services are part of the native protocol, on the same connection as windows, with the same identity and the same permissions (§7). The message types live in the shared protocol crate, beside the window protocol. The first services:
+
+- **Notifications**, drawn by the server: placed under Contract 2, the same size on every monitor (Contract 1), readable by accessibility tools (Contract 3), and quiet when the user asks.
+- **Settings**: one source of truth (fonts, theme, cursor, text and interface size). A change is pushed to every subscriber at once, so applications and the server's own title bars follow it live, instead of reading environment variables at launch.
+- **Launch and activation**, with activation tokens, so focus moves only on user action (§7.3).
+- **Accessibility**: the Contract 3 tree travels over the core bus, not a separate bus.
+- Later: media keys and global hotkeys registered by name (§7.3), and screen capture requests under permission.
+
+The rules: **the server always knows who is calling** (socket credentials now, a sandbox identity where one exists, §7.4); **there is no eavesdropping**, and a signal reaches only subscribers entitled to it; **nothing starts on demand** except services the user has installed and declared.
+
+**Edge: a D-Bus front end, written by the project.** Existing applications expect a D-Bus session bus, so the server provides one at the usual address (`DBUS_SESSION_BUS_ADDRESS`). It speaks the D-Bus wire protocol, which is documented and small: authentication over a Unix socket, the message encoding, and the bus's own methods (registering a name, subscribing to signals, looking up a name's owner). It does not run the reference D-Bus daemon. Calls to well-known interfaces are **translated into core services**:
+
+| D-Bus interface | Core service |
+|---|---|
+| `org.freedesktop.Notifications` | Notifications |
+| `org.freedesktop.portal.Settings` (colour scheme, accent, fonts) | Settings |
+| AT-SPI (`org.a11y.Bus` and the accessibility bus) | Contract 3, through the AT-SPI bridge (§8.2) |
+| Others as measured: screensaver inhibit, application activation | As needed |
+
+Applications that talk to themselves over the bus keep working: a name an application owns is routed to it, so single-instance behaviour such as Firefox opening a link in the window already running still works. A name nobody owns and the edge doesn't translate gets a clean "service unknown" reply, never an automatic start. The edge only translates and routes: apart from which application owns which name, it keeps no state, and permissions are decided in the core.
+
+**Why not run the reference D-Bus daemon at the edge?** It would work, but it keeps the side channel's flaws (no window identity, open broadcasts, activation) and still leaves every service to be written. The subset applications actually use is small, and writing it ties every call to the server's identity and permissions.
+
+**Out of scope:** the D-Bus **system** bus (power, removable media, networking) belongs to the operating system and stays as it is. Nothing here depends on systemd or logind, which FreeBSD doesn't have.
+
 ---
 
 ## 7. Security model
@@ -311,6 +346,7 @@ Nothing is impossible; nothing is silent.
 | Clipboard | Background clipboard sniffing | Read only on the user's paste or by the focused app; clipboard managers need a permission. |
 | Input injection | Fake input | Permission plus indicator (remote desktop, voice control). |
 | Global hotkeys | Apps keylogging to catch shortcuts | Hotkeys **registered with the server by name and approved by the user**. Push-to-talk keys for radio and voice tools work properly. |
+| Session bus (§6.8) | Programs calling each other's services, sniffing broadcast signals, or starting services silently | The server knows every caller; no eavesdropping, and signals reach only entitled subscribers; no on-demand activation beyond declared services; the D-Bus edge exposes only translated interfaces and names an application owns. |
 | Remote display | Network eavesdropping and hijack | Always authenticated and encrypted (SSH or WireGuard); never unauthenticated TCP. |
 | Phase 1 daemon (X11) | Creating a new hole | No network socket, no unauthenticated control interface; the published property holds only monitor scales; saved layouts stored with owner-only permissions (0600). |
 
@@ -341,7 +377,8 @@ Why one language:
 
 - **Wayland applications** connect through a standard Wayland front end.
 - **X11 applications** run through rootless Xwayland. Because the server owns input routing, legacy windows can be **scaled per monitor with correct input mapping**, which removes the input wall from §5 without any X extension.
-- The server speaks Wayland and X11 at the edges, but placement, memory, units, accessibility and security follow this design.
+- **D-Bus clients** reach a D-Bus front end written by the project, which translates notifications, settings and accessibility into the server's own session bus (§6.8).
+- The server speaks Wayland, X11 and D-Bus at the edges, but placement, memory, units, accessibility and security follow this design.
 
 **Platforms.** FreeBSD (15, X11, Xfce as the stable session) is the primary development platform, on real hardware. Debian (13, X11, Xfce; Xephyr for nested development) is tested alongside at every phase. Where the two must differ, as with hot-plug events (§4.7), the code and the documents say so.
 
@@ -377,6 +414,34 @@ Firefox and Thunderbird are GTK applications on Linux and FreeBSD with mature na
 
 *Expectations as understood at the time of writing; to be verified (see §10).*
 
+### 8.3 GPUs and drivers
+
+The development machine has Intel integrated graphics. Other machines will have AMD or NVIDIA graphics, some on open-source drivers and some on proprietary ones, and some will have two GPUs at once. "No new drivers" still holds: the server uses the interfaces the operating system's drivers already provide (KMS for display, GBM for buffers, EGL and Vulkan for rendering, sync objects for timing). What differs between drivers is which of those interfaces they implement, and how well.
+
+**The driver landscape:**
+
+| GPU | FreeBSD | Linux (Debian) |
+|---|---|---|
+| Intel | drm-kmod (a port of Linux's DRM drivers) + Mesa | in-kernel DRM + Mesa |
+| AMD | drm-kmod (amdgpu) + Mesa | in-kernel DRM (amdgpu) + Mesa |
+| NVIDIA, open source | **none**: FreeBSD has no nouveau | nouveau + NVK (Mesa); slower, newer cards first |
+| NVIDIA, proprietary | NVIDIA's driver + its DRM module for KMS | NVIDIA's driver; KMS only when its DRM module is loaded with `modeset=1` |
+
+Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit synchronisation, where the kernel makes sure a buffer is finished before anyone reads it. The phase 2 server runs on this path today, so Intel and AMD on either system should need little beyond testing. NVIDIA's proprietary driver is a different stack:
+
+- **Display needs KMS switched on.** Without `modeset=1` the driver drives no monitor through KMS, and the server can't start. On a Debian 13 machine with an RTX 3060 on driver 550, used here for reference, the DRM module is loaded but nothing switches KMS on, which is the default for an install that only computes.
+- **Buffers through GBM.** NVIDIA supports GBM on Linux since driver 495, through its own GBM back end (Debian packages it as `libnvidia-egl-gbm1`). Whether NVIDIA's FreeBSD driver offers GBM well enough for a display server is not yet known (§10). If it doesn't, the server needs a second way to get scan-out buffers: EGL streams or direct allocation through NVIDIA's EGL device interface, written by the project.
+- **Explicit synchronisation.** NVIDIA doesn't do implicit sync. Without explicit sync (DRM sync objects in the kernel, and a protocol through which clients hand the server a fence with each buffer), Xwayland and GL applications flicker or show half-drawn frames. NVIDIA supports explicit sync from driver 555, so Debian 13's driver 550 predates it.
+
+**Design decisions:**
+
+1. **Explicit sync is part of the native protocol from the start.** Every buffer a client submits carries an acquire point and gets a release point. Implicit sync stays only as a fallback at the compatibility edges, for drivers and clients that don't provide fences. It is the right design on every GPU, not just a workaround for one vendor: the server knows exactly when each buffer is ready, which also helps frame timing (§6.7).
+2. **One renderer per GPU.** The server already composes each monitor in its own buffer (§6.2). Each buffer is rendered on the GPU that drives that monitor. When an application draws on another GPU, its buffer is copied across once per frame, and the server tells the application which GPU sits under its window, so it can move there. This covers hybrid machines (integrated plus discrete), and multi-card walls (§5.1).
+3. **Capabilities are probed, never assumed by vendor.** Formats, modifiers, sync support and GBM are each queried from the driver at start-up and logged, and the server picks its path from the answers, not from the vendor's name. A driver that improves gets used fully without a code change.
+4. **Display lists need Vulkan compute** (§6.6). Intel and AMD have it through Mesa on both systems, and NVIDIA's proprietary driver on Linux. On FreeBSD with NVIDIA it is to be checked (§10). Bitmap surfaces never need it.
+
+**Test hardware, planned.** A dual-boot FreeBSD and Debian machine with an Intel UHD 630 and an NVIDIA RTX card covers integrated graphics, proprietary NVIDIA on both systems, nouveau/NVK on Debian, and the hybrid two-GPU case in one box. AMD comes later. A working NVIDIA compute machine is used only for reading driver facts, not for display tests.
+
 ---
 
 ## 9. Roadmap
@@ -384,7 +449,7 @@ Firefox and Thunderbird are GTK applications on Linux and FreeBSD with mature na
 | Phase | Deliverable | Value on its own | Estimated effort |
 |---|---|---|---|
 | **1** | X11 consistency daemon: EDID profiles, scaling modes A/B, toolkit settings, layout memory | Fixes daily annoyances on any X11 desktop, FreeBSD and Debian | Days to weeks |
-| **2** | Display server, first nested in a window, then on real hardware: native per-monitor rendering, placement memory, reference-unit scaling, per-window scaling of X11 apps with correct input | A usable personal desktop that beats X11 and Wayland on consistency | Months |
+| **2** | Display server, first nested in a window, then on real hardware: native per-monitor rendering, placement memory, reference-unit scaling, per-window scaling of X11 apps with correct input, the session bus with its D-Bus edge (§6.8) | A usable personal desktop that beats X11 and Wayland on consistency | Months |
 | **3** | Accessibility contract and display-list surfaces: Rust/Vello reference implementation, then the native Avalonia backend (§8.1) | Sharp magnification, sharp straddling windows, accessibility by design | Research |
 | **4** | Remote display over display lists | Efficient, sharp remote desktops | Research |
 
@@ -404,11 +469,13 @@ Firefox and Thunderbird are GTK applications on Linux and FreeBSD with mature na
 4. How to capture viewing distance simply (presets: laptop, desktop, TV; or a one-time calibration).
 5. Status of Wayland session-restore and placement protocols, and whether the server should implement them for compatibility.
 6. Display-list format: the minimal validated command set (paths, fills, strokes, gradients, images, text runs with font references, clips, layers), and how text is shipped (glyph runs plus font identity, so the server can re-render text sharply at any density).
-7. FreeBSD specifics: DRM/KMS driver coverage for the target GPUs beyond Intel; libinput and seat management; a suspend-and-wake loop for testing.
+7. FreeBSD specifics: DRM/KMS driver coverage for the target GPUs beyond Intel (§8.3); libinput and seat management; a suspend-and-wake loop for testing.
 8. Slint versus iced for the tools, decided by a small prototype of the profile editor on both FreeBSD and Debian.
 9. The scope of the native Avalonia backend: which parts of Avalonia's platform interfaces it must implement, and how its automation peers map to Contract 3.
 10. Firefox and Thunderbird: confirm that Firefox on X11 has no per-monitor scaling; check whether Mozilla implements (or plans) the Wayland session-restore protocol; how well heuristics match several Firefox windows to saved layouts; the scope of an AT-SPI bridge into Contract 3.
 11. Many monitors on several GPUs (§5.1): NVIDIA's FreeBSD driver with more than one card (Xinerama versus PRIME output sinks for phase 1; its DRM/KMS support for phase 2); how many monitors report a real EDID serial number (the linuxhw database can answer this), since identical panels without one are told apart only by port.
+12. GPUs and drivers (§8.3): whether NVIDIA's FreeBSD driver provides GBM, KMS and DRM sync objects well enough for the server, and Vulkan compute for display lists; which nouveau/NVK generations are usable on Debian; the cost of copying each frame between GPUs on a hybrid machine; AMD on FreeBSD's drm-kmod, on real hardware.
+13. Session bus (§6.8): which D-Bus interfaces everyday applications (Firefox, Thunderbird, GTK and Qt applications, Avalonia) actually call, measured with a logging edge before anything is translated; which of them only warn when a service is missing and which fail; the scope of the AT-SPI bridge on the bus side.
 
 ---
 
@@ -422,11 +489,16 @@ Firefox and Thunderbird are GTK applications on Linux and FreeBSD with mature na
 - **Compositor:** the component that combines window images into the final screen image.
 - **Display list:** a recorded sequence of drawing commands that can be replayed at any resolution.
 - **KMS/DRM:** the kernel interfaces for display mode-setting and GPU access, on Linux and FreeBSD.
+- **GBM:** Generic Buffer Management, the interface through which a display server allocates GPU buffers it can show on a monitor.
+- **Mesa:** the open-source implementation of OpenGL, Vulkan and GBM used by Intel, AMD and nouveau drivers.
+- **Explicit sync:** passing a fence with each buffer that says when the GPU has finished with it, instead of leaving the kernel to work that out (implicit sync).
 - **Smithay:** a Rust library for building Wayland compositors.
 - **Slint:** a lightweight declarative UI toolkit for Rust, running on Linux and FreeBSD.
 - **Vello:** a Rust GPU renderer for 2D vector graphics.
 - **x11rb:** Rust bindings for the X11 protocol (XCB).
 - **Capsicum:** FreeBSD's capability-based sandboxing framework.
+- **D-Bus:** the message bus Linux and FreeBSD desktops use between programs; the *session* bus serves one user's login, the *system* bus the whole machine. *Activation* starts a service when its name is first called.
+- **AT-SPI:** the accessibility interface on Linux and FreeBSD desktops, carried over D-Bus.
 
 ## Appendix B: One sentence
 
