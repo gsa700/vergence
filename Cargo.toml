@@ -12,3 +12,7 @@ publish = false
 vergence-edid = { path = "crates/vergence-edid" }
 vergence-profile = { path = "crates/vergence-profile" }
 vergence-xsettings = { path = "crates/vergence-xsettings" }
+
+# drm-rs 0.14.1 with the FreeBSD DRM node fixes (patches/README.md).
+[patch.crates-io]
+drm = { path = "third_party/drm-rs" }

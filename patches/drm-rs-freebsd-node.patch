@@ -1,0 +1,44 @@
+--- a/src/node/mod.rs
++++ b/src/node/mod.rs
+@@ -43,12 +43,22 @@
+         if !is_device_drm(dev) {
+             return Err(CreateDrmNodeError::NotDrmNode);
+         }
++
++        // FreeBSD does not encode the type in the device number (/dev/drm/0 is 103,
++        // /dev/drm/128 is 258 on an Intel UHD 630, FreeBSD 15.1): it is in the name,
++        // drm/N, with N in the same ranges as Linux's minors. libdrm reads the name too.
++        #[cfg(target_os = "freebsd")]
++        let index = devname(dev)
++            .and_then(|n| n.strip_prefix("drm/").and_then(|i| i.parse::<u32>().ok()))
++            .ok_or(CreateDrmNodeError::NotDrmNode)?;
++        #[cfg(not(target_os = "freebsd"))]
++        let index = minor(dev);
+ 
+         // The type of the DRM node is determined by the minor number ranges:
+         //   0 -  63 -> Primary
+         //  64 - 127 -> Control
+         // 128 - 255 -> Render
+-        let ty = match minor(dev) >> 6 {
++        let ty = match index >> 6 {
+             0 => NodeType::Primary,
+             1 => NodeType::Control,
+             2 => NodeType::Render,
+@@ -331,7 +341,7 @@
+         let suffix = dev_name.trim_start_matches(|c: char| !c.is_numeric());
+         if let Ok(old_id) = suffix.parse::<u32>() {
+             let id_mask = 0b11_1111;
+-            let id = old_id & id_mask + ty.minor_base();
++            let id = (old_id & id_mask) + ty.minor_base(); // parenthesised: + binds tighter than &
+             let path = PathBuf::from(format!("/dev/dri/{}{}", ty.minor_name_prefix(), id));
+             if path.exists() {
+                 return Ok(path);
+@@ -364,7 +374,7 @@
+ 
+     let old_id = minor(dev);
+     let id_mask = 0b11_1111;
+-    let id = old_id & id_mask + ty.minor_base();
++    let id = (old_id & id_mask) + ty.minor_base();
+     let path = PathBuf::from(format!("/dev/dri/{}{}", ty.minor_name_prefix(), id));
+     if path.exists() {
+         return Ok(path);
