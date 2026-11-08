@@ -1,0 +1,10 @@
+[package]
+name = "vergence-protocol"
+description = "Vergence's native protocol: message types and wire format shared by the server and its clients (the session bus first)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Our own code only (whitepaper §8, "Our own parts"): no dependencies.
+[dependencies]

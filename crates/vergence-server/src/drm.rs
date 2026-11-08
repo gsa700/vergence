@@ -338,6 +338,7 @@ fn disconnect(state: &mut Server, crtc: crtc::Handle) {
     state.space.unmap_output(&s.output);
     state.display_handle.remove_global::<Server>(s.global);
     tracing::info!("{} removed", s.connector);
+    state.bus_outputs_changed();
 }
 
 /// After monitors came or went: lay them out, find the setup, put windows back.
@@ -436,6 +437,7 @@ fn lay_out(state: &mut Server) {
     for (o, p) in placed {
         state.space.map_output(&o, p);
     }
+    state.bus_outputs_changed();
 }
 
 fn render(state: &mut Server, crtc: crtc::Handle) {

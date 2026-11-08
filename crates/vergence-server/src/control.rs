@@ -39,6 +39,10 @@ pub fn socket_path() -> Option<PathBuf> {
 
 pub fn listen(state: &mut Server) {
     let Some(path) = socket_path() else { return tracing::warn!("control: no XDG_RUNTIME_DIR") };
+    // A nested server must not take over the session server's socket.
+    if crate::bus::socket_is_live(&path) {
+        return tracing::warn!("control: {} belongs to a running server; no control socket here", path.display());
+    }
     let _ = std::fs::remove_file(&path);
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,
@@ -49,7 +53,7 @@ pub fn listen(state: &mut Server) {
     let res = state.loop_handle.insert_source(Generic::new(listener, Interest::READ, Mode::Level), |_, l, state| {
         while let Ok((stream, _)) = l.accept() {
             // Owner only.
-            let ours = unsafe { libc_getuid() };
+            let ours = our_uid();
             match peer_uid(&stream) {
                 Some(uid) if uid == ours => {}
                 other => {
@@ -71,7 +75,10 @@ pub fn listen(state: &mut Server) {
         Ok(PostAction::Continue)
     });
     match res {
-        Ok(_) => tracing::info!("control socket {}", path.display()),
+        Ok(_) => {
+            tracing::info!("control socket {}", path.display());
+            state.control_owned = true;
+        }
         Err(e) => tracing::warn!("control: {e}"),
     }
 }
@@ -82,7 +89,12 @@ unsafe extern "C" {
     fn getpeereid(fd: i32, euid: *mut u32, egid: *mut u32) -> i32;
 }
 
-fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
+pub fn our_uid() -> u32 {
+    unsafe { libc_getuid() }
+}
+
+/// The connecting process's user id (getpeereid: FreeBSD, and Linux through libc).
+pub fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
     use std::os::fd::AsRawFd;
     let (mut uid, mut gid) = (u32::MAX, u32::MAX);
     (unsafe { getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } == 0).then_some(uid)

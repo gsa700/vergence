@@ -18,6 +18,7 @@ mod place;
 mod memory;
 mod wallpaper;
 mod menu;
+mod bus;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;
@@ -45,6 +46,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // The development control socket (owner-only; control.rs).
     crate::control::listen(&mut state);
+    // The session bus (bus.rs); sets VERGENCE_BUS for everything started after it.
+    crate::bus::listen(&mut state);
 
     // X11 apps through Xwayland; the first app starts once it is ready (or failed),
     // so it inherits DISPLAY.
@@ -54,7 +57,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Server is running
     })?;
 
-    if let Some(p) = crate::control::socket_path() {
+    if let Some(p) = crate::control::socket_path().filter(|_| state.control_owned) {
+        let _ = std::fs::remove_file(p);
+    }
+    if let Some(p) = state.bus.path.take() {
         let _ = std::fs::remove_file(p);
     }
     if state.exit_code != 0 {

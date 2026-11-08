@@ -17,6 +17,7 @@ xcursor = "0.3"
 vergence-profile.workspace = true
 vergence-edid.workspace = true
 vergence-xsettings.workspace = true
+vergence-protocol.workspace = true
 x11rb = "0.13"
 png = "0.18"
 ab_glyph = "0.2"

@@ -82,6 +82,10 @@ pub struct Server {
     pub dmabuf: Option<(smithay::wayland::dmabuf::DmabufState, smithay::wayland::dmabuf::DmabufGlobal)>,
     /// The process exit status (control.rs: 75 = restart me).
     pub exit_code: i32,
+    /// This server made the control socket (and removes it on exit).
+    pub control_owned: bool,
+    /// The session bus (bus.rs).
+    pub bus: crate::bus::Bus,
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
@@ -190,6 +194,8 @@ impl Server {
             menu: None,
             menu_swallow: None,
             exit_code: 0,
+            control_owned: false,
+            bus: Default::default(),
             popups,
             seat,
             regions: Vec::new(),

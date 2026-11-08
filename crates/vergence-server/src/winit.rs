@@ -180,4 +180,5 @@ fn lay_out(virtuals: &mut [Virtual], state: &mut Server, window: Size<i32, Physi
         logical_x += col as f64 / v.scale;
     }
     state.window_px = window;
+    state.bus_outputs_changed();
 }
