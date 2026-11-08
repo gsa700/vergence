@@ -104,6 +104,116 @@ impl Server {
     }
 }
 
+impl Server {
+    /// Each window's monitor (by EDID ID) and its place on it, before monitors change.
+    pub fn window_anchors(&self) -> Vec<(Window, String, Point<i32, Logical>)> {
+        self.space
+            .elements()
+            .filter_map(|w| {
+                let geo = self.space.element_geometry(w)?;
+                let centre = (geo.loc.x + geo.size.w / 2, geo.loc.y + geo.size.h / 2);
+                self.space.outputs().find_map(|o| {
+                    let g = self.space.output_geometry(o)?;
+                    if !g.contains(centre) {
+                        return None;
+                    }
+                    Some((w.clone(), crate::memory::monitor_id_of(o)?, geo.loc - g.loc))
+                })
+            })
+            .collect()
+    }
+
+    /// The monitors changed: every window to its remembered place on the new setup;
+    /// else, if its monitor is still there, to the same place on it (the layout may
+    /// have moved it); else, if it is left on no monitor, onto the nearest one,
+    /// fitted. The pointer too, if its monitor went.
+    pub fn rearrange_windows(&mut self, anchors: Vec<(Window, String, Point<i32, Logical>)>) {
+        let windows: Vec<Window> = self.space.elements().cloned().collect();
+        for w in windows {
+            if w.x11_surface().is_some_and(|x| x.is_override_redirect()) {
+                continue;
+            }
+            if let Some((r, max)) = self.remembered_place(&w) {
+                if self.restore.contains_key(&w) {
+                    self.toggle_maximize(&w);
+                }
+                self.set_rect(&w, r);
+                if max {
+                    self.toggle_maximize(&w);
+                }
+                tracing::info!("hotplug: window back to its place {:?}", r);
+                continue;
+            }
+            let Some(geo) = self.space.element_geometry(&w) else { continue };
+            // Its monitor is still here: the same place on it.
+            let kept = anchors.iter().find(|(a, _, _)| *a == w).and_then(|(_, mon, off)| {
+                let o = self.space.outputs().find(|o| crate::memory::monitor_id_of(o).as_deref() == Some(mon.as_str()))?;
+                self.space.output_geometry(o).map(|g| g.loc + *off)
+            });
+            if let Some(loc) = kept {
+                if loc != geo.loc {
+                    self.set_rect(&w, Rectangle::new(loc, geo.size));
+                }
+                continue;
+            }
+            let centre = (geo.loc.x + geo.size.w / 2, geo.loc.y + geo.size.h / 2);
+            let on_one = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).any(|g| g.contains(centre));
+            if on_one {
+                continue;
+            }
+            // Rescue: nearest monitor (by centre distance), fitted, centred.
+            let Some(out) = self
+                .space
+                .outputs()
+                .filter_map(|o| self.space.output_geometry(o))
+                .min_by_key(|g| {
+                    let (cx, cy) = (g.loc.x + g.size.w / 2, g.loc.y + g.size.h / 2);
+                    ((cx - centre.0) as i64).pow(2) + ((cy - centre.1) as i64).pow(2)
+                })
+            else {
+                continue;
+            };
+            if self.restore.contains_key(&w) {
+                self.toggle_maximize(&w);
+            }
+            let size = self.space.element_geometry(&w).map(|g| g.size).unwrap_or(geo.size);
+            let area = content_area(out, self.has_title(&w));
+            let fitted = fit(size, area.size, w.x11_surface().and_then(|x| x.min_size()));
+            let r = Rectangle::new(centre_of(area, fitted), fitted);
+            tracing::info!("hotplug: window rescued onto {:?}", r);
+            self.set_rect(&w, r);
+        }
+        // The pointer, if its monitor went.
+        if let Some(p) = self.seat.get_pointer() {
+            let at = p.current_location();
+            let on = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).any(|g| g.to_f64().contains(at));
+            let first = self.space.outputs().next().and_then(|o| self.space.output_geometry(o));
+            if !on && let Some(g) = first {
+                let c = ((g.loc.x + g.size.w / 2) as f64, (g.loc.y + g.size.h / 2) as f64);
+                self.pointer_to(c.into(), smithay::backend::input::InputTime::now());
+            }
+        }
+    }
+
+    /// Put a window's content at `r` (X11: configured; Wayland: asked to take the size).
+    pub fn set_rect(&mut self, w: &Window, r: Rectangle<i32, Logical>) {
+        if let Some(x) = w.x11_surface() {
+            let _ = x.configure(r);
+        } else if let Some(t) = w.toplevel() {
+            if w.geometry().size != r.size {
+                t.with_pending_state(|s| s.size = Some(r.size));
+                t.send_pending_configure();
+            }
+        }
+        self.space.map_element(w.clone(), r.loc, false);
+        self.remember(w);
+    }
+}
+
+fn centre_of(area: Rectangle<i32, Logical>, size: Size<i32, Logical>) -> Point<i32, Logical> {
+    centre(area, size)
+}
+
 /// A monitor's area below a title bar's height (when titled).
 pub fn content_area(out: Rectangle<i32, Logical>, titled: bool) -> Rectangle<i32, Logical> {
     let top = if titled { TITLE_H } else { 0 };

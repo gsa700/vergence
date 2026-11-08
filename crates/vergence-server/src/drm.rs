@@ -69,6 +69,8 @@ struct Surface {
     scale: f64,
     /// The monitor's EDID (or its connector name when it has none): its identity.
     edid: Vec<u8>,
+    /// Its wl_output global, removed when the monitor goes.
+    global: smithay::reexports::wayland_server::backend::GlobalId,
 }
 
 pub struct Backend {
@@ -181,9 +183,22 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
         }
     })?;
 
-    // udev keeps the device list; the monitors come from a connector scan.
-    let _udev = UdevBackend::new(&seat)?;
-    scan(state);
+    // The monitors: scanned now, then again whenever udev says the GPU changed, and
+    // every 2 s as well, in case FreeBSD's udev emulation does not pass on DRM
+    // hotplug events (devd's "DRM HOTPLUG").
+    let udev = UdevBackend::new(&seat)?;
+    event_loop.handle().insert_source(udev, |event, _, state| {
+        if let smithay::backend::udev::UdevEvent::Changed { .. } = event {
+            scan(state, false);
+        }
+    })?;
+    event_loop.handle().insert_source(Timer::from_duration(Duration::from_secs(2)), |_, _, state| {
+        if state.session.as_ref().is_some_and(|s| s.is_active()) {
+            scan(state, false);
+        }
+        TimeoutAction::ToDuration(Duration::from_secs(2))
+    })?;
+    scan(state, true);
     let crtcs: Vec<crtc::Handle> = state.backend.as_ref().map(|b| b.surfaces.keys().copied().collect()).unwrap_or_default();
     for c in crtcs {
         render(state, c);
@@ -192,20 +207,91 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
 }
 
 /// The connected monitors: an output each, at its EDID's scale, laid out left to right.
-fn scan(state: &mut Server) {
+/// At start-up every monitor at once; afterwards (hotplug) a new monitor is set up a
+/// second later from a fresh forced probe: FreeBSD's first look after a hotplug can
+/// see only the kernel's fallback modes (800x600; vergd, 2026-11-07).
+fn scan(state: &mut Server, startup: bool) {
     let Some(b) = state.backend.as_mut() else { return };
     let events = match b.scanner.scan_connectors(b.manager.device()) {
         Ok(e) => e,
         Err(e) => return tracing::warn!("connector scan: {e:?}"),
     };
+    let anchors = state.window_anchors();
+    let mut changed = false;
     for event in events {
-        if let DrmScanEvent::Connected { connector, crtc: Some(crtc) } = event {
-            connect(state, connector, crtc);
+        match event {
+            DrmScanEvent::Connected { connector, crtc: Some(crtc) } if startup => {
+                connect(state, connector, crtc);
+                changed = true;
+            }
+            DrmScanEvent::Connected { connector, crtc: Some(crtc) } => {
+                let handle = connector.handle();
+                tracing::info!("hotplug: {}-{} connected; setting up in 1 s", connector.interface().as_str(), connector.interface_id());
+                let _ = state.loop_handle.insert_source(Timer::from_duration(Duration::from_secs(1)), move |_, _, st| {
+                    let info = st.backend.as_ref().and_then(|b| b.manager.device().get_connector(handle, true).ok());
+                    if let Some(info) = info.filter(|i| i.state() == connector::State::Connected) {
+                        let anchors = st.window_anchors();
+                        connect(st, info, crtc);
+                        setup_changed(st, anchors);
+                        render(st, crtc);
+                    }
+                    TimeoutAction::Drop
+                });
+            }
+            DrmScanEvent::Disconnected { connector, crtc: Some(crtc) } => {
+                tracing::info!("hotplug: {}-{} disconnected", connector.interface().as_str(), connector.interface_id());
+                disconnect(state, crtc);
+                changed = true;
+            }
+            DrmScanEvent::Changed { connector, crtc: Some(crtc) } => {
+                // New modes on a monitor that stayed connected (a late probe): set it up
+                // again, but only if the mode we would pick differs from the one running.
+                // (The scanner reports the ASUS as changed on every scan, mode list
+                // unchanged in substance; reconnecting each time blanked it, 2026-11-07.)
+                let want = connector
+                    .modes()
+                    .iter()
+                    .find(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED))
+                    .or(connector.modes().first())
+                    .map(|m| m.size());
+                let running = state
+                    .backend
+                    .as_ref()
+                    .and_then(|b| b.surfaces.get(&crtc))
+                    .and_then(|s| s.output.current_mode())
+                    .map(|m| (m.size.w as u16, m.size.h as u16));
+                if want.is_none() || want == running {
+                    continue;
+                }
+                tracing::info!("hotplug: {}-{} modes changed ({running:?} -> {want:?})", connector.interface().as_str(), connector.interface_id());
+                disconnect(state, crtc);
+                connect(state, connector, crtc);
+                changed = true;
+                render(state, crtc);
+            }
+            _ => {}
         }
     }
+    if changed {
+        setup_changed(state, anchors);
+    }
+}
+
+/// The monitor at `crtc` is gone: its output leaves the desktop and the clients.
+fn disconnect(state: &mut Server, crtc: crtc::Handle) {
+    let Some(b) = state.backend.as_mut() else { return };
+    let Some(s) = b.surfaces.remove(&crtc) else { return };
+    state.space.unmap_output(&s.output);
+    state.display_handle.remove_global::<Server>(s.global);
+    tracing::info!("{} removed", s.connector);
+}
+
+/// After monitors came or went: lay them out, find the setup, put windows back.
+fn setup_changed(state: &mut Server, anchors: Vec<(smithay::desktop::Window, String, smithay::utils::Point<i32, smithay::utils::Logical>)>) {
     lay_out(state);
     let edids: Vec<Vec<u8>> = state.backend.as_ref().map(|b| b.surfaces.values().map(|s| s.edid.clone()).collect()).unwrap_or_default();
     state.set_setup(&edids);
+    state.rearrange_windows(anchors);
 }
 
 fn connect(state: &mut Server, conn: connector::Info, crtc: crtc::Handle) {
@@ -239,7 +325,7 @@ fn connect(state: &mut Server, conn: connector::Info, crtc: crtc::Handle) {
             serial_number: String::new(),
         },
     );
-    let _global = output.create_global::<Server>(&dh);
+    let global = output.create_global::<Server>(&dh);
     let identity = edid.clone().unwrap_or_else(|| name.clone().into_bytes());
     output.user_data().insert_if_missing(|| crate::memory::MonitorId(vergence_profile::monitor_id(&identity)));
     output.set_preferred(wl_mode);
@@ -258,7 +344,7 @@ fn connect(state: &mut Server, conn: connector::Info, crtc: crtc::Handle) {
         Ok(o) => o,
         Err(e) => return tracing::warn!("{name}: cannot initialise: {e:?}"),
     };
-    b.surfaces.insert(crtc, Surface { output, drm_output, connector: name, scale, edid: identity });
+    b.surfaces.insert(crtc, Surface { output, drm_output, connector: name, scale, edid: identity, global });
 }
 
 /// The EDID blob DRM keeps for a connector.

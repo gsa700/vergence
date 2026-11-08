@@ -212,3 +212,17 @@ accessibility (Contract 3); display-list surfaces.
   from the 14" -> back on the ASUS; foot moved, maximised, closed, reopened
   -> maximised on the ASUS. Not yet: moving windows when the setup changes
   during a session (with hotplug).
+- **Monitor hotplug (2026-11-07):** connectors scanned on udev change events
+  and every 2 s (FreeBSD's udev emulation may not pass DRM hotplug on). A new
+  monitor is set up 1 s after it appears from a forced probe (FreeBSD's first
+  look can see only the fallback modes); a removed one leaves the desktop and
+  its wl_output global goes. A "modes changed" report reconfigures only if
+  the mode we would pick differs (the scanner reported the ASUS as changed on
+  every scan; reconnecting blanked it). After a change: lay out, new setup
+  key, then each window to its remembered place on the new setup; else, if
+  its monitor is still there, to the same place on it (the layout may shift
+  it); else, if it is on no monitor, fitted onto the nearest. The pointer
+  likewise. Dave unplugged and replugged each monitor: setups 8ec9c14b (ASUS
+  only, the same key as vergd's), a2488f9d (14" only) and back to 8b4a39a2,
+  every window where it belonged each time. Not yet: Xwayland's scale is
+  fixed at start (the densest monitor then).
