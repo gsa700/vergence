@@ -20,7 +20,7 @@ to switch scale once most of it has crossed.
 Smithay (main at 65aa86f, 0.7.0) builds on Hubble (FreeBSD 15.1, Rust 1.98):
 `anvil --winit` runs nested in Xfce, renders with GLES2 through Mesa EGL on
 the UHD 630, and serves foot as a Wayland client. Xfce sets
-`XDG_RUNTIME_DIR=/var/run/xdg/derickson`. Installed: foot, xwayland, seatd.
+`XDG_RUNTIME_DIR=/var/run/xdg/<user>`. Installed: foot, xwayland, seatd.
 
 ## Stages
 
