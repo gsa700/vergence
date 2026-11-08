@@ -13,6 +13,8 @@
 //   spawn <command>      run a command (sh -c) inside the session
 //   move <i> <x> <y>     put window i's content at logical x, y
 //   focus <i>            raise window i and give it the keyboard
+//   pointer <x> <y>      move the pointer to logical x, y (as the mouse would)
+//   press|release [left|right|middle]   a mouse button, as the mouse would
 //   restart              exit with status 75 (the launcher starts the new build)
 //   quit                 exit
 //
@@ -106,8 +108,8 @@ impl Server {
                 if command.is_empty() {
                     return "spawn: no command".into();
                 }
-                match std::process::Command::new("sh").args(["-c", command]).spawn() {
-                    Ok(c) => format!("spawned pid {}", c.id()),
+                match crate::spawn(std::process::Command::new("sh").args(["-c", command])) {
+                    Ok(pid) => format!("spawned pid {pid}"),
                     Err(e) => format!("spawn: {e}"),
                 }
             }
@@ -132,6 +134,30 @@ impl Server {
                 self.focus_window(&w, smithay::utils::SERIAL_COUNTER.next_serial());
                 format!("focused {i}")
             }
+            "pointer" => {
+                let (Some(x), Some(y)) = (args.first().and_then(|a| a.parse::<f64>().ok()), args.get(1).and_then(|a| a.parse::<f64>().ok())) else {
+                    return "pointer <x> <y>".into();
+                };
+                let t = smithay::backend::input::InputTime::now();
+                self.pointer_to((x, y).into(), t);
+                format!("pointer at {x},{y}")
+            }
+            "press" | "release" => {
+                let button = match args.first().copied().unwrap_or("left") {
+                    "left" => 0x110,
+                    "right" => 0x111,
+                    "middle" => 0x112,
+                    other => return format!("{cmd}: no button {other}"),
+                };
+                let state = if cmd == "press" {
+                    smithay::backend::input::ButtonState::Pressed
+                } else {
+                    smithay::backend::input::ButtonState::Released
+                };
+                let t = smithay::backend::input::InputTime::now();
+                self.handle_button(button, state, t);
+                format!("{cmd}ed {:#x}", button)
+            }
             "restart" => {
                 self.exit_code = RESTART;
                 self.loop_signal.stop();
@@ -141,7 +167,7 @@ impl Server {
                 self.loop_signal.stop();
                 "quitting".into()
             }
-            _ => "commands: shot, windows, spawn <cmd>, move <i> <x> <y>, focus <i>, restart, quit".into(),
+            _ => "commands: shot, windows, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
         }
     }
 

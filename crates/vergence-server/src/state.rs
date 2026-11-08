@@ -67,6 +67,8 @@ pub struct Server {
     pub title_font: Option<crate::text::TextFont>,
     /// Wayland windows already placed (place.rs: on their first sized commit).
     pub placed: std::collections::HashSet<Window>,
+    /// linux-dmabuf (DRM backend): apps' GPU buffers.
+    pub dmabuf: Option<(smithay::wayland::dmabuf::DmabufState, smithay::wayland::dmabuf::DmabufGlobal)>,
     /// The process exit status (control.rs: 75 = restart me).
     pub exit_code: i32,
     pub popups: PopupManager,
@@ -170,6 +172,7 @@ impl Server {
             shot_pending: Vec::new(),
             title_font: crate::text::TextFont::load(),
             placed: Default::default(),
+            dmabuf: None,
             exit_code: 0,
             popups,
             seat,

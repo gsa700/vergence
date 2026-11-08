@@ -78,10 +78,8 @@ impl Server {
                     pos.x = pos.x.clamp(b.loc.x as f64, (b.loc.x + b.size.w) as f64 - 1.0);
                     pos.y = pos.y.clamp(b.loc.y as f64, (b.loc.y + b.size.h) as f64 - 1.0);
                 }
-                let serial = SERIAL_COUNTER.next_serial();
-                let under = self.surface_under(pos);
-                pointer.motion(self, under, &MotionEvent { location: pos, serial, time: Event::time(&event) });
-                pointer.frame(self);
+                let _ = pointer;
+                self.pointer_to(pos, Event::time(&event));
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
                 // The position in the host window, mapped through the output it is over
@@ -119,97 +117,7 @@ impl Server {
                 pointer.frame(self);
             }
             InputEvent::PointerButton { event, .. } => {
-                let pointer = self.seat.get_pointer().unwrap();
-                let keyboard = self.seat.get_keyboard().unwrap();
-
-                let serial = SERIAL_COUNTER.next_serial();
-
-                let button = event.button_code();
-
-                let button_state = event.state();
-
-                // (window, Some(edges) = resize / None = move)
-                let mut grab_with: Option<(smithay::desktop::Window, Option<ResizeEdge>)> = None;
-                if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
-                    use crate::decor::Hit;
-                    let at = pointer.current_location();
-                    let hit = self.hit(at);
-                    let left = button == BTN_LEFT;
-                    match &hit {
-                        Hit::Surface(w, ..) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Edge(w, _) => {
-                            self.focus_window(&w.clone(), serial)
-                        }
-                        Hit::Nothing => {}
-                    }
-                    match hit {
-                        // Alt+left drag moves, Alt+right drag resizes any window.
-                        Hit::Surface(w, ..) if keyboard.modifier_state().alt && (left || button == BTN_RIGHT) => {
-                            let edges = (!left).then(|| self.nearest_edges(&w, at));
-                            grab_with = Some((w, edges));
-                        }
-                        Hit::Surface(..) => {}
-                        Hit::Title(w) if left => {
-                            let now = std::time::Instant::now();
-                            let double = self
-                                .last_title_press
-                                .as_ref()
-                                .is_some_and(|(lw, t)| *lw == w && now.duration_since(*t).as_millis() < 400);
-                            if double {
-                                self.last_title_press = None;
-                                self.toggle_maximize(&w);
-                            } else {
-                                self.last_title_press = Some((w.clone(), now));
-                                grab_with = Some((w, None));
-                            }
-                        }
-                        Hit::Close(w) if left => self.close_window(&w),
-                        Hit::Maximize(w) if left => self.toggle_maximize(&w),
-                        Hit::Edge(w, e) if left => grab_with = Some((w, Some(e))),
-                        Hit::Title(_) | Hit::Close(_) | Hit::Maximize(_) | Hit::Edge(..) => {}
-                        Hit::Nothing => {
-                        self.space.elements().for_each(|window| {
-                            window.set_activated(false);
-                            if let Some(t) = window.toplevel() {
-                                t.send_pending_configure();
-                            }
-                        });
-                        keyboard.set_focus(self, Option::<KeyboardFocus>::None, serial);
-                        }
-                    }
-                };
-
-                if let Some((window, resize)) = grab_with {
-                    // The press goes to the grab, not the app. Moving a maximised window
-                    // takes it out of maximised (back to its size, under the pointer).
-                    let start = smithay::input::pointer::GrabStartData { focus: None, button, location: pointer.current_location() };
-                    match resize {
-                        Some(edges) => self.start_resize(window, edges, Some(start)),
-                        None => {
-                            if let Some(old) = self.restore.get(&window).copied() {
-                                self.toggle_maximize(&window);
-                                let x = (start.location.x - old.size.w as f64 / 2.0).round() as i32;
-                                let y = start.location.y.round() as i32 + crate::decor::TITLE_H / 2;
-                                self.space.map_element(window.clone(), (x, y), true);
-                                if let Some(xs) = window.x11_surface() {
-                                    let _ = xs.configure(smithay::utils::Rectangle::new((x, y).into(), old.size));
-                                }
-                            }
-                            self.start_move(window, Some(start));
-                        }
-                    }
-                    return;
-                }
-
-                pointer.button(
-                    self,
-                    &ButtonEvent {
-                        button,
-                        state: button_state,
-                        serial,
-                        time: event.time(),
-                    },
-                );
-                pointer.frame(self);
+                self.handle_button(event.button_code(), event.state(), Event::time(&event));
             }
             InputEvent::PointerAxis { event, .. } => {
                 let source = event.source();
@@ -295,5 +203,111 @@ impl Server {
             e |= ResizeEdge::BOTTOM;
         }
         if e.is_empty() { ResizeEdge::BOTTOM_RIGHT } else { e }
+    }
+}
+
+impl Server {
+    /// The pointer at `pos` (logical): focus, shape, and motion to the app or grab.
+    /// The mouse and the control socket's `pointer` both come here.
+    pub fn pointer_to(&mut self, pos: smithay::utils::Point<f64, smithay::utils::Logical>, time: smithay::backend::input::InputTime) {
+        let pointer = self.seat.get_pointer().unwrap();
+        let serial = SERIAL_COUNTER.next_serial();
+        let under = self.surface_under(pos);
+        pointer.motion(self, under, &MotionEvent { location: pos, serial, time });
+        pointer.frame(self);
+    }
+
+    /// A button pressed or released: title bars, Alt+drag, focus, then the app.
+    /// The mouse and the control socket's `press`/`release` both come here.
+    pub fn handle_button(&mut self, button: u32, button_state: ButtonState, time: smithay::backend::input::InputTime) {
+        let pointer = self.seat.get_pointer().unwrap();
+        let keyboard = self.seat.get_keyboard().unwrap();
+
+        let serial = SERIAL_COUNTER.next_serial();
+
+
+
+        // (window, Some(edges) = resize / None = move)
+        let mut grab_with: Option<(smithay::desktop::Window, Option<ResizeEdge>)> = None;
+        if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
+            use crate::decor::Hit;
+            let at = pointer.current_location();
+            let hit = self.hit(at);
+            let left = button == BTN_LEFT;
+            match &hit {
+                Hit::Surface(w, ..) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Edge(w, _) => {
+                    self.focus_window(&w.clone(), serial)
+                }
+                Hit::Nothing => {}
+            }
+            match hit {
+                // Alt+left drag moves, Alt+right drag resizes any window.
+                Hit::Surface(w, ..) if keyboard.modifier_state().alt && (left || button == BTN_RIGHT) => {
+                    let edges = (!left).then(|| self.nearest_edges(&w, at));
+                    grab_with = Some((w, edges));
+                }
+                Hit::Surface(..) => {}
+                Hit::Title(w) if left => {
+                    let now = std::time::Instant::now();
+                    let double = self
+                        .last_title_press
+                        .as_ref()
+                        .is_some_and(|(lw, t)| *lw == w && now.duration_since(*t).as_millis() < 400);
+                    if double {
+                        self.last_title_press = None;
+                        self.toggle_maximize(&w);
+                    } else {
+                        self.last_title_press = Some((w.clone(), now));
+                        grab_with = Some((w, None));
+                    }
+                }
+                Hit::Close(w) if left => self.close_window(&w),
+                Hit::Maximize(w) if left => self.toggle_maximize(&w),
+                Hit::Edge(w, e) if left => grab_with = Some((w, Some(e))),
+                Hit::Title(_) | Hit::Close(_) | Hit::Maximize(_) | Hit::Edge(..) => {}
+                Hit::Nothing => {
+                self.space.elements().for_each(|window| {
+                    window.set_activated(false);
+                    if let Some(t) = window.toplevel() {
+                        t.send_pending_configure();
+                    }
+                });
+                keyboard.set_focus(self, Option::<KeyboardFocus>::None, serial);
+                }
+            }
+        };
+
+        if let Some((window, resize)) = grab_with {
+            // The press goes to the grab, not the app. Moving a maximised window
+            // takes it out of maximised (back to its size, under the pointer).
+            let start = smithay::input::pointer::GrabStartData { focus: None, button, location: pointer.current_location() };
+            match resize {
+                Some(edges) => self.start_resize(window, edges, Some(start)),
+                None => {
+                    if let Some(old) = self.restore.get(&window).copied() {
+                        self.toggle_maximize(&window);
+                        let x = (start.location.x - old.size.w as f64 / 2.0).round() as i32;
+                        let y = start.location.y.round() as i32 + crate::decor::TITLE_H / 2;
+                        self.space.map_element(window.clone(), (x, y), true);
+                        if let Some(xs) = window.x11_surface() {
+                            let _ = xs.configure(smithay::utils::Rectangle::new((x, y).into(), old.size));
+                        }
+                    }
+                    self.start_move(window, Some(start));
+                }
+            }
+            return;
+        }
+
+        pointer.button(
+            self,
+            &ButtonEvent {
+                button,
+                state: button_state,
+                serial,
+                time: time,
+            },
+        );
+        pointer.frame(self);
     }
 }

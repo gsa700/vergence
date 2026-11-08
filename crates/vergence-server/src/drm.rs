@@ -99,6 +99,21 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
     let render_formats: FormatSet = renderer.egl_context().dmabuf_render_formats().iter().copied().collect();
     state.shm_formats_from(&renderer);
 
+    // GPU buffers from apps (linux-dmabuf v4): Xwayland's glamor and GL apps draw on
+    // the GPU and hand their buffers over without a copy. Without it Xwayland fell
+    // back to software and AlbumWall managed ~4 frames a second at 3.28 (2026-11-07).
+    // The feedback names the render node: Mesa opens the device by its number.
+    let render_node = node.node_with_type(NodeType::Render).and_then(|r| r.ok()).unwrap_or(node);
+    match smithay::wayland::dmabuf::DmabufFeedbackBuilder::new(render_node.dev_id(), renderer.dmabuf_formats()).build() {
+        Ok(feedback) => {
+            let mut dmabuf_state = smithay::wayland::dmabuf::DmabufState::new();
+            let global = dmabuf_state.create_global_with_default_feedback::<Server>(&state.display_handle, &feedback);
+            state.dmabuf = Some((dmabuf_state, global));
+            tracing::info!("linux-dmabuf on {render_node:?}");
+        }
+        Err(e) => tracing::warn!("linux-dmabuf: {e:?}"),
+    }
+
     let manager = DrmOutputManager::new(
         drm,
         GbmAllocator::new(gbm.clone(), GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT),
@@ -383,6 +398,13 @@ fn capture(
         .map_err(|e| e.to_string())?;
     let bytes = renderer.map_texture(&mapping).map_err(|e| e.to_string())?;
     Ok(bytes.to_vec())
+}
+
+impl Backend {
+    /// Can the renderer use this app buffer? (linux-dmabuf import check)
+    pub fn import_dmabuf(&mut self, dmabuf: &smithay::backend::allocator::dmabuf::Dmabuf) -> bool {
+        self.renderer.import_dmabuf(dmabuf, None).is_ok()
+    }
 }
 
 impl Server {

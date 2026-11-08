@@ -171,3 +171,20 @@ accessibility (Contract 3); display-list surfaces.
   was answered with the position X last reported, not where the server had
   just put it (AlbumWall snapped back to 0,0). AlbumWall (1131 x 710 saved)
   now opens at 1131 x 658 on the 14", all on screen.
+- **Resizing X apps (2026-11-07):** AlbumWall resizing was broken and then
+  sluggish; seen and driven over the control socket (`vctl pointer`,
+  `press`, `release`, new). Causes and fixes: (1) apps the server started
+  inherited its stdin, the console; AlbumWall (.NET) blocked reading it and
+  stopped drawing (state `ttyin`), so the window changed size while the
+  content froze. Apps now get /dev/null and are reaped (`spawn` in main.rs).
+  (2) A mapped X window's resize requests were not capped: AlbumWall
+  restored a saved 1222 x 922 onto the 14" (1170 x 658). Now capped to the
+  monitor it is mostly on. (3) Xwayland had no GPU: the server offered no
+  linux-dmabuf, so glamor fell back to software (DRISWRAST). Now linux-dmabuf
+  v4 with feedback naming the render node (Mesa opens the device by its
+  number; FreeBSD: drm/128 = dev 258): "Initialized glamor GL provider", and
+  AlbumWall draws through iris. (4) Every pointer motion sent a new size and
+  they queued behind AlbumWall's ~100-150 ms layout (over a second behind the
+  mouse); now `configure_with_sync` (_NET_WM_SYNC_REQUEST, Avalonia supports
+  it): the window settles ~225 ms after the mouse stops. Dave: "much better.
+  may still need work". Remaining cost is AlbumWall's own layout per size.

@@ -145,8 +145,14 @@ impl PointerGrab<Server> for ResizeSurfaceGrab {
             if self.edges.intersects(ResizeEdge::TOP) {
                 loc.y += self.initial_rect.size.h - self.last_window_size.h;
             }
-            let _ = x.configure(Rectangle::new(loc, self.last_window_size));
-            data.space.map_element(self.window.clone(), loc, true);
+            // Paced by _NET_WM_SYNC_REQUEST: the next size goes out only once the app
+            // has drawn the last one (Smithay buffers the newest meanwhile), so sizes do
+            // not pile up behind a slow app (AlbumWall: ~150 ms a layout at 3.28 ran
+            // over a second behind the mouse). Apps without the protocol get a plain
+            // configure. The window moves when X reports the change (configure_notify),
+            // so position and size change together.
+            let _ = x.configure_with_sync(Rectangle::new(loc, self.last_window_size), None);
+            let _ = &data;
             return;
         }
         let xdg = self.window.toplevel().unwrap();

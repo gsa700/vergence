@@ -112,4 +112,28 @@ impl smithay::wayland::fractional_scale::FractionalScaleHandler for Server {
     }
 }
 
+//
+// GPU buffers (linux-dmabuf; the DRM backend creates the global)
+//
+
+impl smithay::wayland::dmabuf::DmabufHandler for Server {
+    fn dmabuf_state(&mut self) -> &mut smithay::wayland::dmabuf::DmabufState {
+        &mut self.dmabuf.as_mut().expect("dmabuf global without state").0
+    }
+
+    fn dmabuf_imported(
+        &mut self,
+        _global: &smithay::wayland::dmabuf::DmabufGlobal,
+        dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
+        notifier: smithay::wayland::dmabuf::ImportNotifier,
+    ) {
+        let ok = self.backend.as_mut().is_some_and(|b| b.import_dmabuf(&dmabuf));
+        if ok {
+            let _ = notifier.successful::<Server>();
+        } else {
+            notifier.failed();
+        }
+    }
+}
+
 smithay::delegate_dispatch2!(Server);

@@ -92,6 +92,7 @@ impl XwmHandler for Server {
         h: Option<u32>,
         _reorder: Option<Reorder>,
     ) {
+        tracing::debug!("X11 configure request {:?}: x {x:?} y {y:?} w {w:?} h {h:?}", window.title());
         // Size as asked; position only before it is mapped (the server places windows).
         // Once mapped, from where the server has it: X may not have caught up with
         // our last configure yet (AlbumWall snapped back to 0,0 on its first resize).
@@ -100,6 +101,11 @@ impl XwmHandler for Server {
             && let Some(g) = self.space.element_geometry(&w)
         {
             geo.loc = g.loc;
+            // Never larger than the monitor it is mostly on (AlbumWall restored a
+            // saved 1222 x 922 after being fitted to the 14"'s 1170 x 658).
+            if let Some(room) = self.room_for(&w) {
+                geo.size = crate::place::fit(geo.size, room, window.min_size());
+            }
         }
         if let Some(w) = w {
             geo.size.w = w as i32;
@@ -152,7 +158,8 @@ impl XwmHandler for Server {
         let _ = window.set_fullscreen(false);
     }
 
-    fn resize_request(&mut self, _xwm: XwmId, window: X11Surface, _button: u32, edge: X11ResizeEdge) {
+    fn resize_request(&mut self, _xwm: XwmId, window: X11Surface, button: u32, edge: X11ResizeEdge) {
+        tracing::info!("X11 resize request {:?}: button {button} edge {edge:?}", window.title());
         let Some(w) = self.window_for_x11(&window) else { return };
         let edges = match edge {
             X11ResizeEdge::Top => ResizeEdge::TOP,
@@ -167,7 +174,8 @@ impl XwmHandler for Server {
         self.start_resize(w, edges, None);
     }
 
-    fn move_request(&mut self, _xwm: XwmId, window: X11Surface, _button: u32) {
+    fn move_request(&mut self, _xwm: XwmId, window: X11Surface, button: u32) {
+        tracing::info!("X11 move request {:?}: button {button}", window.title());
         if let Some(w) = self.window_for_x11(&window) {
             self.start_move(w, None);
         }

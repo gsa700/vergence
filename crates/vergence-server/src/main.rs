@@ -73,6 +73,17 @@ fn init_logging() {
     }
 }
 
+/// Start an app in the session: stdin from /dev/null (the server's is the console:
+/// a .NET app blocked reading it and froze, 2026-11-07), reaped when it exits.
+pub fn spawn(cmd: &mut std::process::Command) -> std::io::Result<u32> {
+    let mut child = cmd.stdin(std::process::Stdio::null()).spawn()?;
+    let pid = child.id();
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(pid)
+}
+
 fn spawn_client() {
     let mut args = std::env::args().skip(1).filter(|a| a != "--drm");
     let flag = args.next();
@@ -80,10 +91,10 @@ fn spawn_client() {
 
     match (flag.as_deref(), arg) {
         (Some("-c") | Some("--command"), Some(command)) => {
-            std::process::Command::new(command).spawn().ok();
+            let _ = spawn(&mut std::process::Command::new(command));
         }
         _ => {
-            std::process::Command::new("foot").spawn().ok();
+            let _ = spawn(&mut std::process::Command::new("foot"));
         }
     }
 }

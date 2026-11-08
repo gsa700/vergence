@@ -52,6 +52,22 @@ impl Server {
         Rectangle::new(centre(area, size), size)
     }
 
+    /// The most a mapped window may be: the monitor it is mostly on, below its title bar.
+    pub fn room_for(&self, w: &Window) -> Option<Size<i32, Logical>> {
+        let geo = self.space.element_geometry(w)?;
+        let out = self
+            .space
+            .outputs()
+            .filter_map(|o| {
+                let g = self.space.output_geometry(o)?;
+                let i = g.intersection(geo)?;
+                Some((i.size.w as i64 * i.size.h as i64, g))
+            })
+            .max_by_key(|(a, _)| *a)
+            .map(|(_, g)| g)?;
+        Some(content_area(out, self.has_title(w)).size)
+    }
+
     /// Fit and centre a Wayland window once it has a size (its first commit).
     pub fn place_wayland(&mut self, w: &Window) {
         let Some(t) = w.toplevel() else { return };
@@ -78,7 +94,7 @@ pub fn content_area(out: Rectangle<i32, Logical>, titled: bool) -> Rectangle<i32
 }
 
 /// `size` no larger than `room`, and no smaller than the app's minimum.
-fn fit(size: Size<i32, Logical>, room: Size<i32, Logical>, min: Option<Size<i32, Logical>>) -> Size<i32, Logical> {
+pub fn fit(size: Size<i32, Logical>, room: Size<i32, Logical>, min: Option<Size<i32, Logical>>) -> Size<i32, Logical> {
     let min = min.unwrap_or_default();
     (size.w.min(room.w).max(min.w).max(1), size.h.min(room.h).max(min.h).max(1)).into()
 }
