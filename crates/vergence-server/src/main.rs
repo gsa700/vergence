@@ -104,17 +104,19 @@ pub fn spawn(cmd: &mut std::process::Command) -> std::io::Result<u32> {
     Ok(pid)
 }
 
+/// The first app, once Xwayland is ready: `-c <command>` only, and never on the
+/// real monitors (--drm): the session starts with an empty desktop; apps come
+/// from the desktop menu (2026-11-08: a foot window opened at every restart, a
+/// leftover from the first nested tests). Nested runs still take `-c`.
 fn spawn_client() {
-    let mut args = std::env::args().skip(1).filter(|a| a != "--drm");
-    let flag = args.next();
-    let arg = args.next();
-
-    match (flag.as_deref(), arg) {
-        (Some("-c") | Some("--command"), Some(command)) => {
-            let _ = spawn(&mut std::process::Command::new(command));
-        }
-        _ => {
-            let _ = spawn(&mut std::process::Command::new("foot"));
-        }
+    let all: Vec<String> = std::env::args().skip(1).collect();
+    if all.iter().any(|a| a == "--drm") {
+        return;
+    }
+    let mut args = all.into_iter();
+    if let (Some(flag), Some(command)) = (args.next(), args.next())
+        && (flag == "-c" || flag == "--command")
+    {
+        let _ = spawn(&mut std::process::Command::new(command));
     }
 }

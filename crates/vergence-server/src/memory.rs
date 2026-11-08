@@ -28,6 +28,12 @@ use vergence_profile::windows::{WindowId, WindowSetting, WindowStore};
 
 use crate::Server;
 
+/// The smallest window memory records or restores, in points. A foot window
+/// was put back at 1x1 at every restart (it had been anchored before its first
+/// commit, squeezed to one cell, 7x15, and remembered so, 2026-11-08).
+const MIN_W: i32 = 64;
+const MIN_H: i32 = 48;
+
 /// A monitor's EDID-based ID, kept on its Output (set by the backend).
 pub struct MonitorId(pub String);
 
@@ -126,10 +132,14 @@ impl Server {
     }
 
     /// Where memory puts this window on the current setup: its content rectangle
-    /// and whether it was maximised. None: no place, monitor absent, or no fit.
+    /// and whether it was maximised. None: no place, monitor absent, no fit, or a
+    /// size no real window has (see MIN_W).
     pub fn remembered_place(&mut self, w: &Window) -> Option<(Rectangle<i32, Logical>, bool)> {
         let id = self.window_identity(w)?;
         let s = self.memory.store.get(&self.memory.setup)?.get(&id)?.clone();
+        if (s.width as i32) < MIN_W || (s.height as i32) < MIN_H {
+            return None;
+        }
         let out = self.space.outputs().find(|o| monitor_id_of(o).as_deref() == Some(s.monitor.as_str()))?.clone();
         let og = self.space.output_geometry(&out)?;
         let r = Rectangle::new((og.loc.x + s.x, og.loc.y + s.y).into(), (s.width as i32, s.height as i32).into());
@@ -148,6 +158,11 @@ impl Server {
         let Some(id) = self.window_identity(w) else { return };
         let maximised = self.restore.get(w).copied();
         let Some(geo) = maximised.or_else(|| self.space.element_geometry(w)) else { return };
+        // A window that hasn't got its size yet (1x1 before its first commit),
+        // or was squeezed to it, is not a place to remember.
+        if geo.size.w < MIN_W || geo.size.h < MIN_H {
+            return;
+        }
         let centre = (geo.loc.x + geo.size.w / 2, geo.loc.y + geo.size.h / 2);
         let Some((mon, og)) = self.space.outputs().find_map(|o| {
             let g = self.space.output_geometry(o)?;

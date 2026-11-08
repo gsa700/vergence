@@ -286,3 +286,20 @@ accessibility (Contract 3); display-list surfaces.
   the first output, so Firefox's menus on the ASUS opened on the 14". Now the
   monitor under the popup's anchor (else the one the window is mostly on).
   Dave: works.
+
+## X apps and live scale changes (2026-11-08)
+
+With scales now changing live (Displays), Xwayland keeps the client scale it
+started with (the densest monitor's then). Measured on Hubble: setting the
+14" from 3x to 2x and back left a GTK 3 X window where it was, at nearly the
+same size in points (696x543 -> 644x491), so X apps follow size changes like
+everything else; they are drawn at the starting density and shrunk to fit,
+sharp. The only loss is when the densest monitor goes above Xwayland's scale
+(then they are enlarged, soft) until the next session.
+
+Tried and backed out the same day: changing Xwayland's client scale live
+(new client scale, outputs re-sent, every X window re-configured to keep its
+size in points, X resources and XSETTINGS republished). Apps reacted on their
+own: AlbumWall (Avalonia) re-maximised itself onto the other monitor, GTK 3
+resized its window to a size of its own choosing. Real fixes are per app: the
+native Avalonia backend (whitepaper §8.1) and GTK on Wayland.

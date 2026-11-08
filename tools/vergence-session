@@ -31,7 +31,7 @@ LOG=$HOME/vergence-drm.log
 tries=0
 while :; do
     started=$(date +%s)
-    "$BIN" --drm -c foot > "$LOG" 2>&1
+    "$BIN" --drm > "$LOG" 2>&1
     status=$?
     if [ "$status" -eq 75 ]; then
         tries=0
