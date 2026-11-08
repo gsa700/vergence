@@ -24,6 +24,11 @@
 // (2026-11-08: choosing a picture for one screen used to redraw both). The worker
 // keeps the last few decoded pictures, each shrunk to what the largest monitor
 // needs (an 8K JPEG is 130 MB decoded and took 1.4 s to draw again each time).
+//
+// Finished pictures are also kept on disk, in ~/.cache/vergence/wallpaper, one
+// file per picture, fit, colour and monitor size (raw pixels: reading one back
+// takes milliseconds where decoding the 8K JPEG took 2 s), so a restart shows the
+// wallpaper at once. The newest CACHE_FILES are kept.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -292,6 +297,65 @@ impl Wallpaper {
 
 /// Decoded pictures kept by the worker.
 const KEEP_SOURCES: usize = 3;
+/// Finished pictures kept on disk.
+const CACHE_FILES: usize = 12;
+const CACHE_MAGIC: &[u8; 8] = b"VWALL001";
+
+/// The cache file for a look at w x h, named by the picture's path, size and
+/// time too, so an edited picture is drawn again.
+fn cache_path(look: &Look, w: u32, h: u32) -> Option<PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let image = look.image.as_ref()?;
+    let meta = std::fs::metadata(image).ok()?;
+    let mut hs = std::collections::hash_map::DefaultHasher::new();
+    look.hash(&mut hs);
+    (w, h, meta.len()).hash(&mut hs);
+    meta.modified().ok()?.hash(&mut hs);
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join(".cache/vergence/wallpaper").join(format!("{:016x}-{w}x{h}.rgba", hs.finish())))
+}
+
+/// A finished picture from the cache: 8-byte magic, width and height (u32 LE),
+/// then w x h premultiplied RGBA.
+fn cache_read(path: &std::path::Path, w: u32, h: u32) -> Option<Vec<u8>> {
+    let data = std::fs::read(path).ok()?;
+    let want = 16 + w as usize * h as usize * 4;
+    if data.len() != want || &data[..8] != CACHE_MAGIC || data[8..12] != w.to_le_bytes() || data[12..16] != h.to_le_bytes() {
+        return None;
+    }
+    // Touch it, so the newest-kept rule counts it as used.
+    let _ = std::fs::File::options().append(true).open(path).and_then(|f| f.set_modified(SystemTime::now()));
+    Some(data[16..].to_vec())
+}
+
+fn cache_write(path: &std::path::Path, w: u32, h: u32, rgba: &[u8]) {
+    let Some(dir) = path.parent() else { return };
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let mut data = Vec::with_capacity(16 + rgba.len());
+    data.extend_from_slice(CACHE_MAGIC);
+    data.extend_from_slice(&w.to_le_bytes());
+    data.extend_from_slice(&h.to_le_bytes());
+    data.extend_from_slice(rgba);
+    let tmp = path.with_extension("rgba.new");
+    if std::fs::write(&tmp, &data).and_then(|_| std::fs::rename(&tmp, path)).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return;
+    }
+    // Keep the newest CACHE_FILES.
+    let mut files: Vec<(SystemTime, PathBuf)> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "rgba"))
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, p) in files.into_iter().skip(CACHE_FILES) {
+        let _ = std::fs::remove_file(p);
+    }
+}
 
 fn worker(jobs: std::sync::mpsc::Receiver<Job>, done: Sender<Done>) {
     // The last few decoded pictures, newest first, each shrunk to `cover`.
@@ -302,13 +366,19 @@ fn worker(jobs: std::sync::mpsc::Receiver<Job>, done: Sender<Done>) {
     let mut cover = (0u32, 0u32);
     while let Ok(job) = jobs.recv() {
         let Some(path) = job.look.image.clone() else { continue };
+        let t = std::time::Instant::now();
+        let cached = cache_path(&job.look, job.w, job.h);
+        if let Some(rgba) = cached.as_deref().and_then(|c| cache_read(c, job.w, job.h)) {
+            tracing::info!("wallpaper: {} at {}x{} from the cache in {} ms", job.output, job.w, job.h, t.elapsed().as_millis());
+            let _ = done.send(Done { look: job.look, output: job.output, w: job.w, h: job.h, rgba: Some(rgba) });
+            continue;
+        }
         let grew = job.w > cover.0 || job.h > cover.1;
         cover = (cover.0.max(job.w), cover.1.max(job.h));
         if grew {
             // Kept rasters may now be too small for this monitor.
             sources.retain(|(_, _, s)| matches!(s, Source::Svg(_)));
         }
-        let t = std::time::Instant::now();
         // "center" shows the picture at its own pixels: never from a shrunk copy.
         let may_shrink = job.look.mode != "center";
         let at = match sources.iter().position(|(p, shrunk, _)| *p == path && (may_shrink || !shrunk)) {
@@ -329,6 +399,9 @@ fn worker(jobs: std::sync::mpsc::Receiver<Job>, done: Sender<Done>) {
         let loaded = t.elapsed().as_millis();
         let rgba = at.map(|i| sources[i].2.render(job.w, job.h, &job.look.mode, parse_color(&job.look.color)));
         tracing::info!("wallpaper: {} at {}x{} in {} ms ({} ms to read)", job.output, job.w, job.h, t.elapsed().as_millis(), loaded);
+        if let (Some(c), Some(px)) = (&cached, &rgba) {
+            cache_write(c, job.w, job.h, px);
+        }
         let _ = done.send(Done { look: job.look, output: job.output, w: job.w, h: job.h, rgba });
     }
 }
@@ -448,5 +521,24 @@ mod monitor_tests {
         assert_eq!(f.wallpaper.for_monitor("other").image, Some(PathBuf::from("/a.svg")));
         let c = WallpaperConfig { monitor: vec![MonitorWallpaper { id: "m".into(), image: Some(PathBuf::new()), ..Default::default() }], ..f.wallpaper.clone() };
         assert_eq!(c.for_monitor("m").image, None);
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn cache_round_trip_and_rejects() {
+        let dir = std::env::temp_dir().join(format!("vergence-wall-test-{}", std::process::id()));
+        let path = dir.join("x-2x1.rgba");
+        let px = vec![1, 2, 3, 255, 4, 5, 6, 255];
+        cache_write(&path, 2, 1, &px);
+        assert_eq!(cache_read(&path, 2, 1), Some(px));
+        // Another size, or a damaged file, is not used.
+        assert_eq!(cache_read(&path, 1, 2), None);
+        std::fs::write(&path, b"short").unwrap();
+        assert_eq!(cache_read(&path, 2, 1), None);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
