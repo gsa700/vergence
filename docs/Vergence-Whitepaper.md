@@ -21,9 +21,9 @@ On today's Unix-like desktops, an application's size on screen depends on which 
 
 This paper proposes a path to **app consistency**: every application the right size, in the right place and readable, on any monitor setup, for every user, including users who depend on accessibility tools. It starts with something buildable in days on an ordinary X11 desktop: a daemon that recognises monitor setups by their EDIDs, applies consistent scaling across toolkits, and remembers window layouts per setup. It ends with a long-term design for a new display server. That server rests on one authority and three contracts: geometry in visual size, placement owned by the server but negotiated with apps, and accessibility built into the protocol. Optional vector "display-list" surfaces revive the best idea of NeXTSTEP's Display PostScript.
 
-The design targets **FreeBSD** as the primary development platform and **Debian** as the second, tested at every phase.
+The design targets **FreeBSD** as the primary development platform and **Linux** as the second, tested on Fedora at every phase.
 
-As of November 2026 the phase 1 daemon is built and frozen, and the phase 2 server runs as the author's daily session on FreeBSD, on real monitors (§9).
+As of November 2026 the phase 1 daemon is built and frozen, and the phase 2 server runs as the author's daily session on FreeBSD, on real monitors, and runs on Linux too (§9).
 
 ---
 
@@ -92,7 +92,7 @@ X11 had a Display PostScript extension (DPS/X) on Sun, DEC and SGI workstations,
 3. **Every phase stands alone.** Each phase delivers value even if nobody else ever adopts it.
 4. **Compatibility at the edges.** Existing X11, Wayland and D-Bus applications keep working; new capabilities are optional upgrades.
 5. **Accessibility and security are part of the design**, not afterthoughts, and neither is allowed to break the other.
-6. **Two platforms from day one:** FreeBSD first, Debian second. Starting on FreeBSD keeps the code away from Linux-only interfaces (systemd, logind, Linux-specific kernel interfaces).
+6. **Two platforms from day one:** FreeBSD first, Linux second. Starting on FreeBSD keeps the code away from Linux-only interfaces (systemd, logind, Linux-specific kernel interfaces).
 7. **Our own parts.** The core is written by the project. A part from another project is used only when it is truly necessary, and only by explicit decision (§8).
 
 ---
@@ -371,10 +371,10 @@ On a typical desktop, any program running as the user can already read the user'
 
 | Part | Used for | Status |
 |---|---|---|
-| Smithay | The server's Wayland front end, DRM/KMS and input back ends, renderer | Borrowed for phase 2 bring-up; under review |
+| Smithay | The server's Wayland front end, DRM/KMS and input back ends, renderer | Borrowed for phase 2 bring-up; moving to a support role (decided 8 November 2026): the renderer is replaced with the project's own first, then the DRM/KMS and input back ends; the Wayland front end may stay as an edge |
 | libinput, libseat/seatd, xkbcommon | Input devices, seat and device access, keymaps | Borrowed through Smithay |
 | Xwayland | X11 applications (the X11 edge) | Borrowed; an X server of our own is a large project |
-| Slint | The settings app's prototype | Borrowed; licence (GPLv3 or royalty-free) to settle before publishing |
+| iced | The terminal and the settings app | Borrowed (MIT); chosen over Slint on 8 November 2026, and Slint removed. Draws in software on Hubble for now (§8.3) |
 | ab_glyph, resvg | Title-bar text, SVG wallpapers | Borrowed; small, candidates for our own |
 | Adwaita cursor theme | The pointer | Borrowed artwork, read at run time |
 
@@ -382,7 +382,7 @@ On a typical desktop, any program running as the user can already read the user'
 
 - **Phase 1 daemon:** Rust over XCB/RandR (the `x11rb` crate). Its profile, EDID and rules logic lives in a shared crate that moves unchanged into the server.
 - **Server core:** Rust. A compositor needs steady frame timing, which rules out garbage-collected runtimes.
-- **Settings, profile editor and tray indicator:** Rust. Whether they keep Slint or use a toolkit of the project's own is open (§10).
+- **Settings, profile editor and tray indicator:** Rust. They use iced for now; whether they move to a toolkit of the project's own is open (§10).
 - **Display-list reference implementation:** Rust (§6.6).
 
 Why one language:
@@ -398,7 +398,7 @@ Why one language:
 - **D-Bus clients** reach a D-Bus front end written by the project, which translates notifications, settings and accessibility into the server's own session bus (§6.8).
 - The server speaks Wayland, X11 and D-Bus at the edges, but placement, memory, units, accessibility and security follow this design.
 
-**Platforms.** FreeBSD 15 is the primary development platform, on real hardware: the phase 2 server is the daily session there, with Xfce on X11 kept as the fallback session. Debian 13 (X11, Xfce) is the second platform, to be tested alongside at every phase; the phase 2 server has not run on it yet. Where the two must differ, as with hot-plug events (§4.7), the code and the documents say so.
+**Platforms.** FreeBSD 15 is the primary development platform, on real hardware: the phase 2 server is the daily session there, with Xfce on X11 kept as the fallback session. Linux is the second platform, tested on Fedora on a workstation with Intel UHD 770 graphics; it replaced Debian 13 with Xfce, which had been chosen to host the X11 daemon of phase 1. On Linux the server meets logind, udev and the in-kernel DRM drivers instead of seatd, devd and drm-kmod. The phase 2 server has not run on it yet. Where the two must differ, as with hot-plug events (§4.7), the code and the documents say so.
 
 ### 8.1 Running our .NET/Avalonia applications
 
@@ -438,7 +438,7 @@ The development machine has Intel integrated graphics. Other machines will have 
 
 **The driver landscape:**
 
-| GPU | FreeBSD | Linux (Debian) |
+| GPU | FreeBSD | Linux |
 |---|---|---|
 | Intel | drm-kmod (a port of Linux's DRM drivers) + Mesa | in-kernel DRM + Mesa |
 | AMD | drm-kmod (amdgpu) + Mesa | in-kernel DRM (amdgpu) + Mesa |
@@ -457,8 +457,9 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 2. **One renderer per GPU.** The server already composes each monitor in its own buffer (§6.2). Each buffer is rendered on the GPU that drives that monitor. When an application draws on another GPU, its buffer is copied across once per frame, and the server tells the application which GPU sits under its window, so it can move there. This covers hybrid machines (integrated plus discrete), and multi-card walls (§5.1).
 3. **Capabilities are probed, never assumed by vendor.** Formats, modifiers, sync support and GBM are each queried from the driver at start-up and logged, and the server picks its path from the answers, not from the vendor's name. A driver that improves gets used fully without a code change.
 4. **Display lists need Vulkan compute** (§6.6). Intel and AMD have it through Mesa on both systems, and NVIDIA's proprietary driver on Linux. On FreeBSD with NVIDIA it is to be checked (§10). Bitmap surfaces never need it.
+5. **The server survives a GPU reset.** When the kernel resets a hung GPU, every GL context on it may be lost. On Hubble a reset caused by a client left the server drawing black while every GL call still reported success. The server's renderer uses robust contexts, checks reset status every frame, and on a reset rebuilds its context and re-uploads its textures without a restart. A client that hangs the GPU is logged by name.
 
-**Test hardware, planned.** A dual-boot FreeBSD and Debian machine with an Intel UHD 630 and an NVIDIA RTX card covers integrated graphics, proprietary NVIDIA on both systems, nouveau/NVK on Debian, and the hybrid two-GPU case in one box. AMD comes later. A working NVIDIA compute machine is used only for reading driver facts, not for display tests.
+**Test hardware, planned.** A dual-boot FreeBSD and Linux machine (likely Fedora, as on the Linux test workstation) with an Intel UHD 630 and an NVIDIA RTX card covers integrated graphics, proprietary NVIDIA on both systems, nouveau/NVK on Linux, and the hybrid two-GPU case in one box. AMD comes later. A working NVIDIA compute machine is used only for reading driver facts, not for display tests.
 
 ---
 
@@ -466,7 +467,7 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 
 | Phase | Deliverable | Value on its own | Estimated effort |
 |---|---|---|---|
-| **1** | X11 consistency daemon: EDID profiles, scaling modes A/B, toolkit settings, layout memory | Fixes daily annoyances on any X11 desktop, FreeBSD and Debian | Days to weeks |
+| **1** | X11 consistency daemon: EDID profiles, scaling modes A/B, toolkit settings, layout memory | Fixes daily annoyances on any X11 desktop, FreeBSD and Linux | Days to weeks |
 | **2** | Display server, first nested in a window, then on real hardware: native per-monitor rendering, placement memory, reference-unit scaling, per-window scaling of X11 apps with correct input, the session bus with its D-Bus edge (§6.8) | A usable personal desktop that beats X11 and Wayland on consistency | Months |
 | **3** | Accessibility contract and display-list surfaces: Rust reference implementation, then the native Avalonia backend (§8.1) | Sharp magnification, sharp straddling windows, accessibility by design | Research |
 | **4** | Remote display over display lists | Efficient, sharp remote desktops | Research |
@@ -474,7 +475,7 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 **Status, 8 November 2026.**
 
 - **Phase 1** is built through its fourth milestone (profiles, layout memory, window memory, scaling) and runs on FreeBSD. It is frozen except for blockers, because X11's walls (§5) cost more effort than they teach.
-- **Phase 2** runs on real hardware as the daily session on FreeBSD 15.1 with Intel UHD 630 graphics, on two monitors of very different density: a 14″ 4K panel at scale 3 and an ordinary 1080p monitor at 1, the defaults from their EDIDs (calculated 3.28 and 1.07, snapped to whole numbers as Contract 1 says). Wayland applications draw natively at each monitor's scale. X11 applications run through rootless Xwayland at the densest monitor's scale and are shown smaller on the others; a smoothing filter for that shrink was tried and rejected because it softened text. The server draws title bars, places new windows on the monitor under the pointer, remembers window places per monitor setup (a first piece of Contract 2), follows monitors being plugged in and out, and has a control socket for scripted tests. The session bus (§6.8) works: its core (monitors, settings and notifications on the project's own protocol) and a D-Bus edge written by the project, which provides the settings portal (applications follow dark or light and the accent live) and draws notifications itself. A settings app (Slint, a sidebar of pages) sets appearance, each screen's wallpaper (one screen's is the default), each screen's scale and the arrangement of the screens, all applied live. Windows, placement and accessibility on the native protocol, and explicit sync (§8.3), come next.
+- **Phase 2** runs on real hardware as the daily session on FreeBSD 15.1 with Intel UHD 630 graphics, on two monitors of very different density: a 14″ 4K panel at scale 3 and an ordinary 1080p monitor at 1, the defaults from their EDIDs (calculated 3.28 and 1.07, snapped to whole numbers as Contract 1 says). Wayland applications draw natively at each monitor's scale. X11 applications run through rootless Xwayland at the densest monitor's scale and are shown smaller on the others; a smoothing filter for that shrink was tried and rejected because it softened text. The server draws title bars, places new windows on the monitor under the pointer, remembers window places per monitor setup (a first piece of Contract 2), follows monitors being plugged in and out, and has a control socket for scripted tests. The session bus (§6.8) works: its core (monitors, settings and notifications on the project's own protocol) and a D-Bus edge written by the project, which provides the settings portal (applications follow dark or light and the accent live) and draws notifications itself. A settings app (iced, a sidebar of pages) sets appearance, each screen's wallpaper (one screen's is the default), each screen's scale and the arrangement of the screens, all applied live. On 8 November it also ran on Linux for the first time, on Fedora with Intel UHD 770 graphics, started from the GDM login screen, with the same monitors at 60 Hz and the same scales; the only changes needed were the peer-credential call (glibc has no `getpeereid`) and seat access through logind instead of seatd. Windows, placement and accessibility on the native protocol, and explicit sync (§8.3), come next.
 
 **What FreeBSD taught phase 2.** As in phase 1 (§4.7), the real machine showed things a Linux-first build would have missed:
 
@@ -499,11 +500,11 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 5. Status of Wayland session-restore and placement protocols, and whether the server should implement them for compatibility.
 6. Display-list format: the minimal validated command set (paths, fills, strokes, gradients, images, text runs with font references, clips, layers), and how text is shipped (glyph runs plus font identity, so the server can re-render text sharply at any density).
 7. FreeBSD specifics: DRM/KMS driver coverage for the target GPUs beyond Intel (§8.3); libinput and seat management; a suspend-and-wake loop for testing.
-8. The tools' user interface: a Slint prototype of the settings app (its Wallpaper page) runs on FreeBSD under the server. Slint is a borrowed toolkit (§8), so whether the tools keep it or use a toolkit of the project's own is open. Its licence (GPLv3 or royalty-free) must be settled before anything is published.
+8. The tools' user interface: the settings app and the terminal use iced (MIT, chosen over Slint on 8 November 2026, whose GPLv3 or royalty-free licence was a concern). iced is a borrowed toolkit (§8), so whether the tools keep it or use a toolkit of the project's own is open; its software renderer is slow at scale 3 when scrolling large pages, and its GPU renderer hung Hubble's GPU (§8.3).
 9. The scope of the native Avalonia backend: which parts of Avalonia's platform interfaces it must implement, and how its automation peers map to Contract 3.
 10. Firefox and Thunderbird: confirm that Firefox on X11 has no per-monitor scaling; check whether Mozilla implements (or plans) the Wayland session-restore protocol; how well heuristics match several Firefox windows to saved layouts; the scope of an AT-SPI bridge into Contract 3.
 11. Many monitors on several GPUs (§5.1): NVIDIA's FreeBSD driver with more than one card (Xinerama versus PRIME output sinks for phase 1; its DRM/KMS support for phase 2); how many monitors report a real EDID serial number (the linuxhw database can answer this), since identical panels without one are told apart only by port.
-12. GPUs and drivers (§8.3): whether NVIDIA's FreeBSD driver provides GBM, KMS and DRM sync objects well enough for the server, and Vulkan compute for display lists; which nouveau/NVK generations are usable on Debian; the cost of copying each frame between GPUs on a hybrid machine; AMD on FreeBSD's drm-kmod, on real hardware.
+12. GPUs and drivers (§8.3): whether NVIDIA's FreeBSD driver provides GBM, KMS and DRM sync objects well enough for the server, and Vulkan compute for display lists; which nouveau/NVK generations are usable on Linux; the cost of copying each frame between GPUs on a hybrid machine; AMD on FreeBSD's drm-kmod, on real hardware.
 13. Session bus (§6.8): which D-Bus interfaces everyday applications (Firefox, Thunderbird, GTK and Qt applications, Avalonia) actually call, measured with a logging edge before anything is translated; which of them only warn when a service is missing and which fail; the scope of the AT-SPI bridge on the bus side. *First measurement (8 November 2026, Firefox, Slint, Avalonia): the settings portal (now provided), GNOME's idle monitor (Firefox polls it), gvfs, screensaver inhibit, Ubuntu's menu registrar and the accessibility bus. None of the applications failed without them.*
 
 ---
@@ -521,8 +522,8 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 - **GBM:** Generic Buffer Management, the interface through which a display server allocates GPU buffers it can show on a monitor.
 - **Mesa:** the open-source implementation of OpenGL, Vulkan and GBM used by Intel, AMD and nouveau drivers.
 - **Explicit sync:** passing a fence with each buffer that says when the GPU has finished with it, instead of leaving the kernel to work that out (implicit sync).
+- **iced:** a cross-platform GUI toolkit for Rust, with a GPU renderer (wgpu) and a software one (tiny-skia).
 - **Smithay:** a Rust library for building Wayland compositors.
-- **Slint:** a lightweight declarative UI toolkit for Rust, running on Linux and FreeBSD.
 - **Vello:** a Rust GPU renderer for 2D vector graphics.
 - **x11rb:** Rust bindings for the X11 protocol (XCB).
 - **Capsicum:** FreeBSD's capability-based sandboxing framework.
