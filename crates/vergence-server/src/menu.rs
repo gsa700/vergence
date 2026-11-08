@@ -9,8 +9,8 @@
 //     name = "Terminal"
 //     exec = "foot"
 //
-// or, without any, the usual apps that are installed (terminal, settings, browser,
-// files, AlbumWall). Re-read each time the menu opens.
+// or, without any, the usual apps that are installed (Vergence's terminal,
+// settings, browser, files, AlbumWall). Re-read each time the menu opens.
 
 use std::collections::HashMap;
 
@@ -97,7 +97,9 @@ fn apps() -> Vec<Item> {
             out.push(Item { name: name.into(), exec });
         }
     };
-    add("Terminal", on_path("foot"));
+    // Our own terminal (crates/vergence-term), built beside the server; foot only
+    // if it isn't there (Dave, 2026-11-08: "no more dirty foot").
+    add("Terminal", here.as_ref().map(|d| d.join("vergence-term")).filter(|p| p.exists()).map(|p| p.display().to_string()).or_else(|| on_path("foot")));
     add("Settings", here.map(|d| d.join("vergence-settings")).filter(|p| p.exists()).map(|p| p.display().to_string()));
     add("Firefox", on_path("firefox"));
     add("Files", on_path("thunar"));

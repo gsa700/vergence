@@ -1,0 +1,13 @@
+[package]
+name = "vergence-term"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Vergence's terminal: tabs in the title bar, split panes, sharp at every scale (iced; our own terminal core)"
+
+# iced (MIT; Dave chose it for the terminal 2026-11-08, spikes/toolkit/RESULTS.md).
+# The terminal itself (parser, screen, PTY) is our own code.
+[dependencies]
+iced = { version = "0.14", features = ["canvas", "advanced"] }
+vergence-xsettings.workspace = true
