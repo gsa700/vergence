@@ -106,7 +106,7 @@ pub fn init_winit(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Res
                 let scene = state.scene(renderer, &v.output, v.output.current_scale().fractional_scale());
                 let texture = v.texture.as_mut().unwrap();
                 let mut fb = renderer.bind(texture).expect("bind texture");
-                v.damage.render_output(renderer, &mut fb, 0, &scene, [0.1, 0.1, 0.1, 1.0]).expect("render output");
+                v.damage.render_output(renderer, &mut fb, 0, &scene, state.background_color()).expect("render output");
             }
 
             // Then side by side in the host window.

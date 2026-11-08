@@ -56,7 +56,7 @@ smithay::backend::renderer::element::render_elements! {
     pub SceneElement<=GlesRenderer>;
     Surface = WaylandSurfaceRenderElement<GlesRenderer>,
     Solid = SolidColorRenderElement,
-    Text = MemoryRenderBufferRenderElement<GlesRenderer>,
+    Memory = MemoryRenderBufferRenderElement<GlesRenderer>,
 }
 
 /// What is under a point of the desktop.
@@ -254,7 +254,7 @@ impl Server {
                         Some(logical),
                         Kind::Unspecified,
                     ) {
-                        Ok(e) => elements.push(SceneElement::Text(e)),
+                        Ok(e) => elements.push(SceneElement::Memory(e)),
                         Err(e) => tracing::warn!("title text: {e:?}"),
                     }
                 }
@@ -271,6 +271,12 @@ impl Server {
             let render_loc = (loc - w.geometry().loc - out.loc).to_f64().to_physical(scale).to_i32_round();
             let surfaces: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = w.render_elements(renderer, render_loc, scale.into(), 1.0);
             elements.extend(surfaces.into_iter().map(SceneElement::Surface));
+        }
+        // Behind everything: the wallpaper, at this output's own pixels (wallpaper.rs).
+        if let Some(mode) = output.current_mode()
+            && let Some(e) = self.wallpaper_element(renderer, &output.name(), mode.size, out.size)
+        {
+            elements.push(SceneElement::Memory(e));
         }
         elements
     }

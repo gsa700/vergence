@@ -1,0 +1,6 @@
+#!/bin/sh
+# Xfce from a text console (Hubble has no display manager since 2026-11-07):
+# what lightdm's wrapper did first, loading ~/.xprofile (vergd's session.env with
+# the per-monitor scale for Qt/Avalonia on Xorg), then Xfce through startx.
+[ -r "$HOME/.xprofile" ] && . "$HOME/.xprofile"
+exec startxfce4 "$@"

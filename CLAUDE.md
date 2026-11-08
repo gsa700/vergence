@@ -16,11 +16,13 @@ the current milestone is docs/milestone-4.md (scaling; earlier ones in docs/mile
   copy. It is the XSETTINGS manager (Xfce's Appearance dialog no longer
   applies); run `xfconf-query` only with the session's
   DBUS_SESSION_BUS_ADDRESS, or a stray xfconfd appears.
-- **The phase 2 server on Hubble's real monitors** runs as the "Vergence"
-  session at lightdm's login screen (tools/vergence-session, installed by
-  tools/install-session.sh; Ctrl+Alt+Backspace ends it), or from a console
-  (Ctrl+Alt+F2) with `~/run-vergence-drm.sh` (= tools/run-server-drm.sh); log
-  ~/vergence-drm.log either way. Over SSH, `~/bin/vctl` (tools/vctl; finds the
+- **The phase 2 server on Hubble's real monitors**: Hubble has no display
+  manager since 2026-11-07 (lightdm disabled: its Wayland sessions were
+  fragile on FreeBSD without logind; `sudo sysrc lightdm_enable=YES` brings it
+  back). Log in on the text console, then `vergence` (~/bin link to
+  tools/vergence-session; Ctrl+Alt+Backspace ends it) or `xfce`
+  (tools/start-xfce: loads ~/.xprofile, then startxfce4). Log
+  ~/vergence-drm.log. Wallpaper: ~/.config/vergence/desktop.toml. Over SSH, `~/bin/vctl` (tools/vctl; finds the
   socket in /var/run/xdg/<user> or /tmp/xdg-<uid>) drives it: `vctl shot` then copy
   ~/vergence-shots/*.png back to look, `vctl windows`, `vctl spawn
   tools/xtest.sh`, `vctl move`, and `vctl restart` after a rebuild (no hand at

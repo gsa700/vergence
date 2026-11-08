@@ -73,6 +73,8 @@ pub struct Server {
     /// linux-dmabuf (DRM backend): apps' GPU buffers.
     /// Where windows were, per monitor setup (memory.rs).
     pub memory: crate::memory::Memory,
+    /// The wallpaper and its desktop.toml watch (wallpaper.rs).
+    pub wallpaper: Option<crate::wallpaper::Wallpaper>,
     pub dmabuf: Option<(smithay::wayland::dmabuf::DmabufState, smithay::wayland::dmabuf::DmabufGlobal)>,
     /// The process exit status (control.rs: 75 = restart me).
     pub exit_code: i32,
@@ -180,6 +182,7 @@ impl Server {
             mapped_at: Default::default(),
             dmabuf: None,
             memory: crate::memory::Memory::load(),
+            wallpaper: None,
             exit_code: 0,
             popups,
             seat,

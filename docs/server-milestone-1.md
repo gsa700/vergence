@@ -237,3 +237,18 @@ accessibility (Contract 3); display-list surfaces.
   connectors: Permission denied"); the script now retries a failure within 5 s
   of start, up to 5 times (each try's log kept as ~/vergence-drm.log.tryN).
   Second try: logged in from the greeter, works; vctl finds the socket.
+- **Wallpaper (2026-11-07):** `wallpaper.rs`, from
+  ~/.config/vergence/desktop.toml (`[wallpaper] image, mode = fill|fit|center|
+  stretch, color`), checked every second, applied at once. Each monitor gets
+  the picture at its own native pixels on a worker thread: SVG drawn by resvg
+  at that size (Xfce's leaves: 79 ms at 3840x2160, 24 ms at 1920x1080), PNG/JPEG
+  resampled Catmull-Rom (1.05 s / 0.27 s for a 2048x1536 PNG); the colour shows
+  until it is ready and behind "fit"/"center". First piece of the settings app
+  work (docs: the app writes desktop.toml and settings.toml; the server applies).
+- **lightdm dropped (2026-11-07):** its Vergence session raced the outgoing X
+  server, a `vctl restart` inside it could not get the display back (seatd:
+  "Could not set VT mode ... Operation not permitted", "drm master: Device
+  busy"), and when the session ended lightdm looped starting greeter X servers
+  on the session's VT (~1000 log lines a second; stopped by restarting
+  lightdm). greetd is not packaged for FreeBSD. Hubble now logs in on the text
+  console: `vergence` or `xfce`. Restarts work from the console.

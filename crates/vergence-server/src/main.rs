@@ -16,6 +16,7 @@ mod control;
 mod text;
 mod place;
 mod memory;
+mod wallpaper;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;
@@ -28,6 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let display: Display<Server> = Display::new()?;
 
     let mut state = Server::new(&mut event_loop, display);
+    state.start_wallpaper();
 
     // --drm: the real monitors (from a text console, through libseat); else nested.
     if std::env::args().any(|a| a == "--drm") {

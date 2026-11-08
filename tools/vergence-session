@@ -4,7 +4,8 @@
 # through seatd; `vctl restart` (exit status 75) starts it again with the build
 # that is there now; any other exit ends the session (back to the login screen).
 # Installed as a session by tools/install-session.sh.
-here=$(cd "$(dirname "$0")" && pwd)
+# (Through the link in ~/bin too: the checkout is where the script really is.)
+here=$(dirname "$(realpath "$0")")
 BIN=${VERGENCE_SERVER:-$here/../target/release/vergence-server}
 # lightdm's PAM gives a private runtime directory; from a console there is none.
 if [ -z "$XDG_RUNTIME_DIR" ]; then
