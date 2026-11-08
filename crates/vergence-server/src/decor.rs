@@ -203,7 +203,8 @@ impl Server {
         let focused = self.seat.get_keyboard().and_then(|k| k.current_focus());
         self.decor.retain(|w, _| w.alive());
         let windows: Vec<Window> = self.space.elements().rev().cloned().collect();
-        let mut elements = Vec::new();
+        // In front of everything: the desktop menu, if open (menu.rs).
+        let mut elements = self.menu_elements(renderer, out, scale);
         for w in windows {
             let frame = self.frame_of(&w);
             let reach = frame.as_ref().map(|f| f.whole()).or_else(|| self.space.element_bbox(&w));

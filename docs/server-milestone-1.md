@@ -270,3 +270,15 @@ accessibility (Contract 3); display-list surfaces.
   winit backend sends no app_id (set_xdg_app_id has no effect; needs its winit
   attributes hook), Fluent light style, no D-Bus session bus warning, Slint's
   licence (GPLv3 or royalty-free with attribution) to settle before publishing.
+- **Desktop menu (2026-11-07):** `menu.rs`. Right-click on the bare desktop:
+  the apps and "Exit Vergence" (ends the session; back to the console).
+  Drawn by the server like the title bars, sized in points (same physical
+  size on every monitor), labels rasterised per monitor; hover highlight;
+  Escape or a click outside closes it; it swallows the clicks it uses. Apps:
+  `[[menu.item]] name/exec` in desktop.toml, else the installed defaults
+  (Terminal = foot, Settings, Firefox, Files = Thunar, AlbumWall), started in
+  the session like `vctl spawn`. Dave: "fine for now".
+- **Settings app: wallpaper previews (2026-11-07):** a grid of thumbnails
+  (560 x 315 px, sharp at 3.28) rendered on a thread and filled in as they
+  come (SVG by resvg, PNG/JPEG resized to fill); click selects, double-click
+  applies.

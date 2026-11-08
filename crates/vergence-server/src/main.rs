@@ -17,6 +17,7 @@ mod text;
 mod place;
 mod memory;
 mod wallpaper;
+mod menu;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;

@@ -75,6 +75,10 @@ pub struct Server {
     pub memory: crate::memory::Memory,
     /// The wallpaper and its desktop.toml watch (wallpaper.rs).
     pub wallpaper: Option<crate::wallpaper::Wallpaper>,
+    /// The desktop menu while it is open (menu.rs), and the button whose release
+    /// it swallows.
+    pub menu: Option<crate::menu::OpenMenu>,
+    pub menu_swallow: Option<u32>,
     pub dmabuf: Option<(smithay::wayland::dmabuf::DmabufState, smithay::wayland::dmabuf::DmabufGlobal)>,
     /// The process exit status (control.rs: 75 = restart me).
     pub exit_code: i32,
@@ -183,6 +187,8 @@ impl Server {
             dmabuf: None,
             memory: crate::memory::Memory::load(),
             wallpaper: None,
+            menu: None,
+            menu_swallow: None,
             exit_code: 0,
             popups,
             seat,

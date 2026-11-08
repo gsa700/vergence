@@ -20,6 +20,7 @@ const BTN_RIGHT: u32 = 0x111;
 enum KeyAction {
     Quit,
     Vt(i32),
+    CloseMenu,
 }
 
 impl Server {
@@ -36,11 +37,14 @@ impl Server {
                     event.state(),
                     serial,
                     time,
-                    |_, mods, handle| {
+                    |st, mods, handle| {
                         let sym = handle.modified_sym().raw();
                         if event.state() == smithay::backend::input::KeyState::Pressed {
                             if mods.ctrl && mods.alt && sym == smithay::input::keyboard::keysyms::KEY_BackSpace {
                                 return FilterResult::Intercept(KeyAction::Quit);
+                            }
+                            if st.menu_is_open() && sym == smithay::input::keyboard::keysyms::KEY_Escape {
+                                return FilterResult::Intercept(KeyAction::CloseMenu);
                             }
                             let vt1 = smithay::input::keyboard::keysyms::KEY_XF86Switch_VT_1;
                             if (vt1..vt1 + 12).contains(&sym) {
@@ -52,6 +56,7 @@ impl Server {
                 );
                 match action {
                     Some(KeyAction::Quit) => self.loop_signal.stop(),
+                    Some(KeyAction::CloseMenu) => self.close_menu(),
                     Some(KeyAction::Vt(n)) => {
                         if let Some(session) = self.session.as_mut() {
                             use smithay::backend::session::Session;
@@ -212,6 +217,7 @@ impl Server {
     pub fn pointer_to(&mut self, pos: smithay::utils::Point<f64, smithay::utils::Logical>, time: smithay::backend::input::InputTime) {
         let pointer = self.seat.get_pointer().unwrap();
         let serial = SERIAL_COUNTER.next_serial();
+        self.menu_hover(pos);
         let under = self.surface_under(pos);
         pointer.motion(self, under, &MotionEvent { location: pos, serial, time });
         pointer.frame(self);
@@ -225,7 +231,18 @@ impl Server {
 
         let serial = SERIAL_COUNTER.next_serial();
 
-
+        // The desktop menu takes the clicks while it is open (and the release of the
+        // click that opened or used it).
+        if button_state == ButtonState::Released && self.menu_swallow == Some(button) {
+            self.menu_swallow = None;
+            return;
+        }
+        if button_state == ButtonState::Pressed && self.menu_is_open() {
+            let at = pointer.current_location();
+            self.menu_press(at);
+            self.menu_swallow = Some(button);
+            return;
+        }
 
         // (window, Some(edges) = resize / None = move)
         let mut grab_with: Option<(smithay::desktop::Window, Option<ResizeEdge>)> = None;
@@ -265,6 +282,12 @@ impl Server {
                 Hit::Maximize(w) if left => self.toggle_maximize(&w),
                 Hit::Edge(w, e) if left => grab_with = Some((w, Some(e))),
                 Hit::Title(_) | Hit::Close(_) | Hit::Maximize(_) | Hit::Edge(..) => {}
+                // Right-click on the bare desktop: the desktop menu.
+                Hit::Nothing if button == BTN_RIGHT => {
+                    self.open_menu(at);
+                    self.menu_swallow = Some(button);
+                    return;
+                }
                 Hit::Nothing => {
                 self.space.elements().for_each(|window| {
                     window.set_activated(false);
