@@ -16,6 +16,7 @@ use smithay::{
     backend::renderer::{
         element::{
             AsRenderElements, Id, Kind,
+            memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
             solid::SolidColorRenderElement,
             surface::WaylandSurfaceRenderElement,
         },
@@ -31,8 +32,9 @@ use smithay::{
         },
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    utils::{IsAlive, Logical, Physical, Point, Rectangle},
+    utils::{IsAlive, Logical, Physical, Point, Rectangle, Size, Transform},
 };
+use smithay::backend::allocator::Fourcc;
 
 use crate::{Server, grabs::resize_grab::ResizeEdge};
 
@@ -45,11 +47,16 @@ const BAR_ACTIVE: [f32; 4] = [0.20, 0.24, 0.32, 1.0];
 const BAR_INACTIVE: [f32; 4] = [0.22, 0.22, 0.22, 1.0];
 const CLOSE: [f32; 4] = [0.78, 0.30, 0.28, 1.0];
 const BUTTON: [f32; 4] = [0.72, 0.72, 0.72, 1.0];
+const TEXT_ACTIVE: [f32; 3] = [0.92, 0.92, 0.92];
+const TEXT_INACTIVE: [f32; 3] = [0.62, 0.62, 0.62];
+/// Space before the title text and between it and the buttons, in points.
+const TEXT_PAD: i32 = 8;
 
 smithay::backend::renderer::element::render_elements! {
     pub SceneElement<=GlesRenderer>;
     Surface = WaylandSurfaceRenderElement<GlesRenderer>,
     Solid = SolidColorRenderElement,
+    Text = MemoryRenderBufferRenderElement<GlesRenderer>,
 }
 
 /// What is under a point of the desktop.
@@ -62,16 +69,29 @@ pub enum Hit {
     Nothing,
 }
 
-/// The ids of one window's bar parts, for damage tracking.
+/// The ids of one window's bar parts, for damage tracking, and its title rasters.
 pub struct Decor {
     ids: [Id; 6],
     commit: CommitCounter,
     active: bool,
+    /// One title raster per output scale (key: the scale's bits).
+    titles: std::collections::HashMap<u64, TitleRaster>,
+}
+
+/// A title drawn for one scale: what it shows, and the pixels.
+struct TitleRaster {
+    key: (String, Size<i32, Logical>, bool),
+    buffer: MemoryRenderBuffer,
 }
 
 impl Decor {
     fn new() -> Self {
-        Decor { ids: std::array::from_fn(|_| Id::new()), commit: CommitCounter::default(), active: false }
+        Decor {
+            ids: std::array::from_fn(|_| Id::new()),
+            commit: CommitCounter::default(),
+            active: false,
+            titles: Default::default(),
+        }
     }
 }
 
@@ -191,6 +211,7 @@ impl Server {
                 continue;
             }
             if let Some(f) = frame {
+                let title = self.window_title(&w);
                 let active = focused.as_ref().is_some_and(|k| match k {
                     crate::focus::KeyboardFocus::X11(x) => w.x11_surface() == Some(x),
                     crate::focus::KeyboardFocus::Wayland(s) => w.toplevel().is_some_and(|t| t.wl_surface() == s),
@@ -203,7 +224,40 @@ impl Server {
                 let solid = |i: usize, r: Rectangle<f64, Logical>, c: [f32; 4]| {
                     SceneElement::Solid(SolidColorRenderElement::new(d.ids[i].clone(), physical(r, out.loc, scale), d.commit, c, Kind::Unspecified))
                 };
-                // Front to back: button marks, then the bar.
+                // Front to back: title text, button marks, then the bar.
+                let text_x = f.title.loc.x + TEXT_PAD;
+                let logical: Size<i32, Logical> = (f.maximize.loc.x - TEXT_PAD / 2 - text_x, TITLE_H).into();
+                if let Some(font) = self.title_font.as_ref()
+                    && logical.w > 0
+                    && !title.is_empty()
+                {
+                    // Pixels exactly as Smithay places `logical` at this scale: drawn 1:1.
+                    let (pw, ph) = ((logical.w as f64 * scale).round() as i32, (logical.h as f64 * scale).round() as i32);
+                    let key = (title.clone(), logical, active);
+                    let raster = d.titles.entry(scale.to_bits()).or_insert_with(|| TitleRaster {
+                        key: (String::new(), Size::default(), false),
+                        buffer: MemoryRenderBuffer::new(Fourcc::Abgr8888, (1, 1), 1, Transform::Normal, None),
+                    });
+                    if raster.key != key {
+                        let rgba = font.render(&title, pw as usize, ph as usize, scale, if active { TEXT_ACTIVE } else { TEXT_INACTIVE });
+                        raster.buffer = MemoryRenderBuffer::from_slice(&rgba, Fourcc::Abgr8888, (pw, ph), 1, Transform::Normal, None);
+                        raster.key = key;
+                    }
+                    let at = (Point::<i32, Logical>::from((text_x, f.title.loc.y)) - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+                    let whole = Rectangle::<f64, Logical>::from_size((pw as f64, ph as f64).into());
+                    match MemoryRenderBufferRenderElement::from_buffer(
+                        renderer,
+                        at.to_f64(),
+                        &raster.buffer,
+                        None,
+                        Some(whole),
+                        Some(logical),
+                        Kind::Unspecified,
+                    ) {
+                        Ok(e) => elements.push(SceneElement::Text(e)),
+                        Err(e) => tracing::warn!("title text: {e:?}"),
+                    }
+                }
                 let m = inset(f.maximize, 7.0);
                 let t = 1.5;
                 elements.push(solid(0, inset(f.close, 7.0), CLOSE));
@@ -219,6 +273,20 @@ impl Server {
             elements.extend(surfaces.into_iter().map(SceneElement::Surface));
         }
         elements
+    }
+
+    /// A window's title, as its app set it.
+    pub fn window_title(&self, w: &Window) -> String {
+        if let Some(x) = w.x11_surface() {
+            return x.title();
+        }
+        let Some(t) = w.toplevel() else { return String::new() };
+        smithay::wayland::compositor::with_states(t.wl_surface(), |s| {
+            s.data_map
+                .get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>()
+                .and_then(|d| d.lock().unwrap().title.clone())
+                .unwrap_or_default()
+        })
     }
 
     /// Close a window as its app is asked to.

@@ -154,3 +154,11 @@ accessibility (Contract 3); display-list surfaces.
   offscreen, to ~/vergence-shots/), `windows`, `spawn`, `move`, `focus`,
   `restart` (exit 75; `tools/run-server-drm.sh` loops on it), `quit`. Lets
   the session on the real monitors be seen and driven over SSH.
+- **Title text (2026-11-07):** window titles in the server's title bars
+  (`text.rs`): one line rasterised with ab_glyph (pure Rust) separately for
+  each monitor at its own pixels and drawn 1:1, so it is sharp on both; the
+  desktop font from Gtk/FontName in settings.toml (Sans 10 -> Noto Sans via
+  fc-match); light on the focused window, grey otherwise; ellipsis before the
+  buttons; re-rasterised only when title, width, focus or scale changes.
+  Kerning, no shaping (Latin titles; real text stack later). Checked from
+  screenshots on both monitors.

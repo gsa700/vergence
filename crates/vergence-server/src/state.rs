@@ -63,6 +63,8 @@ pub struct Server {
     pub last_title_press: Option<(Window, std::time::Instant)>,
     /// Monitors (connector names) still to capture for the control socket's `shot`.
     pub shot_pending: Vec<String>,
+    /// The desktop font for title text (None: titles without text).
+    pub title_font: Option<crate::text::TextFont>,
     /// The process exit status (control.rs: 75 = restart me).
     pub exit_code: i32,
     pub popups: PopupManager,
@@ -164,6 +166,7 @@ impl Server {
             restore: Default::default(),
             last_title_press: None,
             shot_pending: Vec::new(),
+            title_font: crate::text::TextFont::load(),
             exit_code: 0,
             popups,
             seat,

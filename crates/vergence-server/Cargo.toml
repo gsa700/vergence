@@ -19,6 +19,7 @@ vergence-edid.workspace = true
 vergence-xsettings.workspace = true
 x11rb = "0.13"
 png = "0.18"
+ab_glyph = "0.2"
 
 [dependencies.smithay]
 git = "https://github.com/Smithay/smithay"
