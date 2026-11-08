@@ -67,8 +67,11 @@ end written by the project sits at the edge. All our own code (whitepaper §8,
    The nested server left the session's control socket alone. **Passed**
    2026-11-08.
 4. On the real monitors (`--drm`): `vbus watch outputs` reports an unplug
-   and replug. **To do**, after the session server is restarted on this
-   build.
+   and replug. **Passed** 2026-11-08 on Hubble's live session: the ASUS
+   unplugged gave one event with the 14" alone, replugged one event with
+   both (the second ~1 s after the plug, when the server sets the monitor
+   up). One event per change: the server calls in from both the removal
+   and the layout, and the unchanged-list check sends it once.
 
 ## Not in this step
 
