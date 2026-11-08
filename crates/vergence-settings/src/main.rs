@@ -78,6 +78,8 @@ enum Message {
     SameAsPrimary(bool),
     MakePrimary,
     Thumb(PathBuf, Option<thumbs::Thumb>),
+    WindowOpened(iced::window::Id),
+    UiScale(f32),
     RemoveSource(usize),
     Browse(bool),
     BrowseOpen(usize),
@@ -115,6 +117,12 @@ struct App {
     // Wallpaper.
     files: Vec<PathBuf>,
     thumbs: HashMap<PathBuf, image::Handle>,
+    // The grid's previews at its exact pixel size for the window's scale, drawn
+    // without filtering: resampling 38 full previews in software on every frame
+    // made the wallpaper page crawl at scale 3 (Hubble, 2026-11-08).
+    raw: HashMap<PathBuf, thumbs::Thumb>,
+    grid: HashMap<PathBuf, image::Handle>,
+    ui_scale: f32,
     asked: HashSet<PathBuf>,
     bg_text: String,
     browser: Option<Browser>,
@@ -189,6 +197,9 @@ impl App {
             scale: 1.0,
             files: Vec::new(),
             thumbs: HashMap::new(),
+            raw: HashMap::new(),
+            grid: HashMap::new(),
+            ui_scale: 1.0,
             asked: HashSet::new(),
             bg_text: String::new(),
             browser: None,
@@ -400,7 +411,16 @@ impl App {
             }
             Message::Thumb(p, t) => {
                 if let Some(t) = t {
-                    self.thumbs.insert(p, image::Handle::from_rgba(t.w, t.h, t.rgba));
+                    self.grid.insert(p.clone(), thumbs::grid_handle(&t, self.ui_scale));
+                    self.thumbs.insert(p.clone(), image::Handle::from_rgba(t.w, t.h, t.rgba.clone()));
+                    self.raw.insert(p, t);
+                }
+            }
+            Message::WindowOpened(id) => return iced::window::scale_factor(id).map(Message::UiScale),
+            Message::UiScale(s) => {
+                if s > 0.0 && (s - self.ui_scale).abs() > 0.001 {
+                    self.ui_scale = s;
+                    self.grid = self.raw.iter().map(|(p, t)| (p.clone(), thumbs::grid_handle(t, s))).collect();
                 }
             }
             Message::RemoveSource(i) => {
@@ -529,11 +549,18 @@ impl App {
 
     fn theme(&self) -> Theme {
         let base = if self.dark() { Theme::Dark } else { Theme::Light };
-        Theme::custom("Vergence".to_string(), iced::theme::Palette { primary: self.accent(), ..base.palette() })
+        Theme::custom("Vergence".to_string(), iced::theme::Palette { primary: self.accent(), background: self.colours().page, ..base.palette() })
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        Subscription::run(bus_outputs)
+        Subscription::batch([
+            Subscription::run(bus_outputs),
+            iced::window::open_events().map(Message::WindowOpened),
+            iced::window::events().filter_map(|(_, e)| match e {
+                iced::window::Event::Rescaled(s) => Some(Message::UiScale(s)),
+                _ => None,
+            }),
+        ])
     }
 
     // ---- the view ----
@@ -558,7 +585,12 @@ impl App {
             Page::Screen(_) => self.screen(c),
             Page::About => self.about(c),
         };
-        let page = container(page).width(Length::Fill).height(Length::Fill).style(move |_| container::background(c.page));
+        // No fill of its own: the page colour is the theme's background, which the
+        // software renderer clears each redrawn region with directly. A container
+        // fill the size of the page crossed the scrolled region's edge, so every
+        // scroll step filled it again through a clip mask: ~45% of the frame
+        // (dtrace on Hubble, 2026-11-08).
+        let page = container(page).width(Length::Fill).height(Length::Fill);
         row![self.sidebar(c), container(Space::new().width(1.0).height(Length::Fill)).style(move |_| container::background(c.line)), page].into()
     }
 
@@ -805,17 +837,27 @@ impl App {
         let mut grid = row![].spacing(8);
         for (i, p) in self.files.iter().enumerate() {
             let selected = shown.image.as_deref() == Some(p.as_path());
-            let picture: Element<'_, Message> = match self.thumbs.get(p) {
-                Some(h) => image(h.clone()).width(Length::Fixed(152.0)).height(Length::Fixed(86.0)).content_fit(iced::ContentFit::Cover).into(),
-                None => container(Space::new().width(152.0).height(86.0)).style(move |_| container::background(c.card)).into(),
+            let picture: Element<'_, Message> = match self.grid.get(p) {
+                Some(h) => image(h.clone())
+                    .width(Length::Fixed(thumbs::GRID_W))
+                    .height(Length::Fixed(thumbs::GRID_H))
+                    .content_fit(iced::ContentFit::Fill)
+                    .filter_method(image::FilterMethod::Nearest)
+                    .into(),
+                None => container(Space::new().width(thumbs::GRID_W).height(thumbs::GRID_H)).style(move |_| container::background(c.card)).into(),
             };
             let name = p.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let tile = button(column![picture, text(name).size(11).color(c.text).width(152).wrapping(text::Wrapping::None)].spacing(4))
+            // Long names are shortened to the tile's width instead of running into the
+            // next one. Cut in the text, not clipped: a clipped caption made the software
+            // renderer clear a window-sized mask for each one on every frame.
+            let caption = text(short_name(&name, 25)).size(11).color(c.text).width(thumbs::GRID_W).wrapping(text::Wrapping::None);
+            let tile = button(column![picture, caption].spacing(4))
                 .padding(3)
                 .on_press(Message::PickPicture(i))
                 .style(move |_: &Theme, _| button::Style {
                     background: None,
-                    border: Border { color: if selected { c.accent } else { Color::TRANSPARENT }, width: 3.0, radius: 6.0.into() },
+                    // Unselected tiles draw no border at all (a transparent one is still drawn).
+                    border: if selected { Border { color: c.accent, width: 3.0, radius: 6.0.into() } } else { Border::default() },
                     ..button::Style::default()
                 });
             grid = grid.push(tile);
@@ -979,6 +1021,17 @@ fn group<'a>(c: Colours, heading: Option<&str>, rows: Vec<Element<'a, Message>>)
         Some(h) => column![text(h.to_string()).size(12).color(c.dim).font(iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT }), card].spacing(6).into(),
         None => card.into(),
     }
+}
+
+/// `name` cut to at most `max` characters, with an ellipsis when cut (about a
+/// 152-point tile's width at 11 points).
+fn short_name(name: &str, max: usize) -> String {
+    if name.chars().count() <= max {
+        return name.to_string();
+    }
+    let mut s: String = name.chars().take(max - 1).collect();
+    s.push('\u{2026}');
+    s
 }
 
 /// One setting: its name and a line about it on the left, its control on the right.

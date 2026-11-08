@@ -9,6 +9,23 @@ use std::path::{Path, PathBuf};
 pub const W: u32 = 560;
 pub const H: u32 = 315;
 
+/// A tile in the wallpaper grid, in points.
+pub const GRID_W: f32 = 152.0;
+pub const GRID_H: f32 = 86.0;
+
+/// The preview made at the grid tile's exact pixel size for `scale`, filled
+/// (cropped) as the server draws "fill", so the page copies it 1:1.
+pub fn grid_handle(t: &Thumb, scale: f32) -> iced::widget::image::Handle {
+    let (w, h) = (((GRID_W * scale).round() as u32).max(1), ((GRID_H * scale).round() as u32).max(1));
+    match image::RgbaImage::from_raw(t.w, t.h, t.rgba.clone()) {
+        Some(img) => {
+            let out = image::DynamicImage::ImageRgba8(img).resize_to_fill(w, h, image::imageops::FilterType::Triangle).to_rgba8();
+            iced::widget::image::Handle::from_rgba(w, h, out.into_raw())
+        }
+        None => iced::widget::image::Handle::from_rgba(t.w, t.h, t.rgba.clone()),
+    }
+}
+
 /// A preview: width, height, straight RGBA.
 #[derive(Debug, Clone)]
 pub struct Thumb {
