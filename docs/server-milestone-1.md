@@ -226,3 +226,14 @@ accessibility (Contract 3); display-list surfaces.
   only, the same key as vergd's), a2488f9d (14" only) and back to 8b4a39a2,
   every window where it belonged each time. Not yet: Xwayland's scale is
   fixed at start (the densest monitor then).
+- **Login-screen session (2026-11-07):** "Vergence" in lightdm's session menu
+  (/usr/local/share/wayland-sessions/vergence.desktop, from
+  tools/install-session.sh; undo by removing that file), running
+  tools/vergence-session from the checkout: lightdm's XDG_RUNTIME_DIR (pam_xdg:
+  /var/run/xdg/<user>), seatd, the restart loop for `vctl restart`, and phase 1's
+  Xorg scale variables cleared (lightdm's wrapper sources ~/.xprofile, where
+  vergd loads session.env). First try failed: lightdm started the session while
+  the outgoing Xfce X server still held the display ("Failed to disable
+  connectors: Permission denied"); the script now retries a failure within 5 s
+  of start, up to 5 times (each try's log kept as ~/vergence-drm.log.tryN).
+  Second try: logged in from the greeter, works; vctl finds the socket.

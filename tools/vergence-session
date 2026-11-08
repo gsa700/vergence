@@ -1,0 +1,48 @@
+#!/bin/sh
+# The Vergence session: what a display manager (lightdm on Hubble) runs when
+# "Vergence" is chosen at the login screen. vergence-server on the real monitors
+# through seatd; `vctl restart` (exit status 75) starts it again with the build
+# that is there now; any other exit ends the session (back to the login screen).
+# Installed as a session by tools/install-session.sh.
+here=$(cd "$(dirname "$0")" && pwd)
+BIN=${VERGENCE_SERVER:-$here/../target/release/vergence-server}
+# lightdm's PAM gives a private runtime directory; from a console there is none.
+if [ -z "$XDG_RUNTIME_DIR" ]; then
+    XDG_RUNTIME_DIR=/tmp/xdg-$(id -u)
+    mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+fi
+export XDG_RUNTIME_DIR
+# The server tells apps their scale (Wayland fractional scale; XSETTINGS and
+# Xft.dpi for X apps). Factors meant for an X11 desktop must not reach them: the
+# display manager's wrapper sources ~/.xprofile, where vergd (phase 1) loads its
+# per-monitor session.env for Xorg.
+unset QT_SCREEN_SCALE_FACTORS QT_SCALE_FACTOR QT_AUTO_SCREEN_SCALE_FACTOR \
+    AVALONIA_SCREEN_SCALE_FACTORS AVALONIA_GLOBAL_SCALE_FACTOR \
+    GDK_SCALE GDK_DPI_SCALE _JAVA_OPTIONS VERGENCE_SCALE DISPLAY
+export LIBSEAT_BACKEND=seatd
+export XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=Vergence
+export RUST_LOG=${RUST_LOG:-info,smithay=warn}
+LOG=$HOME/vergence-drm.log
+# A quick failure at start is retried: when the user logs out of an X session and
+# into this one, the display manager starts us while the old X server is still
+# letting go of the display ("Failed to disable connectors: Permission denied",
+# Hubble 2026-11-07). Each try's log is kept beside the main one.
+tries=0
+while :; do
+    started=$(date +%s)
+    "$BIN" --drm -c foot > "$LOG" 2>&1
+    status=$?
+    if [ "$status" -eq 75 ]; then
+        tries=0
+        sleep 1
+        continue
+    fi
+    if [ "$status" -ne 0 ] && [ $(( $(date +%s) - started )) -lt 5 ] && [ "$tries" -lt 5 ]; then
+        tries=$((tries + 1))
+        cp "$LOG" "$LOG.try$tries"
+        sleep 1
+        continue
+    fi
+    break
+done
+exit "$status"

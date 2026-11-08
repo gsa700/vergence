@@ -16,10 +16,12 @@ the current milestone is docs/milestone-4.md (scaling; earlier ones in docs/mile
   copy. It is the XSETTINGS manager (Xfce's Appearance dialog no longer
   applies); run `xfconf-query` only with the session's
   DBUS_SESSION_BUS_ADDRESS, or a stray xfconfd appears.
-- **The phase 2 server on Hubble's real monitors** runs from the console
-  (Ctrl+Alt+F2) with `~/run-vergence-drm.sh` (= tools/run-server-drm.sh, log
-  ~/vergence-drm.log). Over SSH, `~/bin/vctl` (tools/vctl; needs
-  XDG_RUNTIME_DIR=/tmp/xdg-1001) drives it: `vctl shot` then copy
+- **The phase 2 server on Hubble's real monitors** runs as the "Vergence"
+  session at lightdm's login screen (tools/vergence-session, installed by
+  tools/install-session.sh; Ctrl+Alt+Backspace ends it), or from a console
+  (Ctrl+Alt+F2) with `~/run-vergence-drm.sh` (= tools/run-server-drm.sh); log
+  ~/vergence-drm.log either way. Over SSH, `~/bin/vctl` (tools/vctl; finds the
+  socket in /var/run/xdg/<user> or /tmp/xdg-<uid>) drives it: `vctl shot` then copy
   ~/vergence-shots/*.png back to look, `vctl windows`, `vctl spawn
   tools/xtest.sh`, `vctl move`, and `vctl restart` after a rebuild (no hand at
   the console needed). Window indices are the stacking order (they change on
