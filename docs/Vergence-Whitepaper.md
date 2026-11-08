@@ -23,6 +23,8 @@ This paper proposes a path to **app consistency**: every application the right s
 
 The design targets **FreeBSD** as the primary development platform and **Debian** as the second, tested at every phase.
 
+As of November 2026 the phase 1 daemon is built and frozen, and the phase 2 server runs as the author's daily session on FreeBSD, on real monitors (§9).
+
 ---
 
 ## 1. The problem
@@ -88,9 +90,10 @@ X11 had a Display PostScript extension (DPS/X) on Sun, DEC and SGI workstations,
 1. **Derive, don't guess.** Scale comes from each panel's physical size (from its EDID) and viewing distance, not from a percentage the user tunes by eye.
 2. **Remember per setup.** Layouts are keyed to the set of connected monitors, so every setup (docked, travelling, presenting) keeps its own arrangement.
 3. **Every phase stands alone.** Each phase delivers value even if nobody else ever adopts it.
-4. **Compatibility at the edges.** Existing X11 and Wayland applications keep working; new capabilities are optional upgrades.
+4. **Compatibility at the edges.** Existing X11, Wayland and D-Bus applications keep working; new capabilities are optional upgrades.
 5. **Accessibility and security are part of the design**, not afterthoughts, and neither is allowed to break the other.
-6. **Two platforms from day one:** FreeBSD first, Debian second. Starting on FreeBSD keeps the code on the X protocol and away from Linux-only interfaces.
+6. **Two platforms from day one:** FreeBSD first, Debian second. Starting on FreeBSD keeps the code away from Linux-only interfaces (systemd, logind, Linux-specific kernel interfaces).
+7. **Our own parts.** The core is written by the project. A part from another project is used only when it is truly necessary, and only by explicit decision (§8).
 
 ---
 
@@ -116,9 +119,11 @@ Because most toolkits read environment variables only at launch, the daemon writ
 
 ### 4.3 Two scaling modes per profile
 
-**Mode A, "Uniform" (the macOS approach; default).** Render the whole desktop at the highest scale needed and use `xrandr --scale` to scale lower-density monitors down. Every toolkit uses the same scale, so everything is the same size everywhere. The costs are GPU work and some softness on scaled-down monitors.
+**Mode B, "Native" (sharpest; the default).** No GPU scaling; each monitor at its native resolution; per-monitor factors, calculated from each panel's EDID, go to toolkits that support them (Qt, Avalonia). Those apps are perfect. Toolkits that support only one global value (GTK, Electron, Java) cannot be right on every monitor on X11. That is a known gap, to be closed by toolkit work and then by the phase 2 server, not a reason to prefer Mode A.
 
-**Mode B, "Native" (sharpest).** No GPU scaling; each monitor at its native resolution; per-monitor factors go to toolkits that support them (Qt, Avalonia). Those apps are perfect. Toolkits that support only one global value (GTK, Electron, Java) cannot be right on every monitor.
+**Mode A, "Uniform" (the macOS approach; opt-in fallback).** Render the whole desktop at the highest scale needed and use `xrandr --scale` to scale lower-density monitors down. Every toolkit uses the same scale, so everything is the same size everywhere. The costs are GPU work and some softness on scaled-down monitors.
+
+Mode A was the default until the first test on real monitors of very different density (103 ppi beside 315 ppi). There it was visibly less sharp, made an 11,861 × 4,038 desktop for two monitors, and broke the Xfce desktop's wallpaper at render scale 4. Mode B, native pixels at a calculated scale, is also what the phase 2 server does for every application, so design and testing effort goes there.
 
 ### 4.4 Window layout memory
 
@@ -270,7 +275,7 @@ An application may submit either a **bitmap** (always supported) or a **retained
 - **Magnification is truly sharp:** text at 4× is re-rendered text, not enlarged pixels.
 - **Remote display sends drawing commands instead of video**, the network transparency X promised, done properly.
 
-The reference implementation is in Rust, rendering with Vello, and the server's own tools are its first clients. **Avalonia is the first outside toolkit to adopt it** (§8.1): it already draws a retained scene, which converts naturally. Display PostScript died because every application had to speak it; here it is an optional upgrade over bitmaps.
+The reference implementation is in Rust, and the server's own tools are its first clients. Its renderer is the project's own unless a borrowed one, such as Vello, is decided to be necessary (§8). **Avalonia is the first outside toolkit to adopt it** (§8.1): it already draws a retained scene, which converts naturally. Display PostScript died because every application had to speak it; here it is an optional upgrade over bitmaps.
 
 ### 6.7 Other display problems addressed
 
@@ -358,18 +363,29 @@ On a typical desktop, any program running as the user can already read the user'
 
 ## 8. Implementation strategy
 
-**No new drivers.** The server builds on the shared lower layers that **both Linux and FreeBSD** provide: DRM/KMS for display, libinput for input, Vulkan/OpenGL for rendering.
+**No new drivers.** The server builds on the shared lower layers that **both Linux and FreeBSD** provide: DRM/KMS for display, the kernel's input devices (evdev), GBM, EGL and Vulkan for rendering (§8.3).
+
+**Our own parts.** The project writes its own core. A part from another project (a library, a program, a protocol extension added only so borrowed clients work) comes in only when it is truly necessary, and only by explicit decision of the project lead, with the reason and the cost of writing our own on record. The operating system's own interfaces (above) and the compatibility edges' protocols are not borrowing; implementations of them are. This replaces an earlier "borrow first, replace later" approach. Parts borrowed while bringing the server up stay until each is decided on:
+
+| Part | Used for | Status |
+|---|---|---|
+| Smithay | The server's Wayland front end, DRM/KMS and input back ends, renderer | Borrowed for phase 2 bring-up; under review |
+| libinput, libseat/seatd, xkbcommon | Input devices, seat and device access, keymaps | Borrowed through Smithay |
+| Xwayland | X11 applications (the X11 edge) | Borrowed; an X server of our own is a large project |
+| Slint | The settings app's prototype | Borrowed; licence (GPLv3 or royalty-free) to settle before publishing |
+| ab_glyph, resvg | Title-bar text, SVG wallpapers | Borrowed; small, candidates for our own |
+| Adwaita cursor theme | The pointer | Borrowed artwork, read at run time |
 
 **Language: Rust throughout.** Everything the project itself ships is written in Rust:
 
 - **Phase 1 daemon:** Rust over XCB/RandR (the `x11rb` crate). Its profile, EDID and rules logic lives in a shared crate that moves unchanged into the server.
-- **Server core:** Rust, on **Smithay**, the compositor library behind niri and System76's COSMIC. A compositor needs steady frame timing, which rules out garbage-collected runtimes.
-- **Settings, profile editor and tray indicator:** Rust with **Slint**, a light declarative UI toolkit that runs on Linux and FreeBSD (iced, used by COSMIC, is the alternative).
-- **Display-list reference implementation:** Rust, rendering with **Vello**, a Rust GPU vector renderer (§6.6).
+- **Server core:** Rust. A compositor needs steady frame timing, which rules out garbage-collected runtimes.
+- **Settings, profile editor and tray indicator:** Rust. Whether they keep Slint or use a toolkit of the project's own is open (§10).
+- **Display-list reference implementation:** Rust (§6.6).
 
 Why one language:
 
-1. **FreeBSD from day one.** Rust and Slint build natively on FreeBSD today. .NET works on FreeBSD (AlbumWall, Deadwax and Marginal all run there as Native AOT builds made with the FreeBSD port's own ILCompiler), but only through the FreeBSD ports' .NET 9, a version behind what our apps target and outside Microsoft's official platforms. System components of the desktop itself should not depend on that.
+1. **FreeBSD from day one.** Rust builds natively on FreeBSD today. .NET works on FreeBSD (AlbumWall, Deadwax and Marginal all run there as Native AOT builds made with the FreeBSD port's own ILCompiler), but only through the FreeBSD ports' .NET 9, a version behind what our apps target and outside Microsoft's official platforms. System components of the desktop itself should not depend on that.
 2. **System components must be small and start instantly.** Settings panels and tray indicators are part of the desktop, not applications, and are packaged with it.
 3. **One codebase.** Profile and EDID logic, the configuration format and the protocol types are shared between daemon, server and tools, with no second toolchain or cross-language bindings.
 
@@ -380,7 +396,7 @@ Why one language:
 - **D-Bus clients** reach a D-Bus front end written by the project, which translates notifications, settings and accessibility into the server's own session bus (§6.8).
 - The server speaks Wayland, X11 and D-Bus at the edges, but placement, memory, units, accessibility and security follow this design.
 
-**Platforms.** FreeBSD (15, X11, Xfce as the stable session) is the primary development platform, on real hardware. Debian (13, X11, Xfce; Xephyr for nested development) is tested alongside at every phase. Where the two must differ, as with hot-plug events (§4.7), the code and the documents say so.
+**Platforms.** FreeBSD 15 is the primary development platform, on real hardware: the phase 2 server is the daily session there, with Xfce on X11 kept as the fallback session. Debian 13 (X11, Xfce) is the second platform, to be tested alongside at every phase; the phase 2 server has not run on it yet. Where the two must differ, as with hot-plug events (§4.7), the code and the documents say so.
 
 ### 8.1 Running our .NET/Avalonia applications
 
@@ -450,8 +466,19 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 |---|---|---|---|
 | **1** | X11 consistency daemon: EDID profiles, scaling modes A/B, toolkit settings, layout memory | Fixes daily annoyances on any X11 desktop, FreeBSD and Debian | Days to weeks |
 | **2** | Display server, first nested in a window, then on real hardware: native per-monitor rendering, placement memory, reference-unit scaling, per-window scaling of X11 apps with correct input, the session bus with its D-Bus edge (§6.8) | A usable personal desktop that beats X11 and Wayland on consistency | Months |
-| **3** | Accessibility contract and display-list surfaces: Rust/Vello reference implementation, then the native Avalonia backend (§8.1) | Sharp magnification, sharp straddling windows, accessibility by design | Research |
+| **3** | Accessibility contract and display-list surfaces: Rust reference implementation, then the native Avalonia backend (§8.1) | Sharp magnification, sharp straddling windows, accessibility by design | Research |
 | **4** | Remote display over display lists | Efficient, sharp remote desktops | Research |
+
+**Status, 8 November 2026.**
+
+- **Phase 1** is built through its fourth milestone (profiles, layout memory, window memory, scaling) and runs on FreeBSD. It is frozen except for blockers, because X11's walls (§5) cost more effort than they teach.
+- **Phase 2** runs on real hardware as the daily session on FreeBSD 15.1 with Intel UHD 630 graphics, on two monitors of very different density: a 14″ 4K panel at scale 3.28 and an ordinary 1080p monitor at 1.07, both calculated from their EDIDs. Wayland applications draw natively at each monitor's scale. X11 applications run through rootless Xwayland at the densest monitor's scale and are shown smaller on the others; a smoothing filter for that shrink was tried and rejected because it softened text. The server draws title bars, places new windows on the monitor under the pointer, remembers window places per monitor setup (a first piece of Contract 2), follows monitors being plugged in and out, and has a control socket for scripted tests. There is no native protocol yet; the three contracts, the session bus (§6.8) and explicit sync (§8.3) come next.
+
+**What FreeBSD taught phase 2.** As in phase 1 (§4.7), the real machine showed things a Linux-first build would have missed:
+
+- There is no logind, so seat and device access go through seatd. A display manager's Wayland sessions proved unreliable without logind, so the session starts from a console login.
+- Every query of a DRM connector's state took about 327 ms on FreeBSD, and polling connectors stalled the whole server, freezing dragged windows every few seconds. Hot-plug is detected from devd's DRM events instead, and connectors are never polled.
+- FreeBSD has no abstract Unix sockets, so Xwayland can only be reached through its socket file, and the first X application waits until Xwayland is ready.
 
 **Where the real costs are.** Writing the code is not the bottleneck. The bottlenecks are:
 
@@ -470,7 +497,7 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 5. Status of Wayland session-restore and placement protocols, and whether the server should implement them for compatibility.
 6. Display-list format: the minimal validated command set (paths, fills, strokes, gradients, images, text runs with font references, clips, layers), and how text is shipped (glyph runs plus font identity, so the server can re-render text sharply at any density).
 7. FreeBSD specifics: DRM/KMS driver coverage for the target GPUs beyond Intel (§8.3); libinput and seat management; a suspend-and-wake loop for testing.
-8. Slint versus iced for the tools, decided by a small prototype of the profile editor on both FreeBSD and Debian.
+8. The tools' user interface: a Slint prototype of the settings app (its Wallpaper page) runs on FreeBSD under the server. Slint is a borrowed toolkit (§8), so whether the tools keep it or use a toolkit of the project's own is open. Its licence (GPLv3 or royalty-free) must be settled before anything is published.
 9. The scope of the native Avalonia backend: which parts of Avalonia's platform interfaces it must implement, and how its automation peers map to Contract 3.
 10. Firefox and Thunderbird: confirm that Firefox on X11 has no per-monitor scaling; check whether Mozilla implements (or plans) the Wayland session-restore protocol; how well heuristics match several Firefox windows to saved layouts; the scope of an AT-SPI bridge into Contract 3.
 11. Many monitors on several GPUs (§5.1): NVIDIA's FreeBSD driver with more than one card (Xinerama versus PRIME output sinks for phase 1; its DRM/KMS support for phase 2); how many monitors report a real EDID serial number (the linuxhw database can answer this), since identical panels without one are told apart only by port.

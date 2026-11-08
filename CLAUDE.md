@@ -35,9 +35,16 @@ the current milestone is docs/milestone-4.md (scaling; earlier ones in docs/mile
   (BsdProbe's libSkiaSharp 119, libc-epoll, HarfBuzz link).
 - **Names:** the project and its crates are `vergence` / `vergence-*`; the
   phase 1 daemon is `vergd`. "Verge" for short in conversation.
-- **Rust throughout** (whitepaper §8): x11rb for phase 1, Smithay for the
-  server, Slint (or iced) for tools, Vello for display lists. EDID, profile and
-  rules logic live in library crates the server reuses.
+- **Rust throughout** (whitepaper §8). EDID, profile and rules logic live in
+  library crates the server reuses.
+- **No borrowing unless absolutely necessary, and always ask Dave first**
+  (Dave, 2026-11-08; replaces "borrow first, replace later"). Before adding
+  any part from another project (crate, program, protocol extension added only
+  for borrowed clients, borrowed panel or daemon), ask him: what it is, why it
+  is necessary, what writing our own would take. Parts already in (Smithay,
+  libinput/seatd/xkbcommon, Xwayland, Slint, ab_glyph, resvg, Adwaita cursors;
+  table in whitepaper §8) stay until he decides on each. OS interfaces (DRM/KMS,
+  evdev, GBM, EGL, Vulkan) are not borrowing.
 - **FreeBSD first (bare hardware, X11), Debian 13 (X11, XFCE) second, both
   at every phase.** Dave, 2026-11-06: development happens on FreeBSD; it was
   Debian first until then. Stay with the X protocol (RandR) rather than
