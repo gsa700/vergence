@@ -7,8 +7,9 @@
 //! reply to a request carries the same serial. Events the client subscribed
 //! to arrive with serial 0.
 //!
-//! Version 1 has the bus itself and one topic, the monitors
-//! ([`Topic::Outputs`]). Settings and notifications come next.
+//! Version 1 has the bus itself and two topics: the monitors
+//! ([`Topic::Outputs`]) and the desktop settings ([`Topic::Settings`]).
+//! Notifications come next.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
@@ -21,18 +22,23 @@ pub enum Topic {
     /// The monitors: their names, places and scales; sent again whenever
     /// one is added, removed, moved or rescaled.
     Outputs,
+    /// The desktop settings (appearance, theme, fonts, cursor): all of them
+    /// on subscribe, then the ones that changed.
+    Settings,
 }
 
 impl Topic {
     pub fn to_wire(self) -> u16 {
         match self {
             Topic::Outputs => 1,
+            Topic::Settings => 2,
         }
     }
 
     pub fn from_wire(v: u16) -> Option<Topic> {
         match v {
             1 => Some(Topic::Outputs),
+            2 => Some(Topic::Settings),
             _ => None,
         }
     }
@@ -40,15 +46,39 @@ impl Topic {
     pub fn name(self) -> &'static str {
         match self {
             Topic::Outputs => "outputs",
+            Topic::Settings => "settings",
         }
     }
 
     pub fn from_name(s: &str) -> Option<Topic> {
         match s {
             "outputs" => Some(Topic::Outputs),
+            "settings" => Some(Topic::Settings),
             _ => None,
         }
     }
+}
+
+/// A setting's value. Tags are fixed on the wire.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SettingValue {
+    Bool(bool),
+    U32(u32),
+    I32(i32),
+    F64(f64),
+    Str(String),
+    /// A colour, each channel 0 to 1.
+    Rgb(f64, f64, f64),
+}
+
+/// One setting: a namespace (e.g. "org.freedesktop.appearance"), a key
+/// (e.g. "color-scheme") and its value. Namespaces and keys follow what
+/// existing toolkits ask for, so the D-Bus edge can pass them on unchanged.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Setting {
+    pub namespace: String,
+    pub key: String,
+    pub value: SettingValue,
 }
 
 /// Why the server refused a request. Values are fixed on the wire.
@@ -123,6 +153,8 @@ pub enum ClientMsg {
     Unsubscribe { serial: u32, topic: Topic },
     /// The monitors now, as a reply (no subscription).
     GetOutputs { serial: u32 },
+    /// Every setting now, as a reply (no subscription).
+    GetSettings { serial: u32 },
 }
 
 /// Server to client.
@@ -135,6 +167,10 @@ pub enum ServerMsg {
     Error { serial: u32, code: ErrorCode, message: String },
     /// The monitors: a reply (serial of the request) or an event (serial 0).
     Outputs { serial: u32, outputs: Vec<OutputInfo> },
+    /// Settings: a reply or the first event after subscribing (`complete`:
+    /// every setting), or an event with the ones that changed. A setting
+    /// that disappeared is not sent; a later version may add removals.
+    Settings { serial: u32, complete: bool, settings: Vec<Setting> },
 }
 
 mod op {
@@ -144,12 +180,37 @@ mod op {
     pub const SUBSCRIBE: u16 = 3;
     pub const UNSUBSCRIBE: u16 = 4;
     pub const GET_OUTPUTS: u16 = 5;
+    pub const GET_SETTINGS: u16 = 6;
     // Server to client.
     pub const WELCOME: u16 = 1;
     pub const PONG: u16 = 2;
     pub const DONE: u16 = 3;
     pub const ERROR: u16 = 4;
     pub const OUTPUTS: u16 = 5;
+    pub const SETTINGS: u16 = 6;
+}
+
+fn put_setting_value(e: &mut Encoder, v: &SettingValue) {
+    match v {
+        SettingValue::Bool(b) => e.u8(1).bool(*b),
+        SettingValue::U32(x) => e.u8(2).u32(*x),
+        SettingValue::I32(x) => e.u8(3).i32(*x),
+        SettingValue::F64(x) => e.u8(4).f64(*x),
+        SettingValue::Str(s) => e.u8(5).str(s),
+        SettingValue::Rgb(r, g, b) => e.u8(6).f64(*r).f64(*g).f64(*b),
+    };
+}
+
+fn get_setting_value(d: &mut Decoder) -> Result<SettingValue, WireError> {
+    Ok(match d.u8()? {
+        1 => SettingValue::Bool(d.bool()?),
+        2 => SettingValue::U32(d.u32()?),
+        3 => SettingValue::I32(d.i32()?),
+        4 => SettingValue::F64(d.f64()?),
+        5 => SettingValue::Str(d.str()?),
+        6 => SettingValue::Rgb(d.f64()?, d.f64()?, d.f64()?),
+        _ => return Err(WireError::BadValue("setting value")),
+    })
 }
 
 /// A decode failure that the server answers with an error rather than
@@ -192,6 +253,11 @@ impl ClientMsg {
                 e.u32(*serial);
                 e
             }
+            ClientMsg::GetSettings { serial } => {
+                let mut e = Encoder::frame(op::GET_SETTINGS);
+                e.u32(*serial);
+                e
+            }
         };
         e.finish()
     }
@@ -220,6 +286,7 @@ impl ClientMsg {
                 })
             }
             op::GET_OUTPUTS => Ok(ClientMsg::GetOutputs { serial: d.u32().map_err(|e| bad(0, e))? }),
+            op::GET_SETTINGS => Ok(ClientMsg::GetSettings { serial: d.u32().map_err(|e| bad(0, e))? }),
             other => {
                 // Every request starts with its serial; answer with it if present.
                 let serial = d.u32().unwrap_or(0);
@@ -260,6 +327,15 @@ impl ServerMsg {
                 }
                 e
             }
+            ServerMsg::Settings { serial, complete, settings } => {
+                let mut e = Encoder::frame(op::SETTINGS);
+                e.u32(*serial).bool(*complete).count(settings.len());
+                for s in settings {
+                    e.str(&s.namespace).str(&s.key);
+                    put_setting_value(&mut e, &s.value);
+                }
+                e
+            }
         };
         e.finish()
     }
@@ -288,6 +364,17 @@ impl ServerMsg {
                     });
                 }
                 ServerMsg::Outputs { serial, outputs }
+            }
+            op::SETTINGS => {
+                let serial = d.u32()?;
+                let complete = d.bool()?;
+                // Each setting: two strings and a tagged value (at least 4 + 4 + 2 bytes).
+                let n = d.count(10)?;
+                let mut settings = Vec::with_capacity(n);
+                for _ in 0..n {
+                    settings.push(Setting { namespace: d.str()?, key: d.str()?, value: get_setting_value(&mut d)? });
+                }
+                ServerMsg::Settings { serial, complete, settings }
             }
             other => return Err(WireError::UnknownOpcode(other)),
         })
@@ -320,6 +407,8 @@ mod tests {
             ClientMsg::Subscribe { serial: 10, topic: Topic::Outputs },
             ClientMsg::Unsubscribe { serial: 11, topic: Topic::Outputs },
             ClientMsg::GetOutputs { serial: 12 },
+            ClientMsg::GetSettings { serial: 13 },
+            ClientMsg::Subscribe { serial: 14, topic: Topic::Settings },
         ] {
             assert_eq!(ClientMsg::decode(&frame(&m.encode().unwrap())).unwrap(), m);
         }
@@ -335,6 +424,18 @@ mod tests {
             ServerMsg::Error { serial: 12, code: ErrorCode::Other(77), message: String::new() },
             ServerMsg::Outputs { serial: 0, outputs: outputs() },
             ServerMsg::Outputs { serial: 4, outputs: Vec::new() },
+            ServerMsg::Settings {
+                serial: 0,
+                complete: true,
+                settings: vec![
+                    Setting { namespace: "org.freedesktop.appearance".into(), key: "color-scheme".into(), value: SettingValue::U32(1) },
+                    Setting { namespace: "org.freedesktop.appearance".into(), key: "accent-color".into(), value: SettingValue::Rgb(0.2, 0.5, 1.0) },
+                    Setting { namespace: "org.gnome.desktop.interface".into(), key: "font-name".into(), value: SettingValue::Str("Sans 10".into()) },
+                    Setting { namespace: "n".into(), key: "b".into(), value: SettingValue::Bool(true) },
+                    Setting { namespace: "n".into(), key: "i".into(), value: SettingValue::I32(-24) },
+                    Setting { namespace: "n".into(), key: "d".into(), value: SettingValue::F64(1.25) },
+                ],
+            },
         ] {
             assert_eq!(ServerMsg::decode(&frame(&m.encode().unwrap())).unwrap(), m);
         }
@@ -372,6 +473,7 @@ mod tests {
     fn topics_by_name() {
         assert_eq!(Topic::from_name("outputs"), Some(Topic::Outputs));
         assert_eq!(Topic::from_name(Topic::Outputs.name()), Some(Topic::Outputs));
-        assert_eq!(Topic::from_name("settings"), None);
+        assert_eq!(Topic::from_name("settings"), Some(Topic::Settings));
+        assert_eq!(Topic::from_name("notifications"), None);
     }
 }

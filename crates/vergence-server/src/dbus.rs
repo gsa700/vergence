@@ -14,17 +14,22 @@
 // destination and method: `vctl dbus` shows the table, which decides what the
 // edge translates into core services first (whitepaper §10, question 13).
 //
+// Step 2c: the edge itself provides org.freedesktop.portal.Desktop's Settings
+// interface (ReadAll, Read, ReadOne, SettingChanged, version 2) from the
+// server's settings service (settings.rs), as the pseudo-connection ":1.0".
+// Other portal interfaces answer UnknownMethod, so apps fall back as before.
+//
 // VERGENCE_DBUS=0 turns the edge off. Otherwise it takes over
 // DBUS_SESSION_BUS_ADDRESS when none is set, or always with VERGENCE_DBUS=1.
 
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     io::{ErrorKind, Read, Write},
     os::unix::{fs::PermissionsExt, net::{UnixListener, UnixStream}},
     path::PathBuf,
 };
 
-use smithay::reexports::calloop::{Interest, Mode, PostAction, RegistrationToken, generic::Generic};
+use smithay::reexports::calloop::{Interest, Mode, PostAction, RegistrationToken, channel, generic::Generic};
 use vergence_dbus::{
     BUS_NAME, BUS_PATH, Message, Value,
     auth::{Auth, Step},
@@ -48,6 +53,13 @@ const E_MATCH_NOT_FOUND: &str = "org.freedesktop.DBus.Error.MatchRuleNotFound";
 const E_ACCESS_DENIED: &str = "org.freedesktop.DBus.Error.AccessDenied";
 const E_LIMITS: &str = "org.freedesktop.DBus.Error.LimitsExceeded";
 
+/// The services the edge provides itself, as the pseudo-connection 0.
+const PORTAL_NAME: &str = "org.freedesktop.portal.Desktop";
+const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
+const PORTAL_SETTINGS: &str = "org.freedesktop.portal.Settings";
+const EDGE_UNIQUE: &str = ":1.0";
+const EDGE: u32 = 0;
+
 // RequestName flags and replies.
 const ALLOW_REPLACEMENT: u32 = 1;
 const REPLACE_EXISTING: u32 = 2;
@@ -64,6 +76,10 @@ pub struct DBus {
     pub path: Option<PathBuf>,
     /// Calls seen: "destination interface.member" -> (count, answered by an owner).
     pub stats: BTreeMap<String, (u64, bool)>,
+    /// Program names, looked up off the main thread (ps takes a few ms).
+    names_tx: Option<channel::Sender<(u32, String)>>,
+    /// Settings already read through the portal, to log each one once.
+    reads: HashSet<(String, String)>,
 }
 
 struct Conn {
@@ -110,6 +126,16 @@ pub fn listen(state: &mut Server) {
     if let Err(e) = res {
         return tracing::warn!("dbus: {e}");
     }
+    let (tx, rx) = channel::channel::<(u32, String)>();
+    let res = state.loop_handle.insert_source(rx, |event, _, state| {
+        if let channel::Event::Msg((id, program)) = event {
+            state.dbus_program_known(id, program);
+        }
+    });
+    if let Err(e) = res {
+        tracing::warn!("dbus: {e}");
+    }
+    state.dbus.names_tx = Some(tx);
     state.dbus.guid = make_guid();
     let existing = std::env::var("DBUS_SESSION_BUS_ADDRESS").ok().filter(|a| !a.is_empty());
     if existing.is_none() || mode == "1" {
@@ -197,6 +223,11 @@ impl Server {
             return tracing::warn!("dbus: {e}");
         }
         let guid = self.dbus.guid.clone();
+        if let Some(tx) = self.dbus.names_tx.clone() {
+            std::thread::spawn(move || {
+                let _ = tx.send((id, program_of(pid)));
+            });
+        }
         self.dbus.conns.insert(
             id,
             Conn {
@@ -206,7 +237,7 @@ impl Server {
                 unique: None,
                 uid,
                 pid,
-                program: program_of(pid),
+                program: String::new(),
                 rules: Vec::new(),
                 outbox: Vec::new(),
                 write_source: None,
@@ -321,7 +352,7 @@ impl Server {
             entry.1 |= to_bus || owner.is_some();
             // Each destination and method is logged the first time; `vctl dbus` counts the rest.
             if !to_bus && entry.0 == 1 {
-                let program = &self.dbus.conns[&id].program;
+                let program = &self.dbus_who(id);
                 match owner {
                     Some(_) => tracing::info!("dbus: {program} {unique} -> {dest} {} {}", m.method(), m.path.as_deref().unwrap_or("")),
                     None => tracing::info!("dbus: {program} {unique} -> {dest} {} {} (nobody owns it)", m.method(), m.path.as_deref().unwrap_or("")),
@@ -337,6 +368,11 @@ impl Server {
         }
         match m.destination.clone() {
             Some(dest) => match self.dbus_owner(&dest) {
+                Some(EDGE) => {
+                    if m.kind == METHOD_CALL {
+                        self.dbus_portal(id, &m);
+                    }
+                }
                 Some(to) => self.dbus_deliver(to, &m),
                 None if m.kind == METHOD_CALL && m.flags & NO_REPLY_EXPECTED == 0 => {
                     let text = format!("The name {dest} is not provided by this session (Vergence starts nothing on demand)");
@@ -357,7 +393,9 @@ impl Server {
         let unique = format!(":1.{id}");
         let Some(c) = self.dbus.conns.get_mut(&id) else { return };
         c.unique = Some(unique.clone());
-        tracing::info!("dbus: {} (pid {:?}, uid {}) is {unique}", c.program, c.pid, c.uid);
+        if !c.program.is_empty() {
+            tracing::info!("dbus: {} (pid {:?}, uid {}) is {unique}", c.program, c.pid, c.uid);
+        }
         let mut call = m.clone();
         call.sender = Some(unique.clone());
         self.dbus_reply(id, Message::method_return(&call, BUS_NAME, &[Value::Str(unique.clone())]));
@@ -365,8 +403,30 @@ impl Server {
         self.dbus_owner_changed(&unique, "", &unique);
     }
 
-    /// The connection that owns `name` (unique or well-known).
+    /// The program for logs, or its pid while the name is being looked up.
+    fn dbus_who(&self, id: u32) -> String {
+        match self.dbus.conns.get(&id) {
+            Some(c) if !c.program.is_empty() => c.program.clone(),
+            Some(c) => format!("pid {}", c.pid.map(|p| p.to_string()).unwrap_or_else(|| "?".into())),
+            None => "?".into(),
+        }
+    }
+
+    /// The program name arrived from the lookup thread.
+    fn dbus_program_known(&mut self, id: u32, program: String) {
+        let Some(c) = self.dbus.conns.get_mut(&id) else { return };
+        if let Some(u) = &c.unique {
+            tracing::info!("dbus: {program} (pid {:?}, uid {}) is {u}", c.pid, c.uid);
+        }
+        c.program = program;
+    }
+
+    /// The connection that owns `name` (unique or well-known); EDGE for the
+    /// services the edge provides itself.
     fn dbus_owner(&self, name: &str) -> Option<u32> {
+        if name == PORTAL_NAME || name == EDGE_UNIQUE {
+            return Some(EDGE);
+        }
         if let Some(n) = name.strip_prefix(":1.") {
             let id: u32 = n.parse().ok()?;
             return self.dbus.conns.get(&id).filter(|c| c.unique.is_some()).map(|_| id);
@@ -375,11 +435,17 @@ impl Server {
     }
 
     fn dbus_unique(&self, id: u32) -> String {
+        if id == EDGE {
+            return EDGE_UNIQUE.into();
+        }
         self.dbus.conns.get(&id).and_then(|c| c.unique.clone()).unwrap_or_default()
     }
 
     /// Every name connection `id` owns, its unique name first.
     fn dbus_names_of(&self, id: u32) -> Vec<String> {
+        if id == EDGE {
+            return vec![EDGE_UNIQUE.into(), PORTAL_NAME.into()];
+        }
         let mut out = vec![self.dbus_unique(id)];
         out.extend(self.dbus.names.iter().filter(|(_, q)| q.front().is_some_and(|(o, _)| *o == id)).map(|(n, _)| n.clone()));
         out
@@ -480,7 +546,7 @@ impl Server {
                 None => err(E_INVALID_ARGS, "NameHasOwner(s)"),
             },
             (BUS_NAME, "ListNames") => {
-                let mut names = vec![BUS_NAME.to_string()];
+                let mut names = vec![BUS_NAME.to_string(), EDGE_UNIQUE.to_string(), PORTAL_NAME.to_string()];
                 names.extend(self.dbus.conns.values().filter_map(|c| c.unique.clone()));
                 names.extend(self.dbus.names.keys().cloned());
                 ok(&[Value::strings(names)])
@@ -568,7 +634,7 @@ impl Server {
 
     /// RequestName: 1 primary owner, 2 queued, 3 exists, 4 already owner.
     fn dbus_request_name(&mut self, id: u32, name: &str, flags: u32) -> Result<u32, String> {
-        if name.starts_with(':') || name == BUS_NAME || !vergence_dbus::valid_bus_name(name) {
+        if name.starts_with(':') || name == BUS_NAME || name == PORTAL_NAME || !vergence_dbus::valid_bus_name(name) {
             return Err(format!("{name} can't be requested"));
         }
         let me = self.dbus_unique(id);
@@ -746,6 +812,125 @@ impl Server {
         out.join("\n")
     }
 }
+
+impl Server {
+    /// A call to the edge's own portal object.
+    fn dbus_portal(&mut self, id: u32, m: &Message) {
+        let args = m.args().unwrap_or_default();
+        let s = |i: usize| args.get(i).and_then(Value::as_str).map(str::to_owned);
+        let iface = m.interface.as_deref().unwrap_or("");
+        let member = m.member.as_deref().unwrap_or("");
+        let on_portal = m.path.as_deref() == Some(PORTAL_PATH);
+        let ok = |vals: &[Value]| Message::method_return(m, EDGE_UNIQUE, vals);
+        let err = |name: &str, text: &str| Message::error(m, EDGE_UNIQUE, name, text);
+        let not_found = |ns: &str, key: &str| err("org.freedesktop.portal.Error.NotFound", &format!("{ns} {key}: no such setting"));
+        let reply = match (iface, member) {
+            ("org.freedesktop.DBus.Peer", "Ping") => ok(&[]),
+            ("org.freedesktop.DBus.Peer", "GetMachineId") => ok(&[Value::Str(machine_id())]),
+            ("org.freedesktop.DBus.Introspectable", "Introspect") => {
+                ok(&[Value::Str(if on_portal { PORTAL_INTROSPECTION } else { EMPTY_INTROSPECTION }.into())])
+            }
+            (_, _) if !on_portal => err(E_UNKNOWN_METHOD, "no such object"),
+            (PORTAL_SETTINGS, "ReadOne") | (PORTAL_SETTINGS, "Read") => match (s(0), s(1)) {
+                (Some(ns), Some(key)) => {
+                    self.dbus_log_read(id, &ns, &key);
+                    match self.settings.current.get(&(ns.clone(), key.clone())) {
+                        // Read (deprecated) wraps the value in a second variant.
+                        Some(v) if member == "Read" => ok(&[Value::Variant(Box::new(Value::Variant(Box::new(to_dbus(v)))))]),
+                        Some(v) => ok(&[Value::Variant(Box::new(to_dbus(v)))]),
+                        None => not_found(&ns, &key),
+                    }
+                }
+                _ => err(E_INVALID_ARGS, "ReadOne(ss)"),
+            },
+            (PORTAL_SETTINGS, "ReadAll") => {
+                let patterns: Vec<String> = match args.first() {
+                    Some(Value::Array(_, items)) => items.iter().filter_map(Value::as_str).map(str::to_owned).collect(),
+                    _ => Vec::new(),
+                };
+                self.dbus_log_read(id, &patterns.join(","), "*");
+                let mut by_ns: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+                for ((ns, key), v) in &self.settings.current {
+                    if namespace_matches(&patterns, ns) {
+                        by_ns.entry(ns.clone()).or_default().push(entry(key, to_dbus(v)));
+                    }
+                }
+                let outer = by_ns
+                    .into_iter()
+                    .map(|(ns, entries)| Value::Entry(Box::new(Value::Str(ns)), Box::new(Value::Array("{sv}".into(), entries))))
+                    .collect();
+                ok(&[Value::Array("{sa{sv}}".into(), outer)])
+            }
+            ("org.freedesktop.DBus.Properties", "Get") => match (s(0).as_deref(), s(1).as_deref()) {
+                (Some(PORTAL_SETTINGS), Some("version")) => ok(&[Value::Variant(Box::new(Value::U32(2)))]),
+                _ => err(E_INVALID_ARGS, "no such interface or property"),
+            },
+            ("org.freedesktop.DBus.Properties", "GetAll") => match s(0).as_deref() {
+                Some(PORTAL_SETTINGS) => ok(&[Value::Array("{sv}".into(), vec![entry("version", Value::U32(2))])]),
+                _ => err(E_INVALID_ARGS, "no such interface"),
+            },
+            _ => err(E_UNKNOWN_METHOD, &format!("{iface}.{member} is not provided (yet) by Vergence")),
+        };
+        if m.flags & NO_REPLY_EXPECTED == 0 {
+            self.dbus_reply(id, reply);
+        }
+    }
+
+    fn dbus_log_read(&mut self, id: u32, ns: &str, key: &str) {
+        if self.dbus.reads.insert((ns.to_string(), key.to_string())) {
+            let program = self.dbus_who(id);
+            tracing::info!("dbus: portal: {program} reads {ns} {key}");
+        }
+    }
+
+    /// Settings changed (settings.rs): the portal's SettingChanged signal.
+    pub fn dbus_settings_changed(&mut self, changed: &[vergence_protocol::bus::Setting]) {
+        if self.dbus.path.is_none() {
+            return;
+        }
+        for c in changed {
+            let args = [Value::Str(c.namespace.clone()), Value::Str(c.key.clone()), Value::Variant(Box::new(to_dbus(&c.value)))];
+            let mut sig = Message::signal(EDGE_UNIQUE, PORTAL_PATH, PORTAL_SETTINGS, "SettingChanged", &args);
+            sig.serial = self.dbus_next_serial();
+            self.dbus_broadcast(&sig);
+        }
+    }
+}
+
+/// ReadAll's namespace patterns: empty means all; "org.gnome.*" a prefix.
+fn namespace_matches(patterns: &[String], ns: &str) -> bool {
+    patterns.is_empty()
+        || patterns.iter().any(|p| match p.strip_suffix('*') {
+            Some(prefix) => ns.starts_with(prefix),
+            None => p == ns || p.is_empty(),
+        })
+}
+
+fn to_dbus(v: &vergence_protocol::bus::SettingValue) -> Value {
+    use vergence_protocol::bus::SettingValue as S;
+    match v {
+        S::Bool(b) => Value::Bool(*b),
+        S::U32(x) => Value::U32(*x),
+        S::I32(x) => Value::I32(*x),
+        S::F64(x) => Value::Double(*x),
+        S::Str(s) => Value::Str(s.clone()),
+        S::Rgb(r, g, b) => Value::Struct(vec![Value::Double(*r), Value::Double(*g), Value::Double(*b)]),
+    }
+}
+
+const EMPTY_INTROSPECTION: &str = "<node/>";
+
+const PORTAL_INTROSPECTION: &str = r#"<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <interface name="org.freedesktop.portal.Settings">
+    <method name="ReadAll"><arg type="as" name="namespaces" direction="in"/><arg type="a{sa{sv}}" name="value" direction="out"/></method>
+    <method name="Read"><arg type="s" name="namespace" direction="in"/><arg type="s" name="key" direction="in"/><arg type="v" name="value" direction="out"/></method>
+    <method name="ReadOne"><arg type="s" name="namespace" direction="in"/><arg type="s" name="key" direction="in"/><arg type="v" name="value" direction="out"/></method>
+    <signal name="SettingChanged"><arg type="s" name="namespace"/><arg type="s" name="key"/><arg type="v" name="value"/></signal>
+    <property name="version" type="u" access="read"/>
+  </interface>
+</node>
+"#;
 
 fn entry(k: &str, v: Value) -> Value {
     Value::Entry(Box::new(Value::Str(k.into())), Box::new(Value::Variant(Box::new(v))))

@@ -2,6 +2,7 @@
 //
 //   vbus ping                 round trip to the server
 //   vbus outputs              the monitors, once
+//   vbus settings             the desktop settings, once
 //   vbus watch <topic>        subscribe and print every event (Ctrl+C ends)
 //
 // Finds the bus from $VERGENCE_BUS, else $WAYLAND_DISPLAY in $XDG_RUNTIME_DIR.
@@ -9,7 +10,7 @@
 
 use vergence_protocol::{
     Client,
-    bus::{ClientMsg, OutputInfo, ServerMsg, Topic},
+    bus::{ClientMsg, OutputInfo, ServerMsg, Setting, SettingValue, Topic},
 };
 
 fn main() {
@@ -43,9 +44,13 @@ fn run(socket: Option<std::path::PathBuf>, args: &[String]) -> Result<(), Box<dy
             ServerMsg::Outputs { outputs, .. } => print_outputs(&outputs),
             other => return Err(format!("unexpected {other:?}").into()),
         },
+        Some("settings") => match c.request(|serial| ClientMsg::GetSettings { serial })? {
+            ServerMsg::Settings { settings, .. } => print_settings(&settings),
+            other => return Err(format!("unexpected {other:?}").into()),
+        },
         Some("watch") => {
             let name = args.get(1).map(String::as_str).unwrap_or("");
-            let topic = Topic::from_name(name).ok_or_else(|| format!("no topic {name:?} (topics: outputs)"))?;
+            let topic = Topic::from_name(name).ok_or_else(|| format!("no topic {name:?} (topics: outputs, settings)"))?;
             c.request(|serial| ClientMsg::Subscribe { serial, topic })?;
             loop {
                 match c.next_event()? {
@@ -53,11 +58,15 @@ fn run(socket: Option<std::path::PathBuf>, args: &[String]) -> Result<(), Box<dy
                         println!("-- outputs");
                         print_outputs(&outputs);
                     }
+                    ServerMsg::Settings { complete, settings, .. } => {
+                        println!("-- settings{}", if complete { " (all)" } else { " (changed)" });
+                        print_settings(&settings);
+                    }
                     other => println!("{other:?}"),
                 }
             }
         }
-        _ => return Err("usage: vbus [--socket <path>] ping | outputs | watch <topic>".into()),
+        _ => return Err("usage: vbus [--socket <path>] ping | outputs | settings | watch <topic>".into()),
     }
     Ok(())
 }
@@ -65,5 +74,19 @@ fn run(socket: Option<std::path::PathBuf>, args: &[String]) -> Result<(), Box<dy
 fn print_outputs(outputs: &[OutputInfo]) {
     for o in outputs {
         println!("{} {:?} at {},{} size {}x{} scale {:.4}", o.name, o.description, o.x, o.y, o.width, o.height, o.scale);
+    }
+}
+
+fn print_settings(settings: &[Setting]) {
+    for s in settings {
+        let v = match &s.value {
+            SettingValue::Bool(b) => b.to_string(),
+            SettingValue::U32(x) => x.to_string(),
+            SettingValue::I32(x) => x.to_string(),
+            SettingValue::F64(x) => x.to_string(),
+            SettingValue::Str(x) => format!("{x:?}"),
+            SettingValue::Rgb(r, g, b) => format!("rgb({r:.3}, {g:.3}, {b:.3})"),
+        };
+        println!("{} {} = {v}", s.namespace, s.key);
     }
 }

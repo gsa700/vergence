@@ -214,6 +214,10 @@ impl Server {
                 let outputs = self.bus_outputs();
                 self.bus_send(id, ServerMsg::Outputs { serial, outputs });
             }
+            ClientMsg::GetSettings { serial } => {
+                let settings = crate::settings::all(&self.settings.current);
+                self.bus_send(id, ServerMsg::Settings { serial, complete: true, settings });
+            }
             ClientMsg::Subscribe { serial, topic } => {
                 c.topics.insert(topic);
                 self.bus_send(id, ServerMsg::Done { serial });
@@ -222,6 +226,10 @@ impl Server {
                     Topic::Outputs => {
                         let outputs = self.bus_outputs();
                         self.bus_send(id, ServerMsg::Outputs { serial: 0, outputs });
+                    }
+                    Topic::Settings => {
+                        let settings = crate::settings::all(&self.settings.current);
+                        self.bus_send(id, ServerMsg::Settings { serial: 0, complete: true, settings });
                     }
                 }
             }
@@ -339,6 +347,14 @@ impl Server {
             .collect();
         out.sort_by_key(|o| (o.x, o.y));
         out
+    }
+
+    /// Settings changed (settings.rs): subscribers get the changed ones.
+    pub fn bus_settings_changed(&mut self, changed: &[vergence_protocol::bus::Setting]) {
+        let ids: Vec<u32> = self.bus.clients.iter().filter(|(_, c)| c.topics.contains(&Topic::Settings)).map(|(id, _)| *id).collect();
+        for id in ids {
+            self.bus_send(id, ServerMsg::Settings { serial: 0, complete: false, settings: changed.to_vec() });
+        }
     }
 
     /// Call after monitors were added, removed, moved or rescaled: subscribers

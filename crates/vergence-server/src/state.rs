@@ -88,6 +88,8 @@ pub struct Server {
     pub bus: crate::bus::Bus,
     /// The D-Bus edge (dbus.rs).
     pub dbus: crate::dbus::DBus,
+    /// The desktop settings (settings.rs).
+    pub settings: crate::settings::SettingsState,
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
@@ -199,6 +201,7 @@ impl Server {
             control_owned: false,
             bus: Default::default(),
             dbus: Default::default(),
+            settings: Default::default(),
             popups,
             seat,
             regions: Vec::new(),

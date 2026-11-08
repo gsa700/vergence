@@ -1,8 +1,10 @@
-// Vergence settings (prototype, 2026-11-07): wallpaper first. It writes
-// ~/.config/vergence/desktop.toml; the server re-reads that within a second and
-// draws the wallpaper at every monitor's own pixels (vergence-server wallpaper.rs).
-// Appearance (GTK theme, icons, cursor, fonts) will write settings.toml, the
-// XSETTINGS file vergd and the server share.
+// Vergence settings (prototype, 2026-11-07): wallpaper and appearance. Both
+// write ~/.config/vergence/desktop.toml ([wallpaper], [appearance]), keeping
+// every other table (the menu's items) as it is. The server re-reads the file
+// within a second: the wallpaper is drawn at every monitor's own pixels
+// (vergence-server wallpaper.rs), and appearance changes reach every app at
+// once through the session bus and its settings portal (settings.rs, dbus.rs).
+// Theme, icons, cursor and fonts (settings.toml, the XSETTINGS file) are next.
 
 use std::path::{Path, PathBuf};
 
@@ -10,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use slint::{Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
 slint::slint! {
-    import { TabWidget, ScrollView, ComboBox, LineEdit, Button, HorizontalBox, VerticalBox } from "std-widgets.slint";
+    import { TabWidget, ScrollView, ComboBox, LineEdit, Button, CheckBox, HorizontalBox, VerticalBox } from "std-widgets.slint";
 
     export struct Wallpaper { name: string, thumb: image }
 
@@ -25,6 +27,12 @@ slint::slint! {
         in-out property <string> bg-color: "#202020";
         in property <string> status;
         callback apply();
+        in-out property <int> scheme-index: 0;
+        in-out property <string> accent: "";
+        in-out property <bool> high-contrast: false;
+        in-out property <bool> reduced-motion: false;
+        in property <string> appearance-status;
+        callback apply-appearance();
 
         TabWidget {
             Tab {
@@ -89,7 +97,26 @@ slint::slint! {
             Tab {
                 title: "Appearance";
                 VerticalBox {
-                    Text { text: "Theme, icons, cursor and fonts: next."; }
+                    alignment: start;
+                    HorizontalBox {
+                        Text { text: "Style"; vertical-alignment: center; min-width: 120px; }
+                        ComboBox {
+                            model: ["Default", "Dark", "Light"];
+                            current-index <=> root.scheme-index;
+                            selected => { root.apply-appearance(); }
+                        }
+                    }
+                    HorizontalBox {
+                        Text { text: "Accent colour"; vertical-alignment: center; min-width: 120px; }
+                        LineEdit { text <=> root.accent; placeholder-text: "#3b82f6 (empty: none)"; width: 200px; accepted => { root.apply-appearance(); } }
+                    }
+                    CheckBox { text: "High contrast"; checked <=> root.high-contrast; toggled => { root.apply-appearance(); } }
+                    CheckBox { text: "Reduce motion"; checked <=> root.reduced-motion; toggled => { root.apply-appearance(); } }
+                    HorizontalBox {
+                        Button { text: "Apply"; primary: true; clicked => { root.apply-appearance(); } }
+                    }
+                    Text { text: root.appearance-status; color: #888; }
+                    Text { text: "Theme, icons, cursor and fonts: next."; color: #888; }
                 }
             }
         }
@@ -100,11 +127,6 @@ type WallpaperItem = Wallpaper;
 
 const MODES: [&str; 4] = ["fill", "fit", "center", "stretch"];
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct DesktopFile {
-    #[serde(default)]
-    wallpaper: WallpaperConf,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -123,6 +145,31 @@ impl Default for WallpaperConf {
 fn desktop_path() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/vergence/desktop.toml")
 }
+
+/// desktop.toml as a table (empty if missing or unreadable).
+fn read_desktop() -> toml::Table {
+    std::fs::read_to_string(desktop_path()).ok().and_then(|t| t.parse().ok()).unwrap_or_default()
+}
+
+/// Replace one table of desktop.toml, keeping the others (the menu's items).
+fn write_desktop_table(name: &str, value: toml::Value) -> Result<PathBuf, String> {
+    let path = desktop_path();
+    let mut table = match std::fs::read_to_string(&path) {
+        Ok(text) => text.parse::<toml::Table>().map_err(|e| format!("{} is not valid TOML ({e}); not overwriting it", path.display()))?,
+        Err(_) => toml::Table::new(),
+    };
+    table.insert(name.into(), value);
+    let text = toml::to_string(&table).map_err(|e| e.to_string())?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    // Write beside it and rename, so the server never reads half a file.
+    let tmp = path.with_extension("toml.new");
+    std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+const SCHEMES: [&str; 3] = ["default", "dark", "light"];
 
 /// Pictures the server can draw, from the usual places.
 fn find_wallpapers() -> Vec<PathBuf> {
@@ -188,10 +235,10 @@ fn thumbnail(path: &Path, w: u32, h: u32) -> Option<SharedPixelBuffer<Rgba8Pixel
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let files = find_wallpapers();
-    let current: DesktopFile = std::fs::read_to_string(desktop_path())
-        .ok()
-        .and_then(|t| toml::from_str(&t).ok())
-        .unwrap_or_default();
+    let desktop = read_desktop();
+    let wallpaper: WallpaperConf =
+        desktop.get("wallpaper").cloned().and_then(|w| w.try_into().ok()).unwrap_or_default();
+    let appearance = desktop.get("appearance").and_then(|a| a.as_table()).cloned().unwrap_or_default();
 
     // The Wayland app_id: the server's placement memory knows windows by it.
     let _ = slint::set_xdg_app_id("vergence-settings");
@@ -224,31 +271,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     }
-    if let Some(i) = current.wallpaper.image.as_ref().and_then(|c| files.iter().position(|f| f == c)) {
+    if let Some(i) = wallpaper.image.as_ref().and_then(|c| files.iter().position(|f| f == c)) {
         ui.set_selected(i as i32);
     }
-    ui.set_mode_index(MODES.iter().position(|m| *m == current.wallpaper.mode).unwrap_or(0) as i32);
-    ui.set_bg_color(current.wallpaper.color.clone().into());
+    ui.set_mode_index(MODES.iter().position(|m| *m == wallpaper.mode).unwrap_or(0) as i32);
+    ui.set_bg_color(wallpaper.color.clone().into());
+    let text = |k: &str| appearance.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    ui.set_scheme_index(SCHEMES.iter().position(|s| *s == text("color-scheme")).unwrap_or(0) as i32);
+    ui.set_accent(text("accent").into());
+    ui.set_high_contrast(text("contrast") == "high");
+    ui.set_reduced_motion(appearance.get("reduced-motion").and_then(|v| v.as_bool()).unwrap_or(false));
+
+    let weak = ui.as_weak();
+    ui.on_apply_appearance(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let accent = ui.get_accent().trim().to_string();
+        let valid = accent.is_empty()
+            || (accent.len() == 7 && accent.starts_with('#') && accent[1..].chars().all(|c| c.is_ascii_hexdigit()));
+        if !valid {
+            ui.set_appearance_status("Accent colour: write it as #rrggbb, or leave it empty".into());
+            return;
+        }
+        let mut t = toml::Table::new();
+        t.insert("color-scheme".into(), SCHEMES[ui.get_scheme_index().clamp(0, 2) as usize].into());
+        if !accent.is_empty() {
+            t.insert("accent".into(), accent.into());
+        }
+        t.insert("contrast".into(), if ui.get_high_contrast() { "high" } else { "normal" }.into());
+        t.insert("reduced-motion".into(), ui.get_reduced_motion().into());
+        ui.set_appearance_status(match write_desktop_table("appearance", toml::Value::Table(t)) {
+            Ok(p) => format!("Saved {}; apps follow within a second", p.display()).into(),
+            Err(e) => format!("Could not save: {e}").into(),
+        });
+    });
 
     let weak = ui.as_weak();
     ui.on_apply(move || {
         let Some(ui) = weak.upgrade() else { return };
         let image = usize::try_from(ui.get_selected()).ok().and_then(|i| files.get(i).cloned());
-        let file = DesktopFile {
-            wallpaper: WallpaperConf {
-                image,
-                mode: MODES[ui.get_mode_index().clamp(0, 3) as usize].into(),
-                color: ui.get_bg_color().to_string(),
-            },
+        let conf = WallpaperConf {
+            image,
+            mode: MODES[ui.get_mode_index().clamp(0, 3) as usize].into(),
+            color: ui.get_bg_color().to_string(),
         };
-        let path = desktop_path();
-        let res = path
-            .parent()
-            .map(std::fs::create_dir_all)
-            .unwrap_or(Ok(()))
-            .and_then(|_| std::fs::write(&path, toml::to_string(&file).unwrap_or_default()));
+        let res = toml::Value::try_from(&conf).map_err(|e| e.to_string()).and_then(|v| write_desktop_table("wallpaper", v));
         ui.set_status(match res {
-            Ok(()) => format!("Saved {}", path.display()).into(),
+            Ok(p) => format!("Saved {}", p.display()).into(),
             Err(e) => format!("Could not save: {e}").into(),
         });
     });

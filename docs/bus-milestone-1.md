@@ -107,6 +107,43 @@ Next (2b): run the live session on it with the everyday apps (Firefox,
 Thunderbird, AlbumWall, the settings app) for a while, then read `vctl dbus`
 to choose what the edge translates first.
 
+## Step 2b: what the everyday apps asked for (2026-11-08)
+
+Live session, ~4 minutes with the settings app, Firefox and AlbumWall
+(`vctl dbus`). Unanswered calls by count: org.gnome.Mutter.IdleMonitor
+GetIdletime 14 (Firefox polls idle time), org.gtk.vfs mount tracker 7,
+org.freedesktop.portal.Settings ReadOne 5 + a portal property read
+(Slint, Avalonia: colour scheme), portal Inhibit and GNOME SessionManager
+Inhibit 1 each (Firefox), com.canonical.AppMenu.Registrar 1 (Avalonia),
+org.a11y.Bus 1. Firefox owned its single-instance name; AlbumWall owned
+org.mpris.MediaPlayer2.albumwall. No notification was attempted in the run.
+Decision (Dave): the settings portal first.
+
+## Step 2c: the settings service and portal (built 2026-11-08)
+
+- `vergence-server/src/settings.rs`: one settings map from
+  `desktop.toml [appearance]` (color-scheme default/dark/light, accent
+  #rrggbb, contrast normal/high, reduced-motion) and `settings.toml`
+  (theme, icons, cursor, fonts), under the namespaces toolkits ask for
+  (org.freedesktop.appearance, org.gnome.desktop.interface). Both files
+  re-read within a second; only changed settings are pushed.
+- Core bus: topic `settings` (2), GetSettings, Settings (complete, or the
+  changed ones). `vbus settings`, `vbus watch settings`.
+- D-Bus edge: provides org.freedesktop.portal.Desktop as ":1.0" with the
+  Settings interface (ReadAll, Read, ReadOne, SettingChanged, version 2).
+  Other portal interfaces answer UnknownMethod. Each setting a program
+  reads is logged once.
+- Settings app: an Appearance page (style, accent, high contrast, reduce
+  motion) that applies at once; saving keeps desktop.toml's other tables
+  (it used to rewrite the whole file, dropping the menu's items).
+- Program names for the log are looked up off the main thread.
+
+Tested nested with a test home: gdbus ReadOne/ReadAll/version/GetNameOwner
+(":1.0"); appending `color-scheme = "dark"` and an accent to desktop.toml
+sent SettingChanged for accent-color, color-scheme (u 1) and the GNOME
+color-scheme ("prefer-dark") to gdbus monitor, and the same three as one
+"changed" event to `vbus watch settings`. Server tests: 3 new.
+
 ## Not in this step
 
 Permissions beyond the uid check; the pid; settings and notifications
