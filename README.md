@@ -18,7 +18,7 @@ monitor setup by its EDIDs, puts its arrangement back, puts every window back
 in Mode A (everything the same physical size: a 200-unit box measured 52.9 mm
 on a 103 ppi and a 163 ppi monitor in GTK 3/4, Qt, Electron and Avalonia) or
 Mode B (native pixels, per-monitor factors). Waiting for real monitors (a
-14" 4K, a 32" 4K) for the final checks. Debian 13 is to be tested alongside.
+14" 4K, a 32" 4K) for the final checks.
 
 Crates: `vergence-edid` (EDID parser), `vergence-profile` (profile keys,
 arrangements, window memory, scaling), `vergence-xsettings` (XSETTINGS wire
@@ -36,6 +36,7 @@ toolkit.
 | 3 | Accessibility contract, display-list surfaces, Avalonia backend | Research |
 | 4 | Remote display over display lists | Research |
 
-Language: Rust throughout (whitepaper §8). Platforms: FreeBSD first, Debian
-second, both from day one (FreeBSD made primary 2026-11-06). Whitepaper
+Language: Rust throughout (whitepaper §8). Platforms: FreeBSD first (Hubble),
+Linux second (Fedora on Techbench since 2026-11-08, replacing Debian 13), both
+from day one. Whitepaper
 Draft 0.9.

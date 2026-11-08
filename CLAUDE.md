@@ -42,15 +42,27 @@ the current milestone is docs/bus-milestone-1.md (the session bus; the server's 
   any part from another project (crate, program, protocol extension added only
   for borrowed clients, borrowed panel or daemon), ask him: what it is, why it
   is necessary, what writing our own would take. Parts already in (Smithay,
-  libinput/seatd/xkbcommon, Xwayland, Slint, ab_glyph, resvg, Adwaita cursors;
+  libinput/seatd/xkbcommon, Xwayland, iced (replaced Slint), ab_glyph, resvg, Adwaita cursors;
   table in whitepaper §8) stay until he decides on each. OS interfaces (DRM/KMS,
   evdev, GBM, EGL, Vulkan) are not borrowing.
-- **FreeBSD first (bare hardware, X11), Debian 13 (X11, XFCE) second, both
-  at every phase.** Dave, 2026-11-06: development happens on FreeBSD; it was
-  Debian first until then. Stay with the X protocol (RandR) rather than
-  kernel or Linux interfaces (udev, systemd, /sys); if something must
-  differ, say so in the code and the docs. VMs (canary) are for build checks
-  only.
+- **FreeBSD first (Hubble, bare hardware), Linux second, both at every
+  phase.** Dave, 2026-11-06: development happens on FreeBSD (it was Debian
+  first until then). Dave, 2026-11-08: the Linux platform is **Fedora on
+  Techbench** (Fedora 45, Intel UHD 770), replacing Debian 13, which had been
+  picked for hosting the X11 daemon. Techbench is Dave's workstation, not a
+  project machine: Rust and -devel packages only (dnf needs his sudo), build
+  in ~/src/vergence (`tools/sync-hubble.sh techbench`). Start it from GDM:
+  "Vergence" in the gear menu (tools/install-session.sh put
+  /usr/share/wayland-sessions/vergence.desktop there, 2026-11-08); log out of
+  GNOME first, GDM won't start a second session for the same user. NOT from a
+  text console: Fedora 45's consoles are kmscon, which holds the GPU (the
+  server fails "Device or resource busy"); the kernel console is a dummy.
+  Ctrl+Alt+Backspace ends it, back to GDM. Log ~/vergence-drm.log, `vctl` as on
+  Hubble (socket in /run/user/1000). Techbench is normally headless: the two
+  monitors move between it and Hubble. Keep
+  Linux-only interfaces (udev, systemd, logind, /sys) out of the core; where
+  the platforms must differ, say so in the code and the docs. VMs (canary)
+  are for build checks only.
 - **Xfce is only a host** (Dave, 2026-11-06): nothing new is built on
   Xfce's internals (xfconf, xfsettingsd); everything works under any EWMH
   window manager, and pieces the phase 2 server needs (e.g. the XSETTINGS

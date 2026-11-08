@@ -1,7 +1,7 @@
 #!/bin/sh
 # The Vergence session: what a display manager (lightdm on Hubble) runs when
 # "Vergence" is chosen at the login screen. vergence-server on the real monitors
-# through seatd; `vctl restart` (exit status 75) starts it again with the build
+# through seatd (FreeBSD) or logind (Linux); `vctl restart` (exit status 75) starts it again with the build
 # that is there now; any other exit ends the session (back to the login screen).
 # Installed as a session by tools/install-session.sh.
 # (Through the link in ~/bin too: the checkout is where the script really is.)
@@ -20,7 +20,9 @@ export XDG_RUNTIME_DIR
 unset QT_SCREEN_SCALE_FACTORS QT_SCALE_FACTOR QT_AUTO_SCREEN_SCALE_FACTOR \
     AVALONIA_SCREEN_SCALE_FACTORS AVALONIA_GLOBAL_SCALE_FACTOR \
     GDK_SCALE GDK_DPI_SCALE _JAVA_OPTIONS VERGENCE_SCALE DISPLAY
-export LIBSEAT_BACKEND=seatd
+# Seat and device access: seatd on FreeBSD (no logind there); on Linux libseat
+# finds logind by itself (Fedora on Techbench, 2026-11-08).
+[ "$(uname -s)" = FreeBSD ] && export LIBSEAT_BACKEND=seatd
 export XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=Vergence
 export RUST_LOG=${RUST_LOG:-info,smithay=warn}
 LOG=$HOME/vergence-drm.log
@@ -31,6 +33,9 @@ LOG=$HOME/vergence-drm.log
 tries=0
 while :; do
     started=$(date +%s)
+    # The last run's log is kept (a `vctl restart` after a GPU hang used to wipe
+    # the evidence, 2026-11-08).
+    [ -s "$LOG" ] && mv "$LOG" "$LOG.1"
     "$BIN" --drm > "$LOG" 2>&1
     status=$?
     if [ "$status" -eq 75 ]; then

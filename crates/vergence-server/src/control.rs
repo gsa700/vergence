@@ -4,7 +4,7 @@
 //
 // $XDG_RUNTIME_DIR/vergence-control, a Unix socket in the user's private runtime
 // directory (0700), mode 0600, and every connection's peer uid is checked against
-// ours (getpeereid): owner-only, so it is not an unauthenticated control interface
+// ours (getpeereid / SO_PEERCRED): owner-only, so it is not an unauthenticated control interface
 // (whitepaper §7.3). No network socket. One command per connection, one line in,
 // text out:
 //
@@ -88,18 +88,33 @@ pub fn listen(state: &mut Server) {
 unsafe extern "C" {
     #[link_name = "getuid"]
     fn libc_getuid() -> u32;
+    #[cfg(not(target_os = "linux"))]
     fn getpeereid(fd: i32, euid: *mut u32, egid: *mut u32) -> i32;
+    #[cfg(target_os = "linux")]
+    fn getsockopt(fd: i32, level: i32, name: i32, val: *mut u8, len: *mut u32) -> i32;
 }
 
 pub fn our_uid() -> u32 {
     unsafe { libc_getuid() }
 }
 
-/// The connecting process's user id (getpeereid: FreeBSD, and Linux through libc).
+/// The connecting process's user id: getpeereid on FreeBSD; SO_PEERCRED on Linux,
+/// where glibc has no getpeereid (found on Fedora, 2026-11-08).
 pub fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
     use std::os::fd::AsRawFd;
-    let (mut uid, mut gid) = (u32::MAX, u32::MAX);
-    (unsafe { getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } == 0).then_some(uid)
+    #[cfg(not(target_os = "linux"))]
+    {
+        let (mut uid, mut gid) = (u32::MAX, u32::MAX);
+        (unsafe { getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } == 0).then_some(uid)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // struct ucred { pid, uid, gid }; SOL_SOCKET 1, SO_PEERCRED 17.
+        let mut buf = [0u8; 12];
+        let mut len = buf.len() as u32;
+        let ok = unsafe { getsockopt(stream.as_raw_fd(), 1, 17, buf.as_mut_ptr(), &mut len) } == 0;
+        (ok && len == 12).then(|| u32::from_ne_bytes(buf[4..8].try_into().unwrap()))
+    }
 }
 
 impl Server {
