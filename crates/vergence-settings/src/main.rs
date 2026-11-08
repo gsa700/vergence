@@ -5,59 +5,314 @@
 // (vergence-server wallpaper.rs), and appearance changes reach every app at
 // once through the session bus and its settings portal (settings.rs, dbus.rs).
 // Theme, icons, cursor and fonts (settings.toml, the XSETTINGS file) are next.
+//
+// THE FORMAT (Dave, 2026-11-08: "similar to the macOS ... designed for desktop
+// and not mobiles"; the format of the family's Avalonia Preferences windows):
+// a sidebar of pages on the left, About set apart at its foot; the page in a
+// framed panel with its title and a sentence; settings in rounded groups, the
+// name on the left and the control on the right. Every change applies at once
+// (no OK button). A new feature adds a page: a name in `pages` and an
+// `if root.page == N` block.
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use slint::{Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
 slint::slint! {
-    import { TabWidget, ScrollView, ComboBox, LineEdit, Button, CheckBox, HorizontalBox, VerticalBox } from "std-widgets.slint";
+    import { ScrollView, ComboBox, LineEdit, Switch, Palette } from "std-widgets.slint";
 
     export struct Wallpaper { name: string, thumb: image }
+    struct Swatch { name: string, hex: string, color: color }
+
+    // A line in the sidebar: the page's name; the selected one darker than the
+    // sidebar, edged and in a heavier weight (the family's Preferences format).
+    component SidebarItem inherits Rectangle {
+        in property <string> text;
+        in property <bool> selected;
+        callback clicked;
+        height: 30px;
+        border-radius: 5px;
+        border-width: 1px;
+        border-color: root.selected ? Palette.border : transparent;
+        background: root.selected ? Palette.alternate-background.darker(0.08) : (touch.has-hover ? Palette.alternate-background.darker(0.04) : transparent);
+        accessible-role: list-item;
+        accessible-label: root.text;
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            Text {
+                text: root.text;
+                vertical-alignment: center;
+                font-size: 13px;
+                font-weight: root.selected ? 600 : 400;
+                color: Palette.foreground;
+            }
+        }
+        touch := TouchArea { clicked => { root.clicked(); } }
+    }
+
+    // A page's heading and the sentence under it.
+    component PageTitle inherits VerticalLayout {
+        in property <string> title;
+        in property <string> description;
+        spacing: 6px;
+        Text { text: root.title; font-size: 18px; font-weight: 600; color: Palette.foreground; }
+        if root.description != "": Text {
+            text: root.description;
+            font-size: 13px;
+            wrap: word-wrap;
+            color: Palette.foreground;
+            opacity: 0.65;
+        }
+    }
+
+    // A group of rows in a rounded box (the macOS format), with an optional heading.
+    component Group inherits VerticalLayout {
+        in property <string> heading;
+        spacing: 6px;
+        if root.heading != "": Text { text: root.heading; font-size: 12px; font-weight: 600; color: Palette.foreground; opacity: 0.7; }
+        Rectangle {
+            background: Palette.background;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Palette.border;
+            VerticalLayout {
+                padding: 2px;
+                @children
+            }
+        }
+    }
+
+    // One setting: its name (and a line about it) on the left, its control on
+    // the right. Every row but a group's first has a hairline above it.
+    component Row inherits Rectangle {
+        in property <string> label;
+        in property <string> detail;
+        in property <bool> first: false;
+        min-height: 44px;
+        if !root.first: Rectangle { x: 12px; y: 0; width: parent.width - 24px; height: 1px; background: Palette.border; opacity: 0.6; }
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            padding-top: 6px;
+            padding-bottom: 6px;
+            spacing: 16px;
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                Text { text: root.label; font-size: 13px; color: Palette.foreground; }
+                if root.detail != "": Text { text: root.detail; font-size: 11px; wrap: word-wrap; color: Palette.foreground; opacity: 0.6; }
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 6px;
+                @children
+            }
+        }
+    }
 
     export component Settings inherits Window {
         title: "Vergence Settings";
-        preferred-width: 760px;
-        preferred-height: 560px;
+        preferred-width: 820px;
+        preferred-height: 600px;
+        min-width: 640px;
+        min-height: 480px;
+        background: Palette.alternate-background;
 
-        in property <[Wallpaper]> wallpapers;
-        in-out property <int> selected: -1;
-        in-out property <int> mode-index: 0;
-        in-out property <string> bg-color: "#202020";
-        in property <string> status;
-        callback apply();
+        // The pages, in sidebar order; About is the last index, set apart.
+        in property <[string]> pages: ["Appearance", "Wallpaper"];
+        in-out property <int> page: 0;
+        property <int> about: root.pages.length;
+
+        // Appearance.
         in-out property <int> scheme-index: 0;
         in-out property <string> accent: "";
         in-out property <bool> high-contrast: false;
         in-out property <bool> reduced-motion: false;
         in property <string> appearance-status;
         callback apply-appearance();
+        property <[Swatch]> swatches: [
+            { name: "Blue", hex: "#3b82f6", color: #3b82f6 },
+            { name: "Purple", hex: "#8b5cf6", color: #8b5cf6 },
+            { name: "Pink", hex: "#ec4899", color: #ec4899 },
+            { name: "Red", hex: "#ef4444", color: #ef4444 },
+            { name: "Orange", hex: "#e05a00", color: #e05a00 },
+            { name: "Yellow", hex: "#eab308", color: #eab308 },
+            { name: "Green", hex: "#22c55e", color: #22c55e },
+            { name: "Graphite", hex: "#6b7280", color: #6b7280 },
+        ];
 
-        TabWidget {
-            Tab {
-                title: "Wallpaper";
-                VerticalBox {
+        // Wallpaper.
+        in property <[Wallpaper]> wallpapers;
+        in-out property <int> selected: -1;
+        in-out property <int> mode-index: 0;
+        in-out property <string> bg-color: "#202020";
+        in property <string> status;
+        callback apply();
+
+        // About.
+        in property <string> version;
+        in property <string> session;
+
+        HorizontalLayout {
+            padding: 12px;
+            spacing: 12px;
+
+            // THE PAGES, as a list: Up and Down move through it and the page follows.
+            sidebar := FocusScope {
+                width: 168px;
+                key-pressed(event) => {
+                    if (event.text == Key.UpArrow) {
+                        root.page = Math.max(0, root.page - 1);
+                        return accept;
+                    }
+                    if (event.text == Key.DownArrow) {
+                        root.page = Math.min(root.about, root.page + 1);
+                        return accept;
+                    }
+                    reject
+                }
+                VerticalLayout {
+                    alignment: start;
+                    spacing: 2px;
+                    for p[i] in root.pages: SidebarItem {
+                        text: p;
+                        selected: root.page == i;
+                        clicked => { root.page = i; sidebar.focus(); }
+                    }
+                    // About, set apart at the foot: a page about the desktop, not a setting.
+                    Rectangle { height: 16px; }
+                    SidebarItem {
+                        text: "About";
+                        selected: root.page == root.about;
+                        clicked => { root.page = root.about; sidebar.focus(); }
+                    }
+                }
+            }
+
+            // THE PAGE, in a framed panel; each page scrolls on its own.
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Palette.background.mix(Palette.alternate-background, 0.5);
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: Palette.border;
+
+                if root.page == 0: ScrollView {
+                    VerticalLayout {
+                        padding: 22px;
+                        spacing: 18px;
+                        alignment: start;
+                        PageTitle {
+                            title: "Appearance";
+                            description: "Light or dark, the accent colour, contrast and motion. Every app that follows the desktop changes at once.";
+                        }
+                        Group {
+                            Row {
+                                first: true;
+                                label: "Style";
+                                detail: "App default lets each app choose.";
+                                ComboBox {
+                                    width: 160px;
+                                    model: ["App default", "Dark", "Light"];
+                                    current-index <=> root.scheme-index;
+                                    selected => { root.apply-appearance(); }
+                                }
+                            }
+                            Row {
+                                label: "Accent colour";
+                                detail: root.accent == "" ? "None: each app uses its own." : root.accent;
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 11px;
+                                    border-width: root.accent == "" ? 2px : 1px;
+                                    border-color: root.accent == "" ? Palette.foreground : Palette.border;
+                                    background: transparent;
+                                    Text { text: "\u{2715}"; font-size: 10px; color: Palette.foreground; opacity: 0.6; horizontal-alignment: center; vertical-alignment: center; }
+                                    TouchArea { clicked => { root.accent = ""; root.apply-appearance(); } }
+                                }
+                                for s in root.swatches: Rectangle {
+                                    width: 22px; height: 22px; border-radius: 11px;
+                                    background: s.color;
+                                    border-width: root.accent == s.hex ? 2px : 0px;
+                                    border-color: Palette.foreground;
+                                    accessible-role: button;
+                                    accessible-label: s.name;
+                                    TouchArea { clicked => { root.accent = s.hex; root.apply-appearance(); } }
+                                }
+                            }
+                            Row {
+                                label: "Custom accent";
+                                detail: "Any colour as #rrggbb; Enter applies it.";
+                                LineEdit {
+                                    width: 120px;
+                                    text <=> root.accent;
+                                    placeholder-text: "#rrggbb";
+                                    accepted => { root.apply-appearance(); }
+                                }
+                            }
+                        }
+                        Group {
+                            heading: "Accessibility";
+                            Row {
+                                first: true;
+                                label: "High contrast";
+                                detail: "Apps that support it draw stronger edges and text.";
+                                Switch { checked <=> root.high-contrast; toggled => { root.apply-appearance(); } }
+                            }
+                            Row {
+                                label: "Reduce motion";
+                                detail: "Apps that support it turn off animations.";
+                                Switch { checked <=> root.reduced-motion; toggled => { root.apply-appearance(); } }
+                            }
+                        }
+                        if root.appearance-status != "": Text { text: root.appearance-status; font-size: 11px; color: Palette.foreground; opacity: 0.6; wrap: word-wrap; }
+                    }
+                }
+
+                if root.page == 1: VerticalLayout {
+                    padding: 22px;
+                    spacing: 14px;
+                    PageTitle {
+                        title: "Wallpaper";
+                        description: "A picture is drawn at every monitor's own pixels. Click one to use it.";
+                    }
+                    Group {
+                        Row {
+                            first: true;
+                            label: "Fit";
+                            ComboBox {
+                                width: 140px;
+                                model: ["Fill", "Fit", "Centre", "Stretch"];
+                                current-index <=> root.mode-index;
+                                selected => { root.apply(); }
+                            }
+                        }
+                        Row {
+                            label: "Background colour";
+                            detail: "Around a picture that doesn't fill the screen, or alone without one.";
+                            LineEdit { width: 120px; text <=> root.bg-color; accepted => { root.apply(); } }
+                        }
+                    }
                     grid := ScrollView {
                         vertical-stretch: 1;
                         property <length> cell-w: 180px;
                         property <length> cell-h: 132px;
-                        property <int> cols: max(1, floor(self.visible-width / self.cell-w));
+                        property <int> cols: Math.max(1, Math.floor(self.visible-width / self.cell-w));
                         content-width: self.visible-width;
-                        content-height: ceil(root.wallpapers.length / self.cols) * self.cell-h;
+                        content-height: Math.ceil(root.wallpapers.length / self.cols) * self.cell-h;
                         for w[i] in root.wallpapers: Rectangle {
-                            x: mod(i, grid.cols) * grid.cell-w;
-                            y: floor(i / grid.cols) * grid.cell-h;
+                            x: Math.mod(i, grid.cols) * grid.cell-w;
+                            y: Math.floor(i / grid.cols) * grid.cell-h;
                             width: grid.cell-w;
                             height: grid.cell-h;
                             Rectangle {
                                 x: 6px; y: 6px;
                                 width: parent.width - 12px;
                                 height: parent.height - 34px;
-                                border-radius: 4px;
+                                border-radius: 6px;
                                 border-width: root.selected == i ? 3px : 1px;
-                                border-color: root.selected == i ? #3b82f6 : #8888;
-                                background: #00000010;
+                                border-color: root.selected == i ? Palette.accent-background : Palette.border;
                                 clip: true;
                                 Image {
                                     x: 3px; y: 3px;
@@ -74,49 +329,26 @@ slint::slint! {
                                 horizontal-alignment: center;
                                 overflow: elide;
                                 font-size: 11px;
+                                color: Palette.foreground;
                             }
-                            TouchArea {
-                                clicked => { root.selected = i; }
-                                double-clicked => { root.selected = i; root.apply(); }
-                            }
+                            TouchArea { clicked => { root.selected = i; root.apply(); } }
                         }
                     }
-                    HorizontalBox {
-                        Text { text: "Fit"; vertical-alignment: center; }
-                        ComboBox {
-                            model: ["Fill", "Fit", "Centre", "Stretch"];
-                            current-index <=> root.mode-index;
-                        }
-                        Text { text: "Colour"; vertical-alignment: center; }
-                        LineEdit { text <=> root.bg-color; width: 120px; }
-                        Button { text: "Apply"; primary: true; clicked => { root.apply(); } }
-                    }
-                    Text { text: root.status; color: #888; }
+                    if root.status != "": Text { text: root.status; font-size: 11px; color: Palette.foreground; opacity: 0.6; }
                 }
-            }
-            Tab {
-                title: "Appearance";
-                VerticalBox {
+
+                if root.page == root.about: VerticalLayout {
+                    padding: 22px;
+                    spacing: 18px;
                     alignment: start;
-                    HorizontalBox {
-                        Text { text: "Style"; vertical-alignment: center; min-width: 120px; }
-                        ComboBox {
-                            model: ["Default", "Dark", "Light"];
-                            current-index <=> root.scheme-index;
-                            selected => { root.apply-appearance(); }
-                        }
+                    PageTitle {
+                        title: "About";
+                        description: "Vergence: every app the right size, in the right place and readable, on any monitor setup.";
                     }
-                    HorizontalBox {
-                        Text { text: "Accent colour"; vertical-alignment: center; min-width: 120px; }
-                        LineEdit { text <=> root.accent; placeholder-text: "#3b82f6 (empty: none)"; width: 200px; accepted => { root.apply-appearance(); } }
+                    Group {
+                        Row { first: true; label: "Settings app"; Text { text: root.version; color: Palette.foreground; vertical-alignment: center; } }
+                        Row { label: "Session"; Text { text: root.session; color: Palette.foreground; vertical-alignment: center; } }
                     }
-                    CheckBox { text: "High contrast"; checked <=> root.high-contrast; toggled => { root.apply-appearance(); } }
-                    CheckBox { text: "Reduce motion"; checked <=> root.reduced-motion; toggled => { root.apply-appearance(); } }
-                    HorizontalBox {
-                        Button { text: "Apply"; primary: true; clicked => { root.apply-appearance(); } }
-                    }
-                    Text { text: root.appearance-status; color: #888; }
-                    Text { text: "Theme, icons, cursor and fonts: next."; color: #888; }
                 }
             }
         }
@@ -300,7 +532,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         t.insert("contrast".into(), if ui.get_high_contrast() { "high" } else { "normal" }.into());
         t.insert("reduced-motion".into(), ui.get_reduced_motion().into());
         ui.set_appearance_status(match write_desktop_table("appearance", toml::Value::Table(t)) {
-            Ok(p) => format!("Saved {}; apps follow within a second", p.display()).into(),
+            Ok(_) => SharedString::new(),
             Err(e) => format!("Could not save: {e}").into(),
         });
     });
@@ -316,10 +548,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let res = toml::Value::try_from(&conf).map_err(|e| e.to_string()).and_then(|v| write_desktop_table("wallpaper", v));
         ui.set_status(match res {
-            Ok(p) => format!("Saved {}", p.display()).into(),
+            Ok(_) => SharedString::new(),
             Err(e) => format!("Could not save: {e}").into(),
         });
     });
+    ui.set_version(format!("version {}", env!("CARGO_PKG_VERSION")).into());
+    let session = match (std::env::var("VERGENCE_BUS"), std::env::var("WAYLAND_DISPLAY")) {
+        (Ok(_), Ok(w)) => format!("Vergence on {w}"),
+        (_, Ok(w)) => format!("another Wayland desktop ({w})"),
+        _ => "an X11 desktop".to_string(),
+    };
+    ui.set_session(session.into());
     ui.run()?;
     Ok(())
 }
