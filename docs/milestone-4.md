@@ -437,3 +437,20 @@ EDID sizes (21.5" and 14" diagonals).
    4x one: its title bars stay small until it is restarted.
 8. tools/sizebox/measure.sh moves a new window before vergd has placed it,
    so vergd puts it back (the GTK 4 box was measured twice on the 14").
+
+## Mode B first (Dave, 2026-11-07 18:22)
+
+After the real-monitor test, where Mode A looked "definitely less sharp",
+cost GPU time (an 11861 x 4038 desktop) and broke xfdesktop's wallpaper at
+render 4: **Mode B is the priority** (native pixels, a calculated scale per
+monitor); Mode A stays as an opt-in fallback. "The toolkit issues can be
+addressed later. Core design should be forward looking, performance
+oriented, security, etc." On Hubble in Mode B the Avalonia box is 52.9 mm on
+the ASUS and 53.0 mm on the 14", also after a drag by hand; Qt is right
+where it opens and does not rescale when moved; GTK has one scale. AlbumWall
+(Avalonia) is crisp but does not keep its size when dragged to the 14": its
+window code (Spindle's too) holds pixel sizes; to fix there. The whitepaper
+(§4.3, default mode) is to be updated.
+
+Fixed with this: the derived scale comes from the **current** mode (the 14"
+at 1080p is 157 ppi, exact 1.64, not 315 ppi), which was to-fix item 1.

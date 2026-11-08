@@ -135,9 +135,14 @@ impl Output {
 
 impl Output {
     /// This monitor's derived scale (milestone 4), from its EDID's physical
-    /// size and native resolution; None without a native mode.
+    /// size and the resolution it runs: the current mode, or the native one
+    /// when it is off. None without a native mode. The current mode, because
+    /// the pixels that reach the panel are the mode's: the 14" 4K at
+    /// 1920x1080 is 157 ppi, not 315 (2026-11-07: with the native mode it got
+    /// x1.219 at 1080p instead of x2.44, and Mode A rendered at 4 instead of 2).
     pub fn derived_scale(&self, distance: Distance, preference: f64) -> Option<Derived> {
-        let n = self.native.as_ref()?;
+        self.native.as_ref()?;
+        let n = self.current.as_ref().map(|c| &c.mode).or(self.native.as_ref())?;
         let mm = self
             .edid
             .as_deref()
