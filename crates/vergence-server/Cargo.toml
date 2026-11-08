@@ -1,0 +1,21 @@
+[package]
+name = "vergence-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Vergence's Wayland server (phase 2): one authority over the screens and the input"
+
+# Started from Smithay's smallvil example (MIT, LICENSE-smithay.txt), 2026-11-07.
+# Smithay is pinned to the commit that built and ran on Hubble (FreeBSD 15.1) in step 0.
+
+[dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
+bitflags = "2.2.1"
+
+[dependencies.smithay]
+git = "https://github.com/Smithay/smithay"
+rev = "65aa86f"
+default-features = false
+features = ["backend_winit", "wayland_frontend", "desktop"]
