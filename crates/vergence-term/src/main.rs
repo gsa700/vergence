@@ -1,128 +1,289 @@
-// Vergence's terminal (step 1, 2026-11-08): one window, one shell, our own
-// terminal core (vt.rs parser, grid.rs screen, pty.rs), drawn with iced at the
-// screen's own pixels in the desktop's monospace font (settings.toml
-// Gtk/MonospaceFontName). Next: tabs in the title bar, split panes, the
-// right-click menu, colour schemes.
+// Vergence's terminal. Step 1 (2026-11-08): our own terminal core (vt.rs
+// parser, grid.rs screen, pty.rs) drawn with iced at the screen's own pixels in
+// the desktop's monospace font. Step 2: tabs in the title bar (Dave: "I prefer
+// the tabs in the titlebar ala Firefox"): the window draws its own bar (the
+// server leaves its own off for windows that ask), in the server's colours,
+// with the tabs, a + button and the window buttons; the bar moves the window,
+// a double-click maximises, the edges resize. Next: split panes and the
+// right-click menu, then colour schemes.
 
 mod grid;
 mod pty;
+mod term;
 mod vt;
 
+use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use iced::keyboard::{self, Key, key::Named};
-use iced::widget::canvas::{self, Canvas, Frame, Geometry, Program};
-use iced::{Color, Element, Event, Font, Length, Pixels, Point, Rectangle, Renderer, Size, Subscription, Task, Theme, mouse};
+use iced::widget::{Canvas, Space, button, column, container, mouse_area, row, stack, text};
+use iced::window::Direction;
+use iced::{Background, Border, Color, Element, Event, Length, Padding, Size, Subscription, Task, Theme, mouse};
 
-use grid::{Cell, Color as TColor, Grid};
+use term::{PAD, Tab};
 
-/// Space around the grid, in points.
-const PAD: f32 = 6.0;
+/// The title bar's height, in points (the server's bar is 24; tabs want more).
+const BAR_H: f32 = 34.0;
+/// The invisible border that resizes the window, in points.
+const EDGE: f32 = 5.0;
+
+// The server's title bar colours (vergence-server decor.rs), so our bar
+// matches the windows it decorates.
+const BAR_ACTIVE: Color = Color::from_rgb(0.20, 0.24, 0.32);
+const BAR_INACTIVE: Color = Color::from_rgb(0.22, 0.22, 0.22);
+const TEXT_ACTIVE: Color = Color::from_rgb(0.92, 0.92, 0.92);
+const TEXT_INACTIVE: Color = Color::from_rgb(0.62, 0.62, 0.62);
+const CLOSE: Color = Color::from_rgb(0.78, 0.30, 0.28);
+/// The terminal's background: the active tab is drawn in it, joined to the text below.
+const TERM_BG: Color = Color::from_rgb(0x1e as f32 / 255.0, 0x1e as f32 / 255.0, 0x2e as f32 / 255.0);
 
 #[derive(Debug, Clone)]
 enum Message {
-    Output(Vec<u8>),
-    Exited,
+    Output(u64, Vec<u8>),
+    Exited(u64),
     Key(Key, keyboard::Modifiers, Option<String>),
     Resized(Size),
+    Focused(bool),
+    NewTab,
+    SelectTab(usize),
+    CloseTab(u64),
+    Drag,
+    ToggleMaximize,
+    Minimize,
+    CloseWindow,
+    ResizeEdge(Direction),
 }
 
-/// The shell's output, handed from main to the subscription (iced builds the
-/// stream from a plain function).
-static READER: OnceLock<Mutex<Option<std::fs::File>>> = OnceLock::new();
+/// Each tab's shell output, handed from the tab's creation to its subscription
+/// (iced builds streams from plain functions).
+static READERS: OnceLock<Mutex<HashMap<u64, std::fs::File>>> = OnceLock::new();
 
-struct Term {
-    grid: Grid,
-    parser: vt::Parser,
-    pty: pty::Pty,
-    cache: canvas::Cache,
-    font_size: f32,
-    cell: Size,
+fn readers() -> std::sync::MutexGuard<'static, HashMap<u64, std::fs::File>> {
+    READERS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap()
 }
 
-/// The desktop's monospace font size in points ("Monospace 10" -> 10), as
-/// logical pixels (points at 96 per inch).
-fn font_size() -> f32 {
-    let path = std::path::Path::new(&std::env::var_os("HOME").unwrap_or_default()).join(".config/vergence/settings.toml");
-    let pt = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|t| vergence_xsettings::from_toml(&t).ok())
-        .and_then(|s| match s.get("Gtk/MonospaceFontName") {
-            Some(vergence_xsettings::Value::Str(v)) => v.rsplit_once(' ').and_then(|(_, n)| n.parse::<f32>().ok()),
-            _ => None,
-        })
-        .unwrap_or(10.0);
-    pt * 96.0 / 72.0
+struct App {
+    tabs: Vec<Tab>,
+    active: usize,
+    next_id: u64,
+    /// The window's size (points) and whether it has the keyboard.
+    size: Size,
+    focused: bool,
 }
 
-impl Term {
-    fn new() -> Term {
-        let size = font_size();
-        // Monospace advance: 0.602 em (DejaVu Sans Mono, Noto Sans Mono); lines 1.25 em.
-        let cell = Size::new((size * 0.6021).max(1.0), (size * 1.25).ceil());
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-        let pty = pty::Pty::spawn(&shell, 80, 24).expect("start the shell");
-        let reader = pty.reader().expect("read the shell");
-        READER.get_or_init(|| Mutex::new(None)).lock().unwrap().replace(reader);
-        Term { grid: Grid::new(80, 24), parser: vt::Parser::new(), pty, cache: canvas::Cache::new(), font_size: size, cell }
+impl App {
+    fn new() -> App {
+        let mut app = App { tabs: Vec::new(), active: 0, next_id: 1, size: initial_size(), focused: true };
+        app.open_tab();
+        app
+    }
+
+    /// The terminal area: the window minus the title bar.
+    fn body(&self) -> Size {
+        Size::new(self.size.width, (self.size.height - BAR_H).max(1.0))
+    }
+
+    fn open_tab(&mut self) {
+        let id = self.next_id;
+        self.next_id += 1;
+        let cell = term::cell_for(term::font_size());
+        let body = self.body();
+        let cols = ((body.width - 2.0 * PAD) / cell.width).floor().max(2.0) as usize;
+        let rows = ((body.height - 2.0 * PAD) / cell.height).floor().max(1.0) as usize;
+        match Tab::new(id, cols, rows) {
+            Ok((tab, reader)) => {
+                readers().insert(id, reader);
+                self.tabs.push(tab);
+                self.active = self.tabs.len() - 1;
+            }
+            Err(e) => eprintln!("vergence-term: cannot start a shell: {e}"),
+        }
+    }
+
+    /// Remove a tab; the window closes with its last tab.
+    fn remove_tab(&mut self, id: u64) -> Task<Message> {
+        let Some(i) = self.tabs.iter().position(|t| t.id == id) else { return Task::none() };
+        self.tabs.remove(i);
+        if self.tabs.is_empty() {
+            return iced::exit();
+        }
+        if self.active >= i && self.active > 0 {
+            self.active -= 1;
+        }
+        self.active = self.active.min(self.tabs.len() - 1);
+        Task::none()
     }
 
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
-            Message::Output(bytes) => {
-                self.parser.advance(&mut self.grid, &bytes);
-                if !self.grid.out.is_empty() {
-                    let out = std::mem::take(&mut self.grid.out);
-                    self.pty.write(&out);
-                }
-                if self.grid.dirty {
-                    self.grid.dirty = false;
-                    self.cache.clear();
+            Message::Output(id, bytes) => {
+                if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
+                    t.feed(&bytes);
                 }
             }
-            Message::Exited => return iced::exit(),
-            Message::Key(key, mods, text) => {
-                if let Some(bytes) = key_bytes(&key, mods, text.as_deref(), self.grid.app_cursor) {
-                    self.pty.write(&bytes);
+            Message::Exited(id) => return self.remove_tab(id),
+            Message::Key(key, mods, txt) => {
+                // The terminal's own shortcuts (Ctrl+Shift so the shell keeps Ctrl+T etc.).
+                let cs = mods.control() && mods.shift();
+                match &key {
+                    Key::Character(c) if cs && c.eq_ignore_ascii_case("t") => {
+                        self.open_tab();
+                        return Task::none();
+                    }
+                    Key::Character(c) if cs && c.eq_ignore_ascii_case("w") => {
+                        let id = self.tabs.get(self.active).map(|t| t.id);
+                        return id.map(|id| self.remove_tab(id)).unwrap_or_else(Task::none);
+                    }
+                    Key::Named(Named::PageUp) if mods.control() && !mods.shift() => {
+                        self.active = (self.active + self.tabs.len() - 1) % self.tabs.len();
+                        return Task::none();
+                    }
+                    Key::Named(Named::PageDown) if mods.control() && !mods.shift() => {
+                        self.active = (self.active + 1) % self.tabs.len();
+                        return Task::none();
+                    }
+                    Key::Named(Named::Tab) if mods.control() => {
+                        let n = self.tabs.len();
+                        self.active = if mods.shift() { (self.active + n - 1) % n } else { (self.active + 1) % n };
+                        return Task::none();
+                    }
+                    _ => {}
+                }
+                if let Some(t) = self.tabs.get_mut(self.active)
+                    && let Some(bytes) = term::key_bytes(&key, mods, txt.as_deref(), t.grid.app_cursor)
+                {
+                    t.pty.write(&bytes);
                 }
             }
             Message::Resized(size) => {
-                let cols = ((size.width - 2.0 * PAD) / self.cell.width).floor().max(2.0) as usize;
-                let rows = ((size.height - 2.0 * PAD) / self.cell.height).floor().max(1.0) as usize;
-                if (cols, rows) != (self.grid.cols, self.grid.rows) {
-                    self.grid.resize(cols, rows);
-                    self.pty.resize(cols as u16, rows as u16);
-                    self.cache.clear();
+                self.size = size;
+                let body = self.body();
+                for t in &mut self.tabs {
+                    t.fit(body);
                 }
             }
+            Message::Focused(f) => self.focused = f,
+            Message::NewTab => self.open_tab(),
+            Message::SelectTab(i) => self.active = i.min(self.tabs.len().saturating_sub(1)),
+            Message::CloseTab(id) => return self.remove_tab(id),
+            Message::Drag => return iced::window::latest().and_then(iced::window::drag),
+            Message::ToggleMaximize => return iced::window::latest().and_then(iced::window::toggle_maximize),
+            Message::Minimize => return iced::window::latest().and_then(|id| iced::window::minimize(id, true)),
+            Message::CloseWindow => return iced::exit(),
+            Message::ResizeEdge(d) => return iced::window::latest().and_then(move |id| iced::window::drag_resize(id, d)),
         }
         Task::none()
     }
 
-    fn view(&self) -> Element<'_, Message> {
-        Canvas::new(self).width(Length::Fill).height(Length::Fill).into()
+    fn title(&self) -> String {
+        self.tabs.get(self.active).map(Tab::title).unwrap_or_else(|| "Terminal".into())
     }
 
-    fn title(&self) -> String {
-        if self.grid.title.is_empty() { "Terminal".into() } else { self.grid.title.clone() }
+    fn view(&self) -> Element<'_, Message> {
+        let body: Element<'_, Message> = match self.tabs.get(self.active) {
+            Some(t) => Canvas::new(t).width(Length::Fill).height(Length::Fill).into(),
+            None => Space::new().into(),
+        };
+        let window = column![self.title_bar(), body];
+        // The edges and corners resize the window (it draws its own frame).
+        let edge = |w: Length, h: Length, d: Direction, cursor: mouse::Interaction| {
+            mouse_area(Space::new().width(w).height(h)).on_press(Message::ResizeEdge(d)).interaction(cursor)
+        };
+        let e = Length::Fixed(EDGE);
+        let edges = column![
+            row![edge(e, e, Direction::NorthWest, mouse::Interaction::ResizingDiagonallyDown), edge(Length::Fill, e, Direction::North, mouse::Interaction::ResizingVertically), edge(e, e, Direction::NorthEast, mouse::Interaction::ResizingDiagonallyUp)],
+            row![edge(e, Length::Fill, Direction::West, mouse::Interaction::ResizingHorizontally), Space::new().width(Length::Fill).height(Length::Fill), edge(e, Length::Fill, Direction::East, mouse::Interaction::ResizingHorizontally)],
+            row![edge(e, e, Direction::SouthWest, mouse::Interaction::ResizingDiagonallyUp), edge(Length::Fill, e, Direction::South, mouse::Interaction::ResizingVertically), edge(e, e, Direction::SouthEast, mouse::Interaction::ResizingDiagonallyDown)],
+        ];
+        stack![window, edges].into()
+    }
+
+    /// The bar: tabs (the active one in the terminal's colour, joined to it),
+    /// +, room to grab, and the window buttons.
+    fn title_bar(&self) -> Element<'_, Message> {
+        let fg = if self.focused { TEXT_ACTIVE } else { TEXT_INACTIVE };
+        let bar_bg = if self.focused { BAR_ACTIVE } else { BAR_INACTIVE };
+        let mut tabs = row![].spacing(2).height(Length::Fill).align_y(iced::alignment::Vertical::Bottom);
+        for (i, t) in self.tabs.iter().enumerate() {
+            let active = i == self.active;
+            let close = button(text("\u{2715}").size(11).color(fg))
+                .padding(Padding::from([2, 6]))
+                .on_press(Message::CloseTab(t.id))
+                .style(move |_: &Theme, s| plain(s, if s == button::Status::Hovered { Some(Color { a: 0.18, ..Color::WHITE }) } else { None }));
+            let label = row![text(t.title()).size(12).color(fg).width(Length::Fill).wrapping(text::Wrapping::None), close]
+                .align_y(iced::alignment::Vertical::Center)
+                .spacing(4);
+            let tab = button(label)
+                .width(Length::Fixed(200.0))
+                .height(Length::Fixed(BAR_H - 6.0))
+                .padding(Padding { top: 0.0, bottom: 0.0, left: 12.0, right: 4.0 })
+                .on_press(Message::SelectTab(i))
+                .style(move |_: &Theme, s| {
+                    let bg = if active {
+                        Some(TERM_BG)
+                    } else if s == button::Status::Hovered {
+                        Some(Color { a: 0.10, ..Color::WHITE })
+                    } else {
+                        None
+                    };
+                    let mut st = plain(s, bg);
+                    st.border = Border { radius: iced::border::Radius { top_left: 7.0, top_right: 7.0, bottom_left: 0.0, bottom_right: 0.0 }, ..Border::default() };
+                    st
+                });
+            tabs = tabs.push(tab);
+        }
+        let new_tab = button(text("+").size(16).color(fg))
+            .padding(Padding::from([2, 10]))
+            .on_press(Message::NewTab)
+            .style(move |_: &Theme, s| rounded(plain(s, if s == button::Status::Hovered { Some(Color { a: 0.12, ..Color::WHITE }) } else { None })));
+        let grab = mouse_area(Space::new().width(Length::Fill).height(Length::Fill)).on_press(Message::Drag).on_double_click(Message::ToggleMaximize);
+        let win_button = |label: &'static str, m: Message, danger: bool| {
+            button(text(label).size(12).color(fg))
+                .width(Length::Fixed(32.0))
+                .height(Length::Fixed(24.0))
+                .padding(Padding::from([4, 10]))
+                .on_press(m)
+                .style(move |_: &Theme, s| {
+                    let hover = if danger { CLOSE } else { Color { a: 0.15, ..Color::WHITE } };
+                    rounded(plain(s, if s == button::Status::Hovered { Some(hover) } else { None }))
+                })
+        };
+        let buttons = row![win_button("\u{2013}", Message::Minimize, false), win_button("\u{25a1}", Message::ToggleMaximize, false), win_button("\u{2715}", Message::CloseWindow, true)]
+            .spacing(2)
+            .align_y(iced::alignment::Vertical::Center);
+        let bar = row![tabs, new_tab, grab, buttons].spacing(4).align_y(iced::alignment::Vertical::Center).padding(Padding { top: 4.0, bottom: 0.0, left: 6.0, right: 6.0 });
+        container(bar).height(Length::Fixed(BAR_H)).width(Length::Fill).style(move |_| container::background(bar_bg)).into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([Subscription::run(output), iced::event::listen_with(event)])
+        let mut subs: Vec<Subscription<Message>> = self.tabs.iter().map(|t| Subscription::run_with(t.id, output)).collect();
+        subs.push(iced::event::listen_with(event));
+        Subscription::batch(subs)
     }
 }
 
-/// The shell's output as messages, read on a thread of its own.
-fn output() -> impl iced::futures::Stream<Item = Message> {
-    iced::stream::channel(64, |tx: iced::futures::channel::mpsc::Sender<Message>| async move {
-        let reader = READER.get().and_then(|r| r.lock().unwrap().take());
+/// A flat button: no frame, an optional background.
+fn plain(_s: button::Status, bg: Option<Color>) -> button::Style {
+    button::Style { background: bg.map(Background::Color), text_color: TEXT_ACTIVE, border: Border::default(), ..button::Style::default() }
+}
+
+fn rounded(mut s: button::Style) -> button::Style {
+    s.border = Border { radius: 5.0.into(), ..Border::default() };
+    s
+}
+
+/// A tab's shell output as messages, read on a thread of its own.
+fn output(id: &u64) -> impl iced::futures::Stream<Item = Message> + use<> {
+    let id = *id;
+    iced::stream::channel(64, move |tx: iced::futures::channel::mpsc::Sender<Message>| async move {
+        let reader = readers().remove(&id);
         if let Some(r) = reader {
             std::thread::spawn(move || {
                 use iced::futures::SinkExt;
                 let mut tx2 = tx.clone();
-                pty::read_loop(r, |bytes| iced::futures::executor::block_on(tx2.send(Message::Output(bytes))).is_ok());
+                pty::read_loop(r, |bytes| iced::futures::executor::block_on(tx2.send(Message::Output(id, bytes))).is_ok());
                 let mut tx3 = tx;
-                let _ = iced::futures::executor::block_on(tx3.send(Message::Exited));
+                let _ = iced::futures::executor::block_on(tx3.send(Message::Exited(id)));
             });
         }
         std::future::pending::<()>().await;
@@ -133,191 +294,36 @@ fn event(e: Event, _status: iced::event::Status, _window: iced::window::Id) -> O
     match e {
         Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, text, .. }) => Some(Message::Key(key, modifiers, text.map(|t| t.to_string()))),
         Event::Window(iced::window::Event::Resized(size)) => Some(Message::Resized(size)),
+        Event::Window(iced::window::Event::Focused) => Some(Message::Focused(true)),
+        Event::Window(iced::window::Event::Unfocused) => Some(Message::Focused(false)),
         _ => None,
     }
 }
 
-/// What a key sends to the program (xterm's sequences).
-fn key_bytes(key: &Key, mods: keyboard::Modifiers, text: Option<&str>, app_cursor: bool) -> Option<Vec<u8>> {
-    let csi = |s: &str| Some(format!("\x1b[{s}").into_bytes());
-    let cursor = |c: char| Some(if app_cursor { format!("\x1bO{c}") } else { format!("\x1b[{c}") }.into_bytes());
-    if let Key::Named(n) = key {
-        return match n {
-            Named::Enter => Some(b"\r".to_vec()),
-            Named::Backspace => Some(if mods.control() { vec![0x08] } else { vec![0x7f] }),
-            Named::Tab => Some(if mods.shift() { b"\x1b[Z".to_vec() } else { b"\t".to_vec() }),
-            Named::Escape => Some(vec![0x1b]),
-            Named::ArrowUp => cursor('A'),
-            Named::ArrowDown => cursor('B'),
-            Named::ArrowRight => cursor('C'),
-            Named::ArrowLeft => cursor('D'),
-            Named::Home => cursor('H'),
-            Named::End => cursor('F'),
-            Named::PageUp => csi("5~"),
-            Named::PageDown => csi("6~"),
-            Named::Insert => csi("2~"),
-            Named::Delete => csi("3~"),
-            Named::F1 => Some(b"\x1bOP".to_vec()),
-            Named::F2 => Some(b"\x1bOQ".to_vec()),
-            Named::F3 => Some(b"\x1bOR".to_vec()),
-            Named::F4 => Some(b"\x1bOS".to_vec()),
-            Named::F5 => csi("15~"),
-            Named::F6 => csi("17~"),
-            Named::F7 => csi("18~"),
-            Named::F8 => csi("19~"),
-            Named::F9 => csi("20~"),
-            Named::F10 => csi("21~"),
-            Named::F11 => csi("23~"),
-            Named::F12 => csi("24~"),
-            Named::Space => Some(if mods.control() { vec![0] } else { b" ".to_vec() }),
-            _ => None,
-        };
-    }
-    // Ctrl+letter: the control character.
-    if mods.control()
-        && let Key::Character(c) = key
-        && let Some(ch) = c.chars().next()
-    {
-        let ch = ch.to_ascii_lowercase();
-        let b = match ch {
-            'a'..='z' => Some(ch as u8 - b'a' + 1),
-            '[' => Some(0x1b),
-            '\\' => Some(0x1c),
-            ']' => Some(0x1d),
-            '6' => Some(0x1e),
-            '-' | '/' => Some(0x1f),
-            _ => None,
-        };
-        return b.map(|b| if mods.alt() { vec![0x1b, b] } else { vec![b] });
-    }
-    let t = text.filter(|t| !t.is_empty() && !t.chars().any(|c| c.is_control()))?;
-    let mut out = Vec::new();
-    if mods.alt() {
-        out.push(0x1b);
-    }
-    out.extend_from_slice(t.as_bytes());
-    Some(out)
-}
-
-/// The colours (dark; schemes come in step 4): background, foreground, cursor,
-/// and the 16 ANSI colours.
-struct Palette {
-    bg: Color,
-    fg: Color,
-    cursor: Color,
-    ansi: [Color; 16],
-}
-
-fn rgb(v: u32) -> Color {
-    Color::from_rgb8((v >> 16) as u8, (v >> 8) as u8, v as u8)
-}
-
-fn palette() -> Palette {
-    Palette {
-        bg: rgb(0x1e1e2e),
-        fg: rgb(0xcdd6f4),
-        cursor: rgb(0x89b4fa),
-        ansi: [
-            rgb(0x45475a), rgb(0xf38ba8), rgb(0xa6e3a1), rgb(0xf9e2af), rgb(0x89b4fa), rgb(0xf5c2e7), rgb(0x94e2d5), rgb(0xbac2de),
-            rgb(0x585b70), rgb(0xf38ba8), rgb(0xa6e3a1), rgb(0xf9e2af), rgb(0x89b4fa), rgb(0xf5c2e7), rgb(0x94e2d5), rgb(0xa6adc8),
-        ],
-    }
-}
-
-/// xterm's 256 colours: 16 ANSI, a 6x6x6 cube, 24 greys.
-fn indexed(p: &Palette, i: u8) -> Color {
-    match i {
-        0..=15 => p.ansi[i as usize],
-        16..=231 => {
-            let n = i - 16;
-            let level = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
-            Color::from_rgb8(level(n / 36), level((n / 6) % 6), level(n % 6))
-        }
-        _ => {
-            let g = 8 + (i - 232) * 10;
-            Color::from_rgb8(g, g, g)
-        }
-    }
-}
-
-fn resolve(p: &Palette, c: TColor, default: Color, bold: bool) -> Color {
-    match c {
-        TColor::Default => default,
-        // Bold makes the first 8 colours bright, as xterm does.
-        TColor::Indexed(i) if bold && i < 8 => indexed(p, i + 8),
-        TColor::Indexed(i) => indexed(p, i),
-        TColor::Rgb(r, g, b) => Color::from_rgb8(r, g, b),
-    }
-}
-
-impl Program<Message> for Term {
-    type State = ();
-
-    fn draw(&self, _state: &(), renderer: &Renderer, _theme: &Theme, bounds: Rectangle, _cursor: mouse::Cursor) -> Vec<Geometry> {
-        let p = palette();
-        let geo = self.cache.draw(renderer, bounds.size(), |frame: &mut Frame| {
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), p.bg);
-            let (cw, ch) = (self.cell.width, self.cell.height);
-            for y in 0..self.grid.rows {
-                let line = self.grid.line(y);
-                let top = PAD + y as f32 * ch;
-                // Runs of cells with the same look: one background, one text each.
-                let mut x = 0;
-                while x < line.len() {
-                    let style = line[x].style;
-                    let mut end = x + 1;
-                    while end < line.len() && line[end].style == style {
-                        end += 1;
-                    }
-                    let (mut fg, mut bg) = (resolve(&p, style.fg, p.fg, style.bold), resolve(&p, style.bg, p.bg, false));
-                    if style.inverse {
-                        std::mem::swap(&mut fg, &mut bg);
-                    }
-                    if style.dim {
-                        fg.a = 0.6;
-                    }
-                    if bg != p.bg {
-                        frame.fill_rectangle(Point::new(PAD + x as f32 * cw, top), Size::new((end - x) as f32 * cw, ch), bg);
-                    }
-                    let text: String = line[x..end].iter().filter(|c: &&Cell| c.width != 0).map(|c| c.c).collect();
-                    if !text.trim().is_empty() {
-                        frame.fill_text(canvas::Text {
-                            content: text,
-                            position: Point::new(PAD + x as f32 * cw, top + (ch - self.font_size) / 2.0),
-                            color: fg,
-                            size: Pixels(self.font_size),
-                            font: if style.bold { Font { weight: iced::font::Weight::Bold, ..Font::MONOSPACE } } else { Font::MONOSPACE },
-                            ..canvas::Text::default()
-                        });
-                    }
-                    if style.underline {
-                        frame.fill_rectangle(Point::new(PAD + x as f32 * cw, top + ch - 2.0), Size::new((end - x) as f32 * cw, 1.0), fg);
-                    }
-                    x = end;
-                }
-            }
-            if self.grid.cursor_visible {
-                let at = Point::new(PAD + self.grid.cx as f32 * cw, PAD + self.grid.cy as f32 * ch);
-                frame.fill_rectangle(at, Size::new(cw, ch), Color { a: 0.7, ..p.cursor });
-            }
-        });
-        vec![geo]
-    }
+/// 80 x 24 cells, plus the padding and the title bar.
+fn initial_size() -> Size {
+    let cell = term::cell_for(term::font_size());
+    Size::new(80.0 * cell.width + 2.0 * PAD, 24.0 * cell.height + 2.0 * PAD + BAR_H)
 }
 
 fn main() -> iced::Result {
-    // Vulkan clients don't present on vergence-server yet (spikes/toolkit/RESULTS.md):
-    // OpenGL unless told otherwise.
+    // Software drawing (iced's tiny-skia renderer) unless told otherwise: on
+    // Hubble (Intel UHD 630, FreeBSD 15.1) the GPU renderer hung the GPU again
+    // and again ("GPU HANG ... in vergence-term"), and each reset froze the whole
+    // desktop (2026-11-08). Vulkan doesn't present on vergence-server yet either.
+    // A terminal is text: the CPU draws it easily. ICED_BACKEND=wgpu to try the GPU.
+    if std::env::var_os("ICED_BACKEND").is_none() {
+        unsafe { std::env::set_var("ICED_BACKEND", "tiny-skia") };
+    }
     if std::env::var_os("WGPU_BACKEND").is_none() {
         unsafe { std::env::set_var("WGPU_BACKEND", "gl") };
     }
-    let size = font_size();
-    let cell = Size::new((size * 0.6021).max(1.0), (size * 1.25).ceil());
-    let window = Size::new(80.0 * cell.width + 2.0 * PAD, 24.0 * cell.height + 2.0 * PAD);
-    iced::application(Term::new, Term::update, Term::view)
-        .title(Term::title)
-        .subscription(Term::subscription)
-        .window(iced::window::Settings { size: window, ..Default::default() })
-        .theme(|_: &Term| Theme::CatppuccinMocha)
+    iced::application(App::new, App::update, App::view)
+        .title(App::title)
+        .subscription(App::subscription)
+        // (No app_id: iced sets it on Linux only; the server names windows without
+        // one by their program, vergence-term.)
+        .window(iced::window::Settings { size: initial_size(), decorations: false, ..Default::default() })
+        .theme(|_: &App| Theme::CatppuccinMocha)
         .run()
 }
