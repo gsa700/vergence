@@ -59,8 +59,13 @@ pub struct Pointer {
 }
 
 impl Pointer {
+    /// The pointer in the desktop's cursor theme: settings.toml's
+    /// Gtk/CursorThemeName (the settings app's Theme page), else XCURSOR_THEME,
+    /// else Adwaita.
     pub fn load() -> Pointer {
-        let theme_name = std::env::var("XCURSOR_THEME").unwrap_or_else(|_| "Adwaita".into());
+        let theme_name = configured_theme().or_else(|| std::env::var("XCURSOR_THEME").ok()).unwrap_or_else(|| "Adwaita".into());
+        // Apps started from now on draw their own pointers in it too.
+        unsafe { std::env::set_var("XCURSOR_THEME", &theme_name) };
         let size = std::env::var("XCURSOR_SIZE").ok().and_then(|s| s.parse().ok()).unwrap_or(24);
         tracing::info!("pointer: theme {theme_name}, {size} points");
         Pointer {
@@ -200,6 +205,16 @@ impl Pointer {
 }
 
 /// The frame of an animation to show at `time` (the first if still).
+/// Gtk/CursorThemeName from ~/.config/vergence/settings.toml.
+fn configured_theme() -> Option<String> {
+    let path = std::path::Path::new(&std::env::var_os("HOME")?).join(".config/vergence/settings.toml");
+    let s = vergence_xsettings::from_toml(&std::fs::read_to_string(path).ok()?).ok()?;
+    match s.get("Gtk/CursorThemeName") {
+        Some(vergence_xsettings::Value::Str(t)) if !t.is_empty() => Some(t.clone()),
+        _ => None,
+    }
+}
+
 fn pick(frames: &[Scaled], time: Duration) -> &Scaled {
     let total: u32 = frames.iter().map(|f| f.delay).sum();
     if total == 0 || frames.len() == 1 {

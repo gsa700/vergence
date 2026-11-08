@@ -14,6 +14,11 @@
 //
 // Apps that ignore DPI (xclock, xterm's bitmap fonts) come out small; for them,
 // VERGENCE_XWAYLAND_SCALE=1 (soft on dense monitors instead).
+//
+// When settings.toml changes (the settings app's Theme page), the server pokes
+// the XSETTINGS thread, which reads it again and republishes (theme, icons,
+// fonts, cursor) with the next serial; GTK X apps follow at once. The scale
+// stays the one Xwayland started with.
 
 use std::collections::BTreeMap;
 
@@ -55,7 +60,30 @@ fn user_settings() -> Settings {
 
 /// Tell X apps on `display` to draw at `scale`: X resources now (before any app
 /// starts), XSETTINGS from a thread that keeps the selection while Xwayland runs.
-pub fn publish(display: u32, scale: f64, cursor_points: u32, cursor_theme: &str) {
+/// A message down the returned channel republishes them from the files.
+pub fn publish(display: u32, scale: f64, cursor_points: u32, cursor_theme: &str) -> std::sync::mpsc::Sender<()> {
+    resources(display, scale, cursor_points, cursor_theme);
+    let settings = settings_for(scale, cursor_points);
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        if let Err(e) = serve(display, settings, rx, scale, cursor_points) {
+            tracing::warn!("XSETTINGS manager: {e}");
+        }
+    });
+    tx
+}
+
+/// The user's XSETTINGS with the scale laid over them.
+fn settings_for(scale: f64, cursor_points: u32) -> Settings {
+    let mut settings = user_settings();
+    for (name, value) in overlay(scale, cursor_points) {
+        settings.set(&name, value);
+    }
+    settings
+}
+
+/// The X resources Qt, Xft and Avalonia read: Xft.dpi, the cursor.
+fn resources(display: u32, scale: f64, cursor_points: u32, cursor_theme: &str) {
     let dpi = (96.0 * scale).round() as u32;
     let cursor = (cursor_points as f64 * scale).round() as u32;
     let resources = format!("Xft.dpi: {dpi}\nXcursor.size: {cursor}\nXcursor.theme: {cursor_theme}\n");
@@ -74,25 +102,16 @@ pub fn publish(display: u32, scale: f64, cursor_points: u32, cursor_theme: &str)
         }
         Err(e) => tracing::warn!("xrdb: {e} (Qt and Xft apps will not know the scale)"),
     }
-
-    let mut settings = user_settings();
-    for (name, value) in overlay(scale, cursor_points) {
-        settings.set(&name, value);
-    }
-    settings.serial = 1;
-    tracing::info!("X apps: scale {scale:.4}, Xft.dpi {dpi}, {} XSETTINGS", settings.settings.len());
-    std::thread::spawn(move || {
-        if let Err(e) = serve(display, &settings) {
-            tracing::warn!("XSETTINGS manager: {e}");
-        }
-    });
+    tracing::info!("X apps: scale {scale:.4}, Xft.dpi {dpi}, cursor {cursor_theme}");
 }
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
 /// Own the XSETTINGS selection on `display` and publish `settings` until the
-/// selection is taken or the X server goes away.
-fn serve(display: u32, settings: &Settings) -> Res<()> {
+/// selection is taken or the X server goes away; a poke on `again` reads the
+/// files again and republishes (next serial).
+fn serve(display: u32, mut settings: Settings, again: std::sync::mpsc::Receiver<()>, scale: f64, cursor_points: u32) -> Res<()> {
+    settings.serial = 1;
     let (conn, screen) = RustConnection::connect(Some(&format!(":{display}")))?;
     let root = conn.setup().roots[screen].root;
     let atom = |n: &str| -> Res<u32> { Ok(conn.intern_atom(false, n.as_bytes())?.reply()?.atom) };
@@ -132,11 +151,31 @@ fn serve(display: u32, settings: &Settings) -> Res<()> {
     conn.send_event(false, root, EventMask::STRUCTURE_NOTIFY, ev)?;
     conn.flush()?;
     loop {
-        if let Event::SelectionClear(e) = conn.wait_for_event()?
-            && e.selection == selection
-        {
-            tracing::info!("XSETTINGS selection taken by another manager");
-            return Ok(());
+        while let Some(event) = conn.poll_for_event()? {
+            if let Event::SelectionClear(e) = event
+                && e.selection == selection
+            {
+                tracing::info!("XSETTINGS selection taken by another manager");
+                return Ok(());
+            }
+        }
+        match again.recv_timeout(std::time::Duration::from_millis(250)) {
+            Ok(()) => {
+                let serial = settings.serial.wrapping_add(1);
+                settings = settings_for(scale, cursor_points);
+                settings.serial = serial;
+                let theme = match settings.get("Gtk/CursorThemeName") {
+                    Some(Value::Str(t)) if !t.is_empty() => t.clone(),
+                    _ => "Adwaita".into(),
+                };
+                resources(display, scale, cursor_points, &theme);
+                let data = settings.encode();
+                conn.change_property(PropMode::REPLACE, win, prop, prop, 8, data.len() as u32, &data)?;
+                conn.flush()?;
+                tracing::info!("XSETTINGS: republished (serial {serial})");
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
         }
     }
 }

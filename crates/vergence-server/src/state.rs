@@ -54,6 +54,10 @@ pub struct Server {
     /// Xwayland's window manager, once Xwayland is ready.
     pub xwm: Option<smithay::xwayland::X11Wm>,
     pub xdisplay: Option<u32>,
+    /// Xwayland's client scale, and the XSETTINGS thread's channel: a poke
+    /// republishes (settings.rs, when settings.toml changes).
+    pub x_scale: f64,
+    pub xsettings_tx: Option<std::sync::mpsc::Sender<()>>,
     pub xdg_decoration_state: smithay::wayland::shell::xdg::decoration::XdgDecorationState,
     /// Title bars: per-window ids for damage tracking (decor.rs).
     pub decor: std::collections::HashMap<Window, crate::decor::Decor>,
@@ -190,6 +194,8 @@ impl Server {
             xwayland_shell_state,
             xwm: None,
             xdisplay: None,
+            x_scale: 1.0,
+            xsettings_tx: None,
             xdg_decoration_state,
             decor: Default::default(),
             restore: Default::default(),
@@ -332,7 +338,8 @@ impl Server {
                     Err(e) => tracing::warn!("Xwayland window manager: {e}"),
                 }
                 state.xdisplay = Some(display_number);
-                crate::xsettings::publish(display_number, scale, state.pointer_image.size_points(), &state.pointer_image.theme_name);
+                state.x_scale = scale;
+                state.xsettings_tx = Some(crate::xsettings::publish(display_number, scale, state.pointer_image.size_points(), &state.pointer_image.theme_name));
                 unsafe {
                     std::env::set_var("DISPLAY", format!(":{display_number}"));
                     // Avalonia takes its scale from Xft.dpi; its env factors MULTIPLY

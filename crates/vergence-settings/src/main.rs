@@ -15,6 +15,7 @@
 // `if root.page == N` block.
 
 mod disp;
+mod theme;
 mod wall;
 
 use std::{
@@ -235,6 +236,25 @@ slint::slint! {
         in property <int> primary-page: 1;
         // The Screens overview (several screens): the arrangement and the size.
         out property <int> overview: 100;
+        // Theme and fonts: what is installed and the desktop's choices.
+        out property <int> theme-page: 101;
+        in property <[string]> gtk-themes;
+        in property <[string]> icon-themes;
+        in property <[string]> cursor-themes;
+        in property <[string]> font-families;
+        in property <[string]> mono-families;
+        in property <[string]> font-sizes;
+        in property <[string]> mono-sizes;
+        in-out property <int> theme-index: -1;
+        in-out property <int> icons-index: -1;
+        in-out property <int> cursor-index: -1;
+        in-out property <int> font-index: -1;
+        in-out property <int> font-size-index: -1;
+        in-out property <int> mono-index: -1;
+        in-out property <int> mono-size-index: -1;
+        in property <string> theme-status;
+        // 0 theme, 1 icons, 2 pointer, 3 interface font, 4 monospace font.
+        callback set-theme(int);
         callback arrange-dropped(int, float, float);
         in-out property <float> size: 1.0;
         callback set-size();
@@ -342,6 +362,11 @@ slint::slint! {
                         text: "Appearance";
                         selected: root.page == 0;
                         clicked => { root.page = 0; root.page-changed(); sidebar.focus(); }
+                    }
+                    SidebarItem {
+                        text: "Theme and fonts";
+                        selected: root.page == root.theme-page;
+                        clicked => { root.page = root.theme-page; root.page-changed(); sidebar.focus(); }
                     }
                     // SCREENS leads; with several, each screen is nestled under it,
                     // smaller (Dave, 2026-11-08). Screens itself opens the primary's page.
@@ -615,6 +640,54 @@ slint::slint! {
                             }
                         }
                         if root.status != "": Text { text: root.status; font-size: 11px; color: Palette.foreground; opacity: 0.6; wrap: word-wrap; }
+                    }
+                }
+
+                // THEME AND FONTS: how apps look. Every choice applies at once.
+                if root.page == root.theme-page: ScrollView {
+                    VerticalLayout {
+                        padding: 22px;
+                        spacing: 16px;
+                        alignment: start;
+                        PageTitle {
+                            title: "Theme and fonts";
+                            description: "How apps look: their theme, icons, pointer and fonts. GTK and X11 apps follow at once; the newest GNOME apps keep their own look.";
+                        }
+                        Group {
+                            heading: "Theme";
+                            Row {
+                                first: true;
+                                label: "Applications";
+                                detail: "Buttons, menus and windows in GTK apps.";
+                                ComboBox { width: 220px; model: root.gtk-themes; current-index <=> root.theme-index; selected => { root.set-theme(0); } }
+                            }
+                            Row {
+                                label: "Icons";
+                                ComboBox { width: 220px; model: root.icon-themes; current-index <=> root.icons-index; selected => { root.set-theme(1); } }
+                            }
+                            Row {
+                                label: "Pointer";
+                                detail: "The same size on every screen.";
+                                ComboBox { width: 220px; model: root.cursor-themes; current-index <=> root.cursor-index; selected => { root.set-theme(2); } }
+                            }
+                        }
+                        Group {
+                            heading: "Fonts";
+                            Row {
+                                first: true;
+                                label: "Interface";
+                                detail: "Menus, buttons, labels, and the title bars.";
+                                ComboBox { width: 220px; model: root.font-families; current-index <=> root.font-index; selected => { root.set-theme(3); } }
+                                ComboBox { width: 76px; model: root.font-sizes; current-index <=> root.font-size-index; selected => { root.set-theme(3); } }
+                            }
+                            Row {
+                                label: "Monospace";
+                                detail: "Terminals and code.";
+                                ComboBox { width: 220px; model: root.mono-families; current-index <=> root.mono-index; selected => { root.set-theme(4); } }
+                                ComboBox { width: 76px; model: root.mono-sizes; current-index <=> root.mono-size-index; selected => { root.set-theme(4); } }
+                            }
+                        }
+                        if root.theme-status != "": Text { text: root.theme-status; font-size: 11px; color: Theme.dim; wrap: word-wrap; }
                     }
                 }
 
@@ -1450,6 +1523,75 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ui) = weak.upgrade() {
             ui.set_browsing(false);
         }
+    });
+
+    // Theme and fonts: the lists (the current value is kept in a list even if it
+    // isn't installed, so a choice is never lost by showing the page) and the
+    // current choices.
+    {
+        let current = theme::read();
+        let model = |v: Vec<String>| ModelRc::from(Rc::new(VecModel::from(v.into_iter().map(SharedString::from).collect::<Vec<_>>())));
+        let with = |mut list: Vec<String>, cur: &str| {
+            if !cur.is_empty() && !list.iter().any(|x| x == cur) {
+                list.insert(0, cur.to_string());
+            }
+            let i = list.iter().position(|x| x == cur).map(|i| i as i32).unwrap_or(-1);
+            (list, i)
+        };
+        let (themes, ti) = with(theme::gtk_themes(), &theme::get(&current, theme::THEME));
+        let (icons, ii) = with(theme::icon_themes(), &theme::get(&current, theme::ICONS));
+        let (cursors, ci) = with(theme::cursor_themes(), &theme::get(&current, theme::CURSOR));
+        let (font, font_size) = theme::split_font(&theme::get(&current, theme::FONT));
+        let (mono, mono_size) = theme::split_font(&theme::get(&current, theme::MONO));
+        let (fonts, fi) = with(theme::font_families(false), &font);
+        let (monos, mi) = with(theme::font_families(true), &mono);
+        let size_list = |cur: f32| {
+            let s = theme::sizes(cur);
+            let i = s.iter().position(|x| *x == cur).map(|i| i as i32).unwrap_or(-1);
+            (s.iter().map(|x| if x.fract() == 0.0 { format!("{}", *x as i32) } else { format!("{x}") }).collect::<Vec<_>>(), i)
+        };
+        let (fs, fsi) = size_list(font_size);
+        let (ms, msi) = size_list(mono_size);
+        ui.set_gtk_themes(model(themes));
+        ui.set_icon_themes(model(icons));
+        ui.set_cursor_themes(model(cursors));
+        ui.set_font_families(model(fonts));
+        ui.set_mono_families(model(monos));
+        ui.set_font_sizes(model(fs));
+        ui.set_mono_sizes(model(ms));
+        ui.set_theme_index(ti);
+        ui.set_icons_index(ii);
+        ui.set_cursor_index(ci);
+        ui.set_font_index(fi);
+        ui.set_font_size_index(fsi);
+        ui.set_mono_index(mi);
+        ui.set_mono_size_index(msi);
+    }
+    let weak = ui.as_weak();
+    ui.on_set_theme(move |which| {
+        let Some(ui) = weak.upgrade() else { return };
+        let pick = |list: ModelRc<SharedString>, i: i32| usize::try_from(i).ok().and_then(|i| list.row_data(i)).map(|s| s.to_string());
+        let res = match which {
+            0 => pick(ui.get_gtk_themes(), ui.get_theme_index()).map(|v| theme::set(theme::THEME, &v)),
+            1 => pick(ui.get_icon_themes(), ui.get_icons_index()).map(|v| theme::set(theme::ICONS, &v)),
+            2 => pick(ui.get_cursor_themes(), ui.get_cursor_index()).map(|v| theme::set(theme::CURSOR, &v)),
+            3 | 4 => {
+                let (fam, size) = if which == 3 {
+                    (pick(ui.get_font_families(), ui.get_font_index()), pick(ui.get_font_sizes(), ui.get_font_size_index()))
+                } else {
+                    (pick(ui.get_mono_families(), ui.get_mono_index()), pick(ui.get_mono_sizes(), ui.get_mono_size_index()))
+                };
+                match (fam, size.and_then(|s| s.parse::<f32>().ok())) {
+                    (Some(f), Some(sz)) => Some(theme::set(if which == 3 { theme::FONT } else { theme::MONO }, &theme::join_font(&f, sz))),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        ui.set_theme_status(match res {
+            Some(Err(e)) => format!("Could not save: {e}").into(),
+            _ => SharedString::new(),
+        });
     });
 
     ui.set_version(format!("version {}", env!("CARGO_PKG_VERSION")).into());

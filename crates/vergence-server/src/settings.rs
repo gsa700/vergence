@@ -140,6 +140,33 @@ pub fn all(m: &Map) -> Vec<Setting> {
 }
 
 impl Server {
+    /// The theme, icons, fonts or pointer changed (the settings app's Theme
+    /// page): the server's own drawing follows (pointer, title font), and X apps
+    /// get the XSETTINGS again.
+    pub fn theme_changed(&mut self, diff: &[Setting]) {
+        let changed = |k: &str| diff.iter().any(|s| s.namespace == INTERFACE && s.key == k);
+        if changed("cursor-theme") {
+            self.pointer_image = crate::cursor::Pointer::load();
+            let px = (self.pointer_image.size_points() as f64 * self.x_scale).round() as u32;
+            if let Some(wm) = self.xwm.as_mut()
+                && let Some((pixels, w, h, hx, hy)) = self.pointer_image.x_default(px)
+            {
+                let _ = wm.set_cursor(&pixels, (w, h).into(), (hx, hy).into());
+            }
+        }
+        if changed("font-name") {
+            self.title_font = crate::text::TextFont::load();
+            // Title rasters are drawn again in the new font.
+            self.decor.clear();
+        }
+        if diff.iter().any(|s| s.namespace == INTERFACE)
+            && let Some(tx) = &self.xsettings_tx
+        {
+            let _ = tx.send(());
+        }
+        self.redraw_all();
+    }
+
     /// Load the settings and re-read them whenever a source file changes.
     pub fn start_settings(&mut self) {
         self.settings.current = load();
@@ -161,6 +188,7 @@ impl Server {
                     tracing::info!("settings: {} changed", diff.iter().map(|s| format!("{} {}", s.namespace, s.key)).collect::<Vec<_>>().join(", "));
                     state.bus_settings_changed(&diff);
                     state.dbus_settings_changed(&diff);
+                    state.theme_changed(&diff);
                     state.notify_restyle();
                 }
             }
