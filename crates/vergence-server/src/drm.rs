@@ -476,13 +476,13 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: crtc::Handle) {
     if let Some(i) = state.shot_pending.iter().position(|n| *n == s.connector) {
         state.shot_pending.remove(i);
         let size = output.current_mode().map(|m| m.size).unwrap_or_default();
-        match capture(&mut b.renderer, &elements, size, s.scale, state.background_color()) {
+        match capture(&mut b.renderer, &elements, size, s.scale, state.background_color(&s.connector)) {
             Ok(rgba) => crate::control::save_png(s.connector.clone(), size.w as u32, size.h as u32, rgba),
             Err(e) => tracing::warn!("shot {}: {e}", s.connector),
         }
     }
 
-    let clear = state.background_color();
+    let clear = state.background_color(&s.connector);
     match s.drm_output.render_frame(&mut b.renderer, &elements, clear, FrameFlags::DEFAULT) {
         Ok(r) if !r.is_empty => {
             if let Err(e) = s.drm_output.queue_frame(()) {

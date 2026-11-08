@@ -14,15 +14,23 @@
 // (no OK button). A new feature adds a page: a name in `pages` and an
 // `if root.page == N` block.
 
-use std::path::{Path, PathBuf};
+mod wall;
 
-use serde::{Deserialize, Serialize};
+use std::{
+    cell::RefCell,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
+
 use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
+use vergence_protocol::bus::{ClientMsg, OutputInfo, ServerMsg, Topic};
 
 slint::slint! {
-    import { ScrollView, ComboBox, LineEdit, Switch, Palette } from "std-widgets.slint";
+    import { ScrollView, ComboBox, LineEdit, Switch, Button, ListView, Palette } from "std-widgets.slint";
 
     export struct Wallpaper { name: string, thumb: image }
+    export struct Source { label: string, kind: string }
+    export struct Entry { name: string, folder: bool, picked: bool }
     struct Swatch { name: string, hex: string, color: color }
 
     // A line in the sidebar: the page's name; the selected one darker than the
@@ -102,7 +110,9 @@ slint::slint! {
                 alignment: center;
                 horizontal-stretch: 1;
                 Text { text: root.label; font-size: 13px; color: Palette.foreground; }
-                if root.detail != "": Text { text: root.detail; font-size: 11px; wrap: word-wrap; color: Palette.foreground; opacity: 0.6; }
+                // One line, cut with an ellipsis: in a row, a wrapped line's height
+                // isn't known, and the text ran out of its box (2026-11-08).
+                if root.detail != "": Text { text: root.detail; font-size: 11px; overflow: elide; color: Palette.foreground; opacity: 0.6; }
             }
             HorizontalLayout {
                 alignment: end;
@@ -143,13 +153,32 @@ slint::slint! {
             { name: "Graphite", hex: "#6b7280", color: #6b7280 },
         ];
 
-        // Wallpaper.
+        // Wallpaper: the screens (All screens first), the one being edited and
+        // whether it has its own; the pictures; the user's folders and files.
+        in property <[string]> screens: ["All screens"];
+        in-out property <int> screen-index: 0;
+        in-out property <bool> own: false;
+        callback screen-changed();
+        callback own-changed();
         in property <[Wallpaper]> wallpapers;
         in-out property <int> selected: -1;
         in-out property <int> mode-index: 0;
         in-out property <string> bg-color: "#202020";
         in property <string> status;
         callback apply();
+        in property <[Source]> sources;
+        callback remove-source(int);
+        // The picture browser: open while `browsing`; "folder" or "pictures".
+        in-out property <bool> browsing: false;
+        in property <string> browse-mode;
+        in property <string> browse-path;
+        in property <[Entry]> entries;
+        in property <int> picked-count;
+        callback browse(string);
+        callback browse-open(int);
+        callback browse-up();
+        callback browse-add();
+        callback browse-cancel();
 
         // About.
         in property <string> version;
@@ -270,71 +299,150 @@ slint::slint! {
                     }
                 }
 
-                if root.page == 1: VerticalLayout {
-                    padding: 22px;
-                    spacing: 14px;
-                    PageTitle {
-                        title: "Wallpaper";
-                        description: "A picture is drawn at every monitor's own pixels. Click one to use it.";
-                    }
-                    Group {
-                        Row {
-                            first: true;
-                            label: "Fit";
-                            ComboBox {
-                                width: 140px;
-                                model: ["Fill", "Fit", "Centre", "Stretch"];
-                                current-index <=> root.mode-index;
-                                selected => { root.apply(); }
-                            }
+                if root.page == 1 && !root.browsing: ScrollView {
+                    VerticalLayout {
+                        padding: 22px;
+                        spacing: 16px;
+                        alignment: start;
+                        PageTitle {
+                            title: "Wallpaper";
+                            description: "A picture is drawn at every screen's own pixels. Choose one for all screens, or give a screen its own.";
                         }
-                        Row {
-                            label: "Background colour";
-                            detail: "Around a picture that doesn't fill the screen, or alone without one.";
-                            LineEdit { width: 120px; text <=> root.bg-color; accepted => { root.apply(); } }
-                        }
-                    }
-                    grid := ScrollView {
-                        vertical-stretch: 1;
-                        property <length> cell-w: 180px;
-                        property <length> cell-h: 132px;
-                        property <int> cols: Math.max(1, Math.floor(self.visible-width / self.cell-w));
-                        content-width: self.visible-width;
-                        content-height: Math.ceil(root.wallpapers.length / self.cols) * self.cell-h;
-                        for w[i] in root.wallpapers: Rectangle {
-                            x: Math.mod(i, grid.cols) * grid.cell-w;
-                            y: Math.floor(i / grid.cols) * grid.cell-h;
-                            width: grid.cell-w;
-                            height: grid.cell-h;
-                            Rectangle {
-                                x: 6px; y: 6px;
-                                width: parent.width - 12px;
-                                height: parent.height - 34px;
-                                border-radius: 6px;
-                                border-width: root.selected == i ? 3px : 1px;
-                                border-color: root.selected == i ? Palette.accent-background : Palette.border;
-                                clip: true;
-                                Image {
-                                    x: 3px; y: 3px;
-                                    width: parent.width - 6px;
-                                    height: parent.height - 6px;
-                                    source: w.thumb;
-                                    image-fit: cover;
+                        Group {
+                            Row {
+                                first: true;
+                                label: "Screen";
+                                detail: root.screen-index == 0 ? "Every screen without its own wallpaper." : (root.own ? "This screen has its own wallpaper." : "This screen shows the one for all screens.");
+                                ComboBox {
+                                    width: 300px;
+                                    model: root.screens;
+                                    current-index <=> root.screen-index;
+                                    selected => { root.screen-changed(); }
                                 }
                             }
-                            Text {
-                                x: 6px; y: parent.height - 26px;
-                                width: parent.width - 12px;
-                                text: w.name;
-                                horizontal-alignment: center;
-                                overflow: elide;
-                                font-size: 11px;
-                                color: Palette.foreground;
+                            if root.screen-index > 0: Row {
+                                label: "Its own wallpaper";
+                                detail: "Off: the same as all screens.";
+                                Switch { checked <=> root.own; toggled => { root.own-changed(); } }
                             }
-                            TouchArea { clicked => { root.selected = i; root.apply(); } }
+                            Row {
+                                label: "Fit";
+                                ComboBox {
+                                    width: 140px;
+                                    model: ["Fill", "Fit", "Centre", "Stretch"];
+                                    current-index <=> root.mode-index;
+                                    selected => { root.apply(); }
+                                }
+                            }
+                            Row {
+                                label: "Background colour";
+                                detail: "Around a picture, or alone without one.";
+                                LineEdit { width: 120px; text <=> root.bg-color; accepted => { root.apply(); } }
+                            }
+                        }
+                        grid := Rectangle {
+                            property <length> cell-w: 172px;
+                            property <length> cell-h: 128px;
+                            property <int> cols: Math.max(1, Math.floor(self.width / self.cell-w));
+                            height: Math.ceil(root.wallpapers.length / self.cols) * self.cell-h;
+                            for w[i] in root.wallpapers: Rectangle {
+                                x: Math.mod(i, grid.cols) * grid.cell-w;
+                                y: Math.floor(i / grid.cols) * grid.cell-h;
+                                width: grid.cell-w;
+                                height: grid.cell-h;
+                                Rectangle {
+                                    x: 6px; y: 6px;
+                                    width: parent.width - 12px;
+                                    height: parent.height - 34px;
+                                    border-radius: 6px;
+                                    border-width: root.selected == i ? 3px : 1px;
+                                    border-color: root.selected == i ? Palette.accent-background : Palette.border;
+                                    clip: true;
+                                    Image {
+                                        x: 3px; y: 3px;
+                                        width: parent.width - 6px;
+                                        height: parent.height - 6px;
+                                        source: w.thumb;
+                                        image-fit: cover;
+                                    }
+                                }
+                                Text {
+                                    x: 6px; y: parent.height - 26px;
+                                    width: parent.width - 12px;
+                                    text: w.name;
+                                    horizontal-alignment: center;
+                                    overflow: elide;
+                                    font-size: 11px;
+                                    color: Palette.foreground;
+                                }
+                                TouchArea { clicked => { root.selected = i; root.apply(); } }
+                            }
+                        }
+                        Group {
+                            heading: "Your pictures";
+                            for src[i] in root.sources: Row {
+                                first: i == 0;
+                                label: src.label;
+                                detail: src.kind;
+                                Button { text: "Remove"; clicked => { root.remove-source(i); } }
+                            }
+                            Row {
+                                first: root.sources.length == 0;
+                                label: root.sources.length == 0 ? "Add your own pictures" : "Add more";
+                                detail: "Pictures added to a folder later appear too.";
+                                Button { text: "Add a folder\u{2026}"; clicked => { root.browse("folder"); } }
+                                Button { text: "Add pictures\u{2026}"; clicked => { root.browse("pictures"); } }
+                            }
+                        }
+                        if root.status != "": Text { text: root.status; font-size: 11px; color: Palette.foreground; opacity: 0.6; wrap: word-wrap; }
+                    }
+                }
+
+                // THE PICTURE BROWSER (our own, 2026-11-08): folders to walk into,
+                // pictures to pick; "Add" adds the folder shown, or the pictures picked.
+                if root.page == 1 && root.browsing: VerticalLayout {
+                    padding: 22px;
+                    spacing: 12px;
+                    PageTitle {
+                        title: root.browse-mode == "folder" ? "Add a folder" : "Add pictures";
+                        description: root.browse-mode == "folder" ? "Open the folder you want, then add it. Every picture in it and its folders is offered." : "Click pictures to pick them, in as many folders as you like, then add them.";
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Button { text: "\u{2191} Up"; clicked => { root.browse-up(); } }
+                        Text { text: root.browse-path; vertical-alignment: center; overflow: elide; color: Palette.foreground; horizontal-stretch: 1; }
+                    }
+                    Rectangle {
+                        vertical-stretch: 1;
+                        background: Palette.background;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: Palette.border;
+                        ListView {
+                            for e[i] in root.entries: Rectangle {
+                                height: 30px;
+                                background: e.picked ? Palette.selection-background : (ta.has-hover ? Palette.alternate-background : transparent);
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    spacing: 8px;
+                                    Text { text: e.folder ? "\u{1F4C1}" : (e.picked ? "\u{2713}" : ""); width: 20px; vertical-alignment: center; color: Palette.foreground; }
+                                    Text { text: e.name; vertical-alignment: center; overflow: elide; color: e.picked ? Palette.selection-foreground : Palette.foreground; }
+                                }
+                                ta := TouchArea { clicked => { root.browse-open(i); } }
+                            }
                         }
                     }
-                    if root.status != "": Text { text: root.status; font-size: 11px; color: Palette.foreground; opacity: 0.6; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: end;
+                        Button { text: "Cancel"; clicked => { root.browse-cancel(); } }
+                        Button {
+                            primary: true;
+                            enabled: root.browse-mode == "folder" || root.picked-count > 0;
+                            text: root.browse-mode == "folder" ? "Add this folder" : (root.picked-count == 1 ? "Add 1 picture" : "Add " + root.picked-count + " pictures");
+                            clicked => { root.browse-add(); }
+                        }
+                    }
                 }
 
                 if root.page == root.about: VerticalLayout {
@@ -357,23 +465,6 @@ slint::slint! {
 
 type WallpaperItem = Wallpaper;
 
-const MODES: [&str; 4] = ["fill", "fit", "center", "stretch"];
-
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-struct WallpaperConf {
-    image: Option<PathBuf>,
-    mode: String,
-    color: String,
-}
-
-impl Default for WallpaperConf {
-    fn default() -> Self {
-        WallpaperConf { image: None, mode: "fill".into(), color: "#202020".into() }
-    }
-}
-
 fn desktop_path() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/vergence/desktop.toml")
 }
@@ -383,53 +474,25 @@ fn read_desktop() -> toml::Table {
     std::fs::read_to_string(desktop_path()).ok().and_then(|t| t.parse().ok()).unwrap_or_default()
 }
 
-/// Replace one table of desktop.toml, keeping the others (the menu's items).
-fn write_desktop_table(name: &str, value: toml::Value) -> Result<PathBuf, String> {
+/// Change desktop.toml in place: read it fresh, let `f` edit the table, write
+/// it back (beside it, then renamed, so the server never reads half a file).
+/// Refuses to overwrite a file it can't parse.
+fn update_desktop(f: impl FnOnce(&mut toml::Table)) -> Result<(), String> {
     let path = desktop_path();
     let mut table = match std::fs::read_to_string(&path) {
         Ok(text) => text.parse::<toml::Table>().map_err(|e| format!("{} is not valid TOML ({e}); not overwriting it", path.display()))?,
         Err(_) => toml::Table::new(),
     };
-    table.insert(name.into(), value);
+    f(&mut table);
     let text = toml::to_string(&table).map_err(|e| e.to_string())?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    // Write beside it and rename, so the server never reads half a file.
     let tmp = path.with_extension("toml.new");
-    std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())?;
-    Ok(path)
+    std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
 }
 
 const SCHEMES: [&str; 3] = ["default", "dark", "light"];
-
-/// Pictures the server can draw, from the usual places.
-fn find_wallpapers() -> Vec<PathBuf> {
-    let mut roots = vec![PathBuf::from("/usr/local/share/backgrounds"), PathBuf::from("/usr/share/backgrounds")];
-    if let Some(h) = std::env::var_os("HOME") {
-        roots.push(PathBuf::from(h).join("Pictures"));
-    }
-    let mut out = Vec::new();
-    for r in roots {
-        walk(&r, 0, &mut out);
-    }
-    out.sort();
-    out
-}
-
-fn walk(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for e in entries.flatten() {
-        let p = e.path();
-        if p.is_dir() && depth < 3 {
-            walk(&p, depth + 1, out);
-        } else if p.extension().and_then(|x| x.to_str()).is_some_and(|x| {
-            matches!(x.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "svg")
-        }) {
-            out.push(p);
-        }
-    }
-}
 
 /// Preview size in pixels: 16:9, dense enough to be sharp at the 14"'s 3.28.
 const THUMB_W: u32 = 560;
@@ -465,49 +528,157 @@ fn thumbnail(path: &Path, w: u32, h: u32) -> Option<SharedPixelBuffer<Rgba8Pixel
     Some(SharedPixelBuffer::clone_from_slice(&px, w, h))
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let files = find_wallpapers();
-    let desktop = read_desktop();
-    let wallpaper: WallpaperConf =
-        desktop.get("wallpaper").cloned().and_then(|w| w.try_into().ok()).unwrap_or_default();
-    let appearance = desktop.get("appearance").and_then(|a| a.as_table()).cloned().unwrap_or_default();
+/// A screen as the Screen list names it.
+fn screen_label(o: &OutputInfo) -> String {
+    let px = |v: i32| (v as f64 * o.scale).round() as i64;
+    let desc = if o.description.is_empty() { "Monitor" } else { o.description.as_str() };
+    format!("{desc} \u{2014} {}, {}\u{d7}{}", o.name, px(o.width), px(o.height))
+}
 
-    // The Wayland app_id: the server's placement memory knows windows by it.
-    let _ = slint::set_xdg_app_id("vergence-settings");
-    let ui = Settings::new()?;
-    let items: Vec<WallpaperItem> = files
+/// The page's state behind the widgets.
+#[derive(Default)]
+struct State {
+    files: Vec<PathBuf>,
+    outputs: Vec<OutputInfo>,
+    folders: Vec<PathBuf>,
+    picked_files: Vec<PathBuf>,
+    /// The browser: the folder shown, its sub-folders then pictures, and the
+    /// pictures picked so far (in any folder).
+    browse_dir: PathBuf,
+    browse_entries: Vec<(PathBuf, bool)>,
+    browse_picked: Vec<PathBuf>,
+}
+
+type Shared = Rc<RefCell<State>>;
+
+/// The screen being edited: None for all screens.
+fn screen_id(ui: &Settings, st: &State) -> Option<(String, String)> {
+    let i = usize::try_from(ui.get_screen_index()).ok()?.checked_sub(1)?;
+    st.outputs.get(i).map(|o| (o.id.clone(), o.description.clone()))
+}
+
+/// Show the edited screen's wallpaper (or all screens').
+fn show_scope(ui: &Settings, st: &State) {
+    let desktop = read_desktop();
+    let id = screen_id(ui, st);
+    let s = wall::shown(&desktop, id.as_ref().map(|(i, _)| i.as_str()));
+    ui.set_own(s.own);
+    ui.set_selected(s.image.as_ref().and_then(|c| st.files.iter().position(|f| f == c)).map(|i| i as i32).unwrap_or(-1));
+    ui.set_mode_index(wall::MODES.iter().position(|m| *m == s.mode).unwrap_or(0) as i32);
+    ui.set_bg_color(s.color.into());
+}
+
+/// The pictures on offer (system and the user's), with previews drawn on a
+/// thread and shown as they come.
+fn load_pictures(ui: &Settings, st: &mut State) {
+    let desktop = read_desktop();
+    let (folders, files) = wall::sources(&desktop);
+    st.files = wall::pictures(&folders, &files);
+    st.folders = folders.clone();
+    st.picked_files = files.clone();
+    let items: Vec<WallpaperItem> = st
+        .files
         .iter()
         .map(|p| WallpaperItem {
             name: SharedString::from(p.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()),
             thumb: slint::Image::default(),
         })
         .collect();
-    let model = std::rc::Rc::new(VecModel::from(items));
-    ui.set_wallpapers(ModelRc::from(model.clone()));
-    // Previews, drawn on a thread and shown as they come (the window opens at once).
+    ui.set_wallpapers(ModelRc::from(Rc::new(VecModel::from(items))));
+    let sources: Vec<Source> = folders
+        .iter()
+        .map(|f| Source { label: f.display().to_string().into(), kind: "Folder".into() })
+        .chain(files.iter().map(|f| Source { label: f.display().to_string().into(), kind: "Picture".into() }))
+        .collect();
+    ui.set_sources(ModelRc::from(Rc::new(VecModel::from(sources))));
+    let list = st.files.clone();
+    let weak = ui.as_weak();
+    std::thread::spawn(move || {
+        for (i, f) in list.iter().enumerate() {
+            let Some(px) = thumbnail(f, THUMB_W, THUMB_H) else { continue };
+            let weak = weak.clone();
+            let path = f.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                let m = ui.get_wallpapers();
+                // Only if the list is still the one this thread was drawing.
+                if let Some(mut row) = m.row_data(i)
+                    && row.name.as_str() == path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+                {
+                    row.thumb = slint::Image::from_rgba8(px);
+                    m.set_row_data(i, row);
+                }
+            });
+        }
+    });
+    show_scope(ui, st);
+}
+
+fn set_screens(ui: &Settings, st: &mut State, outputs: Vec<OutputInfo>) {
+    let current = screen_id(ui, st).map(|(id, _)| id);
+    st.outputs = outputs;
+    let mut names: Vec<SharedString> = vec!["All screens".into()];
+    names.extend(st.outputs.iter().map(|o| SharedString::from(screen_label(o))));
+    ui.set_screens(ModelRc::from(Rc::new(VecModel::from(names))));
+    // Keep editing the same screen if it is still there.
+    let index = current.and_then(|id| st.outputs.iter().position(|o| o.id == id)).map(|i| i as i32 + 1).unwrap_or(0);
+    ui.set_screen_index(index);
+    show_scope(ui, st);
+}
+
+fn show_browser(ui: &Settings, st: &mut State) {
+    let (dirs, pics) = wall::list_dir(&st.browse_dir);
+    let folder_mode = ui.get_browse_mode() == "folder";
+    st.browse_entries = dirs.into_iter().map(|d| (d, true)).chain(pics.into_iter().map(|p| (p, false))).collect();
+    let entries: Vec<Entry> = st
+        .browse_entries
+        .iter()
+        .map(|(p, folder)| Entry {
+            name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default().into(),
+            folder: *folder,
+            picked: !folder && !folder_mode && st.browse_picked.contains(p),
+        })
+        .collect();
+    ui.set_entries(ModelRc::from(Rc::new(VecModel::from(entries))));
+    ui.set_browse_path(st.browse_dir.display().to_string().into());
+    ui.set_picked_count(st.browse_picked.len() as i32);
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let desktop = read_desktop();
+    let appearance = desktop.get("appearance").and_then(|a| a.as_table()).cloned().unwrap_or_default();
+
+    // The Wayland app_id: the server's placement memory knows windows by it.
+    let _ = slint::set_xdg_app_id("vergence-settings");
+    let ui = Settings::new()?;
+    let st: Shared = Rc::new(RefCell::new(State::default()));
+    load_pictures(&ui, &mut st.borrow_mut());
+
+    // The screens, from the session bus (Vergence's own protocol): asked once,
+    // then followed, so a monitor plugged in appears in the list. Outside a
+    // Vergence session there is no bus, and only All screens is offered.
     {
-        let files = files.clone();
         let weak = ui.as_weak();
         std::thread::spawn(move || {
-            for (i, f) in files.iter().enumerate() {
-                let Some(px) = thumbnail(f, THUMB_W, THUMB_H) else { continue };
-                let weak = weak.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    let Some(ui) = weak.upgrade() else { return };
-                    let m = ui.get_wallpapers();
-                    if let Some(mut row) = m.row_data(i) {
-                        row.thumb = slint::Image::from_rgba8(px);
-                        m.set_row_data(i, row);
-                    }
-                });
+            let Ok(mut bus) = vergence_protocol::Client::connect("vergence-settings") else { return };
+            if bus.request(|serial| ClientMsg::Subscribe { serial, topic: Topic::Outputs }).is_err() {
+                return;
+            }
+            while let Ok(m) = bus.next_event() {
+                if let ServerMsg::Outputs { outputs, .. } = m {
+                    let weak = weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        let Some(ui) = weak.upgrade() else { return };
+                        if let Some(st) = SHARED.with(|s| s.borrow().clone()) {
+                            set_screens(&ui, &mut st.borrow_mut(), outputs);
+                        }
+                    });
+                }
             }
         });
     }
-    if let Some(i) = wallpaper.image.as_ref().and_then(|c| files.iter().position(|f| f == c)) {
-        ui.set_selected(i as i32);
-    }
-    ui.set_mode_index(MODES.iter().position(|m| *m == wallpaper.mode).unwrap_or(0) as i32);
-    ui.set_bg_color(wallpaper.color.clone().into());
+    SHARED.with(|s| *s.borrow_mut() = Some(st.clone()));
+
     let text = |k: &str| appearance.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
     ui.set_scheme_index(SCHEMES.iter().position(|s| *s == text("color-scheme")).unwrap_or(0) as i32);
     ui.set_accent(text("accent").into());
@@ -531,27 +702,154 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         t.insert("contrast".into(), if ui.get_high_contrast() { "high" } else { "normal" }.into());
         t.insert("reduced-motion".into(), ui.get_reduced_motion().into());
-        ui.set_appearance_status(match write_desktop_table("appearance", toml::Value::Table(t)) {
-            Ok(_) => SharedString::new(),
+        let res = update_desktop(|d| {
+            d.insert("appearance".into(), toml::Value::Table(t));
+        });
+        ui.set_appearance_status(match res {
+            Ok(()) => SharedString::new(),
             Err(e) => format!("Could not save: {e}").into(),
         });
     });
 
-    let weak = ui.as_weak();
+    // A picture, fit or colour chosen: for the screen being edited (which then
+    // has its own wallpaper), or for all screens.
+    let (weak, s2) = (ui.as_weak(), st.clone());
     ui.on_apply(move || {
         let Some(ui) = weak.upgrade() else { return };
-        let image = usize::try_from(ui.get_selected()).ok().and_then(|i| files.get(i).cloned());
-        let conf = WallpaperConf {
-            image,
-            mode: MODES[ui.get_mode_index().clamp(0, 3) as usize].into(),
-            color: ui.get_bg_color().to_string(),
-        };
-        let res = toml::Value::try_from(&conf).map_err(|e| e.to_string()).and_then(|v| write_desktop_table("wallpaper", v));
+        let st = s2.borrow();
+        let image = usize::try_from(ui.get_selected()).ok().and_then(|i| st.files.get(i).cloned());
+        let mode = wall::MODES[ui.get_mode_index().clamp(0, 3) as usize];
+        let color = ui.get_bg_color().to_string();
+        let id = screen_id(&ui, &st);
+        let res = update_desktop(|d| match &id {
+            Some((id, label)) => wall::set(d, Some(id), label, image.as_deref(), mode, &color),
+            None => wall::set(d, None, "", image.as_deref(), mode, &color),
+        });
         ui.set_status(match res {
-            Ok(_) => SharedString::new(),
+            Ok(()) => SharedString::new(),
             Err(e) => format!("Could not save: {e}").into(),
         });
+        if id.is_some() {
+            ui.set_own(true);
+        }
     });
+
+    let (weak, s2) = (ui.as_weak(), st.clone());
+    ui.on_screen_changed(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        show_scope(&ui, &s2.borrow());
+    });
+
+    // Its own wallpaper on: start from what it shows now; off: back to all screens'.
+    let (weak, s2) = (ui.as_weak(), st.clone());
+    ui.on_own_changed(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let st = s2.borrow();
+        let Some((id, label)) = screen_id(&ui, &st) else { return };
+        let on = ui.get_own();
+        let shown = wall::shown(&read_desktop(), Some(&id));
+        let res = update_desktop(|d| {
+            if on {
+                wall::set(d, Some(&id), &label, shown.image.as_deref(), &shown.mode, &shown.color);
+            } else {
+                wall::clear_own(d, &id);
+            }
+        });
+        if let Err(e) = res {
+            ui.set_status(format!("Could not save: {e}").into());
+        }
+        show_scope(&ui, &st);
+    });
+
+    let (weak, s2) = (ui.as_weak(), st.clone());
+    ui.on_remove_source(move |i| {
+        let Some(ui) = weak.upgrade() else { return };
+        let mut st = s2.borrow_mut();
+        let i = i.max(0) as usize;
+        let (mut folders, mut files) = (st.folders.clone(), st.picked_files.clone());
+        if i < folders.len() {
+            folders.remove(i);
+        } else if i - folders.len() < files.len() {
+            files.remove(i - folders.len());
+        }
+        if let Err(e) = update_desktop(|d| wall::set_sources(d, &folders, &files)) {
+            ui.set_status(format!("Could not save: {e}").into());
+        }
+        load_pictures(&ui, &mut st);
+    });
+
+    // The browser opens in ~/Pictures (or home).
+    let (weak, s2) = (ui.as_weak(), st.clone());
+    ui.on_browse(move |mode| {
+        let Some(ui) = weak.upgrade() else { return };
+        let mut st = s2.borrow_mut();
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+        let pics = home.join("Pictures");
+        st.browse_dir = if pics.is_dir() { pics } else { home };
+        st.browse_picked.clear();
+        ui.set_browse_mode(mode);
+        show_browser(&ui, &mut st);
+        ui.set_browsing(true);
+    });
+
+    let (weak, s2) = (ui.as_weak(), st.clone());
+    ui.on_browse_open(move |i| {
+        let Some(ui) = weak.upgrade() else { return };
+        let mut st = s2.borrow_mut();
+        let Some((path, folder)) = st.browse_entries.get(i.max(0) as usize).cloned() else { return };
+        if folder {
+            st.browse_dir = path;
+        } else if ui.get_browse_mode() == "pictures" {
+            match st.browse_picked.iter().position(|p| *p == path) {
+                Some(k) => {
+                    st.browse_picked.remove(k);
+                }
+                None => st.browse_picked.push(path),
+            }
+        }
+        show_browser(&ui, &mut st);
+    });
+
+    let (weak, s2) = (ui.as_weak(), st.clone());
+    ui.on_browse_up(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let mut st = s2.borrow_mut();
+        if let Some(parent) = st.browse_dir.parent().map(Path::to_path_buf) {
+            st.browse_dir = parent;
+            show_browser(&ui, &mut st);
+        }
+    });
+
+    let (weak, s2) = (ui.as_weak(), st.clone());
+    ui.on_browse_add(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let mut st = s2.borrow_mut();
+        let (mut folders, mut files) = (st.folders.clone(), st.picked_files.clone());
+        if ui.get_browse_mode() == "folder" {
+            if !folders.contains(&st.browse_dir) {
+                folders.push(st.browse_dir.clone());
+            }
+        } else {
+            for p in &st.browse_picked {
+                if !files.contains(p) {
+                    files.push(p.clone());
+                }
+            }
+        }
+        if let Err(e) = update_desktop(|d| wall::set_sources(d, &folders, &files)) {
+            ui.set_status(format!("Could not save: {e}").into());
+        }
+        ui.set_browsing(false);
+        load_pictures(&ui, &mut st);
+    });
+
+    let weak = ui.as_weak();
+    ui.on_browse_cancel(move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.set_browsing(false);
+        }
+    });
+
     ui.set_version(format!("version {}", env!("CARGO_PKG_VERSION")).into());
     let session = match (std::env::var("VERGENCE_BUS"), std::env::var("WAYLAND_DISPLAY")) {
         (Ok(_), Ok(w)) => format!("Vergence on {w}"),
@@ -561,4 +859,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_session(session.into());
     ui.run()?;
     Ok(())
+}
+
+thread_local! {
+    /// The page state, for callbacks queued from other threads.
+    static SHARED: RefCell<Option<Shared>> = const { RefCell::new(None) };
 }

@@ -178,6 +178,23 @@ arrived); closing another connection's notification is refused; `vbus
 notify` got Notified and "closed (expired)". Tests: 1 new (wrapping) plus
 the new protocol messages.
 
+## Wallpaper per screen, and your own pictures (2026-11-08)
+
+- Server (`wallpaper.rs`): `[[wallpaper.monitor]]` entries (id = the
+  monitor's EDID hash, as window memory names it; label for people; image,
+  mode, color each optional over `[wallpaper]`; image "" = colour only).
+  The background colour is per monitor too. The id comes from the output's
+  own MonitorId: the first version read it from the backend, which is out
+  of the state during a frame, so every monitor fell back to its port name
+  and no entry matched (found live, fixed the same hour).
+- Core bus: OutputInfo carries `id`.
+- Settings app: Screen chooser (from the bus's outputs, followed live),
+  "Its own wallpaper" switch, and "Your pictures" ([pictures] folders and
+  files in desktop.toml) with our own picture browser (folder or pictures
+  mode). Edits change only their own keys (`wall.rs`, 3 tests).
+- Live: the ASUS showed its own picture (xfce-flower) beside the 14"'s
+  (xfce-cp-dark).
+
 ## Not in this step
 
 Permissions beyond the uid check; the pid; settings and notifications

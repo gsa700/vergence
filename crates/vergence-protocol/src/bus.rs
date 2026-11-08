@@ -128,6 +128,9 @@ impl ErrorCode {
 /// the server's logical pixels).
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutputInfo {
+    /// The monitor's identity (a hash of its EDID): the same on any port, so
+    /// settings kept per monitor follow it.
+    pub id: String,
     /// The connector, e.g. "eDP-1", "HDMI-A-1".
     pub name: String,
     /// Make and model from the EDID, e.g. "ASUS VS229".
@@ -378,7 +381,7 @@ impl ServerMsg {
                 let mut e = Encoder::frame(op::OUTPUTS);
                 e.u32(*serial).count(outputs.len());
                 for o in outputs {
-                    e.str(&o.name).str(&o.description).i32(o.x).i32(o.y).i32(o.width).i32(o.height).f64(o.scale);
+                    e.str(&o.id).str(&o.name).str(&o.description).i32(o.x).i32(o.y).i32(o.width).i32(o.height).f64(o.scale);
                 }
                 e
             }
@@ -419,11 +422,12 @@ impl ServerMsg {
             op::ERROR => ServerMsg::Error { serial: d.u32()?, code: ErrorCode::from_wire(d.u16()?), message: d.str()? },
             op::OUTPUTS => {
                 let serial = d.u32()?;
-                // Each output: two strings (4 bytes each at least), four i32, one f64.
-                let n = d.count(4 + 4 + 16 + 8)?;
+                // Each output: three strings (4 bytes each at least), four i32, one f64.
+                let n = d.count(4 + 4 + 4 + 16 + 8)?;
                 let mut outputs = Vec::with_capacity(n);
                 for _ in 0..n {
                     outputs.push(OutputInfo {
+                        id: d.str()?,
                         name: d.str()?,
                         description: d.str()?,
                         x: d.i32()?,
@@ -467,8 +471,8 @@ mod tests {
 
     fn outputs() -> Vec<OutputInfo> {
         vec![
-            OutputInfo { name: "eDP-1".into(), description: "14\" 4K".into(), x: 0, y: 0, width: 1170, height: 658, scale: 3.283_333 },
-            OutputInfo { name: "HDMI-A-1".into(), description: "ASUS VS229".into(), x: 1170, y: 0, width: 1794, height: 1009, scale: 1.075 },
+            OutputInfo { id: "3f2a9c0e1b7d4a55".into(), name: "eDP-1".into(), description: "14\" 4K".into(), x: 0, y: 0, width: 1170, height: 658, scale: 3.283_333 },
+            OutputInfo { id: "9b1c22d4e5f60718".into(), name: "HDMI-A-1".into(), description: "ASUS VS229".into(), x: 1170, y: 0, width: 1794, height: 1009, scale: 1.075 },
         ]
     }
 

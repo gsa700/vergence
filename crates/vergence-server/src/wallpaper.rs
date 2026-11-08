@@ -7,6 +7,13 @@
 //     mode = "fill"        # fill | fit | center | stretch
 //     color = "#1a1a1a"    # behind the image, and alone without one
 //
+//     [[wallpaper.monitor]]   # optional: one monitor's own (2026-11-08)
+//     id = "3f2a9c0e1b7d4a55"  # its EDID (vergence_profile::monitor_id), any port
+//     label = "ASUS VS229"     # for people; not used
+//     image = "..."            # each field optional: unset ones come from above;
+//     mode = "fit"             # image = "" means none (the colour alone)
+//     color = "#000000"
+//
 // Each monitor gets the image rendered at its own native pixels, once per size:
 // PNG/JPEG resampled from the source (Catmull-Rom), SVG drawn at that size by resvg,
 // so it is sharp at any density. Rendering happens on a worker thread; until a
@@ -40,11 +47,41 @@ pub struct WallpaperConfig {
     pub image: Option<PathBuf>,
     pub mode: String,
     pub color: String,
+    /// Monitors with their own wallpaper.
+    pub monitor: Vec<MonitorWallpaper>,
 }
 
 impl Default for WallpaperConfig {
     fn default() -> Self {
-        WallpaperConfig { image: None, mode: "fill".into(), color: "#1a1a1a".into() }
+        WallpaperConfig { image: None, mode: "fill".into(), color: "#1a1a1a".into(), monitor: Vec::new() }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[serde(default)]
+pub struct MonitorWallpaper {
+    pub id: String,
+    pub image: Option<PathBuf>,
+    pub mode: Option<String>,
+    pub color: Option<String>,
+}
+
+impl WallpaperConfig {
+    /// The wallpaper for the monitor `id`: its own fields over the common ones.
+    pub fn for_monitor(&self, id: &str) -> WallpaperConfig {
+        let mut c = WallpaperConfig { monitor: Vec::new(), ..self.clone() };
+        if let Some(m) = self.monitor.iter().find(|m| m.id == id) {
+            if let Some(i) = &m.image {
+                c.image = (!i.as_os_str().is_empty()).then(|| i.clone());
+            }
+            if let Some(mode) = &m.mode {
+                c.mode = mode.clone();
+            }
+            if let Some(color) = &m.color {
+                c.color = color.clone();
+            }
+        }
+        c
     }
 }
 
@@ -146,10 +183,24 @@ impl Server {
         self.redraw_all();
     }
 
-    /// The colour behind everything on every output.
-    pub fn background_color(&self) -> [f32; 4] {
-        let c = self.wallpaper.as_ref().map(|w| parse_color(&w.config.color)).unwrap_or([0.1, 0.1, 0.1]);
+    /// The colour behind everything on an output.
+    pub fn background_color(&self, output: &str) -> [f32; 4] {
+        let id = self.monitor_id(output);
+        let c = self.wallpaper.as_ref().map(|w| parse_color(&w.config.for_monitor(&id).color)).unwrap_or([0.1, 0.1, 0.1]);
         [c[0], c[1], c[2], 1.0]
+    }
+
+    /// A monitor's identity, from its EDID (as window memory names it, kept on
+    /// the output when it is set up), so its wallpaper follows it to any port;
+    /// nested outputs are named by their name. (Not from the backend: during a
+    /// frame the backend is out of the state, and every monitor fell back to its
+    /// name, so per-monitor wallpapers never matched, 2026-11-08.)
+    pub fn monitor_id(&self, output: &str) -> String {
+        self.space
+            .outputs()
+            .find(|o| o.name() == output)
+            .and_then(|o| o.user_data().get::<crate::memory::MonitorId>().map(|m| m.0.clone()))
+            .unwrap_or_else(|| vergence_profile::monitor_id(output.as_bytes()))
     }
 
     /// The wallpaper element for an output of `px` physical pixels covering `logical`
@@ -161,14 +212,16 @@ impl Server {
         px: Size<i32, smithay::utils::Physical>,
         logical: Size<i32, Logical>,
     ) -> Option<MemoryRenderBufferRenderElement<GlesRenderer>> {
+        let id = self.monitor_id(output);
         let w = self.wallpaper.as_mut()?;
-        w.config.image.as_ref()?;
+        let config = w.config.for_monitor(&id);
+        config.image.as_ref()?;
         let (pw, ph) = (px.w.max(1) as u32, px.h.max(1) as u32);
         let current = w.pictures.get(output).filter(|(x, y, g, _)| *x == pw && *y == ph && *g == w.generation);
         if current.is_none() {
             let key = (output.to_string(), pw, ph, w.generation);
             if w.requested.insert(key) {
-                let _ = w.jobs.send(Job { generation: w.generation, config: w.config.clone(), output: output.into(), w: pw, h: ph });
+                let _ = w.jobs.send(Job { generation: w.generation, config, output: output.into(), w: pw, h: ph });
             }
         }
         // The newest picture for this output, even from an older size, until the new one is ready.
@@ -320,5 +373,22 @@ mod tests {
     fn colors() {
         assert_eq!(parse_color("#ff8000"), [1.0, 128.0 / 255.0, 0.0]);
         assert_eq!(parse_color("nonsense"), parse_color("#1a1a1a"));
+    }
+}
+
+#[cfg(test)]
+mod monitor_tests {
+    use super::*;
+
+    #[test]
+    fn a_monitor_entry_overrides_all_screens() {
+        let text = "[wallpaper]\ncolor = \"#202020\"\nimage = \"/a.svg\"\nmode = \"fill\"\n\n[[wallpaper.monitor]]\ncolor = \"#202020\"\nid = \"a48cece3b53cb939\"\nimage = \"/b.svg\"\nlabel = \"ASUS VS229\"\nmode = \"fit\"\n";
+        let f: DesktopFile = toml::from_str(text).unwrap();
+        let c = f.wallpaper.for_monitor("a48cece3b53cb939");
+        assert_eq!(c.image, Some(PathBuf::from("/b.svg")));
+        assert_eq!(c.mode, "fit");
+        assert_eq!(f.wallpaper.for_monitor("other").image, Some(PathBuf::from("/a.svg")));
+        let c = WallpaperConfig { monitor: vec![MonitorWallpaper { id: "m".into(), image: Some(PathBuf::new()), ..Default::default() }], ..f.wallpaper.clone() };
+        assert_eq!(c.for_monitor("m").image, None);
     }
 }

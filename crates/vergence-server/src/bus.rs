@@ -348,6 +348,7 @@ impl Server {
             .filter_map(|o| {
                 let g = self.space.output_geometry(o)?;
                 Some(OutputInfo {
+                    id: self.monitor_id(&o.name()),
                     name: o.name(),
                     description: o.physical_properties().model,
                     x: g.loc.x,
