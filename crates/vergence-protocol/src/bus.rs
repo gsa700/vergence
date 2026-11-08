@@ -141,6 +141,12 @@ pub struct OutputInfo {
     pub height: i32,
     /// Pixels per logical pixel on this monitor (calculated from its EDID).
     pub scale: f64,
+    /// How the scale was found, in words.
+    pub note: String,
+    /// The screen's default scale (the sharpest near the calculated one), and
+    /// its scale before the size preference (chosen, or the default).
+    pub default_scale: f64,
+    pub base_scale: f64,
 }
 
 /// Client to server.
@@ -176,8 +182,10 @@ pub enum ServerMsg {
     /// A request that has no other reply succeeded.
     Done { serial: u32 },
     Error { serial: u32, code: ErrorCode, message: String },
-    /// The monitors: a reply (serial of the request) or an event (serial 0).
-    Outputs { serial: u32, outputs: Vec<OutputInfo> },
+    /// The monitors: a reply (serial of the request) or an event (serial 0),
+    /// and the setup they make (the set of their EDIDs, hashed): settings kept
+    /// per setup (the arrangement) are keyed by it.
+    Outputs { serial: u32, outputs: Vec<OutputInfo>, setup: String },
     /// Settings: a reply or the first event after subscribing (`complete`:
     /// every setting), or an event with the ones that changed. A setting
     /// that disappeared is not sent; a later version may add removals.
@@ -377,12 +385,13 @@ impl ServerMsg {
                 e.u32(*serial).u16(code.to_wire()).str(message);
                 e
             }
-            ServerMsg::Outputs { serial, outputs } => {
+            ServerMsg::Outputs { serial, outputs, setup } => {
                 let mut e = Encoder::frame(op::OUTPUTS);
                 e.u32(*serial).count(outputs.len());
                 for o in outputs {
-                    e.str(&o.id).str(&o.name).str(&o.description).i32(o.x).i32(o.y).i32(o.width).i32(o.height).f64(o.scale);
+                    e.str(&o.id).str(&o.name).str(&o.description).i32(o.x).i32(o.y).i32(o.width).i32(o.height).f64(o.scale).str(&o.note).f64(o.default_scale).f64(o.base_scale);
                 }
+                e.str(setup);
                 e
             }
             ServerMsg::Settings { serial, complete, settings } => {
@@ -422,8 +431,8 @@ impl ServerMsg {
             op::ERROR => ServerMsg::Error { serial: d.u32()?, code: ErrorCode::from_wire(d.u16()?), message: d.str()? },
             op::OUTPUTS => {
                 let serial = d.u32()?;
-                // Each output: three strings (4 bytes each at least), four i32, one f64.
-                let n = d.count(4 + 4 + 4 + 16 + 8)?;
+                // Each output: four strings (4 bytes each at least), four i32, one f64.
+                let n = d.count(4 + 4 + 4 + 16 + 8 + 4 + 16)?;
                 let mut outputs = Vec::with_capacity(n);
                 for _ in 0..n {
                     outputs.push(OutputInfo {
@@ -435,9 +444,13 @@ impl ServerMsg {
                         width: d.i32()?,
                         height: d.i32()?,
                         scale: d.f64()?,
+                        note: d.str()?,
+                        default_scale: d.f64()?,
+                        base_scale: d.f64()?,
                     });
                 }
-                ServerMsg::Outputs { serial, outputs }
+                let setup = d.str()?;
+                ServerMsg::Outputs { serial, outputs, setup }
             }
             op::SETTINGS => {
                 let serial = d.u32()?;
@@ -471,8 +484,8 @@ mod tests {
 
     fn outputs() -> Vec<OutputInfo> {
         vec![
-            OutputInfo { id: "3f2a9c0e1b7d4a55".into(), name: "eDP-1".into(), description: "14\" 4K".into(), x: 0, y: 0, width: 1170, height: 658, scale: 3.283_333 },
-            OutputInfo { id: "9b1c22d4e5f60718".into(), name: "HDMI-A-1".into(), description: "ASUS VS229".into(), x: 1170, y: 0, width: 1794, height: 1009, scale: 1.075 },
+            OutputInfo { id: "3f2a9c0e1b7d4a55".into(), name: "eDP-1".into(), description: "14\" 4K".into(), x: 0, y: 0, width: 1170, height: 658, scale: 3.283_333, note: "calculated".into(), default_scale: 3.0, base_scale: 3.0 },
+            OutputInfo { id: "9b1c22d4e5f60718".into(), name: "HDMI-A-1".into(), description: "ASUS VS229".into(), x: 1170, y: 0, width: 1794, height: 1009, scale: 1.075, note: "set by hand".into(), default_scale: 1.0, base_scale: 1.25 },
         ]
     }
 
@@ -509,8 +522,8 @@ mod tests {
             ServerMsg::Done { serial: 10 },
             ServerMsg::Error { serial: 11, code: ErrorCode::UnknownTopic, message: "no topic 9".into() },
             ServerMsg::Error { serial: 12, code: ErrorCode::Other(77), message: String::new() },
-            ServerMsg::Outputs { serial: 0, outputs: outputs() },
-            ServerMsg::Outputs { serial: 4, outputs: Vec::new() },
+            ServerMsg::Outputs { serial: 0, outputs: outputs(), setup: "ab12".into() },
+            ServerMsg::Outputs { serial: 4, outputs: Vec::new(), setup: String::new() },
             ServerMsg::Notified { serial: 15, id: 3 },
             ServerMsg::NotificationClosed { id: 3, reason: 2 },
             ServerMsg::ActionInvoked { id: 3, key: "log".into() },

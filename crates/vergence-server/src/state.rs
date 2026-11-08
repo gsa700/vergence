@@ -92,6 +92,10 @@ pub struct Server {
     pub settings: crate::settings::SettingsState,
     /// Notifications on screen (notify.rs).
     pub notes: crate::notify::Notifications,
+    /// How each output's scale was found (displays.rs), by output name, and the
+    /// [displays] settings last applied.
+    pub scale_notes: std::collections::HashMap<String, crate::displays::Scales>,
+    pub displays: crate::displays::DisplaysConfig,
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
@@ -205,6 +209,8 @@ impl Server {
             dbus: Default::default(),
             settings: Default::default(),
             notes: Default::default(),
+            scale_notes: Default::default(),
+            displays: crate::displays::load(),
             popups,
             seat,
             regions: Vec::new(),

@@ -48,7 +48,7 @@ use smithay::{
     wayland::fractional_scale::with_fractional_scale,
 };
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
-use vergence_profile::scaling::{Distance, derive};
+
 
 use crate::Server;
 
@@ -67,6 +67,11 @@ struct Surface {
     drm_output: Out,
     connector: String,
     scale: f64,
+    /// For working the scale out again (displays.rs): the monitor's id, its
+    /// mode in pixels and its size in millimetres.
+    id: String,
+    px: (u32, u32),
+    mm: Option<(u32, u32)>,
     /// The monitor's EDID (or its connector name when it has none): its identity.
     edid: Vec<u8>,
     /// Its wl_output global, removed when the monitor goes.
@@ -343,9 +348,32 @@ fn disconnect(state: &mut Server, crtc: crtc::Handle) {
 
 /// After monitors came or went: lay them out, find the setup, put windows back.
 fn setup_changed(state: &mut Server, anchors: Vec<(smithay::desktop::Window, String, smithay::utils::Point<i32, smithay::utils::Logical>)>) {
-    lay_out(state);
+    // The setup first: the arrangement is kept per setup.
     let edids: Vec<Vec<u8>> = state.backend.as_ref().map(|b| b.surfaces.values().map(|s| s.edid.clone()).collect()).unwrap_or_default();
     state.set_setup(&edids);
+    lay_out(state);
+    state.rearrange_windows(anchors);
+}
+
+/// desktop.toml's [displays] changed (the settings app): work every scale out
+/// again and lay the screens out again; windows go with their screens.
+pub fn displays_changed(state: &mut Server) {
+    let cfg = crate::displays::load();
+    let anchors = state.window_anchors();
+    let mut notes = Vec::new();
+    let Some(b) = state.backend.as_mut() else { return };
+    for s in b.surfaces.values_mut() {
+        let scales = cfg.scale_for(&s.id, &s.connector, s.px, s.mm);
+        if scales.shown != s.scale {
+            tracing::info!("{}: scale {:.4} -> {:.4}, {}", s.connector, s.scale, scales.shown, scales.how);
+            s.scale = scales.shown;
+            s.output.change_current_state(None, None, Some(Scale::Fractional(scales.shown)), None);
+        }
+        notes.push((s.connector.clone(), scales));
+    }
+    b.redraw_all();
+    state.scale_notes.extend(notes);
+    lay_out(state);
     state.rearrange_windows(anchors);
 }
 
@@ -362,13 +390,19 @@ fn connect(state: &mut Server, conn: connector::Info, crtc: crtc::Handle) {
     let edid = edid_of(b.manager.device(), conn.handle());
     let parsed = edid.as_deref().and_then(|e| vergence_edid::Edid::parse(e).ok());
     let mm = parsed.as_ref().and_then(|e| e.physical_size_mm()).map(|(a, c)| (a as u32, c as u32)).or_else(|| conn.size());
-    let derived = derive((w as u32, h as u32), mm, Distance::Desktop, 1.0);
-    // In 120ths, as wp-fractional-scale-v1 tells it to apps: the output at exactly the
-    // scale the apps draw at, so their buffers are shown 1:1, not resampled (the ASUS's
-    // 1.0703 drawn at 128/120 and shown at 1.0703 was soft, 2026-11-07).
-    let scale = crate::scale_in_120ths(derived.exact);
+    let identity = edid.clone().unwrap_or_else(|| name.clone().into_bytes());
+    let id = vergence_profile::monitor_id(&identity);
+    // Calculated from the EDID, the screen's viewing distance and the size
+    // preference, or set by hand (displays.rs). In 120ths, as wp-fractional-scale-v1
+    // tells it to apps: the output at exactly the scale the apps draw at, so their
+    // buffers are shown 1:1, not resampled (the ASUS's 1.0703 drawn at 128/120 and
+    // shown at 1.0703 was soft, 2026-11-07).
+    let scales = crate::displays::load().scale_for(&id, &name, (w as u32, h as u32), mm);
+    let (scale, how) = (scales.shown, scales.how.clone());
     let label = parsed.as_ref().and_then(|e| e.name.clone()).unwrap_or_else(|| name.clone());
-    tracing::info!("{name}: {label:?} {w}x{h} {:?} mm -> scale {:.4} ({}/120, exactly {:.4})", mm, scale, (scale * 120.0).round(), derived.exact);
+    tracing::info!("{name}: {label:?} {w}x{h} {:?} mm -> scale {:.4} ({}/120), {how}", mm, scale, (scale * 120.0).round());
+    state.scale_notes.insert(name.clone(), scales);
+    let Some(b) = state.backend.as_mut() else { return };
 
     let output = Output::new(
         name.clone(),
@@ -381,7 +415,6 @@ fn connect(state: &mut Server, conn: connector::Info, crtc: crtc::Handle) {
         },
     );
     let global = output.create_global::<Server>(&dh);
-    let identity = edid.clone().unwrap_or_else(|| name.clone().into_bytes());
     output.user_data().insert_if_missing(|| crate::memory::MonitorId(vergence_profile::monitor_id(&identity)));
     output.set_preferred(wl_mode);
     output.change_current_state(Some(wl_mode), Some(Transform::Normal), Some(Scale::Fractional(scale)), None);
@@ -399,7 +432,7 @@ fn connect(state: &mut Server, conn: connector::Info, crtc: crtc::Handle) {
         Ok(o) => o,
         Err(e) => return tracing::warn!("{name}: cannot initialise: {e:?}"),
     };
-    b.surfaces.insert(crtc, Surface { output, drm_output, connector: name, scale, edid: identity, global });
+    b.surfaces.insert(crtc, Surface { output, drm_output, connector: name, scale, id, px: (w as u32, h as u32), mm, edid: identity, global });
 }
 
 /// The EDID blob DRM keeps for a connector.
@@ -418,21 +451,27 @@ fn edid_of(dev: &DrmDevice, conn: connector::Handle) -> Option<Vec<u8>> {
     })
 }
 
-/// Left to right, side by side in logical space, tops aligned.
+/// Where the arrangement for this setup puts each screen (displays.rs), else
+/// left to right in connector order, tops aligned.
 fn lay_out(state: &mut Server) {
     let Some(b) = state.backend.as_ref() else { return };
     let order = std::env::var("VERGENCE_LEFT_TO_RIGHT").unwrap_or_else(|_| "HDMI-A-2,HDMI-A-1".into());
     let rank = |c: &str| order.split(',').position(|o| o.trim() == c).unwrap_or(usize::MAX);
-    let mut list: Vec<&Surface> = b.surfaces.values().collect();
+    let mut list: Vec<&Surface> = b.surfaces.values().filter(|s| s.output.current_mode().is_some()).collect();
     list.sort_by_key(|s| (rank(&s.connector), s.connector.clone()));
-    let mut x = 0.0_f64;
+    let sizes: Vec<(String, i32, i32)> = list
+        .iter()
+        .map(|s| {
+            let m = s.output.current_mode().unwrap().size;
+            (s.id.clone(), (m.w as f64 / s.scale).round() as i32, (m.h as f64 / s.scale).round() as i32)
+        })
+        .collect();
+    let places = crate::displays::lay_out(&crate::displays::load(), &state.memory.setup, &sizes);
     let mut placed = Vec::new();
-    for s in list {
-        let Some(mode) = s.output.current_mode() else { continue };
-        s.output.change_current_state(None, None, None, Some((x.round() as i32, 0).into()));
-        placed.push((s.output.clone(), (x.round() as i32, 0)));
-        tracing::info!("{} at x={}, {:.0} points wide", s.connector, x.round(), mode.size.w as f64 / s.scale);
-        x += mode.size.w as f64 / s.scale;
+    for ((s, (x, y)), (_, w, _)) in list.iter().zip(places).zip(&sizes) {
+        s.output.change_current_state(None, None, None, Some((x, y).into()));
+        placed.push((s.output.clone(), (x, y)));
+        tracing::info!("{} at {x},{y}, {w} points wide", s.connector);
     }
     for (o, p) in placed {
         state.space.map_output(&o, p);

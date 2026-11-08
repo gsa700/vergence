@@ -14,6 +14,7 @@
 // (no OK button). A new feature adds a page: a name in `pages` and an
 // `if root.page == N` block.
 
+mod disp;
 mod wall;
 
 use std::{
@@ -30,14 +31,14 @@ use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, Shar
 use vergence_protocol::bus::{ClientMsg, OutputInfo, ServerMsg, Topic};
 
 slint::slint! {
-    import { ScrollView, ComboBox, LineEdit, Switch, Button, ListView, Palette } from "std-widgets.slint";
+    import { ScrollView, ComboBox, LineEdit, Switch, Button, ListView, Slider, Palette } from "std-widgets.slint";
 
     export struct Wallpaper { name: string, thumb: image }
     export struct Source { label: string, kind: string }
     export struct Entry { name: string, folder: bool, picked: bool }
     // A monitor in the little arrangement: its name, its place and size as
     // fractions of the whole arrangement, its wallpaper's preview.
-    export struct ScreenTile { label: string, fx: float, fy: float, fw: float, fh: float, thumb: image, own: bool }
+    export struct ScreenTile { label: string, fx: float, fy: float, fw: float, fh: float, thumb: image, own: bool, scale: string }
     struct Swatch { name: string, hex: string, color: color }
 
     // THE COLOURS (Dave, 2026-11-08, from a macOS System Settings screenshot:
@@ -87,6 +88,66 @@ slint::slint! {
             }
         }
         touch := TouchArea { clicked => { root.clicked(); } }
+    }
+
+    // THE SIZE SLIDER, 75% to 150%, with a detent at 100% (Dave, 2026-11-08: "so
+    // it's easy to return to"): within 3.5% of it, it sticks to exactly 100%; a
+    // tick marks the spot.
+    component SizeSlider inherits Rectangle {
+        in-out property <float> value: 1.0;
+        callback released();
+        width: 220px;
+        height: 34px;
+        Slider {
+            width: parent.width;
+            minimum: 0.75;
+            maximum: 1.5;
+            value <=> root.value;
+            changed(v) => {
+                if (v != 1.0 && Math.abs(v - 1.0) < 0.035) {
+                    root.value = 1.0;
+                }
+            }
+            released => { root.released(); }
+        }
+        // The tick under 100% (the handle travels inset by about its radius).
+        Rectangle {
+            x: 10px + (parent.width - 20px) * (1.0 - 0.75) / (1.5 - 0.75) - 1px;
+            y: parent.height - 5px;
+            width: 2px;
+            height: 5px;
+            background: root.value == 1.0 ? Theme.accent : Theme.dim;
+        }
+    }
+
+    // A SCREEN'S SCALE SLIDER, 0.75 to its maximum, with marks at the whole
+    // numbers (sharp in every app) and the default; Rust makes it stick to a
+    // mark it comes near.
+    component ScaleSlider inherits Rectangle {
+        in-out property <float> value: 1.0;
+        in property <float> maximum: 3.0;
+        in property <[float]> marks;
+        in property <float> default: 1.0;
+        callback moved(float);
+        callback released();
+        width: 260px;
+        height: 34px;
+        property <float> minimum: 0.75;
+        Slider {
+            width: parent.width;
+            minimum: root.minimum;
+            maximum: root.maximum;
+            value <=> root.value;
+            changed(v) => { root.moved(v); }
+            released => { root.released(); }
+        }
+        for m in root.marks: Rectangle {
+            x: 10px + (parent.width - 20px) * (m - root.minimum) / (root.maximum - root.minimum) - 1px;
+            y: parent.height - (m == root.default ? 7px : 5px);
+            width: 2px;
+            height: m == root.default ? 7px : 5px;
+            background: root.value == m ? Theme.accent : Theme.dim;
+        }
     }
 
     // A page's heading and the sentence under it, centred in a card at the top
@@ -172,6 +233,24 @@ slint::slint! {
         // Screens opens (the primary's).
         in property <string> screens-title: "Wallpaper";
         in property <int> primary-page: 1;
+        // The Screens overview (several screens): the arrangement and the size.
+        out property <int> overview: 100;
+        callback arrange-dropped(int, float, float);
+        in-out property <float> size: 1.0;
+        callback set-size();
+        // A screen's Display section: the scale it is shown at and how it was
+        // found; its own scale on a slider (the default: the sharpest near
+        // the calculated one) with marks at the whole numbers and the default.
+        in property <string> scale-text;
+        in property <string> scale-note;
+        in-out property <float> base-scale: 1.0;
+        in property <float> default-scale: 1.0;
+        in property <float> scale-max: 3.0;
+        in property <[float]> detents: [1.0, 2.0, 3.0];
+        in property <bool> chosen: false;
+        callback scale-moved(float);
+        callback set-scale();
+        callback reset-scale();
         in-out property <int> page: 0;
         property <int> about: root.screen-pages.length + 1;
         callback page-changed();
@@ -268,8 +347,8 @@ slint::slint! {
                     // smaller (Dave, 2026-11-08). Screens itself opens the primary's page.
                     SidebarItem {
                         text: root.screens-title;
-                        selected: root.screen-pages.length <= 1 && root.page == 1;
-                        clicked => { root.page = root.primary-page; root.page-changed(); sidebar.focus(); }
+                        selected: root.screen-pages.length > 1 ? root.page == root.overview : root.page == 1;
+                        clicked => { root.page = root.screen-pages.length > 1 ? root.overview : 1; root.page-changed(); sidebar.focus(); }
                     }
                     if root.screen-pages.length > 1: VerticalLayout {
                         spacing: 2px;
@@ -420,7 +499,38 @@ slint::slint! {
                                 }
                             }
                         }
+                        // DISPLAY: the scale, from the screen's size and viewing distance
+                        // (and the size preference), or set by hand.
                         Group {
+                            heading: "Display";
+                            Row {
+                                first: true;
+                                label: "Scale";
+                                detail: root.base-scale == root.default-scale ? "The default: the sharpest for this screen." : (Math.round(root.base-scale) == root.base-scale ? "Whole number: sharp in every app." : "In between: soft in some older apps.");
+                                ScaleSlider {
+                                    value <=> root.base-scale;
+                                    maximum: root.scale-max;
+                                    marks: root.detents;
+                                    default: root.default-scale;
+                                    moved(v) => { root.scale-moved(v); }
+                                    released => { root.set-scale(); }
+                                }
+                                Text { text: Math.round(root.base-scale * 100) + "%"; width: 44px; horizontal-alignment: right; vertical-alignment: center; color: Palette.foreground; font-weight: 600; }
+                            }
+                            Row {
+                                label: "Shown at";
+                                detail: root.scale-note;
+                                if root.chosen: Button { text: "Default"; clicked => { root.reset-scale(); } }
+                                Text { text: root.scale-text; color: Theme.dim; vertical-alignment: center; }
+                            }
+                            if !root.multi: Row {
+                                label: "Size";
+                                detail: "How big everything is: " + Math.round(root.size * 100) + "%.";
+                                SizeSlider { value <=> root.size; released => { root.set-size(); } }
+                            }
+                        }
+                        Group {
+                            heading: "Wallpaper";
                             if root.multi && !root.is-primary: Row {
                                 first: true;
                                 label: "Same as the primary screen";
@@ -505,6 +615,83 @@ slint::slint! {
                             }
                         }
                         if root.status != "": Text { text: root.status; font-size: 11px; color: Palette.foreground; opacity: 0.6; wrap: word-wrap; }
+                    }
+                }
+
+                // THE SCREENS OVERVIEW (several screens): drag them into place; the
+                // one size preference; each screen's scale.
+                if root.page == root.overview: ScrollView {
+                    VerticalLayout {
+                        padding: 22px;
+                        spacing: 16px;
+                        alignment: start;
+                        PageTitle {
+                            title: "Screens";
+                            description: "Drag the screens to where they sit on your desk. Each one's scale is worked out from its size and how far away it is.";
+                        }
+                        Group {
+                            canvas := Rectangle {
+                                height: 240px;
+                                property <length> aw: Math.min(self.width - 60px, (self.height - 60px) * root.arrangement-aspect);
+                                property <length> ah: self.aw / Math.max(0.1, root.arrangement-aspect);
+                                property <length> ox: (self.width - self.aw) / 2;
+                                property <length> oy: (self.height - self.ah) / 2;
+                                for t[i] in root.tiles: Rectangle {
+                                    property <length> dx: 0;
+                                    property <length> dy: 0;
+                                    x: canvas.ox + t.fx * canvas.aw + 3px + self.dx;
+                                    y: canvas.oy + t.fy * canvas.ah + 3px + self.dy;
+                                    width: t.fw * canvas.aw - 6px;
+                                    height: t.fh * canvas.ah - 6px;
+                                    z: drag.pressed ? 1 : 0;
+                                    border-radius: 6px;
+                                    clip: true;
+                                    background: #000000;
+                                    accessible-role: button;
+                                    accessible-label: t.label;
+                                    Image { width: parent.width; height: parent.height; source: t.thumb; image-fit: cover; }
+                                    Rectangle {
+                                        y: parent.height - 34px;
+                                        height: 34px;
+                                        background: #000000a8;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Text { text: t.label; color: #ffffff; font-size: 11px; font-weight: 600; horizontal-alignment: center; overflow: elide; }
+                                            Text { text: t.scale; color: #ffffffc0; font-size: 10px; horizontal-alignment: center; }
+                                        }
+                                    }
+                                    Rectangle {
+                                        border-radius: 6px;
+                                        border-width: drag.pressed ? 3px : 1px;
+                                        border-color: drag.pressed ? Theme.accent : (drag.has-hover ? Palette.foreground : Theme.line);
+                                    }
+                                    drag := TouchArea {
+                                        mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
+                                        moved => {
+                                            parent.dx = self.mouse-x - self.pressed-x;
+                                            parent.dy = self.mouse-y - self.pressed-y;
+                                        }
+                                        pointer-event(e) => {
+                                            if (e.kind == PointerEventKind.up && (parent.dx != 0 || parent.dy != 0)) {
+                                                root.arrange-dropped(i, t.fx + parent.dx / canvas.aw, t.fy + parent.dy / canvas.ah);
+                                                parent.dx = 0;
+                                                parent.dy = 0;
+                                            }
+                                        }
+                                        double-clicked => { root.page = i + 1; root.page-changed(); }
+                                    }
+                                }
+                            }
+                        }
+                        Text { text: "Double-click a screen for its own settings."; font-size: 11px; color: Theme.dim; }
+                        Group {
+                            Row {
+                                first: true;
+                                label: "Size";
+                                detail: "How big everything is, on every screen: " + Math.round(root.size * 100) + "%.";
+                                SizeSlider { value <=> root.size; released => { root.set-size(); } }
+                            }
+                        }
                     }
                 }
 
@@ -719,6 +906,7 @@ fn refresh_tiles(ui: &Settings, st: &State) {
                 t
             });
             ScreenTile {
+                scale: format!("{:.0}%", o.scale * 100.0).into(),
                 label: screen_label(o).into(),
                 fx: (o.x - x0) as f32 / bw,
                 fy: (o.y - y0) as f32 / bh,
@@ -759,6 +947,8 @@ struct State {
     browse_dir: PathBuf,
     browse_entries: Vec<(PathBuf, bool)>,
     browse_picked: Vec<PathBuf>,
+    /// The monitor setup the screens make (from the bus): arrangements are kept per setup.
+    setup: String,
 }
 
 type Shared = Rc<RefCell<State>>;
@@ -798,6 +988,22 @@ fn show_scope(ui: &Settings, st: &State) {
     let primary_index = st.outputs.iter().position(|o| Some(&o.id) == primary.as_ref()).unwrap_or(0);
     ui.set_primary_page(primary_index as i32 + 1);
     ui.set_screen_label(current_output(ui, st).map(screen_label).unwrap_or_else(|| "Wallpaper".into()).into());
+    // The Display section.
+    ui.set_size(disp::size(&desktop) as f32);
+    if let Some(o) = current_output(ui, st) {
+        let (_, chosen) = disp::screen(&desktop, &o.id);
+        let max = (o.default_scale.ceil() + 2.0).max(3.0);
+        ui.set_scale_text(format!("{:.0}% ({:.4})", o.scale * 100.0, o.scale).into());
+        ui.set_scale_note(o.note.clone().into());
+        ui.set_base_scale(o.base_scale as f32);
+        ui.set_default_scale(o.default_scale as f32);
+        ui.set_scale_max(max as f32);
+        ui.set_detents(ModelRc::from(Rc::new(VecModel::from(disp::detents(o.default_scale, max).into_iter().map(|d| d as f32).collect::<Vec<_>>()))));
+        ui.set_chosen(chosen.is_some());
+    } else {
+        ui.set_scale_text("".into());
+        ui.set_scale_note("Outside a Vergence session the desktop decides.".into());
+    }
     ui.set_selected(s.image.as_ref().and_then(|c| st.files.iter().position(|f| f == c)).map(|i| i as i32).unwrap_or(-1));
     ui.set_mode_index(wall::MODES.iter().position(|m| *m == s.mode).unwrap_or(0) as i32);
     ui.set_bg_color(s.color.into());
@@ -860,10 +1066,15 @@ fn load_pictures(ui: &Settings, st: &mut State) {
 
 /// The screens changed (the bus's outputs): one sidebar page each, named so
 /// that identical monitors are told apart by their port.
-fn set_screens(ui: &Settings, st: &mut State, outputs: Vec<OutputInfo>) {
+fn set_screens(ui: &Settings, st: &mut State, outputs: Vec<OutputInfo>, setup: String) {
+    st.setup = setup;
     let page = ui.get_page();
     let old_count = st.outputs.len().max(1) as i32;
     let on_screen = page >= 1 && page <= old_count;
+    if page == ui.get_overview() && outputs.len() <= 1 {
+        // Down to one screen: its page is the Screens page.
+        ui.set_page(1);
+    }
     let current = current_output(ui, st).map(|o| o.id.clone());
     st.outputs = outputs;
     let labels: Vec<String> = st.outputs.iter().map(screen_label).collect();
@@ -901,7 +1112,7 @@ fn set_screens(ui: &Settings, st: &mut State, outputs: Vec<OutputInfo>) {
             st.outputs.iter().position(|o| o.id == p)
         });
         ui.set_page(i.map(|i| i as i32 + 1).unwrap_or(1));
-    } else if page > old_count {
+    } else if page > old_count && page != ui.get_overview() {
         // About moves with the number of screens.
         ui.set_page(count + 1);
     }
@@ -963,12 +1174,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return;
             }
             while let Ok(m) = bus.next_event() {
-                if let ServerMsg::Outputs { outputs, .. } = m {
+                if let ServerMsg::Outputs { outputs, setup, .. } = m {
                     let weak = weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         let Some(ui) = weak.upgrade() else { return };
                         if let Some(st) = SHARED.with(|s| s.borrow().clone()) {
-                            set_screens(&ui, &mut st.borrow_mut(), outputs);
+                            set_screens(&ui, &mut st.borrow_mut(), outputs, setup);
                         }
                     });
                 }
@@ -1078,6 +1289,78 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ui.set_status(format!("Could not save: {e}").into());
         }
         show_scope(&ui, &st);
+    });
+
+    // A screen dropped in the overview: put it edge to edge with the nearest
+    // screen there, and record the arrangement for this setup.
+    let (weak, s2) = (ui.as_weak(), st.clone());
+    ui.on_arrange_dropped(move |i, fx, fy| {
+        let Some(ui) = weak.upgrade() else { return };
+        let st = s2.borrow();
+        let mut rects: Vec<disp::Rect> =
+            st.outputs.iter().map(|o| disp::Rect { id: o.id.clone(), x: o.x, y: o.y, w: o.width, h: o.height }).collect();
+        let Some(i) = usize::try_from(i).ok().filter(|i| *i < rects.len()) else { return };
+        let (x0, y0) = (rects.iter().map(|r| r.x).min().unwrap_or(0), rects.iter().map(|r| r.y).min().unwrap_or(0));
+        let (bw, bh) = (
+            rects.iter().map(|r| r.x + r.w).max().unwrap_or(1) - x0,
+            rects.iter().map(|r| r.y + r.h).max().unwrap_or(1) - y0,
+        );
+        let (x, y) = (x0 + (fx * bw as f32).round() as i32, y0 + (fy * bh as f32).round() as i32);
+        let snap_pts = (bw.max(bh) / 40).max(20);
+        let (nx, ny) = disp::snap(&rects, i, x, y, snap_pts);
+        rects[i].x = nx;
+        rects[i].y = ny;
+        if let Err(e) = update_desktop(|d| disp::set_arrangement(d, &st.setup, &rects)) {
+            ui.set_status(format!("Could not save: {e}").into());
+        }
+    });
+
+    let weak = ui.as_weak();
+    ui.on_set_size(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let size = (ui.get_size() as f64).clamp(0.75, 1.5);
+        if let Err(e) = update_desktop(|d| disp::set_size(d, size)) {
+            ui.set_status(format!("Could not save: {e}").into());
+        }
+    });
+
+    // The scale slider sticks to a mark (a whole number, the default) it comes
+    // within 0.06 of; let go, the scale is saved (the default itself is saved as
+    // "no choice", so it keeps following the screen's default).
+    let weak = ui.as_weak();
+    ui.on_scale_moved(move |v| {
+        let Some(ui) = weak.upgrade() else { return };
+        let marks: Vec<f64> = ui.get_detents().iter().map(f64::from).collect();
+        if let Some(m) = disp::stick(v as f64, &marks, 0.06)
+            && (m as f32) != v
+        {
+            ui.set_base_scale(m as f32);
+        }
+    });
+
+    let (weak, s2) = (ui.as_weak(), st.clone());
+    ui.on_set_scale(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let st = s2.borrow();
+        let Some(o) = current_output(&ui, &st) else { return };
+        let v = (ui.get_base_scale() as f64 * 120.0).round() / 120.0;
+        let choice = (v != o.default_scale).then_some(v);
+        let (id, label) = (o.id.clone(), screen_label(o));
+        if let Err(e) = update_desktop(|d| disp::set_scale(d, &id, &label, choice)) {
+            ui.set_status(format!("Could not save: {e}").into());
+        }
+    });
+
+    let (weak, s2) = (ui.as_weak(), st.clone());
+    ui.on_reset_scale(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let st = s2.borrow();
+        let Some(o) = current_output(&ui, &st) else { return };
+        let (id, label) = (o.id.clone(), screen_label(o));
+        ui.set_base_scale(o.default_scale as f32);
+        if let Err(e) = update_desktop(|d| disp::set_scale(d, &id, &label, None)) {
+            ui.set_status(format!("Could not save: {e}").into());
+        }
     });
 
     let (weak, s2) = (ui.as_weak(), st.clone());

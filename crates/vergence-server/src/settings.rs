@@ -148,6 +148,12 @@ impl Server {
             let now = stamps();
             if now != state.settings.stamps {
                 state.settings.stamps = now;
+                // Screens' scale and arrangement (displays.rs), when they changed.
+                let displays = crate::displays::load();
+                if displays != state.displays {
+                    state.displays = displays;
+                    crate::drm::displays_changed(state);
+                }
                 let new = load();
                 let diff = changed(&state.settings.current, &new);
                 state.settings.current = new;

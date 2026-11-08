@@ -212,7 +212,7 @@ impl Server {
             ClientMsg::Ping { serial } => self.bus_send(id, ServerMsg::Pong { serial }),
             ClientMsg::GetOutputs { serial } => {
                 let outputs = self.bus_outputs();
-                self.bus_send(id, ServerMsg::Outputs { serial, outputs });
+                self.bus_send(id, ServerMsg::Outputs { serial, outputs, setup: self.memory.setup.clone() });
             }
             ClientMsg::Notify { serial, replaces, summary, body, urgency, timeout_ms, actions } => {
                 let app = c.app_id.clone().unwrap_or_default();
@@ -238,7 +238,7 @@ impl Server {
                 match topic {
                     Topic::Outputs => {
                         let outputs = self.bus_outputs();
-                        self.bus_send(id, ServerMsg::Outputs { serial: 0, outputs });
+                        self.bus_send(id, ServerMsg::Outputs { serial: 0, outputs, setup: self.memory.setup.clone() });
                     }
                     Topic::Settings => {
                         let settings = crate::settings::all(&self.settings.current);
@@ -356,6 +356,9 @@ impl Server {
                     width: g.size.w,
                     height: g.size.h,
                     scale: o.current_scale().fractional_scale(),
+                    note: self.scale_notes.get(&o.name()).map(|s| s.how.clone()).unwrap_or_default(),
+                    default_scale: self.scale_notes.get(&o.name()).map(|s| s.default).unwrap_or(1.0),
+                    base_scale: self.scale_notes.get(&o.name()).map(|s| s.base).unwrap_or(1.0),
                 })
             })
             .collect();
@@ -389,7 +392,7 @@ impl Server {
         self.bus.last_outputs = Some(outputs.clone());
         let ids: Vec<u32> = self.bus.clients.iter().filter(|(_, c)| c.topics.contains(&Topic::Outputs)).map(|(id, _)| *id).collect();
         for id in ids {
-            self.bus_send(id, ServerMsg::Outputs { serial: 0, outputs: outputs.clone() });
+            self.bus_send(id, ServerMsg::Outputs { serial: 0, outputs: outputs.clone(), setup: self.memory.setup.clone() });
         }
     }
 }
