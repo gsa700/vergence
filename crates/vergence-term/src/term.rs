@@ -1,8 +1,8 @@
-// One terminal: its screen, parser, shell and drawing (a tab, or later a pane).
+// One terminal: its screen, parser, shell, selection and drawing (a pane).
 
 use iced::keyboard::{self, Key, key::Named};
-use iced::widget::canvas::{self, Frame, Geometry, Program};
-use iced::{Color, Font, Pixels, Point, Rectangle, Renderer, Size, Theme, mouse};
+use iced::widget::canvas::{self, Frame, Geometry};
+use iced::{Color, Font, Pixels, Point, Rectangle, Renderer, Size};
 
 use crate::grid::{Cell, Color as TColor, Grid};
 use crate::{pty, vt};
@@ -10,8 +10,13 @@ use crate::{pty, vt};
 /// Space around the grid, in points.
 pub const PAD: f32 = 6.0;
 
-pub struct Tab {
+/// A cell position: (column, row) on the screen.
+pub type CellPos = (usize, usize);
+
+pub struct Term {
     pub id: u64,
+    /// The text selected with the mouse: anchor and end, in either order.
+    pub selection: Option<(CellPos, CellPos)>,
     pub grid: Grid,
     parser: vt::Parser,
     pub pty: pty::Pty,
@@ -41,15 +46,15 @@ pub fn cell_for(size: f32) -> Size {
     Size::new((size * 0.6021).max(1.0), (size * 1.25).ceil())
 }
 
-impl Tab {
+impl Term {
     /// A new terminal running the user's shell, cols x rows.
-    pub fn new(id: u64, cols: usize, rows: usize) -> std::io::Result<(Tab, std::fs::File)> {
+    pub fn new(id: u64, cols: usize, rows: usize) -> std::io::Result<(Term, std::fs::File)> {
         let size = font_size();
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
         let pty = pty::Pty::spawn(&shell, cols as u16, rows as u16)?;
         let reader = pty.reader()?;
         Ok((
-            Tab { id, grid: Grid::new(cols, rows), parser: vt::Parser::new(), pty, cache: canvas::Cache::new(), font_size: size, cell: cell_for(size) },
+            Term { id, selection: None, grid: Grid::new(cols, rows), parser: vt::Parser::new(), pty, cache: canvas::Cache::new(), font_size: size, cell: cell_for(size) },
             reader,
         ))
     }
@@ -75,6 +80,56 @@ impl Tab {
             self.grid.resize(cols, rows);
             self.pty.resize(cols as u16, rows as u16);
             self.cache.clear();
+        }
+    }
+
+    /// The cell under a point in the pane (points, from its top-left).
+    pub fn cell_at(&self, x: f32, y: f32) -> CellPos {
+        let col = ((x - PAD) / self.cell.width).floor().max(0.0) as usize;
+        let row = ((y - PAD) / self.cell.height).floor().max(0.0) as usize;
+        (col.min(self.grid.cols - 1), row.min(self.grid.rows - 1))
+    }
+
+    pub fn select(&mut self, sel: Option<(CellPos, CellPos)>) {
+        if sel != self.selection {
+            self.selection = sel;
+            self.cache.clear();
+        }
+    }
+
+    /// The selection in reading order (start, end inclusive), if it isn't empty.
+    fn ordered(&self) -> Option<(CellPos, CellPos)> {
+        let (a, b) = self.selection?;
+        let (s, e) = if (a.1, a.0) <= (b.1, b.0) { (a, b) } else { (b, a) };
+        (s != e).then_some((s, e))
+    }
+
+    fn selected(&self, col: usize, row: usize) -> bool {
+        self.ordered().is_some_and(|((sc, sr), (ec, er))| (row > sr || (row == sr && col >= sc)) && (row < er || (row == er && col <= ec)))
+    }
+
+    /// The selected text: lines joined with newlines, trailing spaces dropped.
+    pub fn selected_text(&self) -> Option<String> {
+        let ((sc, sr), (ec, er)) = self.ordered()?;
+        let mut out = Vec::new();
+        for r in sr..=er {
+            let line = self.grid.line(r);
+            let (a, b) = (if r == sr { sc } else { 0 }, if r == er { ec } else { self.grid.cols - 1 });
+            let text: String = line[a..=b.min(line.len() - 1)].iter().filter(|c| c.width != 0).map(|c| c.c).collect();
+            out.push(text.trim_end().to_string());
+        }
+        Some(out.join("\n"))
+    }
+
+    /// Text pasted in: bracketed if the program asked for it.
+    pub fn paste(&mut self, text: &str) {
+        let clean = text.replace("\r\n", "\r").replace('\n', "\r");
+        if self.grid.bracketed_paste {
+            self.pty.write(b"\x1b[200~");
+            self.pty.write(clean.as_bytes());
+            self.pty.write(b"\x1b[201~");
+        } else {
+            self.pty.write(clean.as_bytes());
         }
     }
 
@@ -196,10 +251,9 @@ fn resolve(p: &Palette, c: TColor, default: Color, bold: bool) -> Color {
     }
 }
 
-impl<M> Program<M> for Tab {
-    type State = ();
-
-    fn draw(&self, _state: &(), renderer: &Renderer, _theme: &Theme, bounds: Rectangle, _cursor: mouse::Cursor) -> Vec<Geometry> {
+impl Term {
+    /// The pane's picture (cached until the screen, selection or focus changes).
+    pub fn draw(&self, renderer: &Renderer, bounds: Rectangle, focused: bool) -> Vec<Geometry> {
         let p = palette();
         let geo = self.cache.draw(renderer, bounds.size(), |frame: &mut Frame| {
             frame.fill_rectangle(Point::ORIGIN, bounds.size(), p.bg);
@@ -242,9 +296,31 @@ impl<M> Program<M> for Tab {
                     x = end;
                 }
             }
+            // The selection, over the text.
+            if self.ordered().is_some() {
+                for r in 0..self.grid.rows {
+                    let mut c = 0;
+                    while c < self.grid.cols {
+                        if self.selected(c, r) {
+                            let start = c;
+                            while c < self.grid.cols && self.selected(c, r) {
+                                c += 1;
+                            }
+                            frame.fill_rectangle(Point::new(PAD + start as f32 * cw, PAD + r as f32 * ch), Size::new((c - start) as f32 * cw, ch), Color { a: 0.35, ..p.cursor });
+                        } else {
+                            c += 1;
+                        }
+                    }
+                }
+            }
             if self.grid.cursor_visible {
                 let at = Point::new(PAD + self.grid.cx as f32 * cw, PAD + self.grid.cy as f32 * ch);
-                frame.fill_rectangle(at, Size::new(cw, ch), Color { a: 0.7, ..p.cursor });
+                if focused {
+                    frame.fill_rectangle(at, Size::new(cw, ch), Color { a: 0.7, ..p.cursor });
+                } else {
+                    // Unfocused: an outline, so the pane with the keyboard is clear.
+                    frame.stroke(&canvas::Path::rectangle(at, Size::new(cw, ch)), canvas::Stroke::default().with_color(p.cursor).with_width(1.0));
+                }
             }
         });
         vec![geo]
