@@ -9,8 +9,8 @@ export LIBSEAT_BACKEND=seatd
 # The development control socket (vctl): off in the server unless asked.
 export VERGENCE_CONTROL=${VERGENCE_CONTROL:-1}
 export RUST_LOG=${RUST_LOG:-info,smithay=warn}
-LOG=$HOME/vergence-drm.log
-BIN=$HOME/src/vergence/target/release/vergence-server
+LOG=${XDG_STATE_HOME:-$HOME/.local/state}/vergence/server.log; mkdir -p "$(dirname "$LOG")"
+BIN=$(cd "$(dirname "$0")/.." && pwd)/target/release/vergence-server
 while :; do
     echo "vergence-server on the real monitors; log in $LOG"
     "$BIN" --drm -c foot > "$LOG" 2>&1

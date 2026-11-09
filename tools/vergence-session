@@ -1,13 +1,31 @@
 #!/bin/sh
-# The Vergence session: what a display manager (lightdm on Hubble) runs when
-# "Vergence" is chosen at the login screen. vergence-server on the real monitors
-# through seatd (FreeBSD) or logind (Linux); `vctl restart` (exit status 75) starts it again with the build
-# that is there now; any other exit ends the session (back to the login screen).
-# Installed as a session by tools/install-session.sh.
-# (Through the link in ~/bin too: the checkout is where the script really is.)
+# The Vergence session: vergence-server on the real monitors. Started by a display
+# manager ("Vergence" at the login screen; share/wayland-sessions/vergence.desktop)
+# or by hand from a text console (`vergence`, a link to this script). Seat and
+# devices through libseat: logind where it runs (Fedora), seatd everywhere else
+# (FreeBSD, Linux without systemd). `vctl restart` (exit status 75) starts the
+# server again with the binary that is there now; any other exit ends the session.
+#
+# Runs installed (tools/install.sh puts it in one bin directory with the server)
+# or from a checkout (this script in tools/, the binaries in ../target/release).
+# A checkout is a development session: the control socket (vctl) is on. An
+# installed session has it off (security pass 2026-11-08) unless VERGENCE_CONTROL=1
+# is in the environment or the user has created ~/.config/vergence/control-socket.
 here=$(dirname "$(realpath "$0")")
-BIN=${VERGENCE_SERVER:-$here/../target/release/vergence-server}
-# lightdm's PAM gives a private runtime directory; from a console there is none.
+installed=
+if [ -n "$VERGENCE_SERVER" ]; then
+    BIN=$VERGENCE_SERVER
+elif [ -x "$here/vergence-server" ]; then
+    BIN=$here/vergence-server                        # installed: beside this script
+    installed=1
+elif [ -x "$here/../target/release/vergence-server" ]; then
+    BIN=$here/../target/release/vergence-server     # a checkout
+else
+    BIN=vergence-server                              # whatever PATH finds
+    installed=1
+fi
+# A display manager's PAM gives a private runtime directory; from a console there
+# is none (nor on a Linux without logind): make one.
 if [ -z "$XDG_RUNTIME_DIR" ]; then
     XDG_RUNTIME_DIR=/tmp/xdg-$(id -u)
     mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
@@ -20,16 +38,28 @@ export XDG_RUNTIME_DIR
 unset QT_SCREEN_SCALE_FACTORS QT_SCALE_FACTOR QT_AUTO_SCREEN_SCALE_FACTOR \
     AVALONIA_SCREEN_SCALE_FACTORS AVALONIA_GLOBAL_SCALE_FACTOR \
     GDK_SCALE GDK_DPI_SCALE _JAVA_OPTIONS VERGENCE_SCALE DISPLAY
-# Seat and device access: seatd on FreeBSD (no logind there); on Linux libseat
-# finds logind by itself (Fedora on Techbench, 2026-11-08).
-[ "$(uname -s)" = FreeBSD ] && export LIBSEAT_BACKEND=seatd
+# Seat and device access: libseat finds logind by itself where systemd runs
+# (Fedora on Techbench, 2026-11-08); everywhere else it is seatd.
+if [ -z "$LIBSEAT_BACKEND" ] && [ ! -d /run/systemd/system ]; then
+    export LIBSEAT_BACKEND=seatd
+fi
 export XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=Vergence
-# The development control socket (vctl; src/control.rs): off in the server
-# unless asked. Any program running as the user can drive the session through
-# it, so this line is what makes a session a development session.
-export VERGENCE_CONTROL=${VERGENCE_CONTROL:-1}
+# The development control socket (vctl; src/control.rs): any program running as
+# the user can drive the session through it, so this is what makes a session a
+# development session. On from a checkout; off when installed, unless asked.
+if [ -z "$VERGENCE_CONTROL" ]; then
+    if [ -z "$installed" ] || [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/vergence/control-socket" ]; then
+        VERGENCE_CONTROL=1
+    fi
+fi
+[ -n "$VERGENCE_CONTROL" ] && export VERGENCE_CONTROL
 export RUST_LOG=${RUST_LOG:-info,smithay=warn}
-LOG=$HOME/vergence-drm.log
+# The log: ~/.local/state/vergence/server.log (owner-only: window titles are in it),
+# beside vergd's; the previous run's is kept as server.log.1 (a `vctl restart`
+# after a GPU hang used to wipe the evidence, 2026-11-08).
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/vergence
+mkdir -p "$STATE" && chmod 700 "$STATE"
+LOG=$STATE/server.log
 # A quick failure at start is retried: when the user logs out of an X session and
 # into this one, the display manager starts us while the old X server is still
 # letting go of the display ("Failed to disable connectors: Permission denied",
@@ -37,8 +67,6 @@ LOG=$HOME/vergence-drm.log
 tries=0
 while :; do
     started=$(date +%s)
-    # The last run's log is kept (a `vctl restart` after a GPU hang used to wipe
-    # the evidence, 2026-11-08).
     [ -s "$LOG" ] && mv "$LOG" "$LOG.1"
     "$BIN" --drm > "$LOG" 2>&1
     status=$?

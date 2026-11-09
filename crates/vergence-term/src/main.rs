@@ -1044,6 +1044,10 @@ fn initial_size(look: &look::Look) -> Size {
 }
 
 fn main() -> iced::Result {
+    if std::env::args().any(|a| a == "--version" || a == "-V") {
+        println!("vergence-term {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     // Software drawing (iced's tiny-skia renderer) unless told otherwise: on
     // Hubble (Intel UHD 630, FreeBSD 15.1) the GPU renderer hung the GPU again
     // and again ("GPU HANG ... in vergence-term"), and each reset froze the whole

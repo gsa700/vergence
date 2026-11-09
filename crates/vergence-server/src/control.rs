@@ -10,9 +10,10 @@
 // Off unless VERGENCE_CONTROL=1 (security pass 2026-11-08): owner-only still
 // means any program running as the user, and these commands bypass every
 // mitigation in whitepaper §7.3 (input injection, focus, screen capture, running
-// commands). The development launchers (tools/vergence-session,
-// tools/run-server-drm.sh) turn it on; a session started any other way has no
-// control socket. One command per connection, one line in (at most LINE_MAX
+// commands). tools/vergence-session turns it on when it runs from a checkout (a
+// development session); an installed session (tools/install.sh) has it off unless
+// VERGENCE_CONTROL=1 is in the environment or the user created
+// ~/.config/vergence/control-socket. One command per connection, one line in (at most LINE_MAX
 // bytes), text out; a client gets IO_TIMEOUT to send its line and take the reply:
 //
 //   shot                 PNG of every monitor as shown -> ~/vergence-shots/

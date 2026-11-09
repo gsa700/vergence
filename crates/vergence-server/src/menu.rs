@@ -97,10 +97,12 @@ fn apps() -> Vec<Item> {
             out.push(Item { name: name.into(), exec });
         }
     };
-    // Our own terminal (crates/vergence-term), built beside the server; foot only
-    // if it isn't there (Dave, 2026-11-08: "no more dirty foot").
-    add("Terminal", here.as_ref().map(|d| d.join("vergence-term")).filter(|p| p.exists()).map(|p| p.display().to_string()).or_else(|| on_path("foot")));
-    add("Settings", here.map(|d| d.join("vergence-settings")).filter(|p| p.exists()).map(|p| p.display().to_string()));
+    // Our own terminal and settings app, beside the server (a checkout's
+    // target/release, or the installed bin directory), else on PATH; foot only if
+    // the terminal isn't there at all (Dave, 2026-11-08: "no more dirty foot").
+    let beside = |name: &str| here.as_ref().map(|d| d.join(name)).filter(|p| p.exists()).map(|p| p.display().to_string()).or_else(|| on_path(name));
+    add("Terminal", beside("vergence-term").or_else(|| on_path("foot")));
+    add("Settings", beside("vergence-settings"));
     add("Firefox", on_path("firefox"));
     add("Files", on_path("thunar"));
     let albumwall = home.join(".local/share/albumwall/AlbumWall");

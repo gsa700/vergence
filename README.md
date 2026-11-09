@@ -36,7 +36,8 @@ toolkit.
 | 3 | Accessibility contract, display-list surfaces, Avalonia backend | Research |
 | 4 | Remote display over display lists | Research |
 
-Language: Rust throughout (whitepaper §8). Platforms: FreeBSD first (Hubble),
-Linux second (Fedora on Techbench since 2026-11-08, replacing Debian 13), both
-from day one. Whitepaper
-Draft 0.9.
+Language: Rust throughout (whitepaper §8). Platforms (since 2026-11-09): a
+Linux without systemd, Void on Hubble, for development; FreeBSD (a second
+machine, and the VM canary as the build gate) and Fedora (Techbench) at every
+milestone. Install on a system with `sudo tools/install.sh` after
+`cargo build --release` (see the script's header). Whitepaper Draft 0.9.

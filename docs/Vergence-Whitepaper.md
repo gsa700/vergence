@@ -21,9 +21,9 @@ On today's Unix-like desktops, an application's size on screen depends on which 
 
 This paper proposes a path to **app consistency**: every application the right size, in the right place and readable, on any monitor setup, for every user, including users who depend on accessibility tools. It starts with something buildable in days on an ordinary X11 desktop: a daemon that recognises monitor setups by their EDIDs, applies consistent scaling across toolkits, and remembers window layouts per setup. It ends with a long-term design for a new display server. That server rests on one authority and three contracts: geometry in visual size, placement owned by the server but negotiated with apps, and accessibility built into the protocol. Optional vector "display-list" surfaces revive the best idea of NeXTSTEP's Display PostScript.
 
-The design targets **FreeBSD** as the primary development platform and **Linux** as the second, tested on Fedora at every phase.
+The design targets **Linux and FreeBSD** together: development on a Linux without systemd, with FreeBSD and Fedora tested at every milestone.
 
-As of November 2026 the phase 1 daemon is built and frozen, and the phase 2 server runs as the author's daily session on FreeBSD, on real monitors, and runs on Linux too (§9).
+As of November 2026 the phase 1 daemon is built and frozen, and the phase 2 server runs as the author's daily session on real monitors, on FreeBSD and on Linux (§9).
 
 ---
 
@@ -92,7 +92,7 @@ X11 had a Display PostScript extension (DPS/X) on Sun, DEC and SGI workstations,
 3. **Every phase stands alone.** Each phase delivers value even if nobody else ever adopts it.
 4. **Compatibility at the edges.** Existing X11, Wayland and D-Bus applications keep working; new capabilities are optional upgrades.
 5. **Accessibility and security are part of the design**, not afterthoughts, and neither is allowed to break the other.
-6. **Two platforms from day one:** FreeBSD first, Linux second. Starting on FreeBSD keeps the code away from Linux-only interfaces (systemd, logind, Linux-specific kernel interfaces).
+6. **Three platforms, one code base:** a Linux without systemd for development, FreeBSD and Fedora at every milestone. A core that runs on FreeBSD and on a Linux without systemd cannot depend on Linux-only interfaces (systemd, logind, Linux-specific kernel interfaces); Fedora keeps the logind side honest.
 7. **Our own parts.** The core is written by the project. A part from another project is used only when it is truly necessary, and only by explicit decision (§8).
 
 ---
@@ -398,7 +398,7 @@ Why one language:
 - **D-Bus clients** reach a D-Bus front end written by the project, which translates notifications, settings and accessibility into the server's own session bus (§6.8).
 - The server speaks Wayland, X11 and D-Bus at the edges, but placement, memory, units, accessibility and security follow this design.
 
-**Platforms.** FreeBSD 15 is the primary development platform, on real hardware: the phase 2 server is the daily session there, with Xfce on X11 kept as the fallback session. Linux is the second platform, tested on Fedora on a workstation with Intel UHD 770 graphics; it replaced Debian 13 with Xfce, which had been chosen to host the X11 daemon of phase 1. On Linux the server meets logind, udev and the in-kernel DRM drivers instead of seatd, devd and drm-kmod. The phase 2 server has not run on it yet. Where the two must differ, as with hot-plug events (§4.7), the code and the documents say so.
+**Platforms.** Development happens on a Linux without systemd: Void Linux on a small desktop with Intel UHD 630 graphics, the machine that ran FreeBSD 15 as the primary platform until November 2026. FreeBSD taught the project most of what §9 lists and stays a real-hardware platform on a second machine of the same kind; the order was changed because the work ahead, GPUs and drivers, several cards, explicit sync, a suspend-and-wake soak, is where FreeBSD's ported DRM drivers lag and its tools are thin (no nouveau, no rtcwake, and a GPU hang whose cause is still open, §9). The second Linux is Fedora on a workstation with Intel UHD 770 graphics; there the server meets logind, udev and the in-kernel DRM drivers instead of seatd and devd, and the session starts from the display manager. A FreeBSD virtual machine builds and tests every change in between. Where the platforms must differ, as with hot-plug events (§4.7) or seat management, the code and the documents say so.
 
 ### 8.1 Running our .NET/Avalonia applications
 

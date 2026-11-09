@@ -1399,6 +1399,10 @@ fn bus_outputs() -> impl iced::futures::Stream<Item = Message> {
 }
 
 fn main() -> iced::Result {
+    if std::env::args().any(|a| a == "--version" || a == "-V") {
+        println!("vergence-settings {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     // Software drawing, as the terminal: the GPU renderer hung Hubble's GPU
     // (2026-11-08, /var/log/messages); a settings window is light work for the CPU.
     if std::env::var_os("ICED_BACKEND").is_none() {

@@ -28,6 +28,10 @@ use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().any(|a| a == "--version" || a == "-V") {
+        println!("vergence-server {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     init_logging();
 
     let mut event_loop: EventLoop<Server> = EventLoop::try_new()?;

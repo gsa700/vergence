@@ -4,10 +4,10 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
 the current milestone is docs/bus-milestone-1.md (the session bus; the server's is docs/server-milestone-1.md; phase 1's, frozen, are docs/milestone-1.md to -4.md), status is in README.md.
 
 - **Started 2026-11-06** (Dave's go). The source lives here on Control (the
-  main git copy, pushed to GitHub; Control has no Rust). Build and test on Hubble, the FreeBSD
-  dev box: `tools/sync-hubble.sh` (rsync; keeps Hubble's build output), then run
-  `cargo test` and `DISPLAY=:0 target/debug/vergd probe` there. Fake monitors
-  for tests: docs/milestone-1.md, "Found on Hubble".
+  main git copy, pushed to GitHub; Control has no Rust). Build and test on the
+  dev boxes: `tools/sync-hubble.sh [host]` (rsync; keeps the host's build output;
+  default hubble, also canary and techbench), then `cargo test --workspace`
+  there. Fake monitors for tests: docs/milestone-1.md, "Found on Hubble".
 - **vergd runs in Dave's Xfce session on Hubble** (tools/install-autostart.sh:
   ~/.local/bin/vergd, log ~/.local/state/vergence/vergd.log, profiles
   ~/.config/vergence/profiles.toml, windows.toml, settings.toml,
@@ -22,7 +22,8 @@ the current milestone is docs/bus-milestone-1.md (the session bus; the server's 
   back). Log in on the text console, then `vergence` (~/bin link to
   tools/vergence-session; Ctrl+Alt+Backspace ends it) or `xfce`
   (tools/start-xfce: loads ~/.xprofile, then startxfce4). Log
-  ~/vergence-drm.log. Wallpaper: ~/.config/vergence/desktop.toml. Over SSH, `~/bin/vctl` (tools/vctl; finds the
+  ~/.local/state/vergence/server.log (was ~/vergence-drm.log until 2026-11-09).
+  Wallpaper: ~/.config/vergence/desktop.toml. Over SSH, `~/bin/vctl` (tools/vctl; finds the
   socket in /var/run/xdg/<user> or /tmp/xdg-<uid>) drives it: `vctl shot` then copy
   ~/vergence-shots/*.png back to look, `vctl windows`, `vctl spawn
   tools/xtest.sh`, `vctl move`, and `vctl restart` after a rebuild (no hand at
@@ -45,9 +46,15 @@ the current milestone is docs/bus-milestone-1.md (the session bus; the server's 
   libinput/seatd/xkbcommon, Xwayland, iced (replaced Slint), ab_glyph, resvg, Adwaita cursors;
   table in whitepaper §8) stay until he decides on each. OS interfaces (DRM/KMS,
   evdev, GBM, EGL, Vulkan) are not borrowing.
-- **FreeBSD first (Hubble, bare hardware), Linux second, both at every
-  phase.** Dave, 2026-11-06: development happens on FreeBSD (it was Debian
-  first until then). Dave, 2026-11-08: the Linux platform is **Fedora on
+- **Three platforms, one code base** (Dave, 2026-11-09; replaces "FreeBSD
+  first" of 2026-11-06). The primary development platform is **Linux without
+  systemd: Void (glibc) on Hubble**, reinstalled from FreeBSD on 2026-11-09
+  because the work ahead (GPUs, several cards, explicit sync, suspend soak) is
+  where FreeBSD's drm-kmod lagged and its tools are thin. **FreeBSD** stays a
+  real-hardware platform on the second Lenovo Tiny (when its power supply
+  arrives) and, until then, a build-and-test gate on the VM canary
+  (`tools/sync-hubble.sh canary`; passwordless sudo there). The second Linux is
+  **Fedora on
   Techbench** (Fedora 45, Intel UHD 770), replacing Debian 13, which had been
   picked for hosting the X11 daemon. Techbench is Dave's workstation, not a
   project machine: Rust and -devel packages only (dnf needs his sudo), build
@@ -57,12 +64,20 @@ the current milestone is docs/bus-milestone-1.md (the session bus; the server's 
   GNOME first, GDM won't start a second session for the same user. NOT from a
   text console: Fedora 45's consoles are kmscon, which holds the GPU (the
   server fails "Device or resource busy"); the kernel console is a dummy.
-  Ctrl+Alt+Backspace ends it, back to GDM. Log ~/vergence-drm.log, `vctl` as on
+  Ctrl+Alt+Backspace ends it, back to GDM. Log ~/.local/state/vergence/server.log, `vctl` as on
   Hubble (socket in /run/user/1000). Techbench is normally headless: the two
   monitors move between it and Hubble. Keep
   Linux-only interfaces (udev, systemd, logind, /sys) out of the core; where
   the platforms must differ, say so in the code and the docs. VMs (canary)
-  are for build checks only.
+  are for build checks only. A milestone is done when it builds and passes
+  its tests on all three and has run on the FreeBSD and Fedora machines.
+- **Installing on a system**: `cargo build --release`, then `sudo tools/install.sh`
+  (binaries, `vergence-session` and the `vergence` console command in
+  /usr/local/bin, a Wayland session file, seatd enabled where there is no
+  logind, the user in the seat group; `--prefix`, `--destdir` for packages,
+  `--uninstall`). An installed session has NO control socket: for `vctl`,
+  create ~/.config/vergence/control-socket or start with VERGENCE_CONTROL=1. A
+  checkout's tools/vergence-session is a development session (socket on).
 - **Xfce is only a host** (Dave, 2026-11-06): nothing new is built on
   Xfce's internals (xfconf, xfsettingsd); everything works under any EWMH
   window manager, and pieces the phase 2 server needs (e.g. the XSETTINGS
