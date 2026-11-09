@@ -25,6 +25,22 @@ pub struct Style {
     pub inverse: bool,
 }
 
+/// Which mouse events the program asked for (xterm's DEC private modes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MouseMode {
+    /// None: the mouse selects text.
+    #[default]
+    Off,
+    /// 9 (X10): presses only, no modifiers.
+    Press,
+    /// 1000: presses and releases (and the wheel).
+    Click,
+    /// 1002: also motion while a button is held.
+    Drag,
+    /// 1003: all motion.
+    Motion,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cell {
     pub c: char,
@@ -49,6 +65,11 @@ pub struct Grid {
     other: Vec<Vec<Cell>>,
     pub alt: bool,
     pub scrollback: VecDeque<Vec<Cell>>,
+    /// Lines ever sent to the scrollback: a line's absolute number (the
+    /// selection's rows, while the view is scrolled back) stays put as output
+    /// comes. The scrollback's first line is `pushed - scrollback.len()`;
+    /// screen row r is `pushed + r`.
+    pub pushed: usize,
     pub cx: usize,
     pub cy: usize,
     /// The cursor is past the last column: the next character wraps first.
@@ -62,7 +83,13 @@ pub struct Grid {
     pub cursor_visible: bool,
     pub app_cursor: bool,
     pub bracketed_paste: bool,
+    /// Mouse reporting (modes 9/1000/1002/1003) and its encoding (1006 = SGR).
+    pub mouse: MouseMode,
+    pub mouse_sgr: bool,
     pub title: String,
+    /// Text a program copied with OSC 52 (Claude Code, tmux, vim...), for
+    /// the clipboard. Writes only: programs can never read the clipboard.
+    pub clipboard: Option<String>,
     /// Replies to the program (device status, attributes).
     pub out: Vec<u8>,
     /// Something changed since the last look.
@@ -105,6 +132,7 @@ impl Grid {
             other: vec![vec![Cell::default(); cols]; rows],
             alt: false,
             scrollback: VecDeque::new(),
+            pushed: 0,
             cx: 0,
             cy: 0,
             wrap_next: false,
@@ -117,14 +145,32 @@ impl Grid {
             cursor_visible: true,
             app_cursor: false,
             bracketed_paste: false,
+            mouse: MouseMode::Off,
+            mouse_sgr: false,
             title: String::new(),
+            clipboard: None,
             out: Vec::new(),
             dirty: true,
         }
     }
 
+    /// A screen row (tests; drawing goes through abs_line for the scrollback).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn line(&self, y: usize) -> &[Cell] {
         &self.lines[y]
+    }
+
+    /// A line by absolute number (scrollback, then the screen); None if it
+    /// has left the scrollback or is below the screen.
+    pub fn abs_line(&self, n: usize) -> Option<&[Cell]> {
+        let first = self.pushed - self.scrollback.len();
+        if n < first {
+            None
+        } else if n < self.pushed {
+            self.scrollback.get(n - first).map(|l| l.as_slice())
+        } else {
+            self.lines.get(n - self.pushed).map(|l| l.as_slice())
+        }
     }
 
     /// A blank cell in the current background (erasing uses the pen's background).
@@ -171,6 +217,7 @@ impl Grid {
 
     fn push_scrollback(&mut self, l: Vec<Cell>) {
         self.scrollback.push_back(l);
+        self.pushed += 1;
         if self.scrollback.len() > SCROLLBACK {
             self.scrollback.pop_front();
         }
@@ -315,6 +362,21 @@ impl Grid {
                     }
                 }
                 (true, 2004) => self.bracketed_paste = on,
+                (true, 9 | 1000 | 1002 | 1003) => {
+                    let m = match p {
+                        9 => MouseMode::Press,
+                        1000 => MouseMode::Click,
+                        1002 => MouseMode::Drag,
+                        _ => MouseMode::Motion,
+                    };
+                    // Turning a mode off ends reporting only if it is the one on (xterm).
+                    if on {
+                        self.mouse = m;
+                    } else if self.mouse == m {
+                        self.mouse = MouseMode::Off;
+                    }
+                }
+                (true, 1006) => self.mouse_sgr = on,
                 _ => {}
             }
         }
@@ -545,6 +607,16 @@ impl Perform for Grid {
         {
             self.title = text.chars().take(200).collect();
             self.dirty = true;
+        } else if let Some(("52", rest)) = s.split_once(';')
+            && let Some((_targets, data)) = rest.split_once(';')
+        {
+            // "?" asks to read the clipboard: refused (no reply), as most terminals do.
+            use base64::Engine;
+            if data != "?"
+                && let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data.trim())
+            {
+                self.clipboard = Some(String::from_utf8_lossy(&bytes).into_owned());
+            }
         }
     }
 }
@@ -673,6 +745,42 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&g.out), "\x1b[2;4R\x1b[?62;22c");
         feed(&mut g, "\x1b]0;my title\x07");
         assert_eq!(g.title, "my title");
+        // OSC 52: a copy (base64 of "hello"); a read request is ignored.
+        feed(&mut g, "\x1b]52;c;aGVsbG8=\x07");
+        assert_eq!(g.clipboard.take().as_deref(), Some("hello"));
+        feed(&mut g, "\x1b]52;c;?\x1b\\");
+        assert_eq!(g.clipboard, None);
+    }
+
+    #[test]
+    fn absolute_lines() {
+        let mut g = Grid::new(5, 2);
+        feed(&mut g, "a\r\nb\r\nc\r\nd");
+        assert_eq!((g.pushed, g.scrollback.len()), (2, 2));
+        let text = |n| g.abs_line(n).map(|l| l[0].c);
+        assert_eq!([text(0), text(1), text(2), text(3), text(4)], [Some('a'), Some('b'), Some('c'), Some('d'), None]);
+        // Clearing the scrollback (ED 3, which clears the screen too here) keeps the numbers.
+        feed(&mut g, "\x1b[3J");
+        assert_eq!(g.abs_line(1), None);
+        assert!(g.abs_line(2).is_some());
+        assert_eq!(g.pushed, 2);
+    }
+
+    #[test]
+    fn mouse_modes() {
+        let mut g = Grid::new(10, 3);
+        feed(&mut g, "\x1b[?1000h\x1b[?1006h");
+        assert_eq!((g.mouse, g.mouse_sgr), (MouseMode::Click, true));
+        feed(&mut g, "\x1b[?1002h");
+        assert_eq!(g.mouse, MouseMode::Drag);
+        // Resetting a mode that isn't on leaves reporting alone.
+        feed(&mut g, "\x1b[?1000l");
+        assert_eq!(g.mouse, MouseMode::Drag);
+        feed(&mut g, "\x1b[?1002l\x1b[?1006l");
+        assert_eq!((g.mouse, g.mouse_sgr), (MouseMode::Off, false));
+        // A full reset turns it off.
+        feed(&mut g, "\x1b[?1003h\x1bc");
+        assert_eq!(g.mouse, MouseMode::Off);
     }
 
     #[test]

@@ -32,7 +32,9 @@ enum State {
 }
 
 const MAX_PARAMS: usize = 32;
-const MAX_OSC: usize = 4096;
+/// OSC 52 carries copied text as base64, so this allows a large copy (1 MiB);
+/// the buffer only grows as far as a sequence needs.
+const MAX_OSC: usize = 1 << 20;
 
 pub struct Parser {
     state: State,

@@ -4,64 +4,96 @@ use iced::keyboard::{self, Key, key::Named};
 use iced::widget::canvas::{self, Frame, Geometry};
 use iced::{Color, Font, Pixels, Point, Rectangle, Renderer, Size};
 
-use crate::grid::{Cell, Color as TColor, Grid};
+use crate::grid::{Cell, Color as TColor, Grid, MouseMode};
+use crate::look::{Look, Palette};
 use crate::{pty, vt};
 
 /// Space around the grid, in points.
 pub const PAD: f32 = 6.0;
+/// The scrollbar's width (in the right padding), and the width that grabs it.
+pub const SCROLLBAR_W: f32 = 5.0;
+pub const SCROLLBAR_GRAB: f32 = 12.0;
 
 /// A cell position: (column, row) on the screen.
 pub type CellPos = (usize, usize);
 
 pub struct Term {
     pub id: u64,
-    /// The text selected with the mouse: anchor and end, in either order.
+    /// The text selected with the mouse: anchor and end, in either order;
+    /// rows are absolute line numbers (Grid::pushed), so a selection stays on
+    /// its text while the view scrolls or output comes.
     pub selection: Option<(CellPos, CellPos)>,
+    /// How many lines the view is scrolled back into the scrollback (0: the live screen).
+    pub scroll: usize,
     pub grid: Grid,
     parser: vt::Parser,
     pub pty: pty::Pty,
     pub cache: canvas::Cache,
     pub font_size: f32,
+    pub font: Font,
     pub cell: Size,
+    pub palette: Palette,
 }
 
-/// The desktop's monospace font size in points ("Monospace 10" -> 10), as
-/// logical pixels (points at 96 per inch).
-pub fn font_size() -> f32 {
-    let path = std::path::Path::new(&std::env::var_os("HOME").unwrap_or_default()).join(".config/vergence/settings.toml");
-    let pt = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|t| vergence_xsettings::from_toml(&t).ok())
-        .and_then(|s| match s.get("Gtk/MonospaceFontName") {
-            Some(vergence_xsettings::Value::Str(v)) => v.rsplit_once(' ').and_then(|(_, n)| n.parse::<f32>().ok()),
-            _ => None,
-        })
-        .unwrap_or(10.0);
-    pt * 96.0 / 72.0
-}
-
-/// A cell's size for a font size: monospace advance 0.602 em (DejaVu Sans
-/// Mono, Noto Sans Mono), lines 1.25 em.
-pub fn cell_for(size: f32) -> Size {
-    Size::new((size * 0.6021).max(1.0), (size * 1.25).ceil())
+/// A cell's size for a look: the monospace font's own advance (measured, so
+/// text runs, backgrounds and the cursor line up in any font), lines 1.25 em.
+pub fn cell_for(look: &Look) -> Size {
+    use iced::advanced::text::Paragraph as _;
+    let size = look.font_size;
+    const SAMPLE: &str = "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM";
+    let p = iced::advanced::graphics::text::Paragraph::with_text(iced::advanced::Text {
+        content: SAMPLE,
+        bounds: Size::INFINITE,
+        size: Pixels(size),
+        line_height: iced::widget::text::LineHeight::default(),
+        font: look.mono_font(),
+        align_x: iced::advanced::text::Alignment::Default,
+        align_y: iced::alignment::Vertical::Top,
+        shaping: iced::advanced::text::Shaping::Basic,
+        wrapping: iced::advanced::text::Wrapping::None,
+    });
+    let measured = p.min_bounds().width / SAMPLE.len() as f32;
+    // A font that can't be measured (or isn't monospace-like): DejaVu's 0.602 em.
+    let advance = if (size * 0.3..=size * 1.0).contains(&measured) { measured } else { size * 0.6021 };
+    Size::new(advance.max(1.0), (size * 1.25).ceil())
 }
 
 impl Term {
     /// A new terminal running the user's shell, cols x rows.
-    pub fn new(id: u64, cols: usize, rows: usize) -> std::io::Result<(Term, std::fs::File)> {
-        let size = font_size();
+    pub fn new(id: u64, cols: usize, rows: usize, look: &Look) -> std::io::Result<(Term, std::fs::File)> {
+        let size = look.font_size;
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
         let pty = pty::Pty::spawn(&shell, cols as u16, rows as u16)?;
         let reader = pty.reader()?;
         Ok((
-            Term { id, selection: None, grid: Grid::new(cols, rows), parser: vt::Parser::new(), pty, cache: canvas::Cache::new(), font_size: size, cell: cell_for(size) },
+            Term { id, selection: None, scroll: 0, grid: Grid::new(cols, rows), parser: vt::Parser::new(), pty, cache: canvas::Cache::new(), font_size: size, font: look.mono_font(), cell: cell_for(look), palette: look.palette() },
             reader,
         ))
     }
 
+    /// The desktop's look changed: colours and font size (the caller refits the pane).
+    pub fn set_look(&mut self, look: &Look) {
+        self.palette = look.palette();
+        self.font_size = look.font_size;
+        self.font = look.mono_font();
+        self.cell = cell_for(look);
+        self.cache.clear();
+    }
+
     /// The shell's output: onto the screen; replies back to the shell.
-    pub fn feed(&mut self, bytes: &[u8]) {
+    /// Returns text a program copied (OSC 52), for the clipboard.
+    pub fn feed(&mut self, bytes: &[u8]) -> Option<String> {
+        let before = self.grid.pushed;
         self.parser.advance(&mut self.grid, bytes);
+        if self.grid.pushed < before {
+            // A full reset (ESC c): the line numbers started again.
+            self.selection = None;
+            self.scroll = 0;
+        } else if self.scroll > 0 {
+            // Scrolled back: stay on the same text as new lines arrive.
+            self.scroll += self.grid.pushed - before;
+        }
+        self.clamp_scroll();
         if !self.grid.out.is_empty() {
             let out = std::mem::take(&mut self.grid.out);
             self.pty.write(&out);
@@ -70,6 +102,7 @@ impl Term {
             self.grid.dirty = false;
             self.cache.clear();
         }
+        self.grid.clipboard.take()
     }
 
     /// Fit the grid to an area of `size` points.
@@ -78,16 +111,110 @@ impl Term {
         let rows = ((size.height - 2.0 * PAD) / self.cell.height).floor().max(1.0) as usize;
         if (cols, rows) != (self.grid.cols, self.grid.rows) {
             self.grid.resize(cols, rows);
+            self.clamp_scroll();
             self.pty.resize(cols as u16, rows as u16);
             self.cache.clear();
         }
     }
 
-    /// The cell under a point in the pane (points, from its top-left).
+    /// The cell under a point in the pane (points, from its top-left): the
+    /// screen's column and row (what mouse reporting tells the program).
     pub fn cell_at(&self, x: f32, y: f32) -> CellPos {
         let col = ((x - PAD) / self.cell.width).floor().max(0.0) as usize;
         let row = ((y - PAD) / self.cell.height).floor().max(0.0) as usize;
         (col.min(self.grid.cols - 1), row.min(self.grid.rows - 1))
+    }
+
+    /// The cell under a point as the selection counts it: the row is the
+    /// absolute line number of what is shown there.
+    pub fn text_cell_at(&self, x: f32, y: f32) -> CellPos {
+        let (col, row) = self.cell_at(x, y);
+        (col, self.top_line() + row)
+    }
+
+    /// The absolute number of the line shown at the top of the pane.
+    fn top_line(&self) -> usize {
+        self.grid.pushed - self.scroll
+    }
+
+    /// The line shown at row `r` of the pane (scrollback while scrolled back).
+    fn shown_line(&self, r: usize) -> &[Cell] {
+        self.grid.abs_line(self.top_line() + r).unwrap_or(&[])
+    }
+
+    /// The alternate screen has no scrollback to show; else up to all of it.
+    fn clamp_scroll(&mut self) {
+        let max = if self.grid.alt { 0 } else { self.grid.scrollback.len() };
+        if self.scroll > max {
+            self.scroll = max;
+            self.cache.clear();
+        }
+    }
+
+    /// Scroll the view: positive back into the scrollback, negative toward the live screen.
+    pub fn scroll_by(&mut self, lines: isize) {
+        let was = self.scroll;
+        self.scroll = self.scroll.saturating_add_signed(lines);
+        self.clamp_scroll();
+        if self.scroll != was {
+            self.cache.clear();
+        }
+    }
+
+    /// Jump the view to `lines` back (the scrollbar).
+    pub fn scroll_to(&mut self, lines: usize) {
+        let was = self.scroll;
+        self.scroll = lines;
+        self.clamp_scroll();
+        if self.scroll != was {
+            self.cache.clear();
+        }
+    }
+
+    /// While a selection is dragged past the pane's top (or bottom) edge and
+    /// the view scrolls, its end follows to the edge row at column `col`.
+    pub fn drag_to_edge(&mut self, col: usize, top: bool) {
+        if let Some((anchor, _)) = self.selection {
+            let row = self.top_line() + if top { 0 } else { self.grid.rows - 1 };
+            self.select(Some((anchor, (col.min(self.grid.cols - 1), row))));
+        }
+    }
+
+    /// The scrollbar in a pane of `size`: its track and thumb, or None when
+    /// there is nothing to scroll (no scrollback, or the alternate screen).
+    pub fn scrollbar(&self, size: Size) -> Option<(Rectangle, Rectangle)> {
+        let back = self.grid.scrollback.len();
+        if self.grid.alt || back == 0 {
+            return None;
+        }
+        let track = Rectangle::new(Point::new(size.width - SCROLLBAR_W - 2.0, PAD), Size::new(SCROLLBAR_W, (size.height - 2.0 * PAD).max(1.0)));
+        let total = (back + self.grid.rows) as f32;
+        let h = (track.height * self.grid.rows as f32 / total).max(24.0_f32.min(track.height));
+        // The view's top line from the oldest: 0 at the top, `back` live.
+        let y = track.y + (back - self.scroll) as f32 / back as f32 * (track.height - h);
+        Some((track, Rectangle::new(Point::new(track.x, y), Size::new(SCROLLBAR_W, h))))
+    }
+
+    /// How far back the view goes for the thumb's top at `y` (the scrollbar dragged).
+    pub fn scroll_for_thumb(&self, size: Size, y: f32) -> Option<usize> {
+        let (track, thumb) = self.scrollbar(size)?;
+        let room = (track.height - thumb.height).max(1.0);
+        let frac = ((y - track.y) / room).clamp(0.0, 1.0);
+        let back = self.grid.scrollback.len();
+        Some(back - (frac * back as f32).round() as usize)
+    }
+
+    /// Back to the live screen (typing, pasting).
+    pub fn scroll_to_bottom(&mut self) {
+        if self.scroll != 0 {
+            self.scroll = 0;
+            self.cache.clear();
+        }
+    }
+
+    /// Scrolled-back views can be paged: a screenful less a line.
+    pub fn page(&self) -> isize {
+        self.grid.rows.saturating_sub(1).max(1) as isize
     }
 
     pub fn select(&mut self, sel: Option<(CellPos, CellPos)>) {
@@ -113,8 +240,12 @@ impl Term {
         let ((sc, sr), (ec, er)) = self.ordered()?;
         let mut out = Vec::new();
         for r in sr..=er {
-            let line = self.grid.line(r);
+            let line = self.grid.abs_line(r).unwrap_or(&[]);
             let (a, b) = (if r == sr { sc } else { 0 }, if r == er { ec } else { self.grid.cols - 1 });
+            if line.is_empty() || a >= line.len() {
+                out.push(String::new());
+                continue;
+            }
             let text: String = line[a..=b.min(line.len() - 1)].iter().filter(|c| c.width != 0).map(|c| c.c).collect();
             out.push(text.trim_end().to_string());
         }
@@ -123,6 +254,7 @@ impl Term {
 
     /// Text pasted in: bracketed if the program asked for it.
     pub fn paste(&mut self, text: &str) {
+        self.scroll_to_bottom();
         let clean = text.replace("\r\n", "\r").replace('\n', "\r");
         if self.grid.bracketed_paste {
             self.pty.write(b"\x1b[200~");
@@ -200,29 +332,67 @@ pub fn key_bytes(key: &Key, mods: keyboard::Modifiers, text: Option<&str>, app_c
     Some(out)
 }
 
-/// The colours (dark; schemes come in step 4): background, foreground, cursor,
-/// and the 16 ANSI colours.
-struct Palette {
-    bg: Color,
-    fg: Color,
-    cursor: Color,
-    ansi: [Color; 16],
+/// A mouse button, as the program sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButton {
+    Left,
+    Middle,
+    Right,
 }
 
-fn rgb(v: u32) -> Color {
-    Color::from_rgb8((v >> 16) as u8, (v >> 8) as u8, v as u8)
+/// A mouse event for the program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseAction {
+    Press(MouseButton),
+    Release(MouseButton),
+    /// The pointer moved to another cell, with a button held or not.
+    Motion(Option<MouseButton>),
+    WheelUp,
+    WheelDown,
 }
 
-fn palette() -> Palette {
-    Palette {
-        bg: rgb(0x1e1e2e),
-        fg: rgb(0xcdd6f4),
-        cursor: rgb(0x89b4fa),
-        ansi: [
-            rgb(0x45475a), rgb(0xf38ba8), rgb(0xa6e3a1), rgb(0xf9e2af), rgb(0x89b4fa), rgb(0xf5c2e7), rgb(0x94e2d5), rgb(0xbac2de),
-            rgb(0x585b70), rgb(0xf38ba8), rgb(0xa6e3a1), rgb(0xf9e2af), rgb(0x89b4fa), rgb(0xf5c2e7), rgb(0x94e2d5), rgb(0xa6adc8),
-        ],
+/// What a mouse event sends to the program (xterm's mouse reporting), or
+/// None if its mode doesn't ask for the event. `cell` is (column, row) from 0.
+/// SGR (mode 1006): ESC [ < code ; x ; y M (press, motion) or m (release).
+/// Otherwise the old encoding, ESC [ M and three bytes of 32 + value, which
+/// cannot say a column or row past 223 (then nothing is sent).
+pub fn mouse_bytes(mode: MouseMode, sgr: bool, action: MouseAction, cell: CellPos, mods: keyboard::Modifiers) -> Option<Vec<u8>> {
+    let base = |b: MouseButton| match b {
+        MouseButton::Left => 0,
+        MouseButton::Middle => 1,
+        MouseButton::Right => 2,
+    };
+    let (mut code, release) = match (mode, action) {
+        (MouseMode::Off, _) => return None,
+        (MouseMode::Press, MouseAction::Release(_) | MouseAction::Motion(_)) => return None,
+        (MouseMode::Click, MouseAction::Motion(_)) | (MouseMode::Drag, MouseAction::Motion(None)) => return None,
+        (_, MouseAction::Press(b)) => (base(b), false),
+        // The old encoding can't say which button was released: 3.
+        (_, MouseAction::Release(b)) => (if sgr { base(b) } else { 3 }, true),
+        (_, MouseAction::Motion(b)) => (32 + b.map_or(3, base), false),
+        (_, MouseAction::WheelUp) => (64, false),
+        (_, MouseAction::WheelDown) => (65, false),
+    };
+    // X10 mode reports no modifiers.
+    if mode != MouseMode::Press {
+        code += if mods.shift() { 4 } else { 0 } + if mods.alt() { 8 } else { 0 } + if mods.control() { 16 } else { 0 };
     }
+    let (x, y) = (cell.0 + 1, cell.1 + 1);
+    if sgr {
+        return Some(format!("\x1b[<{code};{x};{y}{}", if release { 'm' } else { 'M' }).into_bytes());
+    }
+    if 32 + x > 255 || 32 + y > 255 {
+        return None;
+    }
+    Some(vec![0x1b, b'[', b'M', 32 + code as u8, (32 + x) as u8, (32 + y) as u8])
+}
+
+/// The wheel on the alternate screen when the program didn't ask for the
+/// mouse (less, man): arrow keys, `lines` of them, as most terminals do.
+pub fn wheel_keys(up: bool, app_cursor: bool, lines: usize) -> Vec<u8> {
+    let c = if up { 'A' } else { 'B' };
+    let one = if app_cursor { format!("\x1bO{c}") } else { format!("\x1b[{c}") };
+    one.repeat(lines).into_bytes()
 }
 
 /// xterm's 256 colours: 16 ANSI, a 6x6x6 cube, 24 greys.
@@ -254,12 +424,12 @@ fn resolve(p: &Palette, c: TColor, default: Color, bold: bool) -> Color {
 impl Term {
     /// The pane's picture (cached until the screen, selection or focus changes).
     pub fn draw(&self, renderer: &Renderer, bounds: Rectangle, focused: bool) -> Vec<Geometry> {
-        let p = palette();
+        let p = self.palette;
         let geo = self.cache.draw(renderer, bounds.size(), |frame: &mut Frame| {
             frame.fill_rectangle(Point::ORIGIN, bounds.size(), p.bg);
             let (cw, ch) = (self.cell.width, self.cell.height);
             for y in 0..self.grid.rows {
-                let line = self.grid.line(y);
+                let line = self.shown_line(y);
                 let top = PAD + y as f32 * ch;
                 // Runs of cells with the same look: one background, one text each.
                 let mut x = 0;
@@ -286,7 +456,7 @@ impl Term {
                             position: Point::new(PAD + x as f32 * cw, top + (ch - self.font_size) / 2.0),
                             color: fg,
                             size: Pixels(self.font_size),
-                            font: if style.bold { Font { weight: iced::font::Weight::Bold, ..Font::MONOSPACE } } else { Font::MONOSPACE },
+                            font: if style.bold { Font { weight: iced::font::Weight::Bold, ..self.font } } else { self.font },
                             ..canvas::Text::default()
                         });
                     }
@@ -298,32 +468,106 @@ impl Term {
             }
             // The selection, over the text.
             if self.ordered().is_some() {
+                let top = self.top_line();
                 for r in 0..self.grid.rows {
                     let mut c = 0;
                     while c < self.grid.cols {
-                        if self.selected(c, r) {
+                        if self.selected(c, top + r) {
                             let start = c;
-                            while c < self.grid.cols && self.selected(c, r) {
+                            while c < self.grid.cols && self.selected(c, top + r) {
                                 c += 1;
                             }
-                            frame.fill_rectangle(Point::new(PAD + start as f32 * cw, PAD + r as f32 * ch), Size::new((c - start) as f32 * cw, ch), Color { a: 0.35, ..p.cursor });
+                            frame.fill_rectangle(Point::new(PAD + start as f32 * cw, PAD + r as f32 * ch), Size::new((c - start) as f32 * cw, ch), Color { a: 0.35, ..p.accent });
                         } else {
                             c += 1;
                         }
                     }
                 }
             }
-            if self.grid.cursor_visible {
-                let at = Point::new(PAD + self.grid.cx as f32 * cw, PAD + self.grid.cy as f32 * ch);
+            // The cursor moves down with the screen while scrolled back, out of sight past the bottom.
+            let cursor_row = self.grid.cy + self.scroll;
+            if self.grid.cursor_visible && cursor_row < self.grid.rows {
+                let at = Point::new(PAD + self.grid.cx as f32 * cw, PAD + cursor_row as f32 * ch);
                 if focused {
-                    frame.fill_rectangle(at, Size::new(cw, ch), Color { a: 0.7, ..p.cursor });
+                    frame.fill_rectangle(at, Size::new(cw, ch), Color { a: 0.7, ..p.accent });
                 } else {
                     // Unfocused: an outline, so the pane with the keyboard is clear.
-                    frame.stroke(&canvas::Path::rectangle(at, Size::new(cw, ch)), canvas::Stroke::default().with_color(p.cursor).with_width(1.0));
+                    frame.stroke(&canvas::Path::rectangle(at, Size::new(cw, ch)), canvas::Stroke::default().with_color(p.accent).with_width(1.0));
                 }
+            }
+            // The scrollbar: faint at the live screen, clearer while scrolled back.
+            if let Some((track, thumb)) = self.scrollbar(bounds.size()) {
+                frame.fill(&canvas::Path::rounded_rectangle(track.position(), track.size(), (SCROLLBAR_W / 2.0).into()), Color { a: 0.06, ..p.fg });
+                let a = if self.scroll > 0 { 0.55 } else { 0.25 };
+                frame.fill(&canvas::Path::rounded_rectangle(thumb.position(), thumb.size(), (SCROLLBAR_W / 2.0).into()), Color { a, ..p.fg });
+            }
+            // Scrolled back: how far, in the top right corner (left of the scrollbar).
+            if self.scroll > 0 {
+                let label = if self.scroll == 1 { "1 line back".to_string() } else { format!("{} lines back", self.scroll) };
+                let size = (self.font_size * 0.85).round();
+                let w = label.chars().count() as f32 * size * 0.6021 + 16.0;
+                let h = size * 1.6;
+                let at = Point::new(bounds.width - w - PAD - SCROLLBAR_GRAB, PAD);
+                frame.fill(&canvas::Path::rounded_rectangle(at, Size::new(w, h), 6.0.into()), Color { a: 0.92, ..p.accent });
+                frame.fill_text(canvas::Text {
+                    content: label,
+                    position: Point::new(at.x + 8.0, at.y + (h - size) / 2.0),
+                    color: p.bg,
+                    size: Pixels(size),
+                    font: self.font,
+                    ..canvas::Text::default()
+                });
             }
         });
         vec![geo]
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NONE: keyboard::Modifiers = keyboard::Modifiers::empty();
+
+    fn sgr(mode: MouseMode, a: MouseAction, cell: CellPos, m: keyboard::Modifiers) -> Option<String> {
+        mouse_bytes(mode, true, a, cell, m).map(|b| String::from_utf8(b).unwrap())
+    }
+
+    #[test]
+    fn sgr_mouse() {
+        use MouseAction::*;
+        use MouseButton::*;
+        // htop's F10: a left click at column 70, row 24 (from 1).
+        assert_eq!(sgr(MouseMode::Click, Press(Left), (69, 23), NONE).as_deref(), Some("\x1b[<0;70;24M"));
+        assert_eq!(sgr(MouseMode::Click, Release(Left), (69, 23), NONE).as_deref(), Some("\x1b[<0;70;24m"));
+        assert_eq!(sgr(MouseMode::Click, Press(Right), (0, 0), keyboard::Modifiers::CTRL).as_deref(), Some("\x1b[<18;1;1M"));
+        assert_eq!(sgr(MouseMode::Click, WheelUp, (4, 2), NONE).as_deref(), Some("\x1b[<64;5;3M"));
+        assert_eq!(sgr(MouseMode::Click, WheelDown, (4, 2), NONE).as_deref(), Some("\x1b[<65;5;3M"));
+        // Motion: only with a button held in 1002, always in 1003.
+        assert_eq!(sgr(MouseMode::Click, Motion(Some(Left)), (1, 1), NONE), None);
+        assert_eq!(sgr(MouseMode::Drag, Motion(Some(Left)), (1, 1), NONE).as_deref(), Some("\x1b[<32;2;2M"));
+        assert_eq!(sgr(MouseMode::Drag, Motion(None), (1, 1), NONE), None);
+        assert_eq!(sgr(MouseMode::Motion, Motion(None), (1, 1), NONE).as_deref(), Some("\x1b[<35;2;2M"));
+        // Off: nothing; X10: presses only, no modifiers.
+        assert_eq!(sgr(MouseMode::Off, Press(Left), (0, 0), NONE), None);
+        assert_eq!(sgr(MouseMode::Press, Release(Left), (0, 0), NONE), None);
+        assert_eq!(sgr(MouseMode::Press, Press(Middle), (0, 0), keyboard::Modifiers::ALT).as_deref(), Some("\x1b[<1;1;1M"));
+    }
+
+    #[test]
+    fn old_mouse_encoding() {
+        let b = mouse_bytes(MouseMode::Click, false, MouseAction::Press(MouseButton::Left), (69, 23), NONE).unwrap();
+        assert_eq!(b, [0x1b, b'[', b'M', 32, 32 + 70, 32 + 24]);
+        // Releases are button 3; past column 223 nothing can be sent.
+        let b = mouse_bytes(MouseMode::Click, false, MouseAction::Release(MouseButton::Right), (0, 0), NONE).unwrap();
+        assert_eq!(b[3], 35);
+        assert_eq!(mouse_bytes(MouseMode::Click, false, MouseAction::Press(MouseButton::Left), (230, 0), NONE), None);
+    }
+
+    #[test]
+    fn wheel_on_the_alternate_screen() {
+        assert_eq!(wheel_keys(true, false, 3), b"\x1b[A\x1b[A\x1b[A");
+        assert_eq!(wheel_keys(false, true, 1), b"\x1bOB");
+    }
+}

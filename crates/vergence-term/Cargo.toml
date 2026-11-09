@@ -11,3 +11,7 @@ description = "Vergence's terminal: tabs in the title bar, split panes, sharp at
 [dependencies]
 iced = { version = "0.14", features = ["canvas", "advanced"] }
 vergence-xsettings.workspace = true
+# Already in the workspace (the server and vergence-xsettings read their TOML with it).
+toml = "0.8"
+# Already in the workspace (via iced); decodes OSC 52 clipboard writes.
+base64 = "0.22"

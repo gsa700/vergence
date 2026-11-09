@@ -156,7 +156,10 @@ impl Server {
 
         // Notify clients that we have a keyboard, for the sake of the example we assume that keyboard is always present.
         // You may want to track keyboard hot-plug in real compositor.
-        seat.add_keyboard(Default::default(), 200, 25).unwrap();
+        // Key repeat: GNOME's 500 ms / 30 a second until the settings load
+        // (settings.rs apply_key_repeat; the settings app's Keyboard page).
+        // It was 200 ms, smallvil's: held keys doubled letters (Dave, 2026-11-08).
+        seat.add_keyboard(Default::default(), crate::settings::REPEAT_DELAY as i32, crate::settings::REPEAT_RATE as i32).unwrap();
 
         // Notify clients that we have a pointer (mouse)
         // Here we assume that there is always pointer plugged in

@@ -6,6 +6,7 @@ use std::{
     fs::File,
     io::{Read, Write},
     os::fd::{AsRawFd, FromRawFd},
+    os::unix::fs::OpenOptionsExt,
     os::unix::process::CommandExt,
     process::{Child, Command, Stdio},
 };
@@ -63,7 +64,10 @@ impl Pty {
             return Err(std::io::Error::last_os_error());
         }
         let name = unsafe { std::ffi::CStr::from_ptr(name) }.to_string_lossy().into_owned();
-        let slave = std::fs::OpenOptions::new().read(true).write(true).open(&name)?;
+        // O_NOCTTY: if we are a session leader with no terminal (started by a
+        // launcher that called setsid), opening the slave would make it OUR
+        // controlling terminal, and the shell's TIOCSCTTY would then fail (EPERM).
+        let slave = std::fs::OpenOptions::new().read(true).write(true).custom_flags(O_NOCTTY).open(&name)?;
         set_size(fd, cols, rows);
         let mut cmd = Command::new(shell);
         cmd.stdin(Stdio::from(slave.try_clone()?))

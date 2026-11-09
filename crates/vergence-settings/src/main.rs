@@ -10,10 +10,10 @@
 // applies at once.
 //
 // Pages: Appearance; Theme and fonts; Windows (title bar controls, either side,
-// chosen buttons); Screens (several screens: an overview to arrange them and
+// chosen buttons); Keyboard (key repeat: on, delay, rate, a box to try it); Screens (several screens: an overview to arrange them and
 // the size preference) with a page per screen (scale, wallpaper); About.
 //
-// Files: ~/.config/vergence/desktop.toml ([appearance], [wallpaper],
+// Files: ~/.config/vergence/desktop.toml ([appearance], [keyboard], [wallpaper],
 // [pictures], [displays]) and settings.toml (theme, fonts, the title bar
 // layout); the server applies both within a second. The screens come from the
 // session bus (crates/vergence-protocol), followed live.
@@ -42,6 +42,7 @@ enum Page {
     Appearance,
     Theme,
     Windows,
+    Keyboard,
     Overview,
     Screen(usize),
     About,
@@ -62,6 +63,12 @@ enum Message {
     FontSize(bool, String),
     // Windows.
     Layout(winbar::Layout),
+    // Keyboard.
+    Repeat(bool),
+    RepeatDelay(f32),
+    RepeatRate(f32),
+    RepeatDone,
+    KeyTest(String),
     // Screens.
     Outputs(Vec<OutputInfo>, String),
     Size(f32),
@@ -126,6 +133,18 @@ struct App {
     asked: HashSet<PathBuf>,
     bg_text: String,
     browser: Option<Browser>,
+    // Keyboard: the sliders while they move (saved on release), and the test box.
+    repeat_delay: f32,
+    repeat_rate: f32,
+    key_test: String,
+}
+
+/// Key repeat as GNOME's defaults have it (the server's too): after 500 ms, 30 a second.
+const REPEAT_DELAY: i64 = 500;
+const REPEAT_RATE: i64 = 30;
+
+fn keyboard_int(d: &toml::Table, k: &str, default: i64) -> i64 {
+    d.get("keyboard").and_then(|a| a.get(k)).and_then(|v| v.as_integer()).unwrap_or(default)
 }
 
 fn home() -> PathBuf {
@@ -203,7 +222,12 @@ impl App {
             asked: HashSet::new(),
             bg_text: String::new(),
             browser: None,
+            repeat_delay: 0.0,
+            repeat_rate: 0.0,
+            key_test: String::new(),
         };
+        app.repeat_delay = keyboard_int(&app.desktop, "repeat-delay", REPEAT_DELAY) as f32;
+        app.repeat_rate = keyboard_int(&app.desktop, "repeat-rate", REPEAT_RATE) as f32;
         let task = app.load_pictures();
         (app, task)
     }
@@ -341,6 +365,19 @@ impl App {
                 return self.ask_thumbs(wanted);
             }
             Message::Size(v) => self.size = if (v - 1.0).abs() < 0.035 { 1.0 } else { v },
+            Message::Repeat(on) => self.save_keyboard(|t| {
+                t.insert("repeat".into(), on.into());
+            }),
+            Message::RepeatDelay(v) => self.repeat_delay = v,
+            Message::RepeatRate(v) => self.repeat_rate = v,
+            Message::RepeatDone => {
+                let (delay, rate) = (self.repeat_delay.round() as i64, self.repeat_rate.round() as i64);
+                self.save_keyboard(|t| {
+                    t.insert("repeat-delay".into(), delay.into());
+                    t.insert("repeat-rate".into(), rate.into());
+                });
+            }
+            Message::KeyTest(t) => self.key_test = t,
             Message::SizeDone => {
                 let s = (self.size as f64).clamp(0.75, 1.5);
                 self.save(|d| disp::set_size(d, s));
@@ -486,6 +523,17 @@ impl App {
         Task::none()
     }
 
+    fn save_keyboard(&mut self, f: impl FnOnce(&mut toml::Table)) {
+        self.save(|d| {
+            if !d.get("keyboard").is_some_and(|a| a.is_table()) {
+                d.insert("keyboard".into(), toml::Value::Table(toml::Table::new()));
+            }
+            if let Some(t) = d.get_mut("keyboard").and_then(|a| a.as_table_mut()) {
+                f(t);
+            }
+        });
+    }
+
     fn save_appearance(&mut self, f: impl FnOnce(&mut toml::Table)) {
         self.save(|d| {
             if !d.get("appearance").is_some_and(|a| a.is_table()) {
@@ -580,6 +628,7 @@ impl App {
             Page::Appearance => self.appearance(c),
             Page::Theme => self.theme_page(c),
             Page::Windows => self.windows(c),
+            Page::Keyboard => self.keyboard(c),
             Page::Overview => self.overview(c),
             Page::Screen(_) if self.browser.is_some() => self.browser_page(c),
             Page::Screen(_) => self.screen(c),
@@ -622,6 +671,7 @@ impl App {
             item("Appearance".into(), Page::Appearance, self.page == Page::Appearance, false),
             item("Theme and fonts".into(), Page::Theme, self.page == Page::Theme, false),
             item("Windows".into(), Page::Windows, self.page == Page::Windows, false),
+            item("Keyboard".into(), Page::Keyboard, self.page == Page::Keyboard, false),
             item(if self.outputs.is_empty() { "Wallpaper".into() } else { "Screens".into() }, screens_page, screens_selected, false),
         ]
         .spacing(2);
@@ -726,6 +776,38 @@ impl App {
                     setting(c, "Interface", "Menus, buttons, labels, and the title bars.", font_row(false)),
                     setting(c, "Monospace", "Terminals and code.", font_row(true)),
                 ]),
+                self.status_line(c),
+            ],
+        )
+    }
+
+    fn keyboard(&self, c: Colours) -> Element<'_, Message> {
+        let on = self.desktop.get("keyboard").and_then(|a| a.get("repeat")).and_then(|v| v.as_bool()).unwrap_or(true);
+        let value = |s: String| text(s).size(13).color(c.text).width(64).align_x(iced::alignment::Horizontal::Right);
+        let delay = row![
+            slider(150.0..=1000.0, self.repeat_delay, Message::RepeatDelay).step(10.0_f32).on_release(Message::RepeatDone).width(220),
+            value(format!("{:.0} ms", self.repeat_delay)),
+        ]
+        .spacing(8)
+        .align_y(iced::alignment::Vertical::Center);
+        let rate = row![
+            slider(5.0..=60.0, self.repeat_rate, Message::RepeatRate).step(1.0_f32).on_release(Message::RepeatDone).width(220),
+            value(format!("{:.0} a second", self.repeat_rate)),
+        ]
+        .spacing(8)
+        .align_y(iced::alignment::Vertical::Center);
+        let mut rows = vec![setting(c, "Key repeat", "Holding a key down types it again and again.", toggler(on).on_toggle(Message::Repeat).into())];
+        if on {
+            rows.push(setting(c, "Delay", "How long a key is held before it repeats. Longer: fewer doubled letters.", delay.into()));
+            rows.push(setting(c, "Speed", "How fast it repeats once it starts.", rate.into()));
+        }
+        page_layout(
+            c,
+            "Keyboard",
+            "Key repeat for every app. Changes apply at once.",
+            vec![
+                group(c, Some("Key repeat"), rows),
+                group(c, Some("Try it"), vec![setting(c, "Test", "Hold a key down here.", text_input("Type here", &self.key_test).on_input(Message::KeyTest).size(13).width(260).into())]),
                 self.status_line(c),
             ],
         )

@@ -7,6 +7,10 @@
 //       accent         = "#3b82f6"          (unset: no accent)
 //       contrast       = "normal" | "high"
 //       reduced-motion = false
+//   ~/.config/vergence/desktop.toml  [keyboard]   (the settings app's Keyboard page)
+//       repeat       = true
+//       repeat-delay = 500   (ms before a held key repeats)
+//       repeat-rate  = 30    (repeats a second)
 //   ~/.config/vergence/settings.toml  the XSETTINGS file (theme, icons, cursor,
 //       fonts), shared with vergd.
 //
@@ -18,6 +22,10 @@
 //                                cursor-theme s, cursor-size i, font-name s,
 //                                monospace-font-name s, cursor-blink b,
 //                                cursor-blink-time i, enable-animations b
+//   org.gnome.desktop.peripherals.keyboard   repeat b, delay u (ms),
+//                                repeat-interval u (ms between repeats)
+// Key repeat is also the server's own: every keyboard client gets it at once
+// (wl_keyboard.repeat_info), so a change needs no restart.
 // Subscribers: the core bus's settings topic (bus.rs) and the portal's
 // SettingChanged signal (dbus.rs).
 
@@ -30,6 +38,10 @@ use crate::Server;
 
 pub const APPEARANCE: &str = "org.freedesktop.appearance";
 pub const INTERFACE: &str = "org.gnome.desktop.interface";
+pub const KEYBOARD: &str = "org.gnome.desktop.peripherals.keyboard";
+/// Key repeat without a [keyboard] table: GNOME's defaults (500 ms, then 30 a second).
+pub const REPEAT_DELAY: u32 = 500;
+pub const REPEAT_RATE: u32 = 30;
 
 pub type Map = BTreeMap<(String, String), SettingValue>;
 
@@ -88,6 +100,16 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
     let reduced = appearance.get("reduced-motion").and_then(|v| v.as_bool()).unwrap_or(false);
     put(APPEARANCE, "reduced-motion", SettingValue::U32(reduced as u32));
     put(INTERFACE, "enable-animations", SettingValue::Bool(!reduced));
+
+    let keyboard = desktop
+        .and_then(|t| t.parse::<toml::Table>().ok())
+        .and_then(|t| t.get("keyboard").and_then(|a| a.as_table()).cloned())
+        .unwrap_or_default();
+    let int = |k: &str, default: u32, lo: u32, hi: u32| keyboard.get(k).and_then(|v| v.as_integer()).map_or(default, |v| (v.max(0) as u32).clamp(lo, hi));
+    let rate = int("repeat-rate", REPEAT_RATE, 1, 100);
+    put(KEYBOARD, "repeat", SettingValue::Bool(keyboard.get("repeat").and_then(|v| v.as_bool()).unwrap_or(true)));
+    put(KEYBOARD, "delay", SettingValue::U32(int("repeat-delay", REPEAT_DELAY, 100, 2000)));
+    put(KEYBOARD, "repeat-interval", SettingValue::U32((1000 + rate / 2) / rate));
 
     let xs = xsettings.and_then(|t| vergence_xsettings::from_toml(t).map_err(|e| tracing::warn!("settings.toml: {e}")).ok()).unwrap_or_default();
     let xstr = |k: &str| match xs.get(k) {
@@ -159,6 +181,9 @@ impl Server {
             // Title rasters are drawn again in the new font.
             self.decor.clear();
         }
+        if diff.iter().any(|s| s.namespace == KEYBOARD) {
+            self.apply_key_repeat();
+        }
         if diff.iter().any(|s| s.namespace == INTERFACE)
             && let Some(tx) = &self.xsettings_tx
         {
@@ -167,10 +192,25 @@ impl Server {
         self.redraw_all();
     }
 
+    /// Key repeat from the settings, to the keyboard and every client that has it.
+    pub fn apply_key_repeat(&mut self) {
+        let get = |k: &str| self.settings.current.get(&(KEYBOARD.to_string(), k.to_string()));
+        let on = !matches!(get("repeat"), Some(SettingValue::Bool(false)));
+        let delay = match get("delay") { Some(SettingValue::U32(v)) => *v, _ => REPEAT_DELAY };
+        let interval = match get("repeat-interval") { Some(SettingValue::U32(v)) if *v > 0 => *v, _ => 1000 / REPEAT_RATE };
+        // A rate of 0 turns repeat off (wl_keyboard.repeat_info).
+        let rate = if on { (1000 / interval).max(1) } else { 0 };
+        if let Some(k) = self.seat.get_keyboard() {
+            k.change_repeat_info(rate as i32, delay as i32);
+            tracing::info!("key repeat: {} a second after {delay} ms", rate);
+        }
+    }
+
     /// Load the settings and re-read them whenever a source file changes.
     pub fn start_settings(&mut self) {
         self.settings.current = load();
         self.settings.stamps = stamps();
+        self.apply_key_repeat();
         let res = self.loop_handle.insert_source(Timer::from_duration(std::time::Duration::from_secs(1)), |_, _, state| {
             let now = stamps();
             if now != state.settings.stamps {
@@ -221,6 +261,19 @@ mod tests {
         assert_eq!(get(INTERFACE, "cursor-blink-time"), Some(SettingValue::I32(1200)));
         assert_eq!(get(INTERFACE, "cursor-size"), Some(SettingValue::I32(24)));
         assert_eq!(get(INTERFACE, "icon-theme"), None); // empty is unset
+    }
+
+    #[test]
+    fn key_repeat() {
+        let key = |m: &Map, k: &str| m.get(&(KEYBOARD.to_string(), k.to_string())).cloned();
+        let m = build(None, None, 24);
+        assert_eq!(key(&m, "delay"), Some(SettingValue::U32(500)));
+        assert_eq!(key(&m, "repeat-interval"), Some(SettingValue::U32(33)));
+        assert_eq!(key(&m, "repeat"), Some(SettingValue::Bool(true)));
+        let m = build(Some("[keyboard]\nrepeat = false\nrepeat-delay = 650\nrepeat-rate = 20\n"), None, 24);
+        assert_eq!(key(&m, "delay"), Some(SettingValue::U32(650)));
+        assert_eq!(key(&m, "repeat-interval"), Some(SettingValue::U32(50)));
+        assert_eq!(key(&m, "repeat"), Some(SettingValue::Bool(false)));
     }
 
     #[test]

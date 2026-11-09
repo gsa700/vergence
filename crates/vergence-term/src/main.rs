@@ -8,7 +8,18 @@
 // double-click maximises, the edges resize.
 // Step 3: split panes (iced's pane grid; Dave liked COSMIC Terminal's "ability
 // to split"), selection with copy and paste, and the right-click menu.
-// Next: colour schemes, scrollback viewing.
+// Step 4: mouse reporting (xterm modes 9/1000/1002/1003, SGR 1006): when a
+// program asks for the mouse (htop, vim, mc), clicks, drags and the wheel go
+// to it; Shift keeps selecting and the right-click menu. The wheel on the
+// alternate screen sends arrow keys when the program didn't ask (less, man).
+// Step 5: scrollback viewing: the wheel on the shell's screen, Shift+PageUp/
+// PageDown/Home/End; typing returns to the live screen; "N lines back" shows.
+// A selection dragged past the top or bottom edge scrolls the view; the
+// scrollbar (in the right padding) shows where the view is and can be dragged.
+// Step 6: colour schemes from the desktop's settings (look.rs): dark or light
+// (Catppuccin Mocha / Latte), high contrast, the accent for the cursor,
+// selection and highlights, and the font size, all live within a second.
+// Next: the font family, a scheme picker of its own if wanted.
 //
 // Drawing is in software (iced's tiny-skia): the GPU renderer hung Hubble's
 // GPU and froze the desktop (2026-11-08).
@@ -16,11 +27,15 @@
 #[cfg(test)]
 mod fuzz;
 mod grid;
+mod look;
 mod pty;
 mod term;
 mod vt;
 
 use std::collections::HashMap;
+use std::time::Duration;
+
+use iced::time::Instant;
 use std::sync::{Mutex, OnceLock};
 
 use iced::keyboard::{self, Key, key::Named};
@@ -29,10 +44,22 @@ use iced::widget::{Space, button, column, container, mouse_area, pane_grid, row,
 use iced::window::Direction;
 use iced::{Background, Border, Color, Element, Event, Length, Padding, Point, Rectangle, Renderer, Size, Subscription, Task, Theme, mouse};
 
-use term::{CellPos, PAD, Term};
+use grid::MouseMode;
+use term::{CellPos, MouseAction, MouseButton, PAD, Term};
 
 /// The title bar's height, in points (the server's bar is 24; tabs want more).
 const BAR_H: f32 = 34.0;
+/// The tabs' height: they sit on the bar's bottom edge, joined to the
+/// terminal; everything else in the bar is centred on the tabs' middle.
+const TAB_H: f32 = 28.0;
+/// A tab's width, in points; longer titles end in an ellipsis.
+const TAB_W: f32 = 200.0;
+/// The window buttons' and the + button's icons: one box size, so they line up.
+const ICON: f32 = 10.0;
+/// How far the tab titles are lifted from where iced centres them: it centres
+/// the line box, and Noto Sans' capitals then sit about a point low (measured
+/// from a screenshot at scale 2.25, 2026-11-08). The icons stay exactly centred.
+const TEXT_LIFT: f32 = 1.0;
 /// The invisible border that resizes the window, in points.
 const EDGE: f32 = 5.0;
 /// The gap between panes (the divider), in points.
@@ -46,17 +73,31 @@ const TEXT_ACTIVE: Color = Color::from_rgb(0.92, 0.92, 0.92);
 const TEXT_INACTIVE: Color = Color::from_rgb(0.62, 0.62, 0.62);
 const CLOSE: Color = Color::from_rgb(0.78, 0.30, 0.28);
 /// The terminal's background: the active tab is drawn in it, joined to the text below.
-const TERM_BG: Color = Color::from_rgb(0x1e as f32 / 255.0, 0x1e as f32 / 255.0, 0x2e as f32 / 255.0);
 /// The right-click menu's width, in points.
 const MENU_W: f32 = 236.0;
 const MENU_BG: Color = Color::from_rgb(0.17, 0.18, 0.23);
-const ACCENT: Color = Color::from_rgb(0x89 as f32 / 255.0, 0xb4 as f32 / 255.0, 0xfa as f32 / 255.0);
+/// The menu with the light scheme (secondary surfaces follow the terminal's scheme).
+const MENU_BG_LIGHT: Color = Color::from_rgb(0.97, 0.97, 0.98);
+const MENU_TEXT_LIGHT: Color = Color::from_rgb(0.12, 0.12, 0.18);
+const MENU_DIM_LIGHT: Color = Color::from_rgb(0.50, 0.51, 0.58);
 
 #[derive(Debug, Clone)]
 enum Message {
     Output(u64, Vec<u8>),
     Exited(u64),
     Key(Key, keyboard::Modifiers, Option<String>),
+    Modifiers(keyboard::Modifiers),
+    /// The desktop's look changed (desktop.toml, settings.toml).
+    Look(look::Look),
+    /// Bytes for a terminal's program from the mouse (reporting, or the wheel as arrows).
+    Mouse(u64, Vec<u8>),
+    /// Scroll a terminal's view by lines (positive: back into the scrollback).
+    Scroll(u64, isize),
+    /// The scrollbar: the view goes this many lines back.
+    ScrollTo(u64, usize),
+    /// A selection dragged past the top (positive lines) or bottom edge: the
+    /// view scrolls and the selection's end follows, at this column.
+    DragScroll(u64, isize, usize),
     Resized(Size),
     Focused(bool),
     NewTab,
@@ -104,11 +145,16 @@ struct App {
     focused: bool,
     /// The right-click menu: where (window points) and for which terminal.
     menu: Option<(Point, u64)>,
+    /// The modifier keys held now (Shift-click selects even when a program has the mouse).
+    mods: keyboard::Modifiers,
+    /// The desktop's look: colours, accent, font size.
+    look: look::Look,
 }
 
 impl App {
     fn new() -> App {
-        let mut app = App { terms: HashMap::new(), tabs: Vec::new(), active: 0, next_id: 1, size: initial_size(), focused: true, menu: None };
+        let mut app = App { terms: HashMap::new(), tabs: Vec::new(), active: 0, next_id: 1, size: Size::ZERO, focused: true, menu: None, mods: keyboard::Modifiers::empty(), look: look::Look::load() };
+        app.size = initial_size(&app.look);
         if let Some(id) = app.spawn(app.body()) {
             let (panes, focus) = pane_grid::State::new(id);
             app.tabs.push(Tab { panes, focus });
@@ -125,10 +171,10 @@ impl App {
     fn spawn(&mut self, area: Size) -> Option<u64> {
         let id = self.next_id;
         self.next_id += 1;
-        let cell = term::cell_for(term::font_size());
+        let cell = term::cell_for(&self.look);
         let cols = ((area.width - 2.0 * PAD) / cell.width).floor().max(2.0) as usize;
         let rows = ((area.height - 2.0 * PAD) / cell.height).floor().max(1.0) as usize;
-        match Term::new(id, cols, rows) {
+        match Term::new(id, cols, rows, &self.look) {
             Ok((t, reader)) => {
                 readers().insert(id, reader);
                 self.terms.insert(id, t);
@@ -225,6 +271,19 @@ impl App {
         task
     }
 
+    /// Give a terminal's pane the keyboard (a click in it).
+    fn focus_term(&mut self, id: u64) {
+        if let Some(tab) = self.tabs.get_mut(self.active)
+            && let Some(pane) = tab.panes.iter().find(|(_, v)| **v == id).map(|(p, _)| *p)
+            && tab.focus != pane
+        {
+            tab.focus = pane;
+        } else {
+            return;
+        }
+        self.repaint_tab();
+    }
+
     fn split(&mut self, axis: pane_grid::Axis) {
         let Some(tab) = self.tabs.get(self.active) else { return };
         let focus = tab.focus;
@@ -243,8 +302,10 @@ impl App {
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
             Message::Output(id, bytes) => {
-                if let Some(t) = self.terms.get_mut(&id) {
-                    t.feed(&bytes);
+                if let Some(t) = self.terms.get_mut(&id)
+                    && let Some(copied) = t.feed(&bytes)
+                {
+                    return iced::clipboard::write(copied);
                 }
             }
             Message::Exited(id) => return self.remove_term(id),
@@ -287,6 +348,22 @@ impl App {
                         self.active = (self.active + 1) % n;
                         return Task::none();
                     }
+                    // The scrollback: Shift+PageUp/PageDown a page, Shift+Home/End the ends
+                    // (on the alternate screen the keys go to the program).
+                    Key::Named(n @ (Named::PageUp | Named::PageDown | Named::Home | Named::End))
+                        if mods.shift() && !mods.control() && !mods.alt()
+                            && let Some(t) = self.focused_term().and_then(|id| self.terms.get_mut(&id))
+                            && !t.grid.alt =>
+                    {
+                        let lines = match n {
+                            Named::PageUp => t.page(),
+                            Named::PageDown => -t.page(),
+                            Named::Home => isize::MAX,
+                            _ => isize::MIN,
+                        };
+                        t.scroll_by(lines);
+                        return Task::none();
+                    }
                     Key::Named(Named::Tab) if mods.control() => {
                         self.active = if mods.shift() { (self.active + n - 1) % n } else { (self.active + 1) % n };
                         return Task::none();
@@ -297,8 +374,9 @@ impl App {
                     && let Some(t) = self.terms.get_mut(&id)
                     && let Some(bytes) = term::key_bytes(&key, mods, txt.as_deref(), t.grid.app_cursor)
                 {
-                    // Typing clears the selection, as in other terminals.
+                    // Typing clears the selection and goes back to the live screen, as in other terminals.
                     t.select(None);
+                    t.scroll_to_bottom();
                     t.pty.write(&bytes);
                 }
             }
@@ -342,19 +420,41 @@ impl App {
             }
             Message::Select(id, sel) => {
                 // A click in a pane gives it the keyboard as well.
-                let mut refocus = false;
-                if let Some(tab) = self.tabs.get_mut(self.active)
-                    && let Some(pane) = tab.panes.iter().find(|(_, v)| **v == id).map(|(p, _)| *p)
-                    && tab.focus != pane
-                {
-                    tab.focus = pane;
-                    refocus = true;
-                }
-                if refocus {
-                    self.repaint_tab();
-                }
+                self.focus_term(id);
                 if let Some(t) = self.terms.get_mut(&id) {
                     t.select(sel);
+                }
+            }
+            Message::Modifiers(m) => self.mods = m,
+            Message::Look(l) => {
+                for t in self.terms.values_mut() {
+                    t.set_look(&l);
+                }
+                self.look = l;
+                // A new font size changes how many cells fit.
+                self.fit_all();
+            }
+            Message::Scroll(id, lines) => {
+                if let Some(t) = self.terms.get_mut(&id) {
+                    t.scroll_by(lines);
+                }
+            }
+            Message::ScrollTo(id, lines) => {
+                if let Some(t) = self.terms.get_mut(&id) {
+                    t.scroll_to(lines);
+                }
+            }
+            Message::DragScroll(id, lines, col) => {
+                if let Some(t) = self.terms.get_mut(&id) {
+                    t.scroll_by(lines);
+                    t.drag_to_edge(col, lines > 0);
+                }
+            }
+            Message::Mouse(id, bytes) => {
+                self.focus_term(id);
+                if let Some(t) = self.terms.get_mut(&id) {
+                    t.select(None);
+                    t.pty.write(&bytes);
                 }
             }
             Message::Menu(id, at) => self.menu = Some((at, id)),
@@ -395,9 +495,10 @@ impl App {
         let body: Element<'_, Message> = match self.tabs.get(self.active) {
             Some(tab) => {
                 let focus = tab.focus;
+                let accent = self.look.palette().accent;
                 pane_grid::PaneGrid::new(&tab.panes, move |pane, id, _| {
                     let content: Element<'_, Message> = match self.terms.get(id) {
-                        Some(t) => Canvas::new(View { term: t, focused: self.focused && pane == focus }).width(Length::Fill).height(Length::Fill).into(),
+                        Some(t) => Canvas::new(View { term: t, focused: self.focused && pane == focus, mods: self.mods }).width(Length::Fill).height(Length::Fill).into(),
                         None => Space::new().into(),
                     };
                     pane_grid::Content::new(content)
@@ -405,10 +506,10 @@ impl App {
                 .spacing(DIVIDER)
                 .on_click(Message::FocusPane)
                 .on_resize(8, Message::PaneResized)
-                .style(|_: &Theme| pane_grid::Style {
-                    hovered_region: pane_grid::Highlight { background: Background::Color(Color { a: 0.2, ..ACCENT }), border: Border::default() },
-                    picked_split: pane_grid::Line { color: ACCENT, width: 2.0 },
-                    hovered_split: pane_grid::Line { color: ACCENT, width: 2.0 },
+                .style(move |_: &Theme| pane_grid::Style {
+                    hovered_region: pane_grid::Highlight { background: Background::Color(Color { a: 0.2, ..accent }), border: Border::default() },
+                    picked_split: pane_grid::Line { color: accent, width: 2.0 },
+                    hovered_split: pane_grid::Line { color: accent, width: 2.0 },
                 })
                 .into()
             }
@@ -435,15 +536,23 @@ impl App {
     /// The right-click menu at `at`: a click outside it closes it.
     fn context_menu(&self, at: Point, id: u64) -> Element<'_, Message> {
         let has_selection = self.terms.get(&id).and_then(Term::selected_text).is_some();
+        let dark = self.look.dark;
+        let accent = self.look.palette().accent;
+        let (ui, ui_size) = (self.look.ui_font(), self.look.ui_size);
+        let (menu_bg, text_on, text_off, edge) =
+            if dark { (MENU_BG, TEXT_ACTIVE, TEXT_INACTIVE, Color { a: 0.15, ..Color::WHITE }) } else { (MENU_BG_LIGHT, MENU_TEXT_LIGHT, MENU_DIM_LIGHT, Color { a: 0.18, ..Color::BLACK }) };
         let item = |label: &'static str, keys: &'static str, m: Option<Message>| {
             let enabled = m.is_some();
-            let c = if enabled { TEXT_ACTIVE } else { TEXT_INACTIVE };
-            let mut b = button(row![text(label).size(13).color(c).width(Length::Fill), text(keys).size(11).color(TEXT_INACTIVE)].spacing(12).align_y(iced::alignment::Vertical::Center))
+            let c = if enabled { text_on } else { text_off };
+            // Hovered: the accent behind white text (readable on either scheme).
+            let mut b = button(row![text(label).font(ui).size(ui_size).width(Length::Fill), text(keys).font(ui).size(ui_size - 2.0)].spacing(12).align_y(iced::alignment::Vertical::Center))
                 .width(Length::Fill)
                 .padding(Padding::from([5, 10]))
                 .style(move |_: &Theme, s| {
-                    let bg = (enabled && s == button::Status::Hovered).then_some(Color { a: 0.9, ..ACCENT });
-                    rounded(plain(s, bg))
+                    let hovered = enabled && s == button::Status::Hovered;
+                    let mut st = rounded(plain(s, hovered.then_some(Color { a: 0.9, ..accent })));
+                    st.text_color = if hovered { Color::WHITE } else { c };
+                    st
                 });
             if let Some(m) = m {
                 b = b.on_press(m);
@@ -451,7 +560,8 @@ impl App {
             b
         };
         // A hairline with room around it (the padding outside the coloured line).
-        let line = || container(container(Space::new().height(1.0).width(Length::Fill)).style(|_| container::background(Color { a: 0.12, ..Color::WHITE }))).padding(Padding::from([4, 8]));
+        let hairline = if dark { Color { a: 0.12, ..Color::WHITE } } else { Color { a: 0.12, ..Color::BLACK } };
+        let line = || container(container(Space::new().height(1.0).width(Length::Fill)).style(move |_| container::background(hairline))).padding(Padding::from([4, 8]));
         // As wide as its longest line ("Split top and bottom" and its keys), no
         // wider: the separators fill the column, so the column sets the width.
         let menu = container(column![
@@ -466,9 +576,9 @@ impl App {
         ]
         .width(Length::Fixed(MENU_W)))
         .padding(4)
-        .style(|_| container::Style {
-            background: Some(Background::Color(MENU_BG)),
-            border: Border { color: Color { a: 0.15, ..Color::WHITE }, width: 1.0, radius: 8.0.into() },
+        .style(move |_| container::Style {
+            background: Some(Background::Color(menu_bg)),
+            border: Border { color: edge, width: 1.0, radius: 8.0.into() },
             ..container::Style::default()
         });
         // Kept inside the window.
@@ -479,30 +589,49 @@ impl App {
         stack![mouse_area(Space::new().width(Length::Fill).height(Length::Fill)).on_press(Message::CloseMenu).on_right_press(Message::CloseMenu), placed].into()
     }
 
-    /// The bar: tabs (the active one in the terminal's colour, joined to it),
-    /// +, room to grab, and the window buttons.
+    /// The bar: tabs (the active one in the terminal's colours, joined to it),
+    /// +, room to grab, and the window buttons where the desktop's layout
+    /// (Gtk/DecorationLayout) puts them. Tabs sit on the bar's bottom edge;
+    /// every other item is centred on the tabs' middle line, and the icons
+    /// share one box size, so the whole bar lines up.
     fn title_bar(&self) -> Element<'_, Message> {
         let fg = if self.focused { TEXT_ACTIVE } else { TEXT_INACTIVE };
         let bar_bg = if self.focused { BAR_ACTIVE } else { BAR_INACTIVE };
-        let mut tabs = row![].spacing(2).height(Length::Fill).align_y(iced::alignment::Vertical::Bottom);
+        let pal = self.look.palette();
+        let (ui, ui_size) = (self.look.ui_font(), self.look.ui_size);
+        let center = iced::alignment::Vertical::Center;
+        let mut tabs = row![].spacing(2).height(Length::Fixed(TAB_H)).align_y(center);
         for (i, tab) in self.tabs.iter().enumerate() {
             let active = i == self.active;
             let title = tab.panes.get(tab.focus).and_then(|id| self.terms.get(id)).map(Term::title).unwrap_or_default();
             let count = tab.panes.len();
-            let label = if count > 1 { format!("{title}  ({count})") } else { title };
-            let close = button(text("\u{2715}").size(11).color(fg))
-                .padding(Padding::from([2, 6]))
+            let label = if count > 1 { format!("{title}  ({count})") } else { title.clone() };
+            let tab_fg = if active { pal.fg } else { fg };
+            let close = button(icon(Glyph::Close, tab_fg, 8.0))
+                .width(Length::Fixed(20.0))
+                .height(Length::Fixed(20.0))
+                .padding(0)
                 .on_press(Message::CloseTab(i))
-                .style(move |_: &Theme, s| plain(s, if s == button::Status::Hovered { Some(Color { a: 0.18, ..Color::WHITE }) } else { None }));
-            let content = row![text(label).size(12).color(fg).width(Length::Fill).wrapping(text::Wrapping::None), close].align_y(iced::alignment::Vertical::Center).spacing(4);
+                .style(move |_: &Theme, s| rounded(plain(s, if s == button::Status::Hovered { Some(Color { a: 0.18, ..tab_fg }) } else { None })));
+            // The pane count stays visible: only the title is shortened.
+            let room = TAB_W - 12.0 - 4.0 - 6.0 - 20.0;
+            let label = if count > 1 {
+                let suffix = format!("  ({count})");
+                format!("{}{suffix}", fit_label(&title, room - text_width(&suffix, ui_size), ui_size))
+            } else {
+                fit_label(&label, room, ui_size)
+            };
+            let name = text(label).font(ui).size(ui_size).color(tab_fg).width(Length::Fill).height(Length::Fill).align_y(center).wrapping(text::Wrapping::None);
+            let name = container(name).width(Length::Fill).height(Length::Fill).clip(true).padding(Padding { bottom: 2.0 * TEXT_LIFT, ..Padding::ZERO });
+            let content = row![name, close].height(Length::Fill).align_y(center).spacing(6);
             let tab_button = button(content)
-                .width(Length::Fixed(200.0))
-                .height(Length::Fixed(BAR_H - 6.0))
+                .width(Length::Fixed(TAB_W))
+                .height(Length::Fixed(TAB_H))
                 .padding(Padding { top: 0.0, bottom: 0.0, left: 12.0, right: 4.0 })
                 .on_press(Message::SelectTab(i))
                 .style(move |_: &Theme, s| {
                     let bg = if active {
-                        Some(TERM_BG)
+                        Some(pal.bg)
                     } else if s == button::Status::Hovered {
                         Some(Color { a: 0.10, ..Color::WHITE })
                     } else {
@@ -514,69 +643,241 @@ impl App {
                 });
             tabs = tabs.push(tab_button);
         }
-        let new_tab = button(text("+").size(16).color(fg))
-            .padding(Padding::from([2, 10]))
+        let new_tab = button(icon(Glyph::Plus, fg, ICON))
+            .width(Length::Fixed(28.0))
+            .height(Length::Fixed(24.0))
+            .padding(0)
             .on_press(Message::NewTab)
             .style(move |_: &Theme, s| rounded(plain(s, if s == button::Status::Hovered { Some(Color { a: 0.12, ..Color::WHITE }) } else { None })));
         let grab = mouse_area(Space::new().width(Length::Fill).height(Length::Fill)).on_press(Message::Drag).on_double_click(Message::ToggleMaximize);
-        let win_button = |label: &'static str, m: Message, danger: bool| {
-            button(text(label).size(12).color(fg))
+        let win_button = |b: look::WinButton| -> Element<'_, Message> {
+            let (glyph, m, danger) = match b {
+                look::WinButton::Minimize => (Glyph::Minimize, Message::Minimize, false),
+                look::WinButton::Maximize => (Glyph::Maximize, Message::ToggleMaximize, false),
+                look::WinButton::Close => (Glyph::Close, Message::CloseWindow, true),
+            };
+            button(icon(glyph, fg, ICON))
                 .width(Length::Fixed(32.0))
                 .height(Length::Fixed(24.0))
-                .padding(Padding::from([4, 10]))
+                .padding(0)
                 .on_press(m)
                 .style(move |_: &Theme, s| {
                     let hover = if danger { CLOSE } else { Color { a: 0.15, ..Color::WHITE } };
                     rounded(plain(s, if s == button::Status::Hovered { Some(hover) } else { None }))
                 })
+                .into()
         };
-        let buttons = row![win_button("\u{2013}", Message::Minimize, false), win_button("\u{25a1}", Message::ToggleMaximize, false), win_button("\u{2715}", Message::CloseWindow, true)]
-            .spacing(2)
-            .align_y(iced::alignment::Vertical::Center);
-        let bar = row![tabs, new_tab, grab, buttons].spacing(4).align_y(iced::alignment::Vertical::Center).padding(Padding { top: 4.0, bottom: 0.0, left: 6.0, right: 6.0 });
-        container(bar).height(Length::Fixed(BAR_H)).width(Length::Fill).style(move |_| container::background(bar_bg)).into()
+        let side = |list: &[look::WinButton]| row(list.iter().map(|b| win_button(*b))).spacing(2).align_y(center);
+        let bar = row![side(&self.look.buttons_left), tabs, new_tab, grab, side(&self.look.buttons_right)].spacing(4).height(Length::Fixed(TAB_H)).align_y(center);
+        container(bar)
+            .padding(Padding { top: BAR_H - TAB_H, bottom: 0.0, left: 6.0, right: 6.0 })
+            .height(Length::Fixed(BAR_H))
+            .width(Length::Fill)
+            .style(move |_| container::background(bar_bg))
+            .into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
         let mut subs: Vec<Subscription<Message>> = self.terms.keys().map(|id| Subscription::run_with(*id, output)).collect();
         subs.push(iced::event::listen_with(event));
+        subs.push(Subscription::run(watch_look));
         Subscription::batch(subs)
     }
 }
 
-/// A pane on screen: the terminal, and whether it has the keyboard. Mouse:
-/// left drag selects (a click clears), right opens the menu.
+/// A pane on screen: the terminal, whether it has the keyboard, and the
+/// modifier keys held. Mouse: left drag selects (a click clears), right opens
+/// the menu, unless the program asked for the mouse (then it gets the events;
+/// Shift still selects and opens the menu).
 struct View<'a> {
     term: &'a Term,
     focused: bool,
+    mods: keyboard::Modifiers,
+}
+
+/// A pane's mouse state between events.
+#[derive(Default)]
+struct Pointer {
+    /// The selection's anchor while the left button is held.
+    anchor: Option<CellPos>,
+    /// The button whose press went to the program, until its release.
+    held: Option<MouseButton>,
+    /// The cell of the last report (motion is reported per cell).
+    last: Option<CellPos>,
+    /// Wheel movement not yet a whole step (touchpads scroll in pixels).
+    wheel: f32,
+    /// The scrollbar's thumb is being dragged: where in it it was grabbed.
+    thumb: Option<f32>,
+    /// A selection is being dragged past the pane's edge: when the view last scrolled.
+    edge_tick: Option<Instant>,
+}
+
+/// While a selection is held past the pane's edge, the view scrolls this often.
+const EDGE_TICK: Duration = Duration::from_millis(50);
+
+fn button_of(b: mouse::Button) -> Option<MouseButton> {
+    match b {
+        mouse::Button::Left => Some(MouseButton::Left),
+        mouse::Button::Middle => Some(MouseButton::Middle),
+        mouse::Button::Right => Some(MouseButton::Right),
+        _ => None,
+    }
+}
+
+impl View<'_> {
+    /// The program has the mouse (Shift takes it back for selecting).
+    fn reporting(&self) -> bool {
+        self.term.grid.mouse != MouseMode::Off && !self.mods.shift()
+    }
+
+    fn report(&self, action: MouseAction, cell: CellPos) -> Option<Vec<u8>> {
+        let g = &self.term.grid;
+        term::mouse_bytes(g.mouse, g.mouse_sgr, action, cell, self.mods)
+    }
+
+    /// The point under the pointer in the pane; past the pane's edge, the nearest one.
+    fn point_clamped(bounds: Rectangle, cursor: mouse::Cursor) -> Point {
+        cursor.position_in(bounds).unwrap_or_else(|| {
+            let c = cursor.position().unwrap_or(bounds.position());
+            Point::new((c.x - bounds.x).clamp(0.0, bounds.width), (c.y - bounds.y).clamp(0.0, bounds.height))
+        })
+    }
+
+    /// The screen cell under the pointer (mouse reporting).
+    fn cell_clamped(&self, bounds: Rectangle, cursor: mouse::Cursor) -> CellPos {
+        let p = Self::point_clamped(bounds, cursor);
+        self.term.cell_at(p.x, p.y)
+    }
+
+    /// The cell under the pointer as the selection counts it (absolute rows).
+    fn text_cell_clamped(&self, bounds: Rectangle, cursor: mouse::Cursor) -> CellPos {
+        let p = Self::point_clamped(bounds, cursor);
+        self.term.text_cell_at(p.x, p.y)
+    }
 }
 
 impl Program<Message> for View<'_> {
-    /// The selection's anchor while the left button is held.
-    type State = Option<CellPos>;
+    type State = Pointer;
 
     fn update(&self, state: &mut Self::State, event: &Event, bounds: Rectangle, cursor: mouse::Cursor) -> Option<canvas::Action<Message>> {
         let at = cursor.position_in(bounds);
         let id = self.term.id;
+        let send = |bytes: Option<Vec<u8>>| Some(match bytes {
+            Some(b) => canvas::Action::publish(Message::Mouse(id, b)).and_capture(),
+            None => canvas::Action::capture(),
+        });
         match event {
+            // The scrollbar: a press on the thumb grabs it; elsewhere on the track the thumb jumps there.
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                if let Some(p) = at
+                    && p.x >= bounds.width - term::SCROLLBAR_GRAB
+                    && let Some((_, thumb)) = self.term.scrollbar(bounds.size()) =>
+            {
+                let grab = if (thumb.y..thumb.y + thumb.height).contains(&p.y) { p.y - thumb.y } else { thumb.height / 2.0 };
+                state.thumb = Some(grab);
+                let to = self.term.scroll_for_thumb(bounds.size(), p.y - grab)?;
+                Some(canvas::Action::publish(Message::ScrollTo(id, to)).and_capture())
+            }
+            Event::Mouse(mouse::Event::CursorMoved { .. }) if let Some(grab) = state.thumb => {
+                let y = cursor.position().map(|c| c.y - bounds.y)?;
+                let to = self.term.scroll_for_thumb(bounds.size(), y - grab)?;
+                (to != self.term.scroll).then(|| canvas::Action::publish(Message::ScrollTo(id, to)).and_capture())
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if state.thumb.is_some() => {
+                state.thumb = None;
+                Some(canvas::Action::capture())
+            }
+            // A selection held past the top or bottom edge: scroll every EDGE_TICK,
+            // faster the further out the pointer is.
+            Event::Window(iced::window::Event::RedrawRequested(now)) if state.anchor.is_some() && state.edge_tick.is_some() => {
+                let c = cursor.position()?;
+                let (above, below) = (bounds.y - c.y, c.y - (bounds.y + bounds.height));
+                let speed = |d: f32| 1 + ((d / self.term.cell.height) as isize).min(9);
+                let lines = if above > 0.0 {
+                    speed(above)
+                } else if below > 0.0 {
+                    -speed(below)
+                } else {
+                    state.edge_tick = None;
+                    return None;
+                };
+                let last = state.edge_tick?;
+                if now.duration_since(last) < EDGE_TICK {
+                    return Some(canvas::Action::request_redraw_at(last + EDGE_TICK));
+                }
+                state.edge_tick = Some(*now);
+                let col = self.term.cell_at((c.x - bounds.x).clamp(0.0, bounds.width), PAD).0;
+                // (Publishing redraws, so the next tick comes on the next RedrawRequested.)
+                Some(canvas::Action::publish(Message::DragScroll(id, lines, col)))
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(b)) if self.reporting() && state.held.is_none() => {
+                let p = at?;
+                let btn = button_of(*b)?;
+                let cell = self.term.cell_at(p.x, p.y);
+                state.held = Some(btn);
+                state.last = Some(cell);
+                send(self.report(MouseAction::Press(btn), cell))
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(b)) if state.held.is_some() && state.held == button_of(*b) => {
+                let btn = state.held.take()?;
+                let cell = self.cell_clamped(bounds, cursor);
+                state.last = Some(cell);
+                send(self.report(MouseAction::Release(btn), cell))
+            }
+            Event::Mouse(mouse::Event::CursorMoved { .. }) if state.anchor.is_none() && (state.held.is_some() || (self.reporting() && at.is_some())) => {
+                let cell = self.cell_clamped(bounds, cursor);
+                if state.last == Some(cell) {
+                    return None;
+                }
+                state.last = Some(cell);
+                self.report(MouseAction::Motion(state.held), cell).map(|b| canvas::Action::publish(Message::Mouse(id, b)).and_capture())
+            }
+            Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                let p = at?;
+                // One step per notch (no smooth scrolling); pixels add up to a cell's height.
+                state.wheel += match delta {
+                    mouse::ScrollDelta::Lines { y, .. } => *y,
+                    mouse::ScrollDelta::Pixels { y, .. } => *y / self.term.cell.height,
+                };
+                let steps = state.wheel.trunc();
+                state.wheel -= steps;
+                if steps == 0.0 {
+                    return None;
+                }
+                let (up, n) = (steps > 0.0, steps.abs() as usize);
+                if self.reporting() {
+                    let cell = self.term.cell_at(p.x, p.y);
+                    let one = self.report(if up { MouseAction::WheelUp } else { MouseAction::WheelDown }, cell)?;
+                    return send(Some(one.repeat(n)));
+                }
+                if self.term.grid.alt {
+                    return send(Some(term::wheel_keys(up, self.term.grid.app_cursor, 3 * n)));
+                }
+                // The shell's screen: the view scrolls through the scrollback, 3 lines a notch.
+                let lines = 3 * n as isize;
+                Some(canvas::Action::publish(Message::Scroll(id, if up { lines } else { -lines })).and_capture())
+            }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let p = at?;
-                let cell = self.term.cell_at(p.x, p.y);
-                *state = Some(cell);
+                let cell = self.term.text_cell_at(p.x, p.y);
+                state.anchor = Some(cell);
                 Some(canvas::Action::publish(Message::Select(id, None)).and_capture())
             }
             Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                let anchor = (*state)?;
-                let p = cursor.position_in(bounds).unwrap_or_else(|| {
-                    // Dragging past the pane's edge keeps selecting up to it.
-                    let c = cursor.position().unwrap_or(bounds.position());
-                    Point::new((c.x - bounds.x).clamp(0.0, bounds.width), (c.y - bounds.y).clamp(0.0, bounds.height))
-                });
-                let cell = self.term.cell_at(p.x, p.y);
+                let anchor = state.anchor?;
+                // Past the top or bottom edge: the view starts scrolling (RedrawRequested above).
+                let outside = cursor.position().is_some_and(|c| c.y < bounds.y || c.y > bounds.y + bounds.height);
+                if outside && state.edge_tick.is_none() {
+                    state.edge_tick = Some(Instant::now() - EDGE_TICK);
+                } else if !outside {
+                    state.edge_tick = None;
+                }
+                let cell = self.text_cell_clamped(bounds, cursor);
                 Some(canvas::Action::publish(Message::Select(id, Some((anchor, cell)))).and_capture())
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                state.take()?;
+                state.edge_tick = None;
+                state.anchor.take()?;
                 Some(canvas::Action::capture())
             }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
@@ -593,8 +894,57 @@ impl Program<Message> for View<'_> {
     }
 
     fn mouse_interaction(&self, _state: &Self::State, bounds: Rectangle, cursor: mouse::Cursor) -> mouse::Interaction {
-        if cursor.is_over(bounds) { mouse::Interaction::Text } else { mouse::Interaction::default() }
+        // An arrow while the program has the mouse, as in xterm; else the text beam.
+        let on_bar = cursor.position_in(bounds).is_some_and(|p| p.x >= bounds.width - term::SCROLLBAR_GRAB) && self.term.scrollbar(bounds.size()).is_some();
+        if !cursor.is_over(bounds) || self.reporting() || on_bar { mouse::Interaction::default() } else { mouse::Interaction::Text }
     }
+}
+
+/// The bar's icons, drawn as lines (font glyphs for these differ in size and
+/// height from font to font, so they never lined up).
+#[derive(Debug, Clone, Copy)]
+enum Glyph {
+    Minimize,
+    Maximize,
+    Close,
+    Plus,
+}
+
+struct Icon {
+    glyph: Glyph,
+    color: Color,
+    size: f32,
+}
+
+impl Program<Message> for Icon {
+    type State = ();
+
+    fn draw(&self, _state: &(), renderer: &Renderer, _theme: &Theme, bounds: Rectangle, _cursor: mouse::Cursor) -> Vec<Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let s = self.size;
+        let (x, y) = ((bounds.width - s) / 2.0, (bounds.height - s) / 2.0);
+        let stroke = canvas::Stroke::default().with_color(self.color).with_width(1.25).with_line_cap(canvas::LineCap::Round);
+        let line = |frame: &mut canvas::Frame, a: (f32, f32), b: (f32, f32)| frame.stroke(&canvas::Path::line(Point::new(x + a.0, y + a.1), Point::new(x + b.0, y + b.1)), stroke);
+        match self.glyph {
+            // On the box's bottom edge, as GNOME and Windows draw it.
+            Glyph::Minimize => line(&mut frame, (0.0, s), (s, s)),
+            Glyph::Maximize => frame.stroke(&canvas::Path::rectangle(Point::new(x, y), Size::new(s, s)), stroke),
+            Glyph::Close => {
+                line(&mut frame, (0.0, 0.0), (s, s));
+                line(&mut frame, (s, 0.0), (0.0, s));
+            }
+            Glyph::Plus => {
+                line(&mut frame, (s / 2.0, 0.0), (s / 2.0, s));
+                line(&mut frame, (0.0, s / 2.0), (s, s / 2.0));
+            }
+        }
+        vec![frame.into_geometry()]
+    }
+}
+
+/// An icon filling its button, drawn centred at `size` points.
+fn icon<'a>(glyph: Glyph, color: Color, size: f32) -> Element<'a, Message> {
+    Canvas::new(Icon { glyph, color, size }).width(Length::Fill).height(Length::Fill).into()
 }
 
 /// A flat button: no frame, an optional background.
@@ -625,9 +975,22 @@ fn output(id: &u64) -> impl iced::futures::Stream<Item = Message> + use<> {
     })
 }
 
+/// The desktop's look as messages, from a thread that watches its files.
+fn watch_look() -> impl iced::futures::Stream<Item = Message> {
+    iced::stream::channel(4, |tx: iced::futures::channel::mpsc::Sender<Message>| async move {
+        std::thread::spawn(move || {
+            use iced::futures::SinkExt;
+            let mut tx = tx;
+            look::watch(look::Look::load(), |l| iced::futures::executor::block_on(tx.send(Message::Look(l))).is_ok());
+        });
+        std::future::pending::<()>().await;
+    })
+}
+
 fn event(e: Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<Message> {
     match e {
         Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, text, .. }) => Some(Message::Key(key, modifiers, text.map(|t| t.to_string()))),
+        Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => Some(Message::Modifiers(m)),
         Event::Window(iced::window::Event::Resized(size)) => Some(Message::Resized(size)),
         Event::Window(iced::window::Event::Focused) => Some(Message::Focused(true)),
         Event::Window(iced::window::Event::Unfocused) => Some(Message::Focused(false)),
@@ -635,9 +998,48 @@ fn event(e: Event, _status: iced::event::Status, _window: iced::window::Id) -> O
     }
 }
 
+/// Shortens a tab title to fit `width` points, ending it in an ellipsis.
+/// iced 0.14 has no ellipsis, so widths are estimated per character (Noto
+/// Sans averages about 0.55 em; narrow letters count less, wide ones more).
+/// The tab also clips its text, so a low estimate never draws past the tab.
+fn fit_label(label: &str, width: f32, size: f32) -> String {
+    let w = |c: char| char_width(c, size);
+    if text_width(label, size) <= width {
+        return label.to_string();
+    }
+    let room = width - w('…');
+    let mut used = 0.0;
+    let mut out = String::new();
+    for c in label.chars() {
+        used += w(c);
+        if used > room {
+            break;
+        }
+        out.push(c);
+    }
+    format!("{}…", out.trim_end())
+}
+
+fn text_width(s: &str, size: f32) -> f32 {
+    s.chars().map(|c| char_width(c, size)).sum()
+}
+
+fn char_width(c: char, size: f32) -> f32 {
+    {
+        let em = match c {
+            'i' | 'l' | 'j' | 't' | 'f' | 'r' | 'I' | '.' | ',' | ':' | ';' | '\'' | '|' | '!' | ' ' => 0.30,
+            'm' | 'w' | 'M' | 'W' | '@' => 0.85,
+            c if c.is_uppercase() || c.is_ascii_digit() => 0.62,
+            c if c.is_ascii() => 0.53,
+            _ => 1.0,
+        };
+        em * size
+    }
+}
+
 /// 80 x 24 cells, plus the padding and the title bar.
-fn initial_size() -> Size {
-    let cell = term::cell_for(term::font_size());
+fn initial_size(look: &look::Look) -> Size {
+    let cell = term::cell_for(look);
     Size::new(80.0 * cell.width + 2.0 * PAD, 24.0 * cell.height + 2.0 * PAD + BAR_H)
 }
 
@@ -658,7 +1060,7 @@ fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
         .title(App::title)
         .subscription(App::subscription)
-        .window(iced::window::Settings { size: initial_size(), decorations: false, ..Default::default() })
+        .window(iced::window::Settings { size: initial_size(&look::Look::load()), decorations: false, ..Default::default() })
         .theme(|_: &App| Theme::CatppuccinMocha)
         .run()
 }

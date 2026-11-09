@@ -4636,7 +4636,9 @@ dependencies = [
 name = "vergence-term"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "iced",
+ "toml",
  "vergence-xsettings",
 ]
 
