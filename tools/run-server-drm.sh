@@ -6,6 +6,8 @@
 export XDG_RUNTIME_DIR=/tmp/xdg-$(id -u)
 mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
 export LIBSEAT_BACKEND=seatd
+# The development control socket (vctl): off in the server unless asked.
+export VERGENCE_CONTROL=${VERGENCE_CONTROL:-1}
 export RUST_LOG=${RUST_LOG:-info,smithay=warn}
 LOG=$HOME/vergence-drm.log
 BIN=$HOME/src/vergence/target/release/vergence-server

@@ -68,8 +68,15 @@ the current milestone is docs/bus-milestone-1.md (the session bus; the server's 
   window manager, and pieces the phase 2 server needs (e.g. the XSETTINGS
   manager) are written to carry over. Xfce stays the desktop on Hubble until
   the server replaces it.
-- **Phase 1 security rules** (whitepaper §7.3): no network socket, no
-  unauthenticated control interface, saved state owner-only (0600).
+- **Security rules** (whitepaper §7.3): no network socket, no
+  unauthenticated control interface, saved state owner-only (0600). The
+  server's sockets (control, bus, D-Bus edge) check the peer's uid. The
+  control socket (`vctl`) exists only when the server starts with
+  `VERGENCE_CONTROL=1` (the launchers in tools/ set it; a nested run needs it
+  by hand): it bypasses every §7.3 mitigation for any program running as the
+  user. Security pass 2026-11-08: docs/security-pass-2026-11-08.md; the
+  fuzz tests (vergence-protocol, vergence-dbus, vergence-term) run with
+  `cargo test`; `FUZZ_ITERS=<n>` for a long run.
 - **GitHub: private `gsa700/vergence`** (origin, created 2026-11-06 at
   Dave's go). Push after committing. Going public is Dave's call (needs
   license files; the whitepaper byline has his callsign, the ASUS test EDID

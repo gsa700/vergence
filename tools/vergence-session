@@ -24,6 +24,10 @@ unset QT_SCREEN_SCALE_FACTORS QT_SCALE_FACTOR QT_AUTO_SCREEN_SCALE_FACTOR \
 # finds logind by itself (Fedora on Techbench, 2026-11-08).
 [ "$(uname -s)" = FreeBSD ] && export LIBSEAT_BACKEND=seatd
 export XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=Vergence
+# The development control socket (vctl; src/control.rs): off in the server
+# unless asked. Any program running as the user can drive the session through
+# it, so this line is what makes a session a development session.
+export VERGENCE_CONTROL=${VERGENCE_CONTROL:-1}
 export RUST_LOG=${RUST_LOG:-info,smithay=warn}
 LOG=$HOME/vergence-drm.log
 # A quick failure at start is retried: when the user logs out of an X session and

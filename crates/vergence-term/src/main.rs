@@ -13,6 +13,8 @@
 // Drawing is in software (iced's tiny-skia): the GPU renderer hung Hubble's
 // GPU and froze the desktop (2026-11-08).
 
+#[cfg(test)]
+mod fuzz;
 mod grid;
 mod pty;
 mod term;

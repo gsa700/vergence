@@ -311,7 +311,7 @@ impl Grid {
                         self.set_alt(true);
                     } else {
                         self.set_alt(false);
-                        (self.cx, self.cy, self.pen) = self.saved;
+                        self.restore_cursor();
                     }
                 }
                 (true, 2004) => self.bracketed_paste = on,
@@ -491,7 +491,7 @@ impl Perform for Grid {
             'h' => self.mode(private_q, params, true),
             'l' => self.mode(private_q, params, false),
             's' if private.is_none() => self.saved = (self.cx, self.cy, self.pen),
-            'u' if private.is_none() => (self.cx, self.cy, self.pen) = self.saved,
+            'u' if private.is_none() => self.restore_cursor(),
             'n' if private.is_none() => match raw(0) {
                 5 => self.out.extend_from_slice(b"\x1b[0n"),
                 6 => self.out.extend_from_slice(format!("\x1b[{};{}R", self.cy + 1, self.cx + 1).as_bytes()),
@@ -513,7 +513,7 @@ impl Perform for Grid {
         }
         match last {
             b'7' => self.saved = (self.cx, self.cy, self.pen),
-            b'8' => (self.cx, self.cy, self.pen) = self.saved,
+            b'8' => self.restore_cursor(),
             b'D' => self.linefeed(),
             b'E' => {
                 self.cx = 0;
@@ -550,6 +550,17 @@ impl Perform for Grid {
 }
 
 impl Grid {
+    /// DECRC / CSI u: the saved cursor, kept on the screen. The screen may have
+    /// shrunk since the save (an editor saves, the window is resized, it
+    /// restores): an unclamped restore put the cursor past the last line and
+    /// the next character crashed the terminal (fuzz test, 2026-11-08).
+    fn restore_cursor(&mut self) {
+        let (x, y, pen) = self.saved;
+        self.cx = x.min(self.cols - 1);
+        self.cy = y.min(self.rows - 1);
+        self.pen = pen;
+    }
+
     /// Delete lines / scroll up without sending lines to the scrollback.
     fn scroll_up_no_scrollback(&mut self, n: usize) {
         for _ in 0..n.min(self.bottom + 1 - self.top) {
@@ -591,6 +602,19 @@ mod tests {
         assert_eq!(g.text(), "1\n2\n3");
         assert_eq!(g.scrollback.len(), 2);
         assert_eq!((g.cx, g.cy), (1, 2));
+    }
+
+    #[test]
+    fn restored_cursor_stays_on_a_smaller_screen() {
+        let mut g = Grid::new(80, 24);
+        feed(&mut g, "\x1b[24;80H\x1b7\x1b[1;1H");
+        g.resize(10, 4);
+        feed(&mut g, "\x1b8x");
+        assert_eq!((g.cx, g.cy), (9, 3));
+        feed(&mut g, "\x1b[4;10H\x1b[s");
+        g.resize(5, 2);
+        feed(&mut g, "\x1b[uy");
+        assert_eq!(g.text().lines().count(), 2);
     }
 
     #[test]

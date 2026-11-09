@@ -5,8 +5,15 @@
 // $XDG_RUNTIME_DIR/vergence-control, a Unix socket in the user's private runtime
 // directory (0700), mode 0600, and every connection's peer uid is checked against
 // ours (getpeereid / SO_PEERCRED): owner-only, so it is not an unauthenticated control interface
-// (whitepaper §7.3). No network socket. One command per connection, one line in,
-// text out:
+// (whitepaper §7.3). No network socket.
+//
+// Off unless VERGENCE_CONTROL=1 (security pass 2026-11-08): owner-only still
+// means any program running as the user, and these commands bypass every
+// mitigation in whitepaper §7.3 (input injection, focus, screen capture, running
+// commands). The development launchers (tools/vergence-session,
+// tools/run-server-drm.sh) turn it on; a session started any other way has no
+// control socket. One command per connection, one line in (at most LINE_MAX
+// bytes), text out; a client gets IO_TIMEOUT to send its line and take the reply:
 //
 //   shot                 PNG of every monitor as shown -> ~/vergence-shots/
 //   windows              the windows: index, kind, title, class, geometry, monitor
@@ -23,8 +30,8 @@
 // tools: `vctl <command>` on Hubble (printf | nc -U -N).
 
 use std::{
-    io::{BufRead, BufReader, Write},
-    os::unix::{fs::PermissionsExt, net::UnixListener},
+    io::{BufRead, BufReader, Read, Write},
+    os::unix::{fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt}, net::UnixListener},
     path::PathBuf,
 };
 
@@ -35,11 +42,26 @@ use crate::Server;
 /// Exit status that asks the launcher to start the server again.
 pub const RESTART: i32 = 75;
 
+/// Longest command line accepted.
+const LINE_MAX: u64 = 64 * 1024;
+/// How long a client gets to send its line, and to take the reply. The socket is
+/// served on the server's own thread, so a client that stalls holds the display
+/// this long at most (owner-only; a stuck vctl, not an attack).
+const IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Is the control socket wanted? VERGENCE_CONTROL=1 only.
+pub fn enabled() -> bool {
+    std::env::var("VERGENCE_CONTROL").is_ok_and(|v| v == "1")
+}
+
 pub fn socket_path() -> Option<PathBuf> {
     std::env::var_os("XDG_RUNTIME_DIR").map(|d| PathBuf::from(d).join("vergence-control"))
 }
 
 pub fn listen(state: &mut Server) {
+    if !enabled() {
+        return tracing::info!("control: off (VERGENCE_CONTROL=1 turns the development control socket on)");
+    }
     let Some(path) = socket_path() else { return tracing::warn!("control: no XDG_RUNTIME_DIR") };
     // A nested server must not take over the session server's socket.
     if crate::bus::socket_is_live(&path) {
@@ -64,9 +86,10 @@ pub fn listen(state: &mut Server) {
                 }
             }
             let _ = stream.set_nonblocking(false);
-            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+            let _ = stream.set_read_timeout(Some(IO_TIMEOUT));
+            let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
             let mut line = String::new();
-            if BufReader::new(&stream).read_line(&mut line).is_err() {
+            if BufReader::new((&stream).take(LINE_MAX)).read_line(&mut line).is_err() {
                 continue;
             }
             let reply = state.control(line.trim());
@@ -78,7 +101,7 @@ pub fn listen(state: &mut Server) {
     });
     match res {
         Ok(_) => {
-            tracing::info!("control socket {}", path.display());
+            tracing::info!("control socket {} (VERGENCE_CONTROL=1: any program running as this user can drive the session)", path.display());
             state.control_owned = true;
         }
         Err(e) => tracing::warn!("control: {e}"),
@@ -237,19 +260,26 @@ pub fn shot_dir() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp")).join("vergence-shots")
 }
 
-/// Write RGBA pixels as a PNG, off the main thread.
+/// Write RGBA pixels as a PNG, off the main thread. A screenshot is the
+/// user's screen: the directory is 0700 and the file 0600 (written beside it,
+/// then moved into place, so an old world-readable file is replaced too).
 pub fn save_png(name: String, w: u32, h: u32, rgba: Vec<u8>) {
     std::thread::spawn(move || {
         let dir = shot_dir();
-        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir);
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
         let path = dir.join(format!("{name}.png"));
+        let tmp = dir.join(format!("{name}.png.tmp"));
         let res = (|| -> Result<(), Box<dyn std::error::Error>> {
-            let file = std::io::BufWriter::new(std::fs::File::create(&path)?);
+            let file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+            let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+            let file = std::io::BufWriter::new(file);
             let mut enc = png::Encoder::new(file, w, h);
             enc.set_color(png::ColorType::Rgba);
             enc.set_depth(png::BitDepth::Eight);
             enc.set_compression(png::Compression::Fast);
             enc.write_header()?.write_image_data(&rgba)?;
+            std::fs::rename(&tmp, &path)?;
             Ok(())
         })();
         match res {
