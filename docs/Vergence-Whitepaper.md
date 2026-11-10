@@ -269,6 +269,15 @@ A single display server owns all outputs and all input, like NeXT's Window Serve
 - Each window publishes its **accessibility tree as part of the window protocol**: roles, names, bounds in reference units, focus and caret position.
 - The server therefore supports, natively: a **magnifier that follows focus and the text caret**, screen readers by design, **voice control and automation** under explicit permission (§7), and consistent, server-drawn focus highlighting.
 
+**An agent is a client of this contract too.** (A design direction, set down on 10 November 2026; none of it is built.) A software agent acting for the user, whichever one the user chooses, needs what a screen reader and a voice-control tool need: to know what is on the screen, and to act on it. Today's agents work from screenshots and pointer coordinates, because that is all a desktop gives them. Here an agent is given the same tree:
+
+- **It reads meaning, not pixels:** roles, names, values and bounds ("the button named Save, enabled"), and where a window is a display list (§6.6), its text as text. It **acts by name**: press this button, type into this field.
+- **Permission is per agent and per application**, under the rule every permission follows (§7.2): granted by the user, shown by an indicator while the agent is at work, revocable, and logged. A password field is no more open to an agent than to any other tool.
+- **It has a seat of its own:** its own pointer and its own keyboard focus. An agent at work does not move the user's pointer or type into the user's window, and the user can watch it or carry on beside it.
+- **Any agent can be plugged in.** The interface is the server's own, on the session bus (§6.8). An adapter at the edge speaks whatever protocol agents use (the Model Context Protocol is one today), as D-Bus is spoken at the edge.
+
+The control socket the server has for scripted tests (§9) is not this interface: it goes around the security model, and exists only when a developer turns it on. When the agent interface exists, the test tool becomes one of its clients. The work belongs to phase 3, with the rest of this contract.
+
 ### 6.6 Optional display-list surfaces
 
 An application may submit either a **bitmap** (always supported) or a **retained vector scene**: a display list of drawing commands in **the server's own minimal, validated format**. Existing serialisations such as Skia's SkPicture were not designed to be read from untrusted processes, so they are not used on the wire; toolkits convert their scenes into this format instead. For display-list surfaces the server can render the window **at any density, at any time**:
@@ -394,6 +403,7 @@ Nothing is impossible; nothing is silent.
 |---|---|---|
 | Placement requests (Contract 2) | Spoofing (fake dialogs over real ones), focus stealing, hidden windows | Positions are requests; the server forbids covering another app's window or always-on-top without permission. Focus moves only on user action (activation tokens). The owning application's name in the title bar is **drawn by the server**, so it cannot be faked. |
 | Accessibility and automation (Contract 3) | A screen reader is technically a full screen reader and keylogger | Permissions for specific tools, with an indicator. **Password fields are protected**: contents never leave the app; tools see only "secure field focused". Automation can be scoped per application. Audit log. |
+| Agents (Contract 3, §6.5) | An agent that can read the tree and act is as able as the user, and can be misled by what it reads on the screen | Grants per agent and per application, with the indicator and the audit log. A seat of its own, so its input is never taken for the user's and can be stopped without stopping the user. Password fields protected as for any tool. Actions that spend, send or delete can be made to wait for the user's own confirmation. |
 | Display-list surfaces | The server interprets untrusted drawing commands | Strict validated format; per-frame complexity budgets; rasterisation in a **separate sandboxed process**: seccomp/Landlock on Linux, **Capsicum on FreeBSD**. |
 | Legacy X11 apps | X clients can spy on each other within one X server | They cannot see native apps. Untrusted X apps can each run in their own isolated rootless X server. |
 | Screen capture | Silent screen recording | Permission plus indicator, scoped to a window or a monitor. |
@@ -562,6 +572,7 @@ The display-list renderer was phase 3 work. Step 1 brings its first version forw
 11. Many monitors on several GPUs (§5.1): NVIDIA's FreeBSD driver with more than one card (Xinerama versus PRIME output sinks for phase 1; its DRM/KMS support for phase 2); how many monitors report a real EDID serial number (the linuxhw database can answer this), since identical panels without one are told apart only by port.
 12. GPUs and drivers (§8.3): whether NVIDIA's FreeBSD driver provides GBM, KMS and DRM sync objects well enough for the server, and Vulkan compute for display lists; which nouveau/NVK generations are usable on Linux; the cost of copying each frame between GPUs on a hybrid machine; AMD on FreeBSD's drm-kmod, on real hardware.
 13. Session bus (§6.8): which D-Bus interfaces everyday applications (Firefox, Thunderbird, GTK and Qt applications, Avalonia) actually call, measured with a logging edge before anything is translated; which of them only warn when a service is missing and which fail; the scope of the AT-SPI bridge on the bus side. *First measurement (8 November 2026, Firefox, Slint, Avalonia): the settings portal (now provided), GNOME's idle monitor (Firefox polls it), gvfs, screensaver inhibit, Ubuntu's menu registrar and the accessibility bus. None of the applications failed without them.*
+14. The agent interface (§6.5): the observations and actions it offers, and how they follow from the accessibility tree; how a grant is scoped (an application, a window, a kind of action); a seat for each agent in the server (how its input is routed, what holds its focus, what the user sees of it); which actions wait for the user's confirmation, and how an agent misled by text on the screen is kept from harm; the protocol at the edge.
 
 ---
 
@@ -573,6 +584,7 @@ The display-list renderer was phase 3 work. Step 1 brings its first version forw
 - **XSETTINGS:** an X11 protocol for publishing desktop settings (fonts, scale) that toolkits read live.
 - **CSS reference pixel:** the visual angle of one pixel at 96 dpi seen from about arm's length (roughly 0.0213°).
 - **Compositor:** the component that combines window images into the final screen image.
+- **Agent:** a program that acts for the user by reading what applications show and operating them; here a permitted client of Contract 3 with a seat of its own (§6.5).
 - **Display list:** a recorded sequence of drawing commands that can be replayed at any resolution.
 - **KMS/DRM:** the kernel interfaces for display mode-setting and GPU access, on Linux and FreeBSD.
 - **GBM:** Generic Buffer Management, the interface through which a display server allocates GPU buffers it can show on a monitor.
