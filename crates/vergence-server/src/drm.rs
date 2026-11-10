@@ -172,7 +172,7 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
         let stalled: Vec<(crtc::Handle, String, u128)> = state
             .backend
             .as_ref()
-            .filter(|_| state.session.as_ref().is_none_or(|s| s.is_active()))
+            .filter(|_| state.session.as_ref().is_none_or(|s| s.is_active()) && !state.energy.screens_off)
             .map(|b| {
                 b.surfaces
                     .iter()
@@ -552,6 +552,11 @@ fn renew_renderer(b: &mut Backend) {
 }
 
 fn render_with(state: &mut Server, b: &mut Backend, crtc: crtc::Handle) {
+    // Screens off (energy.rs): nothing is drawn, so no VBlank comes and the
+    // redraw chain stops; screens_on starts it again.
+    if state.energy.screens_off {
+        return;
+    }
     let pointer_at = state.seat.get_pointer().map(|p| p.current_location()).unwrap_or_default();
     let Some(s) = b.surfaces.get_mut(&crtc) else { return };
     s.last = std::time::Instant::now();
@@ -664,6 +669,33 @@ fn capture(
         .map_err(|e| e.to_string())?;
     let bytes = renderer.map_texture(&mapping).map_err(|e| e.to_string())?;
     Ok(bytes.to_vec())
+}
+
+/// Energy (energy.rs): every monitor off. The CRTC is disabled (DPMS off) and its
+/// planes cleared; the monitor shows nothing and the GPU idles until screens_on.
+pub fn screens_off(state: &mut Server) {
+    let Some(b) = state.backend.as_mut() else { return };
+    for s in b.surfaces.values_mut() {
+        if let Err(e) = s.drm_output.with_compositor(|c| c.clear()) {
+            tracing::warn!("{}: cannot turn off: {e:?}", s.connector);
+        }
+    }
+}
+
+/// Energy (energy.rs): every monitor back on, each with a full frame (the first
+/// queued frame after a clear enables the CRTC again).
+pub fn screens_on(state: &mut Server) {
+    let crtcs: Vec<crtc::Handle> = state
+        .backend
+        .as_mut()
+        .map(|b| {
+            b.redraw_all();
+            b.surfaces.keys().copied().collect()
+        })
+        .unwrap_or_default();
+    for c in crtcs {
+        render(state, c);
+    }
 }
 
 impl Backend {

@@ -10,7 +10,8 @@
 // applies at once.
 //
 // Pages: Appearance; Theme and fonts; Windows (title bar controls, either side,
-// chosen buttons); Keyboard (key repeat: on, delay, rate, a box to try it); Screens (several screens: an overview to arrange them and
+// chosen buttons); Keyboard (key repeat: on, delay, rate, a box to try it); Energy
+// (screens off and sleep after idle, the sleep command); Screens (several screens: an overview to arrange them and
 // the size preference) with a page per screen (scale, wallpaper); About.
 //
 // Files: ~/.config/vergence/desktop.toml ([appearance], [keyboard], [wallpaper],
@@ -43,6 +44,7 @@ enum Page {
     Theme,
     Windows,
     Keyboard,
+    Energy,
     Overview,
     Screen(usize),
     About,
@@ -69,6 +71,11 @@ enum Message {
     RepeatRate(f32),
     RepeatDone,
     KeyTest(String),
+    // Energy.
+    ScreensOff(String),
+    SleepAfter(String),
+    SleepCommand(String),
+    SleepCommandSubmit,
     // Screens.
     Outputs(Vec<OutputInfo>, String),
     Size(f32),
@@ -110,6 +117,8 @@ struct App {
     xsettings: vergence_xsettings::Settings,
     status: String,
     accent_text: String,
+    // Energy: the sleep command as typed, saved on Enter.
+    sleep_cmd: String,
     // Theme and fonts: what is installed.
     gtk_themes: Vec<String>,
     icon_themes: Vec<String>,
@@ -145,6 +154,55 @@ const REPEAT_RATE: i64 = 30;
 
 fn keyboard_int(d: &toml::Table, k: &str, default: i64) -> i64 {
     d.get("keyboard").and_then(|a| a.get(k)).and_then(|v| v.as_integer()).unwrap_or(default)
+}
+
+// ---- Energy: desktop.toml [energy] (the server's energy.rs reads the same keys) ----
+const OFF_CHOICES: [(&str, i64); 11] = [
+    ("Never", 0),
+    ("1 minute", 1),
+    ("2 minutes", 2),
+    ("5 minutes", 5),
+    ("10 minutes", 10),
+    ("15 minutes", 15),
+    ("20 minutes", 20),
+    ("30 minutes", 30),
+    ("45 minutes", 45),
+    ("1 hour", 60),
+    ("2 hours", 120),
+];
+const SLEEP_CHOICES: [(&str, i64); 9] =
+    [("Never", 0), ("10 minutes", 10), ("15 minutes", 15), ("20 minutes", 20), ("30 minutes", 30), ("45 minutes", 45), ("1 hour", 60), ("2 hours", 120), ("3 hours", 180)];
+
+fn energy_int(d: &toml::Table, k: &str, default: i64) -> i64 {
+    d.get("energy").and_then(|a| a.get(k)).and_then(|v| v.as_integer()).unwrap_or(default)
+}
+
+fn energy_cmd(d: &toml::Table) -> String {
+    d.get("energy").and_then(|a| a.get("sleep-command")).and_then(|v| v.as_str()).unwrap_or("").to_string()
+}
+
+/// The labels for a minutes setting, and the current one; a value set by hand
+/// that is not among the choices is shown as "N minutes" and kept.
+fn minute_choices(choices: &[(&str, i64)], current: i64) -> (Vec<String>, String) {
+    let mut list: Vec<String> = choices.iter().map(|(l, _)| l.to_string()).collect();
+    let label = match choices.iter().find(|(_, m)| *m == current) {
+        Some((l, _)) => l.to_string(),
+        None => {
+            let l = format!("{current} minutes");
+            list.push(l.clone());
+            l
+        }
+    };
+    (list, label)
+}
+
+fn minutes_of(choices: &[(&str, i64)], label: &str) -> i64 {
+    choices
+        .iter()
+        .find(|(l, _)| *l == label)
+        .map(|(_, m)| *m)
+        .or_else(|| label.split_whitespace().next().and_then(|n| n.parse().ok()))
+        .unwrap_or(0)
 }
 
 fn home() -> PathBuf {
@@ -203,6 +261,7 @@ impl App {
             page: Page::Appearance,
             accent_text: appearance_text(&desktop, "accent"),
             size: disp::size(&desktop) as f32,
+            sleep_cmd: energy_cmd(&desktop),
             desktop,
             xsettings: theme::read(),
             status: String::new(),
@@ -378,6 +437,25 @@ impl App {
                 });
             }
             Message::KeyTest(t) => self.key_test = t,
+            Message::ScreensOff(label) => {
+                let m = minutes_of(&OFF_CHOICES, &label);
+                self.save_energy(|t| {
+                    t.insert("screens-off".into(), m.into());
+                })
+            }
+            Message::SleepAfter(label) => {
+                let m = minutes_of(&SLEEP_CHOICES, &label);
+                self.save_energy(|t| {
+                    t.insert("sleep".into(), m.into());
+                })
+            }
+            Message::SleepCommand(s) => self.sleep_cmd = s,
+            Message::SleepCommandSubmit => {
+                let v = self.sleep_cmd.trim().to_string();
+                self.save_energy(|t| {
+                    t.insert("sleep-command".into(), v.into());
+                })
+            }
             Message::SizeDone => {
                 let s = (self.size as f64).clamp(0.75, 1.5);
                 self.save(|d| disp::set_size(d, s));
@@ -534,6 +612,17 @@ impl App {
         });
     }
 
+    fn save_energy(&mut self, f: impl FnOnce(&mut toml::Table)) {
+        self.save(|d| {
+            if !d.get("energy").is_some_and(|a| a.is_table()) {
+                d.insert("energy".into(), toml::Value::Table(toml::Table::new()));
+            }
+            if let Some(t) = d.get_mut("energy").and_then(|a| a.as_table_mut()) {
+                f(t);
+            }
+        });
+    }
+
     fn save_appearance(&mut self, f: impl FnOnce(&mut toml::Table)) {
         self.save(|d| {
             if !d.get("appearance").is_some_and(|a| a.is_table()) {
@@ -630,6 +719,7 @@ impl App {
             Page::Theme => self.theme_page(c),
             Page::Windows => self.windows(c),
             Page::Keyboard => self.keyboard(c),
+            Page::Energy => self.energy(c),
             Page::Overview => self.overview(c),
             Page::Screen(_) if self.browser.is_some() => self.browser_page(c),
             Page::Screen(_) => self.screen(c),
@@ -673,6 +763,7 @@ impl App {
             item("Theme and fonts".into(), Page::Theme, self.page == Page::Theme, false),
             item("Windows".into(), Page::Windows, self.page == Page::Windows, false),
             item("Keyboard".into(), Page::Keyboard, self.page == Page::Keyboard, false),
+            item("Energy".into(), Page::Energy, self.page == Page::Energy, false),
             item(if self.outputs.is_empty() { "Wallpaper".into() } else { "Screens".into() }, screens_page, screens_selected, false),
         ]
         .spacing(2);
@@ -809,6 +900,37 @@ impl App {
             vec![
                 group(c, Some("Key repeat"), rows),
                 group(c, Some("Try it"), vec![setting(c, "Test", "Hold a key down here.", text_input("Type here", &self.key_test).on_input(Message::KeyTest).size(13).width(260).into())]),
+                self.status_line(c),
+            ],
+        )
+    }
+
+    fn energy(&self, c: Colours) -> Element<'_, Message> {
+        let off = energy_int(&self.desktop, "screens-off", 0);
+        let sleep = energy_int(&self.desktop, "sleep", 0);
+        let (off_list, off_now) = minute_choices(&OFF_CHOICES, off);
+        let (sleep_list, sleep_now) = minute_choices(&SLEEP_CHOICES, sleep);
+        let default_cmd = if Path::new("/run/systemd/system").is_dir() { "systemctl suspend" } else { "sudo -n zzz" };
+        let detail = format!("Empty: {default_cmd}. zzz needs root: a sudoers line for it, without a password.");
+        page_layout(
+            c,
+            "Energy",
+            "When nothing has been touched for a while: the screens go dark, then the machine sleeps. Any key or a nudge of the mouse brings everything back.",
+            vec![
+                group(
+                    c,
+                    Some("After no input"),
+                    vec![
+                        setting(c, "Turn the screens off", "Every monitor is switched off; apps keep running.", pick_list(off_list, Some(off_now), Message::ScreensOff).text_size(13).width(160).into()),
+                        setting(c, "Put the machine to sleep", "Suspend to memory. The screens go off first.", pick_list(sleep_list, Some(sleep_now), Message::SleepAfter).text_size(13).width(160).into()),
+                    ],
+                ),
+                group(
+                    c,
+                    Some("How it sleeps"),
+                    vec![setting(c, "Sleep command", &detail, text_input(default_cmd, &self.sleep_cmd).on_input(Message::SleepCommand).on_submit(Message::SleepCommandSubmit).size(13).width(260).into())],
+                ),
+                group(c, None, vec![setting(c, "Apps", "Apps cannot yet ask to keep the screens on while they play or present; that comes with the session bus.", Space::new().into())]),
                 self.status_line(c),
             ],
         )

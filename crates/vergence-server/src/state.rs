@@ -100,6 +100,8 @@ pub struct Server {
     /// [displays] settings last applied.
     pub scale_notes: std::collections::HashMap<String, crate::displays::Scales>,
     pub displays: crate::displays::DisplaysConfig,
+    /// The idle clock, screens off and sleep (energy.rs).
+    pub energy: crate::energy::Energy,
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
@@ -220,6 +222,7 @@ impl Server {
             notes: Default::default(),
             scale_notes: Default::default(),
             displays: crate::displays::load(),
+            energy: crate::energy::Energy::new(),
             popups,
             seat,
             regions: Vec::new(),

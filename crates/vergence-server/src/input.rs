@@ -25,6 +25,11 @@ enum KeyAction {
 
 impl Server {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
+        // The idle clock (energy.rs). A key or button that only woke the screens
+        // goes no further; pointer motion does, so the pointer is where the hand put it.
+        if self.energy_activity() && matches!(event, InputEvent::Keyboard { .. } | InputEvent::PointerButton { .. }) {
+            return;
+        }
         match event {
             InputEvent::Keyboard { event, .. } => {
                 let serial = SERIAL_COUNTER.next_serial();

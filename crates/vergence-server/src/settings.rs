@@ -8,6 +8,7 @@
 //       contrast       = "normal" | "high"
 //       reduced-motion = false
 //   ~/.config/vergence/desktop.toml  [keyboard]   (the settings app's Keyboard page)
+//   ~/.config/vergence/desktop.toml  [energy]     screens off and sleep after idle (energy.rs)
 //       repeat       = true
 //       repeat-delay = 500   (ms before a held key repeats)
 //       repeat-rate  = 30    (repeats a second)
@@ -221,6 +222,8 @@ impl Server {
                     state.displays = displays;
                     crate::drm::displays_changed(state);
                 }
+                // Idle times (energy.rs).
+                state.energy_reload();
                 let new = load();
                 let diff = changed(&state.settings.current, &new);
                 state.settings.current = new;
