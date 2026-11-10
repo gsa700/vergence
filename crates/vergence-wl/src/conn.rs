@@ -91,6 +91,25 @@ unsafe extern "C" {
     fn sendmsg(fd: i32, msg: *const MsgHdr, flags: i32) -> isize;
     fn recvmsg(fd: i32, msg: *mut MsgHdr, flags: i32) -> isize;
     fn poll(fds: *mut PollFd, count: std::ffi::c_ulong, timeout_ms: i32) -> i32;
+    fn pipe2(fds: *mut [i32; 2], flags: i32) -> i32;
+}
+
+#[cfg(target_os = "freebsd")]
+const O_CLOEXEC: i32 = 0x0010_0000;
+#[cfg(not(target_os = "freebsd"))]
+const O_CLOEXEC: i32 = 0o2_000_000;
+
+/// A pipe: what is written to the second end is read from the first. The
+/// clipboard's contents travel through one, handed to the other program by
+/// the server. Neither end is passed on to programs this one starts.
+pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
+    let mut fds = [-1i32; 2];
+    // SAFETY: room for the two descriptors the call writes.
+    if unsafe { pipe2(&mut fds, O_CLOEXEC) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: the kernel just gave this process these two descriptors.
+    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
 }
 
 /// Room for [`MAX_FDS`] descriptors in one control message, aligned.
@@ -169,17 +188,23 @@ impl Connection {
     /// `timeout` for some (None: for as long as it takes). Messages already
     /// read but not yet handed out count.
     pub fn wait(&mut self, timeout: Option<std::time::Duration>) -> io::Result<bool> {
-        if wire::split(&self.incoming).is_ok_and(|m| m.is_some()) {
-            return Ok(true);
-        }
-        let ms = timeout.map_or(-1, |t| t.as_millis().min(i32::MAX as u128) as i32);
-        let mut fd = PollFd { fd: self.stream.as_raw_fd(), events: POLLIN, revents: 0 };
+        Ok(self.wait_also(None, timeout)?.0)
+    }
+
+    /// As [`Connection::wait`], while also watching another descriptor (a
+    /// pipe being read): whether the server has input, and whether the
+    /// other descriptor has (or has been closed at its far end).
+    pub fn wait_also(&mut self, other: Option<RawFd>, timeout: Option<std::time::Duration>) -> io::Result<(bool, bool)> {
+        let buffered = wire::split(&self.incoming).is_ok_and(|m| m.is_some());
+        // With a message already in hand, only look at what is ready now.
+        let ms = if buffered { 0 } else { timeout.map_or(-1, |t| t.as_millis().min(i32::MAX as u128) as i32) };
+        let mut fds = [PollFd { fd: self.stream.as_raw_fd(), events: POLLIN, revents: 0 }, PollFd { fd: other.unwrap_or(-1), events: POLLIN, revents: 0 }];
         loop {
-            // SAFETY: one valid pollfd, and the count says so.
-            let n = unsafe { poll(&mut fd, 1, ms) };
+            // SAFETY: two valid pollfds (a negative descriptor is skipped by poll), and the count says so.
+            let n = unsafe { poll(fds.as_mut_ptr(), 2, ms) };
             if n >= 0 {
                 // Readable, or closed or in error: a read will say which.
-                return Ok(n > 0);
+                return Ok((buffered || fds[0].revents != 0, other.is_some() && fds[1].revents != 0));
             }
             let e = io::Error::last_os_error();
             if e.kind() != io::ErrorKind::Interrupted {
@@ -372,6 +397,27 @@ mod tests {
         assert!(client.wait(Some(std::time::Duration::ZERO)).unwrap(), "read but not handed out");
         client.message().unwrap().unwrap();
         assert!(!client.wait(Some(std::time::Duration::ZERO)).unwrap());
+    }
+
+    #[test]
+    fn a_pipe_is_watched_beside_the_server() {
+        let (a, b) = UnixStream::pair().unwrap();
+        let (mut client, mut server) = (Connection::from_stream(a), Connection::from_stream(b));
+        let (read_end, write_end) = pipe().unwrap();
+        let fd = Some(read_end.as_raw_fd());
+        assert_eq!(client.wait_also(fd, Some(std::time::Duration::from_millis(10))).unwrap(), (false, false));
+        std::fs::File::from(write_end.try_clone().unwrap()).write_all(b"clip").unwrap();
+        assert_eq!(client.wait_also(fd, Some(std::time::Duration::from_millis(500))).unwrap(), (false, true));
+        server.send(Writer::new(1, 1).uint(2)).unwrap();
+        server.flush().unwrap();
+        assert_eq!(client.wait_also(fd, None).unwrap(), (true, true));
+        let mut four = [0u8; 4];
+        std::fs::File::from(read_end.try_clone().unwrap()).read_exact(&mut four).unwrap();
+        assert_eq!(&four, b"clip");
+        // The far end closed: the pipe is "ready", and a read finds the end.
+        drop(write_end);
+        assert!(client.wait_also(fd, Some(std::time::Duration::from_millis(500))).unwrap().1);
+        assert_eq!(std::fs::File::from(read_end).read(&mut four).unwrap(), 0);
     }
 
     #[test]

@@ -6,8 +6,8 @@
 //! instead, and holds only what the toolkit uses: a window with a surface,
 //! shared-memory buffers, the exact scale (wp-fractional-scale, wp-viewporter)
 //! and who draws the title bar (xdg-decoration), the pointer and keyboard
-//! (wl_seat) and the pointer's shape (wp-cursor-shape). The clipboard and
-//! GPU buffers come with the steps that need them.
+//! (wl_seat), the pointer's shape (wp-cursor-shape) and the clipboard
+//! (wl_data_device). GPU buffers come with the step that needs them.
 //!
 //! [`Client`] remembers which interface each object id belongs to, so an
 //! incoming message can be read as the right event. An event for an object
@@ -50,6 +50,11 @@ pub enum Interface {
     Keyboard,
     CursorShapeManager,
     CursorShapeDevice,
+    DataDeviceManager,
+    DataDevice,
+    DataSource,
+    /// Made by the server: what another program has put on the clipboard.
+    DataOffer,
 }
 
 impl Interface {
@@ -64,6 +69,7 @@ impl Interface {
             Interface::DecorationManager => "zxdg_decoration_manager_v1",
             Interface::Seat => "wl_seat",
             Interface::CursorShapeManager => "wp_cursor_shape_manager_v1",
+            Interface::DataDeviceManager => "wl_data_device_manager",
             _ => return None,
         })
     }
@@ -74,6 +80,7 @@ impl Interface {
             Interface::Compositor => 4,
             // 5: pointer events come in frames, and the keyboard says its repeat rate.
             Interface::Seat => 5,
+            Interface::DataDeviceManager => 3,
             _ => 1,
         }
     }
@@ -166,7 +173,23 @@ pub enum Event {
     Modifiers { depressed: u32, latched: u32, locked: u32, group: u32 },
     /// Held keys repeat `rate` times a second after `delay` milliseconds (0: never).
     RepeatInfo { rate: i32, delay: i32 },
+    /// Something is on offer (a clipboard's contents, or a drag): its kinds
+    /// of data follow as [`Event::OfferKind`].
+    DataOffer { offer: u32 },
+    /// One kind of data an offer can give, a MIME type.
+    OfferKind { offer: u32, mime: String },
+    /// What the clipboard holds now, for the program with the keyboard
+    /// (None: nothing).
+    Selection { offer: Option<u32> },
+    /// Another program wants what we put on the clipboard, as `mime`,
+    /// written to the file descriptor that came with this ([`Client::take_fd`]).
+    SourceSend { source: u32, mime: String },
+    /// Our clipboard contents have been replaced: the source is finished.
+    SourceCancelled { source: u32 },
 }
+
+/// Object ids from here up are the server's to give out.
+const SERVER_IDS: u32 = 0xff00_0000;
 
 fn invalid(e: WireError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, e)
@@ -207,6 +230,11 @@ pub fn decode(interface: Interface, object: u32, opcode: u16, arguments: &[u8]) 
             Event::Modifiers { depressed: r.uint()?, latched: r.uint()?, locked: r.uint()?, group: r.uint()? }
         }
         (Interface::Keyboard, 5) => Event::RepeatInfo { rate: r.int()?, delay: r.int()? },
+        (Interface::DataDevice, 0) => Event::DataOffer { offer: r.uint()? },
+        (Interface::DataDevice, 5) => Event::Selection { offer: Some(r.uint()?).filter(|id| *id != 0) },
+        (Interface::DataOffer, 0) => Event::OfferKind { offer: object, mime: r.string()?.unwrap_or_default() },
+        (Interface::DataSource, 1) => Event::SourceSend { source: object, mime: r.string()?.unwrap_or_default() },
+        (Interface::DataSource, 2) => Event::SourceCancelled { source: object },
         _ => return Ok(None),
     }))
 }
@@ -245,10 +273,22 @@ impl Client {
     /// As [`Client::dispatch`], but gives up waiting after `timeout` and
     /// returns nothing, for a caller with a timer of its own (key repeat).
     pub fn dispatch_within(&mut self, timeout: Option<Duration>) -> io::Result<Vec<Event>> {
+        Ok(self.dispatch_or(None, timeout)?.0)
+    }
+
+    /// As [`Client::dispatch_within`], while also watching another file
+    /// descriptor (a pipe the clipboard is being read from): the events,
+    /// and whether that descriptor is ready to be read.
+    pub fn dispatch_or(&mut self, other: Option<RawFd>, timeout: Option<Duration>) -> io::Result<(Vec<Event>, bool)> {
         self.conn.flush()?;
-        if !self.conn.wait(timeout)? {
-            return Ok(Vec::new());
+        let (server, other_ready) = self.conn.wait_also(other, timeout)?;
+        if !server {
+            return Ok((Vec::new(), other_ready));
         }
+        Ok((self.read_events()?, other_ready))
+    }
+
+    fn read_events(&mut self) -> io::Result<Vec<Event>> {
         if self.conn.read()? == 0 {
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "the display server closed the connection"));
         }
@@ -263,6 +303,15 @@ impl Client {
             }
             let Some(interface) = self.objects.get(&header.object).copied() else { continue };
             if let Some(event) = decode(interface, header.object, header.opcode, &arguments).map_err(invalid)? {
+                // An offer is an object the server made: remember what it is,
+                // so its own events can be read. Ids below the server's range
+                // are ours to give out and are not taken on its word.
+                if let Event::DataOffer { offer } = event {
+                    if offer < SERVER_IDS {
+                        continue;
+                    }
+                    self.objects.insert(offer, Interface::DataOffer);
+                }
                 events.push(event);
             }
         }
@@ -435,6 +484,49 @@ impl Client {
     /// others), in answer to the pointer entering with this serial.
     pub fn set_cursor_shape(&mut self, device: u32, serial: u32, shape: u32) -> io::Result<()> {
         self.send(Writer::new(device, 1).uint(serial).uint(shape))
+    }
+
+    // wl_data_device_manager: the clipboard
+
+    /// The object through which this seat's clipboard is read and set.
+    pub fn get_data_device(&mut self, manager: u32, seat: u32) -> io::Result<u32> {
+        let id = self.create(Interface::DataDevice);
+        self.send(Writer::new(manager, 1).uint(id).object(seat))?;
+        Ok(id)
+    }
+
+    /// Something to put on the clipboard, offered in these kinds (MIME types).
+    pub fn create_data_source(&mut self, manager: u32, kinds: &[&str]) -> io::Result<u32> {
+        let id = self.create(Interface::DataSource);
+        self.send(Writer::new(manager, 0).uint(id))?;
+        for kind in kinds {
+            self.send(Writer::new(id, 0).string(kind))?;
+        }
+        Ok(id)
+    }
+
+    pub fn destroy_data_source(&mut self, source: u32) -> io::Result<()> {
+        self.send(Writer::new(source, 1))
+    }
+
+    /// Puts a source on the clipboard (0: clears it), in answer to the
+    /// input with this serial.
+    pub fn set_selection(&mut self, device: u32, source: u32, serial: u32) -> io::Result<()> {
+        self.send(Writer::new(device, 1).object(source).uint(serial))
+    }
+
+    /// Asks for an offer's data as `mime`, to be written to `fd` (the
+    /// writing end of a pipe; close our copy after flushing).
+    pub fn receive(&mut self, offer: u32, mime: &str, fd: RawFd) -> io::Result<()> {
+        self.send(Writer::new(offer, 1).string(mime).fd(fd))
+    }
+
+    /// Lets go of an offer that is no longer the clipboard's.
+    pub fn destroy_offer(&mut self, offer: u32) -> io::Result<()> {
+        if self.objects.remove(&offer).is_some() {
+            self.send(Writer::new(offer, 2))?;
+        }
+        Ok(())
     }
 
     // wp_viewporter, wp_viewport
@@ -615,6 +707,67 @@ mod tests {
         client.flush().unwrap();
         assert_eq!(next(&mut server), (top, 5, [seat.to_ne_bytes(), 71u32.to_ne_bytes()].concat()));
         assert_eq!(next(&mut server), (top, 6, [seat.to_ne_bytes(), 71u32.to_ne_bytes(), 10u32.to_ne_bytes()].concat()));
+    }
+
+    #[test]
+    fn the_clipboard_conversation() {
+        let (mut client, mut server) = pair();
+        let (manager, seat) = (client.create(Interface::DataDeviceManager), client.create(Interface::Seat));
+        let device = client.get_data_device(manager, seat).unwrap();
+        // Copy: a source with two kinds, set as the selection.
+        let source = client.create_data_source(manager, &["text/plain;charset=utf-8", "text/plain"]).unwrap();
+        client.set_selection(device, source, 55).unwrap();
+        client.flush().unwrap();
+        assert_eq!(next(&mut server), (manager, 1, [device.to_ne_bytes(), seat.to_ne_bytes()].concat()));
+        assert_eq!(next(&mut server), (manager, 0, source.to_ne_bytes().to_vec()));
+        let (object, opcode, args) = next(&mut server);
+        assert_eq!((object, opcode, Reader::new(&args).string()), (source, 0, Ok(Some("text/plain;charset=utf-8".into()))));
+        assert_eq!(next(&mut server).1, 0);
+        assert_eq!(next(&mut server), (device, 1, [source.to_ne_bytes(), 55u32.to_ne_bytes()].concat()));
+        // Another program asks for it: the request comes with a pipe to write into.
+        let (read_end, write_end) = crate::conn::pipe().unwrap();
+        server.send(Writer::new(source, 1).string("text/plain").fd(std::os::fd::AsRawFd::as_raw_fd(&write_end))).unwrap();
+        // Then someone else copies: ours is cancelled, and theirs is offered in two kinds.
+        server.send(Writer::new(source, 2)).unwrap();
+        let offer = 0xff00_0001u32;
+        server.send(Writer::new(device, 0).uint(offer)).unwrap();
+        server.send(Writer::new(offer, 0).string("text/html")).unwrap();
+        server.send(Writer::new(offer, 0).string("text/plain;charset=utf-8")).unwrap();
+        server.send(Writer::new(device, 5).uint(offer)).unwrap();
+        server.flush().unwrap();
+        drop(write_end);
+        assert_eq!(
+            client.dispatch().unwrap(),
+            [
+                Event::SourceSend { source, mime: "text/plain".into() },
+                Event::SourceCancelled { source },
+                Event::DataOffer { offer },
+                Event::OfferKind { offer, mime: "text/html".into() },
+                Event::OfferKind { offer, mime: "text/plain;charset=utf-8".into() },
+                Event::Selection { offer: Some(offer) },
+            ]
+        );
+        // What we write to the descriptor that came with the request is what the other end reads.
+        std::io::Write::write_all(&mut std::fs::File::from(client.take_fd().expect("the pipe to write into")), b"copied").unwrap();
+        let mut got = String::new();
+        std::io::Read::read_to_string(&mut std::fs::File::from(read_end), &mut got).unwrap();
+        assert_eq!(got, "copied");
+        // Paste: ask the offer for one of its kinds, then let it go, once.
+        let (_r, w) = crate::conn::pipe().unwrap();
+        client.receive(offer, "text/plain;charset=utf-8", std::os::fd::AsRawFd::as_raw_fd(&w)).unwrap();
+        client.destroy_offer(offer).unwrap();
+        client.destroy_offer(offer).unwrap();
+        client.flush().unwrap();
+        let (object, opcode, args) = next(&mut server);
+        assert_eq!((object, opcode, Reader::new(&args).string()), (offer, 1, Ok(Some("text/plain;charset=utf-8".into()))));
+        assert!(server.take_fd().is_some(), "the pipe went with the request");
+        assert_eq!(next(&mut server), (offer, 2, vec![]));
+        // The clipboard emptied; and an "offer" with an id that is ours to give out is not believed.
+        server.send(Writer::new(device, 5).uint(0)).unwrap();
+        server.send(Writer::new(device, 0).uint(7)).unwrap();
+        server.send(Writer::new(7, 0).string("text/plain")).unwrap();
+        server.flush().unwrap();
+        assert_eq!(client.dispatch().unwrap(), [Event::Selection { offer: None }]);
     }
 
     #[test]

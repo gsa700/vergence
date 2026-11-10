@@ -255,6 +255,25 @@ borrowing. Nothing new comes in.
   scrolling, and moving and resizing by hand (the control socket has no
   keys or wheel; Dave to try the demo). Still to do in step 2: the
   clipboard, dead keys and compose, the buffer drawn in place.
+  Tried at the desk the same evening (Dave; read from the demo's log and
+  the server's): typing arrives key by key with its text, drag-to-move
+  and corner resize work (640 x 420 to 777 x 518). Key repeat and the
+  wheel were not seen in the log and are still unverified.
+- **2026-11-09, step 2, third part: the clipboard (text).** `vergence-wl`:
+  wl_data_device (sources, offers, the selection), a pipe, and a wait that
+  watches a second descriptor; an "offer" whose id is not in the server's
+  range is not believed. 23 tests. `vergence-ui`: `Window::copy` puts text
+  on the clipboard and writes it to whoever asks on a thread of its own;
+  `Window::paste` asks for it and it arrives as `Input::Paste`, read in
+  pieces between other events, at most 16 MiB and 5 seconds; pasting our
+  own copy takes no trip through the server. **On Hubble: text with
+  accents and symbols copied in one toolkit window by a click and pasted
+  in another through the server, exact; and pasted back into the window
+  that copied it.** Green on Hubble, canary and Techbench. Not yet
+  checked: copy and paste with another toolkit's programs (Firefox, the
+  iced terminal), and a large paste. Kinds other than text, drag and
+  drop, and the primary selection (middle click; the server does not
+  offer it) are not done.
 
 ## Acceptance
 

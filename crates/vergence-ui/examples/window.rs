@@ -7,10 +7,13 @@
 //! `--animate` keeps a bar moving, to see frames arrive in step with the
 //! monitor; `--frames N` closes after N frames and prints the rate, for
 //! running over SSH. `--own-frame` asks for no title bar from the server.
-//! `--log` prints every input as it arrives.
+//! `--log` prints every input as it arrives. `--copy TEXT` puts TEXT on the
+//! clipboard at every left click; a right click pastes. (For testing the
+//! clipboard between two windows without a keyboard.)
 //!
 //! Input: the shapes light up under the pointer and take a click; typing
-//! goes into the line at the bottom (Backspace deletes, Ctrl+Q closes); the
+//! goes into the line at the bottom (Backspace deletes, Ctrl+C copies the
+//! line, Ctrl+V pastes into it, Ctrl+Q closes); the
 //! wheel changes the grid; dragging the background moves the window, the
 //! bottom right corner resizes it.
 
@@ -37,6 +40,7 @@ struct Demo {
     focused: bool,
     grid: f32,
     inputs: u64,
+    copy_on_click: Option<String>,
 }
 
 impl Demo {
@@ -165,7 +169,12 @@ impl App for Demo {
                 });
             }
             Input::PointerLeft => self.pointer = None,
+            Input::Button { button: Button::Right, pressed: true, .. } => window.paste(),
+            Input::Paste(text) => self.typed.extend(text.chars().map(|c| if c.is_control() { ' ' } else { c })),
             Input::Button { button: Button::Left, pressed: true, x, y, .. } => {
+                if let Some(text) = &self.copy_on_click {
+                    window.copy(text);
+                }
                 if self.in_corner(*x, *y) {
                     window.start_resize(Edges { bottom: true, right: true, ..Edges::default() });
                 } else if let Some(i) = self.shape_at(*x, *y) {
@@ -179,8 +188,13 @@ impl App for Demo {
             }
             Input::Scroll { dy, .. } => self.grid = (self.grid + dy.signum() * 2.0).clamp(6.0, 60.0),
             Input::Key { sym: s, text, pressed: true, modifiers, .. } => {
-                if modifiers.ctrl && text.is_none() && (*s == 'q' as u32 || *s == 'Q' as u32) {
+                let ctrl = |c: char| modifiers.ctrl && text.is_none() && (*s == c as u32 || *s == c.to_ascii_uppercase() as u32);
+                if ctrl('q') {
                     window.close();
+                } else if ctrl('c') {
+                    window.copy(&self.typed);
+                } else if ctrl('v') {
+                    window.paste();
                 } else if *s == sym::BACKSPACE {
                     self.typed.pop();
                 } else if *s == sym::ESCAPE {
@@ -228,6 +242,7 @@ fn main() {
         focused: false,
         grid: 20.0,
         inputs: 0,
+        copy_on_click: args.iter().position(|a| a == "--copy").and_then(|i| args.get(i + 1)).cloned(),
     };
     if let Err(e) = vergence_ui::run(&mut demo, (640, 420)) {
         eprintln!("vergence-ui: {e}");

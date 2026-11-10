@@ -15,7 +15,13 @@
 //!
 //! For now the pixels are drawn by the CPU renderer into memory shared with
 //! the server (`wl_shm`); the GPU renderer and its buffers are step 3 of
-//! the milestone. The clipboard comes next. There are no widgets yet.
+//! the milestone. There are no widgets yet.
+//!
+//! **The clipboard** is text for now. [`Window::copy`] puts text on it; the
+//! text is written to whoever asks on a thread of its own, so a slow reader
+//! never holds the window up. [`Window::paste`] asks for what is there; it
+//! arrives as [`Input::Paste`] when the other program has written it, read
+//! in pieces between other events, with a limit on its size and on the wait.
 //!
 //! Sizes and positions a program sees are in reference units (whitepaper
 //! Contract 1). It is never told to scale anything: the same scene is drawn
@@ -25,7 +31,10 @@
 pub mod keyboard;
 
 use std::{
-    io,
+    collections::HashMap,
+    io::{self, Read, Write},
+    os::fd::AsRawFd,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -41,6 +50,14 @@ pub use keyboard::{Modifiers, sym};
 
 /// The largest keymap accepted from the server.
 const MAX_KEYMAP: usize = 4 << 20;
+/// The most text taken from the clipboard, and how long a paste may take.
+const MAX_PASTE: usize = 16 << 20;
+const PASTE_TIMEOUT: Duration = Duration::from_secs(5);
+/// The most kinds of data remembered for one offer, and the longest name of one.
+const MAX_KINDS: usize = 64;
+const MAX_KIND_NAME: usize = 256;
+/// The kinds of text put on the clipboard and looked for on it, best first.
+const TEXT_KINDS: [&str; 5] = ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "TEXT", "STRING"];
 
 /// What a frame is being drawn for.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -81,6 +98,8 @@ pub enum Input {
     Key { sym: u32, text: Option<String>, pressed: bool, repeat: bool, modifiers: Modifiers },
     /// The window gained or lost the keyboard.
     Focus(bool),
+    /// The clipboard's text, asked for with [`Window::paste`].
+    Paste(String),
 }
 
 /// The pointer's shape over the window.
@@ -143,6 +162,8 @@ enum Command {
     Title(String),
     Maximize(bool),
     Minimize,
+    Copy(String),
+    Paste,
 }
 
 /// What a program may ask of its window while it handles input.
@@ -186,6 +207,17 @@ impl Window {
 
     pub fn minimize(&mut self) {
         self.commands.push(Command::Minimize);
+    }
+
+    /// Puts text on the clipboard, in answer to the key or button just pressed.
+    pub fn copy(&mut self, text: &str) {
+        self.commands.push(Command::Copy(text.to_string()));
+    }
+
+    /// Asks for the clipboard's text; it arrives as [`Input::Paste`], if
+    /// there is any.
+    pub fn paste(&mut self) {
+        self.commands.push(Command::Paste);
     }
 }
 
@@ -239,6 +271,13 @@ struct Buffer {
     busy: bool,
 }
 
+/// Clipboard text on its way in: the pipe the other program writes to.
+struct Paste {
+    pipe: std::fs::File,
+    data: Vec<u8>,
+    started: Instant,
+}
+
 /// A held key that repeats, and when it does next.
 struct Repeat {
     key: u32,
@@ -259,6 +298,8 @@ struct Runner {
     pointer: Option<u32>,
     keyboard_object: Option<u32>,
     cursor_device: Option<u32>,
+    data_manager: Option<u32>,
+    data_device: Option<u32>,
 
     cpu: Cpu,
     fonts: Fonts,
@@ -287,6 +328,17 @@ struct Runner {
     repeat_rate: i32,
     repeat_delay: i32,
     repeat: Option<Repeat>,
+
+    /// The serial of the last key or button press (to set the clipboard).
+    input_serial: u32,
+    /// What is on offer, by the kinds of data each can give; which of them
+    /// is the clipboard; and what we put there ourselves.
+    offers: HashMap<u32, Vec<String>>,
+    selection: Option<u32>,
+    copied: Option<(u32, Arc<str>)>,
+    paste: Option<Paste>,
+    /// Input made here rather than read from the server, to give the program next.
+    inbox: Vec<Input>,
 }
 
 /// Opens the window and runs until it is closed. `size` is the size asked
@@ -306,6 +358,7 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         Interface::DecorationManager,
         Interface::Seat,
         Interface::CursorShapeManager,
+        Interface::DataDeviceManager,
     ];
     let mut offered: Vec<(Interface, u32, u32)> = Vec::new();
     'listing: loop {
@@ -339,6 +392,11 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
     let decoration_manager = bind(&mut client, Interface::DecorationManager)?;
     let seat = bind(&mut client, Interface::Seat)?;
     let cursor_shape_manager = bind(&mut client, Interface::CursorShapeManager)?;
+    let data_manager = bind(&mut client, Interface::DataDeviceManager)?;
+    let data_device = match (data_manager, seat) {
+        (Some(m), Some(s)) => Some(client.get_data_device(m, s)?),
+        _ => None,
+    };
 
     let surface = client.create_surface(compositor)?;
     let xdg_surface = client.get_xdg_surface(wm_base, surface)?;
@@ -375,6 +433,8 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         pointer: None,
         keyboard_object: None,
         cursor_device: None,
+        data_manager,
+        data_device,
         cpu: Cpu::new(),
         fonts: Fonts::system(),
         started: Instant::now(),
@@ -397,6 +457,12 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         repeat_rate: 0,
         repeat_delay: 0,
         repeat: None,
+        input_serial: 0,
+        offers: HashMap::new(),
+        selection: None,
+        copied: None,
+        paste: None,
+        inbox: Vec::new(),
     };
     runner.run(app)
 }
@@ -405,9 +471,21 @@ impl Runner {
     fn run(&mut self, app: &mut dyn App) -> io::Result<()> {
         while !self.closing {
             // Wait for the server, but no longer than the next key repeat is due.
-            let wait = self.repeat.as_ref().map(|r| r.next.saturating_duration_since(Instant::now()));
-            for event in self.client.dispatch_within(wait)? {
+            let now = Instant::now();
+            let repeat = self.repeat.as_ref().map(|r| r.next.saturating_duration_since(now));
+            let paste = self.paste.as_ref().map(|p| (p.started + PASTE_TIMEOUT).saturating_duration_since(now));
+            let wait = match (repeat, paste) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+            let pipe = self.paste.as_ref().map(|p| p.pipe.as_raw_fd());
+            let (events, pipe_ready) = self.client.dispatch_or(pipe, wait)?;
+            for event in events {
                 self.handle(event, app)?;
+            }
+            self.read_paste(pipe_ready);
+            for input in std::mem::take(&mut self.inbox) {
+                self.tell(app, input)?;
             }
             self.repeat_due(app)?;
             if self.configured && self.dirty && self.frame_callback.is_none() && !self.closing {
@@ -447,9 +525,64 @@ impl Runner {
                 Command::Title(title) => self.client.set_title(self.toplevel, &title)?,
                 Command::Maximize(on) => self.client.set_maximized(self.toplevel, on)?,
                 Command::Minimize => self.client.set_minimized(self.toplevel)?,
+                Command::Copy(text) => {
+                    if let (Some(manager), Some(device)) = (self.data_manager, self.data_device) {
+                        if let Some((old, _)) = self.copied.take() {
+                            self.client.destroy_data_source(old)?;
+                        }
+                        let source = self.client.create_data_source(manager, &TEXT_KINDS)?;
+                        self.client.set_selection(device, source, self.input_serial)?;
+                        self.copied = Some((source, text.into()));
+                    }
+                }
+                Command::Paste => self.start_paste()?,
             }
         }
         Ok(())
+    }
+
+    /// Asks whoever owns the clipboard for its text.
+    fn start_paste(&mut self) -> io::Result<()> {
+        // Our own copy needs no trip through the server (and a program
+        // cannot wait on itself).
+        if let Some((_, text)) = &self.copied {
+            self.inbox.push(Input::Paste(text.to_string()));
+            return Ok(());
+        }
+        let Some(offer) = self.selection else { return Ok(()) };
+        let Some(kind) = self.offers.get(&offer).and_then(|kinds| TEXT_KINDS.iter().find(|k| kinds.iter().any(|have| have == *k))) else { return Ok(()) };
+        let (read_end, write_end) = vergence_wl::conn::pipe()?;
+        self.client.receive(offer, kind, write_end.as_raw_fd())?;
+        // Sent now, so that our copy of the writing end can be closed: the
+        // pipe then ends when the other program has finished writing.
+        self.client.flush()?;
+        drop(write_end);
+        self.paste = Some(Paste { pipe: read_end.into(), data: Vec::new(), started: Instant::now() });
+        Ok(())
+    }
+
+    /// Takes what has arrived of a paste; when it is all here (or too much,
+    /// or too late), gives it to the program.
+    fn read_paste(&mut self, ready: bool) {
+        let Some(paste) = &mut self.paste else { return };
+        let mut done = paste.started.elapsed() >= PASTE_TIMEOUT;
+        if ready {
+            let mut chunk = [0u8; 64 * 1024];
+            // The pipe is readable, so this returns at once: some bytes, or the end.
+            match paste.pipe.read(&mut chunk) {
+                Ok(0) | Err(_) => done = true,
+                Ok(n) => {
+                    paste.data.extend_from_slice(&chunk[..n]);
+                    done |= paste.data.len() >= MAX_PASTE;
+                }
+            }
+        }
+        if done && let Some(mut paste) = self.paste.take() {
+            paste.data.truncate(MAX_PASTE);
+            if !paste.data.is_empty() {
+                self.inbox.push(Input::Paste(String::from_utf8_lossy(&paste.data).into_owned()));
+            }
+        }
     }
 
     fn modifiers(&self) -> Modifiers {
@@ -524,6 +657,7 @@ impl Runner {
             Event::PointerButton { serial, button, pressed, .. } => {
                 if pressed {
                     self.press_serial = serial;
+                    self.input_serial = serial;
                 }
                 let button = match button {
                     0x110 => Button::Left,
@@ -561,14 +695,55 @@ impl Runner {
                     k.update(depressed, latched, locked, group);
                 }
             }
-            Event::Key { key, pressed, .. } => {
+            Event::Key { serial, key, pressed, .. } => {
                 if pressed {
+                    self.input_serial = serial;
                     let repeats = self.repeat_rate > 0 && self.keyboard.as_ref().is_some_and(|k| k.repeats(key));
                     self.repeat = repeats.then(|| Repeat { key, next: Instant::now() + Duration::from_millis(self.repeat_delay.max(0) as u64) });
                 } else if self.repeat.as_ref().is_some_and(|r| r.key == key) {
                     self.repeat = None;
                 }
                 self.key(app, key, pressed, false)?;
+            }
+            Event::DataOffer { offer } => {
+                self.offers.insert(offer, Vec::new());
+            }
+            Event::OfferKind { offer, mime } => {
+                if let Some(kinds) = self.offers.get_mut(&offer)
+                    && kinds.len() < MAX_KINDS
+                    && mime.len() <= MAX_KIND_NAME
+                {
+                    kinds.push(mime);
+                }
+            }
+            Event::Selection { offer } => {
+                // Offers that are no longer the clipboard's are let go.
+                let stale: Vec<u32> = self.offers.keys().copied().filter(|id| Some(*id) != offer).collect();
+                for id in stale {
+                    self.offers.remove(&id);
+                    self.client.destroy_offer(id)?;
+                }
+                self.selection = offer.filter(|id| self.offers.contains_key(id));
+            }
+            Event::SourceSend { source, mime } => {
+                // The pipe comes with the event: take it whether or not it is wanted.
+                let pipe = self.client.take_fd();
+                if let (Some(pipe), Some((ours, text))) = (pipe, &self.copied)
+                    && *ours == source
+                    && TEXT_KINDS.contains(&mime.as_str())
+                {
+                    // Written on a thread of its own: the reader may be slow, or never read.
+                    let text = text.clone();
+                    std::thread::spawn(move || {
+                        let _ = std::fs::File::from(pipe).write_all(text.as_bytes());
+                    });
+                }
+            }
+            Event::SourceCancelled { source } => {
+                self.client.destroy_data_source(source)?;
+                if self.copied.as_ref().is_some_and(|(ours, _)| *ours == source) {
+                    self.copied = None;
+                }
             }
             _ => {}
         }
