@@ -7,11 +7,17 @@
 //! `--animate` keeps a bar moving, to see frames arrive in step with the
 //! monitor; `--frames N` closes after N frames and prints the rate, for
 //! running over SSH. `--own-frame` asks for no title bar from the server.
+//! `--log` prints every input as it arrives.
+//!
+//! Input: the shapes light up under the pointer and take a click; typing
+//! goes into the line at the bottom (Backspace deletes, Ctrl+Q closes); the
+//! wheel changes the grid; dragging the background moves the window, the
+//! bottom right corner resizes it.
 
 use vergence_render::text;
 use vergence_scene::{Color, Point, Rect, Scene};
 use vergence_text::Fonts;
-use vergence_ui::{App, Frame};
+use vergence_ui::{App, Button, Cursor, Edges, Frame, Input, Window, sym};
 
 struct Demo {
     animate: bool,
@@ -20,6 +26,33 @@ struct Demo {
     /// How long drawing took, frame by frame, and when the last few were shown.
     draw_ms: Vec<f64>,
     last: Option<(f32, f32, f32)>,
+    log: bool,
+    /// The window's size at the last frame, to know where things are.
+    size: (f32, f32),
+    pointer: Option<(f32, f32)>,
+    /// Which shape was last pressed, and where the last click landed.
+    picked: Option<usize>,
+    click: Option<(f32, f32)>,
+    typed: String,
+    focused: bool,
+    grid: f32,
+    inputs: u64,
+}
+
+impl Demo {
+    /// How many shapes fit across, and which one is at a point.
+    fn shapes(&self) -> usize {
+        ((self.size.0 - 48.0) / 96.0).floor().max(1.0) as usize
+    }
+
+    fn shape_at(&self, x: f32, y: f32) -> Option<usize> {
+        let i = ((x - 24.0) / 96.0).floor();
+        ((150.0..198.0).contains(&y) && i >= 0.0 && (i as usize) < self.shapes() && x - 24.0 - i * 96.0 <= 80.0).then_some(i as usize)
+    }
+
+    fn in_corner(&self, x: f32, y: f32) -> bool {
+        x >= self.size.0 - 18.0 && y >= self.size.1 - 18.0
+    }
 }
 
 const GROUND: Color = Color::rgb(24, 33, 41);
@@ -47,6 +80,7 @@ impl App for Demo {
 
     fn scene(&mut self, f: &Frame, fonts: &mut Fonts) -> Scene {
         let (w, h) = (f.width, f.height);
+        self.size = (w, h);
         let mut s = Scene::new(w, h);
         s.fill(Rect::new(0.0, 0.0, w, h), GROUND);
         s.stroke(Rect::new(0.5, 0.5, w - 1.0, h - 1.0), 0.0, 1.0, Color::rgb(45, 59, 70));
@@ -72,14 +106,35 @@ impl App for Demo {
         for i in 0..n {
             let x = 24.0 + i as f32 * 96.0;
             let c = if i % 2 == 0 { TEAL } else { AMBER };
+            let under = self.pointer.and_then(|(px, py)| self.shape_at(px, py)) == Some(i);
+            let c = if self.picked == Some(i) { INK } else if under { Color::rgb(c.r.saturating_add(40), c.g.saturating_add(40), c.b.saturating_add(40)) } else { c };
             s.fill_rounded(Rect::new(x, 150.0, 80.0, 48.0), (i * 6) as f32, c);
             s.stroke(Rect::new(x, 212.0, 80.0, 48.0), (i * 6) as f32, 1.5, c);
         }
         // A hairline grid: one unit wide, which is one, two or three sharp pixels by the scale.
         let mut y = 280.0;
-        while y < h - 40.0 {
+        while y < h - 100.0 {
             s.fill(Rect::new(24.0, y, w - 48.0, 1.0), Color::rgba(255, 255, 255, 28));
-            y += 20.0;
+            y += self.grid;
+        }
+        // Where the last click landed, and what was typed.
+        if let Some((cx, cy)) = self.click {
+            s.line(Point::new(cx - 6.0, cy), Point::new(cx + 6.0, cy), 1.5, INK);
+            s.line(Point::new(cx, cy - 6.0), Point::new(cx, cy + 6.0), 1.5, INK);
+        }
+        s.fill_rounded(Rect::new(24.0, h - 86.0, w - 48.0, 26.0), 5.0, Color::rgba(255, 255, 255, if self.focused { 28 } else { 12 }));
+        if let Some(face) = mono {
+            let shown = if self.typed.is_empty() && !self.focused { "click here and type".to_string() } else { format!("{}{}", self.typed, if self.focused { "\u{2581}" } else { "" }) };
+            s.push_clip(Rect::new(24.0, h - 86.0, w - 48.0, 26.0), 0.0);
+            text(&mut s, fonts, face, 13.33, if self.typed.is_empty() && !self.focused { SOFT } else { INK }, Point::new(32.0, h - 68.0), &shown);
+            s.pop_clip();
+            let at = self.pointer.map_or("pointer outside".to_string(), |(x, y)| format!("pointer {x:.1}, {y:.1}"));
+            text(&mut s, fonts, face, 11.0, SOFT, Point::new(24.0, h - 40.0), &format!("{at}   inputs {}", self.inputs));
+        }
+        // The corner that resizes.
+        for i in 0..3 {
+            let d = 5.0 + i as f32 * 4.0;
+            s.line(Point::new(w - d, h - 3.0), Point::new(w - 3.0, h - d), 1.0, SOFT);
         }
         if self.animate {
             // Back and forth across the window every four seconds.
@@ -89,6 +144,55 @@ impl App for Demo {
         }
         self.last = Some((w, h, f.scale));
         s
+    }
+
+    fn input(&mut self, input: &Input, window: &mut Window) {
+        self.inputs += 1;
+        if self.log {
+            println!("{input:?}");
+        }
+        match input {
+            Input::PointerMoved { x, y } => {
+                self.pointer = Some((*x, *y));
+                window.set_cursor(if self.in_corner(*x, *y) {
+                    Cursor::Resize(Edges { bottom: true, right: true, ..Edges::default() })
+                } else if self.shape_at(*x, *y).is_some() {
+                    Cursor::Pointer
+                } else if (self.size.1 - 86.0..self.size.1 - 60.0).contains(y) {
+                    Cursor::Text
+                } else {
+                    Cursor::Default
+                });
+            }
+            Input::PointerLeft => self.pointer = None,
+            Input::Button { button: Button::Left, pressed: true, x, y, .. } => {
+                if self.in_corner(*x, *y) {
+                    window.start_resize(Edges { bottom: true, right: true, ..Edges::default() });
+                } else if let Some(i) = self.shape_at(*x, *y) {
+                    self.picked = Some(i);
+                    self.click = Some((*x, *y));
+                } else if *y < 140.0 {
+                    window.start_move();
+                } else {
+                    self.click = Some((*x, *y));
+                }
+            }
+            Input::Scroll { dy, .. } => self.grid = (self.grid + dy.signum() * 2.0).clamp(6.0, 60.0),
+            Input::Key { sym: s, text, pressed: true, modifiers, .. } => {
+                if modifiers.ctrl && text.is_none() && (*s == 'q' as u32 || *s == 'Q' as u32) {
+                    window.close();
+                } else if *s == sym::BACKSPACE {
+                    self.typed.pop();
+                } else if *s == sym::ESCAPE {
+                    self.typed.clear();
+                } else if let Some(t) = text {
+                    self.typed.push_str(t);
+                }
+            }
+            Input::Focus(on) => self.focused = *on,
+            _ => {}
+        }
+        window.redraw();
     }
 
     fn shown(&mut self, f: &Frame, draw_ms: f64) -> bool {
@@ -109,7 +213,22 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let flag = |name: &str| args.iter().any(|a| a == name);
     let value = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).and_then(|v| v.parse().ok());
-    let mut demo = Demo { animate: flag("--animate"), own_frame: flag("--own-frame"), stop_after: value("--frames"), draw_ms: Vec::new(), last: None };
+    let mut demo = Demo {
+        animate: flag("--animate"),
+        own_frame: flag("--own-frame"),
+        stop_after: value("--frames"),
+        draw_ms: Vec::new(),
+        last: None,
+        log: flag("--log"),
+        size: (640.0, 420.0),
+        pointer: None,
+        picked: None,
+        click: None,
+        typed: String::new(),
+        focused: false,
+        grid: 20.0,
+        inputs: 0,
+    };
     if let Err(e) = vergence_ui::run(&mut demo, (640, 420)) {
         eprintln!("vergence-ui: {e}");
         std::process::exit(1);

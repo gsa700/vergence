@@ -28,7 +28,7 @@ fn iters() -> usize {
     std::env::var("FUZZ_ITERS").ok().and_then(|v| v.parse().ok()).unwrap_or(20_000)
 }
 
-const INTERFACES: [Interface; 17] = [
+const INTERFACES: [Interface; 22] = [
     Interface::Display,
     Interface::Registry,
     Interface::Callback,
@@ -46,6 +46,11 @@ const INTERFACES: [Interface; 17] = [
     Interface::FractionalScale,
     Interface::DecorationManager,
     Interface::Decoration,
+    Interface::Seat,
+    Interface::Pointer,
+    Interface::Keyboard,
+    Interface::CursorShapeManager,
+    Interface::CursorShapeDevice,
 ];
 
 /// Everything a client does with bytes from the server.
@@ -85,6 +90,9 @@ fn damaged_events_never_panic() {
         Writer::new(9, 0).int(800).int(600).array(&[4, 0, 0, 0, 1, 0, 0, 0]).finish().unwrap().0,
         Writer::new(7, 0).uint(360).finish().unwrap().0,
         Writer::new(4, 1).finish().unwrap().0,
+        Writer::new(6, 0).uint(70).uint(3).fixed(12.5).fixed(40.25).finish().unwrap().0,
+        Writer::new(6, 3).uint(73).uint(1003).uint(30).uint(1).finish().unwrap().0,
+        Writer::new(6, 4).uint(72).uint(1).uint(0).uint(2).uint(0).finish().unwrap().0,
     ];
     for _ in 0..iters() {
         let mut b = bases[rng.below(bases.len())].clone();

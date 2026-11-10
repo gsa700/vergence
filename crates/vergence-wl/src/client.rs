@@ -5,14 +5,20 @@
 //! from it. This file is written by hand from the protocol's documents
 //! instead, and holds only what the toolkit uses: a window with a surface,
 //! shared-memory buffers, the exact scale (wp-fractional-scale, wp-viewporter)
-//! and who draws the title bar (xdg-decoration). Input, the clipboard and
+//! and who draws the title bar (xdg-decoration), the pointer and keyboard
+//! (wl_seat) and the pointer's shape (wp-cursor-shape). The clipboard and
 //! GPU buffers come with the steps that need them.
 //!
 //! [`Client`] remembers which interface each object id belongs to, so an
 //! incoming message can be read as the right event. An event for an object
 //! or of a kind it does not know is passed over, never guessed at.
 
-use std::{collections::HashMap, io, os::fd::RawFd};
+use std::{
+    collections::HashMap,
+    io,
+    os::fd::{OwnedFd, RawFd},
+    time::Duration,
+};
 
 use crate::{
     conn::Connection,
@@ -39,6 +45,11 @@ pub enum Interface {
     FractionalScale,
     DecorationManager,
     Decoration,
+    Seat,
+    Pointer,
+    Keyboard,
+    CursorShapeManager,
+    CursorShapeDevice,
 }
 
 impl Interface {
@@ -51,6 +62,8 @@ impl Interface {
             Interface::Viewporter => "wp_viewporter",
             Interface::FractionalScaleManager => "wp_fractional_scale_manager_v1",
             Interface::DecorationManager => "zxdg_decoration_manager_v1",
+            Interface::Seat => "wl_seat",
+            Interface::CursorShapeManager => "wp_cursor_shape_manager_v1",
             _ => return None,
         })
     }
@@ -59,6 +72,8 @@ impl Interface {
     pub fn version(self) -> u32 {
         match self {
             Interface::Compositor => 4,
+            // 5: pointer events come in frames, and the keyboard says its repeat rate.
+            Interface::Seat => 5,
             _ => 1,
         }
     }
@@ -78,6 +93,31 @@ pub const STATE_MAXIMIZED: u32 = 1;
 pub const STATE_FULLSCREEN: u32 = 2;
 pub const STATE_RESIZING: u32 = 3;
 pub const STATE_ACTIVATED: u32 = 4;
+
+/// `wl_seat` capabilities.
+pub const SEAT_POINTER: u32 = 1;
+pub const SEAT_KEYBOARD: u32 = 2;
+
+/// `xdg_toplevel.resize` edges.
+pub const EDGE_TOP: u32 = 1;
+pub const EDGE_BOTTOM: u32 = 2;
+pub const EDGE_LEFT: u32 = 4;
+pub const EDGE_RIGHT: u32 = 8;
+
+/// `wp_cursor_shape_device_v1` shapes (the ones the toolkit uses).
+pub const SHAPE_DEFAULT: u32 = 1;
+pub const SHAPE_POINTER: u32 = 4;
+pub const SHAPE_TEXT: u32 = 9;
+pub const SHAPE_MOVE: u32 = 13;
+pub const SHAPE_GRAB: u32 = 16;
+pub const SHAPE_E_RESIZE: u32 = 18;
+pub const SHAPE_N_RESIZE: u32 = 19;
+pub const SHAPE_NE_RESIZE: u32 = 20;
+pub const SHAPE_NW_RESIZE: u32 = 21;
+pub const SHAPE_S_RESIZE: u32 = 22;
+pub const SHAPE_SE_RESIZE: u32 = 23;
+pub const SHAPE_SW_RESIZE: u32 = 24;
+pub const SHAPE_W_RESIZE: u32 = 25;
 
 /// What the server told us.
 #[derive(Debug, Clone, PartialEq)]
@@ -104,6 +144,28 @@ pub enum Event {
     DecorationMode { decoration: u32, mode: u32 },
     SurfaceEnter { surface: u32, output: u32 },
     SurfaceLeave { surface: u32, output: u32 },
+    /// What the seat has: [`SEAT_POINTER`], [`SEAT_KEYBOARD`].
+    SeatCapabilities { seat: u32, capabilities: u32 },
+    /// The pointer came onto a surface, at x, y in the surface's units.
+    PointerEnter { serial: u32, surface: u32, x: f64, y: f64 },
+    PointerLeave { serial: u32, surface: u32 },
+    PointerMotion { time: u32, x: f64, y: f64 },
+    /// A button (a Linux input code: 0x110 left, 0x111 right, 0x112 middle).
+    PointerButton { serial: u32, time: u32, button: u32, pressed: bool },
+    /// Scrolling: `axis` 0 is up and down, 1 is sideways.
+    PointerAxis { time: u32, axis: u32, value: f64 },
+    /// The pointer events since the last frame belong together.
+    PointerFrame,
+    /// The keyboard's map: `size` bytes of text in the file descriptor that
+    /// came with it ([`Client::take_fd`]). `format` 1 is xkb.
+    Keymap { format: u32, size: u32 },
+    KeyboardEnter { serial: u32, surface: u32 },
+    KeyboardLeave { serial: u32, surface: u32 },
+    /// A key (a Linux input code; xkb's keycode is 8 more).
+    Key { serial: u32, time: u32, key: u32, pressed: bool },
+    Modifiers { depressed: u32, latched: u32, locked: u32, group: u32 },
+    /// Held keys repeat `rate` times a second after `delay` milliseconds (0: never).
+    RepeatInfo { rate: i32, delay: i32 },
 }
 
 fn invalid(e: WireError) -> io::Error {
@@ -129,6 +191,22 @@ pub fn decode(interface: Interface, object: u32, opcode: u16, arguments: &[u8]) 
         (Interface::Toplevel, 1) => Event::Close { toplevel: object },
         (Interface::FractionalScale, 0) => Event::PreferredScale { object, scale120: r.uint()? },
         (Interface::Decoration, 0) => Event::DecorationMode { decoration: object, mode: r.uint()? },
+        (Interface::Seat, 0) => Event::SeatCapabilities { seat: object, capabilities: r.uint()? },
+        (Interface::Pointer, 0) => Event::PointerEnter { serial: r.uint()?, surface: r.uint()?, x: r.fixed()?, y: r.fixed()? },
+        (Interface::Pointer, 1) => Event::PointerLeave { serial: r.uint()?, surface: r.uint()? },
+        (Interface::Pointer, 2) => Event::PointerMotion { time: r.uint()?, x: r.fixed()?, y: r.fixed()? },
+        (Interface::Pointer, 3) => Event::PointerButton { serial: r.uint()?, time: r.uint()?, button: r.uint()?, pressed: r.uint()? == 1 },
+        (Interface::Pointer, 4) => Event::PointerAxis { time: r.uint()?, axis: r.uint()?, value: r.fixed()? },
+        (Interface::Pointer, 5) => Event::PointerFrame,
+        (Interface::Keyboard, 0) => Event::Keymap { format: r.uint()?, size: r.uint()? },
+        (Interface::Keyboard, 1) => Event::KeyboardEnter { serial: r.uint()?, surface: r.uint()? },
+        (Interface::Keyboard, 2) => Event::KeyboardLeave { serial: r.uint()?, surface: r.uint()? },
+        (Interface::Keyboard, 3) => Event::Key { serial: r.uint()?, time: r.uint()?, key: r.uint()?, pressed: r.uint()? == 1 },
+        (Interface::Keyboard, 4) => {
+            let _serial = r.uint()?;
+            Event::Modifiers { depressed: r.uint()?, latched: r.uint()?, locked: r.uint()?, group: r.uint()? }
+        }
+        (Interface::Keyboard, 5) => Event::RepeatInfo { rate: r.int()?, delay: r.int()? },
         _ => return Ok(None),
     }))
 }
@@ -161,7 +239,16 @@ impl Client {
     /// (an empty list is possible: wait again). An error if the connection
     /// has closed or the server sent something that is not Wayland.
     pub fn dispatch(&mut self) -> io::Result<Vec<Event>> {
+        self.dispatch_within(None)
+    }
+
+    /// As [`Client::dispatch`], but gives up waiting after `timeout` and
+    /// returns nothing, for a caller with a timer of its own (key repeat).
+    pub fn dispatch_within(&mut self, timeout: Option<Duration>) -> io::Result<Vec<Event>> {
         self.conn.flush()?;
+        if !self.conn.wait(timeout)? {
+            return Ok(Vec::new());
+        }
         if self.conn.read()? == 0 {
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "the display server closed the connection"));
         }
@@ -180,6 +267,11 @@ impl Client {
             }
         }
         Ok(events)
+    }
+
+    /// The file descriptor that came with the event just returned (a keymap's).
+    pub fn take_fd(&mut self) -> Option<OwnedFd> {
+        self.conn.take_fd()
     }
 
     /// Sends what is queued without waiting for an answer.
@@ -297,6 +389,52 @@ impl Client {
     pub fn set_app_id(&mut self, toplevel: u32, app_id: &str) -> io::Result<()> {
         let end = app_id.char_indices().map(|(i, c)| i + c.len_utf8()).take_while(|e| *e <= 256).last().unwrap_or(0);
         self.send(Writer::new(toplevel, 3).string(&app_id[..end]))
+    }
+
+    /// Starts a move of the window by the user, in answer to the button
+    /// press with this serial.
+    pub fn start_move(&mut self, toplevel: u32, seat: u32, serial: u32) -> io::Result<()> {
+        self.send(Writer::new(toplevel, 5).object(seat).uint(serial))
+    }
+
+    /// Starts a resize by the user from these edges ([`EDGE_TOP`] and the others, added).
+    pub fn start_resize(&mut self, toplevel: u32, seat: u32, serial: u32, edges: u32) -> io::Result<()> {
+        self.send(Writer::new(toplevel, 6).object(seat).uint(serial).uint(edges))
+    }
+
+    pub fn set_maximized(&mut self, toplevel: u32, maximized: bool) -> io::Result<()> {
+        self.send(Writer::new(toplevel, if maximized { 9 } else { 10 }))
+    }
+
+    pub fn set_minimized(&mut self, toplevel: u32) -> io::Result<()> {
+        self.send(Writer::new(toplevel, 13))
+    }
+
+    // wl_seat, wp_cursor_shape_manager_v1
+
+    pub fn get_pointer(&mut self, seat: u32) -> io::Result<u32> {
+        let id = self.create(Interface::Pointer);
+        self.send(Writer::new(seat, 0).uint(id))?;
+        Ok(id)
+    }
+
+    pub fn get_keyboard(&mut self, seat: u32) -> io::Result<u32> {
+        let id = self.create(Interface::Keyboard);
+        self.send(Writer::new(seat, 1).uint(id))?;
+        Ok(id)
+    }
+
+    /// The object through which a pointer's shape is set by name.
+    pub fn get_cursor_shape_device(&mut self, manager: u32, pointer: u32) -> io::Result<u32> {
+        let id = self.create(Interface::CursorShapeDevice);
+        self.send(Writer::new(manager, 1).uint(id).object(pointer))?;
+        Ok(id)
+    }
+
+    /// The pointer's shape over our surface ([`SHAPE_DEFAULT`] and the
+    /// others), in answer to the pointer entering with this serial.
+    pub fn set_cursor_shape(&mut self, device: u32, serial: u32, shape: u32) -> io::Result<()> {
+        self.send(Writer::new(device, 1).uint(serial).uint(shape))
     }
 
     // wp_viewporter, wp_viewport
@@ -428,6 +566,64 @@ mod tests {
         client.flush().unwrap();
         assert_eq!(next(&mut server), (xdg, 4, 41u32.to_ne_bytes().to_vec()));
         assert_eq!(next(&mut server), (wm, 3, 9u32.to_ne_bytes().to_vec()));
+    }
+
+    #[test]
+    fn the_pointer_and_the_keyboard_speak() {
+        let (mut client, mut server) = pair();
+        let seat = client.create(Interface::Seat);
+        let (pointer, keyboard) = (client.get_pointer(seat).unwrap(), client.get_keyboard(seat).unwrap());
+        client.flush().unwrap();
+        assert_eq!(next(&mut server), (seat, 0, pointer.to_ne_bytes().to_vec()));
+        assert_eq!(next(&mut server), (seat, 1, keyboard.to_ne_bytes().to_vec()));
+        // A keymap arrives with its file; the pointer comes in, moves, clicks, scrolls; a key goes down.
+        let dir = std::env::temp_dir().join(format!("vergence-wl-keymap-{}", std::process::id()));
+        std::fs::write(&dir, "xkb_keymap {};").unwrap();
+        let map = std::fs::File::open(&dir).unwrap();
+        server.send(Writer::new(keyboard, 0).uint(1).fd(std::os::fd::AsRawFd::as_raw_fd(&map)).uint(14)).unwrap();
+        server.send(Writer::new(keyboard, 5).int(30).int(500)).unwrap();
+        server.send(Writer::new(pointer, 0).uint(70).uint(3).fixed(12.5).fixed(40.25)).unwrap();
+        server.send(Writer::new(pointer, 2).uint(1000).fixed(13.0).fixed(41.0)).unwrap();
+        server.send(Writer::new(pointer, 3).uint(71).uint(1001).uint(0x110).uint(1)).unwrap();
+        server.send(Writer::new(pointer, 4).uint(1002).uint(0).fixed(-15.0)).unwrap();
+        server.send(Writer::new(pointer, 5)).unwrap();
+        server.send(Writer::new(keyboard, 4).uint(72).uint(1).uint(0).uint(2).uint(0)).unwrap();
+        server.send(Writer::new(keyboard, 3).uint(73).uint(1003).uint(30).uint(1)).unwrap();
+        server.flush().unwrap();
+        assert_eq!(
+            client.dispatch().unwrap(),
+            [
+                Event::Keymap { format: 1, size: 14 },
+                Event::RepeatInfo { rate: 30, delay: 500 },
+                Event::PointerEnter { serial: 70, surface: 3, x: 12.5, y: 40.25 },
+                Event::PointerMotion { time: 1000, x: 13.0, y: 41.0 },
+                Event::PointerButton { serial: 71, time: 1001, button: 0x110, pressed: true },
+                Event::PointerAxis { time: 1002, axis: 0, value: -15.0 },
+                Event::PointerFrame,
+                Event::Modifiers { depressed: 1, latched: 0, locked: 2, group: 0 },
+                Event::Key { serial: 73, time: 1003, key: 30, pressed: true },
+            ]
+        );
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut std::fs::File::from(client.take_fd().expect("the keymap's file")), &mut text).unwrap();
+        assert_eq!(text, "xkb_keymap {};");
+        let _ = std::fs::remove_file(dir);
+        // Moving and resizing answer a press by its serial.
+        let top = client.create(Interface::Toplevel);
+        client.start_move(top, seat, 71).unwrap();
+        client.start_resize(top, seat, 71, EDGE_BOTTOM | EDGE_RIGHT).unwrap();
+        client.flush().unwrap();
+        assert_eq!(next(&mut server), (top, 5, [seat.to_ne_bytes(), 71u32.to_ne_bytes()].concat()));
+        assert_eq!(next(&mut server), (top, 6, [seat.to_ne_bytes(), 71u32.to_ne_bytes(), 10u32.to_ne_bytes()].concat()));
+    }
+
+    #[test]
+    fn waiting_can_give_up() {
+        let (mut client, mut server) = pair();
+        assert_eq!(client.dispatch_within(Some(Duration::from_millis(20))).unwrap(), []);
+        server.send(Writer::new(1, 0).uint(1).uint(0).string("x")).unwrap();
+        server.flush().unwrap();
+        assert_eq!(client.dispatch_within(Some(Duration::from_millis(500))).unwrap().len(), 1);
     }
 
     #[test]

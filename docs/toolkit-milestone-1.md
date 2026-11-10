@@ -232,6 +232,29 @@ borrowing. Nothing new comes in.
     first frame can be drawn at scale 1 and again at the real scale.
   Next in step 2: input (pointer, keyboard, clipboard), resizing by the
   user, and the wire fuzz extended to them.
+- **2026-11-09, step 2, second part: input.** `vergence-wl` gained the
+  seat, pointer and keyboard events, the pointer's shape by name
+  (wp-cursor-shape), the requests to move, resize, maximise and minimise,
+  a wait with a time limit (`poll`), and a bounded reader for files the
+  server sends (the keymap); 21 tests, fuzz extended. `vergence-ui`
+  gained `App::input` with `Input` (pointer moved and left, button,
+  scroll, key with symbol, text and modifiers, focus), a `Window` handle
+  for what a program may ask in return (redraw, close, move, resize,
+  cursor, title, maximise, minimise), key repeat at the server's rate, and
+  keyboard.rs, which turns keys into symbols and text with the system's
+  xkbcommon through declarations of our own (3 tests). Every event is
+  given to the program as it is read, a press with the position the
+  pointer had at that press. **On Hubble: 100 clicks, each followed at
+  once by a pointer move away, while the window redrew every frame: 100
+  of 100 arrived at the place they were pressed** (acceptance 2's click
+  test; the iced terminal lost such clicks). The hand cursor over a
+  shape, the pressed shape and the keyboard focus showed in a screenshot.
+  Green on Hubble, canary and Techbench. Found on FreeBSD: the linker
+  does not search /usr/local/lib, so vergence-ui has a build script that
+  asks pkg-config where xkbcommon is. Not yet checked: typing, key repeat,
+  scrolling, and moving and resizing by hand (the control socket has no
+  keys or wheel; Dave to try the demo). Still to do in step 2: the
+  clipboard, dead keys and compose, the buffer drawn in place.
 
 ## Acceptance
 

@@ -20,10 +20,36 @@ unsafe extern "C" {
 const MFD_CLOEXEC: u32 = 1;
 const PROT_READ_WRITE: i32 = 1 | 2;
 const MAP_SHARED: i32 = 1;
+const PROT_READ: i32 = 1;
+const MAP_PRIVATE: i32 = 2;
 
 /// The largest mapping made: a 32,768-pixel square would be 4 GiB, far past
 /// any window; this is room for 16,384 x 8,192 at four bytes a pixel.
 pub const MAX_SHM: usize = 512 << 20;
+
+/// The first `len` bytes of a file the server sent (a keymap), copied out.
+/// The file is mapped privately and read-only, as the protocol asks, and
+/// `len` is refused above `limit`.
+pub fn read_shared(fd: &OwnedFd, len: usize, limit: usize) -> io::Result<Vec<u8>> {
+    if len == 0 || len > limit {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "shared file size out of range"));
+    }
+    // What the sender says and what the file holds may differ: never read past the file.
+    let actual = std::fs::File::from(fd.try_clone()?).metadata()?.len();
+    if (len as u64) > actual {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "shared file is shorter than announced"));
+    }
+    // SAFETY: mapping len bytes of a file at least that long, read-only; the result is checked.
+    let ptr = unsafe { mmap(std::ptr::null_mut(), len, PROT_READ, MAP_PRIVATE, fd.as_raw_fd(), 0) };
+    if ptr as isize == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: ptr..ptr+len is the mapping just made; it is copied and unmapped before returning.
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec();
+    // SAFETY: the mapping made above, unmapped once.
+    unsafe { munmap(ptr, len) };
+    Ok(bytes)
+}
 
 pub struct ShmFile {
     fd: OwnedFd,
@@ -103,6 +129,16 @@ mod tests {
         let mut four = [0u8; 4];
         file.read_exact(&mut four).unwrap();
         assert_eq!(&four, b"here");
+    }
+
+    #[test]
+    fn a_file_from_the_server_is_read_within_its_length() {
+        let mut shm = ShmFile::new(4096).unwrap();
+        shm.bytes()[..6].copy_from_slice(b"keymap");
+        assert_eq!(read_shared(&shm.fd, 6, 1 << 20).unwrap(), b"keymap");
+        assert!(read_shared(&shm.fd, 4097, 1 << 20).is_err(), "longer than the file");
+        assert!(read_shared(&shm.fd, 4096, 1024).is_err(), "longer than the caller allows");
+        assert!(read_shared(&shm.fd, 0, 1024).is_err());
     }
 
     #[test]

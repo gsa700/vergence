@@ -78,9 +78,19 @@ struct CmsgHdr {
     kind: i32,
 }
 
+#[repr(C)]
+struct PollFd {
+    fd: i32,
+    events: i16,
+    revents: i16,
+}
+
+const POLLIN: i16 = 1;
+
 unsafe extern "C" {
     fn sendmsg(fd: i32, msg: *const MsgHdr, flags: i32) -> isize;
     fn recvmsg(fd: i32, msg: *mut MsgHdr, flags: i32) -> isize;
+    fn poll(fds: *mut PollFd, count: std::ffi::c_ulong, timeout_ms: i32) -> i32;
 }
 
 /// Room for [`MAX_FDS`] descriptors in one control message, aligned.
@@ -153,6 +163,29 @@ impl Connection {
             self.outgoing_fds.clear();
         }
         Ok(())
+    }
+
+    /// Whether there is input to [`Connection::read`], waiting up to
+    /// `timeout` for some (None: for as long as it takes). Messages already
+    /// read but not yet handed out count.
+    pub fn wait(&mut self, timeout: Option<std::time::Duration>) -> io::Result<bool> {
+        if wire::split(&self.incoming).is_ok_and(|m| m.is_some()) {
+            return Ok(true);
+        }
+        let ms = timeout.map_or(-1, |t| t.as_millis().min(i32::MAX as u128) as i32);
+        let mut fd = PollFd { fd: self.stream.as_raw_fd(), events: POLLIN, revents: 0 };
+        loop {
+            // SAFETY: one valid pollfd, and the count says so.
+            let n = unsafe { poll(&mut fd, 1, ms) };
+            if n >= 0 {
+                // Readable, or closed or in error: a read will say which.
+                return Ok(n > 0);
+            }
+            let e = io::Error::last_os_error();
+            if e.kind() != io::ErrorKind::Interrupted {
+                return Err(e);
+            }
+        }
     }
 
     /// Waits for input and takes what has arrived. Ok(0): the server closed
@@ -322,6 +355,23 @@ mod tests {
         assert_eq!(client.read().unwrap(), 0);
         client.send(Writer::new(1, 0).uint(2)).unwrap();
         assert!(client.flush().is_err(), "writing to a closed socket is an error, not a signal");
+    }
+
+    #[test]
+    fn waiting_has_a_time_limit() {
+        let (a, b) = UnixStream::pair().unwrap();
+        let (mut client, mut server) = (Connection::from_stream(a), Connection::from_stream(b));
+        let t = std::time::Instant::now();
+        assert!(!client.wait(Some(std::time::Duration::from_millis(30))).unwrap());
+        assert!(t.elapsed() >= std::time::Duration::from_millis(25));
+        server.send(Writer::new(1, 1).uint(2)).unwrap();
+        server.flush().unwrap();
+        assert!(client.wait(Some(std::time::Duration::from_millis(1000))).unwrap());
+        assert!(client.wait(None).unwrap(), "still unread");
+        client.read().unwrap();
+        assert!(client.wait(Some(std::time::Duration::ZERO)).unwrap(), "read but not handed out");
+        client.message().unwrap().unwrap();
+        assert!(!client.wait(Some(std::time::Duration::ZERO)).unwrap());
     }
 
     #[test]
