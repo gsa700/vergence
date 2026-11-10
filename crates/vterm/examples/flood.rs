@@ -126,7 +126,11 @@ fn main() {
             loop {
                 let started = Instant::now();
                 match std::process::Command::new(command).args(&args[3..]).status() {
-                    Ok(_) => report(path, &format!("{command}-seconds {:.3}", started.elapsed().as_secs_f64())),
+                    Ok(status) if status.success() => report(path, &format!("{command}-seconds {:.3}", started.elapsed().as_secs_f64())),
+                    // The command failed: most likely its terminal is gone. (On FreeBSD
+                    // this loop, which never writes to the terminal itself, was not
+                    // ended by the terminal's end, and ran on: 2026-11-10, canary.)
+                    Ok(_) => std::process::exit(0),
                     Err(e) => {
                         eprintln!("flood: {command}: {e}");
                         std::process::exit(1);

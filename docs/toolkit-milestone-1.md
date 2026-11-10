@@ -639,10 +639,42 @@ borrowing. Nothing new comes in.
   lines/s; the interface thread under half a percent; 220 MB. Each
   flood alone passes several times over (colour 21,800 lines/s, cursor
   19,400 batches/s); four at once on six cores do not, with the kernel
-  carrying their bytes: the machine's limit, not the terminal's, and a
-  question for the acceptance figures.
-  Still to do in step 5: an undisturbed soak, the tab-click test, the
-  runs on canary and Techbench, the install.
+  carrying their bytes: the machine's limit, not the terminal's.
+  Acceptance 5 now asks the two of each flood alone (Dave, 2026-11-10):
+  **met**, about twice over.
+- **Step 5, canary in software (2026-11-10): done.** canary has no
+  display device the server can drive, so the server ran nested in its
+  X session (`vergence-server` without `--drm`, `VERGENCE_CONTROL=1`),
+  with `VERGENCE_RENDER=cpu` so `vterm` drew with the CPU renderer. Six
+  tabs for three minutes (top standing in for btop), a window of 54 x 23
+  cells: no crash, nothing on the terminal's error output;
+  `seq 1 1000000` 0.64 to 0.68 s; colour 63,000 lines/s; cursor 8,500
+  batches/s; Unicode 920,000 lines/s; 104 MB. The interface answered:
+  four tab clicks sent through `vctl` during the load, each tab on the
+  screen half a second later (X screenshots). Idle, a `vterm` used no
+  CPU time in 20 seconds. `run.sh` needed two changes for FreeBSD (wc's
+  padded count; `ps -o` once for each column).
+  **Seen there and not explained yet:** when `vterm` was killed, the
+  `seq` job's loop (a program that only starts other programs and never
+  touches the terminal itself) was not ended with it on FreeBSD, as it
+  is on Linux; the three floods, which write, were. Whether FreeBSD
+  sends that program no hangup, or something held its terminal open,
+  is to be looked into before acceptance 4's "leaves none of its
+  programs running" is called met on FreeBSD. (The job now stops when
+  its command fails.)
+- **Step 5, Techbench (2026-11-10): done.** Fedora 45, Intel UHD 770,
+  twenty threads, in the Vergence session from GDM on one 1920 x 1080
+  monitor at scale 1 and 60 Hz; the terminal's window 820 x 520 units
+  (101 x 28 cells). Six tabs for three minutes, all at once:
+  `seq 1 1000000` 0.32 s; colour 50,800 lines/s; cursor 33,700
+  batches/s; Unicode 690,000 lines/s; the interface thread under half a
+  percent; 148 MB; nothing on the terminal's error output, and every
+  job ended with it. One flood alone and shown, at 60 frames a second:
+  the interface thread 1.4% of a core with the colour flood (0.24 ms of
+  CPU a frame, 64,000 lines/s) and 1.2% with the cursor test (44,000
+  batches/s).
+  Still to do in step 5: an undisturbed soak and the tab-click test on
+  Hubble, the install.
 
 ## Acceptance
 
@@ -671,8 +703,12 @@ no new warnings.
    leaves none of its programs running.
 5. The six-tab load, same window size, on Hubble's GPU:
    - `seq 1 1000000`: under 1 s whichever tab is shown;
-   - the colour flood above 10,000 lines/s, the cursor test above 10,000
-     batches/s;
+   - the colour flood above 10,000 lines/s and the cursor test above
+     10,000 batches/s, **each as the only flood running** (restated by
+     Dave, 2026-11-10: as first written the two were to hold with all
+     six tabs at once, which four floods on six cores do not reach, the
+     kernel carrying their bytes; the six-tab figures are kept in
+     Progress for comparison);
    - no thread at 100% except the ones parsing a flood; the interface
      thread under 10% of a core;
    - a tab click shown within two frames, 50 of 50;

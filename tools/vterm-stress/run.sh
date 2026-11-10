@@ -44,7 +44,8 @@ threads() {
     done
 }
 tick=$(getconf CLK_TCK 2>/dev/null || echo 100)
-last() { [ -f "$1" ] && wc -l < "$1" || echo 0; }
+# (BSD's wc pads its count with spaces.)
+last() { if [ -f "$1" ]; then wc -l < "$1" | tr -d ' '; else echo 0; fi; }
 
 minute=0
 [ -d /proc/"$pid"/task ] && threads > "$dir/before"
@@ -71,7 +72,7 @@ while [ "$minute" -lt "$minutes" ]; do
         mv "$dir/after" "$dir/before"
         line="$line | RSS ${rss} MB | threads, % of a core:$cpu"
     else
-        line="$line | $(ps -o rss=,pcpu= -p "$pid" | awk '{ printf "RSS %.1f MB, cpu %s%%", $1 / 1024, $2 }')"
+        line="$line | $(ps -o rss= -o pcpu= -p "$pid" | awk '{ printf "RSS %.1f MB, cpu %s%%", $1 / 1024, $2 }')"
     fi
     echo "$line" | tee -a "$dir/report.txt"
 done
