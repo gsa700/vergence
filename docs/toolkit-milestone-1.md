@@ -202,6 +202,36 @@ borrowing. Nothing new comes in.
   of a row's cost is preparing the whole scene again, which the window
   code in step 2 avoids by keeping the prepared scene between frames.
   With that, **step 1 is complete**. Next: step 2, the window.
+- **2026-11-09, step 2, first part: a window.** `vergence-wl`, our own
+  client side of the Wayland wire protocol with no dependencies: wire.rs
+  (messages as bytes), conn.rs (the socket, with file descriptors passed
+  by `sendmsg`/`recvmsg` declared for Linux's and FreeBSD's layouts),
+  shm.rs (shared memory from `memfd_create`), client.rs (the requests and
+  events a window needs, written by hand: registry, surface, shm buffers,
+  xdg-shell, wp-viewporter, wp-fractional-scale, xdg-decoration). 17 tests
+  and a fuzz test of everything read from the server (2,000,000
+  iterations clean); green on Hubble, canary and Techbench, descriptor
+  passing included. `vergence-ui` is a window: `App` says what the window
+  looks like at a size, `run` asks the server for it, follows its size
+  and the monitor's exact scale, draws with the CPU renderer into shared
+  memory, and shows one frame for each the server asks for, only when
+  something changed. `examples/window.rs` is the demonstration.
+  **On Hubble, 21:19:** the first window of our own toolkit, under the
+  server's title bar, 640 x 420 units drawn as 1920 x 1260 pixels on the
+  14" 4K at scale 3 and sharp; animated, 240 frames in 7.98 s, 30.1 a
+  second on a 30 Hz monitor; moved to the 1080p monitor it drew itself
+  again at scale 1 (640 x 420 pixels). Window memory recorded it
+  (vergence-demo). Open:
+  - drawing takes 15 ms a frame for that window, more than the renderer
+    alone needs: the picture is drawn, then copied into the shared memory
+    with red and blue swapped. The renderer should draw straight into the
+    buffer in the server's byte order;
+  - one "slow frame" (56 ms) in the server's log as the window first
+    appeared;
+  - the server may configure a size before the scale is known, so the
+    first frame can be drawn at scale 1 and again at the real scale.
+  Next in step 2: input (pointer, keyboard, clipboard), resizing by the
+  user, and the wire fuzz extended to them.
 
 ## Acceptance
 

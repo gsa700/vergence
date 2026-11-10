@@ -1,0 +1,12 @@
+[package]
+name = "vergence-wl"
+description = "Vergence's own client side of the Wayland wire protocol, for the toolkit (whitepaper §6.10)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Our own code only (whitepaper §8, "Our own parts"): no dependencies. The
+# few C library calls it needs (sendmsg, recvmsg, memfd_create, mmap) are
+# declared in the source, as vergence-term's pty.rs does.
+[dependencies]

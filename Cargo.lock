@@ -4661,6 +4661,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "vergence-ui"
+version = "0.1.0"
+dependencies = [
+ "vergence-render",
+ "vergence-scene",
+ "vergence-text",
+ "vergence-wl",
+]
+
+[[package]]
+name = "vergence-wl"
+version = "0.1.0"
+
+[[package]]
 name = "vergence-xsettings"
 version = "0.1.0"
 dependencies = [
