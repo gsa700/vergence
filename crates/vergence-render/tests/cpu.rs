@@ -1,7 +1,7 @@
 //! The CPU renderer, pixel by pixel.
 
 use vergence_render::{Cpu, Order, Pixmap, RenderError, Target, text};
-use vergence_scene::{Color, Glyph, Image, Point, Rect, Scene};
+use vergence_scene::{CELL_GLYPH, CELL_UNDERLINE, Cell, Color, Glyph, Image, Point, Rect, Scene};
 use vergence_text::{Fonts, db::FontDb};
 
 const BLACK: Color = Color::rgb(0, 0, 0);
@@ -448,4 +448,91 @@ fn colour_does_not_rasterise_a_glyph_again() {
     }
     Cpu::new().render(&s, &mut fonts, 2.0, BLACK).unwrap();
     assert_eq!(fonts.cached(), kept);
+}
+
+/// A small terminal screen two ways: as one grid of cells, and as the fills
+/// and glyph runs the grid stands for.
+fn grid_two_ways(fonts: &mut Fonts, face: vergence_text::FaceId) -> (Scene, Scene) {
+    let (columns, rows) = (14usize, 5usize);
+    let (origin, cw, ch, baseline, size) = (Point::new(3.3, 5.0), 8.4, 17.0, 13.0, 14.0);
+    let name = fonts.name(face);
+    let grounds = [CLEAR, Color::rgb(120, 20, 30), Color::rgb(20, 40, 160), Color::rgba(40, 200, 90, 128)];
+    let inks = [WHITE, Color::rgb(250, 220, 40), Color::rgba(200, 200, 255, 153)];
+    let text: Vec<char> = "Vergence grid of cells, drawn two ways & compared: 0123456789 ()[]{}".chars().collect();
+    let mut cells = Vec::new();
+    for r in 0..rows {
+        for c in 0..columns {
+            let ch = text[(r * columns + c) % text.len()];
+            cells.push(Cell {
+                ground: grounds[(c / 3 + r) % grounds.len()],
+                ink: inks[(c / 2 + r) % inks.len()],
+                // One character no font has: its cell holds glyph 0, the "no such character" box.
+                glyph: if ch == '&' { 0 } else { fonts.glyph(face, ch).1 },
+                font: 0,
+                flags: if r % 2 == 1 && (3..9).contains(&c) { CELL_UNDERLINE } else { 0 } | if ch == ' ' { 0 } else { CELL_GLYPH },
+            });
+        }
+    }
+    let mut grid = Scene::new(130.0, 100.0);
+    grid.font(&name.family, name.weight, name.italic);
+    grid.fill(Rect::new(0.0, 0.0, 130.0, 100.0), Color::rgb(30, 30, 46));
+    grid.cells(origin, cw, ch, baseline, size, columns as u32, cells.clone());
+
+    let mut plain = Scene::new(130.0, 100.0);
+    let font = plain.font(&name.family, name.weight, name.italic);
+    plain.fill(Rect::new(0.0, 0.0, 130.0, 100.0), Color::rgb(30, 30, 46));
+    for (r, row) in cells.chunks(columns).enumerate() {
+        let top = origin.y + r as f32 * ch;
+        let runs = |same: &dyn Fn(&Cell, &Cell) -> bool| {
+            let (mut out, mut x) = (Vec::new(), 0);
+            while x < columns {
+                let mut end = x + 1;
+                while end < columns && same(&row[x], &row[end]) {
+                    end += 1;
+                }
+                out.push((x, end));
+                x = end;
+            }
+            out
+        };
+        for (x, end) in runs(&|a, b| a.ground == b.ground) {
+            if row[x].ground.a != 0 {
+                plain.fill(Rect::new(origin.x + x as f32 * cw, top, (end - x) as f32 * cw, ch), row[x].ground);
+            }
+        }
+        for (x, end) in runs(&|a, b| a.flags & CELL_UNDERLINE != 0 && b.flags & CELL_UNDERLINE != 0 && a.ink == b.ink) {
+            if row[x].flags & CELL_UNDERLINE != 0 {
+                plain.fill(Rect::new(origin.x + x as f32 * cw, top + ch - 2.0, (end - x) as f32 * cw, 1.0), row[x].ink);
+            }
+        }
+        for (c, cell) in row.iter().enumerate().filter(|(_, cell)| cell.flags & CELL_GLYPH != 0) {
+            plain.glyphs(font, size, cell.ink, Point::new(origin.x, top + baseline), vec![Glyph { id: cell.glyph, x: c as f32 * cw, y: 0.0 }]);
+        }
+    }
+    (grid, plain)
+}
+
+#[test]
+fn a_grid_of_cells_is_the_fills_and_glyphs_it_stands_for() {
+    let (mut fonts, face) = mono();
+    let (grid, plain) = grid_two_ways(&mut fonts, face);
+    assert_eq!(grid.validate(), Ok(()));
+    assert!(grid.commands.len() == 2 && plain.commands.len() > 60, "{} commands against {}", grid.commands.len(), plain.commands.len());
+    for scale in [1.0, 1.25, 2.0, 3.0] {
+        let a = Cpu::new().render(&grid, &mut fonts, scale, BLACK).unwrap();
+        let b = Cpu::new().render(&plain, &mut fonts, scale, BLACK).unwrap();
+        assert!(a.data == b.data, "the two pictures differ at scale {scale}");
+        // And it is a picture: grounds, ink.
+        assert!(a.data.chunks_exact(4).filter(|px| px[0] > 200 && px[1] > 200).count() > 50, "ink at scale {scale}");
+    }
+    // Inside a clip, a grid is cut as anything is.
+    let mut clipped = Scene::new(130.0, 100.0);
+    clipped.fonts = grid.fonts.clone();
+    clipped.push_clip(Rect::new(0.0, 0.0, 40.0, 30.0), 0.0);
+    clipped.commands.push(grid.commands[1].clone());
+    clipped.pop_clip();
+    let p = Cpu::new().render(&clipped, &mut fonts, 2.0, BLACK).unwrap();
+    assert!((0..p.height).all(|y| (80..p.width).all(|x| p.pixel(x, y) == [0, 0, 0, 255])), "nothing right of the clip");
+    assert!((60..p.height).all(|y| (0..p.width).all(|x| p.pixel(x, y) == [0, 0, 0, 255])), "nothing below the clip");
+    assert!(p.data.chunks_exact(4).any(|px| px[0] > 100), "something inside it");
 }

@@ -3,7 +3,7 @@
 //! A machine with no GL at all skips these, and says so.
 
 use vergence_render::{Cpu, Gpu, GpuError, Pixmap, text};
-use vergence_scene::{Color, Image, Point, Rect, Scene};
+use vergence_scene::{CELL_GLYPH, CELL_UNDERLINE, Cell, Color, Glyph, Image, Point, Rect, Scene};
 use vergence_text::{Fonts, db::FontDb};
 
 const BLACK: Color = Color::rgb(0, 0, 0);
@@ -244,4 +244,98 @@ fn what_the_gpu_does_not_draw_yet_is_refused_not_wrong() {
     let mut ok = Scene::new(10.0, 10.0);
     ok.fill(Rect::new(1.0, 1.0, 3.0, 3.0), Color::rgb(255, 0, 0));
     assert_eq!(gpu.render(&ok, &mut none(), 1.0, BLACK).unwrap().pixel(2, 2), [255, 0, 0, 255]);
+}
+
+/// A grid of cells goes to the GPU by a road of its own (cells to instances,
+/// no shapes between): it must come out as the fills and glyph runs it
+/// stands for do, to the byte, and agree with the reference as text does.
+#[test]
+fn a_grid_of_cells_is_drawn_as_its_fills_and_glyphs() {
+    let Some(mut gpu) = gpu() else { return };
+    let mut fonts = Fonts::system();
+    let Some(mono) = fonts.face("monospace", 400, false) else {
+        eprintln!("skipped: no monospace font");
+        return;
+    };
+    let name = fonts.name(mono);
+    let (columns, rows) = (40usize, 6usize);
+    let (origin, cw, ch, baseline, size) = (Point::new(4.0, 6.0), 8.5, 18.0, 14.0, 13.33);
+    let mut rng = Rng(0x7e57_0000_0000_0009);
+    let mut cells = Vec::new();
+    for i in 0..columns * rows {
+        let c = rng.color();
+        let letter = (b'!' + (i % 90) as u8) as char;
+        cells.push(Cell {
+            // Runs of one ground, grounds of their own, and none.
+            ground: match i % 7 {
+                0 | 1 => Color::rgb(70, 20, 90),
+                2 => Color::rgba(0, 0, 0, 0),
+                _ => Color::rgb(c.b / 3, c.r / 3, c.g / 3),
+            },
+            ink: Color::rgba(c.r, c.g, c.b, if i % 11 == 0 { 153 } else { 255 }),
+            glyph: fonts.glyph(mono, letter).1,
+            font: 0,
+            flags: if i % 5 == 4 { 0 } else { CELL_GLYPH } | if (i / 9) % 3 == 0 { CELL_UNDERLINE } else { 0 },
+        });
+    }
+    let two_ways = |clip: Option<f32>| {
+        let mut grid = Scene::new(360.0, 120.0);
+        let mut plain = Scene::new(360.0, 120.0);
+        for s in [&mut grid, &mut plain] {
+            s.font(&name.family, name.weight, name.italic);
+            s.fill(Rect::new(0.0, 0.0, 360.0, 120.0), Color::rgb(46, 52, 54));
+            if let Some(radius) = clip {
+                s.push_clip(Rect::new(20.5, 10.0, 300.0, 90.0), radius);
+            }
+        }
+        grid.cells(origin, cw, ch, baseline, size, columns as u32, cells.clone());
+        for (r, row) in cells.chunks(columns).enumerate() {
+            let top = origin.y + r as f32 * ch;
+            let mut x = 0;
+            while x < columns {
+                let mut end = x + 1;
+                while end < columns && row[end].ground == row[x].ground {
+                    end += 1;
+                }
+                if row[x].ground.a != 0 {
+                    plain.fill(Rect::new(origin.x + x as f32 * cw, top, (end - x) as f32 * cw, ch), row[x].ground);
+                }
+                x = end;
+            }
+            let lined = |c: &Cell| c.flags & CELL_UNDERLINE != 0;
+            let mut x = 0;
+            while x < columns {
+                let mut end = x + 1;
+                if lined(&row[x]) {
+                    while end < columns && lined(&row[end]) && row[end].ink == row[x].ink {
+                        end += 1;
+                    }
+                    plain.fill(Rect::new(origin.x + x as f32 * cw, top + ch - 2.0, (end - x) as f32 * cw, 1.0), row[x].ink);
+                }
+                x = end;
+            }
+            for (c, cell) in row.iter().enumerate().filter(|(_, cell)| cell.flags & CELL_GLYPH != 0) {
+                plain.glyphs(0, size, cell.ink, Point::new(origin.x, top + baseline), vec![Glyph { id: cell.glyph, x: c as f32 * cw, y: 0.0 }]);
+            }
+        }
+        if clip.is_some() {
+            grid.pop_clip();
+            plain.pop_clip();
+        }
+        (grid, plain)
+    };
+    for clip in [None, Some(0.0), Some(9.0)] {
+        let (grid, plain) = two_ways(clip);
+        assert_eq!(grid.validate(), Ok(()));
+        for scale in [1.0, 2.25, 3.0] {
+            let a = gpu.render(&grid, &mut fonts, scale, BLACK).unwrap();
+            let b = gpu.render(&plain, &mut fonts, scale, BLACK).unwrap();
+            assert!(a.data == b.data, "a grid and its fills and glyphs differ on the GPU at scale {scale}, clip {clip:?}");
+            // Three steps, where a screen of opaque text is held to two: some of these
+            // inks are translucent, which is one more multiplication the CPU renderer
+            // rounds and the GPU does not (three apart seen with Techbench's variable
+            // font at scale 2.25, 2026-11-10; two on Hubble and canary).
+            agree(&mut gpu, &grid, &mut fonts, scale, BLACK, 3, 30, "a grid of cells");
+        }
+    }
 }

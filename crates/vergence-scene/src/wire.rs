@@ -17,6 +17,9 @@
 //!   5 Image     u32 image  rect  f32 opacity
 //!   6 PushClip  rect  f32 radius
 //!   7 PopClip
+//!   8 Cells     point origin  f32 cell_w  f32 cell_h  f32 baseline  f32 size
+//!               u32 columns  u32 count, each: color ground  color ink
+//!               u32 glyph  u16 font  u16 flags
 //! rect = f32 x y w h    point = f32 x y    color = u8 r g b a
 //! ```
 //!
@@ -31,8 +34,8 @@
 use std::fmt;
 
 use crate::{
-    Color, Command, FontRef, Glyph, Image, MAX_COMMANDS, MAX_FAMILY, MAX_FONTS, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_RUN_GLYPHS, MAX_SCENE_GLYPHS, Point,
-    Rect, Scene, SceneError, VERSION, image_len,
+    Cell, Color, Command, FontRef, Glyph, Image, MAX_COMMANDS, MAX_FAMILY, MAX_FONTS, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_RUN_GLYPHS, MAX_SCENE_GLYPHS,
+    Point, Rect, Scene, SceneError, VERSION, image_len,
 };
 
 pub const MAGIC: [u8; 4] = *b"VSCN";
@@ -44,6 +47,7 @@ const OP_GLYPHS: u8 = 4;
 const OP_IMAGE: u8 = 5;
 const OP_PUSH_CLIP: u8 = 6;
 const OP_POP_CLIP: u8 = 7;
+const OP_CELLS: u8 = 8;
 
 /// The smallest a font, an image and a command can be on the wire, for
 /// refusing counts the remaining bytes cannot hold.
@@ -51,6 +55,7 @@ const MIN_FONT: usize = 2 + 1 + 4;
 const MIN_IMAGE: usize = 4 + 4 + 4;
 const MIN_COMMAND: usize = 1;
 const GLYPH: usize = 12;
+const CELL: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
@@ -250,6 +255,24 @@ impl Scene {
                     w.f32(*radius);
                 }
                 Command::PopClip => w.u8(OP_POP_CLIP),
+                Command::Cells { origin, cell_w, cell_h, baseline, size, columns, cells } => {
+                    w.u8(OP_CELLS);
+                    w.point(origin);
+                    w.f32(*cell_w);
+                    w.f32(*cell_h);
+                    w.f32(*baseline);
+                    w.f32(*size);
+                    w.u32(*columns);
+                    w.u32(cells.len() as u32);
+                    w.0.reserve(cells.len() * CELL);
+                    for cell in cells {
+                        w.color(&cell.ground);
+                        w.color(&cell.ink);
+                        w.u32(cell.glyph);
+                        w.u16(cell.font);
+                        w.u16(cell.flags);
+                    }
+                }
             }
         }
         Ok(w.0)
@@ -324,6 +347,22 @@ impl Scene {
                 OP_IMAGE => Command::Image { image: r.u32()?, rect: r.rect()?, opacity: r.f32()? },
                 OP_PUSH_CLIP => Command::PushClip { rect: r.rect()?, radius: r.f32()? },
                 OP_POP_CLIP => Command::PopClip,
+                OP_CELLS => {
+                    let origin = r.point()?;
+                    let (cell_w, cell_h, baseline, size) = (r.f32()?, r.f32()?, r.f32()?, r.f32()?);
+                    let columns = r.u32()?;
+                    // Cells count with glyphs against the scene's limit.
+                    let count = r.count(MAX_SCENE_GLYPHS, CELL, "cells")?;
+                    glyph_total += count;
+                    if glyph_total > MAX_SCENE_GLYPHS {
+                        return Err(DecodeError::TooMany("glyphs"));
+                    }
+                    let mut cells = Vec::with_capacity(count);
+                    for _ in 0..count {
+                        cells.push(Cell { ground: r.color()?, ink: r.color()?, glyph: r.u32()?, font: r.u16()?, flags: r.u16()? });
+                    }
+                    Command::Cells { origin, cell_w, cell_h, baseline, size, columns, cells }
+                }
                 op => return Err(DecodeError::Opcode(op)),
             };
             commands.push(c);
@@ -354,6 +393,13 @@ mod tests {
         s.pop_clip();
         s.stroke(Rect::new(0.5, 0.5, 639.0, 399.0), 2.0, 1.0, Color::rgb(80, 90, 110));
         s.line(Point::new(12.0, 12.0), Point::new(22.0, 22.0), 1.25, Color::rgb(235, 235, 235));
+        let cells = vec![
+            Cell { ground: Color::rgb(1, 2, 3), ink: Color::rgb(250, 251, 252), glyph: 40, font: mono as u16, flags: crate::CELL_GLYPH },
+            Cell { ground: Color::rgba(0, 0, 0, 0), ink: Color::rgb(9, 8, 7), glyph: 0, font: 7, flags: crate::CELL_UNDERLINE },
+            Cell { ground: Color::rgb(4, 5, 6), ink: Color::rgba(1, 1, 1, 153), glyph: 41, font: slanted as u16, flags: crate::CELL_UNDERLINE | crate::CELL_GLYPH },
+            Cell::default(),
+        ];
+        s.cells(Point::new(4.0, 40.0), 8.25, 17.0, 13.0, 13.5, 2, cells);
         s
     }
 

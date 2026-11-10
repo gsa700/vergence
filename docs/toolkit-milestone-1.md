@@ -596,6 +596,51 @@ borrowing. Nothing new comes in.
   six-tab figures at the window's real size wait for that fix. Each job
   alone at 80 columns: cursor 19,500 batches/s, colour 36,000 lines/s;
   colour at 135 columns, 21,700 lines/s.
+- **Step 5, the tabs behind (2026-11-10).** Fixed: when the window's or
+  the cells' size changes, every tab's terminals are fitted, not only
+  the ones drawn. The six floods now all report the window's size.
+- **Step 5, the interface thread again (2026-11-10): met.** Two things,
+  and the second was the larger by far.
+  - **A grid of cells in the scene** (`Command::Cells`, opcode 8 on the
+    wire; the version stays 1, nothing outside this workspace reads it
+    yet): origin, cell size, baseline, font size, columns, and sixteen
+    bytes a cell (ground, ink, glyph, font, flags for an underline and
+    for "has a glyph": glyph 0 is a font's "no such character" box and
+    is drawn). Validated and fuzzed like the rest. The CPU renderer makes
+    of it exactly the fills and glyph runs it stands for (a test holds
+    the two pictures equal to the byte at four scales); the GPU renderer
+    goes from the cells to instances with no shapes kept between, each
+    glyph's place in the atlas remembered for the grid (a test holds it
+    equal to the byte to the old way, with and without clips, and to
+    the reference within three steps: translucent ink is one more
+    rounding than opaque text's two). `vterm` draws a terminal's screen
+    as one grid; combining marks, the selection and the cursor go over
+    it as before. Screenshots of a screen of styled text before and
+    after are the same file.
+  - **The window was being woken for every piece of output read**: some
+    25,000 times a second in a flood, each a trip through the kernel
+    and the event loop, which is where most of the thread's time went
+    (in the kernel, where the profile of user time did not show it).
+    "Draw" now stays up from the first output after a frame until that
+    terminal is next drawn, and the parsing thread wakes the window only
+    for news it has not been told: once a frame.
+  Measured as before (one tab, the colour flood at 135 x 38 cells and
+  about 21,800 lines/s, 30 Hz, CPU time by the frame; the absolute
+  figures move with what else the machine's GPU is doing, so builds are
+  compared run beside run): 17ea6fd 8.0 ms a frame (24% of a core);
+  01899b5 6.0 ms (18%); with the grid 4.2 ms (12.5%); with the wakes
+  4.2 -> **0.83 ms a frame, 2.5% of a core**. The cursor test shown:
+  1.7%. Acceptance 5's "under 10%" is met with room for a 60 Hz monitor.
+- **Step 5, six tabs at the window's real size (2026-11-10):** 135 x 38
+  cells in every tab, btop shown, a video in Firefox beside it:
+  `seq 1 1000000` 0.84 to 0.86 s (under 1 s: met; the slowest single
+  run 1.2 s); colour 7,500 to 7,700 lines/s and cursor 6,600 batches/s,
+  both **under acceptance 5's 10,000**; Unicode 143,000 to 151,000
+  lines/s; the interface thread under half a percent; 220 MB. Each
+  flood alone passes several times over (colour 21,800 lines/s, cursor
+  19,400 batches/s); four at once on six cores do not, with the kernel
+  carrying their bytes: the machine's limit, not the terminal's, and a
+  question for the acceptance figures.
   Still to do in step 5: an undisturbed soak, the tab-click test, the
   runs on canary and Techbench, the install.
 

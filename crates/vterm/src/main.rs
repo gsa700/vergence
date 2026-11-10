@@ -80,7 +80,7 @@ use menu::{Item, Menu};
 use panes::{Axis, Divider, Node};
 use scrollbar::Scrollbar;
 use select::{Pos, Selection, Unit};
-use vergence_scene::{Color, Glyph, Point, Rect, Scene};
+use vergence_scene::{CELL_GLYPH, CELL_UNDERLINE, Cell as SceneCell, Color, Glyph, Point, Rect, Scene};
 use vergence_text::{FaceId, Fonts};
 use vergence_ui::{App, Button, Cursor, Edges, Frame, Input, Modifiers, Waker, Window, sym};
 
@@ -372,7 +372,8 @@ struct Session {
     news: Arc<AtomicU8>,
 }
 
-/// The screen changed: a frame is wanted if this terminal is in front.
+/// The screen changed: a frame is wanted if this terminal is in front. Up
+/// from the first output after a frame until the next frame draws it.
 const NEWS_DRAW: u8 = 1;
 /// The title, the clipboard or the program's life changed: look into the screen.
 const NEWS_STATE: u8 = 2;
@@ -421,11 +422,15 @@ impl Session {
                     }
                     (std::mem::take(&mut s.grid.out), bits)
                 };
-                said.fetch_or(bits, Ordering::SeqCst);
                 if !out.is_empty() {
                     let _ = replies.write_all(&out);
                 }
-                waker.wake();
+                // The window is woken for news it has not been told already: "draw"
+                // stays up until a frame has been drawn, so a flood wakes it once a
+                // frame, not once for every piece read.
+                if bits & !said.fetch_or(bits, Ordering::SeqCst) != 0 {
+                    waker.wake();
+                }
                 true
             });
             lock(&shared).exited = true;
@@ -437,6 +442,20 @@ impl Session {
 
     fn label(&self) -> String {
         if self.title.is_empty() { "Terminal".into() } else { self.title.clone() }
+    }
+
+    /// Makes the terminal's grid cols x rows, if it is not, and tells its program.
+    fn fit(&self, s: &mut Screen, cols: usize, rows: usize) {
+        if (cols, rows) == (s.grid.cols, s.grid.rows) {
+            return;
+        }
+        if cols != s.grid.cols {
+            // Lines are cut or padded: the selection's cells are not what they were.
+            s.selection = None;
+        }
+        s.grid.resize(cols, rows);
+        s.clamp_scroll();
+        self.pty.resize(cols as u16, rows as u16);
     }
 }
 
@@ -491,6 +510,8 @@ struct Terminal {
     width: f32,
     height: f32,
     fits: (usize, usize),
+    /// The window's and the cells' sizes the tabs behind were last fitted to.
+    fitted: (f32, f32, f32, f32),
     hover: Option<Part>,
     /// The pane the pointer is over, if it is over one.
     over: Option<u64>,
@@ -535,6 +556,7 @@ impl Terminal {
             width: 820.0,
             height: 520.0,
             fits: (80, 24),
+            fitted: (0.0, 0.0, 0.0, 0.0),
             hover: None,
             over: None,
             maximized: false,
@@ -1024,80 +1046,63 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
     // a frame: a screen of text asks for the same hundred some thousands of times.
     let mut plain: [[Option<(u32, u32)>; 128]; 2] = [[None; 128]; 2];
     scene.push_clip(area, 0.0);
+    // The screen is one grid of cells ([`vergence_scene::Command::Cells`]): each
+    // cell its ground (none where it is the terminal's own), its ink, its glyph.
+    let columns = s.grid.cols;
+    let mut cells: Vec<SceneCell> = Vec::with_capacity(columns * s.grid.rows);
+    // Combining marks are few, and drawn over the grid as glyph runs of their own.
+    let mut marks: Vec<(u32, Color, Point, Glyph)> = Vec::new();
     for r in 0..s.grid.rows {
         let line = s.shown(r);
         let top = first + r as f32 * ch;
-        // Backgrounds and underlines: one rectangle for each run of cells with the same look.
-        let mut x = 0;
-        while x < line.len() {
-            let style = line[x].style;
-            let mut end = x + 1;
-            while end < line.len() && line[end].style == style {
-                end += 1;
-            }
-            let (mut fg, mut bg) = (p.resolve(style.fg, p.fg, style.bold), p.resolve(style.bg, p.bg, false));
-            if style.inverse {
-                std::mem::swap(&mut fg, &mut bg);
-            }
-            if bg != p.bg {
-                scene.fill(Rect::new(left + x as f32 * cw, top, (end - x) as f32 * cw, ch), bg);
-            }
-            if style.underline {
-                scene.fill(Rect::new(left + x as f32 * cw, top + ch - 2.0, (end - x) as f32 * cw, 1.0), fg);
-            }
-            x = end;
-        }
-        // Glyphs, each at its cell: a run for each stretch in one font and colour.
-        let mut run: Option<(u32, Color, Vec<Glyph>)> = None;
-        let origin = Point::new(left, top + mt.baseline);
-        let mut put = |scene: &mut Scene, font: u32, fg: Color, placed: Glyph| match &mut run {
-            Some((f, c, glyphs)) if *f == font && *c == fg => glyphs.push(placed),
-            _ => {
-                if let Some((f, c, glyphs)) = run.take() {
-                    scene.glyphs(f, size, c, origin, glyphs);
-                }
-                run = Some((font, fg, vec![placed]));
-            }
-        };
-        for (col, cell) in line.iter().enumerate() {
-            if cell.width == 0 || cell.c == ' ' {
-                continue;
-            }
+        for (col, cell) in line.iter().take(columns).enumerate() {
             let st = cell.style;
-            let mut fg = if st.inverse { p.resolve(st.bg, p.bg, false) } else { p.resolve(st.fg, p.fg, st.bold) };
+            let (mut ink, mut ground) = (p.resolve(st.fg, p.fg, st.bold), p.resolve(st.bg, p.bg, false));
+            if st.inverse {
+                // The text takes the ground's colour as it is, not its bright form.
+                (ink, ground) = (ground, ink);
+            }
             if st.dim {
-                fg.a = 153;
+                ink.a = 153;
             }
-            let own = if st.bold { mt.bold } else { mt.regular };
-            let (font, glyph) = match plain[st.bold as usize].get_mut(cell.c as usize) {
-                Some(Some(known)) => *known,
-                slot => {
-                    let (face, glyph) = fonts.glyph(own, cell.c);
-                    let found = (font_number(scene, fonts, numbers, face), glyph);
-                    if let Some(slot) = slot {
-                        *slot = Some(found);
+            let mut out = SceneCell { ground: if ground == p.bg { Color::rgba(0, 0, 0, 0) } else { ground }, ink, glyph: 0, font: 0, flags: if st.underline { CELL_UNDERLINE } else { 0 } };
+            if cell.width != 0 && cell.c != ' ' {
+                let own = if st.bold { mt.bold } else { mt.regular };
+                let (font, glyph) = match plain[st.bold as usize].get_mut(cell.c as usize) {
+                    Some(Some(known)) => *known,
+                    slot => {
+                        let (face, glyph) = fonts.glyph(own, cell.c);
+                        let found = (font_number(scene, fonts, numbers, face), glyph);
+                        if let Some(slot) = slot {
+                            *slot = Some(found);
+                        }
+                        found
                     }
-                    found
+                };
+                (out.glyph, out.font, out.flags) = (glyph, font as u16, out.flags | CELL_GLYPH);
+                // Fonts make marks one of two ways: with no advance, drawn back over
+                // what came before the pen (so the pen goes after the character), or as
+                // wide as a cell, drawn in place (so it goes where the character's did).
+                for mark in cell.marks.into_iter().filter(|m| *m != '\0') {
+                    let (face, glyph) = fonts.glyph(own, mark);
+                    let font = font_number(scene, fonts, numbers, face);
+                    let after = fonts.advance(face, glyph, size) < cw * 0.5;
+                    marks.push((font, ink, Point::new(left, top + mt.baseline), Glyph { id: glyph, x: (col + if after { cell.width.max(1) as usize } else { 0 }) as f32 * cw, y: 0.0 }));
                 }
-            };
-            put(scene, font, fg, Glyph { id: glyph, x: col as f32 * cw, y: 0.0 });
-            // Combining marks, drawn on the character. Fonts make them one of two ways:
-            // with no advance, drawn back over what came before the pen (so the pen
-            // goes after the character), or as wide as a cell, drawn in place (so it
-            // goes where the character's did).
-            for mark in cell.marks.into_iter().filter(|m| *m != '\0') {
-                let (face, glyph) = fonts.glyph(own, mark);
-                let font = font_number(scene, fonts, numbers, face);
-                let after = fonts.advance(face, glyph, size) < cw * 0.5;
-                put(scene, font, fg, Glyph { id: glyph, x: (col + if after { cell.width.max(1) as usize } else { 0 }) as f32 * cw, y: 0.0 });
             }
+            cells.push(out);
         }
-        if let Some((f, c, glyphs)) = run.take() {
-            scene.glyphs(f, size, c, origin, glyphs);
-        }
-        // What is selected, tinted over its text.
+        // A line shorter than the screen is wide (kept from a narrower one) ends in nothing.
+        cells.resize((r + 1) * columns, SceneCell::default());
+    }
+    scene.cells(Point::new(left, first), cw, ch, mt.baseline, size, columns as u32, cells);
+    for (font, ink, origin, glyph) in marks {
+        scene.glyphs(font, size, ink, origin, vec![glyph]);
+    }
+    // What is selected, tinted over its text.
+    for r in 0..s.grid.rows {
         if let Some((a, b)) = selection.and_then(|sel| sel.span(top_line + r, s.grid.cols)) {
-            scene.fill(Rect::new(left + a as f32 * cw, top, (b + 1 - a) as f32 * cw, ch), Color::rgba(p.accent.r, p.accent.g, p.accent.b, 89));
+            scene.fill(Rect::new(left + a as f32 * cw, first + r as f32 * ch, (b + 1 - a) as f32 * cw, ch), Color::rgba(p.accent.r, p.accent.g, p.accent.b, 89));
         }
     }
     // The cursor: a block where the keys go, an outline elsewhere. It moves down with the
@@ -1190,7 +1195,8 @@ impl App for Terminal {
         for (index, tab) in self.tabs.iter_mut().enumerate() {
             let active = tab.active;
             for (id, session) in tab.panes.iter_mut() {
-                let news = session.news.swap(0, Ordering::SeqCst);
+                // "Draw" is left up: the frame that draws the terminal takes it down.
+                let news = session.news.fetch_and(!NEWS_STATE, Ordering::SeqCst);
                 // Only the tab in front is drawn: output in the others costs no frame.
                 if news & NEWS_DRAW != 0 && index == shown {
                     window.redraw();
@@ -1468,6 +1474,22 @@ impl App for Terminal {
         // The grid that fits a room: the whole of it for a new tab, a pane's for its terminal.
         let fit = |w: f32, h: f32| ((((w - 2.0 * PAD) / cw).floor().max(2.0) as usize).min(2000), (((h - 2.0 * PAD) / ch).floor().max(1.0) as usize).min(1000));
         self.fits = fit(frame.width, frame.height - BAR_H);
+        // The tabs behind are fitted as well, whenever the window's or the cells'
+        // size changes: a program in a tab nobody is looking at is told its real
+        // size all the same (it was left at the size it started with until shown).
+        let fitted = (frame.width, frame.height, cw, ch);
+        if self.fitted != fitted {
+            self.fitted = fitted;
+            let room = self.room();
+            for (_, tab) in self.tabs.iter().enumerate().filter(|(index, _)| *index != self.shown) {
+                for (id, area) in tab.tree.layout(room).0 {
+                    if let Some(session) = tab.session(id) {
+                        let (cols, rows) = fit(area.w, area.h);
+                        session.fit(&mut lock(&session.screen), cols, rows);
+                    }
+                }
+            }
+        }
 
         let titles: Vec<String> = self.tabs.iter().map(Tab::label).collect();
         let layout = Layout::new(frame.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right);
@@ -1479,19 +1501,13 @@ impl App for Terminal {
         for (id, area) in &panes {
             let Some(session) = tab.session(*id) else { continue };
             let active = *id == tab.active;
+            // What is drawn now is drawn: output after this asks for a frame again.
+            session.news.fetch_and(!NEWS_DRAW, Ordering::SeqCst);
             let mut guard = lock(&session.screen);
             let s = &mut *guard;
             // The terminal's grid follows its room, and its program is told.
             let (cols, rows) = fit(area.w, area.h);
-            if (cols, rows) != (s.grid.cols, s.grid.rows) {
-                if cols != s.grid.cols {
-                    // Lines are cut or padded: the selection's cells are not what they were.
-                    s.selection = None;
-                }
-                s.grid.resize(cols, rows);
-                s.clamp_scroll();
-                session.pty.resize(cols as u16, rows as u16);
-            }
+            session.fit(s, cols, rows);
             if active && let Some((up, col)) = scroll_edge {
                 s.scroll_by(if up { 1 } else { -1 });
                 let row = s.top_line() + if up { 0 } else { s.grid.rows - 1 };

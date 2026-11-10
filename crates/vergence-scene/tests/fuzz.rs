@@ -5,7 +5,7 @@
 //! count for a long run:
 //! `FUZZ_ITERS=2000000 cargo test --release -p vergence-scene --test fuzz`.
 
-use vergence_scene::{Color, Glyph, Image, Point, Rect, Scene};
+use vergence_scene::{CELL_GLYPH, CELL_UNDERLINE, Cell, Color, Glyph, Image, Point, Rect, Scene};
 
 struct Rng(u64);
 
@@ -58,10 +58,17 @@ fn scene(rng: &mut Rng) -> Scene {
     }
     let mut open = 0;
     for _ in 0..rng.below(24) {
-        match rng.below(8) {
+        match rng.below(9) {
             0 | 1 => {
                 let (r, c) = (rect(rng), color(rng));
                 s.fill_rounded(r, rng.unit() * 12.0, c);
+            }
+            8 => {
+                let columns = 1 + rng.below(12);
+                let cells = (0..columns * rng.below(6))
+                    .map(|_| Cell { ground: color(rng), ink: color(rng), glyph: rng.below(3000) as u32, font: rng.below(fonts) as u16, flags: [0, CELL_GLYPH, CELL_GLYPH, CELL_UNDERLINE | CELL_GLYPH, CELL_UNDERLINE][rng.below(5)] })
+                    .collect();
+                s.cells(Point::new(rng.unit() * 600.0, rng.unit() * 400.0), 4.0 + rng.unit() * 12.0, 8.0 + rng.unit() * 20.0, rng.unit() * 20.0, 6.0 + rng.unit() * 30.0, columns as u32, cells);
             }
             2 => {
                 let (r, c) = (rect(rng), color(rng));

@@ -64,7 +64,7 @@ fn edge(lo: f32, hi: f32, p: i32) -> f32 {
 }
 
 impl RRect {
-    fn device(r: &Rect, scale: f32, radius: f32) -> RRect {
+    pub(crate) fn device(r: &Rect, scale: f32, radius: f32) -> RRect {
         let (x0, y0, x1, y1) = (r.x * scale, r.y * scale, (r.x + r.w) * scale, (r.y + r.h) * scale);
         RRect { x0, y0, x1, y1, radius: (radius * scale).min((x1 - x0) / 2.0).min((y1 - y0) / 2.0).max(0.0) }
     }
@@ -98,7 +98,7 @@ impl RRect {
     }
 
     /// The pixels it can touch: x0, y0, x1, y1 (the last two not included).
-    fn bounds(&self) -> [i32; 4] {
+    pub(crate) fn bounds(&self) -> [i32; 4] {
         [self.x0.floor() as i32, self.y0.floor() as i32, self.x1.ceil() as i32, self.y1.ceil() as i32]
     }
 }
@@ -112,6 +112,10 @@ pub(crate) enum Shape {
     /// A glyph's coverage with its top-left pixel at x, y.
     Glyph { x: i32, y: i32, bitmap: Arc<Bitmap> },
     Image { to: RRect, image: usize, opacity: f32 },
+    /// A grid of cells left as it is in the scene (the command at this
+    /// place in its list), for a renderer that makes its own shapes of it:
+    /// the GPU's. Its `bounds` are the clip's, not the grid's.
+    Cells(usize),
 }
 
 pub(crate) struct Prim {
@@ -124,7 +128,7 @@ pub(crate) struct Prim {
     pub(crate) chain: u32,
 }
 
-fn intersect(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
+pub(crate) fn intersect(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
     [a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]
 }
 
@@ -186,6 +190,8 @@ pub(crate) struct Prepared<'a> {
     pub(crate) prims: Vec<Prim>,
     /// Lists of clip shapes; `chains[0]` is empty.
     pub(crate) chains: Vec<Vec<RRect>>,
+    /// The scene's fonts on this machine (None: it has none such).
+    pub(crate) faces: Vec<Option<FaceId>>,
     /// For each band, the shapes that touch it, in drawing order.
     bands: Vec<Vec<u32>>,
     pub(crate) images: &'a [Image],
@@ -201,7 +207,7 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
     let mut chains: Vec<Vec<RRect>> = vec![Vec::new()];
     // The scissor rectangle and the chain in force, one entry per open clip.
     let mut clips: Vec<([i32; 4], u32)> = vec![(whole, 0)];
-    for command in &scene.commands {
+    for (at, command) in scene.commands.iter().enumerate() {
         let (scissor, chain) = *clips.last().expect("the outermost clip is never popped");
         let mut add = |shape: Shape, color: [u8; 4], bounds: [i32; 4]| {
             let bounds = intersect(bounds, scissor);
@@ -266,6 +272,65 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
                     clips.pop();
                 }
             }
+            Command::Cells { .. } if !banded => {
+                // The GPU's renderer makes its instances from the cells themselves.
+                if scissor[0] < scissor[2] && scissor[1] < scissor[3] {
+                    prims.push(Prim { shape: Shape::Cells(at), color: [0; 4], bounds: scissor, chain });
+                }
+            }
+            Command::Cells { origin, cell_w, cell_h, baseline, size, columns, cells } => {
+                // The same shapes, in the same order and by the same arithmetic, as the
+                // fills and glyph runs this command stands for: a row's grounds
+                // (neighbours of one colour as one rectangle), its underlines, its glyphs.
+                let columns = *columns as usize;
+                for (r, row) in cells.chunks_exact(columns).enumerate() {
+                    let top = origin.y + r as f32 * cell_h;
+                    let mut x = 0;
+                    while x < columns {
+                        let ground = row[x].ground;
+                        let mut end = x + 1;
+                        while end < columns && row[end].ground == ground {
+                            end += 1;
+                        }
+                        if ground.a != 0 {
+                            let shape = RRect::device(&Rect::new(origin.x + x as f32 * cell_w, top, (end - x) as f32 * cell_w, *cell_h), scale, 0.0);
+                            add(Shape::Fill(shape), straight(&ground, order), shape.bounds());
+                        }
+                        x = end;
+                    }
+                    let lined = |c: &vergence_scene::Cell| c.flags & vergence_scene::CELL_UNDERLINE != 0;
+                    let mut x = 0;
+                    while x < columns {
+                        let mut end = x + 1;
+                        if lined(&row[x]) {
+                            while end < columns && lined(&row[end]) && row[end].ink == row[x].ink {
+                                end += 1;
+                            }
+                            let shape = RRect::device(&Rect::new(origin.x + x as f32 * cell_w, top + cell_h - 2.0, (end - x) as f32 * cell_w, 1.0), scale, 0.0);
+                            add(Shape::Fill(shape), straight(&row[x].ink, order), shape.bounds());
+                        }
+                        x = end;
+                    }
+                    // Baselines sit on whole pixels, as a glyph run's do.
+                    let line = ((top + baseline) * scale).round() as i32;
+                    for (c, cell) in row.iter().enumerate() {
+                        if cell.flags & vergence_scene::CELL_GLYPH == 0 {
+                            continue;
+                        }
+                        let Some(face) = faces[cell.font as usize] else { continue };
+                        let x = (origin.x + c as f32 * cell_w) * scale;
+                        let (mut whole_x, mut sub) = (x.floor(), ((x - x.floor()) * 4.0).round() as u8);
+                        if sub == 4 {
+                            whole_x += 1.0;
+                            sub = 0;
+                        }
+                        let Some(bitmap) = fonts.raster(face, cell.glyph, size * scale, sub) else { continue };
+                        let (px, py) = (whole_x as i32 + bitmap.left, line + bitmap.top);
+                        let bounds = [px, py, px + bitmap.width as i32, py + bitmap.height as i32];
+                        add(Shape::Glyph { x: px, y: py, bitmap }, straight(&cell.ink, order), bounds);
+                    }
+                }
+            }
         }
     }
     let mut bands = vec![Vec::new(); if banded { (h as usize).div_ceil(BAND) } else { 0 }];
@@ -274,7 +339,7 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
             bands[band].push(i as u32);
         }
     }
-    Prepared { prims, chains, bands, images: &scene.images, order }
+    Prepared { prims, chains, faces, bands, images: &scene.images, order }
 }
 
 /// How much of a pixel the shapes of a clip chain let through.
@@ -353,6 +418,8 @@ impl Prepared<'_> {
                     }
                 }
             }
+            // Only a renderer that asked for grids whole is given them.
+            Shape::Cells(_) => {}
             Shape::Image { to, image, opacity } => {
                 let im = &self.images[*image];
                 let (iw, ih) = (im.width as usize, im.height as usize);

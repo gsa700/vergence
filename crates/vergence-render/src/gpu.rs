@@ -34,12 +34,12 @@ use std::{
     sync::Arc,
 };
 
-use vergence_scene::{Color, Scene};
+use vergence_scene::{CELL_GLYPH, CELL_UNDERLINE, Cell, Color, Command, Rect, Scene};
 use vergence_text::{Bitmap, Fonts};
 
 use crate::{
     Pixmap, RenderError,
-    cpu::{Order, Prim, RRect, Shape, prepare},
+    cpu::{Order, Prepared, RRect, Shape, intersect, prepare},
     gl::{self, Egl, Gbm, Gles},
     pixel_size,
 };
@@ -622,10 +622,10 @@ impl Gpu {
             }
         }
         // Instances, in drawing order. An atlas that fills up is emptied and the frame begun again, once.
-        let mut built = self.instances(&prepared.prims, &prepared.chains);
+        let mut built = self.instances(&prepared, scene, fonts, scale);
         if matches!(built, Err(GpuError::Unsupported("atlas full"))) {
             self.atlas.clear();
-            built = self.instances(&prepared.prims, &prepared.chains);
+            built = self.instances(&prepared, scene, fonts, scale);
         }
         let (mut data, batches) = built?;
         let sizes: Vec<(u32, u32)> = prepared.images.iter().map(|im| (im.width, im.height)).collect();
@@ -696,11 +696,35 @@ impl Gpu {
     }
 
     /// The prepared shapes as instance data, and the draw calls to make of them.
-    fn instances(&mut self, prims: &[Prim], chains: &[Vec<RRect>]) -> Result<(Vec<f32>, Vec<Batch>), GpuError> {
-        let mut data: Vec<f32> = Vec::with_capacity(prims.len() * FLOATS);
+    fn instances(&mut self, prepared: &Prepared, scene: &Scene, fonts: &mut Fonts, scale: f32) -> Result<(Vec<f32>, Vec<Batch>), GpuError> {
+        let (prims, chains) = (&prepared.prims, &prepared.chains);
+        let cells: usize = scene.commands.iter().map(|c| if let Command::Cells { cells, .. } = c { cells.len() } else { 0 }).sum();
+        let mut data: Vec<f32> = Vec::with_capacity((prims.len() + 2 * cells) * FLOATS);
         let mut batches: Vec<Batch> = Vec::new();
         let rect = |r: &RRect| [r.x0, r.y0, r.x1, r.y1];
-        for (i, p) in prims.iter().enumerate() {
+        // One instance, put together and then added whole: the list is grown and
+        // checked once for it, not once for each of its eight parts.
+        fn emit(data: &mut Vec<f32>, batches: &mut Vec<Batch>, parts: [[f32; 4]; 8], image: Option<usize>) {
+            let first = data.len() / FLOATS;
+            let mut instance = [0.0f32; FLOATS];
+            for (to, part) in instance.chunks_exact_mut(4).zip(parts) {
+                to.copy_from_slice(&part);
+            }
+            data.extend_from_slice(&instance);
+            match (image, batches.last_mut()) {
+                (None, Some(b)) if b.image.is_none() => b.count += 1,
+                _ => batches.push(Batch { first, count: 1, image }),
+            }
+        }
+        let colour = |c: [u8; 4]| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, c[3] as f32 / 255.0];
+        let whole = |b: [i32; 4]| [b[0] as f32, b[1] as f32, b[2] as f32, b[3] as f32];
+        for p in prims.iter() {
+            let chain = &chains[p.chain as usize];
+            let (clip, clip_param) = match chain.as_slice() {
+                [] => ([0.0; 4], [0.0; 4]),
+                [one] => (rect(one), [one.radius, 1.0, 0.0, 0.0]),
+                _ => return Err(GpuError::Unsupported("a shape inside more than one rounded clip")),
+            };
             let (mut shape, mut inner, mut uv) = ([0.0f32; 4], [0.0f32; 4], [0.0f32; 4]);
             let mut param: [f32; 4];
             let mut image = None;
@@ -732,34 +756,91 @@ impl Gpu {
                     // The picture's size in pixels is filled in from the scene when it is bound.
                     param = [KIND_IMAGE, *opacity, 0.0, 0.0];
                 }
+                Shape::Cells(at) => {
+                    // A grid goes from its cells to instances with no shapes kept between:
+                    // what the reference renderer's `prepare` makes of it, by the same
+                    // arithmetic and in the same order, written straight into the list.
+                    let Command::Cells { origin, cell_w, cell_h, baseline, size, columns, cells } = &scene.commands[*at] else { continue };
+                    let (columns, scissor) = (*columns as usize, p.bounds);
+                    let fill = |data: &mut Vec<f32>, batches: &mut Vec<Batch>, r: RRect, c: Color| {
+                        let bounds = intersect(r.bounds(), scissor);
+                        if bounds[0] < bounds[2] && bounds[1] < bounds[3] && c.a != 0 {
+                            emit(data, batches, [whole(bounds), rect(&r), [0.0; 4], [KIND_FILL, r.radius, 0.0, 0.0], colour([c.r, c.g, c.b, c.a]), [0.0; 4], clip, clip_param], None);
+                        }
+                    };
+                    // Where each glyph of this grid is in the atlas, and its box: a screen
+                    // of text asks for the same few hundred, thousands of times. A place
+                    // is the glyph's, its font's and its quarter-pixel's; another glyph
+                    // that maps there takes it.
+                    const MEMO: usize = 1024;
+                    let mut memo: Vec<Option<(u64, Option<[i32; 6]>)>> = vec![None; MEMO];
+                    for (r, row) in cells.chunks_exact(columns).enumerate() {
+                        let top = origin.y + r as f32 * cell_h;
+                        let mut x = 0;
+                        while x < columns {
+                            let ground = row[x].ground;
+                            let mut end = x + 1;
+                            while end < columns && row[end].ground == ground {
+                                end += 1;
+                            }
+                            if ground.a != 0 {
+                                fill(&mut data, &mut batches, RRect::device(&Rect::new(origin.x + x as f32 * cell_w, top, (end - x) as f32 * cell_w, *cell_h), scale, 0.0), ground);
+                            }
+                            x = end;
+                        }
+                        let lined = |c: &Cell| c.flags & CELL_UNDERLINE != 0;
+                        let mut x = 0;
+                        while x < columns {
+                            let mut end = x + 1;
+                            if lined(&row[x]) {
+                                while end < columns && lined(&row[end]) && row[end].ink == row[x].ink {
+                                    end += 1;
+                                }
+                                fill(&mut data, &mut batches, RRect::device(&Rect::new(origin.x + x as f32 * cell_w, top + cell_h - 2.0, (end - x) as f32 * cell_w, 1.0), scale, 0.0), row[x].ink);
+                            }
+                            x = end;
+                        }
+                        let line = ((top + baseline) * scale).round() as i32;
+                        for (c, cell) in row.iter().enumerate() {
+                            if cell.flags & CELL_GLYPH == 0 || cell.ink.a == 0 {
+                                continue;
+                            }
+                            let Some(face) = prepared.faces[cell.font as usize] else { continue };
+                            let x = (origin.x + c as f32 * cell_w) * scale;
+                            let (mut whole_x, mut sub) = (x.floor(), ((x - x.floor()) * 4.0).round() as u8);
+                            if sub == 4 {
+                                whole_x += 1.0;
+                                sub = 0;
+                            }
+                            let key = cell.glyph as u64 | (cell.font as u64) << 32 | (sub as u64) << 48;
+                            let slot = (cell.glyph as usize).wrapping_mul(31).wrapping_add(cell.font as usize * 7 + sub as usize) & (MEMO - 1);
+                            let known = match memo[slot] {
+                                Some((k, known)) if k == key => known,
+                                _ => {
+                                    let known = match fonts.raster(face, cell.glyph, size * scale, sub) {
+                                        Some(bitmap) => {
+                                            let at = self.atlas.place(&self.gl, &bitmap).ok_or(GpuError::Unsupported("atlas full"))?;
+                                            Some([at.0, at.1, bitmap.left, bitmap.top, bitmap.width as i32, bitmap.height as i32])
+                                        }
+                                        None => None,
+                                    };
+                                    memo[slot] = Some((key, known));
+                                    known
+                                }
+                            };
+                            let Some([u, v, left, up, w, h]) = known else { continue };
+                            let (px, py) = (whole_x as i32 + left, line + up);
+                            let bounds = intersect([px, py, px + w, py + h], scissor);
+                            if bounds[0] < bounds[2] && bounds[1] < bounds[3] {
+                                let ink = cell.ink;
+                                emit(&mut data, &mut batches, [whole(bounds), [0.0; 4], [0.0; 4], [KIND_GLYPH, 0.0, 0.0, 0.0], colour([ink.r, ink.g, ink.b, ink.a]), [u as f32, v as f32, px as f32, py as f32], clip, clip_param], None);
+                            }
+                        }
+                    }
+                    continue;
+                }
             }
-            let chain = &chains[p.chain as usize];
-            let (clip, clip_param) = match chain.as_slice() {
-                [] => ([0.0; 4], [0.0; 4]),
-                [one] => (rect(one), [one.radius, 1.0, 0.0, 0.0]),
-                _ => return Err(GpuError::Unsupported("a shape inside more than one rounded clip")),
-            };
-            // One instance, put together and then added whole: the list is grown
-            // and checked once for it, not once for each of its eight parts.
-            let mut instance = [0.0f32; FLOATS];
-            let parts: [[f32; 4]; 8] = [
-                [p.bounds[0] as f32, p.bounds[1] as f32, p.bounds[2] as f32, p.bounds[3] as f32],
-                shape,
-                inner,
-                param,
-                [p.color[0] as f32 / 255.0, p.color[1] as f32 / 255.0, p.color[2] as f32 / 255.0, p.color[3] as f32 / 255.0],
-                uv,
-                clip,
-                clip_param,
-            ];
-            for (to, part) in instance.chunks_exact_mut(4).zip(parts) {
-                to.copy_from_slice(&part);
-            }
-            data.extend_from_slice(&instance);
-            match (image, batches.last_mut()) {
-                (None, Some(b)) if b.image.is_none() => b.count += 1,
-                _ => batches.push(Batch { first: i, count: 1, image }),
-            }
+            emit(&mut data, &mut batches, [whole(p.bounds), shape, inner, param, colour(p.color), uv, clip, clip_param], image);
         }
         Ok((data, batches))
     }
