@@ -3,6 +3,7 @@
 //! it; where each line sits is worked out once ([`Menu::new`]) and used both
 //! to draw it and to say what is under the pointer.
 
+use crate::bar::RADIUS;
 use vergence_render::text;
 use vergence_scene::{Color, Point, Rect, Scene};
 use vergence_text::{FaceId, Fonts};
@@ -87,8 +88,8 @@ impl Menu {
 
     /// Draws the menu; `hover` is the line under the pointer.
     pub fn draw(&self, scene: &mut Scene, fonts: &mut Fonts, face: Option<FaceId>, size: f32, accent: Color, hover: Option<Item>) {
-        scene.fill_rounded(self.area, 8.0, GROUND);
-        scene.stroke(self.area, 8.0, 1.0, Color::rgba(255, 255, 255, 38));
+        scene.fill_rounded(self.area, RADIUS, GROUND);
+        scene.stroke(self.area, RADIUS, 1.0, Color::rgba(255, 255, 255, 38));
         for (line, row) in &self.rows {
             let Some(item) = line else {
                 scene.fill(Rect::new(row.x + 4.0, row.y + (row.h - 1.0) / 2.0, row.w - 8.0, 1.0), Color::rgba(255, 255, 255, 31));
@@ -96,7 +97,7 @@ impl Menu {
             };
             let chosen = hover == Some(*item) && self.enabled(*item);
             if chosen {
-                scene.fill_rounded(*row, 5.0, Color::rgba(accent.r, accent.g, accent.b, 230));
+                scene.fill_rounded(*row, RADIUS, Color::rgba(accent.r, accent.g, accent.b, 230));
             }
             let Some(face) = face else { continue };
             let ink = if chosen {

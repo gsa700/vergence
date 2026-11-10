@@ -20,9 +20,15 @@ pub const TAB_W: f32 = 200.0;
 /// The least a tab shrinks to, a button's box, the + tab's width.
 const TAB_MIN: f32 = 28.0;
 const BUTTON_W: f32 = 32.0;
-const BUTTON_H: f32 = 24.0;
+const BUTTON_H: f32 = TAB_H;
 const PLUS_W: f32 = 34.0;
 const SIDE: f32 = 6.0;
+/// The one corner radius, of everything the terminal draws with a round
+/// corner (Dave, 2026-11-10: "I want consistency throughout"): a button's
+/// highlight, a tab's top corners, the menu and its lines, the "lines
+/// back" label, the ends of the scrollbar, and the window's own corners
+/// when the server rounds them.
+pub const RADIUS: f32 = 5.0;
 const GAP: f32 = 2.0;
 /// A tab narrower than this has no room for its own close button, unless
 /// it is the one shown.
@@ -93,7 +99,8 @@ impl Layout {
     /// being the one in front.
     pub fn new(width: f32, count: usize, shown: usize, left: &[WinButton], right: &[WinButton]) -> Layout {
         let mut buttons = Vec::new();
-        let button_y = BAR_H - TAB_H + (TAB_H - BUTTON_H) / 2.0;
+        // As tall as the tabs and standing where they stand (Dave, 2026-11-10).
+        let button_y = BAR_H - TAB_H;
         let mut x = SIDE;
         for b in left {
             buttons.push((*b, Rect::new(x, button_y, BUTTON_W, BUTTON_H)));
@@ -197,15 +204,20 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
     scene.fill(Rect::new(0.0, 0.0, scene.width, BAR_H), if look.focused { BAR_FOCUSED } else { BAR_UNFOCUSED });
     for (b, r) in &layout.buttons {
         let part = Part::Button(*b);
-        if look.hover == Some(part) {
-            scene.fill_rounded(*r, 5.0, if *b == WinButton::Close { CLOSE_HOVER } else { Color::rgba(255, 255, 255, 38) });
-        }
+        // A button has a shape at rest, the fill of a tab that is not shown, and
+        // is lighter under the pointer as such a tab is; the close button, red.
+        let fill = match (look.hover == Some(part), *b) {
+            (true, WinButton::Close) => CLOSE_HOVER,
+            (true, _) => Color::rgba(255, 255, 255, 41),
+            (false, _) => Color::rgba(255, 255, 255, 20),
+        };
+        scene.fill_rounded(*r, RADIUS, fill);
         icon(scene, r, part, 10.0, ink);
     }
     // A tab is round at the top and square where it meets the pane: drawn taller than the bar and cut off.
     let tab_shape = |scene: &mut Scene, r: &Rect, fill: Color| {
         scene.push_clip(*r, 0.0);
-        scene.fill_rounded(Rect::new(r.x, r.y, r.w, r.h + 12.0), 7.0, fill);
+        scene.fill_rounded(Rect::new(r.x, r.y, r.w, r.h + 12.0), RADIUS, fill);
         scene.pop_clip();
     };
     for (i, tab) in layout.tabs.iter().enumerate() {
@@ -217,7 +229,7 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
         let mut text_to = tab.x + tab.w - 8.0;
         if let Some(close) = &layout.closes[i] {
             if look.hover == Some(Part::CloseTab(i)) {
-                scene.fill_rounded(*close, 5.0, Color::rgba(tab_ink.r, tab_ink.g, tab_ink.b, 46));
+                scene.fill_rounded(*close, RADIUS, Color::rgba(tab_ink.r, tab_ink.g, tab_ink.b, 46));
             }
             icon(scene, close, Part::CloseTab(i), 8.0, tab_ink);
             if layout.controls_left {

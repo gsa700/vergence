@@ -527,6 +527,34 @@ borrowing. Nothing new comes in.
   ones xterm sends (Ctrl+2 is NUL, Ctrl+3 to Ctrl+7 are 0x1b to 0x1f);
   dropping them would take those keys away.
   Tests (2 new, 40 in `vterm`) green on Hubble, canary and Techbench.
+- **The window's look (Dave, 2026-11-10).** One corner radius for
+  everything `vterm` draws round, the buttons' 5 units (`bar::RADIUS`):
+  the tabs' top corners (were 7), the menu and its lines (were 8 and 5),
+  the "lines back" label (was 6), the scrollbar's ends as far as its
+  width lets them, and the window's own corners when the server rounds
+  them. The window buttons have a shape at rest, the fill of a tab that
+  is not shown, and are as tall as the tabs, standing on the bar's bottom
+  edge with them. Tried and dropped the same day: the Super key as a
+  command key (it is not under the thumb on a PC keyboard, and other
+  applications use Ctrl), and one 6-unit margin for bar, text and
+  scrollbar.
+- **Step 5 begun (2026-11-10): the stress test, kept.**
+  `crates/vterm/examples/flood.rs` holds the jobs (colour, cursor,
+  unicode, and `time` for `seq`), each writing its rate to a report;
+  `tools/vterm-stress/run.sh [minutes]` opens one `vterm` with the six
+  tabs through `vctl` and writes a line a minute: the rates, the memory,
+  and each thread's share of a core (the parsing threads are named
+  `parse`). First figures on Hubble, six tabs at once, a window of
+  1091 x 699 units on the 4K at 30 Hz, a video playing in Firefox beside
+  it: `seq 1 1000000` 0.69 to 0.75 s; colour 11,500 to 12,600 lines/s;
+  cursor 6,200 to 6,800 batches/s, **under acceptance 5's 10,000**;
+  Unicode about 225,000 lines/s; the interface thread 3% with btop shown;
+  175 MB. The machine was full (13% idle, 46% in the kernel carrying
+  terminal bytes). Each job alone: cursor 19,500 batches/s, colour 36,000
+  lines/s, the interface thread 10% (cursor shown) and 15% (colour
+  shown), the second **over acceptance 5's 10%**. Still to do: the
+  hour's soak (running as this is written), the tab-click test, the runs
+  on canary and Techbench, the install.
 
 ## Acceptance
 

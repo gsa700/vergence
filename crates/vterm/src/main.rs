@@ -377,7 +377,8 @@ impl Session {
         let mut replies = reader.try_clone()?;
         let screen = Arc::new(Mutex::new(Screen { grid: Grid::new(cols, rows), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None, selection: None }));
         let shared = screen.clone();
-        std::thread::spawn(move || {
+        // Named, so that a look at the threads says which is parsing.
+        std::thread::Builder::new().name("parse".into()).spawn(move || {
             pty::read_loop(reader, |bytes| {
                 let out = {
                     let mut guard = lock(&shared);
@@ -410,7 +411,7 @@ impl Session {
             });
             lock(&shared).exited = true;
             waker.wake();
-        });
+        })?;
         Ok(Session { screen, pty, title: String::new() })
     }
 
@@ -1074,16 +1075,16 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
     }
     // The scrollbar: faint at the live screen, clearer while scrolled back or held.
     if let Some(bar) = s.scrollbar(area) {
-        scene.fill_rounded(bar.track, scrollbar::WIDTH / 2.0, Color::rgba(p.fg.r, p.fg.g, p.fg.b, 15));
+        scene.fill_rounded(bar.track, scrollbar::RADIUS, Color::rgba(p.fg.r, p.fg.g, p.fg.b, 15));
         let alpha = if look.thumb_held { 166 } else if s.scroll > 0 { 128 } else { 64 };
-        scene.fill_rounded(bar.thumb, scrollbar::WIDTH / 2.0, Color::rgba(p.fg.r, p.fg.g, p.fg.b, alpha));
+        scene.fill_rounded(bar.thumb, scrollbar::RADIUS, Color::rgba(p.fg.r, p.fg.g, p.fg.b, alpha));
     }
     // Scrolled back: how far, in the top right corner (left of the scrollbar).
     if s.scroll > 0 {
         let label = if s.scroll == 1 { "1 line back".to_string() } else { format!("{} lines back", s.scroll) };
         let width = label.chars().count() as f32 * cw + 16.0;
         let at = Rect::new(area.x + area.w - width - PAD - scrollbar::GRAB, first, width, ch + 4.0);
-        scene.fill_rounded(at, 6.0, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 235));
+        scene.fill_rounded(at, bar::RADIUS, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 235));
         let font = font_number(scene, fonts, numbers, mt.regular);
         let glyphs = label.chars().enumerate().map(|(i, c)| Glyph { id: fonts.glyph(mt.regular, c).1, x: i as f32 * cw, y: 0.0 }).collect();
         scene.glyphs(font, size, p.bg, Point::new(at.x + 8.0, at.y + 2.0 + mt.baseline), glyphs);
