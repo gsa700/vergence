@@ -1,0 +1,71 @@
+diff -ru a/iced_tiny_skia/src/engine.rs b/iced_tiny_skia/src/engine.rs
+--- a/iced_tiny_skia/src/engine.rs	2026-11-09 19:42:50
++++ b/iced_tiny_skia/src/engine.rs	2026-11-09 19:42:50
+@@ -323,6 +323,8 @@
+         transformation: Transformation,
+         pixels: &mut tiny_skia::PixmapMut<'_>,
+         clip_mask: &mut tiny_skia::Mask,
++        // Vergence: the bounds `clip_mask` holds now (patches/README.md).
++        mask_bounds: &mut Rectangle,
+         clip_bounds: Rectangle,
+     ) {
+         match text {
+@@ -351,7 +353,10 @@
+                 let clip_mask = match physical_bounds.is_within(&clip_bounds) {
+                     true => None,
+                     false => {
+-                        adjust_clip_mask(clip_mask, clip_bounds);
++                        if *mask_bounds != clip_bounds {
++                            adjust_clip_mask(clip_mask, clip_bounds);
++                            *mask_bounds = clip_bounds;
++                        }
+                         Some(clip_mask as &_)
+                     }
+                 };
+@@ -389,7 +394,10 @@
+                 let clip_mask = match physical_bounds.is_within(&clip_bounds) {
+                     true => None,
+                     false => {
+-                        adjust_clip_mask(clip_mask, clip_bounds);
++                        if *mask_bounds != clip_bounds {
++                            adjust_clip_mask(clip_mask, clip_bounds);
++                            *mask_bounds = clip_bounds;
++                        }
+                         Some(clip_mask as &_)
+                     }
+                 };
+@@ -424,7 +432,10 @@
+                 let clip_mask = match physical_bounds.is_within(&clip_bounds) {
+                     true => None,
+                     false => {
+-                        adjust_clip_mask(clip_mask, clip_bounds);
++                        if *mask_bounds != clip_bounds {
++                            adjust_clip_mask(clip_mask, clip_bounds);
++                            *mask_bounds = clip_bounds;
++                        }
+                         Some(clip_mask as &_)
+                     }
+                 };
+diff -ru a/iced_tiny_skia/src/lib.rs b/iced_tiny_skia/src/lib.rs
+--- a/iced_tiny_skia/src/lib.rs	2026-11-09 19:42:50
++++ b/iced_tiny_skia/src/lib.rs	2026-11-09 19:42:50
+@@ -177,6 +177,11 @@
+                 if !layer.text.is_empty() {
+                     let render_span = debug::render(debug::Primitive::Image);
+ 
++                    // Vergence: the mask holds the layer's bounds here; a
++                    // text's own clip is put into it only when it differs
++                    // from what the mask already holds (patches/README.md).
++                    let mut mask_bounds = layer_bounds;
++
+                     for group in &layer.text {
+                         for text in group.as_slice() {
+                             self.engine.draw_text(
+@@ -185,6 +190,7 @@
+                                     * group.transformation(),
+                                 pixels,
+                                 clip_mask,
++                                &mut mask_bounds,
+                                 layer_bounds,
+                             );
+                         }

@@ -18,3 +18,5 @@ vergence-dbus = { path = "crates/vergence-dbus" }
 # drm-rs 0.14.1 with the FreeBSD DRM node fixes (patches/README.md).
 [patch.crates-io]
 drm = { path = "third_party/drm-rs" }
+# iced_tiny_skia 0.14.1 without the clip mask rebuilt for every text (patches/README.md).
+iced_tiny_skia = { path = "third_party/iced_tiny_skia" }
