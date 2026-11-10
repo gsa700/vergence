@@ -1,5 +1,9 @@
-//! The terminal's own bar: the window's buttons where the desktop's layout
-//! puts them, a tab for each terminal, and +.
+//! The bar a toolkit window draws for itself: the window's buttons where
+//! the desktop's layout puts them, and either tabs with a + (the terminal:
+//! [`Layout::new`]) or the window's title ([`Layout::plain`]). It was the
+//! terminal's own until 2026-11-10 and is the toolkit's so that every tool
+//! has the same one; its sizes and colours are the desktop's one look
+//! (vergence-look), which the server's title bars are drawn with too.
 //!
 //! Where everything sits is worked out in one place ([`Layout::new`]) and
 //! used both to draw the bar and to say what is under the pointer, so the
@@ -14,8 +18,8 @@ use vergence_text::{FaceId, Fonts};
 
 /// The bar's height, the tabs' (they stand on its bottom edge), and the
 /// most a tab is wide.
-pub const BAR_H: f32 = 36.0;
-pub const TAB_H: f32 = 30.0;
+pub const BAR_H: f32 = vergence_look::BAR_H;
+pub const TAB_H: f32 = vergence_look::BAR_ITEM_H;
 pub const TAB_W: f32 = 200.0;
 /// The least a tab shrinks to, a button's box, the + tab's width.
 const TAB_MIN: f32 = 28.0;
@@ -23,24 +27,26 @@ const BUTTON_W: f32 = 32.0;
 const BUTTON_H: f32 = TAB_H;
 const PLUS_W: f32 = 34.0;
 const SIDE: f32 = 6.0;
-/// The one corner radius, of everything the terminal draws with a round
-/// corner (Dave, 2026-11-10: "I want consistency throughout"): a button's
-/// highlight, a tab's top corners, the menu and its lines, the "lines
-/// back" label, the ends of the scrollbar, and the window's own corners
-/// when the server rounds them.
-pub const RADIUS: f32 = 5.0;
+/// The one corner radius (vergence-look).
+pub const RADIUS: f32 = vergence_look::RADIUS;
 const GAP: f32 = 2.0;
 /// A tab narrower than this has no room for its own close button, unless
 /// it is the one shown.
 const CLOSE_NEEDS: f32 = 72.0;
 
-// The server's title bar colours (vergence-server decor.rs), so this bar
-// matches the windows it decorates.
-const BAR_FOCUSED: Color = Color::rgb(51, 61, 82);
-const BAR_UNFOCUSED: Color = Color::rgb(56, 56, 56);
-const INK_FOCUSED: Color = Color::rgb(235, 235, 235);
-const INK_UNFOCUSED: Color = Color::rgb(158, 158, 158);
-const CLOSE_HOVER: Color = Color::rgb(199, 77, 71);
+const fn colour(c: vergence_look::Rgb) -> Color {
+    Color::rgb(c.0, c.1, c.2)
+}
+const fn shape(alpha: u8) -> Color {
+    Color::rgba(255, 255, 255, alpha)
+}
+const BAR_FOCUSED: Color = colour(vergence_look::BAR_FOCUSED);
+const BAR_UNFOCUSED: Color = colour(vergence_look::BAR_UNFOCUSED);
+const INK_FOCUSED: Color = colour(vergence_look::INK_FOCUSED);
+const INK_UNFOCUSED: Color = colour(vergence_look::INK_UNFOCUSED);
+const CLOSE_HOVER: Color = colour(vergence_look::CLOSE);
+const SHAPE_REST: Color = shape(vergence_look::SHAPE_REST);
+const SHAPE_HOVER: Color = shape(vergence_look::SHAPE_HOVER);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WinButton {
@@ -89,7 +95,10 @@ pub struct Layout {
     pub tabs: Vec<Rect>,
     /// Each tab's close button, where the tab has room for one.
     pub closes: Vec<Option<Rect>>,
+    /// The + after the tabs; no wider than nothing in a bar without tabs.
     pub plus: Rect,
+    /// Where the window's title is written, in a bar without tabs.
+    pub title: Option<Rect>,
     /// True if the window's buttons are on the left: tabs then close on their left too.
     pub controls_left: bool,
 }
@@ -98,21 +107,7 @@ impl Layout {
     /// The bar of a window `width` wide with `count` tabs, the tab `shown`
     /// being the one in front.
     pub fn new(width: f32, count: usize, shown: usize, left: &[WinButton], right: &[WinButton]) -> Layout {
-        let mut buttons = Vec::new();
-        // As tall as the tabs and standing where they stand (Dave, 2026-11-10).
-        let button_y = BAR_H - TAB_H;
-        let mut x = SIDE;
-        for b in left {
-            buttons.push((*b, Rect::new(x, button_y, BUTTON_W, BUTTON_H)));
-            x += BUTTON_W + GAP;
-        }
-        let mut end = width - SIDE;
-        for b in right.iter().rev() {
-            end -= BUTTON_W;
-            buttons.push((*b, Rect::new(end, button_y, BUTTON_W, BUTTON_H)));
-            end -= GAP;
-        }
-        let start = x + if left.is_empty() { 0.0 } else { GAP };
+        let (buttons, start, end) = Layout::buttons(width, left, right);
         // The tabs share what is left after +, down to a least width.
         let room = (end - start - PLUS_W - GAP).max(0.0);
         let n = count.max(1) as f32;
@@ -131,7 +126,35 @@ impl Layout {
             closes.push(close);
             x += tab_w + GAP;
         }
-        Layout { buttons, tabs, closes, plus: Rect::new(x, top, PLUS_W, TAB_H), controls_left }
+        Layout { buttons, tabs, closes, plus: Rect::new(x, top, PLUS_W, TAB_H), title: None, controls_left }
+    }
+
+    /// The bar of a window without tabs: its buttons, and between them the
+    /// room its title is written in. The whole of it moves the window.
+    pub fn plain(width: f32, left: &[WinButton], right: &[WinButton]) -> Layout {
+        let (buttons, start, end) = Layout::buttons(width, left, right);
+        let title = Rect::new(start + 6.0, BAR_H - TAB_H, (end - start - 12.0).max(0.0), TAB_H);
+        Layout { buttons, tabs: Vec::new(), closes: Vec::new(), plus: Rect::new(end, BAR_H - TAB_H, 0.0, TAB_H), title: Some(title), controls_left: !left.is_empty() }
+    }
+
+    /// The window's buttons on their sides, and where the room between them
+    /// starts and ends.
+    fn buttons(width: f32, left: &[WinButton], right: &[WinButton]) -> (Vec<(WinButton, Rect)>, f32, f32) {
+        let mut buttons = Vec::new();
+        // As tall as the tabs and standing where they stand (Dave, 2026-11-10).
+        let button_y = BAR_H - TAB_H;
+        let mut x = SIDE;
+        for b in left {
+            buttons.push((*b, Rect::new(x, button_y, BUTTON_W, BUTTON_H)));
+            x += BUTTON_W + GAP;
+        }
+        let mut end = width - SIDE;
+        for b in right.iter().rev() {
+            end -= BUTTON_W;
+            buttons.push((*b, Rect::new(end, button_y, BUTTON_W, BUTTON_H)));
+            end -= GAP;
+        }
+        (buttons, x + if left.is_empty() { 0.0 } else { GAP }, end)
     }
 
     /// What is at a point of the window, if the point is in the bar.
@@ -193,6 +216,8 @@ pub struct Look<'a> {
     pub font: Option<FaceId>,
     pub font_size: f32,
     pub titles: &'a [String],
+    /// The window's title, for a bar without tabs ([`Layout::plain`]).
+    pub title: &'a str,
     pub shown: usize,
     /// What the pointer is over.
     pub hover: Option<Part>,
@@ -208,8 +233,8 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
         // is lighter under the pointer as such a tab is; the close button, red.
         let fill = match (look.hover == Some(part), *b) {
             (true, WinButton::Close) => CLOSE_HOVER,
-            (true, _) => Color::rgba(255, 255, 255, 41),
-            (false, _) => Color::rgba(255, 255, 255, 20),
+            (true, _) => SHAPE_HOVER,
+            (false, _) => SHAPE_REST,
         };
         scene.fill_rounded(*r, RADIUS, fill);
         icon(scene, r, part, 10.0, ink);
@@ -224,7 +249,7 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
         let shown = i == look.shown;
         let hovered = matches!(look.hover, Some(Part::Tab(t) | Part::CloseTab(t)) if t == i);
         let tab_ink = if shown { look.pane_ink } else { ink };
-        tab_shape(scene, tab, if shown { look.pane } else { Color::rgba(255, 255, 255, if hovered { 41 } else { 20 }) });
+        tab_shape(scene, tab, if shown { look.pane } else if hovered { SHAPE_HOVER } else { SHAPE_REST });
         let mut text_from = tab.x + 12.0;
         let mut text_to = tab.x + tab.w - 8.0;
         if let Some(close) = &layout.closes[i] {
@@ -249,8 +274,20 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
             scene.pop_clip();
         }
     }
-    tab_shape(scene, &layout.plus, Color::rgba(255, 255, 255, if look.hover == Some(Part::Plus) { 41 } else { 20 }));
-    icon(scene, &layout.plus, Part::Plus, 12.0, ink);
+    if layout.plus.w > 0.0 {
+        tab_shape(scene, &layout.plus, if look.hover == Some(Part::Plus) { SHAPE_HOVER } else { SHAPE_REST });
+        icon(scene, &layout.plus, Part::Plus, 12.0, ink);
+    }
+    if let (Some(room), Some(face)) = (&layout.title, look.font)
+        && room.w > 10.0
+    {
+        // The title, on the tabs' line, cut where its room ends.
+        scene.push_clip(*room, 0.0);
+        let m = fonts.metrics(face, look.font_size);
+        let baseline = room.y + ((room.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round() - 1.0;
+        text(scene, fonts, face, look.font_size, ink, Point::new(room.x, baseline), look.title);
+        scene.pop_clip();
+    }
 }
 
 #[cfg(test)]
@@ -314,5 +351,20 @@ mod tests {
         assert!(l.tabs[0].w < CLOSE_NEEDS);
         assert!(l.closes[3].is_some());
         assert!(l.closes.iter().enumerate().all(|(i, c)| c.is_some() == (i == 3)));
+    }
+
+    #[test]
+    fn a_bar_without_tabs_has_its_buttons_and_a_title() {
+        let l = Layout::plain(640.0, &[], &[WinButton::Minimize, WinButton::Maximize, WinButton::Close]);
+        assert!(l.tabs.is_empty() && l.plus.w == 0.0);
+        let title = l.title.unwrap();
+        let first_button = l.buttons.iter().map(|(_, r)| r.x).fold(f32::MAX, f32::min);
+        assert!(title.x >= SIDE && title.x + title.w <= first_button, "the title's room ends before the buttons: {title:?}");
+        assert_eq!(l.at(title.x + 20.0, 20.0), Some(Part::Bar), "the title's room moves the window");
+        assert_eq!(l.at(640.0 - SIDE - 5.0, 20.0), Some(Part::Button(WinButton::Close)));
+        assert_eq!(l.at(300.0, BAR_H + 1.0), None);
+        // Buttons on the left: the title starts after them.
+        let l = Layout::plain(640.0, &LEFT, &[]);
+        assert!(l.title.unwrap().x > 2.0 * BUTTON_W);
     }
 }

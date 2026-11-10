@@ -1,0 +1,11 @@
+[package]
+name = "vergence-look"
+description = "Vergence's look in one place: the radius, the sizes and the colours the server and the toolkit both draw with"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Our own code only, and nothing under it: the server and the toolkit both
+# depend on this, and neither on the other.
+[dependencies]

@@ -45,21 +45,23 @@ use smithay::backend::allocator::Fourcc;
 
 use crate::{Server, grabs::resize_grab::ResizeEdge};
 
+// The sizes and colours are the desktop's one look (vergence-look), which the
+// toolkit's own bars are drawn with too: neither keeps a copy.
 /// The title bar's height, in points.
-pub const TITLE_H: i32 = 24;
+pub const TITLE_H: i32 = vergence_look::TITLE_H as i32;
 /// The resize band around a decorated window, in points.
-pub const BORDER: i32 = 6;
+pub const BORDER: i32 = vergence_look::RESIZE_BAND as i32;
 /// The border line around a window, in points.
-pub const EDGE: i32 = 1;
-const EDGE_ACTIVE: [f32; 4] = [0.42, 0.48, 0.62, 1.0];
-const EDGE_INACTIVE: [f32; 4] = [0.34, 0.34, 0.34, 1.0];
+pub const EDGE: i32 = vergence_look::EDGE as i32;
+const EDGE_ACTIVE: [f32; 4] = vergence_look::EDGE_FOCUSED.floats();
+const EDGE_INACTIVE: [f32; 4] = vergence_look::EDGE_UNFOCUSED.floats();
 
-const BAR_ACTIVE: [f32; 4] = [0.20, 0.24, 0.32, 1.0];
-const BAR_INACTIVE: [f32; 4] = [0.22, 0.22, 0.22, 1.0];
-const CLOSE: [f32; 4] = [0.78, 0.30, 0.28, 1.0];
-const BUTTON: [f32; 4] = [0.72, 0.72, 0.72, 1.0];
-const TEXT_ACTIVE: [f32; 3] = [0.92, 0.92, 0.92];
-const TEXT_INACTIVE: [f32; 3] = [0.62, 0.62, 0.62];
+const BAR_ACTIVE: [f32; 4] = vergence_look::BAR_FOCUSED.floats();
+const BAR_INACTIVE: [f32; 4] = vergence_look::BAR_UNFOCUSED.floats();
+const CLOSE: [f32; 4] = vergence_look::CLOSE.floats();
+const BUTTON: [f32; 4] = vergence_look::BUTTON.floats();
+const TEXT_ACTIVE: [f32; 3] = vergence_look::INK_FOCUSED.floats3();
+const TEXT_INACTIVE: [f32; 3] = vergence_look::INK_UNFOCUSED.floats3();
 /// Space before the title text and between it and the buttons, in points.
 const TEXT_PAD: i32 = 8;
 

@@ -20,7 +20,7 @@
 //! - **Keys arrive in order** through the toolkit and go to the program as
 //!   xterm's sequences.
 //!
-//! So far: terminals in tabs under a bar of the window's own (bar.rs), with
+//! So far: terminals in tabs under a bar of the window's own (the toolkit's, vergence_ui::bar), with
 //! the window's buttons on the side the desktop's settings say and tabs
 //! that shrink to fit; typing, paste, the scrollback (wheel,
 //! Shift+PageUp/PageDown, Shift+Home/End), resizing, titles, the program's own copies (OSC
@@ -48,7 +48,6 @@
 //! Ctrl+C copies when text is selected (and is the interrupt key when
 //! none is); Ctrl+V pastes. Ctrl+Shift+C and Ctrl+Shift+V do the same.
 
-mod bar;
 #[cfg(test)]
 mod fuzz;
 #[allow(dead_code)]
@@ -73,7 +72,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bar::{BAR_H, Layout, Part, WinButton};
+use vergence_ui::bar::{self, BAR_H, Layout, Part, WinButton};
 use grid::{Cell, Color as CellColor, Grid, MouseMode};
 use menu::{Item, Menu};
 use panes::{Axis, Divider, Node};
@@ -1512,7 +1511,7 @@ impl App for Terminal {
 
         let titles: Vec<String> = self.tabs.iter().map(Tab::label).collect();
         let layout = Layout::new(frame.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right);
-        bar::draw(&mut scene, fonts, &layout, &bar::Look { focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, shown: self.shown, hover: self.hover });
+        bar::draw(&mut scene, fonts, &layout, &bar::Look { focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, title: "", shown: self.shown, hover: self.hover });
 
         let Some(tab) = self.tabs.get(self.shown) else { return scene };
         // Scene font numbers for the faces used in this frame.

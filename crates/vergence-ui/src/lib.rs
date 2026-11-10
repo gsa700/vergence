@@ -31,6 +31,7 @@
 //! sharper on a denser monitor, and drawn again when the window moves to
 //! another.
 
+pub mod bar;
 pub mod keyboard;
 
 use std::{

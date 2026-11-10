@@ -745,6 +745,34 @@ borrowing. Nothing new comes in.
   cursor 14,400 batches/s at 3.2%. Acceptance 5's figures for a flood
   alone hold on the slowest of the four machines.
 
+- **After the milestone's steps: the look in one place, the bar in the
+  toolkit (2026-11-10; Dave: yes to both, and to round window corners).**
+  - `crates/vergence-look`, with nothing under it: the one corner radius
+    (5 units), the bars' heights, the border, and the colours of bars,
+    borders, buttons and menus. The server's title bars and borders
+    (`decor.rs`) and the toolkit's bar, menu and scrollbar read them from
+    there; neither keeps a copy. The server's colours move by less than
+    half a step of 255 (they were written as fractions).
+  - The window bar is the toolkit's: `vergence_ui::bar`, moved from the
+    terminal as it was, with a second form for a window without tabs
+    ([`Layout::plain`]: the buttons and the window's title), which the
+    settings app will use when it moves. The terminal's picture is the
+    same file before and after.
+  - **Round window corners, 5 units, drawn by the server**: decided, to
+    be built when the server draws through `vergence-render` (a window
+    that rounded its own corners would sit inside the server's square
+    border). A mock is in the Vergence Window Corners artifact.
+  - **Where preferences live (Dave, 2026-11-10):** an application's
+    settings are all in the application. Each starts from the desktop's
+    setting where there is one (fonts, light or dark, the accent) and may
+    be overridden there for that application alone; what only the
+    application has (the terminal's colours, its scrollback) is simply
+    its own. The settings app holds the desktop's defaults. To be built
+    with the widgets; what an application overrides is kept by the
+    settings service in a section of its own, so that it applies live
+    and the absence of a value means "as the desktop says".
+  256 tests green on kepler and canary, 255 on Hubble and Techbench.
+
 ## Acceptance
 
 Every step: `cargo test --workspace` green on Hubble, canary and Techbench;

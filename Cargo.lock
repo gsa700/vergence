@@ -4582,6 +4582,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "vergence-look"
+version = "0.1.0"
+
+[[package]]
 name = "vergence-profile"
 version = "0.1.0"
 dependencies = [
@@ -4624,6 +4628,7 @@ dependencies = [
  "tracing-subscriber",
  "vergence-dbus",
  "vergence-edid",
+ "vergence-look",
  "vergence-profile",
  "vergence-protocol",
  "vergence-xsettings",
@@ -4648,6 +4653,7 @@ name = "vergence-term"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "vergence-look",
  "vergence-render",
  "vergence-scene",
  "vergence-text",
@@ -4665,6 +4671,7 @@ dependencies = [
 name = "vergence-ui"
 version = "0.1.0"
 dependencies = [
+ "vergence-look",
  "vergence-render",
  "vergence-scene",
  "vergence-text",

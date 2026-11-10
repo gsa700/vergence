@@ -11,3 +11,4 @@ vergence-scene.workspace = true
 vergence-text.workspace = true
 vergence-render.workspace = true
 vergence-wl.workspace = true
+vergence-look.workspace = true

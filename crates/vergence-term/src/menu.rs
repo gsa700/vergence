@@ -3,7 +3,7 @@
 //! it; where each line sits is worked out once ([`Menu::new`]) and used both
 //! to draw it and to say what is under the pointer.
 
-use crate::bar::RADIUS;
+use vergence_look::RADIUS;
 use vergence_render::text;
 use vergence_scene::{Color, Point, Rect, Scene};
 use vergence_text::{FaceId, Fonts};
@@ -13,9 +13,12 @@ const EDGE: f32 = 4.0;
 const ITEM_H: f32 = 28.0;
 const LINE_H: f32 = 9.0;
 
-const GROUND: Color = Color::rgb(43, 46, 59);
-const INK: Color = Color::rgb(235, 235, 235);
-const INK_OFF: Color = Color::rgb(128, 128, 134);
+const fn colour(c: vergence_look::Rgb) -> Color {
+    Color::rgb(c.0, c.1, c.2)
+}
+const GROUND: Color = colour(vergence_look::MENU);
+const INK: Color = colour(vergence_look::MENU_INK);
+const INK_OFF: Color = colour(vergence_look::MENU_INK_OFF);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Item {
