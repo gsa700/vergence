@@ -1,0 +1,17 @@
+[package]
+name = "vterm"
+description = "Vergence's terminal on the project's own toolkit (toolkit milestone 1, step 4); becomes vergence-term when the iced one is retired"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+vergence-scene.workspace = true
+vergence-text.workspace = true
+vergence-render.workspace = true
+vergence-ui.workspace = true
+# The first terminal's grid.rs (used from there as it is) decodes OSC 52
+# clipboard writes with this; already in the workspace through iced. To be
+# replaced by a few lines of our own when grid.rs moves here.
+base64 = "0.22"

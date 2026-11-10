@@ -37,7 +37,10 @@ use std::{
     collections::HashMap,
     io::{self, Read, Write},
     os::fd::AsRawFd,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -228,6 +231,23 @@ impl Window {
     }
 }
 
+/// A way for another thread to get the window's attention: [`App::woken`]
+/// is then called on the window's thread. However many times it is used
+/// before that happens, the program is woken once.
+#[derive(Clone)]
+pub struct Waker {
+    pipe: Arc<std::fs::File>,
+    pending: Arc<AtomicBool>,
+}
+
+impl Waker {
+    pub fn wake(&self) {
+        if !self.pending.swap(true, Ordering::SeqCst) {
+            let _ = (&*self.pipe).write(&[1]);
+        }
+    }
+}
+
 /// A program with one window.
 pub trait App {
     fn title(&self) -> String;
@@ -250,6 +270,13 @@ pub trait App {
 
     /// Something the user did.
     fn input(&mut self, _input: &Input, _window: &mut Window) {}
+
+    /// Called once, before the window opens, with the means for other
+    /// threads to wake it.
+    fn waker(&mut self, _waker: Waker) {}
+
+    /// Another thread used the [`Waker`].
+    fn woken(&mut self, _window: &mut Window) {}
 
     /// True while the picture changes by itself: a new frame is then drawn
     /// every time the monitor is ready for one.
@@ -363,6 +390,9 @@ struct Runner {
     paste: Option<Paste>,
     /// Input made here rather than read from the server, to give the program next.
     inbox: Vec<Input>,
+    /// The pipe other threads wake the window through, and its flag.
+    wake: std::fs::File,
+    wake_pending: Arc<AtomicBool>,
 }
 
 /// Opens the window and runs until it is closed. `size` is the size asked
@@ -451,6 +481,10 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
     // The first commit has no buffer: it asks the server to configure the window.
     client.commit(surface)?;
 
+    let (wake_read, wake_write) = vergence_wl::conn::pipe()?;
+    let wake_pending = Arc::new(AtomicBool::new(false));
+    app.waker(Waker { pipe: Arc::new(wake_write.into()), pending: wake_pending.clone() });
+
     let mut runner = Runner {
         client,
         shm,
@@ -499,6 +533,8 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         copied: None,
         paste: None,
         inbox: Vec::new(),
+        wake: wake_read.into(),
+        wake_pending,
     };
     runner.run(app)
 }
@@ -515,11 +551,18 @@ impl Runner {
                 (a, b) => a.or(b),
             };
             let pipe = self.paste.as_ref().map(|p| p.pipe.as_raw_fd());
-            let (events, pipe_ready) = self.client.dispatch_or(pipe, wait)?;
+            let (events, [pipe_ready, woken]) = self.client.dispatch_or([pipe, Some(self.wake.as_raw_fd())], wait)?;
             for event in events {
                 self.handle(event, app)?;
             }
             self.read_paste(pipe_ready);
+            if woken {
+                // The flag is cleared first: a wake that comes while the program is being told is not lost.
+                let mut drain = [0u8; 64];
+                let _ = self.wake.read(&mut drain);
+                self.wake_pending.store(false, Ordering::SeqCst);
+                self.with_window(app, |app, window| app.woken(window))?;
+            }
             for input in std::mem::take(&mut self.inbox) {
                 self.tell(app, input)?;
             }
@@ -534,8 +577,13 @@ impl Runner {
 
     /// Gives the program one input and does what it asks in return.
     fn tell(&mut self, app: &mut dyn App, input: Input) -> io::Result<()> {
+        self.with_window(app, |app, window| app.input(&input, window))
+    }
+
+    /// Calls the program with a handle on its window, then does what it asked.
+    fn with_window(&mut self, app: &mut dyn App, call: impl FnOnce(&mut dyn App, &mut Window)) -> io::Result<()> {
         let mut window = Window::default();
-        app.input(&input, &mut window);
+        call(app, &mut window);
         for command in window.commands {
             match command {
                 Command::Redraw => self.dirty = true,

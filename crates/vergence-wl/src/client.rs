@@ -292,15 +292,16 @@ impl Client {
     /// As [`Client::dispatch`], but gives up waiting after `timeout` and
     /// returns nothing, for a caller with a timer of its own (key repeat).
     pub fn dispatch_within(&mut self, timeout: Option<Duration>) -> io::Result<Vec<Event>> {
-        Ok(self.dispatch_or(None, timeout)?.0)
+        Ok(self.dispatch_or([None, None], timeout)?.0)
     }
 
-    /// As [`Client::dispatch_within`], while also watching another file
-    /// descriptor (a pipe the clipboard is being read from): the events,
-    /// and whether that descriptor is ready to be read.
-    pub fn dispatch_or(&mut self, other: Option<RawFd>, timeout: Option<Duration>) -> io::Result<(Vec<Event>, bool)> {
+    /// As [`Client::dispatch_within`], while also watching up to two other
+    /// file descriptors (a pipe the clipboard is being read from, a pipe
+    /// that wakes the program): the events, and whether each of those
+    /// descriptors is ready to be read.
+    pub fn dispatch_or(&mut self, others: [Option<RawFd>; 2], timeout: Option<Duration>) -> io::Result<(Vec<Event>, [bool; 2])> {
         self.conn.flush()?;
-        let (server, other_ready) = self.conn.wait_also(other, timeout)?;
+        let (server, other_ready) = self.conn.wait_also(others, timeout)?;
         if !server {
             return Ok((Vec::new(), other_ready));
         }

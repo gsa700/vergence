@@ -364,6 +364,44 @@ borrowing. Nothing new comes in.
   render node.
   Also on 2026-11-09, at the desk: key repeat (Backspace held) and the
   wheel work in the demo window.
+- **2026-11-09, step 4, first part: the terminal.** `crates/vterm`: the
+  new terminal, one window under the server's title bar. The screen, the
+  parser and the pty are vergence-term's grid.rs, vt.rs and pty.rs, used
+  from there unchanged (they never had iced in them; they move here when
+  the first terminal is retired). New around them: the program's output
+  is read and parsed on a thread of its own into the screen behind a
+  lock, and the window is woken (`vergence_ui::Waker`, `App::woken`; the
+  toolkit's wait now watches two more descriptors); the window draws what
+  the screen holds once for each frame the monitor shows; the picture is
+  a scene (a rectangle a run of cells, glyphs cell by cell with font
+  fallback), on the GPU; keys go to the program as xterm's sequences;
+  paste (bracketed), the scrollback (wheel, Shift+PageUp/PageDown, "n
+  lines back"), resizing, the title, OSC 52 copies, the Tango or
+  Catppuccin scheme from desktop.toml. 17 tests (the engine's 14 and 3 of
+  its own). The binary is 1.2 MB; the iced terminal's is 22.7 MB.
+  **On Hubble, a window of 3783 x 2019 pixels (156 x 35 cells) on the 4K,
+  the stress test's jobs one after another:**
+
+  | | iced, software | iced, GPU | vterm |
+  |---|---|---|---|
+  | `seq 1 1000000` | 5.5 to 30 s | 1.4 to 1.7 s | **0.61 s** |
+  | Colour flood, lines/s | ~200 | ~3,000 | **20,700** |
+  | Unicode flood, lines/s | ~2,000 | ~28,000 | **222,700** |
+  | Cursor writes (x250) /s | ~170 | ~2,300 | **14,900** |
+
+  (The iced figures are from six tabs at once; these are one job at a
+  time, so the comparison is fair for the single-thread ceiling, not yet
+  for several terminals together.) The parsing thread ran at 95 to 99%
+  of a core, as a flood should; the window's thread at about 20%, which
+  misses acceptance 5's "under 10%": it builds the whole scene and every
+  instance again for each frame. 141 MB of memory; no GPU hang; nothing
+  from the server.
+  Green on Hubble (whole workspace), canary and Techbench.
+  Still to do in step 4: tabs in an own bar (that shrink to fit), panes,
+  selecting with the mouse and the clipboard, mouse reporting, the
+  scrollbar, the right-click menu, settings followed live, the font from
+  the settings, combining marks kept on their cell, and the pty master
+  closed in children.
 
 ## Acceptance
 

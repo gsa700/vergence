@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/vergence-edid", "crates/vergence-profile", "crates/vergence-xsettings", "crates/vergd", "crates/vergence-harness", "crates/vergence-server", "crates/vergence-settings", "crates/vergence-protocol", "crates/vergence-dbus", "crates/vergence-term", "crates/vergence-scene", "crates/vergence-text", "crates/vergence-render", "crates/vergence-wl", "crates/vergence-ui"]
+members = ["crates/vergence-edid", "crates/vergence-profile", "crates/vergence-xsettings", "crates/vergd", "crates/vergence-harness", "crates/vergence-server", "crates/vergence-settings", "crates/vergence-protocol", "crates/vergence-dbus", "crates/vergence-term", "crates/vergence-scene", "crates/vergence-text", "crates/vergence-render", "crates/vergence-wl", "crates/vergence-ui", "crates/vterm"]
 
 [workspace.package]
 version = "0.1.0"
