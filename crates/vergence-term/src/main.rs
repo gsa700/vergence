@@ -589,8 +589,8 @@ impl App {
         stack![mouse_area(Space::new().width(Length::Fill).height(Length::Fill)).on_press(Message::CloseMenu).on_right_press(Message::CloseMenu), placed].into()
     }
 
-    /// The bar: tabs (the active one in the terminal's colours, joined to it),
-    /// +, room to grab, and the window buttons where the desktop's layout
+    /// The bar: tabs (the active one in the terminal's colours, joined to it;
+    /// the others and + a little lighter than the bar), room to grab, and the window buttons where the desktop's layout
     /// (Gtk/DecorationLayout) puts them. Tabs sit on the bar's bottom edge;
     /// every other item is centred on the tabs' middle line, and the icons
     /// share one box size, so the whole bar lines up.
@@ -633,25 +633,20 @@ impl App {
                 .padding(Padding { top: 0.0, bottom: 0.0, left: pad_left, right: pad_right })
                 .on_press(Message::SelectTab(i))
                 .style(move |_: &Theme, s| {
-                    let bg = if active {
-                        Some(pal.bg)
-                    } else if s == button::Status::Hovered {
-                        Some(Color { a: 0.10, ..Color::WHITE })
-                    } else {
-                        None
-                    };
-                    let mut st = plain(s, bg);
-                    st.border = Border { radius: iced::border::Radius { top_left: 7.0, top_right: 7.0, bottom_left: 0.0, bottom_right: 0.0 }, ..Border::default() };
-                    st
+                    let bg = if active { pal.bg } else { idle_tab(s) };
+                    tab_shape(plain(s, Some(bg)))
                 });
             tabs = tabs.push(tab_button);
         }
-        let new_tab = button(icon(Glyph::Plus, fg, ICON))
-            .width(Length::Fixed(28.0))
-            .height(Length::Fixed(24.0))
-            .padding(0)
+        // + is a tab too: the same shape and fill as the tabs that aren't shown,
+        // at the end of their row (Dave, 2026-11-09).
+        let new_tab = button(container(icon(Glyph::Plus, fg, ICON)).width(Length::Fill).height(Length::Fixed(24.0)))
+            .width(Length::Fixed(34.0))
+            .height(Length::Fixed(TAB_H))
+            .padding(Padding { top: (TAB_H - 24.0) / 2.0 - TEXT_LIFT, ..Padding::ZERO })
             .on_press(Message::NewTab)
-            .style(move |_: &Theme, s| rounded(plain(s, if s == button::Status::Hovered { Some(Color { a: 0.12, ..Color::WHITE }) } else { None })));
+            .style(move |_: &Theme, s| tab_shape(plain(s, Some(idle_tab(s)))));
+        let tabs = tabs.push(new_tab);
         let grab = mouse_area(Space::new().width(Length::Fill).height(Length::Fill)).on_press(Message::Drag).on_double_click(Message::ToggleMaximize);
         let win_button = |b: look::WinButton| -> Element<'_, Message> {
             let (glyph, m, danger) = match b {
@@ -671,7 +666,7 @@ impl App {
                 .into()
         };
         let side = |list: &[look::WinButton]| row(list.iter().map(|b| win_button(*b))).spacing(2).align_y(center);
-        let bar = row![side(&self.look.buttons_left), tabs, new_tab, grab, side(&self.look.buttons_right)].spacing(4).height(Length::Fixed(TAB_H)).align_y(center);
+        let bar = row![side(&self.look.buttons_left), tabs, grab, side(&self.look.buttons_right)].spacing(4).height(Length::Fixed(TAB_H)).align_y(center);
         container(bar)
             .padding(Padding { top: BAR_H - TAB_H, bottom: 0.0, left: 6.0, right: 6.0 })
             .height(Length::Fixed(BAR_H))
@@ -953,6 +948,19 @@ fn icon<'a>(glyph: Glyph, color: Color, size: f32) -> Element<'a, Message> {
 /// A flat button: no frame, an optional background.
 fn plain(_s: button::Status, bg: Option<Color>) -> button::Style {
     button::Style { background: bg.map(Background::Color), text_color: TEXT_ACTIVE, border: Border::default(), ..button::Style::default() }
+}
+
+/// The fill of a tab that isn't the one shown: a little lighter than the bar,
+/// whichever colour the bar has, so every tab has a shape; lighter under the
+/// pointer (Dave, 2026-11-09: tabs without a shape were confusing).
+fn idle_tab(s: button::Status) -> Color {
+    Color { a: if s == button::Status::Hovered { 0.16 } else { 0.08 }, ..Color::WHITE }
+}
+
+/// A tab's outline: round at the top, square where it meets the terminal.
+fn tab_shape(mut s: button::Style) -> button::Style {
+    s.border = Border { radius: iced::border::Radius { top_left: 7.0, top_right: 7.0, bottom_left: 0.0, bottom_right: 0.0 }, ..Border::default() };
+    s
 }
 
 fn rounded(mut s: button::Style) -> button::Style {
