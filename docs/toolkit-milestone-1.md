@@ -2,7 +2,9 @@
 
 Planned 2026-11-09 (Dave: "write the toolkit milestone", after deciding that
 the tools leave iced for a toolkit of our own, GPU first); plan accepted the
-same evening. Nothing here is built yet.
+same evening. **Closed 2026-11-10** (Dave: "milestone closed"): the five
+steps are done and every acceptance figure is met, on Hubble, Techbench,
+canary and kepler; Progress, below, is the record.
 
 The goal: the terminal runs on our own drawing, text and window code, on the
 GPU, and passes the stress test that the iced terminal failed. Widgets, the
