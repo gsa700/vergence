@@ -274,6 +274,27 @@ borrowing. Nothing new comes in.
   iced terminal), and a large paste. Kinds other than text, drag and
   drop, and the primary selection (middle click; the server does not
   offer it) are not done.
+- **2026-11-09, step 2, fourth part: drawing in place, and compose.**
+  The CPU renderer draws straight into a window's buffer in the server's
+  byte order (`Cpu::render_target`, `Order::Bgra`; a test checks it is the
+  same picture byte for byte with red and blue changed places), so the
+  window keeps no picture of its own and copies nothing. The demo window,
+  1920 x 1260 pixels on Hubble: **4.8 ms a frame, from 15.1**, still 30.1
+  frames a second on the 30 Hz monitor. Dead keys and compose sequences:
+  keyboard.rs feeds every pressed key through xkbcommon's compose table
+  for the user's locale; a key taken into an unfinished sequence types
+  nothing and is marked `composing`, the key that completes one types the
+  result (dead acute then e: é; Compose, o, c: ©; a sequence that leads
+  nowhere types nothing). 4 keyboard tests, 18 renderer tests; green on
+  Hubble, canary and Techbench. Hubble's session runs with
+  LANG=en_US.UTF-8, which has a compose table. Not tried at a keyboard:
+  the US layout has no dead keys, so a sequence needs a Compose key set
+  in the layout.
+  **Step 2 is complete** but for what only hands can check (key repeat,
+  the wheel, a compose sequence, copy and paste with other programs).
+  Left for later steps: only the changed rows redrawn (the window still
+  draws every row of a frame), and the prepared scene kept between
+  frames. Next: step 3, the GPU renderer.
 
 ## Acceptance
 

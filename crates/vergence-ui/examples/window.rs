@@ -187,7 +187,7 @@ impl App for Demo {
                 }
             }
             Input::Scroll { dy, .. } => self.grid = (self.grid + dy.signum() * 2.0).clamp(6.0, 60.0),
-            Input::Key { sym: s, text, pressed: true, modifiers, .. } => {
+            Input::Key { sym: s, text, pressed: true, composing: false, modifiers, .. } => {
                 let ctrl = |c: char| modifiers.ctrl && text.is_none() && (*s == c as u32 || *s == c.to_ascii_uppercase() as u32);
                 if ctrl('q') {
                     window.close();

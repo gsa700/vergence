@@ -28,6 +28,26 @@ use crate::{Pixmap, RenderError, pixel_size};
 /// Rows in a band, the unit of work a thread takes.
 pub const BAND: usize = 32;
 
+/// The order of a pixel's four bytes in memory. Alpha is last in both, and
+/// multiplied into the others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Order {
+    /// Red, green, blue, alpha: a [`Pixmap`], a PNG.
+    Rgba,
+    /// Blue, green, red, alpha: what display servers call ARGB8888 on a
+    /// little-endian machine, the format of a window's buffer.
+    Bgra,
+}
+
+/// Memory to draw into: `width` x `height` pixels, four bytes each, rows
+/// from the top with no gaps. A window's buffer, drawn in place.
+pub struct Target<'a> {
+    pub data: &'a mut [u8],
+    pub width: u32,
+    pub height: u32,
+    pub order: Order,
+}
+
 /// A rectangle in pixels with rounded corners (radius 0: square).
 #[derive(Debug, Clone, Copy)]
 struct RRect {
@@ -108,8 +128,12 @@ fn intersect(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
     [a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]
 }
 
-fn straight(c: &Color) -> [u8; 4] {
-    [c.r, c.g, c.b, c.a]
+/// A colour's bytes in the target's order (alpha not multiplied in).
+fn straight(c: &Color, order: Order) -> [u8; 4] {
+    match order {
+        Order::Rgba => [c.r, c.g, c.b, c.a],
+        Order::Bgra => [c.b, c.g, c.r, c.a],
+    }
 }
 
 /// a * b / 255, rounded.
@@ -165,9 +189,10 @@ struct Prepared<'a> {
     /// For each band, the shapes that touch it, in drawing order.
     bands: Vec<Vec<u32>>,
     images: &'a [Image],
+    order: Order,
 }
 
-fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u32, h: u32) -> Prepared<'a> {
+fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u32, h: u32, order: Order) -> Prepared<'a> {
     let faces: Vec<Option<FaceId>> = scene.fonts.iter().map(|f| fonts.face(&f.family, f.weight, f.italic)).collect();
     let whole = [0, 0, w as i32, h as i32];
     let mut prims: Vec<Prim> = Vec::with_capacity(scene.commands.len());
@@ -185,16 +210,16 @@ fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u32, h: u32) 
         match command {
             Command::Fill { rect, radius, color } => {
                 let r = RRect::device(rect, scale, *radius);
-                add(Shape::Fill(r), straight(color), r.bounds());
+                add(Shape::Fill(r), straight(color, order), r.bounds());
             }
             Command::Stroke { rect, radius, width, color } => {
                 let r = RRect::device(rect, scale, *radius);
-                add(Shape::Stroke(r, r.inset(width * scale)), straight(color), r.bounds());
+                add(Shape::Stroke(r, r.inset(width * scale)), straight(color, order), r.bounds());
             }
             Command::Line { from, to, width, color } => {
                 let (ax, ay, bx, by, half) = (from.x * scale, from.y * scale, to.x * scale, to.y * scale, width * scale / 2.0);
                 let bounds = [(ax.min(bx) - half).floor() as i32 - 1, (ay.min(by) - half).floor() as i32 - 1, (ax.max(bx) + half).ceil() as i32 + 1, (ay.max(by) + half).ceil() as i32 + 1];
-                add(Shape::Line { ax, ay, bx, by, half }, straight(color), bounds);
+                add(Shape::Line { ax, ay, bx, by, half }, straight(color, order), bounds);
             }
             Command::Glyphs { font, size, color, origin, glyphs } => {
                 // A font this machine does not have draws nothing: another
@@ -212,7 +237,7 @@ fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u32, h: u32) 
                     let Some(bitmap) = fonts.raster(face, g.id, size * scale, sub) else { continue };
                     let (px, py) = (whole_x as i32 + bitmap.left, baseline as i32 + bitmap.top);
                     let bounds = [px, py, px + bitmap.width as i32, py + bitmap.height as i32];
-                    add(Shape::Glyph { x: px, y: py, bitmap }, straight(color), bounds);
+                    add(Shape::Glyph { x: px, y: py, bitmap }, straight(color, order), bounds);
                 }
             }
             Command::Image { image, rect, opacity } => {
@@ -247,7 +272,7 @@ fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u32, h: u32) 
             bands[band].push(i as u32);
         }
     }
-    Prepared { prims, chains, bands, images: &scene.images }
+    Prepared { prims, chains, bands, images: &scene.images, order }
 }
 
 /// How much of a pixel the shapes of a clip chain let through.
@@ -326,9 +351,11 @@ impl Prepared<'_> {
             Shape::Image { to, image, opacity } => {
                 let im = &self.images[*image];
                 let (iw, ih) = (im.width as usize, im.height as usize);
+                // A picture's bytes are red first; the target's may be blue first.
+                let (first, third) = if self.order == Order::Rgba { (0, 2) } else { (2, 0) };
                 let texel = |tx: usize, ty: usize| -> [f32; 4] {
                     let i = (ty * iw + tx) * 4;
-                    [im.rgba[i] as f32, im.rgba[i + 1] as f32, im.rgba[i + 2] as f32, im.rgba[i + 3] as f32]
+                    [im.rgba[i + first] as f32, im.rgba[i + 1] as f32, im.rgba[i + third] as f32, im.rgba[i + 3] as f32]
                 };
                 // The picture's row under this pixel row, between two of its own rows.
                 let v = ((y as f32 + 0.5 - to.y0) / (to.y1 - to.y0) * ih as f32 - 0.5).clamp(0.0, ih as f32 - 1.0);
@@ -423,6 +450,13 @@ impl Cpu {
     /// size at this scale, leaving the others as they are. What it draws is
     /// exactly what [`Cpu::render`] would put in those rows.
     pub fn render_rows(&self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color, into: &mut Pixmap, rows: Range<u32>) -> Result<(), RenderError> {
+        let target = Target { width: into.width, height: into.height, data: &mut into.data, order: Order::Rgba };
+        self.render_target(scene, fonts, scale, background, target, rows)
+    }
+
+    /// As [`Cpu::render_rows`], into any memory of the right size, in either
+    /// byte order: a window's buffer is drawn in place, with no copy.
+    pub fn render_target(&self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color, into: Target<'_>, rows: Range<u32>) -> Result<(), RenderError> {
         let (w, h) = pixel_size(scene, scale)?;
         if (into.width, into.height) != (w, h) || into.data.len() != w as usize * h as usize * 4 {
             return Err(RenderError::Size);
@@ -432,10 +466,11 @@ impl Cpu {
         if rows.is_empty() {
             return Ok(());
         }
-        let prepared = prepare(scene, fonts, scale, w, h);
+        let prepared = prepare(scene, fonts, scale, w, h, into.order);
         let stride = w as usize * 4;
         let a = background.a as u32;
-        let background = [mul255(background.r as u32, a) as u8, mul255(background.g as u32, a) as u8, mul255(background.b as u32, a) as u8, background.a];
+        let ground = straight(&background, into.order);
+        let background = [mul255(ground[0] as u32, a) as u8, mul255(ground[1] as u32, a) as u8, mul255(ground[2] as u32, a) as u8, background.a];
         let work: Vec<(usize, &mut [u8])> = into.data.chunks_mut(BAND * stride).enumerate().filter(|(band, _)| band * BAND < rows.end && (band + 1) * BAND > rows.start).collect();
         let threads = self.threads.min(work.len());
         let queue = Mutex::new(work);

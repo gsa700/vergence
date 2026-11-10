@@ -4,7 +4,13 @@
 //! numbers; turning a key into a symbol and the text it types, under the
 //! modifiers held, is xkbcommon's work (the system library, borrowed,
 //! whitepaper §8). It is called through declarations of our own, not a
-//! crate. Dead keys and compose sequences are not handled yet.
+//! crate.
+//!
+//! Dead keys and compose sequences (´ then e for é; Compose, o, c for ©)
+//! are xkbcommon's too, from the compose table of the user's locale. While
+//! a sequence is being typed the keys type nothing; the key that completes
+//! it types the result. A machine with no compose table for the locale
+//! simply has no sequences.
 
 use std::ffi::{CString, c_char, c_void};
 
@@ -22,7 +28,20 @@ unsafe extern "C" {
     fn xkb_state_key_get_one_sym(state: *mut c_void, key: u32) -> u32;
     fn xkb_state_key_get_utf8(state: *mut c_void, key: u32, buffer: *mut c_char, size: usize) -> i32;
     fn xkb_state_mod_name_is_active(state: *mut c_void, name: *const c_char, kind: i32) -> i32;
+    fn xkb_compose_table_new_from_locale(context: *mut c_void, locale: *const c_char, flags: i32) -> *mut c_void;
+    fn xkb_compose_table_unref(table: *mut c_void);
+    fn xkb_compose_state_new(table: *mut c_void, flags: i32) -> *mut c_void;
+    fn xkb_compose_state_unref(state: *mut c_void);
+    fn xkb_compose_state_feed(state: *mut c_void, keysym: u32) -> i32;
+    fn xkb_compose_state_get_status(state: *mut c_void) -> i32;
+    fn xkb_compose_state_get_utf8(state: *mut c_void, buffer: *mut c_char, size: usize) -> i32;
+    fn xkb_compose_state_get_one_sym(state: *mut c_void) -> u32;
+    fn xkb_compose_state_reset(state: *mut c_void);
 }
+
+const COMPOSE_COMPOSING: i32 = 1;
+const COMPOSE_COMPOSED: i32 = 2;
+const COMPOSE_CANCELLED: i32 = 3;
 
 const KEYMAP_FORMAT_TEXT_V1: i32 = 1;
 const STATE_MODS_EFFECTIVE: i32 = 1 << 3;
@@ -60,6 +79,25 @@ pub struct Keyboard {
     context: *mut c_void,
     keymap: *mut c_void,
     state: *mut c_void,
+    /// The compose table and where a sequence stands (null: no sequences).
+    compose_table: *mut c_void,
+    compose: *mut c_void,
+}
+
+/// What pressing a key came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pressed {
+    pub sym: u32,
+    /// The text typed: the key's own, or a finished sequence's.
+    pub text: Option<String>,
+    /// The key was taken into a dead-key or compose sequence that is not
+    /// finished: it types nothing, and is not a command either.
+    pub composing: bool,
+}
+
+/// The locale whose compose table applies: LC_ALL, LC_CTYPE, LANG, else "C".
+fn locale() -> String {
+    ["LC_ALL", "LC_CTYPE", "LANG"].iter().filter_map(|v| std::env::var(v).ok()).find(|v| !v.is_empty()).unwrap_or_else(|| "C".into())
 }
 
 impl Keyboard {
@@ -97,7 +135,81 @@ impl Keyboard {
                 xkb_context_unref(context);
                 return None;
             }
-            Some(Keyboard { context, keymap, state })
+            let mut keyboard = Keyboard { context, keymap, state, compose_table: std::ptr::null_mut(), compose: std::ptr::null_mut() };
+            keyboard.set_compose_locale(&locale());
+            Some(keyboard)
+        }
+    }
+
+    /// Takes the compose table of `locale` ("en_US.UTF-8"). True if there is one.
+    pub fn set_compose_locale(&mut self, locale: &str) -> bool {
+        let Ok(name) = CString::new(locale) else { return false };
+        // SAFETY: a live context and a valid C string; results are checked, and what they replace is released.
+        unsafe {
+            let table = xkb_compose_table_new_from_locale(self.context, name.as_ptr(), 0);
+            if table.is_null() {
+                return false;
+            }
+            let state = xkb_compose_state_new(table, 0);
+            if state.is_null() {
+                xkb_compose_table_unref(table);
+                return false;
+            }
+            if !self.compose.is_null() {
+                xkb_compose_state_unref(self.compose);
+                xkb_compose_table_unref(self.compose_table);
+            }
+            (self.compose_table, self.compose) = (table, state);
+        }
+        true
+    }
+
+    /// A key going down: what it is, and what it types, taking any dead-key
+    /// or compose sequence in progress into account.
+    pub fn press(&mut self, key: u32) -> Pressed {
+        let (sym, text) = self.key(key);
+        self.compose_with(sym, text)
+    }
+
+    /// One more symbol into the compose sequence (`text`: what the key would
+    /// type by itself).
+    fn compose_with(&mut self, sym: u32, text: Option<String>) -> Pressed {
+        if self.compose.is_null() {
+            return Pressed { sym, text, composing: false };
+        }
+        // SAFETY: a live compose state; the buffer's true size is given.
+        unsafe {
+            // A key that is no part of sequences (a modifier) leaves things as they are.
+            if xkb_compose_state_feed(self.compose, sym) == 0 {
+                return Pressed { sym, text, composing: false };
+            }
+            match xkb_compose_state_get_status(self.compose) {
+                COMPOSE_COMPOSING => Pressed { sym, text: None, composing: true },
+                COMPOSE_COMPOSED => {
+                    let mut buffer = [0 as c_char; 64];
+                    let len = xkb_compose_state_get_utf8(self.compose, buffer.as_mut_ptr(), buffer.len());
+                    let composed = xkb_compose_state_get_one_sym(self.compose);
+                    xkb_compose_state_reset(self.compose);
+                    let len = (len.max(0) as usize).min(buffer.len() - 1);
+                    let bytes: Vec<u8> = buffer[..len].iter().map(|b| *b as u8).collect();
+                    let text = String::from_utf8(bytes).ok().filter(|t| !t.is_empty() && !t.chars().any(char::is_control));
+                    Pressed { sym: if composed != 0 { composed } else { sym }, text, composing: false }
+                }
+                COMPOSE_CANCELLED => {
+                    // A sequence that leads nowhere: both keys are spent.
+                    xkb_compose_state_reset(self.compose);
+                    Pressed { sym, text: None, composing: true }
+                }
+                _ => Pressed { sym, text, composing: false },
+            }
+        }
+    }
+
+    /// Forgets a sequence in progress (the keyboard went to another window).
+    pub fn reset_compose(&mut self) {
+        if !self.compose.is_null() {
+            // SAFETY: a live compose state.
+            unsafe { xkb_compose_state_reset(self.compose) };
         }
     }
 
@@ -136,8 +248,12 @@ impl Keyboard {
 
 impl Drop for Keyboard {
     fn drop(&mut self) {
-        // SAFETY: the three objects made in build(), released once, in reverse order.
+        // SAFETY: the objects made in build() and set_compose_locale(), released once, in reverse order.
         unsafe {
+            if !self.compose.is_null() {
+                xkb_compose_state_unref(self.compose);
+                xkb_compose_table_unref(self.compose_table);
+            }
             xkb_state_unref(self.state);
             xkb_keymap_unref(self.keymap);
             xkb_context_unref(self.context);
@@ -194,6 +310,35 @@ mod tests {
         // A key number no keyboard has.
         assert_eq!(k.key(60_000).1, None);
         assert_eq!(k.key(u32::MAX).1, None);
+    }
+
+    #[test]
+    fn dead_keys_and_compose_sequences() {
+        let mut k = keyboard();
+        if !k.set_compose_locale("en_US.UTF-8") {
+            eprintln!("skipped: this machine has no compose table for en_US.UTF-8");
+            return;
+        }
+        const DEAD_ACUTE: u32 = 0xfe51;
+        const MULTI_KEY: u32 = 0xff20;
+        // ´ then e: nothing, then é.
+        assert_eq!(k.compose_with(DEAD_ACUTE, None), Pressed { sym: DEAD_ACUTE, text: None, composing: true });
+        assert_eq!(k.compose_with('e' as u32, Some("e".into())), Pressed { sym: 0xe9, text: Some("é".into()), composing: false });
+        // Compose, o, c: ©.
+        assert!(k.compose_with(MULTI_KEY, None).composing);
+        assert!(k.compose_with('o' as u32, Some("o".into())).composing);
+        assert_eq!(k.compose_with('c' as u32, Some("c".into())).text, Some("©".into()));
+        // A sequence that leads nowhere types nothing, and the next key is itself again.
+        assert!(k.compose_with(DEAD_ACUTE, None).composing);
+        assert_eq!(k.compose_with('q' as u32, Some("q".into())), Pressed { sym: 'q' as u32, text: None, composing: true });
+        assert_eq!(k.compose_with('q' as u32, Some("q".into())), Pressed { sym: 'q' as u32, text: Some("q".into()), composing: false });
+        // A modifier in the middle does not break a sequence; forgetting one does.
+        assert!(k.compose_with(DEAD_ACUTE, None).composing);
+        assert!(!k.compose_with(0xffe1, None).composing, "Shift is no part of it");
+        k.reset_compose();
+        assert_eq!(k.compose_with('e' as u32, Some("e".into())).text, Some("e".into()));
+        // An ordinary key through the whole path.
+        assert_eq!(k.press(KEY_A), Pressed { sym: 'a' as u32, text: Some("a".into()), composing: false });
     }
 
     #[test]

@@ -38,7 +38,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use vergence_render::{Cpu, Pixmap, pixel_size};
+use vergence_render::{Cpu, Order, Target, pixel_size};
 use vergence_scene::{Color, Scene};
 use vergence_text::Fonts;
 use vergence_wl::{
@@ -95,7 +95,9 @@ pub enum Input {
     Scroll { x: f32, y: f32, dx: f32, dy: f32 },
     /// A key: its symbol ([`sym`], or a character's code), the text it
     /// types if it types any, and whether this is a held key repeating.
-    Key { sym: u32, text: Option<String>, pressed: bool, repeat: bool, modifiers: Modifiers },
+    /// `composing`: the key went into a dead-key or compose sequence that is
+    /// not finished; it types nothing and should not be taken as a command.
+    Key { sym: u32, text: Option<String>, pressed: bool, repeat: bool, composing: bool, modifiers: Modifiers },
     /// The window gained or lost the keyboard.
     Focus(bool),
     /// The clipboard's text, asked for with [`Window::paste`].
@@ -313,7 +315,6 @@ struct Runner {
     frame_callback: Option<u32>,
     frames: u64,
     buffers: Vec<Buffer>,
-    pixmap: Option<Pixmap>,
     closing: bool,
 
     /// Where the pointer is, if it is over the window.
@@ -447,7 +448,6 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         frame_callback: None,
         frames: 0,
         buffers: Vec::new(),
-        pixmap: None,
         closing: false,
         pointer_at: None,
         enter_serial: 0,
@@ -688,6 +688,9 @@ impl Runner {
             Event::KeyboardEnter { .. } => self.tell(app, Input::Focus(true))?,
             Event::KeyboardLeave { .. } => {
                 self.repeat = None;
+                if let Some(k) = &mut self.keyboard {
+                    k.reset_compose();
+                }
                 self.tell(app, Input::Focus(false))?;
             }
             Event::Modifiers { depressed, latched, locked, group } => {
@@ -751,11 +754,16 @@ impl Runner {
     }
 
     fn key(&mut self, app: &mut dyn App, key: u32, pressed: bool, repeat: bool) -> io::Result<()> {
-        let Some(keyboard) = &self.keyboard else { return Ok(()) };
-        let (sym, text) = keyboard.key(key);
+        let Some(keyboard) = &mut self.keyboard else { return Ok(()) };
         let modifiers = keyboard.modifiers();
-        // A key going up types nothing.
-        self.tell(app, Input::Key { sym, text: text.filter(|_| pressed), pressed, repeat, modifiers })
+        // A key going up types nothing, and is no part of a sequence.
+        let (sym, text, composing) = if pressed {
+            let p = keyboard.press(key);
+            (p.sym, p.text, p.composing)
+        } else {
+            (keyboard.key(key).0, None, false)
+        };
+        self.tell(app, Input::Key { sym, text, pressed, repeat, composing, modifiers })
     }
 
     /// Repeats the held key as often as is due. A program that falls behind
@@ -779,12 +787,6 @@ impl Runner {
         let scene = app.scene(&frame, &mut self.fonts);
         let background = app.background();
         let (pw, ph) = pixel_size(&scene, frame.scale).map_err(other)?;
-        if self.pixmap.as_ref().is_none_or(|p| (p.width, p.height) != (pw, ph)) {
-            self.pixmap = Some(Pixmap::new(pw, ph));
-        }
-        let picture = self.pixmap.as_mut().expect("just made");
-        self.cpu.render_rows(&scene, &mut self.fonts, frame.scale, background, picture, 0..ph).map_err(other)?;
-
         // A buffer of this size that the server is not using; others of another size are let go.
         let mut stale = Vec::new();
         self.buffers.retain(|b| {
@@ -811,10 +813,9 @@ impl Runner {
             }
         };
         let buffer = &mut self.buffers[index];
-        // The renderer's bytes are red, green, blue, alpha; the server's format has blue first.
-        for (to, from) in buffer.file.bytes().chunks_exact_mut(4).zip(picture.data.chunks_exact(4)) {
-            to.copy_from_slice(&[from[2], from[1], from[0], from[3]]);
-        }
+        // Drawn in place, in the server's byte order: no picture of our own, no copy.
+        let target = Target { data: buffer.file.bytes(), width: pw, height: ph, order: Order::Bgra };
+        self.cpu.render_target(&scene, &mut self.fonts, frame.scale, background, target, 0..ph).map_err(other)?;
         buffer.busy = true;
         let id = buffer.id;
         self.client.attach(self.surface, id)?;

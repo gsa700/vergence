@@ -1,6 +1,6 @@
 //! The CPU renderer, pixel by pixel.
 
-use vergence_render::{Cpu, Pixmap, RenderError, text};
+use vergence_render::{Cpu, Order, Pixmap, RenderError, Target, text};
 use vergence_scene::{Color, Glyph, Image, Point, Rect, Scene};
 use vergence_text::{Fonts, db::FontDb};
 
@@ -341,6 +341,26 @@ fn redrawing_rows_gives_what_a_whole_render_gives() {
     marked.data[..4].copy_from_slice(&[1, 2, 3, 4]);
     cpu.render_rows(&s, &mut none(), 1.5, BLACK, &mut marked, 50..60).unwrap();
     assert_eq!(marked.pixel(0, 0), [1, 2, 3, 4]);
+}
+
+#[test]
+fn a_window_buffer_is_drawn_in_place_with_blue_first() {
+    let s = busy();
+    let cpu = Cpu::new();
+    for scale in [1.0, 1.5] {
+        let rgba = cpu.render(&s, &mut none(), scale, Color::rgb(10, 20, 30)).unwrap();
+        let mut bytes = vec![0x5au8; rgba.data.len()];
+        let target = Target { data: &mut bytes, width: rgba.width, height: rgba.height, order: Order::Bgra };
+        cpu.render_target(&s, &mut none(), scale, Color::rgb(10, 20, 30), target, 0..rgba.height).unwrap();
+        // The same picture with red and blue changed places, byte for byte.
+        for (i, (got, want)) in bytes.chunks_exact(4).zip(rgba.data.chunks_exact(4)).enumerate() {
+            assert_eq!(got, [want[2], want[1], want[0], want[3]], "pixel {i} at scale {scale}");
+        }
+    }
+    // Memory of the wrong size is refused, not written past.
+    let mut short = vec![0u8; 100];
+    let target = Target { data: &mut short, width: 300, height: 200, order: Order::Bgra };
+    assert_eq!(cpu.render_target(&s, &mut none(), 1.0, BLACK, target, 0..200), Err(RenderError::Size));
 }
 
 #[test]

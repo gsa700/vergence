@@ -25,7 +25,7 @@ pub mod cpu;
 
 use std::fmt;
 
-pub use cpu::Cpu;
+pub use cpu::{Cpu, Order, Target};
 use vergence_scene::{Color, Glyph, Point, Scene, SceneError};
 use vergence_text::{FaceId, Fonts};
 
