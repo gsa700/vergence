@@ -322,6 +322,34 @@ Applications that talk to themselves over the bus keep working: a name an applic
 
 **Out of scope:** the D-Bus **system** bus (power, removable media, networking) belongs to the operating system and stays as it is. Nothing here depends on systemd or logind, which FreeBSD doesn't have.
 
+### 6.9 The shell: one shelf
+
+The contracts above are where Vergence is new. The shell, the part of the desktop the user sees around the windows, is deliberately not a second experiment: **a familiar shell on a new foundation.** It should be minimal, and it must still show what is installed and what is running. This section is the design decided on 9 November 2026; none of it is built yet.
+
+**What it borrows, and from where.** Window Maker (1997), the free descendant of NeXTSTEP's desktop, had three ideas worth keeping: one icon for each running application, small live tiles ("dockapps") instead of a tray of unrelated icons, and a menu on the bare desktop. It aged badly because its tiles were a fixed 64 pixels, dockapps were ordinary windows drawn by whatever program supplied them, and nothing showed what was installed. From current desktops Vergence takes the compact application list of macOS, a popup rather than a view that takes over the whole screen.
+
+**One shelf.** A single strip holds everything a top bar and a dock would hold between them. It stands on the **right edge** of the main monitor (the primary screen in the settings app) and is always visible; hiding it until the pointer reaches the edge is an option. Any other monitor can have a shelf of its own, switched on in that screen's settings. Its width is set in reference units (Contract 1), so it is the same physical size on every monitor. From top to bottom it has three parts:
+
+- **The apps button**, in the top corner, the easiest target on the screen. It opens a compact popup beside the shelf: a grid of every installed application, with a search field. Typing filters the grid. The same field will later run **named desktop actions** ("move this window to the left monitor", "screens off"), the list that voice control and automation use under permission (§6.5, §7), so there is one command surface for hands, voice and agents.
+- **Applications**: pinned and running, one icon each, with a mark beside those that are running. An application with several windows lists them in a small popup. The shelf on the main monitor shows the windows of every monitor, grouped by screen, except those of a monitor that has its own shelf. A minimised window goes to its application's icon; there are no separate icons for minimised windows.
+- **Live tiles**: clock, volume, network, battery. A tile is not a small window. Its owner **publishes a value and a set of actions on the session bus (§6.8), and the server draws it** in the desktop's style. Tiles are therefore sharp at any scale, look alike whoever supplies them, are readable by a screen reader (Contract 3), and cannot draw anything misleading in the shelf. Detail (a calendar, a volume slider, a list of networks) opens in a popup beside the tile. Controls have real steps the user can set.
+
+A vertical shelf has no room for text, so names appear when the pointer rests on an icon and in the popups. If the main monitor is unplugged, the shelf moves with the primary role to another screen.
+
+**What the shelf knows that others don't.** Because the server owns placement and remembers it per monitor setup (Contract 2):
+
+- **Away windows.** When a monitor is unplugged, its windows are not piled onto another screen. They are shown on the shelf as away and go back to their places when the monitor returns; the user can call one over at any time.
+- **Remembered launch.** Starting an application from the shelf opens it where it last was on this monitor setup.
+
+**Windows.**
+
+- Windows **float**, and the server remembers where they were put. There is no automatic tiling, which would move windows the user had placed, and there are **no workspaces**: monitors and placement memory do that job, and window memory stays keyed to the monitor setup alone.
+- **Snapping**: dragging a window to an edge gives it half the screen, to a corner a quarter, with the shelf counting as the edge. It can be switched off.
+- **Keyboard**: Alt+Tab steps through windows, most recently used first, in a small list in the middle of the screen. One key opens the apps popup with the search field ready, so anything can be started or found by typing.
+- **Menus stay in each window.** There is no global menu bar.
+- **Dialogs** stay attached to the window they belong to and move with it.
+- **The desktop** is wallpaper only, with no icons on it; a right-click on it opens a short menu of applications.
+
 ---
 
 ## 7. Security model
@@ -468,14 +496,14 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 | Phase | Deliverable | Value on its own | Estimated effort |
 |---|---|---|---|
 | **1** | X11 consistency daemon: EDID profiles, scaling modes A/B, toolkit settings, layout memory | Fixes daily annoyances on any X11 desktop, FreeBSD and Linux | Days to weeks |
-| **2** | Display server, first nested in a window, then on real hardware: native per-monitor rendering, placement memory, reference-unit scaling, per-window scaling of X11 apps with correct input, the session bus with its D-Bus edge (§6.8) | A usable personal desktop that beats X11 and Wayland on consistency | Months |
+| **2** | Display server, first nested in a window, then on real hardware: native per-monitor rendering, placement memory, reference-unit scaling, per-window scaling of X11 apps with correct input, the session bus with its D-Bus edge (§6.8), the shell (§6.9) | A usable personal desktop that beats X11 and Wayland on consistency | Months |
 | **3** | Accessibility contract and display-list surfaces: Rust reference implementation, then the native Avalonia backend (§8.1) | Sharp magnification, sharp straddling windows, accessibility by design | Research |
 | **4** | Remote display over display lists | Efficient, sharp remote desktops | Research |
 
 **Status, 8 November 2026.**
 
 - **Phase 1** is built through its fourth milestone (profiles, layout memory, window memory, scaling) and runs on FreeBSD. It is frozen except for blockers, because X11's walls (§5) cost more effort than they teach.
-- **Phase 2** runs on real hardware as the daily session on FreeBSD 15.1 with Intel UHD 630 graphics, on two monitors of very different density: a 14″ 4K panel at scale 3 and an ordinary 1080p monitor at 1, the defaults from their EDIDs (calculated 3.28 and 1.07, snapped to whole numbers as Contract 1 says). Wayland applications draw natively at each monitor's scale. X11 applications run through rootless Xwayland at the densest monitor's scale and are shown smaller on the others; a smoothing filter for that shrink was tried and rejected because it softened text. The server draws title bars, places new windows on the monitor under the pointer, remembers window places per monitor setup (a first piece of Contract 2), follows monitors being plugged in and out, and has a control socket for scripted tests. The session bus (§6.8) works: its core (monitors, settings and notifications on the project's own protocol) and a D-Bus edge written by the project, which provides the settings portal (applications follow dark or light and the accent live) and draws notifications itself. A settings app (iced, a sidebar of pages) sets appearance, each screen's wallpaper (one screen's is the default), each screen's scale and the arrangement of the screens, all applied live. On 8 November it also ran on Linux for the first time, on Fedora with Intel UHD 770 graphics, started from the GDM login screen, with the same monitors at 60 Hz and the same scales; the only changes needed were the peer-credential call (glibc has no `getpeereid`) and seat access through logind instead of seatd. Windows, placement and accessibility on the native protocol, and explicit sync (§8.3), come next.
+- **Phase 2** runs on real hardware as the daily session on FreeBSD 15.1 with Intel UHD 630 graphics, on two monitors of very different density: a 14″ 4K panel at scale 3 and an ordinary 1080p monitor at 1, the defaults from their EDIDs (calculated 3.28 and 1.07, snapped to whole numbers as Contract 1 says). Wayland applications draw natively at each monitor's scale. X11 applications run through rootless Xwayland at the densest monitor's scale and are shown smaller on the others; a smoothing filter for that shrink was tried and rejected because it softened text. The server draws title bars, places new windows on the monitor under the pointer, remembers window places per monitor setup (a first piece of Contract 2), follows monitors being plugged in and out, and has a control socket for scripted tests. The session bus (§6.8) works: its core (monitors, settings and notifications on the project's own protocol) and a D-Bus edge written by the project, which provides the settings portal (applications follow dark or light and the accent live) and draws notifications itself. A settings app (iced, a sidebar of pages) sets appearance, each screen's wallpaper (one screen's is the default), each screen's scale and the arrangement of the screens, all applied live. On 8 November it also ran on Linux for the first time, on Fedora with Intel UHD 770 graphics, started from the GDM login screen, with the same monitors at 60 Hz and the same scales; the only changes needed were the peer-credential call (glibc has no `getpeereid`) and seat access through logind instead of seatd. Windows, placement and accessibility on the native protocol, and explicit sync (§8.3), come next. The shell (§6.9: one shelf, an apps popup, live tiles) was designed on 9 November and is not built yet; until it is, applications start from the menu on the desktop.
 
 **What FreeBSD taught phase 2.** As in phase 1 (§4.7), the real machine showed things a Linux-first build would have missed:
 
@@ -527,6 +555,8 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 - **Vello:** a Rust GPU renderer for 2D vector graphics.
 - **x11rb:** Rust bindings for the X11 protocol (XCB).
 - **Capsicum:** FreeBSD's capability-based sandboxing framework.
+- **Shelf:** Vergence's single strip on a screen edge, holding the apps button, application icons and live tiles (§6.9).
+- **Window Maker:** a window manager for X11 (1997) modelled on NeXTSTEP's desktop, with a dock of application icons and small live "dockapps".
 - **D-Bus:** the message bus Linux and FreeBSD desktops use between programs; the *session* bus serves one user's login, the *system* bus the whole machine. *Activation* starts a service when its name is first called.
 - **AT-SPI:** the accessibility interface on Linux and FreeBSD desktops, carried over D-Bus.
 
