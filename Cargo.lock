@@ -4645,6 +4645,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vergence-text"
+version = "0.1.0"
+dependencies = [
+ "ab_glyph",
+]
+
+[[package]]
 name = "vergence-xsettings"
 version = "0.1.0"
 dependencies = [

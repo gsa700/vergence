@@ -149,8 +149,31 @@ borrowing. Nothing new comes in.
   scenes round-trip; damaged scenes and random bytes never panic, and what
   decodes re-encodes to the same bytes); 2,000,000 fuzz iterations clean on
   Hubble. Green on Hubble, canary and Techbench. Layers with their own
-  opacity were left out until a tool needs them. Next in step 1:
-  `vergence-text`, then the CPU renderer and the PNG tool.
+  opacity were left out until a tool needs them.
+- **2026-11-09, step 1, second part: `vergence-text`.** Our own reader of
+  font files (sfnt.rs: family, weight, slant, fixed pitch, a variable
+  font's weight axis, character coverage; a few kilobytes read per file),
+  the font database with generic names and fallback per character (db.rs),
+  and `Fonts`: faces, glyphs with fallback, one-line layout with kerning,
+  and the glyph cache keyed by face, glyph, size and sub-pixel position,
+  never colour. ab_glyph outlines and rasterises. 23 tests, two of them
+  fuzz tests of the font reader (2,000,000 iterations clean); green on
+  Hubble, canary and Techbench. `cargo run --example fonts` reports what a
+  machine has: Hubble's 349 font files are indexed in 7.5 ms; "monospace"
+  is Noto Sans Mono on all three; Techbench's variable fonts give a true
+  bold. Found on the way:
+  - Noto Sans Mono says "not fixed pitch" in its `post` table and "fixed
+    pitch" in PANOSE; both are read now.
+  - Hubble has no CJK font (the missing glyph is drawn); the first lookup
+    of a character only a far-down font has costs 10 to 30 ms while
+    coverage tables are read, then nothing.
+  - A colour emoji font (canary's Noto Color Emoji) is chosen as a fallback
+    but has no outlines, so nothing is drawn: colour glyphs are outside
+    this milestone, and until then such a face should be passed over for
+    one that can draw.
+  - Outlines are not hinted. Fine at scale 2 and 3; to be judged on the
+    1080p monitor when the renderer draws.
+  Next in step 1: the CPU renderer in `vergence-render` and the PNG tool.
 
 ## Acceptance
 

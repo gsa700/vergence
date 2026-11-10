@@ -1,0 +1,13 @@
+[package]
+name = "vergence-text"
+description = "Vergence's text: finding fonts, fallback per character, glyph positions and a glyph cache (whitepaper §6.10)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# ab_glyph reads glyph outlines and rasterises them (borrowed, whitepaper §8;
+# already used by the server's title bars). Finding fonts, reading their names
+# and coverage, fallback, layout and the cache are ours.
+[dependencies]
+ab_glyph = "0.2"
