@@ -564,6 +564,7 @@ impl App {
         match theme::set(key, value) {
             Ok(()) => {
                 self.xsettings = theme::read();
+                set_ui_family(&self.xsettings);
                 self.status.clear();
             }
             Err(e) => self.status = format!("Could not save: {e}"),
@@ -645,7 +646,7 @@ impl App {
 
     fn sidebar(&self, c: Colours) -> Element<'_, Message> {
         let item = move |label: String, page: Page, selected: bool, child: bool| -> Element<'_, Message> {
-            let font = if selected { iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT } } else { iced::Font::DEFAULT };
+            let font = ui_font(if selected { iced::font::Weight::Semibold } else { iced::font::Weight::Normal });
             button(text(label).size(if child { 12 } else { 13 }).color(if selected { Color::WHITE } else { c.text }).font(font))
                 .width(Length::Fill)
                 .padding(Padding { top: 6.0, bottom: 6.0, left: if child { 26.0 } else { 12.0 }, right: 12.0 })
@@ -1069,7 +1070,38 @@ fn card_style(c: Colours) -> container::Style {
 }
 
 fn bold() -> iced::Font {
-    iced::Font { weight: iced::font::Weight::Bold, ..iced::Font::DEFAULT }
+    ui_font(iced::font::Weight::Bold)
+}
+
+/// The desktop's UI font family (Gtk/FontName in settings.toml), for every label.
+/// iced's generic sans-serif plus a weight lets cosmic-text pick any family that
+/// has that weight: on Void, Noto Sans has no Semibold, so semibold labels came
+/// out in a script font with no Latin glyphs (boxes; Hubble, 2026-11-09). Naming
+/// the family keeps the choice within it (the nearest weight it has).
+static UI_FAMILY: std::sync::Mutex<&'static str> = std::sync::Mutex::new("Noto Sans");
+
+fn set_ui_family(xsettings: &vergence_xsettings::Settings) {
+    static NAMES: std::sync::Mutex<Option<HashSet<&'static str>>> = std::sync::Mutex::new(None);
+    let (family, _) = theme::split_font(&theme::get(xsettings, theme::FONT));
+    let family = family.trim();
+    if family.is_empty() {
+        return;
+    }
+    let mut names = NAMES.lock().unwrap();
+    let names = names.get_or_insert_with(HashSet::new);
+    let name = match names.get(family) {
+        Some(n) => *n,
+        None => {
+            let n: &'static str = Box::leak(family.to_string().into_boxed_str());
+            names.insert(n);
+            n
+        }
+    };
+    *UI_FAMILY.lock().unwrap() = name;
+}
+
+fn ui_font(weight: iced::font::Weight) -> iced::Font {
+    iced::Font { family: iced::font::Family::Name(*UI_FAMILY.lock().unwrap()), weight, ..iced::Font::DEFAULT }
 }
 
 fn title_card<'a>(c: Colours, title: &str, description: &str) -> Element<'a, Message> {
@@ -1100,7 +1132,7 @@ fn group<'a>(c: Colours, heading: Option<&str>, rows: Vec<Element<'a, Message>>)
     }
     let card = container(inner).width(Length::Fill).padding(2).style(move |_| card_style(c));
     match heading {
-        Some(h) => column![text(h.to_string()).size(12).color(c.dim).font(iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT }), card].spacing(6).into(),
+        Some(h) => column![text(h.to_string()).size(12).color(c.dim).font(ui_font(iced::font::Weight::Semibold)), card].spacing(6).into(),
         None => card.into(),
     }
 }
@@ -1409,10 +1441,12 @@ fn main() -> iced::Result {
         // SAFETY: no other threads yet.
         unsafe { std::env::set_var("ICED_BACKEND", "tiny-skia") };
     }
+    set_ui_family(&theme::read());
     iced::application(App::new, App::update, App::view)
         .title(App::title)
         .theme(App::theme)
         .subscription(App::subscription)
+        .default_font(ui_font(iced::font::Weight::Normal))
         .window(iced::window::Settings { size: Size::new(880.0, 640.0), min_size: Some(Size::new(680.0, 480.0)), ..Default::default() })
         .run()
 }
