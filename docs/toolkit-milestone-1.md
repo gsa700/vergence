@@ -445,8 +445,17 @@ borrowing. Nothing new comes in.
   program that has the mouse, a text bar otherwise. Tests (2 new, 29 in
   `vterm`) green on Hubble, canary and Techbench; awaits a hand test in
   `mc` and `htop`.
-  Still to do in step 4: panes, the scrollbar, the right-click menu,
-  settings followed live, and combining marks kept on their cell.
+- **Step 4, fifth part (2026-11-09): the scrollbar.** `scrollbar.rs`: a
+  bar 5 units wide in the padding at the right edge, there whenever there
+  is scrollback (never on the alternate screen). The thumb is the
+  screen's share of all the lines, at least 24 units long; faint at the
+  live screen, clearer scrolled back or held. A press within 12 units of
+  the edge takes hold of it (on the track, the thumb comes to the
+  pointer) and the view follows the drag. The "lines back" label moved
+  left of it. Tests (2 new, 31 in `vterm`) green on Hubble, canary and
+  Techbench; seen in a screenshot on Hubble, the drag awaits a hand test.
+  Still to do in step 4: panes, the right-click menu, settings followed
+  live, and combining marks kept on their cell.
 
 ## Acceptance
 

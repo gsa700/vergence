@@ -32,7 +32,9 @@
 //! program that asked for the mouse gets it (mouse.rs: presses, releases,
 //! moves and the wheel, as xterm reports them) unless Shift is held, which
 //! keeps the mouse for selecting.
-//! Panes, the scrollbar and the settings followed live come next.
+//! A thin scrollbar at the right edge (scrollbar.rs) shows where the view
+//! is in the scrollback and can be dragged.
+//! Panes and the settings followed live come next.
 
 mod bar;
 #[allow(dead_code)]
@@ -42,6 +44,7 @@ mod mouse;
 #[allow(dead_code)]
 #[path = "../../vergence-term/src/pty.rs"]
 mod pty;
+mod scrollbar;
 mod select;
 #[allow(dead_code)]
 #[path = "../../vergence-term/src/vt.rs"]
@@ -56,6 +59,7 @@ use std::{
 
 use bar::{BAR_H, Layout, Part, WinButton};
 use grid::{Cell, Color as CellColor, Grid, MouseMode};
+use scrollbar::Scrollbar;
 use select::{Pos, Selection, Unit};
 use vergence_scene::{Color, Glyph, Point, Rect, Scene};
 use vergence_text::{FaceId, Fonts};
@@ -217,6 +221,13 @@ impl Screen {
         self.grid.abs_line(self.top_line() + r).unwrap_or(&[])
     }
 
+    /// The scrollbar in a window of this size, if there is anything to
+    /// scroll (the alternate screen has no scrollback).
+    fn scrollbar(&self, width: f32, height: f32) -> Option<Scrollbar> {
+        let back = if self.grid.alt { 0 } else { self.grid.scrollback.len() };
+        Scrollbar::new(Rect::new(0.0, BAR_H, width, height - BAR_H), back, self.grid.rows, self.scroll)
+    }
+
     /// The absolute number of the line shown in the top row.
     fn top_line(&self) -> usize {
         self.grid.pushed - self.scroll
@@ -331,8 +342,11 @@ struct Terminal {
     settings: Settings,
     metrics: Option<Metrics>,
     focused: bool,
-    /// The window's width at the last frame, and the grid size that fits it: for the bar's layout and new tabs.
+    /// The window's size at the last frame, and the grid size that fits it: for the bar's layout and new tabs.
     width: f32,
+    height: f32,
+    /// The scrollbar's thumb is held: where in it it was taken hold of.
+    thumb: Option<f32>,
     fits: (usize, usize),
     hover: Option<Part>,
     /// True while the pointer is over the terminal, below the bar.
@@ -367,6 +381,8 @@ impl Terminal {
             metrics: None,
             focused: false,
             width: 820.0,
+            height: 520.0,
+            thumb: None,
             fits: (80, 24),
             hover: None,
             over_pane: false,
@@ -451,6 +467,26 @@ impl Terminal {
         }
         self.selecting = true;
         window.redraw();
+    }
+
+    /// The scrollbar of the tab in front, if it has one now.
+    fn scrollbar(&self) -> Option<Scrollbar> {
+        let session = self.sessions.get(self.shown)?;
+        lock(&session.screen).scrollbar(self.width, self.height)
+    }
+
+    /// The held thumb follows the pointer, and the view with it.
+    fn drag_thumb(&mut self, y: f32, grab: f32, window: &mut Window) {
+        let Some(session) = self.sessions.get(self.shown) else { return };
+        let mut s = lock(&session.screen);
+        if let Some(bar) = s.scrollbar(self.width, self.height) {
+            let to = bar.scroll_for(y - grab);
+            if to != s.scroll {
+                s.scroll = to;
+                s.clamp_scroll();
+                window.redraw();
+            }
+        }
     }
 
     /// Tells the front tab's program about a mouse event at a point of the
@@ -639,14 +675,17 @@ impl App for Terminal {
             _ => {}
         }
         match input {
+            Input::PointerMoved { y, .. } if self.thumb.is_some() => self.drag_thumb(*y, self.thumb.unwrap_or(0.0), window),
+            Input::Button { button: Button::Left, pressed: false, .. } if self.thumb.is_some() => self.thumb = None,
             Input::PointerMoved { x, y } if self.selecting => self.drag_text(*x, *y, window),
             Input::PointerMoved { x, y } => {
                 let part = self.layout().at(*x, *y);
                 self.over_pane = part.is_none() && *y >= BAR_H;
                 // A program with the mouse hears where the pointer is (if it asked for moves),
                 // and while a button it was told of is held, wherever the pointer goes.
-                let theirs = !self.shift && (self.over_pane || self.reported.is_some()) && self.report(mouse::Action::Motion(self.reported), *x, *y, Modifiers::default());
-                window.set_cursor(if part.is_some() || theirs { Cursor::Default } else { Cursor::Text });
+                let on_bar = self.over_pane && self.reported.is_none() && self.scrollbar().is_some_and(|bar| bar.holds(*x, *y));
+                let theirs = !on_bar && !self.shift && (self.over_pane || self.reported.is_some()) && self.report(mouse::Action::Motion(self.reported), *x, *y, Modifiers::default());
+                window.set_cursor(if part.is_some() || theirs || on_bar { Cursor::Default } else { Cursor::Text });
                 if part != self.hover {
                     self.hover = part;
                     window.redraw();
@@ -675,6 +714,12 @@ impl App for Terminal {
                 self.report(mouse::Action::Release(*button), *x, *y, *modifiers);
             }
             Input::Button { button, pressed: true, x, y, modifiers } => match (button, self.layout().at(*x, *y)) {
+                // The scrollbar: a press takes hold of the thumb, which comes to the pointer if it was not under it.
+                (Button::Left, None) if *y >= BAR_H && self.reported.is_none() && self.scrollbar().is_some_and(|bar| bar.holds(*x, *y)) => {
+                    let grab = self.scrollbar().map_or(0.0, |bar| bar.grab(*y));
+                    self.thumb = Some(grab);
+                    self.drag_thumb(*y, grab, window);
+                }
                 (_, None) if *y >= BAR_H && !modifiers.shift && self.reported.is_none() && self.report(mouse::Action::Press(*button), *x, *y, *modifiers) => {
                     self.reported = Some(*button);
                 }
@@ -776,7 +821,7 @@ impl App for Terminal {
 
     fn scene(&mut self, frame: &Frame, fonts: &mut Fonts) -> Scene {
         let p = &self.palette;
-        self.width = frame.width;
+        (self.width, self.height) = (frame.width, frame.height);
         let mut scene = Scene::new(frame.width, frame.height);
         scene.fill(Rect::new(0.0, 0.0, frame.width, frame.height), p.bg);
         let size = self.settings.mono_size;
@@ -903,11 +948,17 @@ impl App for Terminal {
                 scene.stroke(at, 0.0, 1.0, p.accent);
             }
         }
-        // Scrolled back: how far, in the top right corner.
+        // The scrollbar: faint at the live screen, clearer while scrolled back or held.
+        if let Some(bar) = s.scrollbar(frame.width, frame.height) {
+            scene.fill_rounded(bar.track, scrollbar::WIDTH / 2.0, Color::rgba(p.fg.r, p.fg.g, p.fg.b, 15));
+            let alpha = if self.thumb.is_some() { 166 } else if s.scroll > 0 { 128 } else { 64 };
+            scene.fill_rounded(bar.thumb, scrollbar::WIDTH / 2.0, Color::rgba(p.fg.r, p.fg.g, p.fg.b, alpha));
+        }
+        // Scrolled back: how far, in the top right corner (left of the scrollbar).
         if s.scroll > 0 {
             let label = if s.scroll == 1 { "1 line back".to_string() } else { format!("{} lines back", s.scroll) };
             let width = label.chars().count() as f32 * cw + 16.0;
-            let at = Rect::new(frame.width - width - PAD, BAR_H + PAD, width, ch + 4.0);
+            let at = Rect::new(frame.width - width - PAD - scrollbar::GRAB, BAR_H + PAD, width, ch + 4.0);
             scene.fill_rounded(at, 6.0, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 235));
             let font = number(&mut scene, fonts, mt.regular);
             let glyphs = label.chars().enumerate().map(|(i, c)| Glyph { id: fonts.glyph(mt.regular, c).1, x: i as f32 * cw, y: 0.0 }).collect();
