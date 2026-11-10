@@ -26,8 +26,12 @@
 //! Shift+PageUp/PageDown), resizing, titles, the program's own copies (OSC
 //! 52), the fonts and colour scheme from the desktop's settings. Ctrl+Shift+T
 //! opens a tab, Ctrl+Shift+W closes one, Ctrl+PageUp/PageDown change tab.
-//! Panes, selecting with the mouse, mouse reporting, the scrollbar and the
-//! settings followed live come next.
+//! The mouse selects text (select.rs): a drag by characters, a second press
+//! by words, a third by lines, Shift and a press to extend; held past the
+//! top or bottom edge the view scrolls under it. Ctrl+Shift+C copies. A
+//! program that asked for the mouse keeps it unless Shift is held.
+//! Panes, mouse reporting, the scrollbar and the settings followed live
+//! come next.
 
 mod bar;
 #[allow(dead_code)]
@@ -36,6 +40,7 @@ mod grid;
 #[allow(dead_code)]
 #[path = "../../vergence-term/src/pty.rs"]
 mod pty;
+mod select;
 #[allow(dead_code)]
 #[path = "../../vergence-term/src/vt.rs"]
 mod vt;
@@ -48,7 +53,8 @@ use std::{
 };
 
 use bar::{BAR_H, Layout, Part, WinButton};
-use grid::{Cell, Color as CellColor, Grid};
+use grid::{Cell, Color as CellColor, Grid, MouseMode};
+use select::{Pos, Selection, Unit};
 use vergence_scene::{Color, Glyph, Point, Rect, Scene};
 use vergence_text::{FaceId, Fonts};
 use vergence_ui::{App, Button, Cursor, Frame, Input, Modifiers, Waker, Window, sym};
@@ -99,6 +105,8 @@ impl Settings {
         Settings { left, right, ui_family, ui_size, mono_family, mono_size }
     }
 }
+/// While a selection is held past the top or bottom edge, the view moves a line this often.
+const EDGE_TICK: Duration = Duration::from_millis(40);
 /// Lines the view moves for one notch of the wheel.
 const WHEEL_LINES: isize = 3;
 
@@ -186,6 +194,8 @@ struct Screen {
     exited: bool,
     /// Text the program copied (OSC 52), on its way to the clipboard.
     copied: Option<String>,
+    /// The text selected with the mouse.
+    selection: Option<Selection>,
 }
 
 impl Screen {
@@ -202,7 +212,29 @@ impl Screen {
 
     /// The line shown at row `r` (from the scrollback while scrolled back).
     fn shown(&self, r: usize) -> &[Cell] {
-        self.grid.abs_line(self.grid.pushed - self.scroll + r).unwrap_or(&[])
+        self.grid.abs_line(self.top_line() + r).unwrap_or(&[])
+    }
+
+    /// The absolute number of the line shown in the top row.
+    fn top_line(&self) -> usize {
+        self.grid.pushed - self.scroll
+    }
+
+    /// The cell under a point of the window, as a selection counts it;
+    /// points outside the cells count as the nearest one.
+    fn cell_at(&self, x: f32, y: f32, cell_w: f32, cell_h: f32) -> Pos {
+        let col = ((x - PAD) / cell_w).floor().max(0.0) as usize;
+        let row = ((y - BAR_H - PAD) / cell_h).floor().max(0.0) as usize;
+        (col.min(self.grid.cols - 1), self.top_line() + row.min(self.grid.rows - 1))
+    }
+
+    /// Moves the end of the selection being dragged; true if that changed it.
+    fn drag_selection(&mut self, pos: Pos) -> bool {
+        let Some(mut selection) = self.selection else { return false };
+        selection.drag(&self.grid, pos);
+        let changed = self.selection != Some(selection);
+        self.selection = Some(selection);
+        changed
     }
 }
 
@@ -237,17 +269,22 @@ impl Session {
         let pty = pty::Pty::spawn(&shell, cols as u16, rows as u16)?;
         let reader = pty.reader()?;
         let mut replies = reader.try_clone()?;
-        let screen = Arc::new(Mutex::new(Screen { grid: Grid::new(cols, rows), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None }));
+        let screen = Arc::new(Mutex::new(Screen { grid: Grid::new(cols, rows), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None, selection: None }));
         let shared = screen.clone();
         std::thread::spawn(move || {
             pty::read_loop(reader, |bytes| {
                 let out = {
                     let mut guard = lock(&shared);
                     let s = &mut *guard;
-                    let before = s.grid.pushed;
+                    let (before, alt) = (s.grid.pushed, s.grid.alt);
                     s.parser.advance(&mut s.grid, &bytes);
+                    if s.grid.alt != alt {
+                        // Another screen: what was selected is not on it.
+                        s.selection = None;
+                    }
                     if s.grid.pushed < before {
                         // A full reset: the line numbers started again.
+                        s.selection = None;
                         s.scroll = 0;
                     } else if s.scroll > 0 {
                         // Scrolled back: stay on the same text as new lines arrive.
@@ -293,6 +330,13 @@ struct Terminal {
     over_pane: bool,
     maximized: bool,
     bar_press: Option<Instant>,
+    /// The left button is held on the text: the selection follows the pointer.
+    selecting: bool,
+    /// The last press on the text: when, on which cell, and which in a row it was (1 to 3).
+    presses: Option<(Instant, Pos, usize)>,
+    /// The selection is held past the top (true) or bottom edge, at this column: the view scrolls.
+    edge: Option<(bool, usize)>,
+    edge_tick: Instant,
     /// How many tabs to open with (`--tabs N`; one unless asked).
     open_with: usize,
 }
@@ -313,6 +357,10 @@ impl Terminal {
             over_pane: false,
             maximized: false,
             bar_press: None,
+            selecting: false,
+            presses: None,
+            edge: None,
+            edge_tick: Instant::now(),
             open_with: 1,
         }
     }
@@ -354,6 +402,54 @@ impl Terminal {
         if index < self.sessions.len() && index != self.shown {
             self.shown = index;
             self.retitle(window);
+            window.redraw();
+        }
+    }
+
+    /// The left button went down on the text: a selection starts (by
+    /// characters, then words, then lines for presses on the same cell in
+    /// quick succession), or with Shift the one there is reaches to here.
+    fn press_text(&mut self, x: f32, y: f32, m: Modifiers, window: &mut Window) {
+        let Some((cw, ch)) = self.metrics.as_ref().map(|mt| (mt.cell_w, mt.cell_h)) else { return };
+        let Some(session) = self.sessions.get(self.shown) else { return };
+        let mut guard = lock(&session.screen);
+        let s = &mut *guard;
+        // A program that asked for the mouse has it; Shift takes it back.
+        if s.grid.mouse != MouseMode::Off && !m.shift {
+            return;
+        }
+        let pos = s.cell_at(x, y, cw, ch);
+        let now = Instant::now();
+        let nth = match self.presses {
+            Some((then, at, n)) if at == pos && now.duration_since(then) < DOUBLE_CLICK => n % 3 + 1,
+            _ => 1,
+        };
+        self.presses = Some((now, pos, nth));
+        if nth == 1 && m.shift && s.selection.is_some() {
+            s.drag_selection(pos);
+        } else {
+            s.selection = Some(Selection::start(&s.grid, [Unit::Cell, Unit::Word, Unit::Line][nth - 1], pos));
+        }
+        self.selecting = true;
+        window.redraw();
+    }
+
+    /// The pointer moved with the button held on the text.
+    fn drag_text(&mut self, x: f32, y: f32, window: &mut Window) {
+        let Some((cw, ch)) = self.metrics.as_ref().map(|mt| (mt.cell_w, mt.cell_h)) else { return };
+        let Some(session) = self.sessions.get(self.shown) else { return };
+        let mut s = lock(&session.screen);
+        let pos = s.cell_at(x, y, cw, ch);
+        let bottom = BAR_H + PAD + s.grid.rows as f32 * ch;
+        // Past the top or bottom edge the view scrolls for as long as it is held there (scene()).
+        self.edge = if y < BAR_H + PAD {
+            Some((true, pos.0))
+        } else if y >= bottom {
+            Some((false, pos.0))
+        } else {
+            None
+        };
+        if s.drag_selection(pos) || self.edge.is_some() {
             window.redraw();
         }
     }
@@ -438,6 +534,11 @@ impl App for Terminal {
         self.palette.bg
     }
 
+    fn animating(&self) -> bool {
+        // A selection held past the edge scrolls the view frame after frame.
+        self.edge.is_some()
+    }
+
     fn waker(&mut self, waker: Waker) {
         self.waker = Some(waker.clone());
         for _ in 0..self.open_with {
@@ -486,6 +587,7 @@ impl App for Terminal {
 
     fn input(&mut self, input: &Input, window: &mut Window) {
         match input {
+            Input::PointerMoved { x, y } if self.selecting => self.drag_text(*x, *y, window),
             Input::PointerMoved { x, y } => {
                 let part = self.layout().at(*x, *y);
                 self.over_pane = part.is_none();
@@ -501,7 +603,20 @@ impl App for Terminal {
                     window.redraw();
                 }
             }
-            Input::Button { button, pressed: true, x, y, .. } => match (button, self.layout().at(*x, *y)) {
+            Input::Button { button: Button::Left, pressed: false, .. } if self.selecting => {
+                self.selecting = false;
+                self.edge = None;
+                // A press that selected nothing leaves nothing selected.
+                if let Some(session) = self.sessions.get(self.shown) {
+                    let mut s = lock(&session.screen);
+                    if s.selection.is_some_and(|sel| sel.range().is_none()) {
+                        s.selection = None;
+                    }
+                }
+                window.redraw();
+            }
+            Input::Button { button, pressed: true, x, y, modifiers } => match (button, self.layout().at(*x, *y)) {
+                (Button::Left, None) if *y >= BAR_H => self.press_text(*x, *y, *modifiers, window),
                 (Button::Left, Some(Part::Button(WinButton::Close))) => window.close(),
                 (Button::Left, Some(Part::Button(WinButton::Minimize))) => window.minimize(),
                 (Button::Left, Some(Part::Button(WinButton::Maximize))) => {
@@ -539,14 +654,19 @@ impl App for Terminal {
                 }
                 let Some(session) = self.sessions.get_mut(self.shown) else { return };
                 let mut s = lock(&session.screen);
-                if m.ctrl && m.shift && letter('v') {
+                if m.ctrl && m.shift && letter('c') {
+                    if let Some(text) = s.selection.and_then(|sel| sel.text(&s.grid)) {
+                        window.copy(&text);
+                    }
+                } else if m.ctrl && m.shift && letter('v') {
                     window.paste();
                 } else if m.shift && (*key == sym::PAGE_UP || *key == sym::PAGE_DOWN) {
                     let page = s.grid.rows.saturating_sub(1).max(1) as isize;
                     s.scroll_by(if *key == sym::PAGE_UP { page } else { -page });
                 } else if let Some(bytes) = Terminal::key_bytes(*key, text.as_deref(), m, s.grid.app_cursor) {
-                    // Typing goes to the live screen.
+                    // Typing goes to the live screen, and what was selected is let go.
                     s.scroll = 0;
+                    s.selection = None;
                     drop(s);
                     session.pty.write(&bytes);
                 }
@@ -615,10 +735,25 @@ impl App for Terminal {
         let s = &mut *guard;
         // The front tab's grid follows the window's size, and its program is told.
         if (cols, rows) != (s.grid.cols, s.grid.rows) {
+            if cols != s.grid.cols {
+                // Lines are cut or padded: the selection's cells are not what they were.
+                s.selection = None;
+            }
             s.grid.resize(cols, rows);
             s.clamp_scroll();
             session.pty.resize(cols as u16, rows as u16);
         }
+        // A selection held past the top or bottom edge: the view moves a line at a time and
+        // the selection's end goes with the edge row.
+        if let Some((up, col)) = self.edge
+            && self.edge_tick.elapsed() >= EDGE_TICK
+        {
+            self.edge_tick = Instant::now();
+            s.scroll_by(if up { 1 } else { -1 });
+            let row = s.top_line() + if up { 0 } else { s.grid.rows - 1 };
+            s.drag_selection((col, row));
+        }
+        let (selection, top_line) = (s.selection, s.top_line());
         scene.push_clip(Rect::new(0.0, BAR_H, frame.width, (frame.height - BAR_H).max(0.0)), 0.0);
 
         // Scene font numbers for the faces used in this frame.
@@ -679,6 +814,10 @@ impl App for Terminal {
             }
             if let Some((f, c, glyphs)) = run {
                 scene.glyphs(f, size, c, origin, glyphs);
+            }
+            // What is selected, tinted over its text.
+            if let Some((a, b)) = selection.and_then(|sel| sel.span(top_line + r, s.grid.cols)) {
+                scene.fill(Rect::new(PAD + a as f32 * cw, top, (b + 1 - a) as f32 * cw, ch), Color::rgba(p.accent.r, p.accent.g, p.accent.b, 89));
             }
         }
         // The cursor: a block with the keyboard, an outline without. It moves down with the
@@ -790,7 +929,7 @@ mod tests {
 
     #[test]
     fn the_view_scrolls_within_the_scrollback() {
-        let mut s = Screen { grid: Grid::new(20, 4), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None };
+        let mut s = Screen { grid: Grid::new(20, 4), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None, selection: None };
         for i in 0..10 {
             let line = format!("line {i}\r\n");
             s.parser.advance(&mut s.grid, line.as_bytes());

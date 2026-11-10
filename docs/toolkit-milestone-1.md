@@ -417,9 +417,26 @@ borrowing. Nothing new comes in.
     failed one run in three ("Is a directory") or hung; the call is now
     made one at a time. Twelve runs of twelve clean after.
   Green on Hubble, canary and Techbench (`vterm`, `vergence-term`).
-  Still to do in step 4: panes, selecting with the mouse and the
-  clipboard, mouse reporting, the scrollbar, the right-click menu,
-  settings followed live, and combining marks kept on their cell.
+- **Step 4, third part (2026-11-09): selecting with the mouse.**
+  `select.rs`: a selection is counted in cells and absolute line numbers,
+  so it stays on its text as output scrolls. A drag selects characters, a
+  second press on the same cell words (a path or an address is one word),
+  a third whole lines, and a drag after either goes on by that unit;
+  Shift and a press reaches the selection to there. Held past the top or
+  bottom edge the view scrolls a line every 40 ms with the selection's
+  end on the edge row. Ctrl+Shift+C copies: lines joined by newlines,
+  the cells that only pad a line dropped, double-width characters whole.
+  Typing, another screen (the alternate one), a reset or a change of
+  width lets the selection go. A program that asked for the mouse keeps
+  it unless Shift is held (reporting itself is the next part). Not done:
+  a wrapped line is copied as two lines (the screen does not record where
+  it wrapped), and there is no primary selection (middle-click paste):
+  that needs a protocol the toolkit does not speak yet.
+  Tests (4 new, 27 in `vterm`) green on Hubble, canary and Techbench; the
+  pointer's part awaits a hand test.
+  Still to do in step 4: panes, mouse reporting, the scrollbar, the
+  right-click menu, settings followed live, and combining marks kept on
+  their cell.
 
 ## Acceptance
 
