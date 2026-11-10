@@ -1077,5 +1077,10 @@ fn main() -> iced::Result {
         .subscription(App::subscription)
         .window(iced::window::Settings { size: initial_size(&look::Look::load()), decorations: false, ..Default::default() })
         .theme(|_: &App| Theme::CatppuccinMocha)
+        // No multisampling: with it on (iced's default here), the GPU renderer
+        // on Hubble (GLES through Mesa, 2026-11-09) drew none of the bar's icons
+        // (every small canvas), only the terminal's own. The software renderer
+        // smooths its edges either way.
+        .antialiasing(false)
         .run()
 }
