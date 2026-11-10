@@ -1,0 +1,13 @@
+[package]
+name = "vergence-shell"
+description = "Vergence's shell, the part with no drawing in it: where the shelf is, what room it leaves, and (later) the applications it shows (whitepaper §6.9)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Our own code only. No Smithay: the server draws the shelf and routes its
+# input (shelf.rs there); what can be worked out without a display server is
+# worked out here, and tested on every platform.
+[dependencies]
+vergence-look.workspace = true

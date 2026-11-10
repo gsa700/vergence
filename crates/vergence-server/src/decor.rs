@@ -79,6 +79,8 @@ pub enum Hit {
     Close(Window),
     Maximize(Window),
     Edge(Window, ResizeEdge),
+    /// The shelf's strip (shelf.rs): in front of every window.
+    Shelf,
     Nothing,
 }
 
@@ -185,6 +187,9 @@ impl Server {
 
     /// The top-most thing under `pos`: a title bar part, a resize band, or a surface.
     pub fn hit(&self, pos: Point<f64, Logical>) -> Hit {
+        if self.shelf_at(pos) {
+            return Hit::Shelf;
+        }
         for w in self.space.elements().rev() {
             if let Some(f) = self.frame_of(w) {
                 if f.close.to_f64().contains(pos) {
@@ -238,6 +243,8 @@ impl Server {
         let mut elements = self.menu_elements(renderer, out, scale);
         // Then notifications, in front of every window (notify.rs).
         elements.extend(self.notify_elements(renderer, out, scale));
+        // Then the shelf's strip, which no window covers (shelf.rs).
+        elements.extend(self.shelf_elements(renderer, out, scale));
         for w in windows {
             let frame = self.frame_of(&w);
             let border = self.border_of(&w);
@@ -370,6 +377,8 @@ impl Server {
             .map(|(_, g)| g)
             .or_else(|| self.space.outputs().next().and_then(|o| self.space.output_geometry(o)));
         let Some(out) = out else { return };
+        // A screen with the shelf is filled as far as the strip (shelf.rs).
+        let out = self.work_area(out);
         let top = if self.has_title(w) { TITLE_H } else { 0 };
         let rect = Rectangle::new((out.loc.x, out.loc.y + top).into(), (out.size.w, out.size.h - top).into());
         self.restore.insert(w.clone(), geo);

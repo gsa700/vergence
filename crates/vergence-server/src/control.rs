@@ -156,6 +156,7 @@ impl Server {
                 format!("shot: next frame of each monitor -> {}/<connector>.png", dir.display())
             }
             "windows" => self.describe_windows(),
+            "shelf" => self.shelf_report(),
             "dbus" => self.dbus_report(),
             "notes" => self.notify_report(),
             "spawn" => {

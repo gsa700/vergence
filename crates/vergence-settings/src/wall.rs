@@ -127,10 +127,8 @@ pub fn clear_own(desktop: &mut Table, id: &str) {
 /// [displays], if it is connected, else the first.
 pub fn primary(desktop: &Table, ids: &[String]) -> Option<String> {
     let recorded = desktop.get("displays").and_then(|d| d.get("primary")).and_then(Value::as_str);
-    match recorded {
-        Some(r) if ids.iter().any(|i| i == r) => Some(r.to_string()),
-        _ => ids.first().cloned(),
-    }
+    // The rule is vergence-profile's, which the server's shelf follows too.
+    vergence_profile::primary(recorded, ids).map(str::to_string)
 }
 
 /// Make `new` the primary instead of `old` with nothing on screen changing:

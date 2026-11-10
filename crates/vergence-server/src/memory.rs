@@ -147,6 +147,8 @@ impl Server {
         let out = self.space.outputs().find(|o| monitor_id_of(o).as_deref() == Some(s.monitor.as_str()))?.clone();
         let og = self.space.output_geometry(&out)?;
         let r = Rectangle::new((og.loc.x + s.x, og.loc.y + s.y).into(), (s.width as i32, s.height as i32).into());
+        // Where the shelf's strip now stands, the window is moved clear of it (shelf.rs).
+        let r = self.clear_of_shelf(r);
         let maximised = s.max_horz && s.max_vert;
         if !maximised && !self.fits_a_monitor(r, self.has_title(w)) {
             return None;

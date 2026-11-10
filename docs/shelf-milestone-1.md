@@ -2,7 +2,8 @@
 
 Planned 2026-11-09 (Dave: "write the shelf milestone", after the desktop
 paradigm discussion that became whitepaper §6.9); plan accepted the same
-evening. Nothing here is built yet.
+evening. **Begun 2026-11-10**, the day the toolkit's milestone closed;
+Progress, below, says how far it has come.
 
 **Order changed the same evening (Dave, 2026-11-09 20:31):** the project's own
 toolkit comes first (whitepaper §6.10, §9), with the terminal as its first
@@ -138,6 +139,44 @@ pinned or running application. Live tiles are shelf milestone 2.
 
 When step 5 is in, the desktop menu drops its fixed list of applications
 and keeps `[[menu.item]]` entries and Exit Vergence.
+
+**Order (Dave, 2026-11-10):** steps 1 to 5, then the toolkit's widgets
+and the settings app's move onto them, then step 6, whose two settings
+pages are written in the new settings app; nothing is added to the iced
+one.
+
+## Progress
+
+- **Step 1 (2026-11-10): the strip and the work area.**
+  - `crates/vergence-shell` (no Smithay; it depends only on
+    vergence-look): the strip on a screen's right edge, 48 points wide;
+    the work area it leaves; a remembered window moved clear of it.
+    Three tests of the arithmetic, on Hubble's two screens.
+  - The primary screen is one rule for the settings app and the server:
+    `vergence_profile::primary` (the one recorded in `[displays]
+    primary` if it is connected, else the first as the server lists
+    them).
+  - The server (`shelf.rs`): the strip on the primary screen, in front
+    of every window and behind the menu and the notification cards.
+    Maximise, default placement, fitting, the rescue of a window from a
+    screen that went, the desktop menu and the notification cards use
+    the work area; a remembered place the strip would cover is moved
+    left; a maximised window is fitted again when the strip moves. A
+    press on the strip does nothing and reaches nothing behind it.
+    `[shelf] hide` is read and not acted on. `vctl shelf` says where the
+    strip and the work area are.
+  - **The strip is drawn by the project's own drawing code**, the first
+    thing in the server that is: a scene, rendered by
+    `vergence-render`'s CPU renderer at the screen's exact pixels into a
+    buffer the server shows, kept until its height or scale changes.
+    Its ground and edge are in `vergence-look`.
+  - On Hubble (the 14" 4K alone, scale 3): the strip at 1232,0, 48 x 720
+    points; a terminal started maximised is 1232 x 720 and stops at it;
+    a notification card sits 12 points left of it. Not yet looked at:
+    its width with a ruler on two screens (acceptance 1; the ASUS is on
+    kepler), and a second screen at all.
+  Tests green on Hubble, kepler, canary and Techbench (259 on the two
+  FreeBSD machines, 258 on the Linux ones).
 
 ## Acceptance
 

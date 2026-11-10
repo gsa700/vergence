@@ -224,6 +224,8 @@ impl Server {
                 }
                 // Idle times (energy.rs).
                 state.energy_reload();
+                // The shelf's settings and the primary screen (shelf.rs).
+                state.shelf_reload();
                 let new = load();
                 let diff = changed(&state.settings.current, &new);
                 state.settings.current = new;

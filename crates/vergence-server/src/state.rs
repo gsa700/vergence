@@ -100,6 +100,8 @@ pub struct Server {
     /// [displays] settings last applied.
     pub scale_notes: std::collections::HashMap<String, crate::displays::Scales>,
     pub displays: crate::displays::DisplaysConfig,
+    /// The shelf: its settings and its picture (shelf.rs).
+    pub shelf: crate::shelf::Shelf,
     /// The idle clock, screens off and sleep (energy.rs).
     pub energy: crate::energy::Energy,
     pub popups: PopupManager,
@@ -222,6 +224,7 @@ impl Server {
             notes: Default::default(),
             scale_notes: Default::default(),
             displays: crate::displays::load(),
+            shelf: crate::shelf::Shelf::load(),
             energy: crate::energy::Energy::new(),
             popups,
             seat,

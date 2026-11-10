@@ -341,7 +341,7 @@ impl Server {
     }
 
     /// The monitors as the bus describes them, left to right.
-    fn bus_outputs(&self) -> Vec<OutputInfo> {
+    pub fn bus_outputs(&self) -> Vec<OutputInfo> {
         let mut out: Vec<OutputInfo> = self
             .space
             .outputs()
@@ -385,6 +385,8 @@ impl Server {
     /// Call after monitors were added, removed, moved or rescaled: subscribers
     /// get the new list (once, and only if it changed).
     pub fn bus_outputs_changed(&mut self) {
+        // The shelf stands on one of the screens (shelf.rs).
+        self.shelf_moved();
         let outputs = self.bus_outputs();
         if self.bus.last_outputs.as_ref() == Some(&outputs) {
             return;

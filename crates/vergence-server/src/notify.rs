@@ -273,12 +273,14 @@ impl Server {
             },
         };
         self.notes.anchor = Some(anchor);
+        // Beside the shelf's strip, not under it (shelf.rs).
+        let area = self.work_area(anchor);
         let font = self.title_font.as_ref();
         let line_h = font.map(|f| (f.points * 96.0 / 72.0 * 1.45).round() as i32).unwrap_or(18);
         let width = |s: &str| font.map(|f| f.width(s)).unwrap_or(s.chars().count() as f32 * 7.0);
         let text_w = (WIDTH - 2 * PAD) as f32;
-        let x = anchor.loc.x + anchor.size.w - WIDTH - MARGIN;
-        let mut y = anchor.loc.y + MARGIN;
+        let x = area.loc.x + area.size.w - WIDTH - MARGIN;
+        let mut y = area.loc.y + MARGIN;
         for n in self.notes.notes.iter_mut() {
             let mut lines = Vec::new();
             let mut ty = y + PAD;

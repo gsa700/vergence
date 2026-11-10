@@ -24,6 +24,18 @@ pub mod arrangement;
 pub mod scaling;
 pub mod windows;
 
+/// The primary screen among the connected ones (`ids`, in the order the
+/// server lists them: left to right, then top to bottom): the one recorded
+/// in the settings (`[displays] primary`) if it is connected, else the
+/// first. One rule for the settings app, which shows and changes it, and
+/// the server, whose shelf stands on it.
+pub fn primary<'a>(recorded: Option<&str>, ids: &'a [String]) -> Option<&'a str> {
+    match recorded {
+        Some(r) if ids.iter().any(|i| i == r) => ids.iter().find(|i| *i == r).map(String::as_str),
+        _ => ids.first().map(String::as_str),
+    }
+}
+
 use sha2::{Digest, Sha256};
 
 /// A short, stable ID for one monitor: the first 16 hex digits of SHA-256

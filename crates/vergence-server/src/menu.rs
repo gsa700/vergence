@@ -171,7 +171,7 @@ impl Server {
             commit: CommitCounter::default(),
             labels: HashMap::new(),
         };
-        if let Some(out) = self.output_at_pointer() {
+        if let Some(out) = self.output_at_pointer().map(|o| self.work_area(o)) {
             let (w, h) = (WIDTH, m.height());
             m.at.x = m.at.x.min(out.loc.x + out.size.w - w).max(out.loc.x);
             m.at.y = m.at.y.min(out.loc.y + out.size.h - h).max(out.loc.y);

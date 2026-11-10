@@ -61,6 +61,13 @@ pub const BUTTON: Rgb = Rgb(184, 184, 184);
 pub const SHAPE_REST: u8 = 20;
 pub const SHAPE_HOVER: u8 = 41;
 
+/// The shelf (whitepaper §6.9): the strip's width and its icons' size, its
+/// ground, and the line along the side that faces the windows.
+pub const SHELF_W: f32 = 48.0;
+pub const SHELF_ICON: f32 = 32.0;
+pub const SHELF: Rgb = Rgb(32, 35, 44);
+pub const SHELF_EDGE: Rgb = Rgb(64, 68, 80);
+
 /// A menu's ground, its text, and its text for what cannot be chosen.
 pub const MENU: Rgb = Rgb(43, 46, 59);
 pub const MENU_INK: Rgb = Rgb(235, 235, 235);

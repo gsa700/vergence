@@ -4631,6 +4631,10 @@ dependencies = [
  "vergence-look",
  "vergence-profile",
  "vergence-protocol",
+ "vergence-render",
+ "vergence-scene",
+ "vergence-shell",
+ "vergence-text",
  "vergence-xsettings",
  "x11rb 0.13.2",
  "xcursor",
@@ -4644,8 +4648,16 @@ dependencies = [
  "image",
  "resvg",
  "toml",
+ "vergence-profile",
  "vergence-protocol",
  "vergence-xsettings",
+]
+
+[[package]]
+name = "vergence-shell"
+version = "0.1.0"
+dependencies = [
+ "vergence-look",
 ]
 
 [[package]]

@@ -32,7 +32,7 @@ impl Server {
 
     /// Where content can go on every monitor (below a title bar if `titled`).
     fn content_areas(&self, titled: bool) -> Vec<Rectangle<i32, Logical>> {
-        self.space.outputs().filter_map(|o| self.space.output_geometry(o)).map(|g| content_area(g, titled)).collect()
+        self.space.outputs().filter_map(|o| self.space.output_geometry(o)).map(|g| content_area(self.work_area(g), titled)).collect()
     }
 
     /// Does `rect` (content) lie wholly on one monitor, below its title bar if titled?
@@ -45,7 +45,7 @@ impl Server {
         let titled = !x.is_override_redirect() && !x.is_decorated();
         let geo = x.geometry();
         let Some(out) = self.output_at_pointer() else { return geo };
-        let area = content_area(out, titled);
+        let area = content_area(self.work_area(out), titled);
         let size = fit(geo.size, area.size, x.min_size());
         let asked = x.size_hints().is_some_and(|h| h.position.is_some());
         if asked {
@@ -70,7 +70,7 @@ impl Server {
             })
             .max_by_key(|(a, _)| *a)
             .map(|(_, g)| g)?;
-        Some(content_area(out, self.has_title(w)).size)
+        Some(content_area(self.work_area(out), self.has_title(w)).size)
     }
 
     /// Fit and centre a Wayland window once it has a size (its first commit).
@@ -94,7 +94,7 @@ impl Server {
             return;
         }
         let Some(out) = self.output_at_pointer() else { return };
-        let area = content_area(out, self.has_title(w));
+        let area = content_area(self.work_area(out), self.has_title(w));
         let fitted = fit(size, area.size, None);
         if fitted != size {
             t.with_pending_state(|s| s.size = Some(fitted));
@@ -177,7 +177,7 @@ impl Server {
                 self.toggle_maximize(&w);
             }
             let size = self.space.element_geometry(&w).map(|g| g.size).unwrap_or(geo.size);
-            let area = content_area(out, self.has_title(&w));
+            let area = content_area(self.work_area(out), self.has_title(&w));
             let fitted = fit(size, area.size, w.x11_surface().and_then(|x| x.min_size()));
             let r = Rectangle::new(centre_of(area, fitted), fitted);
             tracing::info!("hotplug: window rescued onto {:?}", r);

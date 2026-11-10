@@ -272,7 +272,7 @@ impl Server {
                 Hit::Surface(w, ..) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Edge(w, _) => {
                     self.focus_window(&w.clone(), serial)
                 }
-                Hit::Nothing => {}
+                Hit::Shelf | Hit::Nothing => {}
             }
             match hit {
                 // Alt+left drag moves, Alt+right drag resizes any window.
@@ -299,6 +299,9 @@ impl Server {
                 Hit::Maximize(w) if left => self.toggle_maximize(&w),
                 Hit::Edge(w, e) if left => grab_with = Some((w, Some(e))),
                 Hit::Title(_) | Hit::Close(_) | Hit::Maximize(_) | Hit::Edge(..) => {}
+                // The shelf's strip: nothing on it to press yet (shelf.rs), and what
+                // is behind it is not pressed either.
+                Hit::Shelf => {}
                 // Right-click on the bare desktop: the desktop menu.
                 Hit::Nothing if button == BTN_RIGHT => {
                     self.open_menu(at);
