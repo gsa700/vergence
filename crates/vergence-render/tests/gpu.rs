@@ -202,6 +202,30 @@ fn text_agrees_with_the_reference() {
 }
 
 #[test]
+fn a_buffer_for_the_display_server_holds_the_same_picture() {
+    let Some(mut gpu) = gpu() else { return };
+    if !gpu.shares_buffers() {
+        eprintln!("skipped: this GL makes no buffers a display server can show ({})", gpu.description());
+        return;
+    }
+    let s = busy();
+    for scale in [1.0, 2.25] {
+        let own = gpu.render(&s, &mut none(), scale, Color::rgb(10, 20, 30)).unwrap();
+        let buffer = gpu.buffer(own.width, own.height).unwrap();
+        assert!(buffer.stride >= own.width * 4 && buffer.format == 0x3432_5241, "stride {} format {:#x} modifier {:#x}", buffer.stride, buffer.format, buffer.modifier);
+        eprintln!("buffer {} x {}: stride {}, offset {}, modifier {:#x}", buffer.width, buffer.height, buffer.stride, buffer.offset, buffer.modifier);
+        gpu.draw_into(&buffer, &s, &mut none(), scale, Color::rgb(10, 20, 30)).unwrap();
+        // The same renderer into the shared buffer and into its own texture: the same pixels.
+        assert_eq!(gpu.read(&buffer).unwrap().hash(), own.hash(), "at scale {scale}");
+        // A scene of another size is refused, not stretched.
+        let small = Scene::new(10.0, 10.0);
+        assert!(matches!(gpu.draw_into(&buffer, &small, &mut none(), 1.0, BLACK), Err(GpuError::Render(_))));
+        gpu.release(buffer);
+    }
+    assert!(gpu.buffer(0, 10).is_err());
+}
+
+#[test]
 fn what_the_gpu_does_not_draw_yet_is_refused_not_wrong() {
     let Some(mut gpu) = gpu() else { return };
     let mut s = Scene::new(40.0, 40.0);

@@ -56,6 +56,12 @@ library! {
     Gbm from [c"libgbm.so.1", c"libgbm.so"] {
         fn gbm_create_device(fd: i32) -> *mut c_void;
         fn gbm_device_destroy(device: *mut c_void);
+        fn gbm_bo_create(device: *mut c_void, width: u32, height: u32, format: u32, flags: u32) -> *mut c_void;
+        fn gbm_bo_destroy(buffer: *mut c_void);
+        fn gbm_bo_get_fd(buffer: *mut c_void) -> i32;
+        fn gbm_bo_get_stride(buffer: *mut c_void) -> u32;
+        fn gbm_bo_get_offset(buffer: *mut c_void, plane: i32) -> u32;
+        fn gbm_bo_get_modifier(buffer: *mut c_void) -> u64;
     }
 }
 
@@ -70,6 +76,9 @@ library! {
         fn eglDestroyContext(display: *mut c_void, context: *mut c_void) -> u32;
         fn eglMakeCurrent(display: *mut c_void, draw: *mut c_void, read: *mut c_void, context: *mut c_void) -> u32;
         fn eglGetError() -> i32;
+        fn eglGetProcAddress(name: *const c_char) -> *mut c_void;
+        fn eglCreateImage(display: *mut c_void, context: *mut c_void, target: u32, buffer: *mut c_void, attributes: *const isize) -> *mut c_void;
+        fn eglDestroyImage(display: *mut c_void, image: *mut c_void) -> u32;
     }
 }
 
@@ -80,6 +89,22 @@ pub const EGL_CONTEXT_MAJOR_VERSION: i32 = 0x3098;
 pub const EGL_RENDERABLE_TYPE: i32 = 0x3040;
 pub const EGL_OPENGL_ES3_BIT: i32 = 0x0040;
 pub const EGL_NONE: i32 = 0x3038;
+pub const EGL_WIDTH: isize = 0x3057;
+pub const EGL_HEIGHT: isize = 0x3056;
+pub const EGL_LINUX_DMA_BUF: u32 = 0x3270;
+pub const EGL_LINUX_DRM_FOURCC: isize = 0x3271;
+pub const EGL_DMA_BUF_PLANE0_FD: isize = 0x3272;
+pub const EGL_DMA_BUF_PLANE0_OFFSET: isize = 0x3273;
+pub const EGL_DMA_BUF_PLANE0_PITCH: isize = 0x3274;
+pub const EGL_DMA_BUF_PLANE0_MODIFIER_LO: isize = 0x3443;
+pub const EGL_DMA_BUF_PLANE0_MODIFIER_HI: isize = 0x3444;
+
+/// GBM: a buffer the GPU can draw into.
+pub const GBM_BO_USE_RENDERING: u32 = 1 << 2;
+/// 'AR24': 32 bits a pixel, blue first in memory, alpha last.
+pub const FORMAT_ARGB8888: u32 = 0x3432_5241;
+/// "The driver's own choice of layout", where a buffer has no explicit one.
+pub const MODIFIER_INVALID: u64 = 0x00ff_ffff_ffff_ffff;
 
 library! {
     /// OpenGL ES 3.

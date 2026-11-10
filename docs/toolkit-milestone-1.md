@@ -333,6 +333,37 @@ borrowing. Nothing new comes in.
   the atlas is one texture, emptied when full. Next: the server shown a
   GPU buffer (linux-dmabuf from `vergence-wl`, GBM buffers), then the
   window choosing GPU or CPU by itself.
+- **2026-11-09, step 3, second part: GPU frames in the window.**
+  `vergence-wl`: linux-dmabuf (formats with their modifiers, a buffer
+  offered and the server's created or failed; a "created" whose id is not
+  in the server's range is not believed); 24 tests. `vergence-render`:
+  `Gpu::buffer` makes a `GpuBuffer`, GPU memory from GBM imported as an EGL
+  image and drawn into through a framebuffer, with the file descriptor,
+  stride, offset, format (ARGB8888) and modifier the server needs;
+  `draw_into`, `read`, `release`; a test that the shared buffer holds the
+  same pixels as the renderer's own texture. `vergence-ui`: a window
+  draws on the GPU when the server offers linux-dmabuf and the machine
+  has a GPU that shares buffers; it asks the server to take up to three
+  buffers and draws in software until one is taken; a frame the GPU
+  renderer cannot draw, or a refusal from the server or the driver, goes
+  to the CPU renderer and shared memory, which stays as it was.
+  `VERGENCE_RENDER=cpu` keeps to the CPU. **On Hubble (UHD 630, Void):**
+  the demo window's frames reach the server as dmabufs (modifier
+  I915 Y-tiled), 237 of 240 on the GPU (the first two in software while
+  the buffers were taken), 30.2 frames a second on the 30 Hz monitor, a
+  screenshot correct. Animating, **the demo uses 2% of one core with GPU
+  frames against 114% with CPU frames**, and the server 9% against 15%.
+  (The time to draw one frame reads about the same, 7.8 ms, because the
+  GPU path waits for the card to finish before handing the buffer over:
+  that wait is `glFinish`, to be replaced by explicit sync.) No GPU hang,
+  nothing in the kernel log; one 22 ms slow frame in the server's.
+  Green on Hubble (whole workspace), canary and Techbench. Not tried on
+  screen: Techbench (its monitors are on Hubble). Acceptance 3's "with the
+  GPU taken away the window comes up in software" is met by
+  `VERGENCE_RENDER=cpu` and by canary, not yet by removing access to the
+  render node.
+  Also on 2026-11-09, at the desk: key repeat (Backspace held) and the
+  wheel work in the demo window.
 
 ## Acceptance
 

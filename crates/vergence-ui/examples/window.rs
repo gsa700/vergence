@@ -29,6 +29,7 @@ struct Demo {
     /// How long drawing took, frame by frame, and when the last few were shown.
     draw_ms: Vec<f64>,
     last: Option<(f32, f32, f32)>,
+    drawn_by: [u64; 2],
     log: bool,
     /// The window's size at the last frame, to know where things are.
     size: (f32, f32),
@@ -102,7 +103,7 @@ impl App for Demo {
             let line = format!("{w} x {h} units  scale {:.4}  {} x {} pixels  frame {}", f.scale, pixels.0, pixels.1, f.number);
             text(&mut s, fonts, face, 13.33, AMBER, Point::new(24.0, 104.0), &line);
             if let Some(avg) = (!self.draw_ms.is_empty()).then(|| self.draw_ms.iter().rev().take(30).sum::<f64>() / self.draw_ms.len().min(30) as f64) {
-                text(&mut s, fonts, face, 13.33, SOFT, Point::new(24.0, 124.0), &format!("drawn in {avg:.1} ms a frame, in software"));
+                text(&mut s, fonts, face, 13.33, SOFT, Point::new(24.0, 124.0), &format!("drawn in {avg:.1} ms a frame, on the {}", if f.drawn_by.is_empty() { "?" } else { f.drawn_by }));
             }
         }
         // A row of shapes that fills the width, so resizing shows.
@@ -147,6 +148,11 @@ impl App for Demo {
             s.fill_rounded(Rect::new(24.0 + t * (w - 48.0 - 60.0), h - 30.0, 60.0, 12.0), 6.0, AMBER);
         }
         self.last = Some((w, h, f.scale));
+        match f.drawn_by {
+            "GPU" => self.drawn_by[0] += 1,
+            "CPU" => self.drawn_by[1] += 1,
+            _ => {}
+        }
         s
     }
 
@@ -215,7 +221,7 @@ impl App for Demo {
             Some(n) if f.number + 1 >= n => {
                 let (w, h, scale) = self.last.unwrap_or_default();
                 let mean = self.draw_ms.iter().sum::<f64>() / self.draw_ms.len() as f64;
-                println!("{} frames in {:.2} s: {:.1} a second; {w} x {h} units at scale {scale:.4}; drawing {mean:.1} ms a frame (first {:.1})", f.number + 1, f.time, (f.number + 1) as f64 / f.time.max(0.001), self.draw_ms[0]);
+                println!("{} frames in {:.2} s: {:.1} a second; {w} x {h} units at scale {scale:.4}; drawing {mean:.1} ms a frame (first {:.1}); {} frames on the GPU, {} on the CPU", f.number + 1, f.time, (f.number + 1) as f64 / f.time.max(0.001), self.draw_ms[0], self.drawn_by[0], self.drawn_by[1]);
                 false
             }
             _ => true,
@@ -233,6 +239,7 @@ fn main() {
         stop_after: value("--frames"),
         draw_ms: Vec::new(),
         last: None,
+        drawn_by: [0, 0],
         log: flag("--log"),
         size: (640.0, 420.0),
         pointer: None,

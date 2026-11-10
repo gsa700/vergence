@@ -7,7 +7,7 @@
 //! shared-memory buffers, the exact scale (wp-fractional-scale, wp-viewporter)
 //! and who draws the title bar (xdg-decoration), the pointer and keyboard
 //! (wl_seat), the pointer's shape (wp-cursor-shape) and the clipboard
-//! (wl_data_device). GPU buffers come with the step that needs them.
+//! (wl_data_device), and buffers drawn by the GPU (linux-dmabuf).
 //!
 //! [`Client`] remembers which interface each object id belongs to, so an
 //! incoming message can be read as the right event. An event for an object
@@ -55,6 +55,9 @@ pub enum Interface {
     DataSource,
     /// Made by the server: what another program has put on the clipboard.
     DataOffer,
+    /// linux-dmabuf: buffers that live in the GPU's memory.
+    Dmabuf,
+    DmabufParams,
 }
 
 impl Interface {
@@ -70,6 +73,7 @@ impl Interface {
             Interface::Seat => "wl_seat",
             Interface::CursorShapeManager => "wp_cursor_shape_manager_v1",
             Interface::DataDeviceManager => "wl_data_device_manager",
+            Interface::Dmabuf => "zwp_linux_dmabuf_v1",
             _ => return None,
         })
     }
@@ -81,6 +85,8 @@ impl Interface {
             // 5: pointer events come in frames, and the keyboard says its repeat rate.
             Interface::Seat => 5,
             Interface::DataDeviceManager => 3,
+            // 3: formats come with their modifiers, as plain events.
+            Interface::Dmabuf => 3,
             _ => 1,
         }
     }
@@ -186,6 +192,13 @@ pub enum Event {
     SourceSend { source: u32, mime: String },
     /// Our clipboard contents have been replaced: the source is finished.
     SourceCancelled { source: u32 },
+    /// A pixel format (a fourcc code) and memory layout (modifier) the
+    /// server can show from the GPU's memory.
+    DmabufFormat { format: u32, modifier: u64 },
+    /// The buffer asked for with [`Client::create_dmabuf`] exists.
+    DmabufCreated { params: u32, buffer: u32 },
+    /// The server could not take that buffer; draw into shared memory instead.
+    DmabufFailed { params: u32 },
 }
 
 /// Object ids from here up are the server's to give out.
@@ -235,6 +248,12 @@ pub fn decode(interface: Interface, object: u32, opcode: u16, arguments: &[u8]) 
         (Interface::DataOffer, 0) => Event::OfferKind { offer: object, mime: r.string()?.unwrap_or_default() },
         (Interface::DataSource, 1) => Event::SourceSend { source: object, mime: r.string()?.unwrap_or_default() },
         (Interface::DataSource, 2) => Event::SourceCancelled { source: object },
+        (Interface::Dmabuf, 1) => {
+            let (format, high, low) = (r.uint()?, r.uint()?, r.uint()?);
+            Event::DmabufFormat { format, modifier: (high as u64) << 32 | low as u64 }
+        }
+        (Interface::DmabufParams, 0) => Event::DmabufCreated { params: object, buffer: r.uint()? },
+        (Interface::DmabufParams, 1) => Event::DmabufFailed { params: object },
         _ => return Ok(None),
     }))
 }
@@ -311,6 +330,13 @@ impl Client {
                         continue;
                     }
                     self.objects.insert(offer, Interface::DataOffer);
+                }
+                // So is a buffer made from GPU memory.
+                if let Event::DmabufCreated { buffer, .. } = event {
+                    if buffer < SERVER_IDS {
+                        continue;
+                    }
+                    self.objects.insert(buffer, Interface::Buffer);
                 }
                 events.push(event);
             }
@@ -527,6 +553,27 @@ impl Client {
             self.send(Writer::new(offer, 2))?;
         }
         Ok(())
+    }
+
+    // zwp_linux_dmabuf_v1: buffers in the GPU's memory
+
+    /// Asks the server to make a buffer of GPU memory we drew into: one
+    /// plane, the file descriptor `fd` (ours stays ours), `stride` bytes a
+    /// row from `offset`, in `format` (a fourcc code) laid out as `modifier`
+    /// says. The answer is [`Event::DmabufCreated`] or
+    /// [`Event::DmabufFailed`], for the params object returned here.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_dmabuf(&mut self, dmabuf: u32, fd: RawFd, width: i32, height: i32, format: u32, modifier: u64, offset: u32, stride: u32) -> io::Result<u32> {
+        let params = self.create(Interface::DmabufParams);
+        self.send(Writer::new(dmabuf, 1).uint(params))?;
+        self.send(Writer::new(params, 1).fd(fd).uint(0).uint(offset).uint(stride).uint((modifier >> 32) as u32).uint(modifier as u32))?;
+        self.send(Writer::new(params, 2).int(width).int(height).uint(format).uint(0))?;
+        Ok(params)
+    }
+
+    /// Lets go of a params object once it has answered.
+    pub fn destroy_dmabuf_params(&mut self, params: u32) -> io::Result<()> {
+        self.send(Writer::new(params, 0))
     }
 
     // wp_viewporter, wp_viewport
@@ -768,6 +815,42 @@ mod tests {
         server.send(Writer::new(7, 0).string("text/plain")).unwrap();
         server.flush().unwrap();
         assert_eq!(client.dispatch().unwrap(), [Event::Selection { offer: None }]);
+    }
+
+    #[test]
+    fn a_gpu_buffer_is_offered_and_answered() {
+        let (mut client, mut server) = pair();
+        let dmabuf = client.create(Interface::Dmabuf);
+        // What the server can show: one format with two layouts.
+        server.send(Writer::new(dmabuf, 1).uint(0x3432_5241).uint(0x0100_0000).uint(2)).unwrap();
+        server.send(Writer::new(dmabuf, 1).uint(0x3432_5241).uint(0x00ff_ffff).uint(0xffff_ffff)).unwrap();
+        server.flush().unwrap();
+        assert_eq!(
+            client.dispatch().unwrap(),
+            [Event::DmabufFormat { format: 0x3432_5241, modifier: 0x0100_0000_0000_0002 }, Event::DmabufFormat { format: 0x3432_5241, modifier: 0x00ff_ffff_ffff_ffff }]
+        );
+        let (_r, w) = crate::conn::pipe().unwrap();
+        let params = client.create_dmabuf(dmabuf, std::os::fd::AsRawFd::as_raw_fd(&w), 1920, 1260, 0x3432_5241, 0x0100_0000_0000_0002, 0, 7680).unwrap();
+        client.flush().unwrap();
+        assert_eq!(next(&mut server), (dmabuf, 1, params.to_ne_bytes().to_vec()));
+        let (object, opcode, args) = next(&mut server);
+        let mut r = Reader::new(&args);
+        assert_eq!((object, opcode), (params, 1));
+        assert_eq!((r.uint(), r.uint(), r.uint(), r.uint(), r.uint()), (Ok(0), Ok(0), Ok(7680), Ok(0x0100_0000), Ok(2)), "plane, offset, stride, modifier high and low");
+        assert!(server.take_fd().is_some(), "the buffer's file descriptor went with it");
+        let (object, opcode, args) = next(&mut server);
+        let mut r = Reader::new(&args);
+        assert_eq!((object, opcode, r.int(), r.int(), r.uint(), r.uint()), (params, 2, Ok(1920), Ok(1260), Ok(0x3432_5241), Ok(0)));
+        // The server makes the buffer: it is ours to attach, and its release is heard.
+        let buffer = 0xff00_0009u32;
+        server.send(Writer::new(params, 0).uint(buffer)).unwrap();
+        server.send(Writer::new(buffer, 0)).unwrap();
+        // Another is refused; and a "created" with an id from our own range is not believed.
+        let second = client.create_dmabuf(dmabuf, std::os::fd::AsRawFd::as_raw_fd(&w), 8, 8, 1, 0, 0, 32).unwrap();
+        server.send(Writer::new(second, 1)).unwrap();
+        server.send(Writer::new(second, 0).uint(5)).unwrap();
+        server.flush().unwrap();
+        assert_eq!(client.dispatch().unwrap(), [Event::DmabufCreated { params, buffer }, Event::BufferRelease { buffer }, Event::DmabufFailed { params: second }]);
     }
 
     #[test]

@@ -28,7 +28,7 @@ fn iters() -> usize {
     std::env::var("FUZZ_ITERS").ok().and_then(|v| v.parse().ok()).unwrap_or(20_000)
 }
 
-const INTERFACES: [Interface; 22] = [
+const INTERFACES: [Interface; 28] = [
     Interface::Display,
     Interface::Registry,
     Interface::Callback,
@@ -51,6 +51,12 @@ const INTERFACES: [Interface; 22] = [
     Interface::Keyboard,
     Interface::CursorShapeManager,
     Interface::CursorShapeDevice,
+    Interface::DataDeviceManager,
+    Interface::DataDevice,
+    Interface::DataSource,
+    Interface::DataOffer,
+    Interface::Dmabuf,
+    Interface::DmabufParams,
 ];
 
 /// Everything a client does with bytes from the server.

@@ -28,7 +28,7 @@ pub mod gpu;
 use std::fmt;
 
 pub use cpu::{Cpu, Order, Target};
-pub use gpu::{Gpu, GpuError};
+pub use gpu::{Gpu, GpuBuffer, GpuError};
 use vergence_scene::{Color, Glyph, Point, Scene, SceneError};
 use vergence_text::{FaceId, Fonts};
 

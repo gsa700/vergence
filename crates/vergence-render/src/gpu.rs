@@ -10,10 +10,11 @@
 //! uploaded once and tinted when drawn. Shapes are drawn in the scene's
 //! order in as few draw calls as there are pictures to switch between.
 //!
-//! This first part draws into a texture and reads the pixels back, with no
-//! window, so that its output can be compared with the CPU renderer's,
-//! which is how it is tested (tests/gpu.rs). Handing the server a GPU
-//! buffer is the next part.
+//! It draws into a texture and can read the pixels back, with no window,
+//! so that its output can be compared with the CPU renderer's, which is how
+//! it is tested (tests/gpu.rs). For a window it draws into a [`GpuBuffer`]:
+//! memory on the GPU that the display server can show as it is, handed over
+//! as a file descriptor (a dmabuf), with no copy through main memory.
 //!
 //! The interface is OpenGL ES 3 through EGL (decided 2026-11-09), on the
 //! GPU's render node through GBM. Where there is no GPU device, EGL's
@@ -29,6 +30,7 @@ use std::{
     collections::HashMap,
     ffi::{CStr, c_char, c_void},
     fmt,
+    os::fd::{AsRawFd, FromRawFd, OwnedFd},
     sync::Arc,
 };
 
@@ -266,9 +268,33 @@ struct Batch {
     image: Option<usize>,
 }
 
+/// Memory on the GPU that a window's frame is drawn into and the display
+/// server shows: what to tell the server about it is public, the rest is
+/// the renderer's. Made by [`Gpu::buffer`], given back with [`Gpu::release`].
+pub struct GpuBuffer {
+    pub width: u32,
+    pub height: u32,
+    /// The buffer as a file descriptor (a dmabuf), to send to the server.
+    pub fd: OwnedFd,
+    /// Bytes a row, and where the first row starts.
+    pub stride: u32,
+    pub offset: u32,
+    /// The pixel format (a fourcc code) and the driver's layout of the memory.
+    pub format: u32,
+    pub modifier: u64,
+    object: *mut c_void,
+    image: *mut c_void,
+    texture: u32,
+    framebuffer: u32,
+}
+
 pub struct Gpu {
     egl: Egl,
     gl: Gles,
+    /// The GPU as a device, where there is one (not with a software GL).
+    gbm: Option<(Gbm, *mut c_void)>,
+    /// glEGLImageTargetTexture2DOES, where the GL has it.
+    image_target: Option<unsafe extern "C" fn(u32, *mut c_void)>,
     display: *mut c_void,
     context: *mut c_void,
     /// What is drawing: the GL's own description.
@@ -290,7 +316,12 @@ impl Gpu {
     pub fn new() -> Result<Gpu, GpuError> {
         let egl = Egl::load().ok_or(GpuError::NoLibrary)?;
         let gl = Gles::load().ok_or(GpuError::NoLibrary)?;
-        let display = open_display(&egl).ok_or(GpuError::NoDisplay)?;
+        let (display, gbm) = open_display(&egl).ok_or(GpuError::NoDisplay)?;
+        // SAFETY: a zero-terminated name; the function, if there is one, has this signature.
+        let image_target = unsafe {
+            let p = (egl.eglGetProcAddress)(c"glEGLImageTargetTexture2DOES".as_ptr());
+            (!p.is_null()).then(|| std::mem::transmute::<*mut c_void, unsafe extern "C" fn(u32, *mut c_void)>(p))
+        };
         // SAFETY: EGL calls on a display that initialised; every result is checked.
         let context = unsafe {
             if (egl.eglBindAPI)(gl::EGL_OPENGL_ES_API) == 0 {
@@ -367,6 +398,8 @@ impl Gpu {
             Ok(Gpu {
                 egl,
                 gl,
+                gbm,
+                image_target,
                 display,
                 context,
                 description,
@@ -390,17 +423,172 @@ impl Gpu {
     /// read back from the GPU: the picture [`crate::Cpu::render`] gives,
     /// within a rounding step.
     pub fn render(&mut self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color) -> Result<Pixmap, GpuError> {
-        self.frame(scene, fonts, scale, background, true)
+        self.frame(scene, fonts, scale, background, true, None)
     }
 
     /// Draws the scene on the GPU and waits until it is done, without
     /// reading the pixels back (which costs more than drawing them): what a
     /// window does, and what timings of the drawing itself should use.
     pub fn draw(&mut self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color) -> Result<(), GpuError> {
-        self.frame(scene, fonts, scale, background, false).map(|_| ())
+        self.frame(scene, fonts, scale, background, false, None).map(|_| ())
     }
 
-    fn frame(&mut self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color, read: bool) -> Result<Pixmap, GpuError> {
+    /// True if this renderer can make buffers a display server can show
+    /// ([`Gpu::buffer`]): a real GPU device, not a software GL.
+    pub fn shares_buffers(&self) -> bool {
+        self.gbm.is_some() && self.image_target.is_some()
+    }
+
+    /// A buffer of GPU memory, `width` x `height` pixels, to draw a window's
+    /// frames into and hand to the display server.
+    pub fn buffer(&mut self, width: u32, height: u32) -> Result<GpuBuffer, GpuError> {
+        let (Some((gbm, device)), Some(image_target)) = (&self.gbm, self.image_target) else { return Err(GpuError::Unsupported("buffers a display server can show")) };
+        if width == 0 || height == 0 || width > crate::MAX_SIDE || height > crate::MAX_SIDE {
+            return Err(GpuError::Render(RenderError::TooLarge));
+        }
+        // SAFETY: a live device and display, a current context; every result is checked and what was made is released on failure.
+        unsafe {
+            if (self.egl.eglMakeCurrent)(self.display, std::ptr::null_mut(), std::ptr::null_mut(), self.context) == 0 {
+                return Err(GpuError::Egl("eglMakeCurrent", (self.egl.eglGetError)()));
+            }
+            let object = (gbm.gbm_bo_create)(*device, width, height, gl::FORMAT_ARGB8888, gl::GBM_BO_USE_RENDERING);
+            if object.is_null() {
+                return Err(GpuError::Unsupported("a GPU buffer of this size"));
+            }
+            let raw = (gbm.gbm_bo_get_fd)(object);
+            if raw < 0 {
+                (gbm.gbm_bo_destroy)(object);
+                return Err(GpuError::Unsupported("a GPU buffer as a file descriptor"));
+            }
+            let fd = OwnedFd::from_raw_fd(raw);
+            let (stride, offset, modifier) = ((gbm.gbm_bo_get_stride)(object), (gbm.gbm_bo_get_offset)(object, 0), (gbm.gbm_bo_get_modifier)(object));
+            let mut attributes: Vec<isize> = vec![
+                gl::EGL_WIDTH,
+                width as isize,
+                gl::EGL_HEIGHT,
+                height as isize,
+                gl::EGL_LINUX_DRM_FOURCC,
+                gl::FORMAT_ARGB8888 as isize,
+                gl::EGL_DMA_BUF_PLANE0_FD,
+                fd.as_raw_fd() as isize,
+                gl::EGL_DMA_BUF_PLANE0_OFFSET,
+                offset as isize,
+                gl::EGL_DMA_BUF_PLANE0_PITCH,
+                stride as isize,
+            ];
+            if modifier != gl::MODIFIER_INVALID {
+                attributes.extend_from_slice(&[gl::EGL_DMA_BUF_PLANE0_MODIFIER_LO, (modifier & 0xffff_ffff) as isize, gl::EGL_DMA_BUF_PLANE0_MODIFIER_HI, (modifier >> 32) as isize]);
+            }
+            attributes.push(gl::EGL_NONE as isize);
+            let image = (self.egl.eglCreateImage)(self.display, std::ptr::null_mut(), gl::EGL_LINUX_DMA_BUF, std::ptr::null_mut(), attributes.as_ptr());
+            if image.is_null() {
+                let code = (self.egl.eglGetError)();
+                (gbm.gbm_bo_destroy)(object);
+                return Err(GpuError::Egl("eglCreateImage", code));
+            }
+            let gl = &self.gl;
+            let (mut texture, mut framebuffer) = (0, 0);
+            (gl.glGenTextures)(1, &mut texture);
+            (gl.glActiveTexture)(gl::GL_TEXTURE1);
+            (gl.glBindTexture)(gl::GL_TEXTURE_2D, texture);
+            (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST as i32);
+            (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST as i32);
+            image_target(gl::GL_TEXTURE_2D, image);
+            (gl.glGenFramebuffers)(1, &mut framebuffer);
+            (gl.glBindFramebuffer)(gl::GL_FRAMEBUFFER, framebuffer);
+            (gl.glFramebufferTexture2D)(gl::GL_FRAMEBUFFER, gl::GL_COLOR_ATTACHMENT0, gl::GL_TEXTURE_2D, texture, 0);
+            let complete = (gl.glCheckFramebufferStatus)(gl::GL_FRAMEBUFFER) == gl::GL_FRAMEBUFFER_COMPLETE;
+            let error = (gl.glGetError)();
+            (gl.glBindTexture)(gl::GL_TEXTURE_2D, self.blank);
+            let buffer = GpuBuffer { width, height, fd, stride, offset, format: gl::FORMAT_ARGB8888, modifier, object, image, texture, framebuffer };
+            if !complete || error != 0 {
+                self.release(buffer);
+                return Err(if error != 0 { GpuError::Gl(error) } else { GpuError::Unsupported("drawing into a GPU buffer") });
+            }
+            Ok(buffer)
+        }
+    }
+
+    /// Gives a buffer back. The display server keeps its own hold on the
+    /// memory for as long as it shows it.
+    pub fn release(&mut self, buffer: GpuBuffer) {
+        // SAFETY: the objects made in buffer(), released once, in this renderer's context.
+        unsafe {
+            if (self.egl.eglMakeCurrent)(self.display, std::ptr::null_mut(), std::ptr::null_mut(), self.context) != 0 {
+                (self.gl.glDeleteFramebuffers)(1, &buffer.framebuffer);
+                (self.gl.glDeleteTextures)(1, &buffer.texture);
+            }
+            (self.egl.eglDestroyImage)(self.display, buffer.image);
+            if let Some((gbm, _)) = &self.gbm {
+                (gbm.gbm_bo_destroy)(buffer.object);
+            }
+        }
+    }
+
+    /// Draws the scene into a buffer of its size at this scale, and waits
+    /// until the GPU has finished: the buffer can then be shown.
+    pub fn draw_into(&mut self, buffer: &GpuBuffer, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color) -> Result<(), GpuError> {
+        if pixel_size(scene, scale)? != (buffer.width, buffer.height) {
+            return Err(GpuError::Render(RenderError::Size));
+        }
+        self.frame(scene, fonts, scale, background, false, Some(buffer.framebuffer)).map(|_| ())
+    }
+
+    /// The pixels of a buffer, read back (for tests).
+    pub fn read(&mut self, buffer: &GpuBuffer) -> Result<Pixmap, GpuError> {
+        let mut pixmap = Pixmap::new(buffer.width, buffer.height);
+        // SAFETY: a current context; the pixmap holds width x height x 4 bytes.
+        unsafe {
+            if (self.egl.eglMakeCurrent)(self.display, std::ptr::null_mut(), std::ptr::null_mut(), self.context) == 0 {
+                return Err(GpuError::Egl("eglMakeCurrent", (self.egl.eglGetError)()));
+            }
+            (self.gl.glBindFramebuffer)(gl::GL_FRAMEBUFFER, buffer.framebuffer);
+            (self.gl.glPixelStorei)(gl::GL_PACK_ALIGNMENT, 1);
+            (self.gl.glReadPixels)(0, 0, buffer.width as i32, buffer.height as i32, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, pixmap.data.as_mut_ptr() as *mut c_void);
+            let error = (self.gl.glGetError)();
+            if error != 0 {
+                return Err(GpuError::Gl(error));
+            }
+        }
+        Ok(pixmap)
+    }
+
+    /// The texture this renderer draws into when it is given no buffer, at this size.
+    fn own_target(&mut self, w: u32, h: u32) -> Result<u32, GpuError> {
+        let gl = &self.gl;
+        // SAFETY: a current context (the caller's); what is made is released on failure.
+        unsafe {
+            match self.target {
+                Some((_, f, tw, th)) if (tw, th) == (w, h) => Ok(f),
+                old => {
+                    if let Some((t, f, ..)) = old {
+                        (gl.glDeleteFramebuffers)(1, &f);
+                        (gl.glDeleteTextures)(1, &t);
+                    }
+                    self.target = None;
+                    let (mut t, mut f) = (0, 0);
+                    (gl.glGenTextures)(1, &mut t);
+                    (gl.glActiveTexture)(gl::GL_TEXTURE1);
+                    (gl.glBindTexture)(gl::GL_TEXTURE_2D, t);
+                    (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST as i32);
+                    (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST as i32);
+                    (gl.glTexImage2D)(gl::GL_TEXTURE_2D, 0, gl::GL_RGBA8 as i32, w as i32, h as i32, 0, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, std::ptr::null());
+                    (gl.glGenFramebuffers)(1, &mut f);
+                    (gl.glBindFramebuffer)(gl::GL_FRAMEBUFFER, f);
+                    (gl.glFramebufferTexture2D)(gl::GL_FRAMEBUFFER, gl::GL_COLOR_ATTACHMENT0, gl::GL_TEXTURE_2D, t, 0);
+                    if (gl.glCheckFramebufferStatus)(gl::GL_FRAMEBUFFER) != gl::GL_FRAMEBUFFER_COMPLETE {
+                        (gl.glDeleteFramebuffers)(1, &f);
+                        (gl.glDeleteTextures)(1, &t);
+                        return Err(GpuError::Unsupported("a framebuffer of this size"));
+                    }
+                    self.target = Some((t, f, w, h));
+                    Ok(f)
+                }
+            }
+        }
+    }
+
+    fn frame(&mut self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color, read: bool, into: Option<u32>) -> Result<Pixmap, GpuError> {
         let (w, h) = pixel_size(scene, scale)?;
         scene.validate().map_err(RenderError::from)?;
         let prepared = prepare(scene, fonts, scale, w, h, Order::Rgba);
@@ -420,37 +608,13 @@ impl Gpu {
         let sizes: Vec<(u32, u32)> = prepared.images.iter().map(|im| (im.width, im.height)).collect();
         Gpu::picture_sizes(&mut data, &batches, &sizes);
 
+        let framebuffer = match into {
+            Some(f) => f,
+            None => self.own_target(w, h)?,
+        };
         let gl = &self.gl;
         // SAFETY: a context is current; every pointer given to GL outlives the call it is given to.
         unsafe {
-            let (texture, framebuffer) = match self.target {
-                Some((t, f, tw, th)) if (tw, th) == (w, h) => (t, f),
-                old => {
-                    if let Some((t, f, ..)) = old {
-                        (gl.glDeleteFramebuffers)(1, &f);
-                        (gl.glDeleteTextures)(1, &t);
-                    }
-                    let (mut t, mut f) = (0, 0);
-                    (gl.glGenTextures)(1, &mut t);
-                    (gl.glActiveTexture)(gl::GL_TEXTURE1);
-                    (gl.glBindTexture)(gl::GL_TEXTURE_2D, t);
-                    (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST as i32);
-                    (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST as i32);
-                    (gl.glTexImage2D)(gl::GL_TEXTURE_2D, 0, gl::GL_RGBA8 as i32, w as i32, h as i32, 0, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, std::ptr::null());
-                    (gl.glGenFramebuffers)(1, &mut f);
-                    (gl.glBindFramebuffer)(gl::GL_FRAMEBUFFER, f);
-                    (gl.glFramebufferTexture2D)(gl::GL_FRAMEBUFFER, gl::GL_COLOR_ATTACHMENT0, gl::GL_TEXTURE_2D, t, 0);
-                    if (gl.glCheckFramebufferStatus)(gl::GL_FRAMEBUFFER) != gl::GL_FRAMEBUFFER_COMPLETE {
-                        (gl.glDeleteFramebuffers)(1, &f);
-                        (gl.glDeleteTextures)(1, &t);
-                        self.target = None;
-                        return Err(GpuError::Unsupported("a framebuffer of this size"));
-                    }
-                    self.target = Some((t, f, w, h));
-                    (t, f)
-                }
-            };
-            let _ = texture;
             (gl.glBindFramebuffer)(gl::GL_FRAMEBUFFER, framebuffer);
             (gl.glViewport)(0, 0, w as i32, h as i32);
             (gl.glDisable)(gl::GL_DITHER);
@@ -606,7 +770,8 @@ impl Drop for Gpu {
 
 /// An initialised EGL display: on the first GPU render node that works,
 /// else Mesa's surfaceless platform.
-fn open_display(egl: &Egl) -> Option<*mut c_void> {
+#[allow(clippy::type_complexity)]
+fn open_display(egl: &Egl) -> Option<(*mut c_void, Option<(Gbm, *mut c_void)>)> {
     use std::os::fd::IntoRawFd;
     let ready = |display: *mut c_void| {
         let (mut major, mut minor) = (0, 0);
@@ -627,7 +792,7 @@ fn open_display(egl: &Egl) -> Option<*mut c_void> {
                 }
                 let display = (egl.eglGetPlatformDisplay)(gl::EGL_PLATFORM_GBM, device, std::ptr::null());
                 if ready(display) {
-                    return Some(display);
+                    return Some((display, Some((gbm, device))));
                 }
                 (gbm.gbm_device_destroy)(device);
                 drop(std::fs::File::from(<std::os::fd::OwnedFd as std::os::fd::FromRawFd>::from_raw_fd(fd)));
@@ -636,7 +801,7 @@ fn open_display(egl: &Egl) -> Option<*mut c_void> {
     }
     // SAFETY: the platform's default display.
     let display = unsafe { (egl.eglGetPlatformDisplay)(gl::EGL_PLATFORM_SURFACELESS, std::ptr::null_mut(), std::ptr::null()) };
-    ready(display).then_some(display)
+    ready(display).then_some((display, None))
 }
 
 /// Compiles and links the drawing program.

@@ -13,9 +13,12 @@
 //! none waits for a frame to be drawn. A program that wants a new picture
 //! says so ([`Window::redraw`]); however many events ask, one frame is drawn.
 //!
-//! For now the pixels are drawn by the CPU renderer into memory shared with
-//! the server (`wl_shm`); the GPU renderer and its buffers are step 3 of
-//! the milestone. There are no widgets yet.
+//! **Frames are drawn on the GPU** where there is one and the server takes
+//! its buffers (linux-dmabuf): the scene is drawn into memory on the card
+//! and the server shows that memory as it is. Otherwise, and for any frame
+//! the GPU renderer cannot draw yet, the CPU renderer draws into memory
+//! shared with the server (`wl_shm`). `VERGENCE_RENDER=cpu` in the
+//! environment keeps to the CPU. There are no widgets yet.
 //!
 //! **The clipboard** is text for now. [`Window::copy`] puts text on it; the
 //! text is written to whoever asks on a thread of its own, so a slow reader
@@ -38,7 +41,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use vergence_render::{Cpu, Order, Target, pixel_size};
+use vergence_render::{Cpu, Gpu, GpuBuffer, GpuError, Order, Target, pixel_size};
 use vergence_scene::{Color, Scene};
 use vergence_text::Fonts;
 use vergence_wl::{
@@ -72,6 +75,8 @@ pub struct Frame {
     pub time: f64,
     /// How many frames have been shown before this one.
     pub number: u64,
+    /// What drew the frame before this one: "GPU", "CPU", or "" for the first.
+    pub drawn_by: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -273,6 +278,16 @@ struct Buffer {
     busy: bool,
 }
 
+/// A buffer of GPU memory and the server's name for it.
+struct Shared {
+    buffer: GpuBuffer,
+    id: u32,
+    busy: bool,
+}
+
+/// GPU buffers kept for a window: one showing, one being drawn, one to spare.
+const GPU_BUFFERS: usize = 3;
+
 /// Clipboard text on its way in: the pipe the other program writes to.
 struct Paste {
     pipe: std::fs::File,
@@ -302,6 +317,14 @@ struct Runner {
     cursor_device: Option<u32>,
     data_manager: Option<u32>,
     data_device: Option<u32>,
+    dmabuf: Option<u32>,
+
+    /// The GPU renderer, while it and the server's taking of its buffers work.
+    gpu: Option<Gpu>,
+    /// GPU buffers the server has taken, and those it has been asked to take.
+    shared: Vec<Shared>,
+    asked: Vec<(u32, GpuBuffer)>,
+    drawn_by: &'static str,
 
     cpu: Cpu,
     fonts: Fonts,
@@ -360,6 +383,7 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         Interface::Seat,
         Interface::CursorShapeManager,
         Interface::DataDeviceManager,
+        Interface::Dmabuf,
     ];
     let mut offered: Vec<(Interface, u32, u32)> = Vec::new();
     'listing: loop {
@@ -394,6 +418,13 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
     let seat = bind(&mut client, Interface::Seat)?;
     let cursor_shape_manager = bind(&mut client, Interface::CursorShapeManager)?;
     let data_manager = bind(&mut client, Interface::DataDeviceManager)?;
+    let dmabuf = bind(&mut client, Interface::Dmabuf)?;
+    // The GPU renderer, if the server takes GPU buffers, the machine has a
+    // GPU that makes them, and nobody asked for the CPU.
+    let gpu = dmabuf
+        .filter(|_| std::env::var("VERGENCE_RENDER").as_deref() != Ok("cpu"))
+        .and_then(|_| Gpu::new().ok())
+        .filter(Gpu::shares_buffers);
     let data_device = match (data_manager, seat) {
         (Some(m), Some(s)) => Some(client.get_data_device(m, s)?),
         _ => None,
@@ -436,6 +467,11 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         cursor_device: None,
         data_manager,
         data_device,
+        dmabuf,
+        gpu,
+        shared: Vec::new(),
+        asked: Vec::new(),
+        drawn_by: "",
         cpu: Cpu::new(),
         fonts: Fonts::system(),
         started: Instant::now(),
@@ -615,6 +651,25 @@ impl Runner {
                 if let Some(b) = self.buffers.iter_mut().find(|b| b.id == buffer) {
                     b.busy = false;
                 }
+                if let Some(b) = self.shared.iter_mut().find(|b| b.id == buffer) {
+                    b.busy = false;
+                }
+            }
+            Event::DmabufCreated { params, buffer } => {
+                self.client.destroy_dmabuf_params(params)?;
+                if let Some(i) = self.asked.iter().position(|(p, _)| *p == params) {
+                    let (_, made) = self.asked.swap_remove(i);
+                    self.shared.push(Shared { buffer: made, id: buffer, busy: false });
+                    // A frame drawn in software meanwhile is drawn again on the GPU.
+                    self.dirty = true;
+                } else {
+                    self.client.destroy_buffer(buffer)?;
+                }
+            }
+            Event::DmabufFailed { params } => {
+                // The server does not take this GPU's buffers: software from here on.
+                self.client.destroy_dmabuf_params(params)?;
+                self.give_up_gpu()?;
             }
             Event::Done { callback, .. } if Some(callback) == self.frame_callback => {
                 self.frame_callback = None;
@@ -781,12 +836,78 @@ impl Runner {
         Ok(())
     }
 
+    /// Lets go of the GPU renderer and its buffers, for good.
+    fn give_up_gpu(&mut self) -> io::Result<()> {
+        let Some(mut gpu) = self.gpu.take() else { return Ok(()) };
+        for (_, buffer) in self.asked.drain(..) {
+            gpu.release(buffer);
+        }
+        for shared in self.shared.drain(..) {
+            self.client.destroy_buffer(shared.id)?;
+            gpu.release(shared.buffer);
+        }
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Draws the scene on the GPU into a buffer the server has taken, if
+    /// there is one free. Ok(None): not this time (draw in software).
+    fn draw_on_gpu(&mut self, scene: &Scene, scale: f32, background: Color, pw: u32, ph: u32) -> io::Result<Option<u32>> {
+        let (Some(gpu), Some(dmabuf)) = (self.gpu.as_mut(), self.dmabuf) else { return Ok(None) };
+        // Buffers of another size that the server is done with are let go.
+        let mut i = 0;
+        while i < self.shared.len() {
+            if !self.shared[i].busy && (self.shared[i].buffer.width, self.shared[i].buffer.height) != (pw, ph) {
+                let old = self.shared.swap_remove(i);
+                self.client.destroy_buffer(old.id)?;
+                gpu.release(old.buffer);
+            } else {
+                i += 1;
+            }
+        }
+        let fits = |b: &GpuBuffer| (b.width, b.height) == (pw, ph);
+        let Some(index) = self.shared.iter().position(|s| !s.busy && fits(&s.buffer)) else {
+            // None free: ask the server to take more, up to the few a window needs.
+            let have = self.shared.iter().filter(|s| fits(&s.buffer)).count() + self.asked.iter().filter(|(_, b)| fits(b)).count();
+            for _ in have..GPU_BUFFERS.min(have + 2) {
+                match gpu.buffer(pw, ph) {
+                    Ok(b) => {
+                        let params = self.client.create_dmabuf(dmabuf, std::os::fd::AsRawFd::as_raw_fd(&b.fd), pw as i32, ph as i32, b.format, b.modifier, b.offset, b.stride)?;
+                        self.asked.push((params, b));
+                    }
+                    Err(_) => {
+                        self.give_up_gpu()?;
+                        break;
+                    }
+                }
+            }
+            return Ok(None);
+        };
+        match gpu.draw_into(&self.shared[index].buffer, scene, &mut self.fonts, scale, background) {
+            Ok(()) => {
+                self.shared[index].busy = true;
+                Ok(Some(self.shared[index].id))
+            }
+            // Something this renderer does not draw yet: this frame in software.
+            Err(GpuError::Unsupported(_)) => Ok(None),
+            Err(_) => {
+                self.give_up_gpu()?;
+                Ok(None)
+            }
+        }
+    }
+
     fn draw(&mut self, app: &mut dyn App) -> io::Result<()> {
         let t = Instant::now();
-        let frame = Frame { width: self.width as f32, height: self.height as f32, scale: self.scale120 as f32 / 120.0, time: self.started.elapsed().as_secs_f64(), number: self.frames };
+        let frame = Frame { width: self.width as f32, height: self.height as f32, scale: self.scale120 as f32 / 120.0, time: self.started.elapsed().as_secs_f64(), number: self.frames, drawn_by: self.drawn_by };
         let scene = app.scene(&frame, &mut self.fonts);
         let background = app.background();
         let (pw, ph) = pixel_size(&scene, frame.scale).map_err(other)?;
+        if let Some(id) = self.draw_on_gpu(&scene, frame.scale, background, pw, ph)? {
+            self.drawn_by = "GPU";
+            return self.show(app, &frame, id, pw, ph, t);
+        }
+        self.drawn_by = "CPU";
         // A buffer of this size that the server is not using; others of another size are let go.
         let mut stale = Vec::new();
         self.buffers.retain(|b| {
@@ -818,6 +939,11 @@ impl Runner {
         self.cpu.render_target(&scene, &mut self.fonts, frame.scale, background, target, 0..ph).map_err(other)?;
         buffer.busy = true;
         let id = buffer.id;
+        self.show(app, &frame, id, pw, ph, t)
+    }
+
+    /// Hands the server a drawn buffer as the window's next frame.
+    fn show(&mut self, app: &mut dyn App, frame: &Frame, id: u32, pw: u32, ph: u32, t: Instant) -> io::Result<()> {
         self.client.attach(self.surface, id)?;
         self.client.damage_buffer(self.surface, 0, 0, pw as i32, ph as i32)?;
         if let Some(v) = self.viewport {
@@ -827,7 +953,7 @@ impl Runner {
         self.client.commit(self.surface)?;
         self.client.flush()?;
         self.frames += 1;
-        if !app.shown(&frame, t.elapsed().as_secs_f64() * 1e3) {
+        if !app.shown(frame, t.elapsed().as_secs_f64() * 1e3) {
             self.closing = true;
         }
         Ok(())
