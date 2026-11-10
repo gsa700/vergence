@@ -1,0 +1,10 @@
+[package]
+name = "vergence-scene"
+description = "Vergence's display list: what a window looks like, as validated data (whitepaper §6.6, §6.10)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Our own code only (whitepaper §8, "Our own parts"): no dependencies.
+[dependencies]

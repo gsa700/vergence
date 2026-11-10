@@ -139,6 +139,19 @@ borrowing. Nothing new comes in.
    interface code is deleted. iced stays in the workspace for the settings
    app only.
 
+## Progress
+
+- **2026-11-09, step 1, first part: `vergence-scene`.** The scene types
+  (fill, stroke, line, glyph run, image, clip), a builder, `validate` with
+  the limits a renderer relies on, and the wire format ("VSCN", version 1)
+  with a decoder that refuses anything invalid and reserves no memory a
+  lying count asks for. 14 unit tests and a three-part fuzz test (random
+  scenes round-trip; damaged scenes and random bytes never panic, and what
+  decodes re-encodes to the same bytes); 2,000,000 fuzz iterations clean on
+  Hubble. Green on Hubble, canary and Techbench. Layers with their own
+  opacity were left out until a tool needs them. Next in step 1:
+  `vergence-text`, then the CPU renderer and the PNG tool.
+
 ## Acceptance
 
 Every step: `cargo test --workspace` green on Hubble, canary and Techbench;

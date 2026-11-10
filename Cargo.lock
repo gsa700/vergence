@@ -4595,6 +4595,10 @@ name = "vergence-protocol"
 version = "0.1.0"
 
 [[package]]
+name = "vergence-scene"
+version = "0.1.0"
+
+[[package]]
 name = "vergence-server"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,517 @@
+//! The display list (whitepaper §6.6, §6.10; toolkit milestone 1, step 1).
+//!
+//! A [`Scene`] is what a window looks like, as data: a list of drawing
+//! commands in **reference units** (points at 96 to the inch, whitepaper
+//! Contract 1), with the window's top-left corner at 0,0 and y downwards. It
+//! holds no pixels of its own making and names no scale: whoever renders it
+//! decides the density, so the same scene is sharp on every monitor, can be
+//! drawn again at any size, and can be sent to another machine as it is.
+//!
+//! Version 1 has what the terminal needs:
+//!
+//! - [`Command::Fill`] and [`Command::Stroke`]: a rectangle, corners rounded
+//!   or not, filled or outlined;
+//! - [`Command::Line`]: a straight line of a given width, round ends;
+//! - [`Command::Glyphs`]: glyphs of one font at one size in one colour, each
+//!   placed by the toolkit's text code. The font is named by family, weight
+//!   and slant in the scene's font table, so a renderer anywhere can find it;
+//! - [`Command::Image`]: a picture from the scene's image table, stretched
+//!   to a rectangle;
+//! - [`Command::PushClip`] / [`Command::PopClip`]: everything between them is
+//!   kept inside a (rounded) rectangle.
+//!
+//! Layers with their own opacity, gradients and paths come when a tool needs
+//! them.
+//!
+//! **A scene is untrusted input wherever it is read.** [`Scene::validate`]
+//! checks every number, index and count against the limits below, and
+//! [`Scene::decode`] (wire.rs) never returns a scene that fails it. A renderer
+//! may rely on a validated scene: indices are in range, numbers are finite and
+//! bounded, clips are balanced.
+
+pub mod wire;
+
+use std::fmt;
+
+/// The wire format's version (wire.rs).
+pub const VERSION: u16 = 1;
+
+/// Largest coordinate or length, in reference units, either sign: far
+/// beyond any wall of monitors, small enough that sums stay exact in f32.
+pub const MAX_COORD: f32 = 1_000_000.0;
+/// Largest font size, in reference units.
+pub const MAX_FONT_SIZE: f32 = 4096.0;
+pub const MAX_COMMANDS: usize = 1 << 20;
+/// Glyphs in one run, and in a whole scene.
+pub const MAX_RUN_GLYPHS: usize = 1 << 16;
+pub const MAX_SCENE_GLYPHS: usize = 1 << 22;
+pub const MAX_FONTS: usize = 4096;
+/// Longest font family name, in bytes.
+pub const MAX_FAMILY: usize = 256;
+pub const MAX_IMAGES: usize = 1024;
+/// Largest image side, in pixels, and the most pixel bytes in one scene.
+pub const MAX_IMAGE_SIDE: u32 = 16_384;
+pub const MAX_IMAGE_BYTES: usize = 256 << 20;
+/// How deep clips may nest.
+pub const MAX_CLIP_DEPTH: usize = 64;
+
+/// A colour: sRGB, alpha not multiplied in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+impl Color {
+    pub const fn rgb(r: u8, g: u8, b: u8) -> Color {
+        Color { r, g, b, a: 255 }
+    }
+
+    pub const fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color {
+        Color { r, g, b, a }
+    }
+}
+
+/// A point, in reference units.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Point {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl Point {
+    pub const fn new(x: f32, y: f32) -> Point {
+        Point { x, y }
+    }
+}
+
+/// A rectangle, in reference units: top-left corner and size.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+impl Rect {
+    pub const fn new(x: f32, y: f32, w: f32, h: f32) -> Rect {
+        Rect { x, y, w, h }
+    }
+}
+
+/// A font, named so that any renderer can find it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FontRef {
+    pub family: String,
+    /// 1 to 1000; 400 is regular, 700 bold.
+    pub weight: u16,
+    pub italic: bool,
+}
+
+/// A picture: `width` x `height` pixels, four bytes each (red, green, blue,
+/// alpha; sRGB, alpha not multiplied in), rows from the top.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Image {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+/// One glyph of a run: its number in the font, and where its origin (on the
+/// baseline) sits relative to the run's own origin.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Glyph {
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Command {
+    /// A filled rectangle; `radius` rounds its corners (0: square).
+    Fill { rect: Rect, radius: f32, color: Color },
+    /// A rectangle's outline, `width` wide, drawn inside `rect`.
+    Stroke { rect: Rect, radius: f32, width: f32, color: Color },
+    /// A straight line with round ends.
+    Line { from: Point, to: Point, width: f32, color: Color },
+    /// Glyphs of the font `font` (an index into [`Scene::fonts`]) at `size`
+    /// reference units to the em, the first baseline origin at `origin`.
+    Glyphs { font: u32, size: f32, color: Color, origin: Point, glyphs: Vec<Glyph> },
+    /// The picture `image` (an index into [`Scene::images`]) stretched to
+    /// `rect`, at `opacity` (0 to 1).
+    Image { image: u32, rect: Rect, opacity: f32 },
+    /// Until the matching [`Command::PopClip`], nothing is drawn outside
+    /// this rectangle (and the clips around it).
+    PushClip { rect: Rect, radius: f32 },
+    PopClip,
+}
+
+/// What is wrong with a scene. `at` is the command's place in the list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SceneError {
+    /// A number that is not finite, or outside its range.
+    BadNumber { at: usize, what: &'static str },
+    /// A font or image index with nothing behind it.
+    BadIndex { at: usize, what: &'static str },
+    /// More of something than a scene may hold.
+    TooMany(&'static str),
+    /// A font table entry that cannot be right.
+    BadFont(usize),
+    /// An image whose bytes do not match its size, or that is too large.
+    BadImage(usize),
+    /// A PopClip without a PushClip, a clip left open, or clips nested too deep.
+    Clip { at: usize },
+    /// The window size is not a positive, finite, bounded number.
+    BadSize,
+}
+
+impl fmt::Display for SceneError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SceneError::BadNumber { at, what } => write!(f, "command {at}: bad {what}"),
+            SceneError::BadIndex { at, what } => write!(f, "command {at}: no such {what}"),
+            SceneError::TooMany(what) => write!(f, "too many {what}"),
+            SceneError::BadFont(i) => write!(f, "font {i} is not valid"),
+            SceneError::BadImage(i) => write!(f, "image {i} is not valid"),
+            SceneError::Clip { at } => write!(f, "command {at}: clips do not match"),
+            SceneError::BadSize => write!(f, "bad scene size"),
+        }
+    }
+}
+
+impl std::error::Error for SceneError {}
+
+/// A window's picture. Build one with the methods below, or read one with
+/// [`Scene::decode`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Scene {
+    /// The window's size, in reference units.
+    pub width: f32,
+    pub height: f32,
+    pub fonts: Vec<FontRef>,
+    pub images: Vec<Image>,
+    pub commands: Vec<Command>,
+}
+
+impl Scene {
+    pub fn new(width: f32, height: f32) -> Scene {
+        Scene { width, height, fonts: Vec::new(), images: Vec::new(), commands: Vec::new() }
+    }
+
+    /// The index of this font in the scene's table, added if it is new.
+    pub fn font(&mut self, family: &str, weight: u16, italic: bool) -> u32 {
+        if let Some(i) = self.fonts.iter().position(|f| f.family == family && f.weight == weight && f.italic == italic) {
+            return i as u32;
+        }
+        self.fonts.push(FontRef { family: family.to_string(), weight, italic });
+        (self.fonts.len() - 1) as u32
+    }
+
+    /// Adds a picture and returns its index.
+    pub fn image(&mut self, image: Image) -> u32 {
+        self.images.push(image);
+        (self.images.len() - 1) as u32
+    }
+
+    pub fn fill(&mut self, rect: Rect, color: Color) -> &mut Self {
+        self.commands.push(Command::Fill { rect, radius: 0.0, color });
+        self
+    }
+
+    pub fn fill_rounded(&mut self, rect: Rect, radius: f32, color: Color) -> &mut Self {
+        self.commands.push(Command::Fill { rect, radius, color });
+        self
+    }
+
+    pub fn stroke(&mut self, rect: Rect, radius: f32, width: f32, color: Color) -> &mut Self {
+        self.commands.push(Command::Stroke { rect, radius, width, color });
+        self
+    }
+
+    pub fn line(&mut self, from: Point, to: Point, width: f32, color: Color) -> &mut Self {
+        self.commands.push(Command::Line { from, to, width, color });
+        self
+    }
+
+    pub fn glyphs(&mut self, font: u32, size: f32, color: Color, origin: Point, glyphs: Vec<Glyph>) -> &mut Self {
+        self.commands.push(Command::Glyphs { font, size, color, origin, glyphs });
+        self
+    }
+
+    pub fn draw_image(&mut self, image: u32, rect: Rect, opacity: f32) -> &mut Self {
+        self.commands.push(Command::Image { image, rect, opacity });
+        self
+    }
+
+    pub fn push_clip(&mut self, rect: Rect, radius: f32) -> &mut Self {
+        self.commands.push(Command::PushClip { rect, radius });
+        self
+    }
+
+    pub fn pop_clip(&mut self) -> &mut Self {
+        self.commands.push(Command::PopClip);
+        self
+    }
+
+    /// Checks everything a renderer relies on. A scene from [`Scene::decode`]
+    /// has already passed; one built in the same process should be checked
+    /// before it is handed on.
+    pub fn validate(&self) -> Result<(), SceneError> {
+        if !positive(self.width) || !positive(self.height) {
+            return Err(SceneError::BadSize);
+        }
+        if self.fonts.len() > MAX_FONTS {
+            return Err(SceneError::TooMany("fonts"));
+        }
+        for (i, f) in self.fonts.iter().enumerate() {
+            if f.family.is_empty() || f.family.len() > MAX_FAMILY || f.weight == 0 || f.weight > 1000 || f.family.chars().any(char::is_control) {
+                return Err(SceneError::BadFont(i));
+            }
+        }
+        if self.images.len() > MAX_IMAGES {
+            return Err(SceneError::TooMany("images"));
+        }
+        let mut image_bytes = 0usize;
+        for (i, im) in self.images.iter().enumerate() {
+            let want = image_len(im.width, im.height).ok_or(SceneError::BadImage(i))?;
+            if im.rgba.len() != want {
+                return Err(SceneError::BadImage(i));
+            }
+            image_bytes += want;
+            if image_bytes > MAX_IMAGE_BYTES {
+                return Err(SceneError::TooMany("image bytes"));
+            }
+        }
+        if self.commands.len() > MAX_COMMANDS {
+            return Err(SceneError::TooMany("commands"));
+        }
+        let mut depth = 0usize;
+        let mut glyph_total = 0usize;
+        for (at, c) in self.commands.iter().enumerate() {
+            let bad = |what| Err(SceneError::BadNumber { at, what });
+            match c {
+                Command::Fill { rect, radius, .. } => {
+                    if !rect_ok(rect) {
+                        return bad("rectangle");
+                    }
+                    if !length(*radius) {
+                        return bad("radius");
+                    }
+                }
+                Command::Stroke { rect, radius, width, .. } => {
+                    if !rect_ok(rect) {
+                        return bad("rectangle");
+                    }
+                    if !length(*radius) {
+                        return bad("radius");
+                    }
+                    if !length(*width) {
+                        return bad("width");
+                    }
+                }
+                Command::Line { from, to, width, .. } => {
+                    if !coord(from.x) || !coord(from.y) || !coord(to.x) || !coord(to.y) {
+                        return bad("point");
+                    }
+                    if !length(*width) {
+                        return bad("width");
+                    }
+                }
+                Command::Glyphs { font, size, origin, glyphs, .. } => {
+                    if *font as usize >= self.fonts.len() {
+                        return Err(SceneError::BadIndex { at, what: "font" });
+                    }
+                    if !(size.is_finite() && *size > 0.0 && *size <= MAX_FONT_SIZE) {
+                        return bad("font size");
+                    }
+                    if !coord(origin.x) || !coord(origin.y) {
+                        return bad("point");
+                    }
+                    if glyphs.len() > MAX_RUN_GLYPHS {
+                        return Err(SceneError::TooMany("glyphs in a run"));
+                    }
+                    glyph_total += glyphs.len();
+                    if glyph_total > MAX_SCENE_GLYPHS {
+                        return Err(SceneError::TooMany("glyphs"));
+                    }
+                    if glyphs.iter().any(|g| !coord(g.x) || !coord(g.y)) {
+                        return bad("glyph position");
+                    }
+                }
+                Command::Image { image, rect, opacity } => {
+                    if *image as usize >= self.images.len() {
+                        return Err(SceneError::BadIndex { at, what: "image" });
+                    }
+                    if !rect_ok(rect) {
+                        return bad("rectangle");
+                    }
+                    if !(opacity.is_finite() && (0.0..=1.0).contains(opacity)) {
+                        return bad("opacity");
+                    }
+                }
+                Command::PushClip { rect, radius } => {
+                    if !rect_ok(rect) {
+                        return bad("rectangle");
+                    }
+                    if !length(*radius) {
+                        return bad("radius");
+                    }
+                    depth += 1;
+                    if depth > MAX_CLIP_DEPTH {
+                        return Err(SceneError::Clip { at });
+                    }
+                }
+                Command::PopClip => {
+                    if depth == 0 {
+                        return Err(SceneError::Clip { at });
+                    }
+                    depth -= 1;
+                }
+            }
+        }
+        if depth != 0 {
+            return Err(SceneError::Clip { at: self.commands.len() });
+        }
+        Ok(())
+    }
+}
+
+/// The byte length of a `width` x `height` picture, if its size is allowed.
+pub(crate) fn image_len(width: u32, height: u32) -> Option<usize> {
+    if width == 0 || height == 0 || width > MAX_IMAGE_SIDE || height > MAX_IMAGE_SIDE {
+        return None;
+    }
+    let n = width as usize * height as usize * 4;
+    (n <= MAX_IMAGE_BYTES).then_some(n)
+}
+
+fn coord(v: f32) -> bool {
+    v.is_finite() && v.abs() <= MAX_COORD
+}
+
+/// A size, radius or width: finite, not negative, bounded.
+fn length(v: f32) -> bool {
+    v.is_finite() && (0.0..=MAX_COORD).contains(&v)
+}
+
+fn positive(v: f32) -> bool {
+    v.is_finite() && v > 0.0 && v <= MAX_COORD
+}
+
+fn rect_ok(r: &Rect) -> bool {
+    coord(r.x) && coord(r.y) && length(r.w) && length(r.h)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> Scene {
+        let mut s = Scene::new(640.0, 400.0);
+        let mono = s.font("Noto Sans Mono", 400, false);
+        let bold = s.font("Noto Sans Mono", 700, false);
+        assert_eq!(s.font("Noto Sans Mono", 400, false), mono);
+        let pic = s.image(Image { width: 2, height: 1, rgba: vec![255, 0, 0, 255, 0, 0, 255, 128] });
+        s.fill(Rect::new(0.0, 0.0, 640.0, 400.0), Color::rgb(46, 52, 54));
+        s.fill_rounded(Rect::new(8.0, 4.0, 200.0, 28.0), 7.0, Color::rgba(255, 255, 255, 20));
+        s.push_clip(Rect::new(0.0, 36.0, 640.0, 364.0), 0.0);
+        s.glyphs(mono, 13.5, Color::rgb(211, 215, 207), Point::new(6.0, 52.0), vec![Glyph { id: 71, x: 0.0, y: 0.0 }, Glyph { id: 72, x: 8.1, y: 0.0 }]);
+        s.glyphs(bold, 13.5, Color::rgb(252, 233, 79), Point::new(6.0, 70.0), vec![]);
+        s.draw_image(pic, Rect::new(600.0, 40.0, 32.0, 16.0), 0.5);
+        s.pop_clip();
+        s.stroke(Rect::new(0.5, 0.5, 639.0, 399.0), 0.0, 1.0, Color::rgb(80, 90, 110));
+        s.line(Point::new(12.0, 12.0), Point::new(22.0, 22.0), 1.25, Color::rgb(235, 235, 235));
+        s
+    }
+
+    #[test]
+    fn a_built_scene_is_valid() {
+        assert_eq!(sample().validate(), Ok(()));
+    }
+
+    #[test]
+    fn numbers_must_be_finite_and_bounded() {
+        for bad in [f32::NAN, f32::INFINITY, -f32::INFINITY, MAX_COORD * 2.0] {
+            let mut s = sample();
+            s.fill(Rect::new(bad, 0.0, 1.0, 1.0), Color::default());
+            assert!(matches!(s.validate(), Err(SceneError::BadNumber { what: "rectangle", .. })), "{bad}");
+            let mut s = sample();
+            s.line(Point::new(0.0, 0.0), Point::new(1.0, bad), 1.0, Color::default());
+            assert!(matches!(s.validate(), Err(SceneError::BadNumber { what: "point", .. })), "{bad}");
+        }
+        let mut s = sample();
+        s.fill(Rect::new(0.0, 0.0, -1.0, 1.0), Color::default());
+        assert!(s.validate().is_err(), "a negative width");
+        let mut s = sample();
+        s.fill_rounded(Rect::new(0.0, 0.0, 1.0, 1.0), -0.5, Color::default());
+        assert!(matches!(s.validate(), Err(SceneError::BadNumber { what: "radius", .. })));
+        let mut s = sample();
+        s.draw_image(0, Rect::new(0.0, 0.0, 1.0, 1.0), 1.5);
+        assert!(matches!(s.validate(), Err(SceneError::BadNumber { what: "opacity", .. })));
+        assert_eq!(Scene::new(0.0, 10.0).validate(), Err(SceneError::BadSize));
+        assert_eq!(Scene::new(10.0, f32::NAN).validate(), Err(SceneError::BadSize));
+    }
+
+    #[test]
+    fn indices_must_point_at_something() {
+        let mut s = sample();
+        s.glyphs(2, 12.0, Color::default(), Point::default(), vec![]);
+        assert!(matches!(s.validate(), Err(SceneError::BadIndex { what: "font", .. })));
+        let mut s = sample();
+        s.draw_image(1, Rect::new(0.0, 0.0, 1.0, 1.0), 1.0);
+        assert!(matches!(s.validate(), Err(SceneError::BadIndex { what: "image", .. })));
+        let mut s = sample();
+        s.glyphs(0, 0.0, Color::default(), Point::default(), vec![]);
+        assert!(matches!(s.validate(), Err(SceneError::BadNumber { what: "font size", .. })));
+    }
+
+    #[test]
+    fn clips_must_match() {
+        let mut s = sample();
+        s.pop_clip();
+        assert!(matches!(s.validate(), Err(SceneError::Clip { .. })));
+        let mut s = sample();
+        s.push_clip(Rect::new(0.0, 0.0, 1.0, 1.0), 0.0);
+        assert!(matches!(s.validate(), Err(SceneError::Clip { .. })));
+        let mut s = Scene::new(10.0, 10.0);
+        for _ in 0..=MAX_CLIP_DEPTH {
+            s.push_clip(Rect::new(0.0, 0.0, 1.0, 1.0), 0.0);
+        }
+        for _ in 0..=MAX_CLIP_DEPTH {
+            s.pop_clip();
+        }
+        assert!(matches!(s.validate(), Err(SceneError::Clip { .. })), "nested too deep");
+    }
+
+    #[test]
+    fn fonts_and_images_are_checked() {
+        let mut s = sample();
+        s.fonts.push(FontRef { family: String::new(), weight: 400, italic: false });
+        assert_eq!(s.validate(), Err(SceneError::BadFont(2)));
+        let mut s = sample();
+        s.fonts[0].weight = 1001;
+        assert_eq!(s.validate(), Err(SceneError::BadFont(0)));
+        let mut s = sample();
+        s.fonts[1].family = "Mono\nSans".into();
+        assert_eq!(s.validate(), Err(SceneError::BadFont(1)));
+        let mut s = sample();
+        s.images[0].rgba.pop();
+        assert_eq!(s.validate(), Err(SceneError::BadImage(0)));
+        let mut s = sample();
+        s.images.push(Image { width: 0, height: 4, rgba: vec![] });
+        assert_eq!(s.validate(), Err(SceneError::BadImage(1)));
+        let mut s = sample();
+        s.images.push(Image { width: MAX_IMAGE_SIDE + 1, height: 1, rgba: vec![] });
+        assert_eq!(s.validate(), Err(SceneError::BadImage(1)));
+    }
+
+    #[test]
+    fn a_run_cannot_hold_too_many_glyphs() {
+        let mut s = sample();
+        s.glyphs(0, 12.0, Color::default(), Point::default(), vec![Glyph::default(); MAX_RUN_GLYPHS + 1]);
+        assert_eq!(s.validate(), Err(SceneError::TooMany("glyphs in a run")));
+    }
+}
