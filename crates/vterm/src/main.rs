@@ -39,7 +39,13 @@
 //! button side shows at the next frame.
 //! The right button opens a menu (menu.rs) with copy, paste and the tab
 //! commands; where a program has the mouse, Shift and the right button.
-//! Panes come next.
+//! A tab's room can be divided among several terminals (panes.rs):
+//! Ctrl+Shift+R side by side, Ctrl+Shift+D one above the other, as often
+//! as wanted; a press makes a pane the one the keys go to, the line between
+//! two can be dragged, and Ctrl+Shift+W closes the pane (the tab with its
+//! last).
+//! Ctrl+C copies when text is selected (and is the interrupt key when
+//! none is); Ctrl+V pastes. Ctrl+Shift+C and Ctrl+Shift+V do the same.
 
 mod bar;
 #[allow(dead_code)]
@@ -47,6 +53,7 @@ mod bar;
 mod grid;
 mod menu;
 mod mouse;
+mod panes;
 #[allow(dead_code)]
 #[path = "../../vergence-term/src/pty.rs"]
 mod pty;
@@ -69,11 +76,12 @@ use std::{
 use bar::{BAR_H, Layout, Part, WinButton};
 use grid::{Cell, Color as CellColor, Grid, MouseMode};
 use menu::{Item, Menu};
+use panes::{Axis, Divider, Node};
 use scrollbar::Scrollbar;
 use select::{Pos, Selection, Unit};
 use vergence_scene::{Color, Glyph, Point, Rect, Scene};
 use vergence_text::{FaceId, Fonts};
-use vergence_ui::{App, Button, Cursor, Frame, Input, Modifiers, Waker, Window, sym};
+use vergence_ui::{App, Button, Cursor, Edges, Frame, Input, Modifiers, Waker, Window, sym};
 
 /// Space around the cells, in reference units.
 const PAD: f32 = 4.0;
@@ -256,11 +264,11 @@ impl Screen {
         self.grid.abs_line(self.top_line() + r).unwrap_or(&[])
     }
 
-    /// The scrollbar in a window of this size, if there is anything to
-    /// scroll (the alternate screen has no scrollback).
-    fn scrollbar(&self, width: f32, height: f32) -> Option<Scrollbar> {
+    /// The scrollbar of a terminal that has this room, if there is anything
+    /// to scroll (the alternate screen has no scrollback).
+    fn scrollbar(&self, area: Rect) -> Option<Scrollbar> {
         let back = if self.grid.alt { 0 } else { self.grid.scrollback.len() };
-        Scrollbar::new(Rect::new(0.0, BAR_H, width, height - BAR_H), back, self.grid.rows, self.scroll)
+        Scrollbar::new(area, back, self.grid.rows, self.scroll)
     }
 
     /// The absolute number of the line shown in the top row.
@@ -268,18 +276,19 @@ impl Screen {
         self.grid.pushed - self.scroll
     }
 
-    /// The cell under a point of the window, as a selection counts it;
-    /// points outside the cells count as the nearest one.
-    fn cell_at(&self, x: f32, y: f32, cell_w: f32, cell_h: f32) -> Pos {
-        let (col, row) = self.screen_cell(x, y, cell_w, cell_h);
+    /// The cell under a point of the window, as a selection counts it, for
+    /// a terminal in `area` with cells of `cell` (width, height); points
+    /// outside the cells count as the nearest one.
+    fn cell_at(&self, x: f32, y: f32, area: Rect, cell: (f32, f32)) -> Pos {
+        let (col, row) = self.screen_cell(x, y, area, cell);
         (col, self.top_line() + row)
     }
 
     /// The column and row of the screen under a point of the window (what
     /// mouse reporting tells the program); the nearest, for points outside.
-    fn screen_cell(&self, x: f32, y: f32, cell_w: f32, cell_h: f32) -> (usize, usize) {
-        let col = ((x - PAD) / cell_w).floor().max(0.0) as usize;
-        let row = ((y - BAR_H - PAD) / cell_h).floor().max(0.0) as usize;
+    fn screen_cell(&self, x: f32, y: f32, area: Rect, cell: (f32, f32)) -> (usize, usize) {
+        let col = ((x - area.x - PAD) / cell.0).floor().max(0.0) as usize;
+        let row = ((y - area.y - PAD) / cell.1).floor().max(0.0) as usize;
         (col.min(self.grid.cols - 1), row.min(self.grid.rows - 1))
     }
 
@@ -368,10 +377,48 @@ impl Session {
     }
 }
 
+/// A tab: its room divided among one or more terminals.
+struct Tab {
+    tree: Node,
+    /// The terminals, by the numbers the tree knows them by.
+    panes: Vec<(u64, Session)>,
+    /// The one the keys go to.
+    active: u64,
+}
+
+impl Tab {
+    fn session(&self, id: u64) -> Option<&Session> {
+        self.panes.iter().find(|(own, _)| *own == id).map(|(_, s)| s)
+    }
+
+    fn session_mut(&mut self, id: u64) -> Option<&mut Session> {
+        self.panes.iter_mut().find(|(own, _)| *own == id).map(|(_, s)| s)
+    }
+
+    /// The tab is called what its active terminal is.
+    fn label(&self) -> String {
+        self.session(self.active).map_or_else(|| "Terminal".into(), Session::label)
+    }
+}
+
+/// What the pointer has hold of, from a press to its release.
+enum Held {
+    /// The text: the selection follows the pointer.
+    Text,
+    /// The scrollbar's thumb, and where in it it was taken hold of.
+    Thumb(f32),
+    /// The line between two panes (the split it belongs to).
+    Divider(Vec<bool>),
+    /// A button the program in the active pane was told is down.
+    Reported(Button),
+}
+
 struct Terminal {
-    sessions: Vec<Session>,
+    tabs: Vec<Tab>,
     /// The tab in front.
     shown: usize,
+    /// The number the next terminal gets.
+    next_id: u64,
     waker: Option<Waker>,
     palette: Palette,
     settings: Settings,
@@ -380,16 +427,13 @@ struct Terminal {
     /// The window's size at the last frame, and the grid size that fits it: for the bar's layout and new tabs.
     width: f32,
     height: f32,
-    /// The scrollbar's thumb is held: where in it it was taken hold of.
-    thumb: Option<f32>,
     fits: (usize, usize),
     hover: Option<Part>,
-    /// True while the pointer is over the terminal, below the bar.
-    over_pane: bool,
+    /// The pane the pointer is over, if it is over one.
+    over: Option<u64>,
     maximized: bool,
     bar_press: Option<Instant>,
-    /// The left button is held on the text: the selection follows the pointer.
-    selecting: bool,
+    held: Option<Held>,
     /// The last press on the text: when, on which cell, and which in a row it was (1 to 3).
     presses: Option<(Instant, Pos, usize)>,
     /// The selection is held past the top (true) or bottom edge, at this column: the view scrolls.
@@ -397,24 +441,25 @@ struct Terminal {
     edge_tick: Instant,
     /// Shift is down: the mouse selects even where a program has asked for it.
     shift: bool,
-    /// The button the program was told is down, until it is told it is up.
-    reported: Option<Button>,
-    /// The screen cell the program was last told the pointer is on.
-    reported_cell: Option<(usize, usize)>,
+    /// The pane and screen cell a program was last told the pointer is on.
+    reported_cell: Option<(u64, (usize, usize))>,
     /// The right-click menu, while it is open, and the line of it under the pointer.
     menu: Option<Menu>,
     menu_hover: Option<Item>,
     /// A settings file was written since it was last read.
     settings_changed: Arc<AtomicBool>,
-    /// How many tabs to open with (`--tabs N`; one unless asked).
+    /// How many tabs to open with (`--tabs N`; one unless asked), and how
+    /// many panes in the first (`--panes N`), for trying things out.
     open_with: usize,
+    open_panes: usize,
 }
 
 impl Terminal {
     fn new() -> Terminal {
         Terminal {
-            sessions: Vec::new(),
+            tabs: Vec::new(),
             shown: 0,
+            next_id: 1,
             waker: None,
             palette: palette(),
             settings: Settings::from_text(&config("settings.toml")),
@@ -422,73 +467,183 @@ impl Terminal {
             focused: false,
             width: 820.0,
             height: 520.0,
-            thumb: None,
             fits: (80, 24),
             hover: None,
-            over_pane: false,
+            over: None,
             maximized: false,
             bar_press: None,
-            selecting: false,
+            held: None,
             presses: None,
             edge: None,
             edge_tick: Instant::now(),
             shift: false,
-            reported: None,
             reported_cell: None,
             menu: None,
             menu_hover: None,
             settings_changed: Arc::new(AtomicBool::new(false)),
             open_with: 1,
+            open_panes: 1,
         }
     }
 
     fn layout(&self) -> Layout {
-        Layout::new(self.width, self.sessions.len(), self.shown, &self.settings.left, &self.settings.right)
+        Layout::new(self.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right)
+    }
+
+    /// The room under the bar, which the front tab's panes share.
+    fn room(&self) -> Rect {
+        Rect::new(0.0, BAR_H, self.width, (self.height - BAR_H).max(0.0))
+    }
+
+    /// Where the front tab's panes and the lines between them are.
+    fn areas(&self) -> (Vec<(u64, Rect)>, Vec<Divider>) {
+        self.tabs.get(self.shown).map(|tab| tab.tree.layout(self.room())).unwrap_or_default()
+    }
+
+    /// The pane under a point, and its room.
+    fn pane_at(&self, x: f32, y: f32) -> Option<(u64, Rect)> {
+        self.areas().0.into_iter().find(|(_, r)| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
+    }
+
+    /// The front tab's active pane, and its room.
+    fn active(&self) -> Option<(u64, Rect)> {
+        let active = self.tabs.get(self.shown)?.active;
+        self.areas().0.into_iter().find(|(id, _)| *id == active)
+    }
+
+    /// A terminal of the front tab.
+    fn session(&self, id: u64) -> Option<&Session> {
+        self.tabs.get(self.shown)?.session(id)
+    }
+
+    fn session_mut(&mut self, id: u64) -> Option<&mut Session> {
+        self.tabs.get_mut(self.shown)?.session_mut(id)
+    }
+
+    /// The terminal the keys go to.
+    fn front(&self) -> Option<&Session> {
+        let tab = self.tabs.get(self.shown)?;
+        tab.session(tab.active)
+    }
+
+    fn front_mut(&mut self) -> Option<&mut Session> {
+        let tab = self.tabs.get_mut(self.shown)?;
+        tab.session_mut(tab.active)
+    }
+
+    /// A cell's width and height, once the fonts are known.
+    fn cell(&self) -> Option<(f32, f32)> {
+        self.metrics.as_ref().map(|mt| (mt.cell_w, mt.cell_h))
+    }
+
+    /// Starts a terminal and gives it a number.
+    fn start(&mut self, cols: usize, rows: usize) -> Option<(u64, Session)> {
+        let waker = self.waker.clone()?;
+        match Session::start(cols, rows, waker) {
+            Ok(session) => {
+                self.next_id += 1;
+                Some((self.next_id - 1, session))
+            }
+            Err(e) => {
+                eprintln!("vterm: could not start the shell: {e}");
+                None
+            }
+        }
     }
 
     fn new_tab(&mut self, window: &mut Window) {
-        let Some(waker) = self.waker.clone() else { return };
-        match Session::start(self.fits.0, self.fits.1, waker) {
-            Ok(s) => {
-                self.sessions.push(s);
-                self.shown = self.sessions.len() - 1;
-            }
-            Err(e) => eprintln!("vterm: could not start the shell: {e}"),
+        if let Some((id, session)) = self.start(self.fits.0, self.fits.1) {
+            self.tabs.push(Tab { tree: Node::Leaf(id), panes: vec![(id, session)], active: id });
+            self.shown = self.tabs.len() - 1;
+            self.retitle(window);
         }
         window.redraw();
     }
 
-    /// Closes a tab (its program is ended); the window with the last one.
+    /// Divides the active pane's room in two, with a new terminal in the
+    /// second half, which the keys then go to.
+    fn split(&mut self, axis: Axis, window: &mut Window) {
+        self.split_active(axis);
+        self.retitle(window);
+        window.redraw();
+    }
+
+    fn split_active(&mut self, axis: Axis) {
+        let Some(active) = self.tabs.get(self.shown).map(|tab| tab.active) else { return };
+        // The new terminal starts at the size of the one it divides; the next frame fits both.
+        let size = self.session(active).map(|s| {
+            let s = lock(&s.screen);
+            (s.grid.cols, s.grid.rows)
+        });
+        let Some((id, session)) = self.start(size.map_or(self.fits.0, |s| s.0), size.map_or(self.fits.1, |s| s.1)) else { return };
+        let tab = &mut self.tabs[self.shown];
+        if tab.tree.split(active, axis, id) {
+            tab.panes.push((id, session));
+            tab.active = id;
+        }
+    }
+
+    /// Closes a tab (its programs are ended); the window with the last one.
     fn close_tab(&mut self, index: usize, window: &mut Window) {
-        if index >= self.sessions.len() {
+        if index >= self.tabs.len() {
             return;
         }
-        self.sessions.remove(index);
-        if self.sessions.is_empty() {
+        self.tabs.remove(index);
+        self.held = None;
+        if self.tabs.is_empty() {
             window.close();
             return;
         }
-        if self.shown > index || self.shown >= self.sessions.len() {
+        if self.shown > index || self.shown >= self.tabs.len() {
             self.shown = self.shown.saturating_sub(1);
         }
         self.retitle(window);
         window.redraw();
     }
 
+    /// Closes a pane (its program is ended): its neighbour gets its room.
+    /// The tab goes with its last pane.
+    fn close_pane(&mut self, index: usize, id: u64, window: &mut Window) {
+        let Some(tab) = self.tabs.get_mut(index) else { return };
+        if tab.panes.len() <= 1 {
+            return self.close_tab(index, window);
+        }
+        let leaves = tab.tree.leaves();
+        if !tab.tree.remove(id) {
+            return;
+        }
+        tab.panes.retain(|(own, _)| *own != id);
+        if tab.active == id {
+            // The keys go to the pane that came before it, or the first.
+            let at = leaves.iter().position(|l| *l == id).unwrap_or(0);
+            tab.active = leaves[if at > 0 { at - 1 } else { 1 }];
+        }
+        self.held = None;
+        self.retitle(window);
+        window.redraw();
+    }
+
+    fn close_active(&mut self, window: &mut Window) {
+        if let Some(active) = self.tabs.get(self.shown).map(|tab| tab.active) {
+            self.close_pane(self.shown, active, window);
+        }
+    }
+
     fn show_tab(&mut self, index: usize, window: &mut Window) {
-        if index < self.sessions.len() && index != self.shown {
+        if index < self.tabs.len() && index != self.shown {
             self.shown = index;
+            self.held = None;
             self.retitle(window);
             window.redraw();
         }
     }
 
-    /// The left button went down on the text: a selection starts (by
-    /// characters, then words, then lines for presses on the same cell in
-    /// quick succession), or with Shift the one there is reaches to here.
+    /// The left button went down on the active pane's text: a selection
+    /// starts (by characters, then words, then lines for presses on the
+    /// same cell in quick succession), or with Shift the one there is
+    /// reaches to here.
     fn press_text(&mut self, x: f32, y: f32, m: Modifiers, window: &mut Window) {
-        let Some((cw, ch)) = self.metrics.as_ref().map(|mt| (mt.cell_w, mt.cell_h)) else { return };
-        let Some(session) = self.sessions.get(self.shown) else { return };
+        let (Some(cell), Some((_, area)), Some(session)) = (self.cell(), self.active(), self.front()) else { return };
         let mut guard = lock(&session.screen);
         let s = &mut *guard;
         // A program that asked for the mouse has it (report()); Shift takes it
@@ -496,26 +651,38 @@ impl Terminal {
         if s.grid.mouse != MouseMode::Off && !m.shift && s.scroll == 0 {
             return;
         }
-        let pos = s.cell_at(x, y, cw, ch);
+        let pos = s.cell_at(x, y, area, cell);
         let now = Instant::now();
         let nth = match self.presses {
             Some((then, at, n)) if at == pos && now.duration_since(then) < DOUBLE_CLICK => n % 3 + 1,
             _ => 1,
         };
-        self.presses = Some((now, pos, nth));
         if nth == 1 && m.shift && s.selection.is_some() {
             s.drag_selection(pos);
         } else {
             s.selection = Some(Selection::start(&s.grid, [Unit::Cell, Unit::Word, Unit::Line][nth - 1], pos));
         }
-        self.selecting = true;
+        drop(guard);
+        self.presses = Some((now, pos, nth));
+        self.held = Some(Held::Text);
         window.redraw();
     }
 
-    /// The front tab's selected text, if there is any.
+    /// The active pane's selected text, if there is any.
     fn selected_text(&self) -> Option<String> {
-        let s = lock(&self.sessions.get(self.shown)?.screen);
+        let s = lock(&self.front()?.screen);
         s.selection.and_then(|sel| sel.text(&s.grid))
+    }
+
+    /// Copies what is selected in the active pane; false if nothing is.
+    fn copy(&mut self, window: &mut Window) -> bool {
+        match self.selected_text() {
+            Some(text) => {
+                window.copy(&text);
+                true
+            }
+            None => false,
+        }
     }
 
     /// Input while the menu is open is the menu's: a press on a line does
@@ -544,13 +711,13 @@ impl Terminal {
                 window.redraw();
                 match chosen {
                     Some(Item::Copy) => {
-                        if let Some(text) = self.selected_text() {
-                            window.copy(&text);
-                        }
+                        self.copy(window);
                     }
                     Some(Item::Paste) => window.paste(),
+                    Some(Item::SplitSide) => self.split(Axis::Side, window),
+                    Some(Item::SplitStack) => self.split(Axis::Stack, window),
                     Some(Item::NewTab) => self.new_tab(window),
-                    Some(Item::CloseTab) => self.close_tab(self.shown, window),
+                    Some(Item::ClosePane) => self.close_active(window),
                     None => {}
                 }
                 true
@@ -566,17 +733,16 @@ impl Terminal {
         }
     }
 
-    /// The scrollbar of the tab in front, if it has one now.
-    fn scrollbar(&self) -> Option<Scrollbar> {
-        let session = self.sessions.get(self.shown)?;
-        lock(&session.screen).scrollbar(self.width, self.height)
+    /// The scrollbar of a pane of the front tab, if it has one now.
+    fn scrollbar(&self, id: u64, area: Rect) -> Option<Scrollbar> {
+        lock(&self.session(id)?.screen).scrollbar(area)
     }
 
-    /// The held thumb follows the pointer, and the view with it.
+    /// The held thumb follows the pointer, and the active pane's view with it.
     fn drag_thumb(&mut self, y: f32, grab: f32, window: &mut Window) {
-        let Some(session) = self.sessions.get(self.shown) else { return };
+        let (Some((_, area)), Some(session)) = (self.active(), self.front()) else { return };
         let mut s = lock(&session.screen);
-        if let Some(bar) = s.scrollbar(self.width, self.height) {
+        if let Some(bar) = s.scrollbar(area) {
             let to = bar.scroll_for(y - grab);
             if to != s.scroll {
                 s.scroll = to;
@@ -586,54 +752,121 @@ impl Terminal {
         }
     }
 
-    /// Tells the front tab's program about a mouse event at a point of the
-    /// window, if it asked for such events and Shift is not keeping the
-    /// mouse for selecting. True if the event was the program's.
-    fn report(&mut self, action: mouse::Action, x: f32, y: f32, m: Modifiers) -> bool {
-        let Some((cw, ch)) = self.metrics.as_ref().map(|mt| (mt.cell_w, mt.cell_h)) else { return false };
-        let Some(session) = self.sessions.get_mut(self.shown) else { return false };
+    /// Tells the program in a pane of the front tab about a mouse event at
+    /// a point of the window, if it asked for such events. True if the
+    /// event was the program's.
+    fn report(&mut self, id: u64, area: Rect, action: mouse::Action, x: f32, y: f32, m: Modifiers) -> bool {
+        let Some(cell) = self.cell() else { return false };
+        let last = self.reported_cell;
+        let Some(session) = self.session_mut(id) else { return false };
         let s = lock(&session.screen);
         if s.grid.mouse == MouseMode::Off || s.scroll > 0 {
             // Scrolled back, what is under the pointer is not the program's screen.
             return false;
         }
-        let cell = s.screen_cell(x, y, cw, ch);
-        if matches!(action, mouse::Action::Motion(_)) && self.reported_cell == Some(cell) {
+        let at = s.screen_cell(x, y, area, cell);
+        if matches!(action, mouse::Action::Motion(_)) && last == Some((id, at)) {
             return true;
         }
-        let bytes = mouse::bytes(s.grid.mouse, s.grid.mouse_sgr, action, cell, m);
+        let bytes = mouse::bytes(s.grid.mouse, s.grid.mouse_sgr, action, at, m);
         drop(s);
-        self.reported_cell = Some(cell);
         if let Some(bytes) = bytes {
             session.pty.write(&bytes);
         }
+        self.reported_cell = Some((id, at));
         true
     }
 
-    /// The pointer moved with the button held on the text.
+    /// The pointer moved with the button held on the active pane's text.
     fn drag_text(&mut self, x: f32, y: f32, window: &mut Window) {
-        let Some((cw, ch)) = self.metrics.as_ref().map(|mt| (mt.cell_w, mt.cell_h)) else { return };
-        let Some(session) = self.sessions.get(self.shown) else { return };
+        let (Some(cell), Some((_, area)), Some(session)) = (self.cell(), self.active(), self.front()) else { return };
         let mut s = lock(&session.screen);
-        let pos = s.cell_at(x, y, cw, ch);
-        let bottom = BAR_H + PAD + s.grid.rows as f32 * ch;
+        let pos = s.cell_at(x, y, area, cell);
+        let bottom = area.y + PAD + s.grid.rows as f32 * cell.1;
         // Past the top or bottom edge the view scrolls for as long as it is held there (scene()).
-        self.edge = if y < BAR_H + PAD {
+        let edge = if y < area.y + PAD {
             Some((true, pos.0))
         } else if y >= bottom {
             Some((false, pos.0))
         } else {
             None
         };
-        if s.drag_selection(pos) || self.edge.is_some() {
+        if s.drag_selection(pos) || edge.is_some() {
             window.redraw();
+        }
+        drop(s);
+        self.edge = edge;
+    }
+
+    /// The pointer moved with nothing held: what it is over, the shape it
+    /// takes, and word of it to a program that asked to hear.
+    fn hover(&mut self, x: f32, y: f32, window: &mut Window) {
+        let part = self.layout().at(x, y);
+        let pane = if part.is_none() && y >= BAR_H { self.pane_at(x, y) } else { None };
+        self.over = pane.map(|(id, _)| id);
+        let divider = if part.is_none() { self.areas().1.into_iter().find(|d| d.holds(x, y)) } else { None };
+        let cursor = if let Some(d) = divider {
+            Cursor::Resize(if d.axis == Axis::Side { Edges { right: true, ..Edges::default() } } else { Edges { bottom: true, ..Edges::default() } })
+        } else if let Some((id, area)) = pane {
+            // The scrollbar's edge and a program that has the mouse get the arrow; text, the text bar.
+            let on_bar = self.scrollbar(id, area).is_some_and(|bar| bar.holds(x, y));
+            let theirs = !on_bar && !self.shift && self.report(id, area, mouse::Action::Motion(None), x, y, Modifiers::default());
+            if on_bar || theirs { Cursor::Default } else { Cursor::Text }
+        } else {
+            Cursor::Default
+        };
+        window.set_cursor(cursor);
+        if part != self.hover {
+            self.hover = part;
+            window.redraw();
+        }
+    }
+
+    /// A button went down below the bar.
+    fn press(&mut self, button: Button, x: f32, y: f32, m: Modifiers, window: &mut Window) {
+        // The line between two panes: the left button takes hold of it.
+        if button == Button::Left
+            && let Some(d) = self.areas().1.into_iter().find(|d| d.holds(x, y))
+        {
+            self.held = Some(Held::Divider(d.path));
+            return;
+        }
+        let Some((id, area)) = self.pane_at(x, y) else { return };
+        // A press on a pane makes it the one the keys go to.
+        if let Some(tab) = self.tabs.get_mut(self.shown)
+            && tab.active != id
+        {
+            tab.active = id;
+            self.retitle(window);
+            window.redraw();
+        }
+        // The scrollbar: a press takes hold of the thumb, which comes to the pointer if it was not under it.
+        if button == Button::Left
+            && let Some(bar) = self.scrollbar(id, area).filter(|bar| bar.holds(x, y))
+        {
+            let grab = bar.grab(y);
+            self.held = Some(Held::Thumb(grab));
+            return self.drag_thumb(y, grab, window);
+        }
+        if !m.shift && self.report(id, area, mouse::Action::Press(button), x, y, m) {
+            self.held = Some(Held::Reported(button));
+            return;
+        }
+        match button {
+            Button::Left => self.press_text(x, y, m, window),
+            Button::Right => {
+                self.menu = Some(Menu::new(x, y, (self.width, self.height), self.selected_text().is_some()));
+                self.menu_hover = None;
+                window.redraw();
+            }
+            _ => {}
         }
     }
 
     /// The window is called what its front tab is.
     fn retitle(&self, window: &mut Window) {
-        if let Some(s) = self.sessions.get(self.shown) {
-            window.set_title(&s.label());
+        if let Some(tab) = self.tabs.get(self.shown) {
+            window.set_title(&tab.label());
         }
     }
 
@@ -693,6 +926,129 @@ impl Terminal {
     }
 }
 
+/// The scene's number for a face, given once in a frame.
+fn font_number(scene: &mut Scene, fonts: &Fonts, numbers: &mut HashMap<FaceId, u32>, face: FaceId) -> u32 {
+    *numbers.entry(face).or_insert_with(|| {
+        let n = fonts.name(face);
+        scene.font(&n.family, n.weight, n.italic)
+    })
+}
+
+/// How a pane is drawn.
+struct PaneLook<'a> {
+    palette: &'a Palette,
+    metrics: &'a Metrics,
+    size: f32,
+    /// The keys go to this pane, and the window has the keyboard.
+    keyboard: bool,
+    /// The scrollbar's thumb is held.
+    thumb_held: bool,
+}
+
+/// Draws one terminal in its room.
+fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId, u32>, s: &Screen, area: Rect, look: &PaneLook) {
+    let (p, mt, size) = (look.palette, look.metrics, look.size);
+    let (cw, ch) = (mt.cell_w, mt.cell_h);
+    let (left, first) = (area.x + PAD, area.y + PAD);
+    let (selection, top_line) = (s.selection, s.top_line());
+    scene.push_clip(area, 0.0);
+    for r in 0..s.grid.rows {
+        let line = s.shown(r);
+        let top = first + r as f32 * ch;
+        // Backgrounds and underlines: one rectangle for each run of cells with the same look.
+        let mut x = 0;
+        while x < line.len() {
+            let style = line[x].style;
+            let mut end = x + 1;
+            while end < line.len() && line[end].style == style {
+                end += 1;
+            }
+            let (mut fg, mut bg) = (p.resolve(style.fg, p.fg, style.bold), p.resolve(style.bg, p.bg, false));
+            if style.inverse {
+                std::mem::swap(&mut fg, &mut bg);
+            }
+            if bg != p.bg {
+                scene.fill(Rect::new(left + x as f32 * cw, top, (end - x) as f32 * cw, ch), bg);
+            }
+            if style.underline {
+                scene.fill(Rect::new(left + x as f32 * cw, top + ch - 2.0, (end - x) as f32 * cw, 1.0), fg);
+            }
+            x = end;
+        }
+        // Glyphs, each at its cell: a run for each stretch in one font and colour.
+        let mut run: Option<(u32, Color, Vec<Glyph>)> = None;
+        let origin = Point::new(left, top + mt.baseline);
+        let mut put = |scene: &mut Scene, font: u32, fg: Color, placed: Glyph| match &mut run {
+            Some((f, c, glyphs)) if *f == font && *c == fg => glyphs.push(placed),
+            _ => {
+                if let Some((f, c, glyphs)) = run.take() {
+                    scene.glyphs(f, size, c, origin, glyphs);
+                }
+                run = Some((font, fg, vec![placed]));
+            }
+        };
+        for (col, cell) in line.iter().enumerate() {
+            if cell.width == 0 || cell.c == ' ' {
+                continue;
+            }
+            let st = cell.style;
+            let mut fg = if st.inverse { p.resolve(st.bg, p.bg, false) } else { p.resolve(st.fg, p.fg, st.bold) };
+            if st.dim {
+                fg.a = 153;
+            }
+            let own = if st.bold { mt.bold } else { mt.regular };
+            let (face, glyph) = fonts.glyph(own, cell.c);
+            let font = font_number(scene, fonts, numbers, face);
+            put(scene, font, fg, Glyph { id: glyph, x: col as f32 * cw, y: 0.0 });
+            // Combining marks, drawn on the character. Fonts make them one of two ways:
+            // with no advance, drawn back over what came before the pen (so the pen
+            // goes after the character), or as wide as a cell, drawn in place (so it
+            // goes where the character's did).
+            for mark in cell.marks.into_iter().filter(|m| *m != '\0') {
+                let (face, glyph) = fonts.glyph(own, mark);
+                let font = font_number(scene, fonts, numbers, face);
+                let after = fonts.advance(face, glyph, size) < cw * 0.5;
+                put(scene, font, fg, Glyph { id: glyph, x: (col + if after { cell.width.max(1) as usize } else { 0 }) as f32 * cw, y: 0.0 });
+            }
+        }
+        if let Some((f, c, glyphs)) = run.take() {
+            scene.glyphs(f, size, c, origin, glyphs);
+        }
+        // What is selected, tinted over its text.
+        if let Some((a, b)) = selection.and_then(|sel| sel.span(top_line + r, s.grid.cols)) {
+            scene.fill(Rect::new(left + a as f32 * cw, top, (b + 1 - a) as f32 * cw, ch), Color::rgba(p.accent.r, p.accent.g, p.accent.b, 89));
+        }
+    }
+    // The cursor: a block where the keys go, an outline elsewhere. It moves down with the
+    // screen while scrolled back, out of sight past the bottom.
+    let cursor_row = s.grid.cy + s.scroll;
+    if s.grid.cursor_visible && cursor_row < s.grid.rows {
+        let at = Rect::new(left + s.grid.cx as f32 * cw, first + cursor_row as f32 * ch, cw, ch);
+        if look.keyboard {
+            scene.fill(at, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 178));
+        } else {
+            scene.stroke(at, 0.0, 1.0, p.accent);
+        }
+    }
+    // The scrollbar: faint at the live screen, clearer while scrolled back or held.
+    if let Some(bar) = s.scrollbar(area) {
+        scene.fill_rounded(bar.track, scrollbar::WIDTH / 2.0, Color::rgba(p.fg.r, p.fg.g, p.fg.b, 15));
+        let alpha = if look.thumb_held { 166 } else if s.scroll > 0 { 128 } else { 64 };
+        scene.fill_rounded(bar.thumb, scrollbar::WIDTH / 2.0, Color::rgba(p.fg.r, p.fg.g, p.fg.b, alpha));
+    }
+    // Scrolled back: how far, in the top right corner (left of the scrollbar).
+    if s.scroll > 0 {
+        let label = if s.scroll == 1 { "1 line back".to_string() } else { format!("{} lines back", s.scroll) };
+        let width = label.chars().count() as f32 * cw + 16.0;
+        let at = Rect::new(area.x + area.w - width - PAD - scrollbar::GRAB, first, width, ch + 4.0);
+        scene.fill_rounded(at, 6.0, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 235));
+        let font = font_number(scene, fonts, numbers, mt.regular);
+        let glyphs = label.chars().enumerate().map(|(i, c)| Glyph { id: fonts.glyph(mt.regular, c).1, x: i as f32 * cw, y: 0.0 }).collect();
+        scene.glyphs(font, size, p.bg, Point::new(at.x + 8.0, at.y + 2.0 + mt.baseline), glyphs);
+    }
+    scene.pop_clip();
+}
+
 impl App for Terminal {
     fn title(&self) -> String {
         "Terminal".into()
@@ -717,15 +1073,16 @@ impl App for Terminal {
 
     fn waker(&mut self, waker: Waker) {
         self.waker = Some(waker.clone());
-        watch_settings(self.settings_changed.clone(), waker.clone());
+        watch_settings(self.settings_changed.clone(), waker);
         for _ in 0..self.open_with {
-            match Session::start(self.fits.0, self.fits.1, waker.clone()) {
-                Ok(s) => self.sessions.push(s),
-                Err(e) => {
-                    eprintln!("vterm: could not start the shell: {e}");
-                    std::process::exit(1);
-                }
+            match self.start(self.fits.0, self.fits.1) {
+                Some((id, session)) => self.tabs.push(Tab { tree: Node::Leaf(id), panes: vec![(id, session)], active: id }),
+                None => std::process::exit(1),
             }
+        }
+        // The first tab divided: side by side, then each new pane the other way.
+        for n in 1..self.open_panes {
+            self.split_active(if n % 2 == 1 { Axis::Side } else { Axis::Stack });
         }
     }
 
@@ -738,34 +1095,35 @@ impl App for Terminal {
             self.metrics = None;
             window.redraw();
         }
-        // Tabs whose program has ended go; the window goes with the last.
-        let mut index = 0;
-        while index < self.sessions.len() {
-            if lock(&self.sessions[index].screen).exited {
-                self.close_tab(index, window);
-                if self.sessions.is_empty() {
-                    return;
-                }
-            } else {
-                index += 1;
+        // Panes whose program has ended go; a tab goes with its last pane, the window with its last tab.
+        loop {
+            let ended = self.tabs.iter().enumerate().find_map(|(index, tab)| tab.panes.iter().find(|(_, s)| lock(&s.screen).exited).map(|(id, _)| (index, *id)));
+            let Some((index, id)) = ended else { break };
+            self.close_pane(index, id, window);
+            if self.tabs.is_empty() {
+                return;
             }
         }
-        for (i, session) in self.sessions.iter_mut().enumerate() {
-            let mut s = lock(&session.screen);
-            if let Some(text) = s.copied.take() {
-                window.copy(&text);
-            }
-            if s.grid.title != session.title {
-                session.title = s.grid.title.clone();
-                // The bar shows every tab's title; the window carries the front one's.
-                window.redraw();
-                if i == self.shown {
-                    window.set_title(if session.title.is_empty() { "Terminal" } else { &session.title });
+        let shown = self.shown;
+        for (index, tab) in self.tabs.iter_mut().enumerate() {
+            let active = tab.active;
+            for (id, session) in tab.panes.iter_mut() {
+                let mut s = lock(&session.screen);
+                if let Some(text) = s.copied.take() {
+                    window.copy(&text);
                 }
-            }
-            // Only the tab in front is drawn: output in the others costs no frame.
-            if std::mem::take(&mut s.grid.dirty) && i == self.shown {
-                window.redraw();
+                if s.grid.title != session.title {
+                    session.title = s.grid.title.clone();
+                    // The bar shows every tab's title (its active pane's); the window carries the front one's.
+                    window.redraw();
+                    if index == shown && *id == active {
+                        window.set_title(if session.title.is_empty() { "Terminal" } else { &session.title });
+                    }
+                }
+                // Only the tab in front is drawn: output in the others costs no frame.
+                if std::mem::take(&mut s.grid.dirty) && index == shown {
+                    window.redraw();
+                }
             }
         }
     }
@@ -784,60 +1142,65 @@ impl App for Terminal {
             return;
         }
         match input {
-            Input::PointerMoved { y, .. } if self.thumb.is_some() => self.drag_thumb(*y, self.thumb.unwrap_or(0.0), window),
-            Input::Button { button: Button::Left, pressed: false, .. } if self.thumb.is_some() => self.thumb = None,
-            Input::PointerMoved { x, y } if self.selecting => self.drag_text(*x, *y, window),
-            Input::PointerMoved { x, y } => {
-                let part = self.layout().at(*x, *y);
-                self.over_pane = part.is_none() && *y >= BAR_H;
-                // A program with the mouse hears where the pointer is (if it asked for moves),
-                // and while a button it was told of is held, wherever the pointer goes.
-                let on_bar = self.over_pane && self.reported.is_none() && self.scrollbar().is_some_and(|bar| bar.holds(*x, *y));
-                let theirs = !on_bar && !self.shift && (self.over_pane || self.reported.is_some()) && self.report(mouse::Action::Motion(self.reported), *x, *y, Modifiers::default());
-                window.set_cursor(if part.is_some() || theirs || on_bar { Cursor::Default } else { Cursor::Text });
-                if part != self.hover {
-                    self.hover = part;
-                    window.redraw();
+            // With something held, the pointer's moves are that thing's.
+            Input::PointerMoved { x, y } if self.held.is_some() => match &self.held {
+                Some(Held::Text) => self.drag_text(*x, *y, window),
+                Some(Held::Thumb(grab)) => self.drag_thumb(*y, *grab, window),
+                Some(Held::Divider(path)) => {
+                    let path = path.clone();
+                    if let Some(d) = self.areas().1.into_iter().find(|d| d.path == path)
+                        && let Some(tab) = self.tabs.get_mut(self.shown)
+                    {
+                        tab.tree.set_share(&path, d.share_at(*x, *y));
+                        window.redraw();
+                    }
                 }
-            }
+                Some(Held::Reported(button)) => {
+                    // The program hears of the drag wherever the pointer goes.
+                    let button = *button;
+                    if let Some((id, area)) = self.active() {
+                        self.report(id, area, mouse::Action::Motion(Some(button)), *x, *y, Modifiers::default());
+                    }
+                }
+                None => {}
+            },
+            Input::PointerMoved { x, y } => self.hover(*x, *y, window),
             Input::PointerLeft => {
-                self.over_pane = false;
+                self.over = None;
                 if self.hover.take().is_some() {
                     window.redraw();
                 }
             }
-            Input::Button { button: Button::Left, pressed: false, .. } if self.selecting => {
-                self.selecting = false;
-                self.edge = None;
-                // A press that selected nothing leaves nothing selected.
-                if let Some(session) = self.sessions.get(self.shown) {
-                    let mut s = lock(&session.screen);
-                    if s.selection.is_some_and(|sel| sel.range().is_none()) {
-                        s.selection = None;
+            Input::Button { button, pressed: false, x, y, modifiers } if self.held.is_some() => match &self.held {
+                Some(Held::Reported(told)) if told == button => {
+                    self.held = None;
+                    if let Some((id, area)) = self.active() {
+                        self.report(id, area, mouse::Action::Release(*button), *x, *y, *modifiers);
                     }
                 }
-                window.redraw();
-            }
-            Input::Button { button, pressed: false, x, y, modifiers } if self.reported == Some(*button) => {
-                self.reported = None;
-                self.report(mouse::Action::Release(*button), *x, *y, *modifiers);
-            }
-            Input::Button { button, pressed: true, x, y, modifiers } => match (button, self.layout().at(*x, *y)) {
-                // The scrollbar: a press takes hold of the thumb, which comes to the pointer if it was not under it.
-                (Button::Left, None) if *y >= BAR_H && self.reported.is_none() && self.scrollbar().is_some_and(|bar| bar.holds(*x, *y)) => {
-                    let grab = self.scrollbar().map_or(0.0, |bar| bar.grab(*y));
-                    self.thumb = Some(grab);
-                    self.drag_thumb(*y, grab, window);
-                }
-                (_, None) if *y >= BAR_H && !modifiers.shift && self.reported.is_none() && self.report(mouse::Action::Press(*button), *x, *y, *modifiers) => {
-                    self.reported = Some(*button);
-                }
-                (Button::Left, None) if *y >= BAR_H => self.press_text(*x, *y, *modifiers, window),
-                (Button::Right, None) if *y >= BAR_H => {
-                    self.menu = Some(Menu::new(*x, *y, (self.width, self.height), self.selected_text().is_some()));
-                    self.menu_hover = None;
+                Some(Held::Reported(_)) => {}
+                Some(Held::Text) if *button == Button::Left => {
+                    self.held = None;
+                    self.edge = None;
+                    // A press that selected nothing leaves nothing selected.
+                    if let Some(session) = self.front() {
+                        let mut s = lock(&session.screen);
+                        if s.selection.is_some_and(|sel| sel.range().is_none()) {
+                            s.selection = None;
+                        }
+                    }
                     window.redraw();
                 }
+                Some(Held::Thumb(_) | Held::Divider(_)) if *button == Button::Left => {
+                    self.held = None;
+                    window.redraw();
+                }
+                _ => {}
+            },
+            // One thing is held at a time: other buttons wait for its release.
+            Input::Button { pressed: true, .. } if self.held.is_some() => {}
+            Input::Button { button, pressed: true, x, y, modifiers } => match (button, self.layout().at(*x, *y)) {
+                (_, None) if *y >= BAR_H => self.press(*button, *x, *y, *modifiers, window),
                 (Button::Left, Some(Part::Button(WinButton::Close))) => window.close(),
                 (Button::Left, Some(Part::Button(WinButton::Minimize))) => window.minimize(),
                 (Button::Left, Some(Part::Button(WinButton::Maximize))) => {
@@ -863,25 +1226,46 @@ impl App for Terminal {
                 let m = *modifiers;
                 let letter = |c: char| *key == c as u32 || *key == c.to_ascii_uppercase() as u32;
                 // The terminal's own shortcuts: with Ctrl+Shift, so the shell keeps Ctrl+T and the rest.
-                if m.ctrl && m.shift && letter('t') {
-                    return self.new_tab(window);
-                }
-                if m.ctrl && m.shift && letter('w') {
-                    return self.close_tab(self.shown, window);
+                if m.ctrl && m.shift {
+                    if letter('t') {
+                        return self.new_tab(window);
+                    }
+                    if letter('w') {
+                        return self.close_active(window);
+                    }
+                    if letter('r') {
+                        return self.split(Axis::Side, window);
+                    }
+                    if letter('d') {
+                        return self.split(Axis::Stack, window);
+                    }
+                    if letter('c') {
+                        self.copy(window);
+                        return;
+                    }
                 }
                 if m.ctrl && !m.shift && (*key == sym::PAGE_UP || *key == sym::PAGE_DOWN) {
-                    let n = self.sessions.len().max(1);
+                    let n = self.tabs.len().max(1);
                     return self.show_tab(if *key == sym::PAGE_UP { (self.shown + n - 1) % n } else { (self.shown + 1) % n }, window);
                 }
-                let Some(session) = self.sessions.get_mut(self.shown) else { return };
-                let mut s = lock(&session.screen);
-                if m.ctrl && m.shift && letter('c') {
-                    if let Some(text) = s.selection.and_then(|sel| sel.text(&s.grid)) {
-                        window.copy(&text);
+                // Ctrl+V pastes, with Shift or without (Dave, 2026-11-09). The control
+                // character it used to send (the shell's "take the next key as it is") is
+                // given up for it.
+                if m.ctrl && !m.alt && letter('v') {
+                    return window.paste();
+                }
+                // Ctrl+C copies when there is something selected, and lets it go, so that
+                // the next Ctrl+C is the interrupt key again; with nothing selected it
+                // always is.
+                if m.ctrl && !m.alt && !m.shift && letter('c') && self.copy(window) {
+                    if let Some(session) = self.front() {
+                        lock(&session.screen).selection = None;
                     }
-                } else if m.ctrl && m.shift && letter('v') {
-                    window.paste();
-                } else if m.shift && (*key == sym::PAGE_UP || *key == sym::PAGE_DOWN) {
+                    return window.redraw();
+                }
+                let Some(session) = self.front_mut() else { return };
+                let mut s = lock(&session.screen);
+                if m.shift && (*key == sym::PAGE_UP || *key == sym::PAGE_DOWN) {
                     let page = s.grid.rows.saturating_sub(1).max(1) as isize;
                     s.scroll_by(if *key == sym::PAGE_UP { page } else { -page });
                 } else if let Some(bytes) = Terminal::key_bytes(*key, text.as_deref(), m, s.grid.app_cursor) {
@@ -894,26 +1278,28 @@ impl App for Terminal {
                 window.redraw();
             }
             Input::Paste(text) => {
-                let Some(session) = self.sessions.get_mut(self.shown) else { return };
+                let Some(session) = self.front_mut() else { return };
                 let bracketed = lock(&session.screen).grid.bracketed_paste;
                 // A pasted line end is the Return key; and the paste cannot end its own brackets.
                 let text = text.replace("\r\n", "\r").replace('\n', "\r").replace("\x1b[201~", "");
                 let bytes = if bracketed { format!("\x1b[200~{text}\x1b[201~") } else { text };
                 session.pty.write(bytes.as_bytes());
             }
-            Input::Scroll { x, y, dy, .. } if self.over_pane => {
+            Input::Scroll { x, y, dy, .. } => {
+                // The wheel is the pane's under the pointer, whichever has the keys.
+                let Some((id, area)) = self.pane_at(*x, *y).filter(|_| *y >= BAR_H) else { return };
                 let notches = (dy / 15.0).round() as isize;
                 // A program with the mouse gets the wheel, a report for each notch.
                 if !self.shift && notches != 0 {
                     let action = if notches < 0 { mouse::Action::WheelUp } else { mouse::Action::WheelDown };
-                    if self.report(action, *x, *y, Modifiers::default()) {
+                    if self.report(id, area, action, *x, *y, Modifiers::default()) {
                         for _ in 1..notches.unsigned_abs().min(20) {
-                            self.report(action, *x, *y, Modifiers::default());
+                            self.report(id, area, action, *x, *y, Modifiers::default());
                         }
                         return;
                     }
                 }
-                let Some(session) = self.sessions.get_mut(self.shown) else { return };
+                let Some(session) = self.session_mut(id) else { return };
                 let mut s = lock(&session.screen);
                 if s.grid.alt {
                     // A full-screen program has no scrollback: the wheel is its arrow keys.
@@ -934,10 +1320,9 @@ impl App for Terminal {
     }
 
     fn scene(&mut self, frame: &Frame, fonts: &mut Fonts) -> Scene {
-        let p = &self.palette;
         (self.width, self.height) = (frame.width, frame.height);
         let mut scene = Scene::new(frame.width, frame.height);
-        scene.fill(Rect::new(0.0, 0.0, frame.width, frame.height), p.bg);
+        scene.fill(Rect::new(0.0, 0.0, frame.width, frame.height), self.palette.bg);
         let size = self.settings.mono_size;
         if self.metrics.is_none() {
             // The settings' fonts, or the machine's own if it does not have them.
@@ -950,147 +1335,56 @@ impl App for Terminal {
                 Metrics { regular, bold, ui, cell_w: fonts.advance(face, glyph, size), cell_h: (m.ascent + m.descent + m.line_gap).ceil(), baseline: m.ascent.round() }
             });
         }
-        let Some(mt) = &self.metrics else { return scene };
-        let (cw, ch) = (mt.cell_w, mt.cell_h);
-        // The grid that fits under the bar.
-        let cols = (((frame.width - 2.0 * PAD) / cw).floor().max(2.0) as usize).min(2000);
-        let rows = (((frame.height - BAR_H - 2.0 * PAD) / ch).floor().max(1.0) as usize).min(1000);
-        self.fits = (cols, rows);
-
-        let titles: Vec<String> = self.sessions.iter().map(Session::label).collect();
-        let layout = Layout::new(frame.width, self.sessions.len(), self.shown, &self.settings.left, &self.settings.right);
-        bar::draw(&mut scene, fonts, &layout, &bar::Look { focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, shown: self.shown, hover: self.hover });
-
-        let Some(session) = self.sessions.get(self.shown) else { return scene };
-        let mut guard = lock(&session.screen);
-        let s = &mut *guard;
-        // The front tab's grid follows the window's size, and its program is told.
-        if (cols, rows) != (s.grid.cols, s.grid.rows) {
-            if cols != s.grid.cols {
-                // Lines are cut or padded: the selection's cells are not what they were.
-                s.selection = None;
-            }
-            s.grid.resize(cols, rows);
-            s.clamp_scroll();
-            session.pty.resize(cols as u16, rows as u16);
-        }
+        let (panes, dividers) = self.areas();
         // A selection held past the top or bottom edge: the view moves a line at a time and
         // the selection's end goes with the edge row.
-        if let Some((up, col)) = self.edge
-            && self.edge_tick.elapsed() >= EDGE_TICK
-        {
+        let scroll_edge = self.edge.filter(|_| self.edge_tick.elapsed() >= EDGE_TICK);
+        if scroll_edge.is_some() {
             self.edge_tick = Instant::now();
-            s.scroll_by(if up { 1 } else { -1 });
-            let row = s.top_line() + if up { 0 } else { s.grid.rows - 1 };
-            s.drag_selection((col, row));
         }
-        let (selection, top_line) = (s.selection, s.top_line());
-        scene.push_clip(Rect::new(0.0, BAR_H, frame.width, (frame.height - BAR_H).max(0.0)), 0.0);
+        let p = &self.palette;
+        let Some(mt) = &self.metrics else { return scene };
+        let (cw, ch) = (mt.cell_w, mt.cell_h);
+        // The grid that fits a room: the whole of it for a new tab, a pane's for its terminal.
+        let fit = |w: f32, h: f32| ((((w - 2.0 * PAD) / cw).floor().max(2.0) as usize).min(2000), (((h - 2.0 * PAD) / ch).floor().max(1.0) as usize).min(1000));
+        self.fits = fit(frame.width, frame.height - BAR_H);
 
+        let titles: Vec<String> = self.tabs.iter().map(Tab::label).collect();
+        let layout = Layout::new(frame.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right);
+        bar::draw(&mut scene, fonts, &layout, &bar::Look { focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, shown: self.shown, hover: self.hover });
+
+        let Some(tab) = self.tabs.get(self.shown) else { return scene };
         // Scene font numbers for the faces used in this frame.
         let mut numbers: HashMap<FaceId, u32> = HashMap::new();
-        let mut number = |scene: &mut Scene, fonts: &Fonts, face: FaceId| {
-            *numbers.entry(face).or_insert_with(|| {
-                let n = fonts.name(face);
-                scene.font(&n.family, n.weight, n.italic)
-            })
-        };
-        for r in 0..s.grid.rows {
-            let line = s.shown(r);
-            let top = BAR_H + PAD + r as f32 * ch;
-            // Backgrounds and underlines: one rectangle for each run of cells with the same look.
-            let mut x = 0;
-            while x < line.len() {
-                let style = line[x].style;
-                let mut end = x + 1;
-                while end < line.len() && line[end].style == style {
-                    end += 1;
+        for (id, area) in &panes {
+            let Some(session) = tab.session(*id) else { continue };
+            let active = *id == tab.active;
+            let mut guard = lock(&session.screen);
+            let s = &mut *guard;
+            // The terminal's grid follows its room, and its program is told.
+            let (cols, rows) = fit(area.w, area.h);
+            if (cols, rows) != (s.grid.cols, s.grid.rows) {
+                if cols != s.grid.cols {
+                    // Lines are cut or padded: the selection's cells are not what they were.
+                    s.selection = None;
                 }
-                let (mut fg, mut bg) = (p.resolve(style.fg, p.fg, style.bold), p.resolve(style.bg, p.bg, false));
-                if style.inverse {
-                    std::mem::swap(&mut fg, &mut bg);
-                }
-                if bg != p.bg {
-                    scene.fill(Rect::new(PAD + x as f32 * cw, top, (end - x) as f32 * cw, ch), bg);
-                }
-                if style.underline {
-                    scene.fill(Rect::new(PAD + x as f32 * cw, top + ch - 2.0, (end - x) as f32 * cw, 1.0), fg);
-                }
-                x = end;
+                s.grid.resize(cols, rows);
+                s.clamp_scroll();
+                session.pty.resize(cols as u16, rows as u16);
             }
-            // Glyphs, each at its cell: a run for each stretch in one font and colour.
-            let mut run: Option<(u32, Color, Vec<Glyph>)> = None;
-            let origin = Point::new(PAD, top + mt.baseline);
-            let mut put = |scene: &mut Scene, font: u32, fg: Color, placed: Glyph| match &mut run {
-                Some((f, c, glyphs)) if *f == font && *c == fg => glyphs.push(placed),
-                _ => {
-                    if let Some((f, c, glyphs)) = run.take() {
-                        scene.glyphs(f, size, c, origin, glyphs);
-                    }
-                    run = Some((font, fg, vec![placed]));
-                }
-            };
-            for (col, cell) in line.iter().enumerate() {
-                if cell.width == 0 || cell.c == ' ' {
-                    continue;
-                }
-                let st = cell.style;
-                let mut fg = if st.inverse { p.resolve(st.bg, p.bg, false) } else { p.resolve(st.fg, p.fg, st.bold) };
-                if st.dim {
-                    fg.a = 153;
-                }
-                let own = if st.bold { mt.bold } else { mt.regular };
-                let (face, glyph) = fonts.glyph(own, cell.c);
-                let font = number(&mut scene, fonts, face);
-                put(&mut scene, font, fg, Glyph { id: glyph, x: col as f32 * cw, y: 0.0 });
-                // Combining marks, drawn on the character. Fonts make them one of two ways:
-                // with no advance, drawn back over what came before the pen (so the pen
-                // goes after the character), or as wide as a cell, drawn in place (so it
-                // goes where the character's did).
-                for mark in cell.marks.into_iter().filter(|m| *m != '\0') {
-                    let (face, glyph) = fonts.glyph(own, mark);
-                    let font = number(&mut scene, fonts, face);
-                    let after = fonts.advance(face, glyph, size) < cw * 0.5;
-                    put(&mut scene, font, fg, Glyph { id: glyph, x: (col + if after { cell.width.max(1) as usize } else { 0 }) as f32 * cw, y: 0.0 });
-                }
+            if active && let Some((up, col)) = scroll_edge {
+                s.scroll_by(if up { 1 } else { -1 });
+                let row = s.top_line() + if up { 0 } else { s.grid.rows - 1 };
+                s.drag_selection((col, row));
             }
-            if let Some((f, c, glyphs)) = run.take() {
-                scene.glyphs(f, size, c, origin, glyphs);
-            }
-            // What is selected, tinted over its text.
-            if let Some((a, b)) = selection.and_then(|sel| sel.span(top_line + r, s.grid.cols)) {
-                scene.fill(Rect::new(PAD + a as f32 * cw, top, (b + 1 - a) as f32 * cw, ch), Color::rgba(p.accent.r, p.accent.g, p.accent.b, 89));
-            }
+            let look = PaneLook { palette: p, metrics: mt, size, keyboard: active && self.focused, thumb_held: active && matches!(self.held, Some(Held::Thumb(_))) };
+            draw_pane(&mut scene, fonts, &mut numbers, s, *area, &look);
         }
-        // The cursor: a block with the keyboard, an outline without. It moves down with the
-        // screen while scrolled back, out of sight past the bottom.
-        let cursor_row = s.grid.cy + s.scroll;
-        if s.grid.cursor_visible && cursor_row < s.grid.rows {
-            let at = Rect::new(PAD + s.grid.cx as f32 * cw, BAR_H + PAD + cursor_row as f32 * ch, cw, ch);
-            if self.focused {
-                scene.fill(at, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 178));
-            } else {
-                scene.stroke(at, 0.0, 1.0, p.accent);
-            }
+        // The lines between panes; the one held, in the accent.
+        for d in &dividers {
+            let held = matches!(&self.held, Some(Held::Divider(path)) if *path == d.path);
+            scene.fill(d.line, if held { p.accent } else { Color::rgba(p.fg.r, p.fg.g, p.fg.b, 56) });
         }
-        // The scrollbar: faint at the live screen, clearer while scrolled back or held.
-        if let Some(bar) = s.scrollbar(frame.width, frame.height) {
-            scene.fill_rounded(bar.track, scrollbar::WIDTH / 2.0, Color::rgba(p.fg.r, p.fg.g, p.fg.b, 15));
-            let alpha = if self.thumb.is_some() { 166 } else if s.scroll > 0 { 128 } else { 64 };
-            scene.fill_rounded(bar.thumb, scrollbar::WIDTH / 2.0, Color::rgba(p.fg.r, p.fg.g, p.fg.b, alpha));
-        }
-        // Scrolled back: how far, in the top right corner (left of the scrollbar).
-        if s.scroll > 0 {
-            let label = if s.scroll == 1 { "1 line back".to_string() } else { format!("{} lines back", s.scroll) };
-            let width = label.chars().count() as f32 * cw + 16.0;
-            let at = Rect::new(frame.width - width - PAD - scrollbar::GRAB, BAR_H + PAD, width, ch + 4.0);
-            scene.fill_rounded(at, 6.0, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 235));
-            let font = number(&mut scene, fonts, mt.regular);
-            let glyphs = label.chars().enumerate().map(|(i, c)| Glyph { id: fonts.glyph(mt.regular, c).1, x: i as f32 * cw, y: 0.0 }).collect();
-            scene.glyphs(font, size, p.bg, Point::new(at.x + 8.0, at.y + 2.0 + mt.baseline), glyphs);
-        }
-        scene.pop_clip();
-        drop(guard);
         if let Some(menu) = &self.menu {
             menu.draw(&mut scene, fonts, mt.ui, self.settings.ui_size, p.accent, self.menu_hover);
         }
@@ -1107,6 +1401,9 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(n) = args.iter().position(|a| a == "--tabs").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<usize>().ok()) {
         terminal.open_with = n.clamp(1, 64);
+    }
+    if let Some(n) = args.iter().position(|a| a == "--panes").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<usize>().ok()) {
+        terminal.open_panes = n.clamp(1, 16);
     }
     if let Err(e) = vergence_ui::run(&mut terminal, (820, 520)) {
         eprintln!("vterm: {e}");

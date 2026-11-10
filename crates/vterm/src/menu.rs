@@ -1,5 +1,5 @@
-//! The right-click menu: copy and paste for the mouse, and the tab
-//! commands. It is drawn in the window, over the terminal, and kept inside
+//! The right-click menu: copy and paste for the mouse, and the pane and
+//! tab commands. It is drawn in the window, over the terminal, and kept inside
 //! it; where each line sits is worked out once ([`Menu::new`]) and used both
 //! to draw it and to say what is under the pointer.
 
@@ -20,24 +20,28 @@ const INK_OFF: Color = Color::rgb(128, 128, 134);
 pub enum Item {
     Copy,
     Paste,
+    SplitSide,
+    SplitStack,
     NewTab,
-    CloseTab,
+    ClosePane,
 }
 
 impl Item {
     /// What the line says, and the keys that do the same.
     fn words(self) -> (&'static str, &'static str) {
         match self {
-            Item::Copy => ("Copy", "Ctrl+Shift+C"),
-            Item::Paste => ("Paste", "Ctrl+Shift+V"),
+            Item::Copy => ("Copy", "Ctrl+C"),
+            Item::Paste => ("Paste", "Ctrl+V"),
+            Item::SplitSide => ("Split side by side", "Ctrl+Shift+R"),
+            Item::SplitStack => ("Split top and bottom", "Ctrl+Shift+D"),
             Item::NewTab => ("New tab", "Ctrl+Shift+T"),
-            Item::CloseTab => ("Close tab", "Ctrl+Shift+W"),
+            Item::ClosePane => ("Close pane", "Ctrl+Shift+W"),
         }
     }
 }
 
 /// The menu's lines from the top; None is a dividing line.
-const LINES: [Option<Item>; 5] = [Some(Item::Copy), Some(Item::Paste), None, Some(Item::NewTab), Some(Item::CloseTab)];
+const LINES: [Option<Item>; 8] = [Some(Item::Copy), Some(Item::Paste), None, Some(Item::SplitSide), Some(Item::SplitStack), None, Some(Item::NewTab), Some(Item::ClosePane)];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Menu {
@@ -121,10 +125,10 @@ mod tests {
     #[test]
     fn the_menu_stays_in_the_window() {
         let m = Menu::new(100.0, 80.0, (800.0, 600.0), true);
-        assert_eq!((m.area.x, m.area.y, m.area.w, m.area.h), (100.0, 80.0, 236.0, 129.0), "at the pointer where there is room");
+        assert_eq!((m.area.x, m.area.y, m.area.w, m.area.h), (100.0, 80.0, 236.0, 194.0), "at the pointer where there is room");
         let m = Menu::new(790.0, 590.0, (800.0, 600.0), true);
         assert_eq!((m.area.x + m.area.w, m.area.y + m.area.h), (800.0, 600.0), "moved in from the corner");
-        let m = Menu::new(50.0, 20.0, (120.0, 60.0), true);
+        let m = Menu::new(50.0, 20.0, (120.0, 100.0), true);
         assert_eq!((m.area.x, m.area.y), (0.0, 0.0), "a window smaller than the menu: from its corner");
     }
 
@@ -134,10 +138,13 @@ mod tests {
         assert_eq!(m.at(120.0, 90.0), Some(Item::Copy));
         assert_eq!(m.at(120.0, 84.0 + 28.0 + 5.0), Some(Item::Paste));
         assert_eq!(m.at(120.0, 84.0 + 56.0 + 4.0), None, "the dividing line");
-        assert_eq!(m.at(120.0, 84.0 + 65.0 + 5.0), Some(Item::NewTab));
-        assert_eq!(m.at(120.0, 84.0 + 93.0 + 27.0), Some(Item::CloseTab));
+        assert_eq!(m.at(120.0, 84.0 + 65.0 + 5.0), Some(Item::SplitSide));
+        assert_eq!(m.at(120.0, 84.0 + 93.0 + 5.0), Some(Item::SplitStack));
+        assert_eq!(m.at(120.0, 84.0 + 121.0 + 4.0), None, "the second dividing line");
+        assert_eq!(m.at(120.0, 84.0 + 130.0 + 5.0), Some(Item::NewTab));
+        assert_eq!(m.at(120.0, 84.0 + 158.0 + 27.0), Some(Item::ClosePane));
         assert_eq!((m.at(101.0, 90.0), m.at(400.0, 90.0)), (None, None), "the edge and beyond");
-        assert!(m.contains(101.0, 81.0) && !m.contains(99.0, 90.0) && !m.contains(120.0, 209.5));
+        assert!(m.contains(101.0, 81.0) && !m.contains(99.0, 90.0) && !m.contains(120.0, 274.5));
         // Nothing selected: Copy cannot be chosen, the rest can.
         let m = Menu::new(100.0, 80.0, (800.0, 600.0), false);
         assert_eq!((m.at(120.0, 90.0), m.at(120.0, 84.0 + 28.0 + 5.0)), (None, Some(Item::Paste)));

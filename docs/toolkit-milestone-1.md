@@ -484,7 +484,30 @@ borrowing. Nothing new comes in.
   join it with panes. Tests (2 new, 35 in `vterm`) green on Hubble,
   canary and Techbench; its picture checked from the CPU renderer, its
   use awaits a hand test.
-  Still to do in step 4: panes.
+- **Step 4, eighth part (2026-11-09): panes, and Ctrl+C and Ctrl+V.**
+  - `panes.rs`: a tab is a tree; a leaf is a terminal, a split divides
+    its room in two, side by side or one above the other. One bar of tabs
+    at the top, each tab with its own panes (Dave, 2026-11-09: "one tab
+    bar is fine"; tabs in each pane were the alternative).
+    Ctrl+Shift+R splits side by side, Ctrl+Shift+D top and bottom, both
+    also in the menu; a press makes a pane the one the keys go to (a
+    block cursor there, an outline in the others); the line between two
+    panes can be dragged (no pane below a tenth of its split); the wheel
+    is the pane's under the pointer; Ctrl+Shift+W, or the program
+    ending, closes the pane, its neighbour takes the room, and the tab
+    goes with its last pane. Selection, the scrollbar, mouse reporting
+    and the "lines back" label are each pane's own. `--panes N` opens
+    the first tab divided, for trying it. Three panes seen in a
+    screenshot on Hubble, each with its own shell and size.
+  - Ctrl+C copies when text is selected and lets the selection go; with
+    nothing selected it is the interrupt key as ever. Ctrl+V pastes
+    (Dave, 2026-11-09). The Ctrl+Shift forms still work. Given up for
+    it: the control character Ctrl+V sent (the shell's "next key as it
+    is", vim's block selection, for which vim also takes Ctrl+Q).
+  Tests (3 new, 38 in `vterm`) green on Hubble, canary and Techbench;
+  the pointer's and keys' part awaits a hand test.
+  Step 4's list is done; what is left of it is the hand tests and the
+  check against the first terminal's list (acceptance 4).
 
 ## Acceptance
 
