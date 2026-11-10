@@ -213,6 +213,34 @@ one.
   pass the settings' theme and draw a letter where there is still none.
   Tests green on all four (272 on the FreeBSD machines, 271 on Linux).
 
+- **Step 3, first part (2026-11-10): running applications on the
+  strip.**
+  - `vergence-shell`'s `running.rs`: the application a window belongs
+    to, by its class (the entry's id, the id's last part, its
+    StartupWMClass, its program's name; and a process name the system
+    cut to fifteen characters, which is how the settings app is known
+    until it names itself); one item for each application in the order
+    they started; each item's place under the apps button's. Tests.
+  - The server (`shelf.rs`): the windows in the order they were first
+    seen, each item's icon and mark drawn on the strip. The mark is on
+    the windows' side: short and grey for an application that is
+    running, long and in the accent for the one with the keyboard. An
+    application with no icon, or whose icon has not come yet, has a tile
+    with its name's first letter. `vctl shelf` lists the items.
+  - **Icons are found and decoded on a thread of the shelf's own**
+    (PNG through `image`, SVG through `resvg`, as the plan's Security
+    asks), at the pixels the screen needs (32 points times its scale),
+    kept by name and size; a file over 8 MB or a picture over 4096
+    pixels a side is not an icon. A file that never finished decoding
+    would cost that thread and leave a letter on the strip. The
+    applications are read again when a directory of desktop entries
+    changes.
+  - On Hubble: two terminals share the terminal's icon, the settings
+    app has its own with the accent mark when it has the keyboard, and
+    the toolkit's demo window, which no entry owns, has a "V".
+  Still to do in step 3: the name beside an icon the pointer rests on,
+  a click (focus and raise; a list for several windows), and minimise.
+
 ## Acceptance
 
 Every step: `cargo test --workspace` green on Hubble, canary and Techbench,

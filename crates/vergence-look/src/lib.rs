@@ -67,6 +67,10 @@ pub const SHELF_W: f32 = 48.0;
 pub const SHELF_ICON: f32 = 32.0;
 pub const SHELF: Rgb = Rgb(32, 35, 44);
 pub const SHELF_EDGE: Rgb = Rgb(64, 68, 80);
+/// The tile behind the letter of an application that has no icon.
+pub const SHELF_TILE: Rgb = Rgb(70, 78, 98);
+/// The accent, where the user's settings name none: the cursor's blue.
+pub const ACCENT: Rgb = Rgb(114, 159, 207);
 
 /// A menu's ground, its text, and its text for what cannot be chosen.
 pub const MENU: Rgb = Rgb(43, 46, 59);

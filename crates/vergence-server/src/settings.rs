@@ -237,6 +237,8 @@ impl Server {
                     state.notify_restyle();
                 }
             }
+            // Applications installed or removed since the last look (shelf.rs).
+            state.shelf_tick();
             TimeoutAction::ToDuration(std::time::Duration::from_secs(1))
         });
         if let Err(e) = res {
