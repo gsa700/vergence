@@ -192,7 +192,9 @@ pub(crate) struct Prepared<'a> {
     order: Order,
 }
 
-pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u32, h: u32, order: Order) -> Prepared<'a> {
+/// `banded`: note each shape against the bands of rows it touches, which
+/// only this renderer needs (the GPU's draws the shapes in their order).
+pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u32, h: u32, order: Order, banded: bool) -> Prepared<'a> {
     let faces: Vec<Option<FaceId>> = scene.fonts.iter().map(|f| fonts.face(&f.family, f.weight, f.italic)).collect();
     let whole = [0, 0, w as i32, h as i32];
     let mut prims: Vec<Prim> = Vec::with_capacity(scene.commands.len());
@@ -266,8 +268,8 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
             }
         }
     }
-    let mut bands = vec![Vec::new(); (h as usize).div_ceil(BAND)];
-    for (i, p) in prims.iter().enumerate() {
+    let mut bands = vec![Vec::new(); if banded { (h as usize).div_ceil(BAND) } else { 0 }];
+    for (i, p) in prims.iter().enumerate().filter(|_| banded) {
         for band in p.bounds[1] as usize / BAND..=(p.bounds[3] as usize - 1) / BAND {
             bands[band].push(i as u32);
         }
@@ -469,7 +471,7 @@ impl Cpu {
         if rows.is_empty() {
             return Ok(());
         }
-        let prepared = prepare(scene, fonts, scale, w, h, into.order);
+        let prepared = prepare(scene, fonts, scale, w, h, into.order, true);
         let stride = w as usize * 4;
         let a = background.a as u32;
         let ground = straight(&background, into.order);

@@ -544,17 +544,60 @@ borrowing. Nothing new comes in.
   `tools/vterm-stress/run.sh [minutes]` opens one `vterm` with the six
   tabs through `vctl` and writes a line a minute: the rates, the memory,
   and each thread's share of a core (the parsing threads are named
-  `parse`). First figures on Hubble, six tabs at once, a window of
-  1091 x 699 units on the 4K at 30 Hz, a video playing in Firefox beside
-  it: `seq 1 1000000` 0.69 to 0.75 s; colour 11,500 to 12,600 lines/s;
-  cursor 6,200 to 6,800 batches/s, **under acceptance 5's 10,000**;
-  Unicode about 225,000 lines/s; the interface thread 3% with btop shown;
-  175 MB. The machine was full (13% idle, 46% in the kernel carrying
-  terminal bytes). Each job alone: cursor 19,500 batches/s, colour 36,000
-  lines/s, the interface thread 10% (cursor shown) and 15% (colour
-  shown), the second **over acceptance 5's 10%**. Still to do: the
-  hour's soak (running as this is written), the tab-click test, the runs
-  on canary and Techbench, the install.
+  `parse`). **The first figures written here (commit 17ea6fd) were
+  wrong** and are withdrawn: the flood jobs asked the terminal's size
+  once, as they started, when it was still 80 x 24, so "full-width"
+  colour lines were 80 columns; and the interface thread's share for a
+  job alone was read from an average that included starting up. The
+  jobs now ask the size every second and report it.
+- **Step 5, the soak (2026-11-10).** Six tabs for 62 minutes on Hubble.
+  Memory flat: 175.3 MB in the first minute, 175.6 MB from the 13th to
+  the last. The interface thread 3 to 4% throughout (btop shown). No
+  crash; nothing in the kernel log but the profiler's own notices. The
+  server logged 25 slow frames (21 to 165 ms), every one in a minute
+  when test windows were being opened and closed, screenshots taken or
+  a profile recorded beside the soak, none in the stretches left alone:
+  "no slow frames" is **not shown** and needs a run nobody disturbs.
+- **Step 5, the interface thread (2026-11-10).** Measured properly: one
+  tab, the colour flood at full width (135 x 38 cells, 21,700 lines/s),
+  a quiet machine, 30 Hz, CPU time by the frame (`VTERM_FRAMES=1`
+  counts frames). At 17ea6fd: 6.5 ms a frame, **19.5% of a core**.
+  With this part: 5.0 ms, **15.0%**. Acceptance 5 asks for under 10%:
+  **not met.** What this part did:
+  - `vergence-text`: the glyph cache has a quick front, 2,048 places
+    each holding the glyph last asked for there, so a frame's glyphs
+    skip the cache's own hash (kept as it is: its keys can come from a
+    program that means harm).
+  - `vergence-render`: the bands of rows are worked out only for the
+    CPU renderer, which is the one that uses them; the atlas's lookup by
+    address has a one-multiplication hash; an instance is put together
+    and added whole.
+  - `vterm`: the parsing thread leaves its news (draw; title, clipboard
+    or exit) in an atomic, so the window no longer takes a flooding
+    terminal's lock at every wake to learn "draw"; a plain character's
+    font and glyph are found once a frame; the scene's list starts at
+    the last frame's length. `--maximized` opens the window filling its
+    screen (asked after the first frame; before it, the server's
+    remembered place wins).
+  What is left is in the shape of things: a cell with colours of its
+  own is two commands, two prepared shapes and two 128-byte instances,
+  and the window waits for the parser's lock to draw. The next piece of
+  toolkit work is a primitive for a grid of cells (scene, both
+  renderers, the shader), and drawing from a copy of the screen taken
+  under a short lock.
+- **Found by the stress test, not yet fixed: a tab that is not shown
+  keeps the size it started with** (80 x 24) until it is looked at; only
+  the terminals drawn are fitted to the window. So in the six-tab run
+  the three floods behind btop ran at 80 x 24: `seq 1 1000000` 0.71 to
+  0.74 s; colour 12,400 to 12,600 lines/s of 80 columns; cursor 6,700
+  batches/s, **under acceptance 5's 10,000**; Unicode 220,000 lines/s;
+  the interface thread 8% with this part's build (the machine full: the
+  jobs, the kernel carrying their bytes, a video in Firefox). The
+  six-tab figures at the window's real size wait for that fix. Each job
+  alone at 80 columns: cursor 19,500 batches/s, colour 36,000 lines/s;
+  colour at 135 columns, 21,700 lines/s.
+  Still to do in step 5: an undisturbed soak, the tab-click test, the
+  runs on canary and Techbench, the install.
 
 ## Acceptance
 

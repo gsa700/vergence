@@ -103,7 +103,10 @@ struct Loaded {
     units: f32,
 }
 
-#[derive(PartialEq, Eq, Hash)]
+/// How many glyphs the cache's quick front holds (a power of two).
+const FRONT: usize = 2048;
+
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 struct GlyphKey {
     face: FaceId,
     glyph: u32,
@@ -120,6 +123,13 @@ pub struct Fonts {
     /// The face and glyph that stand in for a character a face lacks.
     fallbacks: HashMap<(FaceId, char), (FaceId, u32)>,
     cache: HashMap<GlyphKey, Option<Arc<Bitmap>>>,
+    /// The glyphs asked for most lately, each at the one place its key
+    /// maps to: a frame of text asks for the same few hundred again and
+    /// again, and finds them here without the cache's own, slower, hash
+    /// (which stays as it is: its keys come from scenes, which may come
+    /// from a program that means harm, and it does not degrade under
+    /// chosen keys). A miss here costs nothing but that lookup.
+    front: Vec<Option<(GlyphKey, Option<Arc<Bitmap>>)>>,
     cache_bytes: usize,
 }
 
@@ -130,7 +140,7 @@ impl Fonts {
     }
 
     pub fn new(db: FontDb) -> Fonts {
-        Fonts { db, loaded: Vec::new(), by_entry: HashMap::new(), fallbacks: HashMap::new(), cache: HashMap::new(), cache_bytes: 0 }
+        Fonts { db, loaded: Vec::new(), by_entry: HashMap::new(), fallbacks: HashMap::new(), cache: HashMap::new(), front: vec![None; FRONT], cache_bytes: 0 }
     }
 
     pub fn db(&self) -> &FontDb {
@@ -255,16 +265,28 @@ impl Fonts {
             return None;
         }
         let key = GlyphKey { face, glyph, size: (em_px * 64.0).round() as u32, sub_x: sub_x & 3 };
-        if !self.cache.contains_key(&key) {
-            let bitmap = self.rasterise(face, glyph, key.size as f32 / 64.0, key.sub_x).map(Arc::new);
-            if self.cache_bytes > MAX_CACHE_BYTES {
-                self.cache.clear();
-                self.cache_bytes = 0;
-            }
-            self.cache_bytes += bitmap.as_ref().map_or(0, |b| b.alpha.len()) + 64;
-            self.cache.insert(GlyphKey { face, glyph, size: key.size, sub_x: key.sub_x }, bitmap);
+        let slot = (glyph.wrapping_mul(0x9e37_79b1) ^ key.size.wrapping_mul(0x85eb_ca6b) ^ ((face.0 as u32) << 7) ^ key.sub_x as u32) as usize >> 3 & (FRONT - 1);
+        if let Some((k, bitmap)) = &self.front[slot]
+            && *k == key
+        {
+            return bitmap.clone();
         }
-        self.cache.get(&key).and_then(Option::clone)
+        let bitmap = match self.cache.get(&key) {
+            Some(known) => known.clone(),
+            None => {
+                let bitmap = self.rasterise(face, glyph, key.size as f32 / 64.0, key.sub_x).map(Arc::new);
+                if self.cache_bytes > MAX_CACHE_BYTES {
+                    self.cache.clear();
+                    self.front.fill(None);
+                    self.cache_bytes = 0;
+                }
+                self.cache_bytes += bitmap.as_ref().map_or(0, |b| b.alpha.len()) + 64;
+                self.cache.insert(key, bitmap.clone());
+                bitmap
+            }
+        };
+        self.front[slot] = Some((key, bitmap.clone()));
+        bitmap
     }
 
     fn rasterise(&self, face: FaceId, glyph: u32, em_px: f32, sub_x: u8) -> Option<Bitmap> {

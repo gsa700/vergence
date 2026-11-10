@@ -219,8 +219,31 @@ struct Atlas {
     y: i32,
     row: i32,
     /// A bitmap (by its address, kept alive here so the address stays its own) and its place.
-    places: HashMap<usize, (i32, i32)>,
+    places: HashMap<usize, (i32, i32), std::hash::BuildHasherDefault<AddressHasher>>,
     held: Vec<Arc<Bitmap>>,
+}
+
+/// The hash of the atlas's keys: one multiplication. They are addresses of
+/// bitmaps this process holds, which no scene can choose, and the atlas is
+/// asked once for every glyph of every frame.
+#[derive(Default)]
+struct AddressHasher(u64);
+
+impl std::hash::Hasher for AddressHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.write_usize(self.0 as usize ^ *b as usize);
+        }
+    }
+
+    fn write_usize(&mut self, n: usize) {
+        let h = (n as u64 ^ self.0.rotate_left(29)).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        self.0 = h ^ (h >> 32);
+    }
 }
 
 impl Atlas {
@@ -407,7 +430,7 @@ impl Gpu {
                 vertex_array,
                 buffer,
                 size_uniform,
-                atlas: Atlas { texture: atlas_texture, size, x: 0, y: 0, row: 0, places: HashMap::new(), held: Vec::new() },
+                atlas: Atlas { texture: atlas_texture, size, x: 0, y: 0, row: 0, places: HashMap::default(), held: Vec::new() },
                 target: None,
                 blank,
             })
@@ -591,7 +614,7 @@ impl Gpu {
     fn frame(&mut self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color, read: bool, into: Option<u32>) -> Result<Pixmap, GpuError> {
         let (w, h) = pixel_size(scene, scale)?;
         scene.validate().map_err(RenderError::from)?;
-        let prepared = prepare(scene, fonts, scale, w, h, Order::Rgba);
+        let prepared = prepare(scene, fonts, scale, w, h, Order::Rgba, false);
         // SAFETY: the context is made current on this thread for the calls that follow.
         unsafe {
             if (self.egl.eglMakeCurrent)(self.display, std::ptr::null_mut(), std::ptr::null_mut(), self.context) == 0 {
@@ -716,14 +739,23 @@ impl Gpu {
                 [one] => (rect(one), [one.radius, 1.0, 0.0, 0.0]),
                 _ => return Err(GpuError::Unsupported("a shape inside more than one rounded clip")),
             };
-            data.extend_from_slice(&[p.bounds[0] as f32, p.bounds[1] as f32, p.bounds[2] as f32, p.bounds[3] as f32]);
-            data.extend_from_slice(&shape);
-            data.extend_from_slice(&inner);
-            data.extend_from_slice(&param);
-            data.extend(p.color.iter().map(|c| *c as f32 / 255.0));
-            data.extend_from_slice(&uv);
-            data.extend_from_slice(&clip);
-            data.extend_from_slice(&clip_param);
+            // One instance, put together and then added whole: the list is grown
+            // and checked once for it, not once for each of its eight parts.
+            let mut instance = [0.0f32; FLOATS];
+            let parts: [[f32; 4]; 8] = [
+                [p.bounds[0] as f32, p.bounds[1] as f32, p.bounds[2] as f32, p.bounds[3] as f32],
+                shape,
+                inner,
+                param,
+                [p.color[0] as f32 / 255.0, p.color[1] as f32 / 255.0, p.color[2] as f32 / 255.0, p.color[3] as f32 / 255.0],
+                uv,
+                clip,
+                clip_param,
+            ];
+            for (to, part) in instance.chunks_exact_mut(4).zip(parts) {
+                to.copy_from_slice(&part);
+            }
+            data.extend_from_slice(&instance);
             match (image, batches.last_mut()) {
                 (None, Some(b)) if b.image.is_none() => b.count += 1,
                 _ => batches.push(Batch { first: i, count: 1, image }),

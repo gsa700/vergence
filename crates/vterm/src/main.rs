@@ -69,7 +69,7 @@ use std::{
     io::Write,
     sync::{
         Arc, Mutex, MutexGuard,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -365,7 +365,17 @@ struct Session {
     screen: Arc<Mutex<Screen>>,
     pty: pty::Pty,
     title: String,
+    /// What the parsing thread has to say since the window last looked
+    /// ([`NEWS_DRAW`], [`NEWS_STATE`]), kept outside the screen's lock: a
+    /// terminal in a flood holds that nearly all the time, and the window
+    /// would wait for it at every wake only to learn "draw me".
+    news: Arc<AtomicU8>,
 }
+
+/// The screen changed: a frame is wanted if this terminal is in front.
+const NEWS_DRAW: u8 = 1;
+/// The title, the clipboard or the program's life changed: look into the screen.
+const NEWS_STATE: u8 = 2;
 
 impl Session {
     /// Starts the user's shell on a new terminal of cols x rows. Its output
@@ -377,14 +387,21 @@ impl Session {
         let mut replies = reader.try_clone()?;
         let screen = Arc::new(Mutex::new(Screen { grid: Grid::new(cols, rows), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None, selection: None }));
         let shared = screen.clone();
+        let news = Arc::new(AtomicU8::new(0));
+        let said = news.clone();
         // Named, so that a look at the threads says which is parsing.
         std::thread::Builder::new().name("parse".into()).spawn(move || {
             pty::read_loop(reader, |bytes| {
-                let out = {
+                let (out, bits) = {
                     let mut guard = lock(&shared);
                     let s = &mut *guard;
                     let (before, alt) = (s.grid.pushed, s.grid.alt);
+                    let title = s.grid.title.clone();
                     s.parser.advance(&mut s.grid, &bytes);
+                    let mut bits = if std::mem::take(&mut s.grid.dirty) { NEWS_DRAW } else { 0 };
+                    if s.grid.title != title {
+                        bits |= NEWS_STATE;
+                    }
                     if s.grid.alt != alt {
                         // Another screen: what was selected is not on it.
                         s.selection = None;
@@ -400,9 +417,11 @@ impl Session {
                     s.clamp_scroll();
                     if let Some(text) = s.grid.clipboard.take() {
                         s.copied = Some(text);
+                        bits |= NEWS_STATE;
                     }
-                    std::mem::take(&mut s.grid.out)
+                    (std::mem::take(&mut s.grid.out), bits)
                 };
+                said.fetch_or(bits, Ordering::SeqCst);
                 if !out.is_empty() {
                     let _ = replies.write_all(&out);
                 }
@@ -410,9 +429,10 @@ impl Session {
                 true
             });
             lock(&shared).exited = true;
+            said.fetch_or(NEWS_STATE, Ordering::SeqCst);
             waker.wake();
         })?;
-        Ok(Session { screen, pty, title: String::new() })
+        Ok(Session { screen, pty, title: String::new(), news })
     }
 
     fn label(&self) -> String {
@@ -495,6 +515,10 @@ struct Terminal {
     /// many panes in the first (`--panes N`), for trying things out.
     open_with: usize,
     open_panes: usize,
+    /// `--maximized`: the window is to fill its screen as soon as it is open.
+    open_maximized: bool,
+    /// How many commands the last frame's scene held.
+    last_commands: usize,
 }
 
 impl Terminal {
@@ -526,6 +550,8 @@ impl Terminal {
             settings_changed: Arc::new(AtomicBool::new(false)),
             open_with: 1,
             open_panes: 1,
+            open_maximized: false,
+            last_commands: 0,
         }
     }
 
@@ -994,6 +1020,9 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
     let (cw, ch) = (mt.cell_w, mt.cell_h);
     let (left, first) = (area.x + PAD, area.y + PAD);
     let (selection, top_line) = (s.selection, s.top_line());
+    // The font and glyph of each plain character, regular and bold, found once
+    // a frame: a screen of text asks for the same hundred some thousands of times.
+    let mut plain: [[Option<(u32, u32)>; 128]; 2] = [[None; 128]; 2];
     scene.push_clip(area, 0.0);
     for r in 0..s.grid.rows {
         let line = s.shown(r);
@@ -1040,8 +1069,17 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
                 fg.a = 153;
             }
             let own = if st.bold { mt.bold } else { mt.regular };
-            let (face, glyph) = fonts.glyph(own, cell.c);
-            let font = font_number(scene, fonts, numbers, face);
+            let (font, glyph) = match plain[st.bold as usize].get_mut(cell.c as usize) {
+                Some(Some(known)) => *known,
+                slot => {
+                    let (face, glyph) = fonts.glyph(own, cell.c);
+                    let found = (font_number(scene, fonts, numbers, face), glyph);
+                    if let Some(slot) = slot {
+                        *slot = Some(found);
+                    }
+                    found
+                }
+            };
             put(scene, font, fg, Glyph { id: glyph, x: col as f32 * cw, y: 0.0 });
             // Combining marks, drawn on the character. Fonts make them one of two ways:
             // with no advance, drawn back over what came before the pen (so the pen
@@ -1130,6 +1168,13 @@ impl App for Terminal {
     }
 
     fn woken(&mut self, window: &mut Window) {
+        // Asked once the window has shown a frame: a request made before the
+        // server has placed the window is lost to the place it remembers.
+        if self.open_maximized && self.last_commands > 0 {
+            self.open_maximized = false;
+            self.maximized = true;
+            window.set_maximized(true);
+        }
         if self.settings_changed.swap(false, Ordering::SeqCst) {
             // Colours, fonts and the buttons' side as they are now; the cell's size is
             // worked out again at the next frame, and the grids follow it.
@@ -1138,20 +1183,23 @@ impl App for Terminal {
             self.metrics = None;
             window.redraw();
         }
-        // Panes whose program has ended go; a tab goes with its last pane, the window with its last tab.
-        loop {
-            let ended = self.tabs.iter().enumerate().find_map(|(index, tab)| tab.panes.iter().find(|(_, s)| lock(&s.screen).exited).map(|(id, _)| (index, *id)));
-            let Some((index, id)) = ended else { break };
-            self.close_pane(index, id, window);
-            if self.tabs.is_empty() {
-                return;
-            }
-        }
+        // Each terminal's news, taken without its screen's lock; only one whose
+        // title, clipboard or program's life changed is looked into.
         let shown = self.shown;
+        let mut ended = false;
         for (index, tab) in self.tabs.iter_mut().enumerate() {
             let active = tab.active;
             for (id, session) in tab.panes.iter_mut() {
+                let news = session.news.swap(0, Ordering::SeqCst);
+                // Only the tab in front is drawn: output in the others costs no frame.
+                if news & NEWS_DRAW != 0 && index == shown {
+                    window.redraw();
+                }
+                if news & NEWS_STATE == 0 {
+                    continue;
+                }
                 let mut s = lock(&session.screen);
+                ended |= s.exited;
                 if let Some(text) = s.copied.take() {
                     window.copy(&text);
                 }
@@ -1163,10 +1211,15 @@ impl App for Terminal {
                         window.set_title(if session.title.is_empty() { "Terminal" } else { &session.title });
                     }
                 }
-                // Only the tab in front is drawn: output in the others costs no frame.
-                if std::mem::take(&mut s.grid.dirty) && index == shown {
-                    window.redraw();
-                }
+            }
+        }
+        // Panes whose program has ended go; a tab goes with its last pane, the window with its last tab.
+        while ended {
+            let gone = self.tabs.iter().enumerate().find_map(|(index, tab)| tab.panes.iter().find(|(_, s)| lock(&s.screen).exited).map(|(id, _)| (index, *id)));
+            let Some((index, id)) = gone else { break };
+            self.close_pane(index, id, window);
+            if self.tabs.is_empty() {
+                return;
             }
         }
     }
@@ -1382,7 +1435,13 @@ impl App for Terminal {
 
     fn scene(&mut self, frame: &Frame, fonts: &mut Fonts) -> Scene {
         (self.width, self.height) = (frame.width, frame.height);
+        // For measuring: VTERM_FRAMES=1 writes the count of frames every thirtieth.
+        if frame.number % 30 == 0 && std::env::var_os("VTERM_FRAMES").is_some() {
+            eprintln!("frame {}", frame.number);
+        }
         let mut scene = Scene::new(frame.width, frame.height);
+        // Room for as much as the last frame held, so the list is not grown step by step.
+        scene.commands.reserve(self.last_commands);
         scene.fill(Rect::new(0.0, 0.0, frame.width, frame.height), self.palette.bg);
         let size = self.settings.mono_size;
         if self.metrics.is_none() {
@@ -1449,6 +1508,7 @@ impl App for Terminal {
         if let Some(menu) = &self.menu {
             menu.draw(&mut scene, fonts, mt.ui, self.settings.ui_size, p.accent, self.menu_hover);
         }
+        self.last_commands = scene.commands.len();
         scene
     }
 }
@@ -1466,6 +1526,7 @@ fn main() {
     if let Some(n) = args.iter().position(|a| a == "--panes").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<usize>().ok()) {
         terminal.open_panes = n.clamp(1, 16);
     }
+    terminal.open_maximized = args.iter().any(|a| a == "--maximized");
     if let Err(e) = vergence_ui::run(&mut terminal, (820, 520)) {
         eprintln!("vterm: {e}");
         std::process::exit(1);
