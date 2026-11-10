@@ -29,14 +29,16 @@
 //! The mouse selects text (select.rs): a drag by characters, a second press
 //! by words, a third by lines, Shift and a press to extend; held past the
 //! top or bottom edge the view scrolls under it. Ctrl+Shift+C copies. A
-//! program that asked for the mouse keeps it unless Shift is held.
-//! Panes, mouse reporting, the scrollbar and the settings followed live
-//! come next.
+//! program that asked for the mouse gets it (mouse.rs: presses, releases,
+//! moves and the wheel, as xterm reports them) unless Shift is held, which
+//! keeps the mouse for selecting.
+//! Panes, the scrollbar and the settings followed live come next.
 
 mod bar;
 #[allow(dead_code)]
 #[path = "../../vergence-term/src/grid.rs"]
 mod grid;
+mod mouse;
 #[allow(dead_code)]
 #[path = "../../vergence-term/src/pty.rs"]
 mod pty;
@@ -223,9 +225,16 @@ impl Screen {
     /// The cell under a point of the window, as a selection counts it;
     /// points outside the cells count as the nearest one.
     fn cell_at(&self, x: f32, y: f32, cell_w: f32, cell_h: f32) -> Pos {
+        let (col, row) = self.screen_cell(x, y, cell_w, cell_h);
+        (col, self.top_line() + row)
+    }
+
+    /// The column and row of the screen under a point of the window (what
+    /// mouse reporting tells the program); the nearest, for points outside.
+    fn screen_cell(&self, x: f32, y: f32, cell_w: f32, cell_h: f32) -> (usize, usize) {
         let col = ((x - PAD) / cell_w).floor().max(0.0) as usize;
         let row = ((y - BAR_H - PAD) / cell_h).floor().max(0.0) as usize;
-        (col.min(self.grid.cols - 1), self.top_line() + row.min(self.grid.rows - 1))
+        (col.min(self.grid.cols - 1), row.min(self.grid.rows - 1))
     }
 
     /// Moves the end of the selection being dragged; true if that changed it.
@@ -337,6 +346,12 @@ struct Terminal {
     /// The selection is held past the top (true) or bottom edge, at this column: the view scrolls.
     edge: Option<(bool, usize)>,
     edge_tick: Instant,
+    /// Shift is down: the mouse selects even where a program has asked for it.
+    shift: bool,
+    /// The button the program was told is down, until it is told it is up.
+    reported: Option<Button>,
+    /// The screen cell the program was last told the pointer is on.
+    reported_cell: Option<(usize, usize)>,
     /// How many tabs to open with (`--tabs N`; one unless asked).
     open_with: usize,
 }
@@ -361,6 +376,9 @@ impl Terminal {
             presses: None,
             edge: None,
             edge_tick: Instant::now(),
+            shift: false,
+            reported: None,
+            reported_cell: None,
             open_with: 1,
         }
     }
@@ -414,8 +432,9 @@ impl Terminal {
         let Some(session) = self.sessions.get(self.shown) else { return };
         let mut guard = lock(&session.screen);
         let s = &mut *guard;
-        // A program that asked for the mouse has it; Shift takes it back.
-        if s.grid.mouse != MouseMode::Off && !m.shift {
+        // A program that asked for the mouse has it (report()); Shift takes it
+        // back, and scrolled back the text under the pointer is ours.
+        if s.grid.mouse != MouseMode::Off && !m.shift && s.scroll == 0 {
             return;
         }
         let pos = s.cell_at(x, y, cw, ch);
@@ -432,6 +451,30 @@ impl Terminal {
         }
         self.selecting = true;
         window.redraw();
+    }
+
+    /// Tells the front tab's program about a mouse event at a point of the
+    /// window, if it asked for such events and Shift is not keeping the
+    /// mouse for selecting. True if the event was the program's.
+    fn report(&mut self, action: mouse::Action, x: f32, y: f32, m: Modifiers) -> bool {
+        let Some((cw, ch)) = self.metrics.as_ref().map(|mt| (mt.cell_w, mt.cell_h)) else { return false };
+        let Some(session) = self.sessions.get_mut(self.shown) else { return false };
+        let s = lock(&session.screen);
+        if s.grid.mouse == MouseMode::Off || s.scroll > 0 {
+            // Scrolled back, what is under the pointer is not the program's screen.
+            return false;
+        }
+        let cell = s.screen_cell(x, y, cw, ch);
+        if matches!(action, mouse::Action::Motion(_)) && self.reported_cell == Some(cell) {
+            return true;
+        }
+        let bytes = mouse::bytes(s.grid.mouse, s.grid.mouse_sgr, action, cell, m);
+        drop(s);
+        self.reported_cell = Some(cell);
+        if let Some(bytes) = bytes {
+            session.pty.write(&bytes);
+        }
+        true
     }
 
     /// The pointer moved with the button held on the text.
@@ -586,12 +629,24 @@ impl App for Terminal {
     }
 
     fn input(&mut self, input: &Input, window: &mut Window) {
+        const SHIFT_L: u32 = 0xffe1;
+        const SHIFT_R: u32 = 0xffe2;
+        match input {
+            // The key itself says Shift went down or up; a button says how things stand.
+            Input::Key { sym: SHIFT_L | SHIFT_R, pressed, repeat: false, .. } => self.shift = *pressed,
+            Input::Button { modifiers, .. } => self.shift = modifiers.shift,
+            Input::Focus(false) => self.shift = false,
+            _ => {}
+        }
         match input {
             Input::PointerMoved { x, y } if self.selecting => self.drag_text(*x, *y, window),
             Input::PointerMoved { x, y } => {
                 let part = self.layout().at(*x, *y);
-                self.over_pane = part.is_none();
-                window.set_cursor(if part.is_none() { Cursor::Text } else { Cursor::Default });
+                self.over_pane = part.is_none() && *y >= BAR_H;
+                // A program with the mouse hears where the pointer is (if it asked for moves),
+                // and while a button it was told of is held, wherever the pointer goes.
+                let theirs = !self.shift && (self.over_pane || self.reported.is_some()) && self.report(mouse::Action::Motion(self.reported), *x, *y, Modifiers::default());
+                window.set_cursor(if part.is_some() || theirs { Cursor::Default } else { Cursor::Text });
                 if part != self.hover {
                     self.hover = part;
                     window.redraw();
@@ -615,7 +670,14 @@ impl App for Terminal {
                 }
                 window.redraw();
             }
+            Input::Button { button, pressed: false, x, y, modifiers } if self.reported == Some(*button) => {
+                self.reported = None;
+                self.report(mouse::Action::Release(*button), *x, *y, *modifiers);
+            }
             Input::Button { button, pressed: true, x, y, modifiers } => match (button, self.layout().at(*x, *y)) {
+                (_, None) if *y >= BAR_H && !modifiers.shift && self.reported.is_none() && self.report(mouse::Action::Press(*button), *x, *y, *modifiers) => {
+                    self.reported = Some(*button);
+                }
                 (Button::Left, None) if *y >= BAR_H => self.press_text(*x, *y, *modifiers, window),
                 (Button::Left, Some(Part::Button(WinButton::Close))) => window.close(),
                 (Button::Left, Some(Part::Button(WinButton::Minimize))) => window.minimize(),
@@ -680,9 +742,19 @@ impl App for Terminal {
                 let bytes = if bracketed { format!("\x1b[200~{text}\x1b[201~") } else { text };
                 session.pty.write(bytes.as_bytes());
             }
-            Input::Scroll { dy, .. } if self.over_pane => {
-                let Some(session) = self.sessions.get_mut(self.shown) else { return };
+            Input::Scroll { x, y, dy, .. } if self.over_pane => {
                 let notches = (dy / 15.0).round() as isize;
+                // A program with the mouse gets the wheel, a report for each notch.
+                if !self.shift && notches != 0 {
+                    let action = if notches < 0 { mouse::Action::WheelUp } else { mouse::Action::WheelDown };
+                    if self.report(action, *x, *y, Modifiers::default()) {
+                        for _ in 1..notches.unsigned_abs().min(20) {
+                            self.report(action, *x, *y, Modifiers::default());
+                        }
+                        return;
+                    }
+                }
+                let Some(session) = self.sessions.get_mut(self.shown) else { return };
                 let mut s = lock(&session.screen);
                 if s.grid.alt {
                     // A full-screen program has no scrollback: the wheel is its arrow keys.

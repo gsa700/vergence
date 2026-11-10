@@ -434,9 +434,19 @@ borrowing. Nothing new comes in.
   that needs a protocol the toolkit does not speak yet.
   Tests (4 new, 27 in `vterm`) green on Hubble, canary and Techbench; the
   pointer's part awaits a hand test.
-  Still to do in step 4: panes, mouse reporting, the scrollbar, the
-  right-click menu, settings followed live, and combining marks kept on
-  their cell.
+- **Step 4, fourth part (2026-11-09): mouse reporting.** `mouse.rs`:
+  xterm's modes 9, 1000, 1002 and 1003 in the SGR (1006) and the old
+  encoding, as the first terminal sent them. A program that asked for the
+  mouse is told of presses and releases of the three buttons (a release
+  wherever the pointer has gone), of moves from cell to cell if its mode
+  asks, and of each notch of the wheel. Shift keeps the mouse for
+  selecting; so does a view scrolled back, where what is under the
+  pointer is not the program's screen. The pointer is an arrow over a
+  program that has the mouse, a text bar otherwise. Tests (2 new, 29 in
+  `vterm`) green on Hubble, canary and Techbench; awaits a hand test in
+  `mc` and `htop`.
+  Still to do in step 4: panes, the scrollbar, the right-click menu,
+  settings followed live, and combining marks kept on their cell.
 
 ## Acceptance
 
