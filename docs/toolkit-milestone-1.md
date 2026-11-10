@@ -508,6 +508,25 @@ borrowing. Nothing new comes in.
   the pointer's and keys' part awaits a hand test.
   Step 4's list is done; what is left of it is the hand tests and the
   check against the first terminal's list (acceptance 4).
+- **Step 4, ninth part (2026-11-10): the check against the first
+  terminal.** Dave's hand tests of the pointer and keys are done. The
+  first terminal's code (main.rs, term.rs, look.rs) read against
+  `vterm`'s; four things were missing and are in now:
+  - Shift+Home and Shift+End go to the two ends of the scrollback.
+  - On the alternate screen Shift+PageUp/PageDown/Home/End are the
+    program's (they were swallowed).
+  - Ctrl+Tab and Ctrl+Shift+Tab change tab, as Ctrl+PageDown/PageUp do.
+  - The desktop's appearance from desktop.toml: `color-scheme = "light"`
+    (Catppuccin Latte, or Tango on white), `contrast = "high"` (text on
+    pure black or white), `accent` (cursor, selection, highlights); live
+    like the rest. Seen in screenshots on Hubble with a throwaway
+    configuration.
+  Left as it is on purpose: the first terminal dropped typed text that
+  contained a control character, a guard against what iced handed it.
+  Here the text comes from xkbcommon, whose control characters are the
+  ones xterm sends (Ctrl+2 is NUL, Ctrl+3 to Ctrl+7 are 0x1b to 0x1f);
+  dropping them would take those keys away.
+  Tests (2 new, 40 in `vterm`) green on Hubble, canary and Techbench.
 
 ## Acceptance
 

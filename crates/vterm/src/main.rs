@@ -23,9 +23,10 @@
 //! So far: terminals in tabs under a bar of the window's own (bar.rs), with
 //! the window's buttons on the side the desktop's settings say and tabs
 //! that shrink to fit; typing, paste, the scrollback (wheel,
-//! Shift+PageUp/PageDown), resizing, titles, the program's own copies (OSC
+//! Shift+PageUp/PageDown, Shift+Home/End), resizing, titles, the program's own copies (OSC
 //! 52), the fonts and colour scheme from the desktop's settings. Ctrl+Shift+T
-//! opens a tab, Ctrl+Shift+W closes one, Ctrl+PageUp/PageDown change tab.
+//! opens a tab, Ctrl+Shift+W closes one, Ctrl+PageUp/PageDown and
+//! Ctrl+Tab/Ctrl+Shift+Tab change tab.
 //! The mouse selects text (select.rs): a drag by characters, a second press
 //! by words, a third by lines, Shift and a press to extend; held past the
 //! top or bottom edge the view scrolls under it. Ctrl+Shift+C copies. A
@@ -187,23 +188,64 @@ const CATPPUCCIN: Palette = Palette {
     ansi: [0x45475a, 0xf38ba8, 0xa6e3a1, 0xf9e2af, 0x89b4fa, 0xf5c2e7, 0x94e2d5, 0xbac2de, 0x585b70, 0xf38ba8, 0xa6e3a1, 0xf9e2af, 0x89b4fa, 0xf5c2e7, 0x94e2d5, 0xa6adc8],
 };
 
-/// The scheme chosen in desktop.toml (`[terminal] scheme = "tango"`), as the
-/// first terminal reads it; Catppuccin if nothing is.
-fn palette() -> Palette {
-    let text = config("desktop.toml");
+/// Tango on white, for the light desktop.
+const TANGO_LIGHT: Palette = Palette { bg: rgb(0xffffff), fg: rgb(0x2e3436), accent: rgb(0x3465a4), ansi: TANGO.ansi };
+
+/// Catppuccin Latte, the light one.
+const LATTE: Palette = Palette {
+    bg: rgb(0xeff1f5),
+    fg: rgb(0x4c4f69),
+    accent: rgb(0x1e66f5),
+    ansi: [0x5c5f77, 0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xacb0be, 0x6c6f85, 0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xbcc0cc],
+};
+
+/// "#rrggbb" -> a colour.
+fn parse_rgb(s: &str) -> Option<Color> {
+    let h = s.trim().strip_prefix('#')?;
+    (h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit())).then(|| rgb(u32::from_str_radix(h, 16).unwrap_or(0)))
+}
+
+/// The colours desktop.toml asks for, as the first terminal reads it:
+/// `[terminal] scheme` chooses Tango or Catppuccin (Catppuccin if nothing
+/// does); under `[appearance]`, `color-scheme = "light"` the light one of
+/// the pair, `contrast = "high"` the text on pure black or white, and
+/// `accent = "#rrggbb"` the colour of the cursor, the selection and the
+/// highlights.
+fn palette_from(text: &str) -> Palette {
+    let (mut tango, mut light, mut high, mut accent) = (false, false, false, None);
     let mut section = "";
     for line in text.lines().map(str::trim) {
         if line.starts_with('[') {
             section = line;
-        } else if section == "[terminal]"
-            && let Some((key, value)) = line.split_once('=')
-            && key.trim() == "scheme"
-            && value.trim().trim_matches('"').eq_ignore_ascii_case("tango")
-        {
-            return TANGO;
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else { continue };
+        let value = value.trim().trim_matches('"');
+        match (section, key.trim()) {
+            ("[terminal]", "scheme") => tango = value.eq_ignore_ascii_case("tango"),
+            ("[appearance]", "color-scheme") => light = value == "light",
+            ("[appearance]", "contrast") => high = value == "high",
+            ("[appearance]", "accent") => accent = parse_rgb(value),
+            _ => {}
         }
     }
-    CATPPUCCIN
+    let mut p = match (tango, light) {
+        (true, false) => TANGO,
+        (true, true) => TANGO_LIGHT,
+        (false, false) => CATPPUCCIN,
+        (false, true) => LATTE,
+    };
+    if high {
+        (p.bg, p.fg) = if light { (rgb(0xffffff), rgb(0x000000)) } else { (rgb(0x000000), rgb(0xffffff)) };
+    }
+    if let Some(accent) = accent {
+        p.accent = accent;
+    }
+    p
+}
+
+fn palette() -> Palette {
+    palette_from(&config("desktop.toml"))
 }
 
 impl Palette {
@@ -255,7 +297,7 @@ impl Screen {
     }
 
     fn scroll_by(&mut self, lines: isize) {
-        self.scroll = (self.scroll as isize + lines).max(0) as usize;
+        self.scroll = (self.scroll as isize).saturating_add(lines).max(0) as usize;
         self.clamp_scroll();
     }
 
@@ -1244,9 +1286,19 @@ impl App for Terminal {
                         return;
                     }
                 }
-                if m.ctrl && !m.shift && (*key == sym::PAGE_UP || *key == sym::PAGE_DOWN) {
+                // The next tab and the one before: Ctrl+PageDown and Ctrl+PageUp, or
+                // Ctrl+Tab and, with Shift, back (which arrives as its own key).
+                const BACK_TAB: u32 = 0xfe20;
+                let step = match *key {
+                    sym::PAGE_UP if m.ctrl && !m.shift => Some(false),
+                    sym::PAGE_DOWN if m.ctrl && !m.shift => Some(true),
+                    sym::TAB if m.ctrl && !m.alt => Some(!m.shift),
+                    BACK_TAB if m.ctrl && !m.alt => Some(false),
+                    _ => None,
+                };
+                if let Some(forward) = step {
                     let n = self.tabs.len().max(1);
-                    return self.show_tab(if *key == sym::PAGE_UP { (self.shown + n - 1) % n } else { (self.shown + 1) % n }, window);
+                    return self.show_tab(if forward { (self.shown + 1) % n } else { (self.shown + n - 1) % n }, window);
                 }
                 // Ctrl+V pastes, with Shift or without (Dave, 2026-11-09). The control
                 // character it used to send (the shell's "take the next key as it is") is
@@ -1265,9 +1317,17 @@ impl App for Terminal {
                 }
                 let Some(session) = self.front_mut() else { return };
                 let mut s = lock(&session.screen);
-                if m.shift && (*key == sym::PAGE_UP || *key == sym::PAGE_DOWN) {
+                // The scrollback: with Shift, PageUp and PageDown a page, Home and End
+                // its two ends. On the alternate screen there is none, and the keys
+                // are the program's.
+                if m.shift && !m.ctrl && !m.alt && !s.grid.alt && matches!(*key, sym::PAGE_UP | sym::PAGE_DOWN | sym::HOME | sym::END) {
                     let page = s.grid.rows.saturating_sub(1).max(1) as isize;
-                    s.scroll_by(if *key == sym::PAGE_UP { page } else { -page });
+                    s.scroll_by(match *key {
+                        sym::PAGE_UP => page,
+                        sym::PAGE_DOWN => -page,
+                        sym::HOME => isize::MAX,
+                        _ => isize::MIN,
+                    });
                 } else if let Some(bytes) = Terminal::key_bytes(*key, text.as_deref(), m, s.grid.app_cursor) {
                     // Typing goes to the live screen, and what was selected is let go.
                     s.scroll = 0;
@@ -1416,6 +1476,43 @@ mod tests {
     use super::*;
 
     const NONE: Modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false };
+
+    #[test]
+    fn colours_follow_the_desktop() {
+        let same = |a: &Palette, b: &Palette| (a.bg, a.fg, a.accent, a.ansi) == (b.bg, b.fg, b.accent, b.ansi);
+        assert!(same(&palette_from(""), &CATPPUCCIN));
+        assert!(same(&palette_from("[terminal]\nscheme = \"Tango\"\n"), &TANGO));
+        assert!(same(&palette_from("[appearance]\ncolor-scheme = \"light\"\n"), &LATTE));
+        assert!(same(&palette_from("[appearance]\ncolor-scheme = \"default\"\n"), &CATPPUCCIN));
+        assert!(same(&palette_from("[appearance]\ncolor-scheme = \"light\"\n[terminal]\nscheme = \"tango\"\n"), &TANGO_LIGHT));
+        // A key of the same name in another section is not ours.
+        assert!(same(&palette_from("[wallpaper]\nscheme = \"tango\"\ncontrast = \"high\"\n"), &CATPPUCCIN));
+        // High contrast: the text on black or white; the 16 colours stay.
+        let p = palette_from("[appearance]\ncontrast = \"high\"\naccent = \"#ff8800\"\n");
+        assert_eq!((p.bg, p.fg, p.accent), (Color::rgb(0, 0, 0), Color::rgb(255, 255, 255), Color::rgb(0xff, 0x88, 0)));
+        assert_eq!(p.ansi, CATPPUCCIN.ansi);
+        let p = palette_from("[appearance]\ncolor-scheme = \"light\"\ncontrast = \"high\"\n");
+        assert_eq!((p.bg, p.fg), (Color::rgb(255, 255, 255), Color::rgb(0, 0, 0)));
+        // A broken accent is no accent.
+        for bad in ["blue", "#12345", "#+12345", "#gggggg", ""] {
+            assert_eq!(palette_from(&format!("[appearance]\naccent = \"{bad}\"\n")).accent, CATPPUCCIN.accent, "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_scrollback_keys_reach_its_ends() {
+        let mut s = Screen { grid: Grid::new(10, 4), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None, selection: None };
+        for i in 0..10 {
+            let line = format!("line {i}\r\n");
+            s.parser.advance(&mut s.grid, line.as_bytes());
+        }
+        assert!(s.grid.scrollback.len() > 3);
+        s.scroll_by(2);
+        s.scroll_by(isize::MAX);
+        assert_eq!(s.scroll, s.grid.scrollback.len());
+        s.scroll_by(isize::MIN);
+        assert_eq!(s.scroll, 0);
+    }
 
     #[test]
     fn keys_send_what_xterm_sends() {
