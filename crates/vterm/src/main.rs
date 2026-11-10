@@ -20,12 +20,16 @@
 //! - **Keys arrive in order** through the toolkit and go to the program as
 //!   xterm's sequences.
 //!
-//! This first part is one terminal in one window under the server's title
-//! bar: typing, paste, the scrollback (wheel, Shift+PageUp/PageDown),
-//! resizing, the window's title, the program's own copies (OSC 52). Tabs,
-//! panes, selecting with the mouse, mouse reporting, the scrollbar and the
+//! So far: terminals in tabs under a bar of the window's own (bar.rs), with
+//! the window's buttons on the side the desktop's settings say and tabs
+//! that shrink to fit; typing, paste, the scrollback (wheel,
+//! Shift+PageUp/PageDown), resizing, titles, the program's own copies (OSC
+//! 52), the fonts and colour scheme from the desktop's settings. Ctrl+Shift+T
+//! opens a tab, Ctrl+Shift+W closes one, Ctrl+PageUp/PageDown change tab.
+//! Panes, selecting with the mouse, mouse reporting, the scrollbar and the
 //! settings followed live come next.
 
+mod bar;
 #[allow(dead_code)]
 #[path = "../../vergence-term/src/grid.rs"]
 mod grid;
@@ -40,16 +44,61 @@ use std::{
     collections::HashMap,
     io::Write,
     sync::{Arc, Mutex, MutexGuard},
+    time::{Duration, Instant},
 };
 
+use bar::{BAR_H, Layout, Part, WinButton};
 use grid::{Cell, Color as CellColor, Grid};
 use vergence_scene::{Color, Glyph, Point, Rect, Scene};
 use vergence_text::{FaceId, Fonts};
-use vergence_ui::{App, Frame, Input, Modifiers, Waker, Window, sym};
+use vergence_ui::{App, Button, Cursor, Frame, Input, Modifiers, Waker, Window, sym};
 
-/// Space around the cells, in reference units, and the text size: 10 points.
+/// Space around the cells, in reference units.
 const PAD: f32 = 4.0;
-const SIZE: f32 = 13.33;
+/// Two presses on the bar within this are a double click.
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+
+/// What the desktop's settings say that the terminal follows
+/// (~/.config/vergence/settings.toml, the file the settings app writes).
+struct Settings {
+    left: Vec<WinButton>,
+    right: Vec<WinButton>,
+    ui_family: String,
+    ui_size: f32,
+    mono_family: String,
+    mono_size: f32,
+}
+
+/// "Adwaita Mono 10" -> the family and the size in reference units (a point is 96/72 of one).
+fn font_name(value: &str, family: &str, points: f32) -> (String, f32) {
+    let value = value.trim();
+    match value.rsplit_once(' ') {
+        Some((name, size)) if size.parse::<f32>().is_ok_and(|s| (4.0..=96.0).contains(&s)) => (name.trim().to_string(), size.parse::<f32>().unwrap_or(points) * 96.0 / 72.0),
+        _ if !value.is_empty() => (value.to_string(), points * 96.0 / 72.0),
+        _ => (family.to_string(), points * 96.0 / 72.0),
+    }
+}
+
+fn config(name: &str) -> String {
+    let base = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")));
+    base.and_then(|b| std::fs::read_to_string(b.join("vergence").join(name)).ok()).unwrap_or_default()
+}
+
+impl Settings {
+    fn from_text(text: &str) -> Settings {
+        // Lines of the form "Gtk/FontName" = "Adwaita Sans 10".
+        let value = |key: &str| {
+            text.lines().find_map(|line| {
+                let (k, v) = line.split_once('=')?;
+                (k.trim().trim_matches('"') == key).then(|| v.trim().trim_matches('"').to_string())
+            })
+        };
+        let (left, right) = bar::decoration_layout(&value("Gtk/DecorationLayout").unwrap_or_else(|| ":minimize,maximize,close".into()));
+        let (ui_family, ui_size) = font_name(&value("Gtk/FontName").unwrap_or_default(), "sans-serif", 10.0);
+        let (mono_family, mono_size) = font_name(&value("Gtk/MonospaceFontName").unwrap_or_default(), "monospace", 10.0);
+        Settings { left, right, ui_family, ui_size, mono_family, mono_size }
+    }
+}
 /// Lines the view moves for one notch of the wheel.
 const WHEEL_LINES: isize = 3;
 
@@ -84,8 +133,7 @@ const CATPPUCCIN: Palette = Palette {
 /// The scheme chosen in desktop.toml (`[terminal] scheme = "tango"`), as the
 /// first terminal reads it; Catppuccin if nothing is.
 fn palette() -> Palette {
-    let base = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")));
-    let text = base.and_then(|b| std::fs::read_to_string(b.join("vergence/desktop.toml")).ok()).unwrap_or_default();
+    let text = config("desktop.toml");
     let mut section = "";
     for line in text.lines().map(str::trim) {
         if line.starts_with('[') {
@@ -162,20 +210,11 @@ impl Screen {
 struct Metrics {
     regular: FaceId,
     bold: FaceId,
+    /// The bar's font, if the machine has one.
+    ui: Option<FaceId>,
     cell_w: f32,
     cell_h: f32,
     baseline: f32,
-}
-
-struct Terminal {
-    screen: Arc<Mutex<Screen>>,
-    pty: pty::Pty,
-    /// The shell's output, until the reading thread takes it.
-    reader: Option<std::fs::File>,
-    palette: Palette,
-    metrics: Option<Metrics>,
-    focused: bool,
-    title: String,
 }
 
 fn lock(screen: &Mutex<Screen>) -> MutexGuard<'_, Screen> {
@@ -183,13 +222,147 @@ fn lock(screen: &Mutex<Screen>) -> MutexGuard<'_, Screen> {
     screen.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-impl Terminal {
-    fn new() -> std::io::Result<Terminal> {
+/// One terminal: a program, its screen, and the thread that reads it.
+struct Session {
+    screen: Arc<Mutex<Screen>>,
+    pty: pty::Pty,
+    title: String,
+}
+
+impl Session {
+    /// Starts the user's shell on a new terminal of cols x rows. Its output
+    /// is read and parsed on a thread of its own, which wakes the window.
+    fn start(cols: usize, rows: usize, waker: Waker) -> std::io::Result<Session> {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-        let pty = pty::Pty::spawn(&shell, 80, 24)?;
+        let pty = pty::Pty::spawn(&shell, cols as u16, rows as u16)?;
         let reader = pty.reader()?;
-        let screen = Screen { grid: Grid::new(80, 24), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None };
-        Ok(Terminal { screen: Arc::new(Mutex::new(screen)), pty, reader: Some(reader), palette: palette(), metrics: None, focused: false, title: String::new() })
+        let mut replies = reader.try_clone()?;
+        let screen = Arc::new(Mutex::new(Screen { grid: Grid::new(cols, rows), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None }));
+        let shared = screen.clone();
+        std::thread::spawn(move || {
+            pty::read_loop(reader, |bytes| {
+                let out = {
+                    let mut guard = lock(&shared);
+                    let s = &mut *guard;
+                    let before = s.grid.pushed;
+                    s.parser.advance(&mut s.grid, &bytes);
+                    if s.grid.pushed < before {
+                        // A full reset: the line numbers started again.
+                        s.scroll = 0;
+                    } else if s.scroll > 0 {
+                        // Scrolled back: stay on the same text as new lines arrive.
+                        s.scroll += s.grid.pushed - before;
+                    }
+                    s.clamp_scroll();
+                    if let Some(text) = s.grid.clipboard.take() {
+                        s.copied = Some(text);
+                    }
+                    std::mem::take(&mut s.grid.out)
+                };
+                if !out.is_empty() {
+                    let _ = replies.write_all(&out);
+                }
+                waker.wake();
+                true
+            });
+            lock(&shared).exited = true;
+            waker.wake();
+        });
+        Ok(Session { screen, pty, title: String::new() })
+    }
+
+    fn label(&self) -> String {
+        if self.title.is_empty() { "Terminal".into() } else { self.title.clone() }
+    }
+}
+
+struct Terminal {
+    sessions: Vec<Session>,
+    /// The tab in front.
+    shown: usize,
+    waker: Option<Waker>,
+    palette: Palette,
+    settings: Settings,
+    metrics: Option<Metrics>,
+    focused: bool,
+    /// The window's width at the last frame, and the grid size that fits it: for the bar's layout and new tabs.
+    width: f32,
+    fits: (usize, usize),
+    hover: Option<Part>,
+    /// True while the pointer is over the terminal, below the bar.
+    over_pane: bool,
+    maximized: bool,
+    bar_press: Option<Instant>,
+    /// How many tabs to open with (`--tabs N`; one unless asked).
+    open_with: usize,
+}
+
+impl Terminal {
+    fn new() -> Terminal {
+        Terminal {
+            sessions: Vec::new(),
+            shown: 0,
+            waker: None,
+            palette: palette(),
+            settings: Settings::from_text(&config("settings.toml")),
+            metrics: None,
+            focused: false,
+            width: 820.0,
+            fits: (80, 24),
+            hover: None,
+            over_pane: false,
+            maximized: false,
+            bar_press: None,
+            open_with: 1,
+        }
+    }
+
+    fn layout(&self) -> Layout {
+        Layout::new(self.width, self.sessions.len(), self.shown, &self.settings.left, &self.settings.right)
+    }
+
+    fn new_tab(&mut self, window: &mut Window) {
+        let Some(waker) = self.waker.clone() else { return };
+        match Session::start(self.fits.0, self.fits.1, waker) {
+            Ok(s) => {
+                self.sessions.push(s);
+                self.shown = self.sessions.len() - 1;
+            }
+            Err(e) => eprintln!("vterm: could not start the shell: {e}"),
+        }
+        window.redraw();
+    }
+
+    /// Closes a tab (its program is ended); the window with the last one.
+    fn close_tab(&mut self, index: usize, window: &mut Window) {
+        if index >= self.sessions.len() {
+            return;
+        }
+        self.sessions.remove(index);
+        if self.sessions.is_empty() {
+            window.close();
+            return;
+        }
+        if self.shown > index || self.shown >= self.sessions.len() {
+            self.shown = self.shown.saturating_sub(1);
+        }
+        self.retitle(window);
+        window.redraw();
+    }
+
+    fn show_tab(&mut self, index: usize, window: &mut Window) {
+        if index < self.sessions.len() && index != self.shown {
+            self.shown = index;
+            self.retitle(window);
+            window.redraw();
+        }
+    }
+
+    /// The window is called what its front tab is.
+    fn retitle(&self, window: &mut Window) {
+        if let Some(s) = self.sessions.get(self.shown) {
+            window.set_title(&s.label());
+        }
     }
 
     /// What a key sends to the program (xterm's sequences).
@@ -257,70 +430,115 @@ impl App for Terminal {
         "vterm".into()
     }
 
+    fn own_frame(&self) -> bool {
+        true
+    }
+
     fn background(&self) -> Color {
         self.palette.bg
     }
 
     fn waker(&mut self, waker: Waker) {
-        // The reading thread: the program's output onto the screen, its replies back, the window woken.
-        let Some(reader) = self.reader.take() else { return };
-        let Ok(mut replies) = reader.try_clone() else { return };
-        let screen = self.screen.clone();
-        std::thread::spawn(move || {
-            pty::read_loop(reader, |bytes| {
-                let out = {
-                    let mut guard = lock(&screen);
-                    let s = &mut *guard;
-                    let before = s.grid.pushed;
-                    s.parser.advance(&mut s.grid, &bytes);
-                    if s.grid.pushed < before {
-                        // A full reset: the line numbers started again.
-                        s.scroll = 0;
-                    } else if s.scroll > 0 {
-                        // Scrolled back: stay on the same text as new lines arrive.
-                        s.scroll += s.grid.pushed - before;
-                    }
-                    s.clamp_scroll();
-                    if let Some(text) = s.grid.clipboard.take() {
-                        s.copied = Some(text);
-                    }
-                    std::mem::take(&mut s.grid.out)
-                };
-                if !out.is_empty() {
-                    let _ = replies.write_all(&out);
+        self.waker = Some(waker.clone());
+        for _ in 0..self.open_with {
+            match Session::start(self.fits.0, self.fits.1, waker.clone()) {
+                Ok(s) => self.sessions.push(s),
+                Err(e) => {
+                    eprintln!("vterm: could not start the shell: {e}");
+                    std::process::exit(1);
                 }
-                waker.wake();
-                true
-            });
-            lock(&screen).exited = true;
-            waker.wake();
-        });
+            }
+        }
     }
 
     fn woken(&mut self, window: &mut Window) {
-        let mut s = lock(&self.screen);
-        if s.exited {
-            window.close();
-            return;
+        // Tabs whose program has ended go; the window goes with the last.
+        let mut index = 0;
+        while index < self.sessions.len() {
+            if lock(&self.sessions[index].screen).exited {
+                self.close_tab(index, window);
+                if self.sessions.is_empty() {
+                    return;
+                }
+            } else {
+                index += 1;
+            }
         }
-        if let Some(text) = s.copied.take() {
-            window.copy(&text);
-        }
-        if s.grid.title != self.title {
-            self.title = s.grid.title.clone();
-            window.set_title(if self.title.is_empty() { "Terminal" } else { &self.title });
-        }
-        if std::mem::take(&mut s.grid.dirty) {
-            window.redraw();
+        for (i, session) in self.sessions.iter_mut().enumerate() {
+            let mut s = lock(&session.screen);
+            if let Some(text) = s.copied.take() {
+                window.copy(&text);
+            }
+            if s.grid.title != session.title {
+                session.title = s.grid.title.clone();
+                // The bar shows every tab's title; the window carries the front one's.
+                window.redraw();
+                if i == self.shown {
+                    window.set_title(if session.title.is_empty() { "Terminal" } else { &session.title });
+                }
+            }
+            // Only the tab in front is drawn: output in the others costs no frame.
+            if std::mem::take(&mut s.grid.dirty) && i == self.shown {
+                window.redraw();
+            }
         }
     }
 
     fn input(&mut self, input: &Input, window: &mut Window) {
         match input {
+            Input::PointerMoved { x, y } => {
+                let part = self.layout().at(*x, *y);
+                self.over_pane = part.is_none();
+                window.set_cursor(if part.is_none() { Cursor::Text } else { Cursor::Default });
+                if part != self.hover {
+                    self.hover = part;
+                    window.redraw();
+                }
+            }
+            Input::PointerLeft => {
+                self.over_pane = false;
+                if self.hover.take().is_some() {
+                    window.redraw();
+                }
+            }
+            Input::Button { button, pressed: true, x, y, .. } => match (button, self.layout().at(*x, *y)) {
+                (Button::Left, Some(Part::Button(WinButton::Close))) => window.close(),
+                (Button::Left, Some(Part::Button(WinButton::Minimize))) => window.minimize(),
+                (Button::Left, Some(Part::Button(WinButton::Maximize))) => {
+                    self.maximized = !self.maximized;
+                    window.set_maximized(self.maximized);
+                }
+                (Button::Left, Some(Part::Tab(i))) => self.show_tab(i, window),
+                (Button::Left, Some(Part::CloseTab(i))) | (Button::Middle, Some(Part::Tab(i) | Part::CloseTab(i))) => self.close_tab(i, window),
+                (Button::Left, Some(Part::Plus)) => self.new_tab(window),
+                (Button::Left, Some(Part::Bar)) => {
+                    // Twice on the bare bar: larger or back. Once: the user moves the window.
+                    if self.bar_press.take().is_some_and(|t| t.elapsed() < DOUBLE_CLICK) {
+                        self.maximized = !self.maximized;
+                        window.set_maximized(self.maximized);
+                    } else {
+                        self.bar_press = Some(Instant::now());
+                        window.start_move();
+                    }
+                }
+                _ => {}
+            },
             Input::Key { sym: key, text, pressed: true, composing: false, modifiers, .. } => {
                 let m = *modifiers;
                 let letter = |c: char| *key == c as u32 || *key == c.to_ascii_uppercase() as u32;
-                let mut s = lock(&self.screen);
+                // The terminal's own shortcuts: with Ctrl+Shift, so the shell keeps Ctrl+T and the rest.
+                if m.ctrl && m.shift && letter('t') {
+                    return self.new_tab(window);
+                }
+                if m.ctrl && m.shift && letter('w') {
+                    return self.close_tab(self.shown, window);
+                }
+                if m.ctrl && !m.shift && (*key == sym::PAGE_UP || *key == sym::PAGE_DOWN) {
+                    let n = self.sessions.len().max(1);
+                    return self.show_tab(if *key == sym::PAGE_UP { (self.shown + n - 1) % n } else { (self.shown + 1) % n }, window);
+                }
+                let Some(session) = self.sessions.get_mut(self.shown) else { return };
+                let mut s = lock(&session.screen);
                 if m.ctrl && m.shift && letter('v') {
                     window.paste();
                 } else if m.shift && (*key == sym::PAGE_UP || *key == sym::PAGE_DOWN) {
@@ -330,25 +548,27 @@ impl App for Terminal {
                     // Typing goes to the live screen.
                     s.scroll = 0;
                     drop(s);
-                    self.pty.write(&bytes);
+                    session.pty.write(&bytes);
                 }
                 window.redraw();
             }
             Input::Paste(text) => {
-                let bracketed = lock(&self.screen).grid.bracketed_paste;
+                let Some(session) = self.sessions.get_mut(self.shown) else { return };
+                let bracketed = lock(&session.screen).grid.bracketed_paste;
                 // A pasted line end is the Return key; and the paste cannot end its own brackets.
                 let text = text.replace("\r\n", "\r").replace('\n', "\r").replace("\x1b[201~", "");
                 let bytes = if bracketed { format!("\x1b[200~{text}\x1b[201~") } else { text };
-                self.pty.write(bytes.as_bytes());
+                session.pty.write(bytes.as_bytes());
             }
-            Input::Scroll { dy, .. } => {
+            Input::Scroll { dy, .. } if self.over_pane => {
+                let Some(session) = self.sessions.get_mut(self.shown) else { return };
                 let notches = (dy / 15.0).round() as isize;
-                let mut s = lock(&self.screen);
+                let mut s = lock(&session.screen);
                 if s.grid.alt {
                     // A full-screen program has no scrollback: the wheel is its arrow keys.
                     let key = if s.grid.app_cursor { "\x1bO" } else { "\x1b[" }.to_string() + if notches < 0 { "A" } else { "B" };
                     drop(s);
-                    self.pty.write(key.repeat((notches.unsigned_abs() * WHEEL_LINES as usize).min(60)).as_bytes());
+                    session.pty.write(key.repeat((notches.unsigned_abs() * WHEEL_LINES as usize).min(60)).as_bytes());
                 } else {
                     s.scroll_by(-notches * WHEEL_LINES);
                     window.redraw();
@@ -364,29 +584,42 @@ impl App for Terminal {
 
     fn scene(&mut self, frame: &Frame, fonts: &mut Fonts) -> Scene {
         let p = &self.palette;
+        self.width = frame.width;
         let mut scene = Scene::new(frame.width, frame.height);
         scene.fill(Rect::new(0.0, 0.0, frame.width, frame.height), p.bg);
+        let size = self.settings.mono_size;
         if self.metrics.is_none() {
-            self.metrics = fonts.face("monospace", 400, false).map(|regular| {
-                let bold = fonts.face("monospace", 700, false).unwrap_or(regular);
-                let m = fonts.metrics(regular, SIZE);
+            // The settings' fonts, or the machine's own if it does not have them.
+            let mono = &self.settings.mono_family;
+            self.metrics = fonts.face(mono, 400, false).or_else(|| fonts.face("monospace", 400, false)).map(|regular| {
+                let bold = fonts.face(mono, 700, false).or_else(|| fonts.face("monospace", 700, false)).unwrap_or(regular);
+                let ui = fonts.face(&self.settings.ui_family, 400, false).or_else(|| fonts.face("sans-serif", 400, false));
+                let m = fonts.metrics(regular, size);
                 let (face, glyph) = fonts.glyph(regular, 'M');
-                Metrics { regular, bold, cell_w: fonts.advance(face, glyph, SIZE), cell_h: (m.ascent + m.descent + m.line_gap).ceil(), baseline: m.ascent.round() }
+                Metrics { regular, bold, ui, cell_w: fonts.advance(face, glyph, size), cell_h: (m.ascent + m.descent + m.line_gap).ceil(), baseline: m.ascent.round() }
             });
         }
         let Some(mt) = &self.metrics else { return scene };
         let (cw, ch) = (mt.cell_w, mt.cell_h);
-
-        let mut guard = lock(&self.screen);
-        let s = &mut *guard;
-        // The grid follows the window's size, and the program is told.
+        // The grid that fits under the bar.
         let cols = (((frame.width - 2.0 * PAD) / cw).floor().max(2.0) as usize).min(2000);
-        let rows = (((frame.height - 2.0 * PAD) / ch).floor().max(1.0) as usize).min(1000);
+        let rows = (((frame.height - BAR_H - 2.0 * PAD) / ch).floor().max(1.0) as usize).min(1000);
+        self.fits = (cols, rows);
+
+        let titles: Vec<String> = self.sessions.iter().map(Session::label).collect();
+        let layout = Layout::new(frame.width, self.sessions.len(), self.shown, &self.settings.left, &self.settings.right);
+        bar::draw(&mut scene, fonts, &layout, &bar::Look { focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, shown: self.shown, hover: self.hover });
+
+        let Some(session) = self.sessions.get(self.shown) else { return scene };
+        let mut guard = lock(&session.screen);
+        let s = &mut *guard;
+        // The front tab's grid follows the window's size, and its program is told.
         if (cols, rows) != (s.grid.cols, s.grid.rows) {
             s.grid.resize(cols, rows);
             s.clamp_scroll();
-            self.pty.resize(cols as u16, rows as u16);
+            session.pty.resize(cols as u16, rows as u16);
         }
+        scene.push_clip(Rect::new(0.0, BAR_H, frame.width, (frame.height - BAR_H).max(0.0)), 0.0);
 
         // Scene font numbers for the faces used in this frame.
         let mut numbers: HashMap<FaceId, u32> = HashMap::new();
@@ -398,7 +631,7 @@ impl App for Terminal {
         };
         for r in 0..s.grid.rows {
             let line = s.shown(r);
-            let top = PAD + r as f32 * ch;
+            let top = BAR_H + PAD + r as f32 * ch;
             // Backgrounds and underlines: one rectangle for each run of cells with the same look.
             let mut x = 0;
             while x < line.len() {
@@ -438,21 +671,21 @@ impl App for Terminal {
                     Some((f, c, glyphs)) if *f == font && *c == fg => glyphs.push(placed),
                     _ => {
                         if let Some((f, c, glyphs)) = run.take() {
-                            scene.glyphs(f, SIZE, c, origin, glyphs);
+                            scene.glyphs(f, size, c, origin, glyphs);
                         }
                         run = Some((font, fg, vec![placed]));
                     }
                 }
             }
             if let Some((f, c, glyphs)) = run {
-                scene.glyphs(f, SIZE, c, origin, glyphs);
+                scene.glyphs(f, size, c, origin, glyphs);
             }
         }
         // The cursor: a block with the keyboard, an outline without. It moves down with the
         // screen while scrolled back, out of sight past the bottom.
         let cursor_row = s.grid.cy + s.scroll;
         if s.grid.cursor_visible && cursor_row < s.grid.rows {
-            let at = Rect::new(PAD + s.grid.cx as f32 * cw, PAD + cursor_row as f32 * ch, cw, ch);
+            let at = Rect::new(PAD + s.grid.cx as f32 * cw, BAR_H + PAD + cursor_row as f32 * ch, cw, ch);
             if self.focused {
                 scene.fill(at, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 178));
             } else {
@@ -463,12 +696,13 @@ impl App for Terminal {
         if s.scroll > 0 {
             let label = if s.scroll == 1 { "1 line back".to_string() } else { format!("{} lines back", s.scroll) };
             let width = label.chars().count() as f32 * cw + 16.0;
-            let at = Rect::new(frame.width - width - PAD, PAD, width, ch + 4.0);
+            let at = Rect::new(frame.width - width - PAD, BAR_H + PAD, width, ch + 4.0);
             scene.fill_rounded(at, 6.0, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 235));
             let font = number(&mut scene, fonts, mt.regular);
             let glyphs = label.chars().enumerate().map(|(i, c)| Glyph { id: fonts.glyph(mt.regular, c).1, x: i as f32 * cw, y: 0.0 }).collect();
-            scene.glyphs(font, SIZE, p.bg, Point::new(at.x + 8.0, at.y + 2.0 + mt.baseline), glyphs);
+            scene.glyphs(font, size, p.bg, Point::new(at.x + 8.0, at.y + 2.0 + mt.baseline), glyphs);
         }
+        scene.pop_clip();
         scene
     }
 }
@@ -478,13 +712,11 @@ fn main() {
         println!("vterm {}", env!("CARGO_PKG_VERSION"));
         return;
     }
-    let mut terminal = match Terminal::new() {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("vterm: could not start the shell: {e}");
-            std::process::exit(1);
-        }
-    };
+    let mut terminal = Terminal::new();
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(n) = args.iter().position(|a| a == "--tabs").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<usize>().ok()) {
+        terminal.open_with = n.clamp(1, 64);
+    }
     if let Err(e) = vergence_ui::run(&mut terminal, (820, 520)) {
         eprintln!("vterm: {e}");
         std::process::exit(1);
@@ -540,6 +772,20 @@ mod tests {
         assert_eq!(p.indexed(232), Color::rgb(8, 8, 8));
         assert_eq!(p.indexed(255), Color::rgb(238, 238, 238));
         assert_eq!(p.resolve(CellColor::Rgb(1, 2, 3), p.fg, false), Color::rgb(1, 2, 3));
+    }
+
+    #[test]
+    fn the_settings_file_is_followed() {
+        let s = Settings::from_text("[settings]\n\"Gtk/DecorationLayout\" = \"close,minimize:\"\n\"Gtk/FontName\" = \"Adwaita Sans 10\"\n\"Gtk/MonospaceFontName\" = \"Adwaita Mono 11\"\n");
+        assert_eq!((s.left.as_slice(), s.right.len()), (&[WinButton::Close, WinButton::Minimize][..], 0));
+        assert_eq!((s.ui_family.as_str(), s.mono_family.as_str()), ("Adwaita Sans", "Adwaita Mono"));
+        assert!((s.ui_size - 13.333).abs() < 0.01 && (s.mono_size - 14.667).abs() < 0.01);
+        // Nothing set: buttons on the right, the machine's own fonts at 10 points.
+        let s = Settings::from_text("");
+        assert_eq!((s.left.len(), s.right.as_slice()), (0, &[WinButton::Minimize, WinButton::Maximize, WinButton::Close][..]));
+        assert_eq!((s.ui_family.as_str(), s.mono_family.as_str()), ("sans-serif", "monospace"));
+        assert_eq!(font_name("Cantarell", "sans-serif", 10.0).0, "Cantarell");
+        assert_eq!(font_name("Noto Sans 400", "sans-serif", 10.0), ("Noto Sans 400".to_string(), 10.0 * 96.0 / 72.0), "a size that is not one is part of the name");
     }
 
     #[test]

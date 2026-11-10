@@ -397,11 +397,29 @@ borrowing. Nothing new comes in.
   instance again for each frame. 141 MB of memory; no GPU hang; nothing
   from the server.
   Green on Hubble (whole workspace), canary and Techbench.
-  Still to do in step 4: tabs in an own bar (that shrink to fit), panes,
-  selecting with the mouse and the clipboard, mouse reporting, the
-  scrollbar, the right-click menu, settings followed live, the font from
-  the settings, combining marks kept on their cell, and the pty master
-  closed in children.
+- **Step 4, second part (2026-11-09): tabs and the window's own bar.**
+  `vterm` draws its own frame: a bar (`bar.rs`) with the window buttons on
+  the side `Gtk/DecorationLayout` names, tabs at most 200 units wide that
+  shrink so + is always in view, and the fonts from `Gtk/FontName` and
+  `Gtk/MonospaceFontName` (read at start; not yet followed live). New tab
+  Ctrl+Shift+T or +, close Ctrl+Shift+W or a middle click, next and
+  previous Ctrl+PageDown and Ctrl+PageUp; the bar drags the window and a
+  double click maximizes it. Each tab is its own session with its own
+  parsing thread. Seven tabs fit with + visible (screenshot on Hubble).
+  Two faults in the shared `pty.rs` were found and fixed on the way:
+  - the pty master was handed down to every program the terminal started
+    (and each later tab's shell held the earlier tabs' masters), so a
+    killed terminal's programs never saw the hangup. It is now opened
+    close-on-exec. Seven tabs, SIGKILL: no program left (acceptance 4);
+  - `ptsname` answers in one buffer shared by the process, so two
+    terminals opened at the same moment from two threads could get each
+    other's name, or half of one. It showed on canary as a test that
+    failed one run in three ("Is a directory") or hung; the call is now
+    made one at a time. Twelve runs of twelve clean after.
+  Green on Hubble, canary and Techbench (`vterm`, `vergence-term`).
+  Still to do in step 4: panes, selecting with the mouse and the
+  clipboard, mouse reporting, the scrollbar, the right-click menu,
+  settings followed live, and combining marks kept on their cell.
 
 ## Acceptance
 
