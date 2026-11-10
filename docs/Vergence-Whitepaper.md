@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "8 November 2026 — Draft 0.9"
+date: "9 November 2026 — Draft 0.9"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.9 · 8 November 2026
+David Erickson (AB0R), with Claude · Draft 0.9 · 9 November 2026
 
 ---
 
@@ -277,7 +277,7 @@ An application may submit either a **bitmap** (always supported) or a **retained
 - **Magnification is truly sharp:** text at 4× is re-rendered text, not enlarged pixels.
 - **Remote display sends drawing commands instead of video**, the network transparency X promised, done properly.
 
-The reference implementation is in Rust, and the server's own tools are its first clients. Its renderer is the project's own unless a borrowed one, such as Vello, is decided to be necessary (§8). **Avalonia is the first outside toolkit to adopt it** (§8.1): it already draws a retained scene, which converts naturally. Display PostScript died because every application had to speak it; here it is an optional upgrade over bitmaps.
+The reference implementation is in Rust, and the server's own tools are its first clients, through the project's toolkit (§6.10), whose scenes are in this format. Its renderer is the project's own unless a borrowed one, such as Vello, is decided to be necessary (§8). **Avalonia is the first outside toolkit to adopt it** (§8.1): it already draws a retained scene, which converts naturally. Display PostScript died because every application had to speak it; here it is an optional upgrade over bitmaps.
 
 ### 6.7 Other display problems addressed
 
@@ -328,7 +328,7 @@ The contracts above are where Vergence is new. The shell, the part of the deskto
 
 **What it borrows, and from where.** Window Maker (1997), the free descendant of NeXTSTEP's desktop, had three ideas worth keeping: one icon for each running application, small live tiles ("dockapps") instead of a tray of unrelated icons, and a menu on the bare desktop. It aged badly because its tiles were a fixed 64 pixels, dockapps were ordinary windows drawn by whatever program supplied them, and nothing showed what was installed. From current desktops Vergence takes the compact application list of macOS, a popup rather than a view that takes over the whole screen.
 
-**One shelf.** A single strip holds everything a top bar and a dock would hold between them. It stands on the **right edge** of the main monitor (the primary screen in the settings app) and is always visible; hiding it until the pointer reaches the edge is an option. Any other monitor can have a shelf of its own, switched on in that screen's settings. Its width is set in reference units (Contract 1), so it is the same physical size on every monitor. From top to bottom it has three parts:
+**One shelf.** A single strip holds everything a top bar and a dock would hold between them, drawn by the server with the same drawing code as the project's toolkit (§6.10). It stands on the **right edge** of the main monitor (the primary screen in the settings app) and is always visible; hiding it until the pointer reaches the edge is an option. Any other monitor can have a shelf of its own, switched on in that screen's settings. Its width is set in reference units (Contract 1), so it is the same physical size on every monitor. From top to bottom it has three parts:
 
 - **The apps button**, in the top corner, the easiest target on the screen. It opens a compact popup beside the shelf: a grid of every installed application, with a search field. Typing filters the grid. The same field will later run **named desktop actions** ("move this window to the left monitor", "screens off"), the list that voice control and automation use under permission (§6.5, §7), so there is one command surface for hands, voice and agents.
 - **Applications**: pinned and running, one icon each, with a mark beside those that are running. An application with several windows lists them in a small popup. The shelf on the main monitor shows the windows of every monitor, grouped by screen, except those of a monitor that has its own shelf. A minimised window goes to its application's icon; there are no separate icons for minimised windows.
@@ -349,6 +349,25 @@ A vertical shelf has no room for text, so names appear when the pointer rests on
 - **Menus stay in each window.** There is no global menu bar.
 - **Dialogs** stay attached to the window they belong to and move with it.
 - **The desktop** is wallpaper only, with no icons on it; a right-click on it opens a short menu of applications.
+
+### 6.10 The toolkit: the tools' own
+
+The project's own tools (the terminal, the settings app, later a file manager and whatever else the desktop itself needs) are drawn with a **toolkit written by the project**. This was decided on 9 November 2026, after two days of building them on a borrowed one (§8): its software renderer rebuilt a window-sized mask for every run of text, its GPU renderer lost small drawings when multisampling was on, clicks went missing under load because input was judged at the pointer's latest position, and it has no route to Contract 3. Each fault had a workaround; the lesson, the same one the author's music applications taught, is that the workarounds cost more than the part. With two tools to move, the cheapest moment is now.
+
+It is not a general-purpose toolkit. It is what this desktop's tools need, and it carries the design's priorities down to the level where a button is drawn:
+
+- **The scene is the currency.** A tool describes its window as a retained scene, a display list in the format of §6.6, not as pixels. Everything else follows from that one choice.
+- **GPU first.** Scenes are rendered on the GPU, in parallel, at the exact scale of the monitor they are on (Contract 1). The CPU draws only where a GPU buys nothing, a dialog that changes once, and as the **reference renderer**: the same scene drawn in software, for tests and for machines without a GPU. The two must agree, which is how the GPU renderer is tested.
+- **One renderer, shared with the server.** The code that draws a tool's scene is the code the server uses for its own shelf (§6.9), title bars and notifications, and for display-list surfaces from any application (§6.6). There is one implementation of text, one of shapes, one glyph cache design, and one place to fix a drawing fault.
+- **Remote display falls out of it.** A tool that produces a scene can send that scene instead of video (phase 4). The toolkit sends what changed, in drawing commands, with text as text.
+- **Meaning is built in.** Every widget publishes its role, name, value and bounds as it is laid out (Contract 3). A tool cannot be built on this toolkit without an accessibility tree, and the same tree is what named desktop actions (§6.9), voice and automation address.
+- **Isolation.** Reading a font, decoding a picture and parsing what a program prints are done on **untrusted input**. The toolkit keeps such work off the thread that owns the window and its input, and where the platform allows (Capsicum on FreeBSD, the equivalents on Linux) in a process that can do nothing else. A tool's interface stays responsive whatever its content is doing: input is handled in order at the place it happened, and never waits for drawing.
+- **Security.** A tool gets nothing a third-party application would not get (§7): no global input, no reading other windows, no placing itself. It reaches the desktop through the same protocol and the same permissions, so the toolkit is also the proof that the protocol is enough.
+- **Size and placement come from the server.** The toolkit has no scale setting and no window-position code of its own. It lays out in reference units and draws at whatever density it is told.
+
+**What it stands on.** For now the toolkit talks to the server as a Wayland client, in code written by the project as the D-Bus edge was (§6.8), with the native window protocol (§6.3 to §6.5) taking its place behind the same interface when that exists. Font files are read and keyboards mapped with the parts already in use (§8) until each is decided on. **Text is the hard part** of any toolkit: shaping for scripts that need it, right-to-left text, fonts that fall back per character, input methods. Plain text comes first; the rest is named in §10 rather than assumed.
+
+**The order.** The drawing and text core comes first, with the **terminal** as its first user: a terminal is a grid of cells, needs the fewest widgets, and is where the borrowed toolkit hurt most. The **shelf** (§6.9) is then built in the server on the same drawing code. Widgets follow (label, button, switch, slider, list, text field, scrolling), and the **settings app** moves when they can carry it. The borrowed toolkit is removed when the second tool has moved.
 
 ---
 
@@ -402,7 +421,7 @@ On a typical desktop, any program running as the user can already read the user'
 | Smithay | The server's Wayland front end, DRM/KMS and input back ends, renderer | Borrowed for phase 2 bring-up; moving to a support role (decided 8 November 2026): the renderer is replaced with the project's own first, then the DRM/KMS and input back ends; the Wayland front end may stay as an edge |
 | libinput, libseat/seatd, xkbcommon | Input devices, seat and device access, keymaps | Borrowed through Smithay |
 | Xwayland | X11 applications (the X11 edge) | Borrowed; an X server of our own is a large project |
-| iced | The terminal and the settings app | Borrowed (MIT); chosen over Slint on 8 November 2026, and Slint removed. Draws in software on Hubble for now (§8.3) |
+| iced | The terminal and the settings app | Borrowed (MIT); chosen over Slint on 8 November 2026. **Being replaced** by the project's own toolkit (§6.10, decided 9 November 2026): the terminal moves first, then the settings app, and iced is removed with the second. Until then it carries two patches and workarounds (its software renderer's clip mask, multisampling off) |
 | ab_glyph, resvg | Title-bar text, SVG wallpapers | Borrowed; small, candidates for our own |
 | Adwaita cursor theme | The pointer | Borrowed artwork, read at run time |
 
@@ -410,7 +429,7 @@ On a typical desktop, any program running as the user can already read the user'
 
 - **Phase 1 daemon:** Rust over XCB/RandR (the `x11rb` crate). Its profile, EDID and rules logic lives in a shared crate that moves unchanged into the server.
 - **Server core:** Rust. A compositor needs steady frame timing, which rules out garbage-collected runtimes.
-- **Settings, profile editor and tray indicator:** Rust. They use iced for now; whether they move to a toolkit of the project's own is open (§10).
+- **The toolkit and the tools** (terminal, settings, the shelf's drawing): Rust, on the project's own toolkit (§6.10). The two tools that exist use iced until they are moved.
 - **Display-list reference implementation:** Rust (§6.6).
 
 Why one language:
@@ -496,14 +515,23 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 | Phase | Deliverable | Value on its own | Estimated effort |
 |---|---|---|---|
 | **1** | X11 consistency daemon: EDID profiles, scaling modes A/B, toolkit settings, layout memory | Fixes daily annoyances on any X11 desktop, FreeBSD and Linux | Days to weeks |
-| **2** | Display server, first nested in a window, then on real hardware: native per-monitor rendering, placement memory, reference-unit scaling, per-window scaling of X11 apps with correct input, the session bus with its D-Bus edge (§6.8), the shell (§6.9) | A usable personal desktop that beats X11 and Wayland on consistency | Months |
+| **2** | Display server, first nested in a window, then on real hardware: native per-monitor rendering, placement memory, reference-unit scaling, per-window scaling of X11 apps with correct input, the session bus with its D-Bus edge (§6.8), the project's own toolkit and the tools on it (§6.10), the shell (§6.9) | A usable personal desktop that beats X11 and Wayland on consistency | Months |
 | **3** | Accessibility contract and display-list surfaces: Rust reference implementation, then the native Avalonia backend (§8.1) | Sharp magnification, sharp straddling windows, accessibility by design | Research |
 | **4** | Remote display over display lists | Efficient, sharp remote desktops | Research |
 
-**Status, 8 November 2026.**
+**Status, 9 November 2026.**
 
 - **Phase 1** is built through its fourth milestone (profiles, layout memory, window memory, scaling) and runs on FreeBSD. It is frozen except for blockers, because X11's walls (§5) cost more effort than they teach.
 - **Phase 2** runs on real hardware as the daily session on FreeBSD 15.1 with Intel UHD 630 graphics, on two monitors of very different density: a 14″ 4K panel at scale 3 and an ordinary 1080p monitor at 1, the defaults from their EDIDs (calculated 3.28 and 1.07, snapped to whole numbers as Contract 1 says). Wayland applications draw natively at each monitor's scale. X11 applications run through rootless Xwayland at the densest monitor's scale and are shown smaller on the others; a smoothing filter for that shrink was tried and rejected because it softened text. The server draws title bars, places new windows on the monitor under the pointer, remembers window places per monitor setup (a first piece of Contract 2), follows monitors being plugged in and out, and has a control socket for scripted tests. The session bus (§6.8) works: its core (monitors, settings and notifications on the project's own protocol) and a D-Bus edge written by the project, which provides the settings portal (applications follow dark or light and the accent live) and draws notifications itself. A settings app (iced, a sidebar of pages) sets appearance, each screen's wallpaper (one screen's is the default), each screen's scale and the arrangement of the screens, all applied live. On 8 November it also ran on Linux for the first time, on Fedora with Intel UHD 770 graphics, started from the GDM login screen, with the same monitors at 60 Hz and the same scales; the only changes needed were the peer-credential call (glibc has no `getpeereid`) and seat access through logind instead of seatd. Windows, placement and accessibility on the native protocol, and explicit sync (§8.3), come next. The shell (§6.9: one shelf, an apps popup, live tiles) was designed on 9 November and is not built yet; until it is, applications start from the menu on the desktop.
+
+**The order of work in phase 2, from 9 November 2026.** The server has been installed as a session on Void Linux since that day (§8), with screens-off and sleep, window borders, and the terminal and settings app as its first tools. What comes next, in order:
+
+1. **The toolkit's drawing and text core, and the terminal on it** (§6.10): scenes in the display-list format, a GPU renderer with a CPU reference renderer, the project's own Wayland client code. This moved ahead of the shell when the borrowed toolkit's faults were measured under load: with six busy tabs in a window of 3792 × 2118 pixels its software renderer held one processor core and nothing else, and its GPU renderer was ten to fifteen times faster on the same load but lost the window's buttons.
+2. **The shell** (§6.9), built in the server on the same drawing code: the shelf, the apps popup, running and pinned applications, then live tiles; snapping and keyboard switching with it.
+3. **Widgets, and the settings app on them**; the borrowed toolkit removed.
+4. **Windows, placement and accessibility on the native protocol**, which the toolkit then uses instead of Wayland, and explicit sync and the rest of §8.3 alongside as hardware allows.
+
+The display-list renderer was phase 3 work. Step 1 brings its first version forward into phase 2, because the tools need it; what stays in phase 3 is the protocol side (applications submitting scenes to the server), the accessibility contract on the wire, and Avalonia.
 
 **What FreeBSD taught phase 2.** As in phase 1 (§4.7), the real machine showed things a Linux-first build would have missed:
 
@@ -528,7 +556,7 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 5. Status of Wayland session-restore and placement protocols, and whether the server should implement them for compatibility.
 6. Display-list format: the minimal validated command set (paths, fills, strokes, gradients, images, text runs with font references, clips, layers), and how text is shipped (glyph runs plus font identity, so the server can re-render text sharply at any density).
 7. FreeBSD specifics: DRM/KMS driver coverage for the target GPUs beyond Intel (§8.3); libinput and seat management; a suspend-and-wake loop for testing.
-8. The tools' user interface: the settings app and the terminal use iced (MIT, chosen over Slint on 8 November 2026, whose GPLv3 or royalty-free licence was a concern). iced is a borrowed toolkit (§8), so whether the tools keep it or use a toolkit of the project's own is open; its software renderer is slow at scale 3 when scrolling large pages, and its GPU renderer hung Hubble's GPU (§8.3).
+8. The tools' user interface. *Answered (9 November 2026): the project's own toolkit (§6.10) replaces iced.* Open within it: text shaping for scripts that need it, right-to-left text and input methods, and whether font reading and shaping are written by the project or borrowed; which GPU interface the renderer uses first (OpenGL ES through EGL, which every target has today, or Vulkan); and how much isolation each platform allows for decoding and parsing.
 9. The scope of the native Avalonia backend: which parts of Avalonia's platform interfaces it must implement, and how its automation peers map to Contract 3.
 10. Firefox and Thunderbird: confirm that Firefox on X11 has no per-monitor scaling; check whether Mozilla implements (or plans) the Wayland session-restore protocol; how well heuristics match several Firefox windows to saved layouts; the scope of an AT-SPI bridge into Contract 3.
 11. Many monitors on several GPUs (§5.1): NVIDIA's FreeBSD driver with more than one card (Xinerama versus PRIME output sinks for phase 1; its DRM/KMS support for phase 2); how many monitors report a real EDID serial number (the linuxhw database can answer this), since identical panels without one are told apart only by port.
@@ -550,7 +578,9 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 - **GBM:** Generic Buffer Management, the interface through which a display server allocates GPU buffers it can show on a monitor.
 - **Mesa:** the open-source implementation of OpenGL, Vulkan and GBM used by Intel, AMD and nouveau drivers.
 - **Explicit sync:** passing a fence with each buffer that says when the GPU has finished with it, instead of leaving the kernel to work that out (implicit sync).
-- **iced:** a cross-platform GUI toolkit for Rust, with a GPU renderer (wgpu) and a software one (tiny-skia).
+- **iced:** a cross-platform GUI toolkit for Rust, with a GPU renderer (wgpu) and a software one (tiny-skia); used by the first tools and being replaced (§6.10).
+- **Toolkit:** the code an application draws its buttons, lists and text with. Vergence's own is described in §6.10.
+- **Multisampling:** smoothing the edges of drawn shapes by sampling each pixel several times on the GPU.
 - **Smithay:** a Rust library for building Wayland compositors.
 - **Vello:** a Rust GPU renderer for 2D vector graphics.
 - **x11rb:** Rust bindings for the X11 protocol (XCB).

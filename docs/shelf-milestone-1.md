@@ -4,6 +4,14 @@ Planned 2026-11-09 (Dave: "write the shelf milestone", after the desktop
 paradigm discussion that became whitepaper §6.9); plan accepted the same
 evening. Nothing here is built yet.
 
+**Order changed the same evening (Dave, 2026-11-09 20:31):** the project's own
+toolkit comes first (whitepaper §6.10, §9), with the terminal as its first
+user, and the shelf is built after it **on the toolkit's drawing code**
+instead of the server's present solid rectangles and per-label rasters. The
+steps and decisions below stand; "Drawing" under Design, and the icon
+decoding note under Security, are to be revised against the toolkit when its
+first milestone is written.
+
 The goal: a session where you can see what is installed, start it, see what
 is running and get back to it, without the right-click menu. That is the
 shelf's strip, its apps button with the popup grid, and one icon for each
