@@ -3,6 +3,9 @@
 //       color-scheme = "default" | "dark" | "light"   (default: dark)
 //       accent       = "#rrggbb"                       (cursor, selection, highlights)
 //       contrast     = "normal" | "high"               (black or white behind the text)
+//   ~/.config/vergence/desktop.toml  [terminal]
+//       scheme = "catppuccin" | "tango"   the 16 colours (default catppuccin; Tango's saturated
+//                                         blue and plain whites suit mc and other 16-colour programs)
 //   ~/.config/vergence/settings.toml  (the settings app's Theme page)
 //       "Gtk/MonospaceFontName" = "Adwaita Mono 10"   the terminal's text
 //       "Gtk/FontName"          = "Noto Sans 10"      tab titles, the menu
@@ -26,8 +29,16 @@ pub enum WinButton {
     Close,
 }
 
+/// Which 16-colour palette the terminal uses (desktop.toml [terminal] scheme).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scheme {
+    Catppuccin,
+    Tango,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Look {
+    pub scheme: Scheme,
     pub dark: bool,
     pub high_contrast: bool,
     pub accent: Option<Color>,
@@ -46,6 +57,7 @@ pub struct Look {
 impl Default for Look {
     fn default() -> Look {
         Look {
+            scheme: Scheme::Catppuccin,
             dark: true,
             high_contrast: false,
             accent: None,
@@ -131,6 +143,11 @@ impl Look {
         look.dark = text("color-scheme").as_deref() != Some("light");
         look.high_contrast = text("contrast").as_deref() == Some("high");
         look.accent = text("accent").as_deref().and_then(parse_rgb);
+        let terminal = desktop.and_then(|t| t.parse::<toml::Table>().ok()).and_then(|t| t.get("terminal").and_then(|a| a.as_table()).cloned()).unwrap_or_default();
+        look.scheme = match terminal.get("scheme").and_then(|v| v.as_str()).map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+            Some("tango") => Scheme::Tango,
+            _ => Scheme::Catppuccin,
+        };
         let xs = xsettings.and_then(|t| vergence_xsettings::from_toml(t).ok()).unwrap_or_default();
         let xstr = |k: &str| match xs.get(k) {
             Some(vergence_xsettings::Value::Str(v)) if !v.trim().is_empty() => Some(v.clone()),
@@ -172,10 +189,13 @@ impl Look {
         font(self.ui_family.as_deref(), Font::DEFAULT)
     }
 
-    /// The colours: Catppuccin's Mocha (dark) and Latte (light) palettes;
+    /// The colours: Catppuccin's Mocha (dark) and Latte (light) palettes, or
+    /// Tango (GNOME Terminal's classic set, made for 16-colour programs);
     /// high contrast puts the text on pure black or white.
     pub fn palette(&self) -> Palette {
-        let mut p = if self.dark {
+        let mut p = if self.scheme == Scheme::Tango {
+            tango(self.dark)
+        } else if self.dark {
             Palette {
                 bg: rgb(0x1e1e2e),
                 fg: rgb(0xcdd6f4),
@@ -203,6 +223,21 @@ impl Look {
             p.accent = a;
         }
         p
+    }
+}
+
+/// Tango: GNOME Terminal's palette since 2006, the look most 16-colour programs
+/// (mc, htop, vim's default schemes) were tuned against: a deep blue, plain
+/// whites, strong brights.
+fn tango(dark: bool) -> Palette {
+    Palette {
+        bg: if dark { rgb(0x2e3436) } else { rgb(0xffffff) },
+        fg: if dark { rgb(0xd3d7cf) } else { rgb(0x2e3436) },
+        accent: if dark { rgb(0x729fcf) } else { rgb(0x3465a4) },
+        ansi: [
+            rgb(0x2e3436), rgb(0xcc0000), rgb(0x4e9a06), rgb(0xc4a000), rgb(0x3465a4), rgb(0x75507b), rgb(0x06989a), rgb(0xd3d7cf),
+            rgb(0x555753), rgb(0xef2929), rgb(0x8ae234), rgb(0xfce94f), rgb(0x729fcf), rgb(0xad7fa8), rgb(0x34e2e2), rgb(0xeeeeec),
+        ],
     }
 }
 
@@ -253,6 +288,16 @@ mod tests {
         // "default" is dark; a broken accent is no accent.
         let l = Look::from_text(Some("[appearance]\ncolor-scheme = \"default\"\naccent = \"blue\"\n"), None);
         assert!(l.dark && l.accent.is_none());
+    }
+
+    #[test]
+    fn scheme_choice() {
+        let l = Look::from_text(Some("[terminal]\nscheme = \"Tango\"\n"), None);
+        assert_eq!(l.scheme, Scheme::Tango);
+        assert_eq!(l.palette().ansi[4], rgb(0x3465a4));
+        let l = Look::from_text(Some("[terminal]\nscheme = \"something\"\n"), None);
+        assert_eq!(l.scheme, Scheme::Catppuccin);
+        assert_eq!(Look::from_text(None, None).scheme, Scheme::Catppuccin);
     }
 
     #[test]

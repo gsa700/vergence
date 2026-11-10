@@ -7,7 +7,14 @@
 // in points like everything else, so the bar is the same physical height on every
 // monitor; it is drawn with solid colours, which are sharp at any scale. Edges are
 // rounded from logical to physical the same way as the window's own position, so
-// bar and content meet without a seam. Title text: later (needs text rendering).
+// bar and content meet without a seam.
+//
+// Every window that draws no frame of its own, ours (the terminal and the settings
+// app draw their own title bars) or a server-decorated one, also gets an EDGE-point
+// border line and the same resize band (Dave, 2026-11-09: "a small border to make
+// resizing the windows easier; it looks weird without one"). A window whose
+// bounding box is larger than its geometry is drawing its own frame and shadow
+// (GTK's client-side decorations) and is left alone.
 //
 // The scene is built here, front to back, window by window, so a title bar is
 // stacked with its window (behind the windows above it).
@@ -42,6 +49,10 @@ use crate::{Server, grabs::resize_grab::ResizeEdge};
 pub const TITLE_H: i32 = 24;
 /// The resize band around a decorated window, in points.
 pub const BORDER: i32 = 6;
+/// The border line around a window, in points.
+pub const EDGE: i32 = 1;
+const EDGE_ACTIVE: [f32; 4] = [0.42, 0.48, 0.62, 1.0];
+const EDGE_INACTIVE: [f32; 4] = [0.34, 0.34, 0.34, 1.0];
 
 const BAR_ACTIVE: [f32; 4] = [0.20, 0.24, 0.32, 1.0];
 const BAR_INACTIVE: [f32; 4] = [0.22, 0.22, 0.22, 1.0];
@@ -71,7 +82,7 @@ pub enum Hit {
 
 /// The ids of one window's bar parts, for damage tracking, and its title rasters.
 pub struct Decor {
-    ids: [Id; 6],
+    ids: [Id; 10],
     commit: CommitCounter,
     active: bool,
     /// One title raster per output scale (key: the scale's bits).
@@ -115,11 +126,6 @@ impl Frame {
     fn whole(&self) -> Rectangle<i32, Logical> {
         Rectangle::new(self.title.loc, (self.content.size.w, self.content.size.h + TITLE_H).into())
     }
-
-    fn outer(&self) -> Rectangle<i32, Logical> {
-        let w = self.whole();
-        Rectangle::new((w.loc.x - BORDER, w.loc.y - BORDER).into(), (w.size.w + 2 * BORDER, w.size.h + 2 * BORDER).into())
-    }
 }
 
 /// Smaller by `by` points on every side.
@@ -155,6 +161,26 @@ impl Server {
         self.has_title(w).then(|| self.space.element_geometry(w).map(Frame::of)).flatten()
     }
 
+    /// The rectangle the server outlines and surrounds with a resize band: the
+    /// whole frame of a decorated window, or the geometry of a window that draws
+    /// no frame of its own. None for fullscreen, override-redirect and
+    /// client-decorated windows.
+    pub fn border_of(&self, w: &Window) -> Option<Rectangle<i32, Logical>> {
+        if let Some(f) = self.frame_of(w) {
+            return Some(f.whole());
+        }
+        if let Some(x) = w.x11_surface() {
+            if x.is_override_redirect() || x.is_fullscreen() {
+                return None;
+            }
+        } else if w.toplevel().is_some_and(|t| t.with_committed_state(|c| c.is_some_and(|s| s.states.contains(xdg_toplevel::State::Fullscreen)))) {
+            return None;
+        }
+        let geo = self.space.element_geometry(w)?;
+        let bbox = self.space.element_bbox(w)?;
+        (bbox == geo).then_some(geo)
+    }
+
     /// The top-most thing under `pos`: a title bar part, a resize band, or a surface.
     pub fn hit(&self, pos: Point<f64, Logical>) -> Hit {
         for w in self.space.elements().rev() {
@@ -168,8 +194,11 @@ impl Server {
                 if f.title.to_f64().contains(pos) {
                     return Hit::Title(w.clone());
                 }
-                let whole = f.whole().to_f64();
-                if f.outer().to_f64().contains(pos) && !whole.contains(pos) {
+            }
+            if let Some(b) = self.border_of(w) {
+                let whole = b.to_f64();
+                let outer = Rectangle::new((b.loc.x - BORDER, b.loc.y - BORDER).into(), (b.size.w + 2 * BORDER, b.size.h + 2 * BORDER).into());
+                if outer.to_f64().contains(pos) && !whole.contains(pos) {
                     let mut e = ResizeEdge::empty();
                     if pos.x < whole.loc.x {
                         e |= ResizeEdge::LEFT;
@@ -209,11 +238,12 @@ impl Server {
         elements.extend(self.notify_elements(renderer, out, scale));
         for w in windows {
             let frame = self.frame_of(&w);
-            let reach = frame.as_ref().map(|f| f.whole()).or_else(|| self.space.element_bbox(&w));
+            let border = self.border_of(&w);
+            let reach = border.map(|b| Rectangle::new((b.loc.x - EDGE, b.loc.y - EDGE).into(), (b.size.w + 2 * EDGE, b.size.h + 2 * EDGE).into())).or_else(|| self.space.element_bbox(&w));
             if !reach.is_some_and(|r| r.overlaps(out)) {
                 continue;
             }
-            if let Some(f) = frame {
+            if frame.is_some() || border.is_some() {
                 let title = self.window_title(&w);
                 let active = focused.as_ref().is_some_and(|k| match k {
                     crate::focus::KeyboardFocus::X11(x) => w.x11_surface() == Some(x),
@@ -227,6 +257,16 @@ impl Server {
                 let solid = |i: usize, r: Rectangle<f64, Logical>, c: [f32; 4]| {
                     SceneElement::Solid(SolidColorRenderElement::new(d.ids[i].clone(), physical(r, out.loc, scale), d.commit, c, Kind::Unspecified))
                 };
+                // The border line, just outside the window (ids 6-9).
+                if let Some(b) = border {
+                    let (r, e) = (b.to_f64(), EDGE as f64);
+                    let c = if active { EDGE_ACTIVE } else { EDGE_INACTIVE };
+                    elements.push(solid(6, Rectangle::new((r.loc.x - e, r.loc.y - e).into(), (r.size.w + 2.0 * e, e).into()), c));
+                    elements.push(solid(7, Rectangle::new((r.loc.x - e, r.loc.y + r.size.h).into(), (r.size.w + 2.0 * e, e).into()), c));
+                    elements.push(solid(8, Rectangle::new((r.loc.x - e, r.loc.y).into(), (e, r.size.h).into()), c));
+                    elements.push(solid(9, Rectangle::new((r.loc.x + r.size.w, r.loc.y).into(), (e, r.size.h).into()), c));
+                }
+                if let Some(f) = frame {
                 // Front to back: title text, button marks, then the bar.
                 let text_x = f.title.loc.x + TEXT_PAD;
                 let logical: Size<i32, Logical> = (f.maximize.loc.x - TEXT_PAD / 2 - text_x, TITLE_H).into();
@@ -269,6 +309,7 @@ impl Server {
                 elements.push(solid(3, Rectangle::new(m.loc, (t, m.size.h).into()), BUTTON));
                 elements.push(solid(4, Rectangle::new((m.loc.x + m.size.w - t, m.loc.y).into(), (t, m.size.h).into()), BUTTON));
                 elements.push(solid(5, f.title.to_f64(), if active { BAR_ACTIVE } else { BAR_INACTIVE }));
+                }
             }
             let Some(loc) = self.space.element_location(&w) else { continue };
             let render_loc = (loc - w.geometry().loc - out.loc).to_f64().to_physical(scale).to_i32_round();

@@ -600,6 +600,8 @@ impl App {
         let pal = self.look.palette();
         let (ui, ui_size) = (self.look.ui_font(), self.look.ui_size);
         let center = iced::alignment::Vertical::Center;
+        // Tabs close on the side the window buttons are on (Dave, 2026-11-09).
+        let controls_left = !self.look.buttons_left.is_empty();
         let mut tabs = row![].spacing(2).height(Length::Fixed(TAB_H)).align_y(center);
         for (i, tab) in self.tabs.iter().enumerate() {
             let active = i == self.active;
@@ -623,11 +625,12 @@ impl App {
             };
             let name = text(label).font(ui).size(ui_size).color(tab_fg).width(Length::Fill).height(Length::Fill).align_y(center).wrapping(text::Wrapping::None);
             let name = container(name).width(Length::Fill).height(Length::Fill).clip(true).padding(Padding { bottom: 2.0 * TEXT_LIFT, ..Padding::ZERO });
-            let content = row![name, close].height(Length::Fill).align_y(center).spacing(6);
+            let content = (if controls_left { row![close, name] } else { row![name, close] }).height(Length::Fill).align_y(center).spacing(6);
+            let (pad_left, pad_right) = if controls_left { (4.0, 12.0) } else { (12.0, 4.0) };
             let tab_button = button(content)
                 .width(Length::Fixed(TAB_W))
                 .height(Length::Fixed(TAB_H))
-                .padding(Padding { top: 0.0, bottom: 0.0, left: 12.0, right: 4.0 })
+                .padding(Padding { top: 0.0, bottom: 0.0, left: pad_left, right: pad_right })
                 .on_press(Message::SelectTab(i))
                 .style(move |_: &Theme, s| {
                     let bg = if active {

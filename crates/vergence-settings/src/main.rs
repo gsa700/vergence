@@ -63,6 +63,7 @@ enum Message {
     // Theme and fonts.
     Pick(&'static str, String),
     FontSize(bool, String),
+    TermScheme(String),
     // Windows.
     Layout(winbar::Layout),
     // Keyboard.
@@ -154,6 +155,16 @@ const REPEAT_RATE: i64 = 30;
 
 fn keyboard_int(d: &toml::Table, k: &str, default: i64) -> i64 {
     d.get("keyboard").and_then(|a| a.get(k)).and_then(|v| v.as_integer()).unwrap_or(default)
+}
+
+// ---- Terminal: desktop.toml [terminal] scheme (vergence-term's look.rs reads it) ----
+const TERM_SCHEMES: [&str; 2] = ["Catppuccin", "Tango"];
+
+fn term_scheme(d: &toml::Table) -> &'static str {
+    match d.get("terminal").and_then(|a| a.get("scheme")).and_then(|v| v.as_str()).map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+        Some("tango") => "Tango",
+        _ => "Catppuccin",
+    }
 }
 
 // ---- Energy: desktop.toml [energy] (the server's energy.rs reads the same keys) ----
@@ -437,6 +448,12 @@ impl App {
                 });
             }
             Message::KeyTest(t) => self.key_test = t,
+            Message::TermScheme(name) => {
+                let v = name.to_ascii_lowercase();
+                self.save_table("terminal", |t| {
+                    t.insert("scheme".into(), v.into());
+                })
+            }
             Message::ScreensOff(label) => {
                 let m = minutes_of(&OFF_CHOICES, &label);
                 self.save_energy(|t| {
@@ -613,11 +630,16 @@ impl App {
     }
 
     fn save_energy(&mut self, f: impl FnOnce(&mut toml::Table)) {
+        self.save_table("energy", f);
+    }
+
+    /// Change one table of desktop.toml, making it if it is missing.
+    fn save_table(&mut self, name: &str, f: impl FnOnce(&mut toml::Table)) {
         self.save(|d| {
-            if !d.get("energy").is_some_and(|a| a.is_table()) {
-                d.insert("energy".into(), toml::Value::Table(toml::Table::new()));
+            if !d.get(name).is_some_and(|a| a.is_table()) {
+                d.insert(name.into(), toml::Value::Table(toml::Table::new()));
             }
-            if let Some(t) = d.get_mut("energy").and_then(|a| a.as_table_mut()) {
+            if let Some(t) = d.get_mut(name).and_then(|a| a.as_table_mut()) {
                 f(t);
             }
         });
@@ -868,6 +890,12 @@ impl App {
                     setting(c, "Interface", "Menus, buttons, labels, and the title bars.", font_row(false)),
                     setting(c, "Monospace", "Terminals and code.", font_row(true)),
                 ]),
+                group(c, Some("Terminal"), vec![setting(
+                    c,
+                    "Colours",
+                    "The terminal's 16 colours. Tango is the classic set that mc, htop and vim were tuned for; Catppuccin is softer.",
+                    pick_list(TERM_SCHEMES.to_vec(), Some(term_scheme(&self.desktop)), |s| Message::TermScheme(s.to_string())).text_size(13).width(160).into(),
+                )]),
                 self.status_line(c),
             ],
         )
