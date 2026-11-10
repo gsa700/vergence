@@ -2,6 +2,7 @@
 
 Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Vergence-Whitepaper.md,
 the current milestone is docs/bus-milestone-1.md (the session bus; the server's is docs/server-milestone-1.md; phase 1's, frozen, are docs/milestone-1.md to -4.md), status is in README.md.
+The shell (whitepaper §6.9, decided 2026-11-09) is planned in docs/shelf-milestone-1.md; not started.
 
 - **Started 2026-11-06** (Dave's go). The source lives here on Control (the
   main git copy, pushed to GitHub; Control has no Rust). Build and test on the
