@@ -10,10 +10,12 @@
 #   cargo build --release
 #
 # What goes where (PREFIX=/usr/local):
-#   bin/vergence-server, vergence-term, vergence-settings, vbus, vctl   the programs
+#   bin/vergence-server, vergence-term, vergence-settings, vbus, vshell, vctl   the programs
 #   bin/vergence-session                     the session launcher (tools/vergence-session)
 #   bin/vergence -> vergence-session         start the session from a text console
 #   share/wayland-sessions/vergence.desktop  "Vergence" at a display manager's login screen
+#   share/applications/vergence-*.desktop    the terminal and the settings app, for the shelf and any launcher
+#   share/icons/hicolor/scalable/apps/       their icons (data/icons, drawn by the project)
 # User files stay in the user's home: ~/.config/vergence (settings), ~/.local/state/vergence (logs).
 #
 # System setup, unless --destdir: where there is no logind, seatd is enabled and
@@ -40,11 +42,15 @@ while [ $# -gt 0 ]; do
 done
 bin=$destdir$prefix/bin
 sessions=$destdir$prefix/share/wayland-sessions
-programs="vergence-server vergence-term vergence-settings vbus"
+applications=$destdir$prefix/share/applications
+icons=$destdir$prefix/share/icons/hicolor/scalable/apps
+programs="vergence-server vergence-term vergence-settings vbus vshell"
+tools="vergence-term vergence-settings"
 
 if [ -n "$uninstall" ]; then
     for p in $programs vctl vergence-session vergence; do rm -f "$bin/$p"; done
     rm -f "$sessions/vergence.desktop"
+    for t in $tools; do rm -f "$applications/$t.desktop" "$icons/$t.svg"; done
     echo "removed Vergence from $destdir$prefix (user settings and logs kept)"
     exit 0
 fi
@@ -58,7 +64,11 @@ if [ -z "$destdir" ] && [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-install -d -m 755 "$bin" "$sessions"
+install -d -m 755 "$bin" "$sessions" "$applications" "$icons"
+for t in $tools; do
+    install -m 644 "$root/data/applications/$t.desktop" "$applications/$t.desktop"
+    install -m 644 "$root/data/icons/$t.svg" "$icons/$t.svg"
+done
 for p in $programs; do install -m 755 "$release/$p" "$bin/$p"; done
 install -m 755 "$here/vctl" "$bin/vctl"
 install -m 755 "$here/vergence-session" "$bin/vergence-session"

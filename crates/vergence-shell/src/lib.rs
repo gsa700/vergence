@@ -1,12 +1,19 @@
 //! The shell's arithmetic and, later, its knowledge of applications
 //! (whitepaper §6.9; docs/shelf-milestone-1.md).
 //!
+//! Step 2 is the applications a system has ([`apps`], from desktop
+//! entries read by [`desktop`]) and their icons ([`icons`]).
+//!
 //! Step 1 is here: the shelf's strip on the right edge of its screen, the
 //! **work area** it leaves (what maximising, placing and fitting windows,
 //! the desktop menu and notification cards keep inside), and moving a
 //! remembered window clear of the strip. Rectangles are in points, in the
 //! desktop's own space (a screen's rectangle is where the arrangement put
 //! it).
+
+pub mod apps;
+pub mod desktop;
+pub mod icons;
 
 /// A rectangle in points: its top-left corner and its size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,0 +1,291 @@
+//! Desktop entries: the files by which a system says what applications it
+//! has (`*.desktop` under `applications/` in the XDG data directories).
+//!
+//! A file format read at the edge (whitepaper principle 4) by our own code.
+//! The files are the user's or a package's, trusted as much as the programs
+//! they start, and still read as untrusted input: a bad one must not take
+//! the session down. Sizes are limited, nothing panics, and what cannot be
+//! understood is left out, never guessed at.
+//!
+//! Read from an entry: Type, Name, Exec, Icon, TryExec, Terminal,
+//! NoDisplay, Hidden, StartupWMClass, Keywords. Translated names
+//! (`Name[de]`) are not used yet.
+
+/// The most of a file that is read, and the longest line and argument list
+/// an entry may have.
+pub const MAX_FILE: usize = 256 * 1024;
+const MAX_VALUE: usize = 4096;
+const MAX_ARGS: usize = 256;
+
+/// One application, as its desktop entry describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Entry {
+    /// The file's name without `.desktop`, subdirectories joined with `-`
+    /// ("firefox", "org.gnome.Nautilus"): what pins and window matching use.
+    pub id: String,
+    pub name: String,
+    /// The program and its arguments, field codes removed. Run as it is,
+    /// with no shell between.
+    pub exec: Vec<String>,
+    /// An icon's name in the icon themes, or a file's path.
+    pub icon: String,
+    /// A program that must exist for the entry to be shown.
+    pub try_exec: String,
+    /// The program wants a terminal to run in.
+    pub terminal: bool,
+    /// Not to be shown in a list of applications (it can still own windows).
+    pub no_display: bool,
+    /// As good as deleted: a user's entry of this kind hides the system's.
+    pub hidden: bool,
+    /// The class its windows carry, where that is not its id.
+    pub startup_wm_class: String,
+    pub keywords: Vec<String>,
+}
+
+/// A value as the file means it: `\s`, `\n`, `\t`, `\r` and `\\` are a
+/// space, a line end, a tab, a return and a backslash.
+fn unescape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('s') => out.push(' '),
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('\\') => out.push('\\'),
+            // An escape the format does not have is kept as it was written.
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+/// An Exec line as arguments, by the specification's rules: arguments are
+/// parted by spaces; one in double quotes may hold spaces, and in it a
+/// backslash before `"`, `` ` ``, `$` or `\` gives that character. Field
+/// codes (`%f`, `%U`, `%i`, `%c`, `%k` and the rest) are dropped, an
+/// argument that was only a field code with them; `%%` is a percent sign.
+/// None if a quote is left open, there is no program, or there are more
+/// arguments than any real entry has.
+pub fn split_exec(exec: &str) -> Option<Vec<String>> {
+    let mut args: Vec<String> = Vec::new();
+    let mut chars = exec.chars().peekable();
+    loop {
+        while chars.peek().is_some_and(|c| *c == ' ' || *c == '\t') {
+            chars.next();
+        }
+        if chars.peek().is_none() {
+            break;
+        }
+        let mut arg = String::new();
+        // An argument that was a field code and nothing else is left out.
+        let (mut only_code, mut quoted) = (false, false);
+        while let Some(&c) = chars.peek() {
+            match c {
+                ' ' | '\t' => break,
+                '"' => {
+                    chars.next();
+                    quoted = true;
+                    loop {
+                        match chars.next()? {
+                            '"' => break,
+                            '\\' => match chars.next()? {
+                                c @ ('"' | '`' | '$' | '\\') => arg.push(c),
+                                other => {
+                                    arg.push('\\');
+                                    arg.push(other);
+                                }
+                            },
+                            c => arg.push(c),
+                        }
+                    }
+                }
+                '%' => {
+                    chars.next();
+                    match chars.next() {
+                        Some('%') => arg.push('%'),
+                        // A field code: a file, a URL, the icon, the name, the entry's own path.
+                        Some(_) => only_code = arg.is_empty(),
+                        None => {}
+                    }
+                }
+                c => {
+                    chars.next();
+                    arg.push(c);
+                    only_code = false;
+                }
+            }
+        }
+        if !(arg.is_empty() && (only_code || !quoted)) {
+            args.push(arg);
+        }
+        if args.len() > MAX_ARGS {
+            return None;
+        }
+    }
+    (!args.is_empty() && !args[0].is_empty()).then_some(args)
+}
+
+/// Reads an entry's text. None if it is not an application's entry: no
+/// `[Desktop Entry]` group, a Type other than Application, no Name, or an
+/// Exec that cannot be split. `id` is given by the caller, from the file's
+/// name.
+pub fn parse(id: &str, text: &str) -> Option<Entry> {
+    let text = if text.len() > MAX_FILE { text.get(..MAX_FILE).or_else(|| text.get(..text.floor_char_boundary(MAX_FILE)))? } else { text };
+    let mut entry = Entry { id: id.to_string(), ..Entry::default() };
+    let (mut in_group, mut seen_group, mut application, mut exec) = (false, false, false, None);
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            // Only the first [Desktop Entry] group counts; actions and the rest are skipped.
+            in_group = line == "[Desktop Entry]" && !seen_group;
+            seen_group |= in_group;
+            continue;
+        }
+        if !in_group {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else { continue };
+        let (key, value) = (key.trim_end(), value.trim_start());
+        if value.len() > MAX_VALUE {
+            continue;
+        }
+        let flag = value == "true";
+        match key {
+            "Type" => application = value == "Application",
+            "Name" => entry.name = unescape(value),
+            "Exec" => exec = Some(unescape(value)),
+            "Icon" => entry.icon = unescape(value),
+            "TryExec" => entry.try_exec = unescape(value),
+            "Terminal" => entry.terminal = flag,
+            "NoDisplay" => entry.no_display = flag,
+            "Hidden" => entry.hidden = flag,
+            "StartupWMClass" => entry.startup_wm_class = unescape(value),
+            "Keywords" => entry.keywords = unescape(value).split(';').map(str::trim).filter(|k| !k.is_empty()).map(str::to_string).collect(),
+            _ => {}
+        }
+    }
+    // A hidden entry is kept (it hides the system's of its id) whatever else it lacks.
+    if entry.hidden {
+        return seen_group.then_some(entry);
+    }
+    if !application || entry.name.trim().is_empty() {
+        return None;
+    }
+    entry.exec = split_exec(&exec?)?;
+    Some(entry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(exec: &str) -> Option<Vec<String>> {
+        split_exec(exec)
+    }
+
+    fn list(items: &[&str]) -> Option<Vec<String>> {
+        Some(items.iter().map(|s| s.to_string()).collect())
+    }
+
+    #[test]
+    fn exec_lines_become_arguments() {
+        assert_eq!(args("firefox %u"), list(&["firefox"]));
+        assert_eq!(args("/usr/bin/htop"), list(&["/usr/bin/htop"]));
+        assert_eq!(args("  env   FOO=1  prog  --flag  "), list(&["env", "FOO=1", "prog", "--flag"]));
+        // Quotes hold spaces; a backslash in them gives the four characters it may.
+        assert_eq!(args(r#"sh -c "echo \"hi there\" \$HOME \\ \`x\`""#), list(&["sh", "-c", r#"echo "hi there" $HOME \ `x`"#]));
+        assert_eq!(args(r#""/opt/My App/run" --name "A B""#), list(&["/opt/My App/run", "--name", "A B"]));
+        // An empty quoted argument is an argument.
+        assert_eq!(args(r#"prog "" x"#), list(&["prog", "", "x"]));
+        // Field codes go; one inside an argument leaves the rest of it; %% is a percent sign.
+        assert_eq!(args("prog --file=%f %U --pct=100%% %i %c %k"), list(&["prog", "--file=", "--pct=100%"]));
+        assert_eq!(args("prog %"), list(&["prog"]));
+    }
+
+    #[test]
+    fn exec_lines_that_are_not_commands_are_refused() {
+        assert_eq!(args(""), None);
+        assert_eq!(args("   "), None);
+        assert_eq!(args("%u"), None);
+        assert_eq!(args(r#"prog "unclosed"#), None);
+        assert_eq!(args(r#"prog "ends in a backslash\"#), None);
+        assert_eq!(args(r#""" x"#), None, "no program");
+        assert_eq!(args(&"a ".repeat(MAX_ARGS + 2)), None);
+    }
+
+    const FIREFOX: &str = "\
+# a comment
+[Desktop Entry]
+Version=1.0
+Name=Firefox
+Name[de]=Feuerfuchs
+GenericName=Web Browser
+Exec=firefox %u
+Icon=firefox
+Terminal=false
+Type=Application
+StartupWMClass=firefox
+Keywords=web;browser;internet;
+Actions=new-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec=firefox --new-window %u
+";
+
+    #[test]
+    fn an_entry_is_read() {
+        let e = parse("firefox", FIREFOX).unwrap();
+        assert_eq!((e.id.as_str(), e.name.as_str(), e.icon.as_str()), ("firefox", "Firefox", "firefox"));
+        assert_eq!(e.exec, ["firefox"], "the entry's own Exec, not its action's");
+        assert_eq!(e.keywords, ["web", "browser", "internet"]);
+        assert_eq!(e.startup_wm_class, "firefox");
+        assert!(!e.terminal && !e.no_display && !e.hidden);
+        let htop = parse("htop", "[Desktop Entry]\nType=Application\nName=Htop\nExec=htop\nTerminal=true\nIcon=htop\nNoDisplay=false\n").unwrap();
+        assert!(htop.terminal && !htop.no_display);
+        // Escapes in values.
+        let e = parse("x", "[Desktop Entry]\nType=Application\nName=Two\\sWords\\\\\nExec=prog\n").unwrap();
+        assert_eq!(e.name, "Two Words\\");
+    }
+
+    #[test]
+    fn what_is_not_an_application_is_not_one() {
+        assert_eq!(parse("x", ""), None);
+        assert_eq!(parse("x", "Name=No group\nExec=x\nType=Application\n"), None);
+        assert_eq!(parse("x", "[Desktop Entry]\nType=Link\nName=A link\nURL=http://example.org\n"), None);
+        assert_eq!(parse("x", "[Desktop Entry]\nType=Application\nExec=x\n"), None, "no name");
+        assert_eq!(parse("x", "[Desktop Entry]\nType=Application\nName=X\n"), None, "nothing to run");
+        assert_eq!(parse("x", "[Desktop Entry]\nType=Application\nName=X\nExec=\"open\n"), None);
+        // Keys of another group are not the entry's.
+        assert_eq!(parse("x", "[Other]\nType=Application\nName=X\nExec=x\n"), None);
+        // Hidden is kept, to hide the system's entry of the same id, with or without the rest.
+        let h = parse("x", "[Desktop Entry]\nHidden=true\n").unwrap();
+        assert!(h.hidden && h.exec.is_empty());
+        let n = parse("x", "[Desktop Entry]\nType=Application\nName=X\nExec=x\nNoDisplay=true\n").unwrap();
+        assert!(n.no_display);
+    }
+
+    #[test]
+    fn oversized_input_is_cut_not_trusted() {
+        let mut text = String::from("[Desktop Entry]\nType=Application\nName=Big\nExec=big\n");
+        text.push_str(&"# padding é\n".repeat(MAX_FILE / 8));
+        assert!(text.len() > MAX_FILE);
+        assert_eq!(parse("big", &text).unwrap().name, "Big");
+        // A value longer than any real one is skipped, not kept.
+        let long = format!("[Desktop Entry]\nType=Application\nName={}\nExec=x\n", "n".repeat(MAX_VALUE + 1));
+        assert_eq!(parse("long", &long), None);
+    }
+}

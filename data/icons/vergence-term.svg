@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Vergence's terminal: a dark screen, a prompt and a cursor. Drawn by the project. -->
+  <rect x="4" y="8" width="56" height="48" rx="8" fill="#20232c"/>
+  <rect x="4" y="8" width="56" height="48" rx="8" fill="none" stroke="#6b7a9e" stroke-width="2"/>
+  <path d="M16 24 L27 32 L16 40" fill="none" stroke="#e6e9ef" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="31" y="38" width="17" height="4" rx="2" fill="#729fcf"/>
+</svg>

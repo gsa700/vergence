@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Vergence's settings: three sliders. Drawn by the project. -->
+  <rect x="4" y="4" width="56" height="56" rx="10" fill="#333d52"/>
+  <g stroke="#9aa5bd" stroke-width="4" stroke-linecap="round">
+    <line x1="16" y1="20" x2="48" y2="20"/>
+    <line x1="16" y1="32" x2="48" y2="32"/>
+    <line x1="16" y1="44" x2="48" y2="44"/>
+  </g>
+  <circle cx="24" cy="20" r="6" fill="#e6e9ef"/>
+  <circle cx="40" cy="32" r="6" fill="#729fcf"/>
+  <circle cx="30" cy="44" r="6" fill="#e6e9ef"/>
+</svg>

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Settings
+Comment=Vergence's settings
+Exec=vergence-settings
+Icon=vergence-settings
+Terminal=false
+Categories=Settings;
+Keywords=preferences;appearance;screens;wallpaper;theme;fonts;
+StartupWMClass=vergence-settings

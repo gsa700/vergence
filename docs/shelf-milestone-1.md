@@ -178,6 +178,41 @@ one.
   Tests green on Hubble, kepler, canary and Techbench (259 on the two
   FreeBSD machines, 258 on the Linux ones).
 
+- **Step 2 (2026-11-10): installed applications.** All in
+  `vergence-shell`, with no drawing:
+  - `desktop.rs` reads a desktop entry (Type, Name, Exec, Icon, TryExec,
+    Terminal, NoDisplay, Hidden, StartupWMClass, Keywords; the first
+    `[Desktop Entry]` group only) and splits its Exec line by the
+    specification's rules, field codes dropped. Nothing is run through a
+    shell.
+  - `apps.rs`: the XDG data directories (the user's, then
+    `/usr/local/share` and `/usr/share` unless `XDG_DATA_DIRS` says
+    otherwise); the first directory that has an id wins and a Hidden
+    entry there removes it; an entry whose TryExec program is missing is
+    left out; sorted by name.
+  - `icons.rs`: an icon by name in the settings' theme, the themes it
+    inherits from, hicolor, then `pixmaps`. A theme's index is the first
+    found and its directories are looked for under every data directory
+    (our own icons are in `/usr/local/share/icons/hicolor`, whose index
+    is `/usr/share`'s). An SVG is preferred; else the nearest size, the
+    larger first. Found on Hubble: hicolor calls its 256 x 256 directory
+    scalable, so a PNG is ranked by its size whatever its directory says.
+  - `vshell apps` lists what the shelf will see: name, id, what is run,
+    the icon file.
+  - `data/applications` and `data/icons`: desktop entries and icons
+    (SVG, drawn by the project) for the terminal and the settings app;
+    `tools/install.sh` installs them, and `vshell`.
+  - Tests: 10 of the reader, the splitter, the directories and the icon
+    choice, and a fuzz test of the reader and the splitter (three kinds,
+    400,000 rounds clean on Hubble).
+  `vshell apps` on the four machines: Hubble 6 listed (AlbumWall, btop,
+  Firefox, Htop, Settings, Terminal), each with an icon file; kepler 4;
+  canary 49 of its Xfce's 57 entries, 46 with a file; Techbench 63 of a
+  GNOME's 238 (175 are marked not for listing), 60 with a file. The few
+  without one name icons that only a full icon theme has; the shelf will
+  pass the settings' theme and draw a letter where there is still none.
+  Tests green on all four (272 on the FreeBSD machines, 271 on Linux).
+
 ## Acceptance
 
 Every step: `cargo test --workspace` green on Hubble, canary and Techbench,

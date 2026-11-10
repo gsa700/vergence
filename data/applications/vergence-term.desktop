@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Terminal
+Comment=Vergence's terminal
+Exec=vergence-term
+Icon=vergence-term
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=shell;prompt;command;console;
+StartupWMClass=vergence-term
