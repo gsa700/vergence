@@ -4,14 +4,19 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Vergence's terminal: tabs in the title bar, split panes, sharp at every scale (iced; our own terminal core)"
+description = "Vergence's terminal: tabs in the window's bar, split panes, sharp at every scale, on the project's own toolkit"
 
-# iced (MIT; Dave chose it for the terminal 2026-11-08, spikes/toolkit/RESULTS.md).
-# The terminal itself (parser, screen, PTY) is our own code.
+# The terminal is the project's own throughout: parser, screen and pty
+# (vt.rs, grid.rs, pty.rs), and since 2026-11-10 its interface, on the
+# toolkit (vergence-ui and the crates under it). Its first interface was
+# built on iced (2026-11-08) and was retired when this one passed the
+# stress test (docs/toolkit-milestone-1.md, step 5).
 [dependencies]
-iced = { version = "0.14", features = ["canvas", "advanced"] }
-vergence-xsettings.workspace = true
-# Already in the workspace (the server and vergence-xsettings read their TOML with it).
-toml = "0.8"
-# Already in the workspace (via iced); decodes OSC 52 clipboard writes.
+vergence-scene.workspace = true
+vergence-text.workspace = true
+vergence-render.workspace = true
+vergence-ui.workspace = true
+# grid.rs decodes OSC 52 clipboard writes with this; already in the
+# workspace through iced (the settings app). To be replaced by a few lines
+# of our own.
 base64 = "0.22"

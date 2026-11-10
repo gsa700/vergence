@@ -157,7 +157,7 @@ fn keyboard_int(d: &toml::Table, k: &str, default: i64) -> i64 {
     d.get("keyboard").and_then(|a| a.get(k)).and_then(|v| v.as_integer()).unwrap_or(default)
 }
 
-// ---- Terminal: desktop.toml [terminal] scheme (vergence-term's look.rs reads it) ----
+// ---- Terminal: desktop.toml [terminal] scheme (vergence-term reads it) ----
 const TERM_SCHEMES: [&str; 2] = ["Catppuccin", "Tango"];
 
 fn term_scheme(d: &toml::Table) -> &'static str {

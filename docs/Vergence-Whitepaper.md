@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "9 November 2026 — Draft 0.9"
+date: "10 November 2026 — Draft 0.9"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.9 · 9 November 2026
+David Erickson (AB0R), with Claude · Draft 0.9 · 10 November 2026
 
 ---
 
@@ -421,7 +421,7 @@ On a typical desktop, any program running as the user can already read the user'
 | Smithay | The server's Wayland front end, DRM/KMS and input back ends, renderer | Borrowed for phase 2 bring-up; moving to a support role (decided 8 November 2026): the renderer is replaced with the project's own first, then the DRM/KMS and input back ends; the Wayland front end may stay as an edge |
 | libinput, libseat/seatd, xkbcommon | Input devices, seat and device access, keymaps | Borrowed through Smithay |
 | Xwayland | X11 applications (the X11 edge) | Borrowed; an X server of our own is a large project |
-| iced | The terminal and the settings app | Borrowed (MIT); chosen over Slint on 8 November 2026. **Being replaced** by the project's own toolkit (§6.10, decided 9 November 2026): the terminal moves first, then the settings app, and iced is removed with the second. Until then it carries two patches and workarounds (its software renderer's clip mask, multisampling off) |
+| iced | The settings app (and, until 10 November 2026, the terminal) | Borrowed (MIT); chosen over Slint on 8 November 2026. **Being replaced** by the project's own toolkit (§6.10, decided 9 November 2026): the terminal moved first, on 10 November; the settings app follows, and iced is removed with it. Until then it carries two patches and workarounds (its software renderer's clip mask, multisampling off) |
 | ab_glyph, resvg | Title-bar text, SVG wallpapers | Borrowed; small, candidates for our own |
 | Adwaita cursor theme | The pointer | Borrowed artwork, read at run time |
 
@@ -429,7 +429,7 @@ On a typical desktop, any program running as the user can already read the user'
 
 - **Phase 1 daemon:** Rust over XCB/RandR (the `x11rb` crate). Its profile, EDID and rules logic lives in a shared crate that moves unchanged into the server.
 - **Server core:** Rust. A compositor needs steady frame timing, which rules out garbage-collected runtimes.
-- **The toolkit and the tools** (terminal, settings, the shelf's drawing): Rust, on the project's own toolkit (§6.10). The two tools that exist use iced until they are moved.
+- **The toolkit and the tools** (terminal, settings, the shelf's drawing): Rust, on the project's own toolkit (§6.10). The terminal is on it; the settings app uses iced until it is moved.
 - **Display-list reference implementation:** Rust (§6.6).
 
 Why one language:
@@ -526,7 +526,7 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 
 **The order of work in phase 2, from 9 November 2026.** The server has been installed as a session on Void Linux since that day (§8), with screens-off and sleep, window borders, and the terminal and settings app as its first tools. What comes next, in order:
 
-1. **The toolkit's drawing and text core, and the terminal on it** (§6.10): scenes in the display-list format, a GPU renderer with a CPU reference renderer, the project's own Wayland client code. This moved ahead of the shell when the borrowed toolkit's faults were measured under load: with six busy tabs in a window of 3792 × 2118 pixels its software renderer held one processor core and nothing else, and its GPU renderer was ten to fifteen times faster on the same load but lost the window's buttons.
+1. **The toolkit's drawing and text core, and the terminal on it** (§6.10; the terminal moved on 10 November 2026): scenes in the display-list format, a GPU renderer with a CPU reference renderer, the project's own Wayland client code. This moved ahead of the shell when the borrowed toolkit's faults were measured under load: with six busy tabs in a window of 3792 × 2118 pixels its software renderer held one processor core and nothing else, and its GPU renderer was ten to fifteen times faster on the same load but lost the window's buttons.
 2. **The shell** (§6.9), built in the server on the same drawing code: the shelf, the apps popup, running and pinned applications, then live tiles; snapping and keyboard switching with it.
 3. **Widgets, and the settings app on them**; the borrowed toolkit removed.
 4. **Windows, placement and accessibility on the native protocol**, which the toolkit then uses instead of Wayland, and explicit sync and the rest of §8.3 alongside as hardware allows.
@@ -578,7 +578,7 @@ The display-list renderer was phase 3 work. Step 1 brings its first version forw
 - **GBM:** Generic Buffer Management, the interface through which a display server allocates GPU buffers it can show on a monitor.
 - **Mesa:** the open-source implementation of OpenGL, Vulkan and GBM used by Intel, AMD and nouveau drivers.
 - **Explicit sync:** passing a fence with each buffer that says when the GPU has finished with it, instead of leaving the kernel to work that out (implicit sync).
-- **iced:** a cross-platform GUI toolkit for Rust, with a GPU renderer (wgpu) and a software one (tiny-skia); used by the first tools and being replaced (§6.10).
+- **iced:** a cross-platform GUI toolkit for Rust, with a GPU renderer (wgpu) and a software one (tiny-skia); used by the first tools and being replaced (§6.10); the terminal left it on 10 November 2026.
 - **Toolkit:** the code an application draws its buttons, lists and text with. Vergence's own is described in §6.10.
 - **Multisampling:** smoothing the edges of drawn shapes by sampling each pixel several times on the GPU.
 - **Smithay:** a Rust library for building Wayland compositors.

@@ -17,6 +17,7 @@ unsafe extern "C" {
     fn unlockpt(fd: i32) -> i32;
     fn ptsname(fd: i32) -> *const std::ffi::c_char;
     fn setsid() -> i32;
+    fn signal(signum: i32, handler: usize) -> usize;
     fn ioctl(fd: i32, request: std::ffi::c_ulong, ...) -> i32;
 }
 
@@ -95,6 +96,16 @@ impl Pty {
             .env("TERM_PROGRAM", "vergence-term");
         unsafe {
             cmd.pre_exec(|| {
+                // The signals a terminal's programs are ended and interrupted by are
+                // theirs to take: if this terminal was started ignoring any of them
+                // (under `nohup`, by a launcher), its programs are not to be born
+                // ignoring them too. One that ignored the hangup would run on after
+                // the terminal was gone (seen 2026-11-10 with a terminal whose server
+                // had been started with nohup). Hangup, interrupt, quit, terminate;
+                // 0 is the default action.
+                for number in [1, 2, 3, 15] {
+                    signal(number, 0);
+                }
                 // A new session, with the terminal (now fd 0) as its controlling terminal.
                 if setsid() < 0 {
                     return Err(std::io::Error::last_os_error());
@@ -184,5 +195,48 @@ mod tests {
         });
         let text = String::from_utf8_lossy(&all);
         assert!(text.contains("vergence-42"), "{text}");
+    }
+
+    /// When the terminal goes (its end of the pty is closed, as when the
+    /// terminal's process is killed), a program on it is ended by the
+    /// system's hangup even if it never reads or writes the terminal and so
+    /// never meets an error of its own: nothing is left running behind a
+    /// dead terminal.
+    #[test]
+    fn a_program_that_ignores_its_terminal_ends_with_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let script = std::env::temp_dir().join(format!("vergence-term-quiet-{}.sh", std::process::id()));
+        std::fs::write(&script, "#!/bin/sh\nwhile :; do sleep 1; done\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Started as under `nohup`, or from a launcher that ignores hangups: what a
+        // process ignores, the programs it starts ignore too, unless told otherwise.
+        const SIGHUP: i32 = 1;
+        // SAFETY: the disposition of one signal, put back below; 1 is SIG_IGN.
+        let before = unsafe { super::signal(SIGHUP, 1) };
+        let p = super::Pty::spawn(script.to_str().unwrap(), 80, 24);
+        // SAFETY: as above.
+        unsafe { super::signal(SIGHUP, before) };
+        let p = p.unwrap();
+        // The terminal's end is closed and nothing else is done: no kill, as when
+        // the terminal itself is killed.
+        let mut p = std::mem::ManuallyDrop::new(p);
+        // SAFETY: the file is read out once and `p` is never dropped, so it is closed once.
+        drop(unsafe { std::ptr::read(&p.master) });
+        let started = std::time::Instant::now();
+        let ended = loop {
+            if let Some(status) = p.child.try_wait().unwrap() {
+                break Some(status);
+            }
+            if started.elapsed() > std::time::Duration::from_secs(5) {
+                break None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        let _ = std::fs::remove_file(&script);
+        if ended.is_none() {
+            let _ = p.child.kill();
+            let _ = p.child.wait();
+        }
+        assert!(ended.is_some(), "the program was still running five seconds after its terminal was closed");
     }
 }

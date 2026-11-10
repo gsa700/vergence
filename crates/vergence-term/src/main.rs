@@ -1,1086 +1,1689 @@
-// Vergence's terminal.
-//
-// Step 1 (2026-11-08): our own terminal core (vt.rs parser, grid.rs screen,
-// pty.rs) drawn at the screen's own pixels in the desktop's monospace font.
-// Step 2: tabs in the title bar (Dave: "I prefer the tabs in the titlebar ala
-// Firefox"): the window draws its own bar in the server's colours, with the
-// tabs, a + button and the window buttons; the bar moves the window, a
-// double-click maximises, the edges resize.
-// Step 3: split panes (iced's pane grid; Dave liked COSMIC Terminal's "ability
-// to split"), selection with copy and paste, and the right-click menu.
-// Step 4: mouse reporting (xterm modes 9/1000/1002/1003, SGR 1006): when a
-// program asks for the mouse (htop, vim, mc), clicks, drags and the wheel go
-// to it; Shift keeps selecting and the right-click menu. The wheel on the
-// alternate screen sends arrow keys when the program didn't ask (less, man).
-// Step 5: scrollback viewing: the wheel on the shell's screen, Shift+PageUp/
-// PageDown/Home/End; typing returns to the live screen; "N lines back" shows.
-// A selection dragged past the top or bottom edge scrolls the view; the
-// scrollbar (in the right padding) shows where the view is and can be dragged.
-// Step 6: colour schemes from the desktop's settings (look.rs): dark or light
-// (Catppuccin Mocha / Latte), high contrast, the accent for the cursor,
-// selection and highlights, and the font size, all live within a second.
-// Next: the font family, a scheme picker of its own if wanted.
-//
-// Drawing is in software (iced's tiny-skia): the GPU renderer hung Hubble's
-// GPU and froze the desktop (2026-11-08).
+//! Vergence's terminal, on the project's own toolkit (toolkit milestone 1).
+//!
+//! The screen, the escape-sequence parser and the pty (grid.rs, vt.rs,
+//! pty.rs) are the ones written for the first terminal, whose interface was
+//! built on a borrowed toolkit (iced, 2026-11-08) and retired on 2026-11-10
+//! when this one passed the stress test that one failed. This interface was
+//! written beside it under the name `vterm`, which the plan's Progress and
+//! the stress test's scripts still use. What it does differently:
+//!
+//! - **The program's output is parsed on a thread of its own**, into the
+//!   screen behind a lock. The window's thread never parses and is never
+//!   held up by a flood: when the screen has changed it is woken, asks for a
+//!   frame, and the frame shows whatever the screen holds when the monitor
+//!   is ready for it. However fast the output, at most one frame is drawn
+//!   for each the monitor shows.
+//! - **The picture is a scene** (vergence-scene), drawn on the GPU or, where
+//!   that is not to be had, in software: a terminal's screen is one grid of
+//!   cells, each with its ground, its ink and its glyph, found in the font
+//!   or in the nearest font that has it.
+//! - **Keys arrive in order** through the toolkit and go to the program as
+//!   xterm's sequences.
+//!
+//! So far: terminals in tabs under a bar of the window's own (bar.rs), with
+//! the window's buttons on the side the desktop's settings say and tabs
+//! that shrink to fit; typing, paste, the scrollback (wheel,
+//! Shift+PageUp/PageDown, Shift+Home/End), resizing, titles, the program's own copies (OSC
+//! 52), the fonts and colour scheme from the desktop's settings. Ctrl+Shift+T
+//! opens a tab, Ctrl+Shift+W closes one, Ctrl+PageUp/PageDown and
+//! Ctrl+Tab/Ctrl+Shift+Tab change tab.
+//! The mouse selects text (select.rs): a drag by characters, a second press
+//! by words, a third by lines, Shift and a press to extend; held past the
+//! top or bottom edge the view scrolls under it. Ctrl+Shift+C copies. A
+//! program that asked for the mouse gets it (mouse.rs: presses, releases,
+//! moves and the wheel, as xterm reports them) unless Shift is held, which
+//! keeps the mouse for selecting.
+//! A thin scrollbar at the right edge (scrollbar.rs) shows where the view
+//! is in the scrollback and can be dragged.
+//! The desktop's settings are followed while the terminal runs: the two
+//! files are looked at once a second, and a change of fonts, colours or
+//! button side shows at the next frame.
+//! The right button opens a menu (menu.rs) with copy, paste and the tab
+//! commands; where a program has the mouse, Shift and the right button.
+//! A tab's room can be divided among several terminals (panes.rs):
+//! Ctrl+Shift+R side by side, Ctrl+Shift+D one above the other, as often
+//! as wanted; a press makes a pane the one the keys go to, the line between
+//! two can be dragged, and Ctrl+Shift+W closes the pane (the tab with its
+//! last).
+//! Ctrl+C copies when text is selected (and is the interrupt key when
+//! none is); Ctrl+V pastes. Ctrl+Shift+C and Ctrl+Shift+V do the same.
 
+mod bar;
 #[cfg(test)]
 mod fuzz;
+#[allow(dead_code)]
 mod grid;
-mod look;
+mod menu;
+mod mouse;
+mod panes;
+#[allow(dead_code)]
 mod pty;
-mod term;
+mod scrollbar;
+mod select;
+#[allow(dead_code)]
 mod vt;
 
-use std::collections::HashMap;
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    io::Write,
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, AtomicU8, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
-use iced::time::Instant;
-use std::sync::{Mutex, OnceLock};
+use bar::{BAR_H, Layout, Part, WinButton};
+use grid::{Cell, Color as CellColor, Grid, MouseMode};
+use menu::{Item, Menu};
+use panes::{Axis, Divider, Node};
+use scrollbar::Scrollbar;
+use select::{Pos, Selection, Unit};
+use vergence_scene::{CELL_GLYPH, CELL_UNDERLINE, Cell as SceneCell, Color, Glyph, Point, Rect, Scene};
+use vergence_text::{FaceId, Fonts};
+use vergence_ui::{App, Button, Cursor, Edges, Frame, Input, Modifiers, Waker, Window, sym};
 
-use iced::keyboard::{self, Key, key::Named};
-use iced::widget::canvas::{self, Canvas, Geometry, Program};
-use iced::widget::{Space, button, column, container, mouse_area, pane_grid, row, stack, text};
-use iced::window::Direction;
-use iced::{Background, Border, Color, Element, Event, Length, Padding, Point, Rectangle, Renderer, Size, Subscription, Task, Theme, mouse};
+/// Space around the cells, in reference units.
+const PAD: f32 = 4.0;
+/// Two presses on the bar within this are a double click.
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
-use grid::MouseMode;
-use term::{CellPos, MouseAction, MouseButton, PAD, Term};
-
-/// The title bar's height, in points (the server's bar is 24; tabs want more).
-const BAR_H: f32 = 34.0;
-/// The tabs' height: they sit on the bar's bottom edge, joined to the
-/// terminal; everything else in the bar is centred on the tabs' middle.
-const TAB_H: f32 = 28.0;
-/// A tab's width, in points; longer titles end in an ellipsis.
-const TAB_W: f32 = 200.0;
-/// The window buttons' and the + button's icons: one box size, so they line up.
-const ICON: f32 = 10.0;
-/// How far the tab titles are lifted from where iced centres them: it centres
-/// the line box, and Noto Sans' capitals then sit about a point low (measured
-/// from a screenshot at scale 2.25, 2026-11-08). The icons stay exactly centred.
-const TEXT_LIFT: f32 = 1.0;
-/// The invisible border that resizes the window, in points.
-const EDGE: f32 = 5.0;
-/// The gap between panes (the divider), in points.
-const DIVIDER: f32 = 2.0;
-
-// The server's title bar colours (vergence-server decor.rs), so our bar
-// matches the windows it decorates.
-const BAR_ACTIVE: Color = Color::from_rgb(0.20, 0.24, 0.32);
-const BAR_INACTIVE: Color = Color::from_rgb(0.22, 0.22, 0.22);
-const TEXT_ACTIVE: Color = Color::from_rgb(0.92, 0.92, 0.92);
-const TEXT_INACTIVE: Color = Color::from_rgb(0.62, 0.62, 0.62);
-const CLOSE: Color = Color::from_rgb(0.78, 0.30, 0.28);
-/// The terminal's background: the active tab is drawn in it, joined to the text below.
-/// The right-click menu's width, in points.
-const MENU_W: f32 = 236.0;
-const MENU_BG: Color = Color::from_rgb(0.17, 0.18, 0.23);
-/// The menu with the light scheme (secondary surfaces follow the terminal's scheme).
-const MENU_BG_LIGHT: Color = Color::from_rgb(0.97, 0.97, 0.98);
-const MENU_TEXT_LIGHT: Color = Color::from_rgb(0.12, 0.12, 0.18);
-const MENU_DIM_LIGHT: Color = Color::from_rgb(0.50, 0.51, 0.58);
-
-#[derive(Debug, Clone)]
-enum Message {
-    Output(u64, Vec<u8>),
-    Exited(u64),
-    Key(Key, keyboard::Modifiers, Option<String>),
-    Modifiers(keyboard::Modifiers),
-    /// The desktop's look changed (desktop.toml, settings.toml).
-    Look(look::Look),
-    /// Bytes for a terminal's program from the mouse (reporting, or the wheel as arrows).
-    Mouse(u64, Vec<u8>),
-    /// Scroll a terminal's view by lines (positive: back into the scrollback).
-    Scroll(u64, isize),
-    /// The scrollbar: the view goes this many lines back.
-    ScrollTo(u64, usize),
-    /// A selection dragged past the top (positive lines) or bottom edge: the
-    /// view scrolls and the selection's end follows, at this column.
-    DragScroll(u64, isize, usize),
-    Resized(Size),
-    Focused(bool),
-    NewTab,
-    SelectTab(usize),
-    CloseTab(usize),
-    FocusPane(pane_grid::Pane),
-    PaneResized(pane_grid::ResizeEvent),
-    Split(pane_grid::Axis),
-    ClosePane,
-    Select(u64, Option<(CellPos, CellPos)>),
-    /// The right-click menu for a terminal, at the click (window points).
-    Menu(u64, Point),
-    CloseMenu,
-    Copy,
-    Paste,
-    Pasted(Option<String>),
-    Drag,
-    ToggleMaximize,
-    Minimize,
-    CloseWindow,
-    ResizeEdge(Direction),
+/// What the desktop's settings say that the terminal follows
+/// (~/.config/vergence/settings.toml, the file the settings app writes).
+struct Settings {
+    left: Vec<WinButton>,
+    right: Vec<WinButton>,
+    ui_family: String,
+    ui_size: f32,
+    mono_family: String,
+    mono_size: f32,
 }
 
-/// Each terminal's shell output, handed from its creation to its subscription
-/// (iced builds streams from plain functions).
-static READERS: OnceLock<Mutex<HashMap<u64, std::fs::File>>> = OnceLock::new();
-
-fn readers() -> std::sync::MutexGuard<'static, HashMap<u64, std::fs::File>> {
-    READERS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap()
+/// "Adwaita Mono 10" -> the family and the size in reference units (a point is 96/72 of one).
+fn font_name(value: &str, family: &str, points: f32) -> (String, f32) {
+    let value = value.trim();
+    match value.rsplit_once(' ') {
+        Some((name, size)) if size.parse::<f32>().is_ok_and(|s| (4.0..=96.0).contains(&s)) => (name.trim().to_string(), size.parse::<f32>().unwrap_or(points) * 96.0 / 72.0),
+        _ if !value.is_empty() => (value.to_string(), points * 96.0 / 72.0),
+        _ => (family.to_string(), points * 96.0 / 72.0),
+    }
 }
 
-/// A tab: its panes (each a terminal, by id) and the one with the keyboard.
-struct Tab {
-    panes: pane_grid::State<u64>,
-    focus: pane_grid::Pane,
+fn config_path(name: &str) -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")));
+    base.map(|b| b.join("vergence").join(name))
 }
 
-struct App {
-    terms: HashMap<u64, Term>,
-    tabs: Vec<Tab>,
-    active: usize,
-    next_id: u64,
-    /// The window's size (points) and whether it has the keyboard.
-    size: Size,
-    focused: bool,
-    /// The right-click menu: where (window points) and for which terminal.
-    menu: Option<(Point, u64)>,
-    /// The modifier keys held now (Shift-click selects even when a program has the mouse).
-    mods: keyboard::Modifiers,
-    /// The desktop's look: colours, accent, font size.
-    look: look::Look,
+fn config(name: &str) -> String {
+    config_path(name).and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default()
 }
 
-impl App {
-    fn new() -> App {
-        let mut app = App { terms: HashMap::new(), tabs: Vec::new(), active: 0, next_id: 1, size: Size::ZERO, focused: true, menu: None, mods: keyboard::Modifiers::empty(), look: look::Look::load() };
-        app.size = initial_size(&app.look);
-        if let Some(id) = app.spawn(app.body()) {
-            let (panes, focus) = pane_grid::State::new(id);
-            app.tabs.push(Tab { panes, focus });
+/// Sets `changed` and wakes the window whenever one of the settings files
+/// is written (looked at once a second, by their modification times, as
+/// the first terminal did; the session bus will tell us instead when the
+/// toolkit speaks it).
+fn watch_settings(changed: Arc<AtomicBool>, waker: Waker) {
+    let stamp = |name: &str| config_path(name).and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok());
+    let stamps = move || [stamp("desktop.toml"), stamp("settings.toml")];
+    std::thread::spawn(move || {
+        let mut seen = stamps();
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+            let now = stamps();
+            if now != seen {
+                seen = now;
+                changed.store(true, Ordering::SeqCst);
+                waker.wake();
+            }
         }
-        app
+    });
+}
+
+impl Settings {
+    fn from_text(text: &str) -> Settings {
+        // Lines of the form "Gtk/FontName" = "Adwaita Sans 10".
+        let value = |key: &str| {
+            text.lines().find_map(|line| {
+                let (k, v) = line.split_once('=')?;
+                (k.trim().trim_matches('"') == key).then(|| v.trim().trim_matches('"').to_string())
+            })
+        };
+        let (left, right) = bar::decoration_layout(&value("Gtk/DecorationLayout").unwrap_or_else(|| ":minimize,maximize,close".into()));
+        let (ui_family, ui_size) = font_name(&value("Gtk/FontName").unwrap_or_default(), "sans-serif", 10.0);
+        let (mono_family, mono_size) = font_name(&value("Gtk/MonospaceFontName").unwrap_or_default(), "monospace", 10.0);
+        Settings { left, right, ui_family, ui_size, mono_family, mono_size }
+    }
+}
+/// While a selection is held past the top or bottom edge, the view moves a line this often.
+const EDGE_TICK: Duration = Duration::from_millis(40);
+/// Lines the view moves for one notch of the wheel.
+const WHEEL_LINES: isize = 3;
+
+/// The terminal's colours: its ground and text, the cursor, and the 16 named ones.
+struct Palette {
+    bg: Color,
+    fg: Color,
+    accent: Color,
+    ansi: [u32; 16],
+}
+
+const fn rgb(v: u32) -> Color {
+    Color::rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
+}
+
+/// Tango: GNOME Terminal's palette, the look 16-colour programs were tuned against.
+const TANGO: Palette = Palette {
+    bg: rgb(0x2e3436),
+    fg: rgb(0xd3d7cf),
+    accent: rgb(0x729fcf),
+    ansi: [0x2e3436, 0xcc0000, 0x4e9a06, 0xc4a000, 0x3465a4, 0x75507b, 0x06989a, 0xd3d7cf, 0x555753, 0xef2929, 0x8ae234, 0xfce94f, 0x729fcf, 0xad7fa8, 0x34e2e2, 0xeeeeec],
+};
+
+/// Catppuccin Mocha, the first terminal's default.
+const CATPPUCCIN: Palette = Palette {
+    bg: rgb(0x1e1e2e),
+    fg: rgb(0xcdd6f4),
+    accent: rgb(0x89b4fa),
+    ansi: [0x45475a, 0xf38ba8, 0xa6e3a1, 0xf9e2af, 0x89b4fa, 0xf5c2e7, 0x94e2d5, 0xbac2de, 0x585b70, 0xf38ba8, 0xa6e3a1, 0xf9e2af, 0x89b4fa, 0xf5c2e7, 0x94e2d5, 0xa6adc8],
+};
+
+/// Tango on white, for the light desktop.
+const TANGO_LIGHT: Palette = Palette { bg: rgb(0xffffff), fg: rgb(0x2e3436), accent: rgb(0x3465a4), ansi: TANGO.ansi };
+
+/// Catppuccin Latte, the light one.
+const LATTE: Palette = Palette {
+    bg: rgb(0xeff1f5),
+    fg: rgb(0x4c4f69),
+    accent: rgb(0x1e66f5),
+    ansi: [0x5c5f77, 0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xacb0be, 0x6c6f85, 0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xbcc0cc],
+};
+
+/// "#rrggbb" -> a colour.
+fn parse_rgb(s: &str) -> Option<Color> {
+    let h = s.trim().strip_prefix('#')?;
+    (h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit())).then(|| rgb(u32::from_str_radix(h, 16).unwrap_or(0)))
+}
+
+/// The colours desktop.toml asks for, as the first terminal read it:
+/// `[terminal] scheme` chooses Tango or Catppuccin (Catppuccin if nothing
+/// does); under `[appearance]`, `color-scheme = "light"` the light one of
+/// the pair, `contrast = "high"` the text on pure black or white, and
+/// `accent = "#rrggbb"` the colour of the cursor, the selection and the
+/// highlights.
+fn palette_from(text: &str) -> Palette {
+    let (mut tango, mut light, mut high, mut accent) = (false, false, false, None);
+    let mut section = "";
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            section = line;
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else { continue };
+        let value = value.trim().trim_matches('"');
+        match (section, key.trim()) {
+            ("[terminal]", "scheme") => tango = value.eq_ignore_ascii_case("tango"),
+            ("[appearance]", "color-scheme") => light = value == "light",
+            ("[appearance]", "contrast") => high = value == "high",
+            ("[appearance]", "accent") => accent = parse_rgb(value),
+            _ => {}
+        }
+    }
+    let mut p = match (tango, light) {
+        (true, false) => TANGO,
+        (true, true) => TANGO_LIGHT,
+        (false, false) => CATPPUCCIN,
+        (false, true) => LATTE,
+    };
+    if high {
+        (p.bg, p.fg) = if light { (rgb(0xffffff), rgb(0x000000)) } else { (rgb(0x000000), rgb(0xffffff)) };
+    }
+    if let Some(accent) = accent {
+        p.accent = accent;
+    }
+    p
+}
+
+fn palette() -> Palette {
+    palette_from(&config("desktop.toml"))
+}
+
+impl Palette {
+    fn indexed(&self, i: u8) -> Color {
+        match i {
+            0..=15 => rgb(self.ansi[i as usize]),
+            16..=231 => {
+                let n = i - 16;
+                let level = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
+                Color::rgb(level(n / 36), level((n / 6) % 6), level(n % 6))
+            }
+            _ => {
+                let g = 8 + (i - 232) * 10;
+                Color::rgb(g, g, g)
+            }
+        }
     }
 
-    /// The terminal area: the window minus the title bar.
-    fn body(&self) -> Size {
-        Size::new(self.size.width, (self.size.height - BAR_H).max(1.0))
+    fn resolve(&self, c: CellColor, default: Color, bold: bool) -> Color {
+        match c {
+            CellColor::Default => default,
+            // Bold makes the first 8 colours bright, as xterm does.
+            CellColor::Indexed(i) if bold && i < 8 => self.indexed(i + 8),
+            CellColor::Indexed(i) => self.indexed(i),
+            CellColor::Rgb(r, g, b) => Color::rgb(r, g, b),
+        }
+    }
+}
+
+/// What the parser's thread and the window's thread share.
+struct Screen {
+    grid: Grid,
+    parser: vt::Parser,
+    /// Lines the view is scrolled back from the live screen.
+    scroll: usize,
+    /// The program has ended.
+    exited: bool,
+    /// Text the program copied (OSC 52), on its way to the clipboard.
+    copied: Option<String>,
+    /// The text selected with the mouse.
+    selection: Option<Selection>,
+}
+
+impl Screen {
+    /// The alternate screen has no scrollback to show; else up to all of it.
+    fn clamp_scroll(&mut self) {
+        let most = if self.grid.alt { 0 } else { self.grid.scrollback.len() };
+        self.scroll = self.scroll.min(most);
     }
 
-    /// A new terminal sized for an area; its id.
-    fn spawn(&mut self, area: Size) -> Option<u64> {
-        let id = self.next_id;
-        self.next_id += 1;
-        let cell = term::cell_for(&self.look);
-        let cols = ((area.width - 2.0 * PAD) / cell.width).floor().max(2.0) as usize;
-        let rows = ((area.height - 2.0 * PAD) / cell.height).floor().max(1.0) as usize;
-        match Term::new(id, cols, rows, &self.look) {
-            Ok((t, reader)) => {
-                readers().insert(id, reader);
-                self.terms.insert(id, t);
-                Some(id)
+    fn scroll_by(&mut self, lines: isize) {
+        self.scroll = (self.scroll as isize).saturating_add(lines).max(0) as usize;
+        self.clamp_scroll();
+    }
+
+    /// The line shown at row `r` (from the scrollback while scrolled back).
+    fn shown(&self, r: usize) -> &[Cell] {
+        self.grid.abs_line(self.top_line() + r).unwrap_or(&[])
+    }
+
+    /// The scrollbar of a terminal that has this room, if there is anything
+    /// to scroll (the alternate screen has no scrollback).
+    fn scrollbar(&self, area: Rect) -> Option<Scrollbar> {
+        let back = if self.grid.alt { 0 } else { self.grid.scrollback.len() };
+        Scrollbar::new(area, back, self.grid.rows, self.scroll)
+    }
+
+    /// The absolute number of the line shown in the top row.
+    fn top_line(&self) -> usize {
+        self.grid.pushed - self.scroll
+    }
+
+    /// The cell under a point of the window, as a selection counts it, for
+    /// a terminal in `area` with cells of `cell` (width, height); points
+    /// outside the cells count as the nearest one.
+    fn cell_at(&self, x: f32, y: f32, area: Rect, cell: (f32, f32)) -> Pos {
+        let (col, row) = self.screen_cell(x, y, area, cell);
+        (col, self.top_line() + row)
+    }
+
+    /// The column and row of the screen under a point of the window (what
+    /// mouse reporting tells the program); the nearest, for points outside.
+    fn screen_cell(&self, x: f32, y: f32, area: Rect, cell: (f32, f32)) -> (usize, usize) {
+        let col = ((x - area.x - PAD) / cell.0).floor().max(0.0) as usize;
+        let row = ((y - area.y - PAD) / cell.1).floor().max(0.0) as usize;
+        (col.min(self.grid.cols - 1), row.min(self.grid.rows - 1))
+    }
+
+    /// Moves the end of the selection being dragged; true if that changed it.
+    fn drag_selection(&mut self, pos: Pos) -> bool {
+        let Some(mut selection) = self.selection else { return false };
+        selection.drag(&self.grid, pos);
+        let changed = self.selection != Some(selection);
+        self.selection = Some(selection);
+        changed
+    }
+}
+
+/// Text metrics, known once the fonts have been asked.
+struct Metrics {
+    regular: FaceId,
+    bold: FaceId,
+    /// The bar's font, if the machine has one.
+    ui: Option<FaceId>,
+    cell_w: f32,
+    cell_h: f32,
+    baseline: f32,
+}
+
+fn lock(screen: &Mutex<Screen>) -> MutexGuard<'_, Screen> {
+    // A panic on the other thread must not take this one with it.
+    screen.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// One terminal: a program, its screen, and the thread that reads it.
+struct Session {
+    screen: Arc<Mutex<Screen>>,
+    pty: pty::Pty,
+    title: String,
+    /// What the parsing thread has to say since the window last looked
+    /// ([`NEWS_DRAW`], [`NEWS_STATE`]), kept outside the screen's lock: a
+    /// terminal in a flood holds that nearly all the time, and the window
+    /// would wait for it at every wake only to learn "draw me".
+    news: Arc<AtomicU8>,
+}
+
+/// The screen changed: a frame is wanted if this terminal is in front. Up
+/// from the first output after a frame until the next frame draws it.
+const NEWS_DRAW: u8 = 1;
+/// The title, the clipboard or the program's life changed: look into the screen.
+const NEWS_STATE: u8 = 2;
+
+impl Session {
+    /// Starts the user's shell on a new terminal of cols x rows. Its output
+    /// is read and parsed on a thread of its own, which wakes the window.
+    fn start(cols: usize, rows: usize, waker: Waker) -> std::io::Result<Session> {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+        let pty = pty::Pty::spawn(&shell, cols as u16, rows as u16)?;
+        let reader = pty.reader()?;
+        let mut replies = reader.try_clone()?;
+        let screen = Arc::new(Mutex::new(Screen { grid: Grid::new(cols, rows), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None, selection: None }));
+        let shared = screen.clone();
+        let news = Arc::new(AtomicU8::new(0));
+        let said = news.clone();
+        // Named, so that a look at the threads says which is parsing.
+        std::thread::Builder::new().name("parse".into()).spawn(move || {
+            pty::read_loop(reader, |bytes| {
+                let (out, bits) = {
+                    let mut guard = lock(&shared);
+                    let s = &mut *guard;
+                    let (before, alt) = (s.grid.pushed, s.grid.alt);
+                    let title = s.grid.title.clone();
+                    s.parser.advance(&mut s.grid, &bytes);
+                    let mut bits = if std::mem::take(&mut s.grid.dirty) { NEWS_DRAW } else { 0 };
+                    if s.grid.title != title {
+                        bits |= NEWS_STATE;
+                    }
+                    if s.grid.alt != alt {
+                        // Another screen: what was selected is not on it.
+                        s.selection = None;
+                    }
+                    if s.grid.pushed < before {
+                        // A full reset: the line numbers started again.
+                        s.selection = None;
+                        s.scroll = 0;
+                    } else if s.scroll > 0 {
+                        // Scrolled back: stay on the same text as new lines arrive.
+                        s.scroll += s.grid.pushed - before;
+                    }
+                    s.clamp_scroll();
+                    if let Some(text) = s.grid.clipboard.take() {
+                        s.copied = Some(text);
+                        bits |= NEWS_STATE;
+                    }
+                    (std::mem::take(&mut s.grid.out), bits)
+                };
+                if !out.is_empty() {
+                    let _ = replies.write_all(&out);
+                }
+                // The window is woken for news it has not been told already: "draw"
+                // stays up until a frame has been drawn, so a flood wakes it once a
+                // frame, not once for every piece read.
+                if bits & !said.fetch_or(bits, Ordering::SeqCst) != 0 {
+                    waker.wake();
+                }
+                true
+            });
+            lock(&shared).exited = true;
+            said.fetch_or(NEWS_STATE, Ordering::SeqCst);
+            waker.wake();
+        })?;
+        Ok(Session { screen, pty, title: String::new(), news })
+    }
+
+    fn label(&self) -> String {
+        if self.title.is_empty() { "Terminal".into() } else { self.title.clone() }
+    }
+
+    /// Makes the terminal's grid cols x rows, if it is not, and tells its program.
+    fn fit(&self, s: &mut Screen, cols: usize, rows: usize) {
+        if (cols, rows) == (s.grid.cols, s.grid.rows) {
+            return;
+        }
+        if cols != s.grid.cols {
+            // Lines are cut or padded: the selection's cells are not what they were.
+            s.selection = None;
+        }
+        s.grid.resize(cols, rows);
+        s.clamp_scroll();
+        self.pty.resize(cols as u16, rows as u16);
+    }
+}
+
+/// A tab: its room divided among one or more terminals.
+struct Tab {
+    tree: Node,
+    /// The terminals, by the numbers the tree knows them by.
+    panes: Vec<(u64, Session)>,
+    /// The one the keys go to.
+    active: u64,
+}
+
+impl Tab {
+    fn session(&self, id: u64) -> Option<&Session> {
+        self.panes.iter().find(|(own, _)| *own == id).map(|(_, s)| s)
+    }
+
+    fn session_mut(&mut self, id: u64) -> Option<&mut Session> {
+        self.panes.iter_mut().find(|(own, _)| *own == id).map(|(_, s)| s)
+    }
+
+    /// The tab is called what its active terminal is.
+    fn label(&self) -> String {
+        self.session(self.active).map_or_else(|| "Terminal".into(), Session::label)
+    }
+}
+
+/// What the pointer has hold of, from a press to its release.
+enum Held {
+    /// The text: the selection follows the pointer.
+    Text,
+    /// The scrollbar's thumb, and where in it it was taken hold of.
+    Thumb(f32),
+    /// The line between two panes (the split it belongs to).
+    Divider(Vec<bool>),
+    /// A button the program in the active pane was told is down.
+    Reported(Button),
+}
+
+struct Terminal {
+    tabs: Vec<Tab>,
+    /// The tab in front.
+    shown: usize,
+    /// The number the next terminal gets.
+    next_id: u64,
+    waker: Option<Waker>,
+    palette: Palette,
+    settings: Settings,
+    metrics: Option<Metrics>,
+    focused: bool,
+    /// The window's size at the last frame, and the grid size that fits it: for the bar's layout and new tabs.
+    width: f32,
+    height: f32,
+    fits: (usize, usize),
+    /// The window's and the cells' sizes the tabs behind were last fitted to.
+    fitted: (f32, f32, f32, f32),
+    hover: Option<Part>,
+    /// The pane the pointer is over, if it is over one.
+    over: Option<u64>,
+    maximized: bool,
+    bar_press: Option<Instant>,
+    held: Option<Held>,
+    /// The last press on the text: when, on which cell, and which in a row it was (1 to 3).
+    presses: Option<(Instant, Pos, usize)>,
+    /// The selection is held past the top (true) or bottom edge, at this column: the view scrolls.
+    edge: Option<(bool, usize)>,
+    edge_tick: Instant,
+    /// Shift is down: the mouse selects even where a program has asked for it.
+    shift: bool,
+    /// The pane and screen cell a program was last told the pointer is on.
+    reported_cell: Option<(u64, (usize, usize))>,
+    /// The right-click menu, while it is open, and the line of it under the pointer.
+    menu: Option<Menu>,
+    menu_hover: Option<Item>,
+    /// A settings file was written since it was last read.
+    settings_changed: Arc<AtomicBool>,
+    /// How many tabs to open with (`--tabs N`; one unless asked), and how
+    /// many panes in the first (`--panes N`), for trying things out.
+    open_with: usize,
+    open_panes: usize,
+    /// `--maximized`: the window is to fill its screen as soon as it is open.
+    open_maximized: bool,
+    /// How many commands the last frame's scene held.
+    last_commands: usize,
+    /// VTERM_FRAMES is set: frames and tab changes are written to the error output.
+    measuring: bool,
+    /// The number of the last frame drawn, and a tab asked for and not yet drawn
+    /// (which, after which frame, when); kept only while measuring.
+    frame_now: u64,
+    asked: Option<(usize, u64, Instant)>,
+}
+
+impl Terminal {
+    fn new() -> Terminal {
+        Terminal {
+            tabs: Vec::new(),
+            shown: 0,
+            next_id: 1,
+            waker: None,
+            palette: palette(),
+            settings: Settings::from_text(&config("settings.toml")),
+            metrics: None,
+            focused: false,
+            width: 820.0,
+            height: 520.0,
+            fits: (80, 24),
+            fitted: (0.0, 0.0, 0.0, 0.0),
+            hover: None,
+            over: None,
+            maximized: false,
+            bar_press: None,
+            held: None,
+            presses: None,
+            edge: None,
+            edge_tick: Instant::now(),
+            shift: false,
+            reported_cell: None,
+            menu: None,
+            menu_hover: None,
+            settings_changed: Arc::new(AtomicBool::new(false)),
+            open_with: 1,
+            open_panes: 1,
+            open_maximized: false,
+            last_commands: 0,
+            measuring: std::env::var_os("VTERM_FRAMES").is_some(),
+            frame_now: 0,
+            asked: None,
+        }
+    }
+
+    fn layout(&self) -> Layout {
+        Layout::new(self.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right)
+    }
+
+    /// The room under the bar, which the front tab's panes share.
+    fn room(&self) -> Rect {
+        Rect::new(0.0, BAR_H, self.width, (self.height - BAR_H).max(0.0))
+    }
+
+    /// Where the front tab's panes and the lines between them are.
+    fn areas(&self) -> (Vec<(u64, Rect)>, Vec<Divider>) {
+        self.tabs.get(self.shown).map(|tab| tab.tree.layout(self.room())).unwrap_or_default()
+    }
+
+    /// The pane under a point, and its room.
+    fn pane_at(&self, x: f32, y: f32) -> Option<(u64, Rect)> {
+        self.areas().0.into_iter().find(|(_, r)| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
+    }
+
+    /// The front tab's active pane, and its room.
+    fn active(&self) -> Option<(u64, Rect)> {
+        let active = self.tabs.get(self.shown)?.active;
+        self.areas().0.into_iter().find(|(id, _)| *id == active)
+    }
+
+    /// A terminal of the front tab.
+    fn session(&self, id: u64) -> Option<&Session> {
+        self.tabs.get(self.shown)?.session(id)
+    }
+
+    fn session_mut(&mut self, id: u64) -> Option<&mut Session> {
+        self.tabs.get_mut(self.shown)?.session_mut(id)
+    }
+
+    /// The terminal the keys go to.
+    fn front(&self) -> Option<&Session> {
+        let tab = self.tabs.get(self.shown)?;
+        tab.session(tab.active)
+    }
+
+    fn front_mut(&mut self) -> Option<&mut Session> {
+        let tab = self.tabs.get_mut(self.shown)?;
+        tab.session_mut(tab.active)
+    }
+
+    /// A cell's width and height, once the fonts are known.
+    fn cell(&self) -> Option<(f32, f32)> {
+        self.metrics.as_ref().map(|mt| (mt.cell_w, mt.cell_h))
+    }
+
+    /// Starts a terminal and gives it a number.
+    fn start(&mut self, cols: usize, rows: usize) -> Option<(u64, Session)> {
+        let waker = self.waker.clone()?;
+        match Session::start(cols, rows, waker) {
+            Ok(session) => {
+                self.next_id += 1;
+                Some((self.next_id - 1, session))
             }
             Err(e) => {
-                eprintln!("vergence-term: cannot start a shell: {e}");
+                eprintln!("vergence-term: could not start the shell: {e}");
                 None
             }
         }
     }
 
-    fn open_tab(&mut self) {
-        if let Some(id) = self.spawn(self.body()) {
-            let (panes, focus) = pane_grid::State::new(id);
-            self.tabs.push(Tab { panes, focus });
-            self.active = self.tabs.len() - 1;
+    fn new_tab(&mut self, window: &mut Window) {
+        if let Some((id, session)) = self.start(self.fits.0, self.fits.1) {
+            self.tabs.push(Tab { tree: Node::Leaf(id), panes: vec![(id, session)], active: id });
+            self.shown = self.tabs.len() - 1;
+            self.retitle(window);
+        }
+        window.redraw();
+    }
+
+    /// Divides the active pane's room in two, with a new terminal in the
+    /// second half, which the keys then go to.
+    fn split(&mut self, axis: Axis, window: &mut Window) {
+        self.split_active(axis);
+        self.retitle(window);
+        window.redraw();
+    }
+
+    fn split_active(&mut self, axis: Axis) {
+        let Some(active) = self.tabs.get(self.shown).map(|tab| tab.active) else { return };
+        // The new terminal starts at the size of the one it divides; the next frame fits both.
+        let size = self.session(active).map(|s| {
+            let s = lock(&s.screen);
+            (s.grid.cols, s.grid.rows)
+        });
+        let Some((id, session)) = self.start(size.map_or(self.fits.0, |s| s.0), size.map_or(self.fits.1, |s| s.1)) else { return };
+        let tab = &mut self.tabs[self.shown];
+        if tab.tree.split(active, axis, id) {
+            tab.panes.push((id, session));
+            tab.active = id;
         }
     }
 
-    /// The terminal with the keyboard.
-    fn focused_term(&self) -> Option<u64> {
-        let tab = self.tabs.get(self.active)?;
-        tab.panes.get(tab.focus).copied()
-    }
-
-    /// Fit every pane's terminal of a tab to its region.
-    fn fit_tab(&mut self, t: usize) {
-        let Some(tab) = self.tabs.get(t) else { return };
-        let body = self.body();
-        let regions = tab.panes.layout().pane_regions(DIVIDER, 0.0, body);
-        for (pane, r) in regions {
-            if let Some(id) = tab.panes.get(pane)
-                && let Some(term) = self.terms.get_mut(id)
-            {
-                term.fit(r.size());
-            }
-        }
-    }
-
-    fn fit_all(&mut self) {
-        for t in 0..self.tabs.len() {
-            self.fit_tab(t);
-        }
-    }
-
-    /// Redraw a tab's panes (the focus changed).
-    fn repaint_tab(&mut self) {
-        if let Some(tab) = self.tabs.get(self.active) {
-            for (_, id) in tab.panes.iter() {
-                if let Some(t) = self.terms.get(id) {
-                    t.cache.clear();
-                }
-            }
-        }
-    }
-
-    /// A terminal ended (its shell exited, or its pane or tab was closed): its
-    /// pane closes; the tab with its last pane; the window with its last tab.
-    fn remove_term(&mut self, id: u64) -> Task<Message> {
-        self.terms.remove(&id);
-        let Some(t) = self.tabs.iter().position(|tab| tab.panes.iter().any(|(_, v)| *v == id)) else { return Task::none() };
-        let tab = &mut self.tabs[t];
-        let pane = tab.panes.iter().find(|(_, v)| **v == id).map(|(p, _)| *p);
-        if tab.panes.len() > 1 {
-            if let Some(p) = pane
-                && let Some((_, sibling)) = tab.panes.close(p)
-                && tab.focus == p
-            {
-                tab.focus = sibling;
-            }
-            self.fit_tab(t);
-            self.repaint_tab();
-            return Task::none();
-        }
-        self.tabs.remove(t);
-        if self.tabs.is_empty() {
-            return iced::exit();
-        }
-        if self.active >= t && self.active > 0 {
-            self.active -= 1;
-        }
-        self.active = self.active.min(self.tabs.len() - 1);
-        Task::none()
-    }
-
-    fn close_tab(&mut self, t: usize) -> Task<Message> {
-        let Some(tab) = self.tabs.get(t) else { return Task::none() };
-        let ids: Vec<u64> = tab.panes.iter().map(|(_, v)| *v).collect();
-        let mut task = Task::none();
-        for id in ids {
-            task = self.remove_term(id);
-        }
-        task
-    }
-
-    /// Give a terminal's pane the keyboard (a click in it).
-    fn focus_term(&mut self, id: u64) {
-        if let Some(tab) = self.tabs.get_mut(self.active)
-            && let Some(pane) = tab.panes.iter().find(|(_, v)| **v == id).map(|(p, _)| *p)
-            && tab.focus != pane
-        {
-            tab.focus = pane;
-        } else {
+    /// Closes a tab (its programs are ended); the window with the last one.
+    fn close_tab(&mut self, index: usize, window: &mut Window) {
+        if index >= self.tabs.len() {
             return;
         }
-        self.repaint_tab();
-    }
-
-    fn split(&mut self, axis: pane_grid::Axis) {
-        let Some(tab) = self.tabs.get(self.active) else { return };
-        let focus = tab.focus;
-        // The new pane starts at half the focused one; fitted right after.
-        let half = Size::new(self.body().width / 2.0, self.body().height);
-        let Some(id) = self.spawn(half) else { return };
-        let tab = &mut self.tabs[self.active];
-        if let Some((pane, _)) = tab.panes.split(axis, focus, id) {
-            tab.focus = pane;
+        self.tabs.remove(index);
+        self.held = None;
+        if self.tabs.is_empty() {
+            window.close();
+            return;
         }
-        let a = self.active;
-        self.fit_tab(a);
-        self.repaint_tab();
-    }
-
-    fn update(&mut self, m: Message) -> Task<Message> {
-        match m {
-            Message::Output(id, bytes) => {
-                if let Some(t) = self.terms.get_mut(&id)
-                    && let Some(copied) = t.feed(&bytes)
-                {
-                    return iced::clipboard::write(copied);
-                }
-            }
-            Message::Exited(id) => return self.remove_term(id),
-            Message::Key(key, mods, txt) => {
-                if self.menu.is_some() && key == Key::Named(Named::Escape) {
-                    self.menu = None;
-                    return Task::none();
-                }
-                // The terminal's own shortcuts: Ctrl+Shift, so the shell keeps Ctrl+T etc.
-                let cs = mods.control() && mods.shift();
-                let is = |c: &str| matches!(&key, Key::Character(k) if k.eq_ignore_ascii_case(c));
-                if cs && is("t") {
-                    self.open_tab();
-                    return Task::none();
-                }
-                if cs && is("w") {
-                    return self.update(Message::ClosePane);
-                }
-                if cs && is("r") {
-                    self.split(pane_grid::Axis::Vertical);
-                    return Task::none();
-                }
-                if cs && is("d") {
-                    self.split(pane_grid::Axis::Horizontal);
-                    return Task::none();
-                }
-                if cs && is("c") {
-                    return self.update(Message::Copy);
-                }
-                if cs && is("v") {
-                    return self.update(Message::Paste);
-                }
-                let n = self.tabs.len().max(1);
-                match &key {
-                    Key::Named(Named::PageUp) if mods.control() && !mods.shift() => {
-                        self.active = (self.active + n - 1) % n;
-                        return Task::none();
-                    }
-                    Key::Named(Named::PageDown) if mods.control() && !mods.shift() => {
-                        self.active = (self.active + 1) % n;
-                        return Task::none();
-                    }
-                    // The scrollback: Shift+PageUp/PageDown a page, Shift+Home/End the ends
-                    // (on the alternate screen the keys go to the program).
-                    Key::Named(n @ (Named::PageUp | Named::PageDown | Named::Home | Named::End))
-                        if mods.shift() && !mods.control() && !mods.alt()
-                            && let Some(t) = self.focused_term().and_then(|id| self.terms.get_mut(&id))
-                            && !t.grid.alt =>
-                    {
-                        let lines = match n {
-                            Named::PageUp => t.page(),
-                            Named::PageDown => -t.page(),
-                            Named::Home => isize::MAX,
-                            _ => isize::MIN,
-                        };
-                        t.scroll_by(lines);
-                        return Task::none();
-                    }
-                    Key::Named(Named::Tab) if mods.control() => {
-                        self.active = if mods.shift() { (self.active + n - 1) % n } else { (self.active + 1) % n };
-                        return Task::none();
-                    }
-                    _ => {}
-                }
-                if let Some(id) = self.focused_term()
-                    && let Some(t) = self.terms.get_mut(&id)
-                    && let Some(bytes) = term::key_bytes(&key, mods, txt.as_deref(), t.grid.app_cursor)
-                {
-                    // Typing clears the selection and goes back to the live screen, as in other terminals.
-                    t.select(None);
-                    t.scroll_to_bottom();
-                    t.pty.write(&bytes);
-                }
-            }
-            Message::Resized(size) => {
-                self.size = size;
-                self.fit_all();
-            }
-            Message::Focused(f) => {
-                self.focused = f;
-                self.repaint_tab();
-            }
-            Message::NewTab => {
-                self.menu = None;
-                self.open_tab();
-            }
-            Message::SelectTab(i) => self.active = i.min(self.tabs.len().saturating_sub(1)),
-            Message::CloseTab(i) => return self.close_tab(i),
-            Message::FocusPane(p) => {
-                if let Some(tab) = self.tabs.get_mut(self.active) {
-                    tab.focus = p;
-                }
-                self.repaint_tab();
-            }
-            Message::PaneResized(e) => {
-                if let Some(tab) = self.tabs.get_mut(self.active) {
-                    tab.panes.resize(e.split, e.ratio);
-                }
-                let a = self.active;
-                self.fit_tab(a);
-            }
-            Message::Split(axis) => {
-                self.menu = None;
-                self.split(axis);
-            }
-            Message::ClosePane => {
-                let target = self.menu.map(|(_, id)| id).or_else(|| self.focused_term());
-                self.menu = None;
-                if let Some(id) = target {
-                    return self.remove_term(id);
-                }
-            }
-            Message::Select(id, sel) => {
-                // A click in a pane gives it the keyboard as well.
-                self.focus_term(id);
-                if let Some(t) = self.terms.get_mut(&id) {
-                    t.select(sel);
-                }
-            }
-            Message::Modifiers(m) => self.mods = m,
-            Message::Look(l) => {
-                for t in self.terms.values_mut() {
-                    t.set_look(&l);
-                }
-                self.look = l;
-                // A new font size changes how many cells fit.
-                self.fit_all();
-            }
-            Message::Scroll(id, lines) => {
-                if let Some(t) = self.terms.get_mut(&id) {
-                    t.scroll_by(lines);
-                }
-            }
-            Message::ScrollTo(id, lines) => {
-                if let Some(t) = self.terms.get_mut(&id) {
-                    t.scroll_to(lines);
-                }
-            }
-            Message::DragScroll(id, lines, col) => {
-                if let Some(t) = self.terms.get_mut(&id) {
-                    t.scroll_by(lines);
-                    t.drag_to_edge(col, lines > 0);
-                }
-            }
-            Message::Mouse(id, bytes) => {
-                self.focus_term(id);
-                if let Some(t) = self.terms.get_mut(&id) {
-                    t.select(None);
-                    t.pty.write(&bytes);
-                }
-            }
-            Message::Menu(id, at) => self.menu = Some((at, id)),
-            Message::CloseMenu => self.menu = None,
-            Message::Copy => {
-                let target = self.menu.map(|(_, id)| id).or_else(|| self.focused_term());
-                self.menu = None;
-                if let Some(text) = target.and_then(|id| self.terms.get(&id)).and_then(Term::selected_text) {
-                    return iced::clipboard::write(text);
-                }
-            }
-            Message::Paste => {
-                self.menu = None;
-                return iced::clipboard::read().map(Message::Pasted);
-            }
-            Message::Pasted(text) => {
-                if let Some(text) = text
-                    && let Some(id) = self.focused_term()
-                    && let Some(t) = self.terms.get_mut(&id)
-                {
-                    t.paste(&text);
-                }
-            }
-            Message::Drag => return iced::window::latest().and_then(iced::window::drag),
-            Message::ToggleMaximize => return iced::window::latest().and_then(iced::window::toggle_maximize),
-            Message::Minimize => return iced::window::latest().and_then(|id| iced::window::minimize(id, true)),
-            Message::CloseWindow => return iced::exit(),
-            Message::ResizeEdge(d) => return iced::window::latest().and_then(move |id| iced::window::drag_resize(id, d)),
+        if self.shown > index || self.shown >= self.tabs.len() {
+            self.shown = self.shown.saturating_sub(1);
         }
-        Task::none()
+        self.retitle(window);
+        window.redraw();
     }
 
-    fn title(&self) -> String {
-        self.focused_term().and_then(|id| self.terms.get(&id)).map(Term::title).unwrap_or_else(|| "Terminal".into())
-    }
-
-    fn view(&self) -> Element<'_, Message> {
-        let body: Element<'_, Message> = match self.tabs.get(self.active) {
-            Some(tab) => {
-                let focus = tab.focus;
-                let accent = self.look.palette().accent;
-                pane_grid::PaneGrid::new(&tab.panes, move |pane, id, _| {
-                    let content: Element<'_, Message> = match self.terms.get(id) {
-                        Some(t) => Canvas::new(View { term: t, focused: self.focused && pane == focus, mods: self.mods }).width(Length::Fill).height(Length::Fill).into(),
-                        None => Space::new().into(),
-                    };
-                    pane_grid::Content::new(content)
-                })
-                .spacing(DIVIDER)
-                .on_click(Message::FocusPane)
-                .on_resize(8, Message::PaneResized)
-                .style(move |_: &Theme| pane_grid::Style {
-                    hovered_region: pane_grid::Highlight { background: Background::Color(Color { a: 0.2, ..accent }), border: Border::default() },
-                    picked_split: pane_grid::Line { color: accent, width: 2.0 },
-                    hovered_split: pane_grid::Line { color: accent, width: 2.0 },
-                })
-                .into()
-            }
-            None => Space::new().into(),
-        };
-        let window = container(column![self.title_bar(), body]).style(|_| container::background(BAR_INACTIVE));
-        // The edges and corners resize the window (it draws its own frame).
-        let edge = |w: Length, h: Length, d: Direction, cursor: mouse::Interaction| {
-            mouse_area(Space::new().width(w).height(h)).on_press(Message::ResizeEdge(d)).interaction(cursor)
-        };
-        let e = Length::Fixed(EDGE);
-        let edges = column![
-            row![edge(e, e, Direction::NorthWest, mouse::Interaction::ResizingDiagonallyDown), edge(Length::Fill, e, Direction::North, mouse::Interaction::ResizingVertically), edge(e, e, Direction::NorthEast, mouse::Interaction::ResizingDiagonallyUp)],
-            row![edge(e, Length::Fill, Direction::West, mouse::Interaction::ResizingHorizontally), Space::new().width(Length::Fill).height(Length::Fill), edge(e, Length::Fill, Direction::East, mouse::Interaction::ResizingHorizontally)],
-            row![edge(e, e, Direction::SouthWest, mouse::Interaction::ResizingDiagonallyUp), edge(Length::Fill, e, Direction::South, mouse::Interaction::ResizingVertically), edge(e, e, Direction::SouthEast, mouse::Interaction::ResizingDiagonallyDown)],
-        ];
-        let mut layers = stack![window, edges];
-        if let Some((at, id)) = self.menu {
-            layers = layers.push(self.context_menu(at, id));
+    /// Closes a pane (its program is ended): its neighbour gets its room.
+    /// The tab goes with its last pane.
+    fn close_pane(&mut self, index: usize, id: u64, window: &mut Window) {
+        let Some(tab) = self.tabs.get_mut(index) else { return };
+        if tab.panes.len() <= 1 {
+            return self.close_tab(index, window);
         }
-        layers.into()
+        let leaves = tab.tree.leaves();
+        if !tab.tree.remove(id) {
+            return;
+        }
+        tab.panes.retain(|(own, _)| *own != id);
+        if tab.active == id {
+            // The keys go to the pane that came before it, or the first.
+            let at = leaves.iter().position(|l| *l == id).unwrap_or(0);
+            tab.active = leaves[if at > 0 { at - 1 } else { 1 }];
+        }
+        self.held = None;
+        self.retitle(window);
+        window.redraw();
     }
 
-    /// The right-click menu at `at`: a click outside it closes it.
-    fn context_menu(&self, at: Point, id: u64) -> Element<'_, Message> {
-        let has_selection = self.terms.get(&id).and_then(Term::selected_text).is_some();
-        let dark = self.look.dark;
-        let accent = self.look.palette().accent;
-        let (ui, ui_size) = (self.look.ui_font(), self.look.ui_size);
-        let (menu_bg, text_on, text_off, edge) =
-            if dark { (MENU_BG, TEXT_ACTIVE, TEXT_INACTIVE, Color { a: 0.15, ..Color::WHITE }) } else { (MENU_BG_LIGHT, MENU_TEXT_LIGHT, MENU_DIM_LIGHT, Color { a: 0.18, ..Color::BLACK }) };
-        let item = |label: &'static str, keys: &'static str, m: Option<Message>| {
-            let enabled = m.is_some();
-            let c = if enabled { text_on } else { text_off };
-            // Hovered: the accent behind white text (readable on either scheme).
-            let mut b = button(row![text(label).font(ui).size(ui_size).width(Length::Fill), text(keys).font(ui).size(ui_size - 2.0)].spacing(12).align_y(iced::alignment::Vertical::Center))
-                .width(Length::Fill)
-                .padding(Padding::from([5, 10]))
-                .style(move |_: &Theme, s| {
-                    let hovered = enabled && s == button::Status::Hovered;
-                    let mut st = rounded(plain(s, hovered.then_some(Color { a: 0.9, ..accent })));
-                    st.text_color = if hovered { Color::WHITE } else { c };
-                    st
-                });
-            if let Some(m) = m {
-                b = b.on_press(m);
+    fn close_active(&mut self, window: &mut Window) {
+        if let Some(active) = self.tabs.get(self.shown).map(|tab| tab.active) {
+            self.close_pane(self.shown, active, window);
+        }
+    }
+
+    fn show_tab(&mut self, index: usize, window: &mut Window) {
+        if index < self.tabs.len() && index != self.shown {
+            if self.measuring {
+                self.asked = Some((index, self.frame_now, Instant::now()));
+                eprintln!("press for tab {index} at {:.3}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64() % 1000.0));
             }
-            b
-        };
-        // A hairline with room around it (the padding outside the coloured line).
-        let hairline = if dark { Color { a: 0.12, ..Color::WHITE } } else { Color { a: 0.12, ..Color::BLACK } };
-        let line = || container(container(Space::new().height(1.0).width(Length::Fill)).style(move |_| container::background(hairline))).padding(Padding::from([4, 8]));
-        // As wide as its longest line ("Split top and bottom" and its keys), no
-        // wider: the separators fill the column, so the column sets the width.
-        let menu = container(column![
-            item("Copy", "Ctrl+Shift+C", has_selection.then_some(Message::Copy)),
-            item("Paste", "Ctrl+Shift+V", Some(Message::Paste)),
-            line(),
-            item("Split side by side", "Ctrl+Shift+R", Some(Message::Split(pane_grid::Axis::Vertical))),
-            item("Split top and bottom", "Ctrl+Shift+D", Some(Message::Split(pane_grid::Axis::Horizontal))),
-            line(),
-            item("New tab", "Ctrl+Shift+T", Some(Message::NewTab)),
-            item("Close pane", "Ctrl+Shift+W", Some(Message::ClosePane)),
-        ]
-        .width(Length::Fixed(MENU_W)))
-        .padding(4)
-        .style(move |_| container::Style {
-            background: Some(Background::Color(menu_bg)),
-            border: Border { color: edge, width: 1.0, radius: 8.0.into() },
-            ..container::Style::default()
-        });
-        // Kept inside the window.
-        let (mw, mh) = (MENU_W + 10.0, 250.0);
-        let x = at.x.min(self.size.width - mw).max(0.0);
-        let y = at.y.min(self.size.height - mh).max(0.0);
-        let placed = container(menu).padding(Padding { top: y, left: x, right: 0.0, bottom: 0.0 });
-        stack![mouse_area(Space::new().width(Length::Fill).height(Length::Fill)).on_press(Message::CloseMenu).on_right_press(Message::CloseMenu), placed].into()
+            self.shown = index;
+            self.held = None;
+            self.retitle(window);
+            window.redraw();
+        }
     }
 
-    /// The bar: tabs (the active one in the terminal's colours, joined to it;
-    /// the others and + a little lighter than the bar), room to grab, and the window buttons where the desktop's layout
-    /// (Gtk/DecorationLayout) puts them. Tabs sit on the bar's bottom edge;
-    /// every other item is centred on the tabs' middle line, and the icons
-    /// share one box size, so the whole bar lines up.
-    fn title_bar(&self) -> Element<'_, Message> {
-        let fg = if self.focused { TEXT_ACTIVE } else { TEXT_INACTIVE };
-        let bar_bg = if self.focused { BAR_ACTIVE } else { BAR_INACTIVE };
-        let pal = self.look.palette();
-        let (ui, ui_size) = (self.look.ui_font(), self.look.ui_size);
-        let center = iced::alignment::Vertical::Center;
-        // Tabs close on the side the window buttons are on (Dave, 2026-11-09).
-        let controls_left = !self.look.buttons_left.is_empty();
-        let mut tabs = row![].spacing(2).height(Length::Fixed(TAB_H)).align_y(center);
-        for (i, tab) in self.tabs.iter().enumerate() {
-            let active = i == self.active;
-            let title = tab.panes.get(tab.focus).and_then(|id| self.terms.get(id)).map(Term::title).unwrap_or_default();
-            let count = tab.panes.len();
-            let label = if count > 1 { format!("{title}  ({count})") } else { title.clone() };
-            let tab_fg = if active { pal.fg } else { fg };
-            let close = button(icon(Glyph::Close, tab_fg, 8.0))
-                .width(Length::Fixed(20.0))
-                .height(Length::Fixed(20.0))
-                .padding(0)
-                .on_press(Message::CloseTab(i))
-                .style(move |_: &Theme, s| rounded(plain(s, if s == button::Status::Hovered { Some(Color { a: 0.18, ..tab_fg }) } else { None })));
-            // The pane count stays visible: only the title is shortened.
-            let room = TAB_W - 12.0 - 4.0 - 6.0 - 20.0;
-            let label = if count > 1 {
-                let suffix = format!("  ({count})");
-                format!("{}{suffix}", fit_label(&title, room - text_width(&suffix, ui_size), ui_size))
-            } else {
-                fit_label(&label, room, ui_size)
+    /// The left button went down on the active pane's text: a selection
+    /// starts (by characters, then words, then lines for presses on the
+    /// same cell in quick succession), or with Shift the one there is
+    /// reaches to here.
+    fn press_text(&mut self, x: f32, y: f32, m: Modifiers, window: &mut Window) {
+        let (Some(cell), Some((_, area)), Some(session)) = (self.cell(), self.active(), self.front()) else { return };
+        let mut guard = lock(&session.screen);
+        let s = &mut *guard;
+        // A program that asked for the mouse has it (report()); Shift takes it
+        // back, and scrolled back the text under the pointer is ours.
+        if s.grid.mouse != MouseMode::Off && !m.shift && s.scroll == 0 {
+            return;
+        }
+        let pos = s.cell_at(x, y, area, cell);
+        let now = Instant::now();
+        let nth = match self.presses {
+            Some((then, at, n)) if at == pos && now.duration_since(then) < DOUBLE_CLICK => n % 3 + 1,
+            _ => 1,
+        };
+        if nth == 1 && m.shift && s.selection.is_some() {
+            s.drag_selection(pos);
+        } else {
+            s.selection = Some(Selection::start(&s.grid, [Unit::Cell, Unit::Word, Unit::Line][nth - 1], pos));
+        }
+        drop(guard);
+        self.presses = Some((now, pos, nth));
+        self.held = Some(Held::Text);
+        window.redraw();
+    }
+
+    /// The active pane's selected text, if there is any.
+    fn selected_text(&self) -> Option<String> {
+        let s = lock(&self.front()?.screen);
+        s.selection.and_then(|sel| sel.text(&s.grid))
+    }
+
+    /// Copies what is selected in the active pane; false if nothing is.
+    fn copy(&mut self, window: &mut Window) -> bool {
+        match self.selected_text() {
+            Some(text) => {
+                window.copy(&text);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Input while the menu is open is the menu's: a press on a line does
+    /// what it says, a press anywhere else or Escape closes it. True if the
+    /// input was used up here.
+    fn menu_input(&mut self, input: &Input, window: &mut Window) -> bool {
+        let Some(menu) = &self.menu else { return false };
+        match input {
+            Input::PointerMoved { x, y } => {
+                let over = menu.at(*x, *y);
+                window.set_cursor(Cursor::Default);
+                if over != self.menu_hover {
+                    self.menu_hover = over;
+                    window.redraw();
+                }
+                true
+            }
+            Input::Button { button, pressed: true, x, y, .. } => {
+                let chosen = if *button == Button::Left { menu.at(*x, *y) } else { None };
+                // A press on the menu's own ground, between its lines, leaves it open.
+                if chosen.is_none() && *button == Button::Left && menu.contains(*x, *y) {
+                    return true;
+                }
+                self.menu = None;
+                self.menu_hover = None;
+                window.redraw();
+                match chosen {
+                    Some(Item::Copy) => {
+                        self.copy(window);
+                    }
+                    Some(Item::Paste) => window.paste(),
+                    Some(Item::SplitSide) => self.split(Axis::Side, window),
+                    Some(Item::SplitStack) => self.split(Axis::Stack, window),
+                    Some(Item::NewTab) => self.new_tab(window),
+                    Some(Item::ClosePane) => self.close_active(window),
+                    None => {}
+                }
+                true
+            }
+            Input::Button { .. } | Input::Scroll { .. } => true,
+            Input::Key { sym: sym::ESCAPE, pressed: true, .. } | Input::Focus(false) => {
+                self.menu = None;
+                self.menu_hover = None;
+                window.redraw();
+                matches!(input, Input::Key { .. })
+            }
+            _ => false,
+        }
+    }
+
+    /// The scrollbar of a pane of the front tab, if it has one now.
+    fn scrollbar(&self, id: u64, area: Rect) -> Option<Scrollbar> {
+        lock(&self.session(id)?.screen).scrollbar(area)
+    }
+
+    /// The held thumb follows the pointer, and the active pane's view with it.
+    fn drag_thumb(&mut self, y: f32, grab: f32, window: &mut Window) {
+        let (Some((_, area)), Some(session)) = (self.active(), self.front()) else { return };
+        let mut s = lock(&session.screen);
+        if let Some(bar) = s.scrollbar(area) {
+            let to = bar.scroll_for(y - grab);
+            if to != s.scroll {
+                s.scroll = to;
+                s.clamp_scroll();
+                window.redraw();
+            }
+        }
+    }
+
+    /// Tells the program in a pane of the front tab about a mouse event at
+    /// a point of the window, if it asked for such events. True if the
+    /// event was the program's.
+    fn report(&mut self, id: u64, area: Rect, action: mouse::Action, x: f32, y: f32, m: Modifiers) -> bool {
+        let Some(cell) = self.cell() else { return false };
+        let last = self.reported_cell;
+        let Some(session) = self.session_mut(id) else { return false };
+        let s = lock(&session.screen);
+        if s.grid.mouse == MouseMode::Off || s.scroll > 0 {
+            // Scrolled back, what is under the pointer is not the program's screen.
+            return false;
+        }
+        let at = s.screen_cell(x, y, area, cell);
+        if matches!(action, mouse::Action::Motion(_)) && last == Some((id, at)) {
+            return true;
+        }
+        let bytes = mouse::bytes(s.grid.mouse, s.grid.mouse_sgr, action, at, m);
+        drop(s);
+        if let Some(bytes) = bytes {
+            session.pty.write(&bytes);
+        }
+        self.reported_cell = Some((id, at));
+        true
+    }
+
+    /// The pointer moved with the button held on the active pane's text.
+    fn drag_text(&mut self, x: f32, y: f32, window: &mut Window) {
+        let (Some(cell), Some((_, area)), Some(session)) = (self.cell(), self.active(), self.front()) else { return };
+        let mut s = lock(&session.screen);
+        let pos = s.cell_at(x, y, area, cell);
+        let bottom = area.y + PAD + s.grid.rows as f32 * cell.1;
+        // Past the top or bottom edge the view scrolls for as long as it is held there (scene()).
+        let edge = if y < area.y + PAD {
+            Some((true, pos.0))
+        } else if y >= bottom {
+            Some((false, pos.0))
+        } else {
+            None
+        };
+        if s.drag_selection(pos) || edge.is_some() {
+            window.redraw();
+        }
+        drop(s);
+        self.edge = edge;
+    }
+
+    /// The pointer moved with nothing held: what it is over, the shape it
+    /// takes, and word of it to a program that asked to hear.
+    fn hover(&mut self, x: f32, y: f32, window: &mut Window) {
+        let part = self.layout().at(x, y);
+        let pane = if part.is_none() && y >= BAR_H { self.pane_at(x, y) } else { None };
+        self.over = pane.map(|(id, _)| id);
+        let divider = if part.is_none() { self.areas().1.into_iter().find(|d| d.holds(x, y)) } else { None };
+        let cursor = if let Some(d) = divider {
+            Cursor::Resize(if d.axis == Axis::Side { Edges { right: true, ..Edges::default() } } else { Edges { bottom: true, ..Edges::default() } })
+        } else if let Some((id, area)) = pane {
+            // The scrollbar's edge and a program that has the mouse get the arrow; text, the text bar.
+            let on_bar = self.scrollbar(id, area).is_some_and(|bar| bar.holds(x, y));
+            let theirs = !on_bar && !self.shift && self.report(id, area, mouse::Action::Motion(None), x, y, Modifiers::default());
+            if on_bar || theirs { Cursor::Default } else { Cursor::Text }
+        } else {
+            Cursor::Default
+        };
+        window.set_cursor(cursor);
+        if part != self.hover {
+            self.hover = part;
+            window.redraw();
+        }
+    }
+
+    /// A button went down below the bar.
+    fn press(&mut self, button: Button, x: f32, y: f32, m: Modifiers, window: &mut Window) {
+        // The line between two panes: the left button takes hold of it.
+        if button == Button::Left
+            && let Some(d) = self.areas().1.into_iter().find(|d| d.holds(x, y))
+        {
+            self.held = Some(Held::Divider(d.path));
+            return;
+        }
+        let Some((id, area)) = self.pane_at(x, y) else { return };
+        // A press on a pane makes it the one the keys go to.
+        if let Some(tab) = self.tabs.get_mut(self.shown)
+            && tab.active != id
+        {
+            tab.active = id;
+            self.retitle(window);
+            window.redraw();
+        }
+        // The scrollbar: a press takes hold of the thumb, which comes to the pointer if it was not under it.
+        if button == Button::Left
+            && let Some(bar) = self.scrollbar(id, area).filter(|bar| bar.holds(x, y))
+        {
+            let grab = bar.grab(y);
+            self.held = Some(Held::Thumb(grab));
+            return self.drag_thumb(y, grab, window);
+        }
+        if !m.shift && self.report(id, area, mouse::Action::Press(button), x, y, m) {
+            self.held = Some(Held::Reported(button));
+            return;
+        }
+        match button {
+            Button::Left => self.press_text(x, y, m, window),
+            Button::Right => {
+                self.menu = Some(Menu::new(x, y, (self.width, self.height), self.selected_text().is_some()));
+                self.menu_hover = None;
+                window.redraw();
+            }
+            _ => {}
+        }
+    }
+
+    /// The window is called what its front tab is.
+    fn retitle(&self, window: &mut Window) {
+        if let Some(tab) = self.tabs.get(self.shown) {
+            window.set_title(&tab.label());
+        }
+    }
+
+    /// What a key sends to the program (xterm's sequences).
+    fn key_bytes(sym_: u32, text: Option<&str>, m: Modifiers, app_cursor: bool) -> Option<Vec<u8>> {
+        let csi = |s: &str| Some(format!("\x1b[{s}").into_bytes());
+        let cursor = |c: char| Some(if app_cursor { format!("\x1bO{c}") } else { format!("\x1b[{c}") }.into_bytes());
+        const KP_ENTER: u32 = 0xff8d;
+        const BACK_TAB: u32 = 0xfe20;
+        const INSERT: u32 = 0xff63;
+        const F1: u32 = 0xffbe;
+        match sym_ {
+            sym::RETURN | KP_ENTER => return Some(b"\r".to_vec()),
+            sym::BACKSPACE => return Some(if m.ctrl { vec![0x08] } else { vec![0x7f] }),
+            sym::TAB => return Some(if m.shift { b"\x1b[Z".to_vec() } else { b"\t".to_vec() }),
+            BACK_TAB => return Some(b"\x1b[Z".to_vec()),
+            sym::ESCAPE => return Some(vec![0x1b]),
+            sym::UP => return cursor('A'),
+            sym::DOWN => return cursor('B'),
+            sym::RIGHT => return cursor('C'),
+            sym::LEFT => return cursor('D'),
+            sym::HOME => return cursor('H'),
+            sym::END => return cursor('F'),
+            sym::PAGE_UP => return csi("5~"),
+            sym::PAGE_DOWN => return csi("6~"),
+            INSERT => return csi("2~"),
+            sym::DELETE => return csi("3~"),
+            s if (F1..F1 + 4).contains(&s) => return Some(vec![0x1b, b'O', b'P' + (s - F1) as u8]),
+            s if (F1 + 4..F1 + 12).contains(&s) => return csi(["15~", "17~", "18~", "19~", "20~", "21~", "23~", "24~"][(s - F1 - 4) as usize]),
+            0x20 if m.ctrl => return Some(vec![0]),
+            _ => {}
+        }
+        // Ctrl+letter: the control character.
+        if m.ctrl
+            && let Some(ch) = char::from_u32(sym_).map(|c| c.to_ascii_lowercase())
+        {
+            let b = match ch {
+                'a'..='z' => Some(ch as u8 - b'a' + 1),
+                '[' => Some(0x1b),
+                '\\' => Some(0x1c),
+                ']' => Some(0x1d),
+                '6' => Some(0x1e),
+                '-' | '/' => Some(0x1f),
+                _ => None,
             };
-            let name = text(label).font(ui).size(ui_size).color(tab_fg).width(Length::Fill).height(Length::Fill).align_y(center).wrapping(text::Wrapping::None);
-            let name = container(name).width(Length::Fill).height(Length::Fill).clip(true).padding(Padding { bottom: 2.0 * TEXT_LIFT, ..Padding::ZERO });
-            let content = (if controls_left { row![close, name] } else { row![name, close] }).height(Length::Fill).align_y(center).spacing(6);
-            let (pad_left, pad_right) = if controls_left { (4.0, 12.0) } else { (12.0, 4.0) };
-            let tab_button = button(content)
-                .width(Length::Fixed(TAB_W))
-                .height(Length::Fixed(TAB_H))
-                .padding(Padding { top: 0.0, bottom: 0.0, left: pad_left, right: pad_right })
-                .on_press(Message::SelectTab(i))
-                .style(move |_: &Theme, s| {
-                    let bg = if active { pal.bg } else { idle_tab(s) };
-                    tab_shape(plain(s, Some(bg)))
-                });
-            tabs = tabs.push(tab_button);
+            if let Some(b) = b {
+                return Some(if m.alt { vec![0x1b, b] } else { vec![b] });
+            }
         }
-        // + is a tab too: the same shape and fill as the tabs that aren't shown,
-        // at the end of their row (Dave, 2026-11-09).
-        let new_tab = button(container(icon(Glyph::Plus, fg, ICON)).width(Length::Fill).height(Length::Fixed(24.0)))
-            .width(Length::Fixed(34.0))
-            .height(Length::Fixed(TAB_H))
-            .padding(Padding { top: (TAB_H - 24.0) / 2.0 - TEXT_LIFT, ..Padding::ZERO })
-            .on_press(Message::NewTab)
-            .style(move |_: &Theme, s| tab_shape(plain(s, Some(idle_tab(s)))));
-        let tabs = tabs.push(new_tab);
-        let grab = mouse_area(Space::new().width(Length::Fill).height(Length::Fill)).on_press(Message::Drag).on_double_click(Message::ToggleMaximize);
-        let win_button = |b: look::WinButton| -> Element<'_, Message> {
-            let (glyph, m, danger) = match b {
-                look::WinButton::Minimize => (Glyph::Minimize, Message::Minimize, false),
-                look::WinButton::Maximize => (Glyph::Maximize, Message::ToggleMaximize, false),
-                look::WinButton::Close => (Glyph::Close, Message::CloseWindow, true),
-            };
-            button(icon(glyph, fg, ICON))
-                .width(Length::Fixed(32.0))
-                .height(Length::Fixed(24.0))
-                .padding(0)
-                .on_press(m)
-                .style(move |_: &Theme, s| {
-                    let hover = if danger { CLOSE } else { Color { a: 0.15, ..Color::WHITE } };
-                    rounded(plain(s, if s == button::Status::Hovered { Some(hover) } else { None }))
-                })
-                .into()
-        };
-        let side = |list: &[look::WinButton]| row(list.iter().map(|b| win_button(*b))).spacing(2).align_y(center);
-        let bar = row![side(&self.look.buttons_left), tabs, grab, side(&self.look.buttons_right)].spacing(4).height(Length::Fixed(TAB_H)).align_y(center);
-        container(bar)
-            .padding(Padding { top: BAR_H - TAB_H, bottom: 0.0, left: 6.0, right: 6.0 })
-            .height(Length::Fixed(BAR_H))
-            .width(Length::Fill)
-            .style(move |_| container::background(bar_bg))
-            .into()
-    }
-
-    fn subscription(&self) -> Subscription<Message> {
-        let mut subs: Vec<Subscription<Message>> = self.terms.keys().map(|id| Subscription::run_with(*id, output)).collect();
-        subs.push(iced::event::listen_with(event));
-        subs.push(Subscription::run(watch_look));
-        Subscription::batch(subs)
-    }
-}
-
-/// A pane on screen: the terminal, whether it has the keyboard, and the
-/// modifier keys held. Mouse: left drag selects (a click clears), right opens
-/// the menu, unless the program asked for the mouse (then it gets the events;
-/// Shift still selects and opens the menu).
-struct View<'a> {
-    term: &'a Term,
-    focused: bool,
-    mods: keyboard::Modifiers,
-}
-
-/// A pane's mouse state between events.
-#[derive(Default)]
-struct Pointer {
-    /// The selection's anchor while the left button is held.
-    anchor: Option<CellPos>,
-    /// The button whose press went to the program, until its release.
-    held: Option<MouseButton>,
-    /// The cell of the last report (motion is reported per cell).
-    last: Option<CellPos>,
-    /// Wheel movement not yet a whole step (touchpads scroll in pixels).
-    wheel: f32,
-    /// The scrollbar's thumb is being dragged: where in it it was grabbed.
-    thumb: Option<f32>,
-    /// A selection is being dragged past the pane's edge: when the view last scrolled.
-    edge_tick: Option<Instant>,
-}
-
-/// While a selection is held past the pane's edge, the view scrolls this often.
-const EDGE_TICK: Duration = Duration::from_millis(50);
-
-fn button_of(b: mouse::Button) -> Option<MouseButton> {
-    match b {
-        mouse::Button::Left => Some(MouseButton::Left),
-        mouse::Button::Middle => Some(MouseButton::Middle),
-        mouse::Button::Right => Some(MouseButton::Right),
-        _ => None,
-    }
-}
-
-impl View<'_> {
-    /// The program has the mouse (Shift takes it back for selecting).
-    fn reporting(&self) -> bool {
-        self.term.grid.mouse != MouseMode::Off && !self.mods.shift()
-    }
-
-    fn report(&self, action: MouseAction, cell: CellPos) -> Option<Vec<u8>> {
-        let g = &self.term.grid;
-        term::mouse_bytes(g.mouse, g.mouse_sgr, action, cell, self.mods)
-    }
-
-    /// The point under the pointer in the pane; past the pane's edge, the nearest one.
-    fn point_clamped(bounds: Rectangle, cursor: mouse::Cursor) -> Point {
-        cursor.position_in(bounds).unwrap_or_else(|| {
-            let c = cursor.position().unwrap_or(bounds.position());
-            Point::new((c.x - bounds.x).clamp(0.0, bounds.width), (c.y - bounds.y).clamp(0.0, bounds.height))
-        })
-    }
-
-    /// The screen cell under the pointer (mouse reporting).
-    fn cell_clamped(&self, bounds: Rectangle, cursor: mouse::Cursor) -> CellPos {
-        let p = Self::point_clamped(bounds, cursor);
-        self.term.cell_at(p.x, p.y)
-    }
-
-    /// The cell under the pointer as the selection counts it (absolute rows).
-    fn text_cell_clamped(&self, bounds: Rectangle, cursor: mouse::Cursor) -> CellPos {
-        let p = Self::point_clamped(bounds, cursor);
-        self.term.text_cell_at(p.x, p.y)
-    }
-}
-
-impl Program<Message> for View<'_> {
-    type State = Pointer;
-
-    fn update(&self, state: &mut Self::State, event: &Event, bounds: Rectangle, cursor: mouse::Cursor) -> Option<canvas::Action<Message>> {
-        let at = cursor.position_in(bounds);
-        let id = self.term.id;
-        let send = |bytes: Option<Vec<u8>>| Some(match bytes {
-            Some(b) => canvas::Action::publish(Message::Mouse(id, b)).and_capture(),
-            None => canvas::Action::capture(),
-        });
-        match event {
-            // The scrollbar: a press on the thumb grabs it; elsewhere on the track the thumb jumps there.
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
-                if let Some(p) = at
-                    && p.x >= bounds.width - term::SCROLLBAR_GRAB
-                    && let Some((_, thumb)) = self.term.scrollbar(bounds.size()) =>
-            {
-                let grab = if (thumb.y..thumb.y + thumb.height).contains(&p.y) { p.y - thumb.y } else { thumb.height / 2.0 };
-                state.thumb = Some(grab);
-                let to = self.term.scroll_for_thumb(bounds.size(), p.y - grab)?;
-                Some(canvas::Action::publish(Message::ScrollTo(id, to)).and_capture())
-            }
-            Event::Mouse(mouse::Event::CursorMoved { .. }) if let Some(grab) = state.thumb => {
-                let y = cursor.position().map(|c| c.y - bounds.y)?;
-                let to = self.term.scroll_for_thumb(bounds.size(), y - grab)?;
-                (to != self.term.scroll).then(|| canvas::Action::publish(Message::ScrollTo(id, to)).and_capture())
-            }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if state.thumb.is_some() => {
-                state.thumb = None;
-                Some(canvas::Action::capture())
-            }
-            // A selection held past the top or bottom edge: scroll every EDGE_TICK,
-            // faster the further out the pointer is.
-            Event::Window(iced::window::Event::RedrawRequested(now)) if state.anchor.is_some() && state.edge_tick.is_some() => {
-                let c = cursor.position()?;
-                let (above, below) = (bounds.y - c.y, c.y - (bounds.y + bounds.height));
-                let speed = |d: f32| 1 + ((d / self.term.cell.height) as isize).min(9);
-                let lines = if above > 0.0 {
-                    speed(above)
-                } else if below > 0.0 {
-                    -speed(below)
-                } else {
-                    state.edge_tick = None;
-                    return None;
-                };
-                let last = state.edge_tick?;
-                if now.duration_since(last) < EDGE_TICK {
-                    return Some(canvas::Action::request_redraw_at(last + EDGE_TICK));
-                }
-                state.edge_tick = Some(*now);
-                let col = self.term.cell_at((c.x - bounds.x).clamp(0.0, bounds.width), PAD).0;
-                // (Publishing redraws, so the next tick comes on the next RedrawRequested.)
-                Some(canvas::Action::publish(Message::DragScroll(id, lines, col)))
-            }
-            Event::Mouse(mouse::Event::ButtonPressed(b)) if self.reporting() && state.held.is_none() => {
-                let p = at?;
-                let btn = button_of(*b)?;
-                let cell = self.term.cell_at(p.x, p.y);
-                state.held = Some(btn);
-                state.last = Some(cell);
-                send(self.report(MouseAction::Press(btn), cell))
-            }
-            Event::Mouse(mouse::Event::ButtonReleased(b)) if state.held.is_some() && state.held == button_of(*b) => {
-                let btn = state.held.take()?;
-                let cell = self.cell_clamped(bounds, cursor);
-                state.last = Some(cell);
-                send(self.report(MouseAction::Release(btn), cell))
-            }
-            Event::Mouse(mouse::Event::CursorMoved { .. }) if state.anchor.is_none() && (state.held.is_some() || (self.reporting() && at.is_some())) => {
-                let cell = self.cell_clamped(bounds, cursor);
-                if state.last == Some(cell) {
-                    return None;
-                }
-                state.last = Some(cell);
-                self.report(MouseAction::Motion(state.held), cell).map(|b| canvas::Action::publish(Message::Mouse(id, b)).and_capture())
-            }
-            Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
-                let p = at?;
-                // One step per notch (no smooth scrolling); pixels add up to a cell's height.
-                state.wheel += match delta {
-                    mouse::ScrollDelta::Lines { y, .. } => *y,
-                    mouse::ScrollDelta::Pixels { y, .. } => *y / self.term.cell.height,
-                };
-                let steps = state.wheel.trunc();
-                state.wheel -= steps;
-                if steps == 0.0 {
-                    return None;
-                }
-                let (up, n) = (steps > 0.0, steps.abs() as usize);
-                if self.reporting() {
-                    let cell = self.term.cell_at(p.x, p.y);
-                    let one = self.report(if up { MouseAction::WheelUp } else { MouseAction::WheelDown }, cell)?;
-                    return send(Some(one.repeat(n)));
-                }
-                if self.term.grid.alt {
-                    return send(Some(term::wheel_keys(up, self.term.grid.app_cursor, 3 * n)));
-                }
-                // The shell's screen: the view scrolls through the scrollback, 3 lines a notch.
-                let lines = 3 * n as isize;
-                Some(canvas::Action::publish(Message::Scroll(id, if up { lines } else { -lines })).and_capture())
-            }
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                let p = at?;
-                let cell = self.term.text_cell_at(p.x, p.y);
-                state.anchor = Some(cell);
-                Some(canvas::Action::publish(Message::Select(id, None)).and_capture())
-            }
-            Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                let anchor = state.anchor?;
-                // Past the top or bottom edge: the view starts scrolling (RedrawRequested above).
-                let outside = cursor.position().is_some_and(|c| c.y < bounds.y || c.y > bounds.y + bounds.height);
-                if outside && state.edge_tick.is_none() {
-                    state.edge_tick = Some(Instant::now() - EDGE_TICK);
-                } else if !outside {
-                    state.edge_tick = None;
-                }
-                let cell = self.text_cell_clamped(bounds, cursor);
-                Some(canvas::Action::publish(Message::Select(id, Some((anchor, cell)))).and_capture())
-            }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                state.edge_tick = None;
-                state.anchor.take()?;
-                Some(canvas::Action::capture())
-            }
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
-                at?;
-                let p = cursor.position()?;
-                Some(canvas::Action::publish(Message::Menu(id, p)).and_capture())
-            }
-            _ => None,
+        let t = text.filter(|t| !t.is_empty())?;
+        let mut out = Vec::new();
+        if m.alt {
+            out.push(0x1b);
         }
-    }
-
-    fn draw(&self, _state: &Self::State, renderer: &Renderer, _theme: &Theme, bounds: Rectangle, _cursor: mouse::Cursor) -> Vec<Geometry> {
-        self.term.draw(renderer, bounds, self.focused)
-    }
-
-    fn mouse_interaction(&self, _state: &Self::State, bounds: Rectangle, cursor: mouse::Cursor) -> mouse::Interaction {
-        // An arrow while the program has the mouse, as in xterm; else the text beam.
-        let on_bar = cursor.position_in(bounds).is_some_and(|p| p.x >= bounds.width - term::SCROLLBAR_GRAB) && self.term.scrollbar(bounds.size()).is_some();
-        if !cursor.is_over(bounds) || self.reporting() || on_bar { mouse::Interaction::default() } else { mouse::Interaction::Text }
+        out.extend_from_slice(t.as_bytes());
+        Some(out)
     }
 }
 
-/// The bar's icons, drawn as lines (font glyphs for these differ in size and
-/// height from font to font, so they never lined up).
-#[derive(Debug, Clone, Copy)]
-enum Glyph {
-    Minimize,
-    Maximize,
-    Close,
-    Plus,
+/// The scene's number for a face, given once in a frame.
+fn font_number(scene: &mut Scene, fonts: &Fonts, numbers: &mut HashMap<FaceId, u32>, face: FaceId) -> u32 {
+    *numbers.entry(face).or_insert_with(|| {
+        let n = fonts.name(face);
+        scene.font(&n.family, n.weight, n.italic)
+    })
 }
 
-struct Icon {
-    glyph: Glyph,
-    color: Color,
+/// How a pane is drawn.
+struct PaneLook<'a> {
+    palette: &'a Palette,
+    metrics: &'a Metrics,
     size: f32,
+    /// The keys go to this pane, and the window has the keyboard.
+    keyboard: bool,
+    /// The scrollbar's thumb is held.
+    thumb_held: bool,
 }
 
-impl Program<Message> for Icon {
-    type State = ();
-
-    fn draw(&self, _state: &(), renderer: &Renderer, _theme: &Theme, bounds: Rectangle, _cursor: mouse::Cursor) -> Vec<Geometry> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let s = self.size;
-        let (x, y) = ((bounds.width - s) / 2.0, (bounds.height - s) / 2.0);
-        let stroke = canvas::Stroke::default().with_color(self.color).with_width(1.25).with_line_cap(canvas::LineCap::Round);
-        let line = |frame: &mut canvas::Frame, a: (f32, f32), b: (f32, f32)| frame.stroke(&canvas::Path::line(Point::new(x + a.0, y + a.1), Point::new(x + b.0, y + b.1)), stroke);
-        match self.glyph {
-            // On the box's bottom edge, as GNOME and Windows draw it.
-            Glyph::Minimize => line(&mut frame, (0.0, s), (s, s)),
-            Glyph::Maximize => frame.stroke(&canvas::Path::rectangle(Point::new(x, y), Size::new(s, s)), stroke),
-            Glyph::Close => {
-                line(&mut frame, (0.0, 0.0), (s, s));
-                line(&mut frame, (s, 0.0), (0.0, s));
+/// Draws one terminal in its room.
+fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId, u32>, s: &Screen, area: Rect, look: &PaneLook) {
+    let (p, mt, size) = (look.palette, look.metrics, look.size);
+    let (cw, ch) = (mt.cell_w, mt.cell_h);
+    let (left, first) = (area.x + PAD, area.y + PAD);
+    let (selection, top_line) = (s.selection, s.top_line());
+    // The font and glyph of each plain character, regular and bold, found once
+    // a frame: a screen of text asks for the same hundred some thousands of times.
+    let mut plain: [[Option<(u32, u32)>; 128]; 2] = [[None; 128]; 2];
+    scene.push_clip(area, 0.0);
+    // The screen is one grid of cells ([`vergence_scene::Command::Cells`]): each
+    // cell its ground (none where it is the terminal's own), its ink, its glyph.
+    let columns = s.grid.cols;
+    let mut cells: Vec<SceneCell> = Vec::with_capacity(columns * s.grid.rows);
+    // Combining marks are few, and drawn over the grid as glyph runs of their own.
+    let mut marks: Vec<(u32, Color, Point, Glyph)> = Vec::new();
+    for r in 0..s.grid.rows {
+        let line = s.shown(r);
+        let top = first + r as f32 * ch;
+        for (col, cell) in line.iter().take(columns).enumerate() {
+            let st = cell.style;
+            let (mut ink, mut ground) = (p.resolve(st.fg, p.fg, st.bold), p.resolve(st.bg, p.bg, false));
+            if st.inverse {
+                // The text takes the ground's colour as it is, not its bright form.
+                (ink, ground) = (ground, ink);
             }
-            Glyph::Plus => {
-                line(&mut frame, (s / 2.0, 0.0), (s / 2.0, s));
-                line(&mut frame, (0.0, s / 2.0), (s, s / 2.0));
+            if st.dim {
+                ink.a = 153;
+            }
+            let mut out = SceneCell { ground: if ground == p.bg { Color::rgba(0, 0, 0, 0) } else { ground }, ink, glyph: 0, font: 0, flags: if st.underline { CELL_UNDERLINE } else { 0 } };
+            if cell.width != 0 && cell.c != ' ' {
+                let own = if st.bold { mt.bold } else { mt.regular };
+                let (font, glyph) = match plain[st.bold as usize].get_mut(cell.c as usize) {
+                    Some(Some(known)) => *known,
+                    slot => {
+                        let (face, glyph) = fonts.glyph(own, cell.c);
+                        let found = (font_number(scene, fonts, numbers, face), glyph);
+                        if let Some(slot) = slot {
+                            *slot = Some(found);
+                        }
+                        found
+                    }
+                };
+                (out.glyph, out.font, out.flags) = (glyph, font as u16, out.flags | CELL_GLYPH);
+                // Fonts make marks one of two ways: with no advance, drawn back over
+                // what came before the pen (so the pen goes after the character), or as
+                // wide as a cell, drawn in place (so it goes where the character's did).
+                for mark in cell.marks.into_iter().filter(|m| *m != '\0') {
+                    let (face, glyph) = fonts.glyph(own, mark);
+                    let font = font_number(scene, fonts, numbers, face);
+                    let after = fonts.advance(face, glyph, size) < cw * 0.5;
+                    marks.push((font, ink, Point::new(left, top + mt.baseline), Glyph { id: glyph, x: (col + if after { cell.width.max(1) as usize } else { 0 }) as f32 * cw, y: 0.0 }));
+                }
+            }
+            cells.push(out);
+        }
+        // A line shorter than the screen is wide (kept from a narrower one) ends in nothing.
+        cells.resize((r + 1) * columns, SceneCell::default());
+    }
+    scene.cells(Point::new(left, first), cw, ch, mt.baseline, size, columns as u32, cells);
+    for (font, ink, origin, glyph) in marks {
+        scene.glyphs(font, size, ink, origin, vec![glyph]);
+    }
+    // What is selected, tinted over its text.
+    for r in 0..s.grid.rows {
+        if let Some((a, b)) = selection.and_then(|sel| sel.span(top_line + r, s.grid.cols)) {
+            scene.fill(Rect::new(left + a as f32 * cw, first + r as f32 * ch, (b + 1 - a) as f32 * cw, ch), Color::rgba(p.accent.r, p.accent.g, p.accent.b, 89));
+        }
+    }
+    // The cursor: a block where the keys go, an outline elsewhere. It moves down with the
+    // screen while scrolled back, out of sight past the bottom.
+    let cursor_row = s.grid.cy + s.scroll;
+    if s.grid.cursor_visible && cursor_row < s.grid.rows {
+        let at = Rect::new(left + s.grid.cx as f32 * cw, first + cursor_row as f32 * ch, cw, ch);
+        if look.keyboard {
+            scene.fill(at, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 178));
+        } else {
+            scene.stroke(at, 0.0, 1.0, p.accent);
+        }
+    }
+    // The scrollbar: faint at the live screen, clearer while scrolled back or held.
+    if let Some(bar) = s.scrollbar(area) {
+        scene.fill_rounded(bar.track, scrollbar::RADIUS, Color::rgba(p.fg.r, p.fg.g, p.fg.b, 15));
+        let alpha = if look.thumb_held { 166 } else if s.scroll > 0 { 128 } else { 64 };
+        scene.fill_rounded(bar.thumb, scrollbar::RADIUS, Color::rgba(p.fg.r, p.fg.g, p.fg.b, alpha));
+    }
+    // Scrolled back: how far, in the top right corner (left of the scrollbar).
+    if s.scroll > 0 {
+        let label = if s.scroll == 1 { "1 line back".to_string() } else { format!("{} lines back", s.scroll) };
+        let width = label.chars().count() as f32 * cw + 16.0;
+        let at = Rect::new(area.x + area.w - width - PAD - scrollbar::GRAB, first, width, ch + 4.0);
+        scene.fill_rounded(at, bar::RADIUS, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 235));
+        let font = font_number(scene, fonts, numbers, mt.regular);
+        let glyphs = label.chars().enumerate().map(|(i, c)| Glyph { id: fonts.glyph(mt.regular, c).1, x: i as f32 * cw, y: 0.0 }).collect();
+        scene.glyphs(font, size, p.bg, Point::new(at.x + 8.0, at.y + 2.0 + mt.baseline), glyphs);
+    }
+    scene.pop_clip();
+}
+
+impl App for Terminal {
+    fn title(&self) -> String {
+        "Terminal".into()
+    }
+
+    fn app_id(&self) -> String {
+        "vergence-term".into()
+    }
+
+    fn own_frame(&self) -> bool {
+        true
+    }
+
+    fn background(&self) -> Color {
+        self.palette.bg
+    }
+
+    fn animating(&self) -> bool {
+        // A selection held past the edge scrolls the view frame after frame.
+        self.edge.is_some()
+    }
+
+    fn waker(&mut self, waker: Waker) {
+        self.waker = Some(waker.clone());
+        watch_settings(self.settings_changed.clone(), waker);
+        for _ in 0..self.open_with {
+            match self.start(self.fits.0, self.fits.1) {
+                Some((id, session)) => self.tabs.push(Tab { tree: Node::Leaf(id), panes: vec![(id, session)], active: id }),
+                None => std::process::exit(1),
             }
         }
-        vec![frame.into_geometry()]
+        // The first tab divided: side by side, then each new pane the other way.
+        for n in 1..self.open_panes {
+            self.split_active(if n % 2 == 1 { Axis::Side } else { Axis::Stack });
+        }
     }
-}
 
-/// An icon filling its button, drawn centred at `size` points.
-fn icon<'a>(glyph: Glyph, color: Color, size: f32) -> Element<'a, Message> {
-    Canvas::new(Icon { glyph, color, size }).width(Length::Fill).height(Length::Fill).into()
-}
+    fn woken(&mut self, window: &mut Window) {
+        // Asked once the window has shown a frame: a request made before the
+        // server has placed the window is lost to the place it remembers.
+        if self.open_maximized && self.last_commands > 0 {
+            self.open_maximized = false;
+            self.maximized = true;
+            window.set_maximized(true);
+        }
+        if self.settings_changed.swap(false, Ordering::SeqCst) {
+            // Colours, fonts and the buttons' side as they are now; the cell's size is
+            // worked out again at the next frame, and the grids follow it.
+            self.palette = palette();
+            self.settings = Settings::from_text(&config("settings.toml"));
+            self.metrics = None;
+            window.redraw();
+        }
+        // Each terminal's news, taken without its screen's lock; only one whose
+        // title, clipboard or program's life changed is looked into.
+        let shown = self.shown;
+        let mut ended = false;
+        for (index, tab) in self.tabs.iter_mut().enumerate() {
+            let active = tab.active;
+            for (id, session) in tab.panes.iter_mut() {
+                // "Draw" is left up: the frame that draws the terminal takes it down.
+                let news = session.news.fetch_and(!NEWS_STATE, Ordering::SeqCst);
+                // Only the tab in front is drawn: output in the others costs no frame.
+                if news & NEWS_DRAW != 0 && index == shown {
+                    window.redraw();
+                }
+                if news & NEWS_STATE == 0 {
+                    continue;
+                }
+                let mut s = lock(&session.screen);
+                ended |= s.exited;
+                if let Some(text) = s.copied.take() {
+                    window.copy(&text);
+                }
+                if s.grid.title != session.title {
+                    session.title = s.grid.title.clone();
+                    // The bar shows every tab's title (its active pane's); the window carries the front one's.
+                    window.redraw();
+                    if index == shown && *id == active {
+                        window.set_title(if session.title.is_empty() { "Terminal" } else { &session.title });
+                    }
+                }
+            }
+        }
+        // Panes whose program has ended go; a tab goes with its last pane, the window with its last tab.
+        while ended {
+            let gone = self.tabs.iter().enumerate().find_map(|(index, tab)| tab.panes.iter().find(|(_, s)| lock(&s.screen).exited).map(|(id, _)| (index, *id)));
+            let Some((index, id)) = gone else { break };
+            self.close_pane(index, id, window);
+            if self.tabs.is_empty() {
+                return;
+            }
+        }
+    }
 
-/// A flat button: no frame, an optional background.
-fn plain(_s: button::Status, bg: Option<Color>) -> button::Style {
-    button::Style { background: bg.map(Background::Color), text_color: TEXT_ACTIVE, border: Border::default(), ..button::Style::default() }
-}
+    fn input(&mut self, input: &Input, window: &mut Window) {
+        const SHIFT_L: u32 = 0xffe1;
+        const SHIFT_R: u32 = 0xffe2;
+        match input {
+            // The key itself says Shift went down or up; a button says how things stand.
+            Input::Key { sym: SHIFT_L | SHIFT_R, pressed, repeat: false, .. } => self.shift = *pressed,
+            Input::Button { modifiers, .. } => self.shift = modifiers.shift,
+            Input::Focus(false) => self.shift = false,
+            _ => {}
+        }
+        if self.menu_input(input, window) {
+            return;
+        }
+        match input {
+            // With something held, the pointer's moves are that thing's.
+            Input::PointerMoved { x, y } if self.held.is_some() => match &self.held {
+                Some(Held::Text) => self.drag_text(*x, *y, window),
+                Some(Held::Thumb(grab)) => self.drag_thumb(*y, *grab, window),
+                Some(Held::Divider(path)) => {
+                    let path = path.clone();
+                    if let Some(d) = self.areas().1.into_iter().find(|d| d.path == path)
+                        && let Some(tab) = self.tabs.get_mut(self.shown)
+                    {
+                        tab.tree.set_share(&path, d.share_at(*x, *y));
+                        window.redraw();
+                    }
+                }
+                Some(Held::Reported(button)) => {
+                    // The program hears of the drag wherever the pointer goes.
+                    let button = *button;
+                    if let Some((id, area)) = self.active() {
+                        self.report(id, area, mouse::Action::Motion(Some(button)), *x, *y, Modifiers::default());
+                    }
+                }
+                None => {}
+            },
+            Input::PointerMoved { x, y } => self.hover(*x, *y, window),
+            Input::PointerLeft => {
+                self.over = None;
+                if self.hover.take().is_some() {
+                    window.redraw();
+                }
+            }
+            Input::Button { button, pressed: false, x, y, modifiers } if self.held.is_some() => match &self.held {
+                Some(Held::Reported(told)) if told == button => {
+                    self.held = None;
+                    if let Some((id, area)) = self.active() {
+                        self.report(id, area, mouse::Action::Release(*button), *x, *y, *modifiers);
+                    }
+                }
+                Some(Held::Reported(_)) => {}
+                Some(Held::Text) if *button == Button::Left => {
+                    self.held = None;
+                    self.edge = None;
+                    // A press that selected nothing leaves nothing selected.
+                    if let Some(session) = self.front() {
+                        let mut s = lock(&session.screen);
+                        if s.selection.is_some_and(|sel| sel.range().is_none()) {
+                            s.selection = None;
+                        }
+                    }
+                    window.redraw();
+                }
+                Some(Held::Thumb(_) | Held::Divider(_)) if *button == Button::Left => {
+                    self.held = None;
+                    window.redraw();
+                }
+                _ => {}
+            },
+            // One thing is held at a time: other buttons wait for its release.
+            Input::Button { pressed: true, .. } if self.held.is_some() => {}
+            Input::Button { button, pressed: true, x, y, modifiers } => match (button, self.layout().at(*x, *y)) {
+                (_, None) if *y >= BAR_H => self.press(*button, *x, *y, *modifiers, window),
+                (Button::Left, Some(Part::Button(WinButton::Close))) => window.close(),
+                (Button::Left, Some(Part::Button(WinButton::Minimize))) => window.minimize(),
+                (Button::Left, Some(Part::Button(WinButton::Maximize))) => {
+                    self.maximized = !self.maximized;
+                    window.set_maximized(self.maximized);
+                }
+                (Button::Left, Some(Part::Tab(i))) => self.show_tab(i, window),
+                (Button::Left, Some(Part::CloseTab(i))) | (Button::Middle, Some(Part::Tab(i) | Part::CloseTab(i))) => self.close_tab(i, window),
+                (Button::Left, Some(Part::Plus)) => self.new_tab(window),
+                (Button::Left, Some(Part::Bar)) => {
+                    // Twice on the bare bar: larger or back. Once: the user moves the window.
+                    if self.bar_press.take().is_some_and(|t| t.elapsed() < DOUBLE_CLICK) {
+                        self.maximized = !self.maximized;
+                        window.set_maximized(self.maximized);
+                    } else {
+                        self.bar_press = Some(Instant::now());
+                        window.start_move();
+                    }
+                }
+                _ => {}
+            },
+            Input::Key { sym: key, text, pressed: true, composing: false, modifiers, .. } => {
+                let m = *modifiers;
+                let letter = |c: char| *key == c as u32 || *key == c.to_ascii_uppercase() as u32;
+                // The terminal's own shortcuts: with Ctrl+Shift, so the shell keeps Ctrl+T and the rest.
+                if m.ctrl && m.shift {
+                    if letter('t') {
+                        return self.new_tab(window);
+                    }
+                    if letter('w') {
+                        return self.close_active(window);
+                    }
+                    if letter('r') {
+                        return self.split(Axis::Side, window);
+                    }
+                    if letter('d') {
+                        return self.split(Axis::Stack, window);
+                    }
+                    if letter('c') {
+                        self.copy(window);
+                        return;
+                    }
+                }
+                // The next tab and the one before: Ctrl+PageDown and Ctrl+PageUp, or
+                // Ctrl+Tab and, with Shift, back (which arrives as its own key).
+                const BACK_TAB: u32 = 0xfe20;
+                let step = match *key {
+                    sym::PAGE_UP if m.ctrl && !m.shift => Some(false),
+                    sym::PAGE_DOWN if m.ctrl && !m.shift => Some(true),
+                    sym::TAB if m.ctrl && !m.alt => Some(!m.shift),
+                    BACK_TAB if m.ctrl && !m.alt => Some(false),
+                    _ => None,
+                };
+                if let Some(forward) = step {
+                    let n = self.tabs.len().max(1);
+                    return self.show_tab(if forward { (self.shown + 1) % n } else { (self.shown + n - 1) % n }, window);
+                }
+                // Ctrl+V pastes, with Shift or without (Dave, 2026-11-09). The control
+                // character it used to send (the shell's "take the next key as it is") is
+                // given up for it.
+                if m.ctrl && !m.alt && letter('v') {
+                    return window.paste();
+                }
+                // Ctrl+C copies when there is something selected, and lets it go, so that
+                // the next Ctrl+C is the interrupt key again; with nothing selected it
+                // always is.
+                if m.ctrl && !m.alt && !m.shift && letter('c') && self.copy(window) {
+                    if let Some(session) = self.front() {
+                        lock(&session.screen).selection = None;
+                    }
+                    return window.redraw();
+                }
+                let Some(session) = self.front_mut() else { return };
+                let mut s = lock(&session.screen);
+                // The scrollback: with Shift, PageUp and PageDown a page, Home and End
+                // its two ends. On the alternate screen there is none, and the keys
+                // are the program's.
+                if m.shift && !m.ctrl && !m.alt && !s.grid.alt && matches!(*key, sym::PAGE_UP | sym::PAGE_DOWN | sym::HOME | sym::END) {
+                    let page = s.grid.rows.saturating_sub(1).max(1) as isize;
+                    s.scroll_by(match *key {
+                        sym::PAGE_UP => page,
+                        sym::PAGE_DOWN => -page,
+                        sym::HOME => isize::MAX,
+                        _ => isize::MIN,
+                    });
+                } else if let Some(bytes) = Terminal::key_bytes(*key, text.as_deref(), m, s.grid.app_cursor) {
+                    // Typing goes to the live screen, and what was selected is let go.
+                    s.scroll = 0;
+                    s.selection = None;
+                    drop(s);
+                    session.pty.write(&bytes);
+                }
+                window.redraw();
+            }
+            Input::Paste(text) => {
+                let Some(session) = self.front_mut() else { return };
+                let bracketed = lock(&session.screen).grid.bracketed_paste;
+                // A pasted line end is the Return key; and the paste cannot end its own brackets.
+                let text = text.replace("\r\n", "\r").replace('\n', "\r").replace("\x1b[201~", "");
+                let bytes = if bracketed { format!("\x1b[200~{text}\x1b[201~") } else { text };
+                session.pty.write(bytes.as_bytes());
+            }
+            Input::Scroll { x, y, dy, .. } => {
+                // The wheel is the pane's under the pointer, whichever has the keys.
+                let Some((id, area)) = self.pane_at(*x, *y).filter(|_| *y >= BAR_H) else { return };
+                let notches = (dy / 15.0).round() as isize;
+                // A program with the mouse gets the wheel, a report for each notch.
+                if !self.shift && notches != 0 {
+                    let action = if notches < 0 { mouse::Action::WheelUp } else { mouse::Action::WheelDown };
+                    if self.report(id, area, action, *x, *y, Modifiers::default()) {
+                        for _ in 1..notches.unsigned_abs().min(20) {
+                            self.report(id, area, action, *x, *y, Modifiers::default());
+                        }
+                        return;
+                    }
+                }
+                let Some(session) = self.session_mut(id) else { return };
+                let mut s = lock(&session.screen);
+                if s.grid.alt {
+                    // A full-screen program has no scrollback: the wheel is its arrow keys.
+                    let key = if s.grid.app_cursor { "\x1bO" } else { "\x1b[" }.to_string() + if notches < 0 { "A" } else { "B" };
+                    drop(s);
+                    session.pty.write(key.repeat((notches.unsigned_abs() * WHEEL_LINES as usize).min(60)).as_bytes());
+                } else {
+                    s.scroll_by(-notches * WHEEL_LINES);
+                    window.redraw();
+                }
+            }
+            Input::Focus(on) => {
+                self.focused = *on;
+                window.redraw();
+            }
+            _ => {}
+        }
+    }
 
-/// The fill of a tab that isn't the one shown: a little lighter than the bar,
-/// whichever colour the bar has, so every tab has a shape; lighter under the
-/// pointer (Dave, 2026-11-09: tabs without a shape were confusing).
-fn idle_tab(s: button::Status) -> Color {
-    Color { a: if s == button::Status::Hovered { 0.16 } else { 0.08 }, ..Color::WHITE }
-}
-
-/// A tab's outline: round at the top, square where it meets the terminal.
-fn tab_shape(mut s: button::Style) -> button::Style {
-    s.border = Border { radius: iced::border::Radius { top_left: 7.0, top_right: 7.0, bottom_left: 0.0, bottom_right: 0.0 }, ..Border::default() };
-    s
-}
-
-fn rounded(mut s: button::Style) -> button::Style {
-    s.border = Border { radius: 5.0.into(), ..Border::default() };
-    s
-}
-
-/// A terminal's shell output as messages, read on a thread of its own.
-fn output(id: &u64) -> impl iced::futures::Stream<Item = Message> + use<> {
-    let id = *id;
-    iced::stream::channel(64, move |tx: iced::futures::channel::mpsc::Sender<Message>| async move {
-        let reader = readers().remove(&id);
-        if let Some(r) = reader {
-            std::thread::spawn(move || {
-                use iced::futures::SinkExt;
-                let mut tx2 = tx.clone();
-                pty::read_loop(r, |bytes| iced::futures::executor::block_on(tx2.send(Message::Output(id, bytes))).is_ok());
-                let mut tx3 = tx;
-                let _ = iced::futures::executor::block_on(tx3.send(Message::Exited(id)));
+    fn scene(&mut self, frame: &Frame, fonts: &mut Fonts) -> Scene {
+        (self.width, self.height) = (frame.width, frame.height);
+        // For measuring (VTERM_FRAMES=1): the count of frames every thirtieth, and
+        // for a tab that was asked for, how many frames and how long it took to be drawn.
+        if self.measuring {
+            if frame.number % 30 == 0 {
+                eprintln!("frame {}", frame.number);
+            }
+            if let Some((tab, after, when)) = self.asked.take() {
+                eprintln!("tab {tab} asked after frame {after}, drawn in frame {}, {:.1} ms later", frame.number, when.elapsed().as_secs_f64() * 1000.0);
+            }
+            self.frame_now = frame.number;
+        }
+        let mut scene = Scene::new(frame.width, frame.height);
+        // Room for as much as the last frame held, so the list is not grown step by step.
+        scene.commands.reserve(self.last_commands);
+        scene.fill(Rect::new(0.0, 0.0, frame.width, frame.height), self.palette.bg);
+        let size = self.settings.mono_size;
+        if self.metrics.is_none() {
+            // The settings' fonts, or the machine's own if it does not have them.
+            let mono = &self.settings.mono_family;
+            self.metrics = fonts.face(mono, 400, false).or_else(|| fonts.face("monospace", 400, false)).map(|regular| {
+                let bold = fonts.face(mono, 700, false).or_else(|| fonts.face("monospace", 700, false)).unwrap_or(regular);
+                let ui = fonts.face(&self.settings.ui_family, 400, false).or_else(|| fonts.face("sans-serif", 400, false));
+                let m = fonts.metrics(regular, size);
+                let (face, glyph) = fonts.glyph(regular, 'M');
+                Metrics { regular, bold, ui, cell_w: fonts.advance(face, glyph, size), cell_h: (m.ascent + m.descent + m.line_gap).ceil(), baseline: m.ascent.round() }
             });
         }
-        std::future::pending::<()>().await;
-    })
-}
-
-/// The desktop's look as messages, from a thread that watches its files.
-fn watch_look() -> impl iced::futures::Stream<Item = Message> {
-    iced::stream::channel(4, |tx: iced::futures::channel::mpsc::Sender<Message>| async move {
-        std::thread::spawn(move || {
-            use iced::futures::SinkExt;
-            let mut tx = tx;
-            look::watch(look::Look::load(), |l| iced::futures::executor::block_on(tx.send(Message::Look(l))).is_ok());
-        });
-        std::future::pending::<()>().await;
-    })
-}
-
-fn event(e: Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<Message> {
-    match e {
-        Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, text, .. }) => Some(Message::Key(key, modifiers, text.map(|t| t.to_string()))),
-        Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => Some(Message::Modifiers(m)),
-        Event::Window(iced::window::Event::Resized(size)) => Some(Message::Resized(size)),
-        Event::Window(iced::window::Event::Focused) => Some(Message::Focused(true)),
-        Event::Window(iced::window::Event::Unfocused) => Some(Message::Focused(false)),
-        _ => None,
-    }
-}
-
-/// Shortens a tab title to fit `width` points, ending it in an ellipsis.
-/// iced 0.14 has no ellipsis, so widths are estimated per character (Noto
-/// Sans averages about 0.55 em; narrow letters count less, wide ones more).
-/// The tab also clips its text, so a low estimate never draws past the tab.
-fn fit_label(label: &str, width: f32, size: f32) -> String {
-    let w = |c: char| char_width(c, size);
-    if text_width(label, size) <= width {
-        return label.to_string();
-    }
-    let room = width - w('…');
-    let mut used = 0.0;
-    let mut out = String::new();
-    for c in label.chars() {
-        used += w(c);
-        if used > room {
-            break;
+        let (panes, dividers) = self.areas();
+        // A selection held past the top or bottom edge: the view moves a line at a time and
+        // the selection's end goes with the edge row.
+        let scroll_edge = self.edge.filter(|_| self.edge_tick.elapsed() >= EDGE_TICK);
+        if scroll_edge.is_some() {
+            self.edge_tick = Instant::now();
         }
-        out.push(c);
+        let p = &self.palette;
+        let Some(mt) = &self.metrics else { return scene };
+        let (cw, ch) = (mt.cell_w, mt.cell_h);
+        // The grid that fits a room: the whole of it for a new tab, a pane's for its terminal.
+        let fit = |w: f32, h: f32| ((((w - 2.0 * PAD) / cw).floor().max(2.0) as usize).min(2000), (((h - 2.0 * PAD) / ch).floor().max(1.0) as usize).min(1000));
+        self.fits = fit(frame.width, frame.height - BAR_H);
+        // The tabs behind are fitted as well, whenever the window's or the cells'
+        // size changes: a program in a tab nobody is looking at is told its real
+        // size all the same (it was left at the size it started with until shown).
+        let fitted = (frame.width, frame.height, cw, ch);
+        if self.fitted != fitted {
+            self.fitted = fitted;
+            let room = self.room();
+            for (_, tab) in self.tabs.iter().enumerate().filter(|(index, _)| *index != self.shown) {
+                for (id, area) in tab.tree.layout(room).0 {
+                    if let Some(session) = tab.session(id) {
+                        let (cols, rows) = fit(area.w, area.h);
+                        session.fit(&mut lock(&session.screen), cols, rows);
+                    }
+                }
+            }
+        }
+
+        let titles: Vec<String> = self.tabs.iter().map(Tab::label).collect();
+        let layout = Layout::new(frame.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right);
+        bar::draw(&mut scene, fonts, &layout, &bar::Look { focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, shown: self.shown, hover: self.hover });
+
+        let Some(tab) = self.tabs.get(self.shown) else { return scene };
+        // Scene font numbers for the faces used in this frame.
+        let mut numbers: HashMap<FaceId, u32> = HashMap::new();
+        for (id, area) in &panes {
+            let Some(session) = tab.session(*id) else { continue };
+            let active = *id == tab.active;
+            // What is drawn now is drawn: output after this asks for a frame again.
+            session.news.fetch_and(!NEWS_DRAW, Ordering::SeqCst);
+            let mut guard = lock(&session.screen);
+            let s = &mut *guard;
+            // The terminal's grid follows its room, and its program is told.
+            let (cols, rows) = fit(area.w, area.h);
+            session.fit(s, cols, rows);
+            if active && let Some((up, col)) = scroll_edge {
+                s.scroll_by(if up { 1 } else { -1 });
+                let row = s.top_line() + if up { 0 } else { s.grid.rows - 1 };
+                s.drag_selection((col, row));
+            }
+            let look = PaneLook { palette: p, metrics: mt, size, keyboard: active && self.focused, thumb_held: active && matches!(self.held, Some(Held::Thumb(_))) };
+            draw_pane(&mut scene, fonts, &mut numbers, s, *area, &look);
+        }
+        // The lines between panes; the one held, in the accent.
+        for d in &dividers {
+            let held = matches!(&self.held, Some(Held::Divider(path)) if *path == d.path);
+            scene.fill(d.line, if held { p.accent } else { Color::rgba(p.fg.r, p.fg.g, p.fg.b, 56) });
+        }
+        if let Some(menu) = &self.menu {
+            menu.draw(&mut scene, fonts, mt.ui, self.settings.ui_size, p.accent, self.menu_hover);
+        }
+        self.last_commands = scene.commands.len();
+        scene
     }
-    format!("{}…", out.trim_end())
 }
 
-fn text_width(s: &str, size: f32) -> f32 {
-    s.chars().map(|c| char_width(c, size)).sum()
-}
-
-fn char_width(c: char, size: f32) -> f32 {
-    {
-        let em = match c {
-            'i' | 'l' | 'j' | 't' | 'f' | 'r' | 'I' | '.' | ',' | ':' | ';' | '\'' | '|' | '!' | ' ' => 0.30,
-            'm' | 'w' | 'M' | 'W' | '@' => 0.85,
-            c if c.is_uppercase() || c.is_ascii_digit() => 0.62,
-            c if c.is_ascii() => 0.53,
-            _ => 1.0,
-        };
-        em * size
-    }
-}
-
-/// 80 x 24 cells, plus the padding and the title bar.
-fn initial_size(look: &look::Look) -> Size {
-    let cell = term::cell_for(look);
-    Size::new(80.0 * cell.width + 2.0 * PAD, 24.0 * cell.height + 2.0 * PAD + BAR_H)
-}
-
-fn main() -> iced::Result {
+fn main() {
     if std::env::args().any(|a| a == "--version" || a == "-V") {
         println!("vergence-term {}", env!("CARGO_PKG_VERSION"));
-        return Ok(());
+        return;
     }
-    // Software drawing (iced's tiny-skia renderer) unless told otherwise: on
-    // Hubble (Intel UHD 630, FreeBSD 15.1) the GPU renderer hung the GPU again
-    // and again ("GPU HANG ... in vergence-term"), and each reset froze the whole
-    // desktop (2026-11-08). Vulkan doesn't present on vergence-server yet either.
-    // A terminal is text: the CPU draws it easily. ICED_BACKEND=wgpu to try the GPU.
-    if std::env::var_os("ICED_BACKEND").is_none() {
-        unsafe { std::env::set_var("ICED_BACKEND", "tiny-skia") };
+    let mut terminal = Terminal::new();
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(n) = args.iter().position(|a| a == "--tabs").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<usize>().ok()) {
+        terminal.open_with = n.clamp(1, 64);
     }
-    if std::env::var_os("WGPU_BACKEND").is_none() {
-        unsafe { std::env::set_var("WGPU_BACKEND", "gl") };
+    if let Some(n) = args.iter().position(|a| a == "--panes").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<usize>().ok()) {
+        terminal.open_panes = n.clamp(1, 16);
     }
-    // (No app_id: iced sets it on Linux only; the server names windows without
-    // one by their program, vergence-term.)
-    iced::application(App::new, App::update, App::view)
-        .title(App::title)
-        .subscription(App::subscription)
-        .window(iced::window::Settings { size: initial_size(&look::Look::load()), decorations: false, ..Default::default() })
-        .theme(|_: &App| Theme::CatppuccinMocha)
-        // No multisampling: with it on (iced's default here), the GPU renderer
-        // on Hubble (GLES through Mesa, 2026-11-09) drew none of the bar's icons
-        // (every small canvas), only the terminal's own. The software renderer
-        // smooths its edges either way.
-        .antialiasing(false)
-        .run()
+    terminal.open_maximized = args.iter().any(|a| a == "--maximized");
+    if let Err(e) = vergence_ui::run(&mut terminal, (820, 520)) {
+        eprintln!("vergence-term: {e}");
+        std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NONE: Modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false };
+
+    #[test]
+    fn colours_follow_the_desktop() {
+        let same = |a: &Palette, b: &Palette| (a.bg, a.fg, a.accent, a.ansi) == (b.bg, b.fg, b.accent, b.ansi);
+        assert!(same(&palette_from(""), &CATPPUCCIN));
+        assert!(same(&palette_from("[terminal]\nscheme = \"Tango\"\n"), &TANGO));
+        assert!(same(&palette_from("[appearance]\ncolor-scheme = \"light\"\n"), &LATTE));
+        assert!(same(&palette_from("[appearance]\ncolor-scheme = \"default\"\n"), &CATPPUCCIN));
+        assert!(same(&palette_from("[appearance]\ncolor-scheme = \"light\"\n[terminal]\nscheme = \"tango\"\n"), &TANGO_LIGHT));
+        // A key of the same name in another section is not ours.
+        assert!(same(&palette_from("[wallpaper]\nscheme = \"tango\"\ncontrast = \"high\"\n"), &CATPPUCCIN));
+        // High contrast: the text on black or white; the 16 colours stay.
+        let p = palette_from("[appearance]\ncontrast = \"high\"\naccent = \"#ff8800\"\n");
+        assert_eq!((p.bg, p.fg, p.accent), (Color::rgb(0, 0, 0), Color::rgb(255, 255, 255), Color::rgb(0xff, 0x88, 0)));
+        assert_eq!(p.ansi, CATPPUCCIN.ansi);
+        let p = palette_from("[appearance]\ncolor-scheme = \"light\"\ncontrast = \"high\"\n");
+        assert_eq!((p.bg, p.fg), (Color::rgb(255, 255, 255), Color::rgb(0, 0, 0)));
+        // A broken accent is no accent.
+        for bad in ["blue", "#12345", "#+12345", "#gggggg", ""] {
+            assert_eq!(palette_from(&format!("[appearance]\naccent = \"{bad}\"\n")).accent, CATPPUCCIN.accent, "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_scrollback_keys_reach_its_ends() {
+        let mut s = Screen { grid: Grid::new(10, 4), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None, selection: None };
+        for i in 0..10 {
+            let line = format!("line {i}\r\n");
+            s.parser.advance(&mut s.grid, line.as_bytes());
+        }
+        assert!(s.grid.scrollback.len() > 3);
+        s.scroll_by(2);
+        s.scroll_by(isize::MAX);
+        assert_eq!(s.scroll, s.grid.scrollback.len());
+        s.scroll_by(isize::MIN);
+        assert_eq!(s.scroll, 0);
+    }
+
+    #[test]
+    fn keys_send_what_xterm_sends() {
+        let k = |s: u32, t: Option<&str>, m: Modifiers| Terminal::key_bytes(s, t, m, false);
+        let ctrl = Modifiers { ctrl: true, ..NONE };
+        let alt = Modifiers { alt: true, ..NONE };
+        assert_eq!(k('a' as u32, Some("a"), NONE), Some(b"a".to_vec()));
+        assert_eq!(k(0xe9, Some("é"), NONE), Some("é".as_bytes().to_vec()));
+        assert_eq!(k(sym::RETURN, None, NONE), Some(b"\r".to_vec()));
+        assert_eq!(k(sym::BACKSPACE, None, NONE), Some(vec![0x7f]));
+        assert_eq!(k(sym::BACKSPACE, None, ctrl), Some(vec![0x08]));
+        assert_eq!(k(sym::TAB, None, Modifiers { shift: true, ..NONE }), Some(b"\x1b[Z".to_vec()));
+        assert_eq!(k(sym::UP, None, NONE), Some(b"\x1b[A".to_vec()));
+        assert_eq!(Terminal::key_bytes(sym::UP, None, NONE, true), Some(b"\x1bOA".to_vec()), "application cursor keys");
+        assert_eq!(k(sym::PAGE_DOWN, None, NONE), Some(b"\x1b[6~".to_vec()));
+        assert_eq!(k(sym::DELETE, None, NONE), Some(b"\x1b[3~".to_vec()));
+        assert_eq!(k(0xffbe, None, NONE), Some(b"\x1bOP".to_vec()), "F1");
+        assert_eq!(k(0xffc1, None, NONE), Some(b"\x1bOS".to_vec()), "F4");
+        assert_eq!(k(0xffc2, None, NONE), Some(b"\x1b[15~".to_vec()), "F5");
+        assert_eq!(k(0xffc9, None, NONE), Some(b"\x1b[24~".to_vec()), "F12");
+        assert_eq!(k('c' as u32, None, ctrl), Some(vec![3]));
+        assert_eq!(k('C' as u32, None, Modifiers { shift: true, ..ctrl }), Some(vec![3]));
+        assert_eq!(k('[' as u32, None, ctrl), Some(vec![0x1b]));
+        assert_eq!(k(0x20, Some(" "), ctrl), Some(vec![0]));
+        assert_eq!(k('x' as u32, Some("x"), alt), Some(b"\x1bx".to_vec()));
+        assert_eq!(k('d' as u32, None, Modifiers { ctrl: true, alt: true, ..NONE }), Some(vec![0x1b, 4]));
+        // A modifier by itself, or a key that types nothing, sends nothing.
+        assert_eq!(k(0xffe1, None, NONE), None);
+        assert_eq!(k(0xffeb, None, NONE), None);
+    }
+
+    #[test]
+    fn colours_come_from_the_palette_or_the_cube() {
+        let p = TANGO;
+        assert_eq!(p.resolve(CellColor::Default, p.fg, false), p.fg);
+        assert_eq!(p.resolve(CellColor::Indexed(1), p.fg, false), rgb(0xcc0000));
+        assert_eq!(p.resolve(CellColor::Indexed(1), p.fg, true), rgb(0xef2929), "bold is the bright one");
+        assert_eq!(p.resolve(CellColor::Indexed(9), p.fg, true), rgb(0xef2929));
+        assert_eq!(p.indexed(16), Color::rgb(0, 0, 0));
+        assert_eq!(p.indexed(231), Color::rgb(255, 255, 255));
+        assert_eq!(p.indexed(196), Color::rgb(255, 0, 0));
+        assert_eq!(p.indexed(232), Color::rgb(8, 8, 8));
+        assert_eq!(p.indexed(255), Color::rgb(238, 238, 238));
+        assert_eq!(p.resolve(CellColor::Rgb(1, 2, 3), p.fg, false), Color::rgb(1, 2, 3));
+    }
+
+    #[test]
+    fn the_settings_file_is_followed() {
+        let s = Settings::from_text("[settings]\n\"Gtk/DecorationLayout\" = \"close,minimize:\"\n\"Gtk/FontName\" = \"Adwaita Sans 10\"\n\"Gtk/MonospaceFontName\" = \"Adwaita Mono 11\"\n");
+        assert_eq!((s.left.as_slice(), s.right.len()), (&[WinButton::Close, WinButton::Minimize][..], 0));
+        assert_eq!((s.ui_family.as_str(), s.mono_family.as_str()), ("Adwaita Sans", "Adwaita Mono"));
+        assert!((s.ui_size - 13.333).abs() < 0.01 && (s.mono_size - 14.667).abs() < 0.01);
+        // Nothing set: buttons on the right, the machine's own fonts at 10 points.
+        let s = Settings::from_text("");
+        assert_eq!((s.left.len(), s.right.as_slice()), (0, &[WinButton::Minimize, WinButton::Maximize, WinButton::Close][..]));
+        assert_eq!((s.ui_family.as_str(), s.mono_family.as_str()), ("sans-serif", "monospace"));
+        assert_eq!(font_name("Cantarell", "sans-serif", 10.0).0, "Cantarell");
+        assert_eq!(font_name("Noto Sans 400", "sans-serif", 10.0), ("Noto Sans 400".to_string(), 10.0 * 96.0 / 72.0), "a size that is not one is part of the name");
+    }
+
+    #[test]
+    fn the_view_scrolls_within_the_scrollback() {
+        let mut s = Screen { grid: Grid::new(20, 4), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None, selection: None };
+        for i in 0..10 {
+            let line = format!("line {i}\r\n");
+            s.parser.advance(&mut s.grid, line.as_bytes());
+        }
+        let text = |s: &Screen, r: usize| s.shown(r).iter().map(|c| c.c).collect::<String>().trim_end().to_string();
+        assert_eq!(text(&s, 0), "line 7");
+        s.scroll_by(3);
+        assert_eq!((s.scroll, text(&s, 0)), (3, "line 4".to_string()));
+        s.scroll_by(100);
+        assert_eq!(text(&s, 0), "line 0", "no further than the first line kept");
+        s.scroll_by(-1000);
+        assert_eq!((s.scroll, text(&s, 0)), (0, "line 7".to_string()));
+    }
 }

@@ -3,7 +3,7 @@
 Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Vergence-Whitepaper.md,
 the current milestone is docs/bus-milestone-1.md (the session bus; the server's is docs/server-milestone-1.md; phase 1's, frozen, are docs/milestone-1.md to -4.md), status is in README.md.
 The shell (whitepaper §6.9, decided 2026-11-09) is planned in docs/shelf-milestone-1.md; not started.
-**Order of work since 2026-11-09 (whitepaper §9):** our own toolkit's drawing and text core with the terminal on it (§6.10; plan: docs/toolkit-milestone-1.md, not started), then the shelf on the same drawing code, then widgets and the settings app, then iced is removed. GPU first; a CPU reference renderer for tests and GPU-less machines (canary).
+**Order of work since 2026-11-09 (whitepaper §9):** our own toolkit's drawing and text core with the terminal on it (§6.10; plan: docs/toolkit-milestone-1.md; the terminal, crates/vergence-term, has been on it since 2026-11-10 and its iced interface is gone), then the shelf on the same drawing code, then widgets and the settings app, then iced is removed. GPU first; a CPU reference renderer for tests and GPU-less machines (canary).
 
 - **Started 2026-11-06** (Dave's go). The source lives here on Control (the
   main git copy, pushed to GitHub; Control has no Rust). Build and test on the
@@ -45,7 +45,7 @@ The shell (whitepaper §6.9, decided 2026-11-09) is planned in docs/shelf-milest
   any part from another project (crate, program, protocol extension added only
   for borrowed clients, borrowed panel or daemon), ask him: what it is, why it
   is necessary, what writing our own would take. Parts already in (Smithay,
-  libinput/seatd/xkbcommon, Xwayland, iced (replaced Slint; itself being replaced by our own toolkit, Dave 2026-11-09: no new work goes into iced beyond keeping the two tools running), ab_glyph, resvg, Adwaita cursors;
+  libinput/seatd/xkbcommon, Xwayland, iced (replaced Slint; itself being replaced by our own toolkit, Dave 2026-11-09: no new work goes into iced beyond keeping the settings app running; the terminal left it on 2026-11-10), ab_glyph, resvg, Adwaita cursors;
   table in whitepaper §8) stay until he decides on each. OS interfaces (DRM/KMS,
   evdev, GBM, EGL, Vulkan) are not borrowing.
 - **Three platforms, one code base** (Dave, 2026-11-09; replaces "FreeBSD

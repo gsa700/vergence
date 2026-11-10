@@ -13,7 +13,12 @@
 # Per-thread figures are read from /proc and so are Linux's only; elsewhere
 # the line has the process's total from ps.
 #
-# Build first: cargo build --release -p vterm --example flood
+# ("vterm" was the terminal's name while the first one, on iced, still stood.)
+#
+# With VTERM_FRAMES=1 in the environment the terminal counts its frames and
+# times tab changes on its error output (vterm.log), which clicks.sh reads.
+#
+# Build first: cargo build --release -p vergence-term --example flood
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
 root=$(cd "$here/.." && pwd)
@@ -25,12 +30,13 @@ cat > "$dir/start.sh" <<START
 export VSTRESS_DIR="$dir"
 export VSTRESS_FLOOD="$root/target/release/examples/flood"
 export SHELL="$here/vterm-stress/shell.sh"
-exec "$root/target/release/vterm" --tabs 6 $* 2>"$dir/vterm.log"
+${VTERM_FRAMES:+export VTERM_FRAMES=1}
+exec "$root/target/release/vergence-term" --tabs 6 $* 2>"$dir/vterm.log"
 START
 chmod +x "$dir/start.sh"
 "$here/vctl" spawn "$dir/start.sh" >/dev/null
 sleep 3
-pid=$(pgrep -n -x vterm)
+pid=$(pgrep -n -x vergence-term)
 echo "vterm pid $pid, report in $dir/report.txt"
 echo "$pid" > "$dir/pid"
 

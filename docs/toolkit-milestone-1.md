@@ -654,14 +654,19 @@ borrowing. Nothing new comes in.
   screen half a second later (X screenshots). Idle, a `vterm` used no
   CPU time in 20 seconds. `run.sh` needed two changes for FreeBSD (wc's
   padded count; `ps -o` once for each column).
-  **Seen there and not explained yet:** when `vterm` was killed, the
-  `seq` job's loop (a program that only starts other programs and never
-  touches the terminal itself) was not ended with it on FreeBSD, as it
-  is on Linux; the three floods, which write, were. Whether FreeBSD
-  sends that program no hangup, or something held its terminal open,
-  is to be looked into before acceptance 4's "leaves none of its
-  programs running" is called met on FreeBSD. (The job now stops when
-  its command fails.)
+  **Seen there, and explained the same day:** when `vterm` was killed,
+  the `seq` job's loop (a program that only starts other programs and
+  never touches the terminal itself) was not ended with it; the three
+  floods, which write, were. Not FreeBSD: the nested server had been
+  started with `nohup`, everything under it ignored the hangup signal,
+  and so did the terminal's programs. A terminal's programs are no
+  longer born ignoring it: `pty.rs` puts hangup, interrupt, quit and
+  terminate back to their default before a program starts, and a test
+  holds that a program which ignores its terminal ends with it even
+  when the terminal itself was started ignoring hangups (it failed on
+  Linux and FreeBSD alike before the change). Acceptance 4's "leaves
+  none of its programs running" stands on both. (The job also stops
+  when its command fails.)
 - **Step 5, Techbench (2026-11-10): done.** Fedora 45, Intel UHD 770,
   twenty threads, in the Vergence session from GDM on one 1920 x 1080
   monitor at scale 1 and 60 Hz; the terminal's window 820 x 520 units
@@ -673,8 +678,29 @@ borrowing. Nothing new comes in.
   the interface thread 1.4% of a core with the colour flood (0.24 ms of
   CPU a frame, 64,000 lines/s) and 1.2% with the cursor test (44,000
   batches/s).
-  Still to do in step 5: an undisturbed soak and the tab-click test on
-  Hubble, the install.
+- **Step 5, the switch (2026-11-10).** `vterm` is `vergence-term` now:
+  its sources moved into `crates/vergence-term` beside the parser, the
+  screen and the pty they were already using; the iced interface
+  (main.rs, term.rs, look.rs: 1,972 lines) is deleted, and the crate no
+  longer depends on iced, toml or vergence-xsettings. The program's name
+  to the desktop is `vergence-term`. The server's menu and
+  `tools/install.sh` already named `vergence-term` and needed no change;
+  the stress test's scripts keep their `vterm` in the path. 42 tests (the
+  interface's 40 and the engine's fuzz tests). iced stays in the
+  workspace for the settings app. Installed on Hubble with
+  `tools/install.sh`: `/usr/local/bin/vergence-term` is 1.3 MB where the
+  iced one was 22.7 MB.
+- **Step 5, tab clicks (2026-11-10): 50 of 50.** `tools/vterm-stress/
+  clicks.sh` presses the six tabs in turn through `vctl` while their
+  jobs run, and the terminal (with `VTERM_FRAMES=1`) writes when each
+  press arrived and in which frame the tab was drawn. On Hubble under
+  the six-tab load: every one of 50 drawn in the very next frame, its
+  scene begun 0.04 ms after the press arrived on average and 1.6 ms at
+  worst; from `vctl` sending a press to the terminal having it, 13 to
+  40 ms. (A first reading of "600 to 850 ms" was the script taking the
+  frame number for the time.)
+  Still to do in step 5: an undisturbed soak on Hubble (running as this
+  is written).
 
 ## Acceptance
 

@@ -36,8 +36,8 @@ toolkit.
 | 3 | Accessibility contract, display-list surfaces, Avalonia backend | Research |
 | 4 | Remote display over display lists | Research |
 
-Language: Rust throughout (whitepaper §8). The tools (terminal, settings app) use iced until
-they move to the project's own toolkit (decided 2026-11-09, whitepaper §6.10). Platforms (since 2026-11-09): a
+Language: Rust throughout (whitepaper §8). The terminal has been on the project's own
+toolkit since 2026-11-10 (whitepaper §6.10; docs/toolkit-milestone-1.md); the settings app uses iced until it moves too. Platforms (since 2026-11-09): a
 Linux without systemd, Void on Hubble, for development; FreeBSD (a second
 machine, and the VM canary as the build gate) and Fedora (Techbench) at every
 milestone. Install on a system with `sudo tools/install.sh` after
