@@ -295,6 +295,44 @@ borrowing. Nothing new comes in.
   Left for later steps: only the changed rows redrawn (the window still
   draws every row of a frame), and the prepared scene kept between
   frames. Next: step 3, the GPU renderer.
+- **2026-11-09, step 3, first part: the GPU renderer, without a window.**
+  `vergence-render` gl.rs loads EGL, OpenGL ES 3 and GBM when a renderer
+  is made (`dlopen`, declarations of our own): nothing is linked, so a
+  machine without the libraries or their development files still builds
+  (Techbench has only the run-time ones). gpu.rs: a context on the GPU's
+  render node through GBM with no window, or Mesa's surfaceless software
+  GL where there is no GPU; the scene prepared exactly as for the CPU
+  renderer; one instance a shape; one fragment program with cpu.rs's
+  coverage arithmetic line for line; a glyph atlas (a glyph uploaded once,
+  tinted when drawn); shapes drawn in order in as few calls as there are
+  pictures to switch between; the pixels read back for comparison.
+  tests/gpu.rs draws the same scenes both ways. **Agreement:** plain
+  shapes, outlines, lines, clips and pictures 0 or 1 step apart in every
+  byte; a screen of text never more than 2; four hundred translucent
+  shapes over each other never more than 3 (each layer may round
+  differently). Green on Hubble (UHD 630), Techbench (UHD 770) and canary,
+  where the "GPU" is llvmpipe, so FreeBSD runs the same comparison.
+  The stress test's window, 3792 x 2118 pixels, 5,338 cells:
+
+  | | GPU | a frame drawn | CPU renderer |
+  |---|---|---|---|
+  | Hubble | UHD 630 | 8.0 ms | 13.7 ms on 6 cores |
+  | Techbench | UHD 770 | 6.5 ms | 4.6 ms on 20 cores |
+  | canary | llvmpipe | 14.8 ms | 6.1 ms on 16 cores |
+
+  Most of the GPU's time is ours, not the card's: the whole scene is
+  prepared and every instance rebuilt and uploaded for each frame, on one
+  thread. Keeping what did not change is where the next gain is, for both
+  renderers. Reading the pixels back costs more than drawing them (18.7 ms
+  on Hubble) and is for tests only.
+  **The comparison found a fault in the reference:** a line's coverage was
+  multiplied by a clip's before being limited to 1, so a line was too
+  strong at the edge of a rounded clip. Fixed in cpu.rs.
+  Not done: a shape inside more than one rounded or off-pixel clip (the
+  GPU renderer refuses the scene, and a caller falls back to the CPU);
+  the atlas is one texture, emptied when full. Next: the server shown a
+  GPU buffer (linux-dmabuf from `vergence-wl`, GBM buffers), then the
+  window choosing GPU or CPU by itself.
 
 ## Acceptance
 

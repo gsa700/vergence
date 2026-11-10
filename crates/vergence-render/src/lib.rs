@@ -22,10 +22,13 @@
 //! refuses sizes that would need an absurd buffer.
 
 pub mod cpu;
+mod gl;
+pub mod gpu;
 
 use std::fmt;
 
 pub use cpu::{Cpu, Order, Target};
+pub use gpu::{Gpu, GpuError};
 use vergence_scene::{Color, Glyph, Point, Scene, SceneError};
 use vergence_text::{FaceId, Fonts};
 

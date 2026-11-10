@@ -7,11 +7,12 @@
 //! `term` is the stress test's window (toolkit milestone 1): 1264 x 706
 //! reference units of terminal, every cell its own colours and its own
 //! character. `shapes` is one of everything. `--size WxH` changes the
-//! window, `--scene file` also writes the scene's bytes.
+//! window, `--scene file` also writes the scene's bytes, `--gpu` draws it on
+//! the GPU as well and compares (the PNG is then the GPU's picture).
 
 use std::time::Instant;
 
-use vergence_render::{Cpu, text};
+use vergence_render::{Cpu, Gpu, text};
 use vergence_scene::{Color, Image, Point, Rect, Scene};
 use vergence_text::Fonts;
 
@@ -178,6 +179,33 @@ fn main() {
     let row = (pixmap.height / 2)..(pixmap.height / 2 + (cell_h * scale).ceil() as u32);
     let line = (0..20).map(|_| ms(&mut || cpu.render_rows(&scene, &mut fonts, scale, background, &mut pixmap, row.clone()).expect("it renders"))).fold(f64::MAX, f64::min);
     println!("one row of text ({} pixel rows) redrawn in {line:.2} ms; picture {:016x}", row.len(), pixmap.hash());
+
+    if args.iter().any(|a| a == "--gpu") {
+        match Gpu::new() {
+            Err(e) => println!("GPU: none ({e})"),
+            Ok(mut gpu) => {
+                println!("GPU: {}", gpu.description());
+                let mut drawn = None;
+                let first = ms(&mut || drawn = Some(gpu.render(&scene, &mut fonts, scale, background)));
+                match drawn.expect("ran") {
+                    Err(e) => println!("GPU: {e}"),
+                    Ok(picture) => {
+                        let draw = (0..10).map(|_| ms(&mut || gpu.draw(&scene, &mut fonts, scale, background).expect("it draws"))).fold(f64::MAX, f64::min);
+                        let read = (0..5).map(|_| ms(&mut || drop(gpu.render(&scene, &mut fonts, scale, background)))).fold(f64::MAX, f64::min);
+                        let (mut worst, mut beyond) = (0u8, 0usize);
+                        for (a, b) in picture.data.chunks_exact(4).zip(pixmap.data.chunks_exact(4)) {
+                            let d = a.iter().zip(b).map(|(x, y)| x.abs_diff(*y)).max().unwrap_or(0);
+                            worst = worst.max(d);
+                            beyond += (d > 1) as usize;
+                        }
+                        println!("GPU: first frame {first:.1} ms, then {draw:.2} ms a frame drawn ({read:.1} ms with the pixels read back)");
+                        println!("GPU against CPU: worst byte difference {worst}, {beyond} of {} pixels more than one step apart", pixmap.width as usize * pixmap.height as usize);
+                        pixmap = picture;
+                    }
+                }
+            }
+        }
+    }
 
     if let Some(path) = out {
         let file = std::io::BufWriter::new(std::fs::File::create(&path).expect("create the PNG"));

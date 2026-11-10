@@ -1,0 +1,689 @@
+//! The GPU renderer (toolkit milestone 1, step 3).
+//!
+//! The same scene, prepared the same way as for the CPU renderer (cpu.rs:
+//! positions in pixels, clips resolved, glyphs from the text cache), drawn
+//! by the graphics card: every prepared shape becomes one **instance**, a
+//! rectangle of pixels with the numbers that describe the shape, and a
+//! single fragment program works out how much of each pixel the shape
+//! covers with the same arithmetic as the CPU renderer. Glyphs come from an
+//! **atlas**, one texture holding every glyph bitmap in use; a glyph is
+//! uploaded once and tinted when drawn. Shapes are drawn in the scene's
+//! order in as few draw calls as there are pictures to switch between.
+//!
+//! This first part draws into a texture and reads the pixels back, with no
+//! window, so that its output can be compared with the CPU renderer's,
+//! which is how it is tested (tests/gpu.rs). Handing the server a GPU
+//! buffer is the next part.
+//!
+//! The interface is OpenGL ES 3 through EGL (decided 2026-11-09), on the
+//! GPU's render node through GBM. Where there is no GPU device, EGL's
+//! "surfaceless" platform is tried, which on Mesa is a software GL: slow,
+//! but it lets the same tests run on a machine without a GPU. A machine
+//! with none of this gets an error from [`Gpu::new`] and draws with the CPU
+//! renderer.
+//!
+//! Not yet handled here: a shape inside more than one rounded or off-pixel
+//! clip at once (the CPU renderer does it; this one says so and refuses).
+
+use std::{
+    collections::HashMap,
+    ffi::{CStr, c_char, c_void},
+    fmt,
+    sync::Arc,
+};
+
+use vergence_scene::{Color, Scene};
+use vergence_text::{Bitmap, Fonts};
+
+use crate::{
+    Pixmap, RenderError,
+    cpu::{Order, Prim, RRect, Shape, prepare},
+    gl::{self, Egl, Gbm, Gles},
+    pixel_size,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GpuError {
+    /// The system has no EGL or OpenGL ES library.
+    NoLibrary,
+    /// No GPU device, and no software GL either.
+    NoDisplay,
+    /// EGL refused (what it was asked, and its error code).
+    Egl(&'static str, i32),
+    /// The drawing program did not compile or link.
+    Program(String),
+    /// OpenGL reported an error while drawing.
+    Gl(u32),
+    /// Something this renderer does not do yet.
+    Unsupported(&'static str),
+    Render(RenderError),
+}
+
+impl fmt::Display for GpuError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GpuError::NoLibrary => write!(f, "no EGL or OpenGL ES library"),
+            GpuError::NoDisplay => write!(f, "no GPU device and no software GL"),
+            GpuError::Egl(what, code) => write!(f, "EGL: {what} failed ({code:#x})"),
+            GpuError::Program(log) => write!(f, "drawing program: {log}"),
+            GpuError::Gl(code) => write!(f, "OpenGL error {code:#x}"),
+            GpuError::Unsupported(what) => write!(f, "not drawn on the GPU yet: {what}"),
+            GpuError::Render(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for GpuError {}
+
+impl From<RenderError> for GpuError {
+    fn from(e: RenderError) -> Self {
+        GpuError::Render(e)
+    }
+}
+
+/// Floats in one instance: eight attributes of four.
+const FLOATS: usize = 32;
+
+const KIND_FILL: f32 = 0.0;
+const KIND_STROKE: f32 = 1.0;
+const KIND_LINE: f32 = 2.0;
+const KIND_GLYPH: f32 = 3.0;
+const KIND_IMAGE: f32 = 4.0;
+
+const VERTEX: &str = r#"#version 300 es
+precision highp float;
+layout(location = 0) in vec4 a_rect;
+layout(location = 1) in vec4 a_shape;
+layout(location = 2) in vec4 a_inner;
+layout(location = 3) in vec4 a_param;
+layout(location = 4) in vec4 a_color;
+layout(location = 5) in vec4 a_uv;
+layout(location = 6) in vec4 a_clip;
+layout(location = 7) in vec4 a_clip_param;
+uniform vec2 u_size;
+flat out vec4 v_shape;
+flat out vec4 v_inner;
+flat out vec4 v_param;
+flat out vec4 v_color;
+flat out vec4 v_uv;
+flat out vec4 v_clip;
+flat out vec4 v_clip_param;
+void main() {
+    vec2 corner = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1));
+    vec2 p = mix(a_rect.xy, a_rect.zw, corner);
+    // Pixel row 0 goes to the framebuffer's first row, so what is read back starts at the top.
+    gl_Position = vec4(p / u_size * 2.0 - 1.0, 0.0, 1.0);
+    v_shape = a_shape;
+    v_inner = a_inner;
+    v_param = a_param;
+    v_color = a_color;
+    v_uv = a_uv;
+    v_clip = a_clip;
+    v_clip_param = a_clip_param;
+}
+"#;
+
+// The coverage arithmetic is cpu.rs's, line for line: edge() and RRect::cover().
+const FRAGMENT: &str = r#"#version 300 es
+precision highp float;
+precision highp int;
+uniform highp sampler2D u_atlas;
+uniform highp sampler2D u_image;
+flat in vec4 v_shape;
+flat in vec4 v_inner;
+flat in vec4 v_param;
+flat in vec4 v_color;
+flat in vec4 v_uv;
+flat in vec4 v_clip;
+flat in vec4 v_clip_param;
+out vec4 o_color;
+
+float edge(float lo, float hi, float p) {
+    return clamp(min(p + 1.0, hi) - max(p, lo), 0.0, 1.0);
+}
+
+float cover(vec4 r, float radius, vec2 p) {
+    bool row = radius > 0.0 && (p.y < r.y + radius || p.y + 1.0 > r.w - radius);
+    bool col = radius > 0.0 && (p.x < r.x + radius || p.x + 1.0 > r.z - radius);
+    if (!(row && col)) {
+        return edge(r.x, r.z, p.x) * edge(r.y, r.w, p.y);
+    }
+    vec2 centre = (r.xy + r.zw) * 0.5;
+    vec2 q = abs(p + 0.5 - centre) - ((r.zw - r.xy) * 0.5 - radius);
+    float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+    return clamp(0.5 - d, 0.0, 1.0);
+}
+
+void main() {
+    vec2 p = floor(gl_FragCoord.xy);
+    int kind = int(v_param.x);
+    float c = 0.0;
+    vec4 colour = v_color;
+    if (kind == 0) {
+        c = cover(v_shape, v_param.y, p);
+    } else if (kind == 1) {
+        c = cover(v_shape, v_param.y, p);
+        if (v_param.w > 0.5) {
+            c -= cover(v_inner, v_param.z, p);
+        }
+    } else if (kind == 2) {
+        vec2 a = v_shape.xy;
+        vec2 d = v_shape.zw - a;
+        vec2 q = p + 0.5 - a;
+        float len2 = dot(d, d);
+        float t = len2 > 0.0 ? clamp(dot(q, d) / len2, 0.0, 1.0) : 0.0;
+        c = 0.5 - (length(q - d * t) - v_param.y);
+    } else if (kind == 3) {
+        c = texelFetch(u_atlas, ivec2(p - v_uv.zw + v_uv.xy), 0).r;
+    } else {
+        // A picture stretched to v_shape: between four of its pixels, mixed
+        // with alpha multiplied in so a clear one's colour does not bleed.
+        vec2 size = v_param.zw;
+        vec2 uv = clamp((p + 0.5 - v_shape.xy) / (v_shape.zw - v_shape.xy) * size - 0.5, vec2(0.0), size - 1.0);
+        ivec2 t0 = ivec2(floor(uv));
+        ivec2 t1 = min(t0 + 1, ivec2(size) - 1);
+        vec2 f = uv - floor(uv);
+        vec4 mixed = vec4(0.0);
+        vec4 t;
+        float w;
+        t = texelFetch(u_image, t0, 0); w = t.a * (1.0 - f.x) * (1.0 - f.y); mixed += vec4(t.rgb * w, w);
+        t = texelFetch(u_image, ivec2(t1.x, t0.y), 0); w = t.a * f.x * (1.0 - f.y); mixed += vec4(t.rgb * w, w);
+        t = texelFetch(u_image, ivec2(t0.x, t1.y), 0); w = t.a * (1.0 - f.x) * f.y; mixed += vec4(t.rgb * w, w);
+        t = texelFetch(u_image, t1, 0); w = t.a * f.x * f.y; mixed += vec4(t.rgb * w, w);
+        c = cover(v_shape, 0.0, p) * v_param.y;
+        if (mixed.a <= 0.0) {
+            discard;
+        }
+        colour = vec4(mixed.rgb / mixed.a, mixed.a);
+    }
+    c = clamp(c, 0.0, 1.0);
+    if (v_clip_param.y > 0.5) {
+        c *= cover(v_clip, v_clip_param.x, p);
+    }
+    float a = colour.a * c;
+    if (a <= 0.0) {
+        discard;
+    }
+    o_color = vec4(colour.rgb * a, a);
+}
+"#;
+
+/// One texture of glyph coverage, filled in rows.
+struct Atlas {
+    texture: u32,
+    size: i32,
+    /// Where the next glyph goes, and the height of the row being filled.
+    x: i32,
+    y: i32,
+    row: i32,
+    /// A bitmap (by its address, kept alive here so the address stays its own) and its place.
+    places: HashMap<usize, (i32, i32)>,
+    held: Vec<Arc<Bitmap>>,
+}
+
+impl Atlas {
+    fn clear(&mut self) {
+        (self.x, self.y, self.row) = (0, 0, 0);
+        self.places.clear();
+        self.held.clear();
+    }
+
+    /// The glyph's place in the atlas, uploading it if it is new. None: no room left.
+    fn place(&mut self, gl: &Gles, bitmap: &Arc<Bitmap>) -> Option<(i32, i32)> {
+        let key = Arc::as_ptr(bitmap) as usize;
+        if let Some(at) = self.places.get(&key) {
+            return Some(*at);
+        }
+        let (w, h) = (bitmap.width as i32, bitmap.height as i32);
+        if w > self.size || h > self.size {
+            return None;
+        }
+        if self.x + w > self.size {
+            (self.x, self.y, self.row) = (0, self.y + self.row + 1, 0);
+        }
+        if self.y + h > self.size {
+            return None;
+        }
+        let at = (self.x, self.y);
+        // SAFETY: the bitmap holds width x height bytes, and rows are read one byte apart.
+        unsafe {
+            (gl.glBindTexture)(gl::GL_TEXTURE_2D, self.texture);
+            (gl.glPixelStorei)(gl::GL_UNPACK_ALIGNMENT, 1);
+            (gl.glTexSubImage2D)(gl::GL_TEXTURE_2D, 0, at.0, at.1, w, h, gl::GL_RED, gl::GL_UNSIGNED_BYTE, bitmap.alpha.as_ptr() as *const c_void);
+        }
+        self.x += w + 1;
+        self.row = self.row.max(h);
+        self.places.insert(key, at);
+        self.held.push(bitmap.clone());
+        Some(at)
+    }
+}
+
+/// Instances to draw in one call, and the picture they need bound, if any.
+struct Batch {
+    first: usize,
+    count: usize,
+    image: Option<usize>,
+}
+
+pub struct Gpu {
+    egl: Egl,
+    gl: Gles,
+    display: *mut c_void,
+    context: *mut c_void,
+    /// What is drawing: the GL's own description.
+    description: String,
+    program: u32,
+    vertex_array: u32,
+    buffer: u32,
+    size_uniform: i32,
+    atlas: Atlas,
+    /// The texture drawn into and its framebuffer, at the last size used.
+    target: Option<(u32, u32, u32, u32)>,
+    /// A one-pixel texture, bound where no picture is needed.
+    blank: u32,
+}
+
+impl Gpu {
+    /// A renderer on this machine's GPU (or its software GL). An error if
+    /// there is neither; draw with [`crate::Cpu`] then.
+    pub fn new() -> Result<Gpu, GpuError> {
+        let egl = Egl::load().ok_or(GpuError::NoLibrary)?;
+        let gl = Gles::load().ok_or(GpuError::NoLibrary)?;
+        let display = open_display(&egl).ok_or(GpuError::NoDisplay)?;
+        // SAFETY: EGL calls on a display that initialised; every result is checked.
+        let context = unsafe {
+            if (egl.eglBindAPI)(gl::EGL_OPENGL_ES_API) == 0 {
+                return Err(GpuError::Egl("eglBindAPI", (egl.eglGetError)()));
+            }
+            let mut config: *mut c_void = std::ptr::null_mut();
+            let mut count = 0;
+            let wanted = [gl::EGL_RENDERABLE_TYPE, gl::EGL_OPENGL_ES3_BIT, gl::EGL_NONE];
+            // No config at all is fine where the context needs none (drawing goes to a texture).
+            if (egl.eglChooseConfig)(display, wanted.as_ptr(), &mut config, 1, &mut count) == 0 || count < 1 {
+                config = std::ptr::null_mut();
+            }
+            let version = [gl::EGL_CONTEXT_MAJOR_VERSION, 3, gl::EGL_NONE];
+            let context = (egl.eglCreateContext)(display, config, std::ptr::null_mut(), version.as_ptr());
+            if context.is_null() {
+                return Err(GpuError::Egl("eglCreateContext", (egl.eglGetError)()));
+            }
+            if (egl.eglMakeCurrent)(display, std::ptr::null_mut(), std::ptr::null_mut(), context) == 0 {
+                let code = (egl.eglGetError)();
+                (egl.eglDestroyContext)(display, context);
+                return Err(GpuError::Egl("eglMakeCurrent", code));
+            }
+            context
+        };
+        // SAFETY: a context is current on this thread; GL calls with valid arguments.
+        unsafe {
+            let text = |name: u32| {
+                let p = (gl.glGetString)(name);
+                if p.is_null() { String::new() } else { CStr::from_ptr(p).to_string_lossy().into_owned() }
+            };
+            let description = format!("{} ({})", text(gl::GL_RENDERER), text(gl::GL_VERSION));
+            let program = match link(&gl) {
+                Ok(p) => p,
+                Err(e) => {
+                    (egl.eglMakeCurrent)(display, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+                    (egl.eglDestroyContext)(display, context);
+                    return Err(e);
+                }
+            };
+            (gl.glUseProgram)(program);
+            (gl.glUniform1i)((gl.glGetUniformLocation)(program, c"u_atlas".as_ptr()), 0);
+            (gl.glUniform1i)((gl.glGetUniformLocation)(program, c"u_image".as_ptr()), 1);
+            let size_uniform = (gl.glGetUniformLocation)(program, c"u_size".as_ptr());
+
+            let (mut vertex_array, mut buffer) = (0, 0);
+            (gl.glGenVertexArrays)(1, &mut vertex_array);
+            (gl.glBindVertexArray)(vertex_array);
+            (gl.glGenBuffers)(1, &mut buffer);
+            (gl.glBindBuffer)(gl::GL_ARRAY_BUFFER, buffer);
+            for i in 0..8 {
+                (gl.glEnableVertexAttribArray)(i);
+                (gl.glVertexAttribDivisor)(i, 1);
+            }
+
+            let mut limit = 0;
+            (gl.glGetIntegerv)(gl::GL_MAX_TEXTURE_SIZE, &mut limit);
+            let size = limit.clamp(256, 4096);
+            let texture = |internal: u32, format: u32, w: i32, h: i32, pixels: *const c_void| {
+                let mut t = 0;
+                (gl.glGenTextures)(1, &mut t);
+                (gl.glBindTexture)(gl::GL_TEXTURE_2D, t);
+                for (name, value) in [(gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST), (gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST), (gl::GL_TEXTURE_WRAP_S, gl::GL_CLAMP_TO_EDGE), (gl::GL_TEXTURE_WRAP_T, gl::GL_CLAMP_TO_EDGE)] {
+                    (gl.glTexParameteri)(gl::GL_TEXTURE_2D, name, value as i32);
+                }
+                (gl.glTexImage2D)(gl::GL_TEXTURE_2D, 0, internal as i32, w, h, 0, format, gl::GL_UNSIGNED_BYTE, pixels);
+                t
+            };
+            let atlas_texture = texture(gl::GL_R8, gl::GL_RED, size, size, std::ptr::null());
+            let blank = texture(gl::GL_RGBA8, gl::GL_RGBA, 1, 1, [0u8; 4].as_ptr() as *const c_void);
+            let error = (gl.glGetError)();
+            if error != 0 {
+                return Err(GpuError::Gl(error));
+            }
+            Ok(Gpu {
+                egl,
+                gl,
+                display,
+                context,
+                description,
+                program,
+                vertex_array,
+                buffer,
+                size_uniform,
+                atlas: Atlas { texture: atlas_texture, size, x: 0, y: 0, row: 0, places: HashMap::new(), held: Vec::new() },
+                target: None,
+                blank,
+            })
+        }
+    }
+
+    /// What is doing the drawing ("Mesa Intel(R) UHD Graphics 630 ...", or a software GL's name).
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// The scene at `scale` pixels to the reference unit, over `background`,
+    /// read back from the GPU: the picture [`crate::Cpu::render`] gives,
+    /// within a rounding step.
+    pub fn render(&mut self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color) -> Result<Pixmap, GpuError> {
+        self.frame(scene, fonts, scale, background, true)
+    }
+
+    /// Draws the scene on the GPU and waits until it is done, without
+    /// reading the pixels back (which costs more than drawing them): what a
+    /// window does, and what timings of the drawing itself should use.
+    pub fn draw(&mut self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color) -> Result<(), GpuError> {
+        self.frame(scene, fonts, scale, background, false).map(|_| ())
+    }
+
+    fn frame(&mut self, scene: &Scene, fonts: &mut Fonts, scale: f32, background: Color, read: bool) -> Result<Pixmap, GpuError> {
+        let (w, h) = pixel_size(scene, scale)?;
+        scene.validate().map_err(RenderError::from)?;
+        let prepared = prepare(scene, fonts, scale, w, h, Order::Rgba);
+        // SAFETY: the context is made current on this thread for the calls that follow.
+        unsafe {
+            if (self.egl.eglMakeCurrent)(self.display, std::ptr::null_mut(), std::ptr::null_mut(), self.context) == 0 {
+                return Err(GpuError::Egl("eglMakeCurrent", (self.egl.eglGetError)()));
+            }
+        }
+        // Instances, in drawing order. An atlas that fills up is emptied and the frame begun again, once.
+        let mut built = self.instances(&prepared.prims, &prepared.chains);
+        if matches!(built, Err(GpuError::Unsupported("atlas full"))) {
+            self.atlas.clear();
+            built = self.instances(&prepared.prims, &prepared.chains);
+        }
+        let (mut data, batches) = built?;
+        let sizes: Vec<(u32, u32)> = prepared.images.iter().map(|im| (im.width, im.height)).collect();
+        Gpu::picture_sizes(&mut data, &batches, &sizes);
+
+        let gl = &self.gl;
+        // SAFETY: a context is current; every pointer given to GL outlives the call it is given to.
+        unsafe {
+            let (texture, framebuffer) = match self.target {
+                Some((t, f, tw, th)) if (tw, th) == (w, h) => (t, f),
+                old => {
+                    if let Some((t, f, ..)) = old {
+                        (gl.glDeleteFramebuffers)(1, &f);
+                        (gl.glDeleteTextures)(1, &t);
+                    }
+                    let (mut t, mut f) = (0, 0);
+                    (gl.glGenTextures)(1, &mut t);
+                    (gl.glActiveTexture)(gl::GL_TEXTURE1);
+                    (gl.glBindTexture)(gl::GL_TEXTURE_2D, t);
+                    (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST as i32);
+                    (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST as i32);
+                    (gl.glTexImage2D)(gl::GL_TEXTURE_2D, 0, gl::GL_RGBA8 as i32, w as i32, h as i32, 0, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, std::ptr::null());
+                    (gl.glGenFramebuffers)(1, &mut f);
+                    (gl.glBindFramebuffer)(gl::GL_FRAMEBUFFER, f);
+                    (gl.glFramebufferTexture2D)(gl::GL_FRAMEBUFFER, gl::GL_COLOR_ATTACHMENT0, gl::GL_TEXTURE_2D, t, 0);
+                    if (gl.glCheckFramebufferStatus)(gl::GL_FRAMEBUFFER) != gl::GL_FRAMEBUFFER_COMPLETE {
+                        (gl.glDeleteFramebuffers)(1, &f);
+                        (gl.glDeleteTextures)(1, &t);
+                        self.target = None;
+                        return Err(GpuError::Unsupported("a framebuffer of this size"));
+                    }
+                    self.target = Some((t, f, w, h));
+                    (t, f)
+                }
+            };
+            let _ = texture;
+            (gl.glBindFramebuffer)(gl::GL_FRAMEBUFFER, framebuffer);
+            (gl.glViewport)(0, 0, w as i32, h as i32);
+            (gl.glDisable)(gl::GL_DITHER);
+            let a = background.a as f32 / 255.0;
+            (gl.glClearColor)(background.r as f32 / 255.0 * a, background.g as f32 / 255.0 * a, background.b as f32 / 255.0 * a, a);
+            (gl.glClear)(gl::GL_COLOR_BUFFER_BIT);
+            (gl.glEnable)(gl::GL_BLEND);
+            // Colours leave the fragment program with alpha multiplied in.
+            (gl.glBlendFunc)(gl::GL_ONE, gl::GL_ONE_MINUS_SRC_ALPHA);
+            (gl.glUseProgram)(self.program);
+            (gl.glUniform2f)(self.size_uniform, w as f32, h as f32);
+            (gl.glBindVertexArray)(self.vertex_array);
+            (gl.glBindBuffer)(gl::GL_ARRAY_BUFFER, self.buffer);
+            (gl.glBufferData)(gl::GL_ARRAY_BUFFER, std::mem::size_of_val(data.as_slice()) as isize, data.as_ptr() as *const c_void, gl::GL_STREAM_DRAW);
+            (gl.glActiveTexture)(gl::GL_TEXTURE0);
+            (gl.glBindTexture)(gl::GL_TEXTURE_2D, self.atlas.texture);
+            (gl.glActiveTexture)(gl::GL_TEXTURE1);
+            (gl.glBindTexture)(gl::GL_TEXTURE_2D, self.blank);
+            let stride = (FLOATS * 4) as i32;
+            let mut picture = 0u32;
+            for batch in &batches {
+                if let Some(index) = batch.image {
+                    let im = &prepared.images[index];
+                    if picture == 0 {
+                        (gl.glGenTextures)(1, &mut picture);
+                    }
+                    (gl.glBindTexture)(gl::GL_TEXTURE_2D, picture);
+                    (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST as i32);
+                    (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST as i32);
+                    (gl.glPixelStorei)(gl::GL_UNPACK_ALIGNMENT, 1);
+                    (gl.glTexImage2D)(gl::GL_TEXTURE_2D, 0, gl::GL_RGBA8 as i32, im.width as i32, im.height as i32, 0, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, im.rgba.as_ptr() as *const c_void);
+                }
+                // ES 3.0 has no "first instance": the attributes are pointed at the batch's first.
+                let base = batch.first * FLOATS * 4;
+                for i in 0..8usize {
+                    (gl.glVertexAttribPointer)(i as u32, 4, gl::GL_FLOAT, 0, stride, (base + i * 16) as *const c_void);
+                }
+                (gl.glDrawArraysInstanced)(gl::GL_TRIANGLE_STRIP, 0, 4, batch.count as i32);
+            }
+            let mut pixmap = Pixmap::new(if read { w } else { 0 }, if read { h } else { 0 });
+            if read {
+                (gl.glPixelStorei)(gl::GL_PACK_ALIGNMENT, 1);
+                (gl.glReadPixels)(0, 0, w as i32, h as i32, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, pixmap.data.as_mut_ptr() as *mut c_void);
+            } else {
+                (gl.glFinish)();
+            }
+            if picture != 0 {
+                (gl.glDeleteTextures)(1, &picture);
+            }
+            let error = (gl.glGetError)();
+            if error != 0 {
+                return Err(GpuError::Gl(error));
+            }
+            Ok(pixmap)
+        }
+    }
+
+    /// The prepared shapes as instance data, and the draw calls to make of them.
+    fn instances(&mut self, prims: &[Prim], chains: &[Vec<RRect>]) -> Result<(Vec<f32>, Vec<Batch>), GpuError> {
+        let mut data: Vec<f32> = Vec::with_capacity(prims.len() * FLOATS);
+        let mut batches: Vec<Batch> = Vec::new();
+        let rect = |r: &RRect| [r.x0, r.y0, r.x1, r.y1];
+        for (i, p) in prims.iter().enumerate() {
+            let (mut shape, mut inner, mut uv) = ([0.0f32; 4], [0.0f32; 4], [0.0f32; 4]);
+            let mut param: [f32; 4];
+            let mut image = None;
+            match &p.shape {
+                Shape::Fill(r) => {
+                    shape = rect(r);
+                    param = [KIND_FILL, r.radius, 0.0, 0.0];
+                }
+                Shape::Stroke(outer, hole) => {
+                    shape = rect(outer);
+                    param = [KIND_STROKE, outer.radius, 0.0, 0.0];
+                    if let Some(h) = hole {
+                        inner = rect(h);
+                        (param[2], param[3]) = (h.radius, 1.0);
+                    }
+                }
+                Shape::Line { ax, ay, bx, by, half } => {
+                    shape = [*ax, *ay, *bx, *by];
+                    param = [KIND_LINE, *half, 0.0, 0.0];
+                }
+                Shape::Glyph { x, y, bitmap } => {
+                    let at = self.atlas.place(&self.gl, bitmap).ok_or(GpuError::Unsupported("atlas full"))?;
+                    uv = [at.0 as f32, at.1 as f32, *x as f32, *y as f32];
+                    param = [KIND_GLYPH, 0.0, 0.0, 0.0];
+                }
+                Shape::Image { to, image: index, opacity } => {
+                    shape = rect(to);
+                    image = Some(*index);
+                    // The picture's size in pixels is filled in from the scene when it is bound.
+                    param = [KIND_IMAGE, *opacity, 0.0, 0.0];
+                }
+            }
+            let chain = &chains[p.chain as usize];
+            let (clip, clip_param) = match chain.as_slice() {
+                [] => ([0.0; 4], [0.0; 4]),
+                [one] => (rect(one), [one.radius, 1.0, 0.0, 0.0]),
+                _ => return Err(GpuError::Unsupported("a shape inside more than one rounded clip")),
+            };
+            data.extend_from_slice(&[p.bounds[0] as f32, p.bounds[1] as f32, p.bounds[2] as f32, p.bounds[3] as f32]);
+            data.extend_from_slice(&shape);
+            data.extend_from_slice(&inner);
+            data.extend_from_slice(&param);
+            data.extend(p.color.iter().map(|c| *c as f32 / 255.0));
+            data.extend_from_slice(&uv);
+            data.extend_from_slice(&clip);
+            data.extend_from_slice(&clip_param);
+            match (image, batches.last_mut()) {
+                (None, Some(b)) if b.image.is_none() => b.count += 1,
+                _ => batches.push(Batch { first: i, count: 1, image }),
+            }
+        }
+        Ok((data, batches))
+    }
+
+    /// Fills in each picture's size, which the fragment program needs.
+    fn picture_sizes(data: &mut [f32], batches: &[Batch], sizes: &[(u32, u32)]) {
+        for b in batches {
+            if let Some(index) = b.image {
+                let at = b.first * FLOATS + 12;
+                (data[at + 2], data[at + 3]) = (sizes[index].0 as f32, sizes[index].1 as f32);
+            }
+        }
+    }
+}
+
+impl Drop for Gpu {
+    fn drop(&mut self) {
+        // SAFETY: the objects this renderer made, deleted once in its own context, then the context.
+        // The display (and a GPU device under it) is left for the process's lifetime: other
+        // renderers in the process may share it.
+        unsafe {
+            if (self.egl.eglMakeCurrent)(self.display, std::ptr::null_mut(), std::ptr::null_mut(), self.context) != 0 {
+                let gl = &self.gl;
+                if let Some((t, f, ..)) = self.target {
+                    (gl.glDeleteFramebuffers)(1, &f);
+                    (gl.glDeleteTextures)(1, &t);
+                }
+                (gl.glDeleteTextures)(1, &self.atlas.texture);
+                (gl.glDeleteTextures)(1, &self.blank);
+                (gl.glDeleteBuffers)(1, &self.buffer);
+                (gl.glDeleteVertexArrays)(1, &self.vertex_array);
+                (gl.glDeleteProgram)(self.program);
+                (gl.glFinish)();
+                (self.egl.eglMakeCurrent)(self.display, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+            }
+            (self.egl.eglDestroyContext)(self.display, self.context);
+        }
+    }
+}
+
+/// An initialised EGL display: on the first GPU render node that works,
+/// else Mesa's surfaceless platform.
+fn open_display(egl: &Egl) -> Option<*mut c_void> {
+    use std::os::fd::IntoRawFd;
+    let ready = |display: *mut c_void| {
+        let (mut major, mut minor) = (0, 0);
+        // SAFETY: a display EGL returned, or null, which is checked first.
+        !display.is_null() && unsafe { (egl.eglInitialize)(display, &mut major, &mut minor) } != 0
+    };
+    if let Some(gbm) = Gbm::load() {
+        for n in 128..136 {
+            let Ok(file) = std::fs::OpenOptions::new().read(true).write(true).open(format!("/dev/dri/renderD{n}")) else { continue };
+            // The device keeps the descriptor for as long as the display lives (the process).
+            let fd = file.into_raw_fd();
+            // SAFETY: a descriptor we own; results are checked, and released if unused.
+            unsafe {
+                let device = (gbm.gbm_create_device)(fd);
+                if device.is_null() {
+                    drop(std::fs::File::from(<std::os::fd::OwnedFd as std::os::fd::FromRawFd>::from_raw_fd(fd)));
+                    continue;
+                }
+                let display = (egl.eglGetPlatformDisplay)(gl::EGL_PLATFORM_GBM, device, std::ptr::null());
+                if ready(display) {
+                    return Some(display);
+                }
+                (gbm.gbm_device_destroy)(device);
+                drop(std::fs::File::from(<std::os::fd::OwnedFd as std::os::fd::FromRawFd>::from_raw_fd(fd)));
+            }
+        }
+    }
+    // SAFETY: the platform's default display.
+    let display = unsafe { (egl.eglGetPlatformDisplay)(gl::EGL_PLATFORM_SURFACELESS, std::ptr::null_mut(), std::ptr::null()) };
+    ready(display).then_some(display)
+}
+
+/// Compiles and links the drawing program.
+///
+/// # Safety
+/// A GL context must be current.
+unsafe fn link(gl: &Gles) -> Result<u32, GpuError> {
+    unsafe {
+        let compile = |kind: u32, source: &str| -> Result<u32, GpuError> {
+            let shader = (gl.glCreateShader)(kind);
+            let (text, len) = (source.as_ptr() as *const c_char, source.len() as i32);
+            (gl.glShaderSource)(shader, 1, &text, &len);
+            (gl.glCompileShader)(shader);
+            let mut ok = 0;
+            (gl.glGetShaderiv)(shader, gl::GL_COMPILE_STATUS, &mut ok);
+            if ok == 0 {
+                let mut log = [0 as c_char; 2048];
+                let mut n = 0;
+                (gl.glGetShaderInfoLog)(shader, log.len() as i32, &mut n, log.as_mut_ptr());
+                (gl.glDeleteShader)(shader);
+                return Err(GpuError::Program(CStr::from_ptr(log.as_ptr()).to_string_lossy().into_owned()));
+            }
+            Ok(shader)
+        };
+        let vertex = compile(gl::GL_VERTEX_SHADER, VERTEX)?;
+        let fragment = match compile(gl::GL_FRAGMENT_SHADER, FRAGMENT) {
+            Ok(f) => f,
+            Err(e) => {
+                (gl.glDeleteShader)(vertex);
+                return Err(e);
+            }
+        };
+        let program = (gl.glCreateProgram)();
+        (gl.glAttachShader)(program, vertex);
+        (gl.glAttachShader)(program, fragment);
+        (gl.glLinkProgram)(program);
+        (gl.glDeleteShader)(vertex);
+        (gl.glDeleteShader)(fragment);
+        let mut ok = 0;
+        (gl.glGetProgramiv)(program, gl::GL_LINK_STATUS, &mut ok);
+        if ok == 0 {
+            let mut log = [0 as c_char; 2048];
+            let mut n = 0;
+            (gl.glGetProgramInfoLog)(program, log.len() as i32, &mut n, log.as_mut_ptr());
+            (gl.glDeleteProgram)(program);
+            return Err(GpuError::Program(CStr::from_ptr(log.as_ptr()).to_string_lossy().into_owned()));
+        }
+        Ok(program)
+    }
+}

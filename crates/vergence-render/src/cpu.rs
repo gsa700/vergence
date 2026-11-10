@@ -50,12 +50,12 @@ pub struct Target<'a> {
 
 /// A rectangle in pixels with rounded corners (radius 0: square).
 #[derive(Debug, Clone, Copy)]
-struct RRect {
-    x0: f32,
-    y0: f32,
-    x1: f32,
-    y1: f32,
-    radius: f32,
+pub(crate) struct RRect {
+    pub(crate) x0: f32,
+    pub(crate) y0: f32,
+    pub(crate) x1: f32,
+    pub(crate) y1: f32,
+    pub(crate) radius: f32,
 }
 
 /// How much of pixel `p` (from `p` to `p + 1`) lies between `lo` and `hi`.
@@ -103,7 +103,7 @@ impl RRect {
     }
 }
 
-enum Shape {
+pub(crate) enum Shape {
     Fill(RRect),
     /// The outer shape less the inner one (None: the outline is the whole shape).
     Stroke(RRect, Option<RRect>),
@@ -114,14 +114,14 @@ enum Shape {
     Image { to: RRect, image: usize, opacity: f32 },
 }
 
-struct Prim {
-    shape: Shape,
+pub(crate) struct Prim {
+    pub(crate) shape: Shape,
     /// Not multiplied by alpha.
-    color: [u8; 4],
+    pub(crate) color: [u8; 4],
     /// The pixels it may touch, inside its clip: x0, y0, x1, y1.
-    bounds: [i32; 4],
+    pub(crate) bounds: [i32; 4],
     /// Which list of clip shapes it is tested against (0: none).
-    chain: u32,
+    pub(crate) chain: u32,
 }
 
 fn intersect(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
@@ -182,17 +182,17 @@ fn span(row: &mut [u8], x0: i32, x1: i32, c: [u8; 4], cover: u32) {
     }
 }
 
-struct Prepared<'a> {
-    prims: Vec<Prim>,
+pub(crate) struct Prepared<'a> {
+    pub(crate) prims: Vec<Prim>,
     /// Lists of clip shapes; `chains[0]` is empty.
-    chains: Vec<Vec<RRect>>,
+    pub(crate) chains: Vec<Vec<RRect>>,
     /// For each band, the shapes that touch it, in drawing order.
     bands: Vec<Vec<u32>>,
-    images: &'a [Image],
+    pub(crate) images: &'a [Image],
     order: Order,
 }
 
-fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u32, h: u32, order: Order) -> Prepared<'a> {
+pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u32, h: u32, order: Order) -> Prepared<'a> {
     let faces: Vec<Option<FaceId>> = scene.fonts.iter().map(|f| fonts.face(&f.family, f.weight, f.italic)).collect();
     let whole = [0, 0, w as i32, h as i32];
     let mut prims: Vec<Prim> = Vec::with_capacity(scene.commands.len());
@@ -288,7 +288,10 @@ impl Prepared<'_> {
         // A shape given by a coverage function, pixel by pixel, from xa to xb.
         let each = |row: &mut [u8], xa: i32, xb: i32, cover: &dyn Fn(i32) -> f32| {
             for x in xa.max(x0)..xb.min(x1) {
-                let mut c = cover(x);
+                // Clamped before a clip is applied: a line's coverage runs past 1 inside it, and
+                // times a clip's 0.3 that would be more than 0.3 (found by the GPU renderer
+                // disagreeing, 2026-11-09).
+                let mut c = cover(x).clamp(0.0, 1.0);
                 if c > 0.0 && !chain.is_empty() {
                     c *= chain_cover(chain, x, y);
                 }
