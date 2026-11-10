@@ -8,6 +8,20 @@ use vergence_text::{Fonts, db::FontDb};
 
 const BLACK: Color = Color::rgb(0, 0, 0);
 
+/// The graphics libraries are loaded before the test harness starts its
+/// threads: on FreeBSD a thread that existed before they were loaded
+/// crashes at its first drawing call (vergence-render's gl.rs), and the
+/// harness runs these tests on several threads at once. A function the
+/// system runs as the program is loaded, before `main`.
+#[used]
+#[unsafe(link_section = ".init_array")]
+static LOAD_FIRST: extern "C" fn() = {
+    extern "C" fn load_first() {
+        vergence_render::preload_gpu_libraries();
+    }
+    load_first
+};
+
 fn gpu() -> Option<Gpu> {
     match Gpu::new() {
         Ok(g) => Some(g),

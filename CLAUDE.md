@@ -8,7 +8,7 @@ The shell (whitepaper §6.9, decided 2026-11-09) is planned in docs/shelf-milest
 - **Started 2026-11-06** (Dave's go). The source lives here on Control (the
   main git copy, pushed to GitHub; Control has no Rust). Build and test on the
   dev boxes: `tools/sync-hubble.sh [host]` (rsync; keeps the host's build output;
-  default hubble, also canary and techbench), then `cargo test --workspace`
+  default hubble, also kepler, canary and techbench), then `cargo test --workspace`
   there. Fake monitors for tests: docs/milestone-1.md, "Found on Hubble".
 - **vergd runs in Dave's Xfce session on Hubble** (tools/install-autostart.sh:
   ~/.local/bin/vergd, log ~/.local/state/vergence/vergd.log, profiles
@@ -53,9 +53,16 @@ The shell (whitepaper §6.9, decided 2026-11-09) is planned in docs/shelf-milest
   systemd: Void (glibc) on Hubble**, reinstalled from FreeBSD on 2026-11-09
   because the work ahead (GPUs, several cards, explicit sync, suspend soak) is
   where FreeBSD's drm-kmod lagged and its tools are thin. **FreeBSD** stays a
-  real-hardware platform on the second Lenovo Tiny (when its power supply
-  arrives) and, until then, a build-and-test gate on the VM canary
-  (`tools/sync-hubble.sh canary`; passwordless sudo there). The second Linux is
+  real-hardware platform on **kepler**, the second Lenovo Tiny (ThinkCentre
+  M910q, i5-6500T, Intel HD 530, 16 GB; FreeBSD 15.1 on ZFS, installed
+  2026-11-10; drm-kmod with `kld_list="i915kms"`, seatd, Rust by rustup so
+  `. ~/.cargo/env` over ssh; `tools/sync-hubble.sh kepler`; passwordless
+  sudo; Vergence installed under /usr/local, `vergence` from its text
+  console starts the session, and ~/.config/vergence/control-socket is
+  there so `vctl` works), and a build-and-test gate on the VM canary
+  (`tools/sync-hubble.sh canary`; passwordless sudo there; no display
+  device, so a session there is the server nested in its Xfce: see
+  docs/toolkit-milestone-1.md, "canary in software"). The second Linux is
   **Fedora on
   Techbench** (Fedora 45, Intel UHD 770), replacing Debian 13, which had been
   picked for hosting the X11 daemon. Techbench is Dave's workstation, not a

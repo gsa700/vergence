@@ -7,6 +7,15 @@
 //! program is built: a machine without them, or without their development
 //! files (Techbench has only the run-time libraries), still builds and runs,
 //! and draws in software. Only the functions the renderer uses are declared.
+//!
+//! **On FreeBSD the loading has a rule** (found on kepler, 2026-11-10:
+//! FreeBSD 15.1, Mesa 26.2.2, Intel graphics): a thread that already existed
+//! when these libraries were loaded cannot use them. Its thread-local state
+//! for them is not set up, and its first drawing call jumps to address zero.
+//! The thread that loads them is safe, and so is every thread started
+//! afterwards; Linux has no such rule. So: the thread that draws is the one
+//! that makes the first renderer (the toolkit's window thread does both), or
+//! [`preload`] is called before any other thread is started, as the tests do.
 
 use std::ffi::{c_char, c_void};
 
@@ -20,6 +29,14 @@ const RTLD_NOW: i32 = 2;
 /// The first of these libraries that loads.
 fn open(names: &[&std::ffi::CStr]) -> Option<*mut c_void> {
     names.iter().map(|n| unsafe { dlopen(n.as_ptr(), RTLD_NOW) }).find(|h| !h.is_null())
+}
+
+/// Loads the libraries now, on this thread; true if all three are there.
+/// For a program that will draw on threads which are not yet started, or
+/// that cannot say which thread makes its first renderer: call it before
+/// starting any (see the FreeBSD rule above). Loading again later is free.
+pub fn preload() -> bool {
+    Gbm::load().is_some() & Egl::load().is_some() & Gles::load().is_some()
 }
 
 /// Declares a struct of functions and how to load it from a library.

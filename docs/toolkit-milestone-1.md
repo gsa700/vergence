@@ -699,8 +699,51 @@ borrowing. Nothing new comes in.
   worst; from `vctl` sending a press to the terminal having it, 13 to
   40 ms. (A first reading of "600 to 850 ms" was the script taking the
   frame number for the time.)
-  Still to do in step 5: an undisturbed soak on Hubble (running as this
-  is written).
+- **Step 5, the soak again, left alone (2026-11-10): clean.** Six tabs
+  for 62 minutes on Hubble with the installed terminal, nobody opening
+  windows or measuring beside it. Memory 225.2 MB in the first minute,
+  225.3 to 225.4 MB from the tenth to the last. The interface thread
+  under half a percent in every minute (btop shown). `seq 1 1000000`
+  0.72 s on average, 1.03 s the slowest single run of some 5,000;
+  colour 9,500 lines/s and cursor 8,300 batches/s with the four floods
+  at once. Nothing on the terminal's error output; every job ended with
+  it. The kernel log gained two lines, a USB device unplugged twice.
+  The server logged one slow frame, 45 ms, in the second the test's
+  window opened, and none in the 62 minutes after. Idle, a terminal
+  used no CPU time in 20 seconds.
+  **With that, every figure of acceptance 5 has been met and written
+  here, and the five steps are done:** on Hubble (Void) and Techbench
+  (Fedora), in software on canary (FreeBSD), and on kepler (FreeBSD on
+  real hardware).
+- **kepler: FreeBSD on real hardware again (2026-11-10).** The second
+  Lenovo Tiny (ThinkCentre M910q, i5-6500T, Intel HD 530, 16 GB) was
+  installed with FreeBSD 15.1 and set up that afternoon (CLAUDE.md has
+  the particulars). The whole workspace built there in 8 minutes and
+  its 253 tests pass, the GPU renderer's among them on a real GPU for
+  the first time on FreeBSD (text at scale 1: two pixels of 43,200 more
+  than one step from the reference).
+  **Found there: on FreeBSD a thread that existed before the graphics
+  libraries were loaded cannot use them** (its first drawing call jumps
+  to address zero). The renderer loads them when the first renderer is
+  made, and the test harness had made several threads by then: the GPU
+  tests crashed whenever they ran side by side, and passed one at a
+  time or with the libraries loaded at the program's start. The rule is
+  written in `gl.rs`; `vergence_render::preload_gpu_libraries` loads
+  them early for a program that needs it, and the GPU tests call it
+  before `main`. The terminal is not touched by it: its window thread
+  both loads the libraries and draws.
+  **The session and the terminal on kepler** (installed with
+  `tools/install.sh`, started with `vergence` from its text console; one
+  1920 x 1080 monitor at scale 1 and 60 Hz; the terminal 820 x 520 units,
+  114 x 25 cells): the terminal and the settings app draw as they do on
+  Linux. Six tabs for three minutes on its four cores: no crash, nothing
+  on the error output, `seq 1 1000000` 0.90 to 0.91 s, colour 8,700
+  lines/s, cursor 4,400 batches/s, Unicode 254,000 lines/s, the
+  interface thread 0.14 s of CPU in the three minutes; every job ended
+  with the terminal. One flood alone and shown, at 60 frames a second:
+  colour 25,000 lines/s with the interface thread at 3.8% of a core;
+  cursor 14,400 batches/s at 3.2%. Acceptance 5's figures for a flood
+  alone hold on the slowest of the four machines.
 
 ## Acceptance
 

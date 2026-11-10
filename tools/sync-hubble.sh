@@ -1,12 +1,14 @@
 #!/bin/bash
-# Copy this working tree (committed or not) to the FreeBSD dev box, Hubble,
-# at ~/src/vergence, for building and testing there (see CLAUDE.md).
+# Copy this working tree (committed or not) to a dev box, at ~/src/vergence,
+# for building and testing there (see CLAUDE.md): hubble (Void Linux, the
+# default), kepler (FreeBSD on real hardware), canary (FreeBSD VM), techbench
+# (Fedora).
 #
 # rsync sends only what changed and deletes files removed here, but never
 # touches build output on Hubble (target/, the size-box binaries, .NET
 # bin/obj): excluded paths are left alone by --delete.
 #
-# Usage: tools/sync-hubble.sh [host]     (default: hubble, an SSH alias)
+# Usage: tools/sync-hubble.sh [host]     (default: hubble; hosts by their DNS names)
 set -euo pipefail
 host=${1:-hubble}
 here=$(cd "$(dirname "$0")/.." && pwd)
