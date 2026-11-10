@@ -1,0 +1,16 @@
+[package]
+name = "vergence-render"
+description = "Vergence's renderer: a scene into pixels, on the CPU (the reference) and the GPU (whitepaper §6.10)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+vergence-scene.workspace = true
+vergence-text.workspace = true
+
+# The vscene tool writes PNGs with the crate the server's screenshots use
+# (borrowed, whitepaper §8). The renderer itself has no other parts.
+[dev-dependencies]
+png = "0.18"

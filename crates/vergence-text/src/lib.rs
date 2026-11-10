@@ -32,7 +32,7 @@ pub mod sfnt;
 #[cfg(test)]
 mod fuzz;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use ab_glyph::{Font, FontVec, GlyphId, PxScale, VariableFont, point};
 
@@ -119,7 +119,7 @@ pub struct Fonts {
     by_entry: HashMap<(usize, u16), Option<FaceId>>,
     /// The face and glyph that stand in for a character a face lacks.
     fallbacks: HashMap<(FaceId, char), (FaceId, u32)>,
-    cache: HashMap<GlyphKey, Option<Bitmap>>,
+    cache: HashMap<GlyphKey, Option<Arc<Bitmap>>>,
     cache_bytes: usize,
 }
 
@@ -248,14 +248,15 @@ impl Fonts {
     /// The glyph's coverage with the em `em_px` pixels tall, its origin
     /// `sub_x` quarter-pixels right of a whole pixel (0 to 3). None for a
     /// glyph with nothing to draw (a space), or a size that makes no sense.
-    /// Rasterised once and kept.
-    pub fn raster(&mut self, face: FaceId, glyph: u32, em_px: f32, sub_x: u8) -> Option<&Bitmap> {
+    /// Rasterised once and kept; the bitmap is shared, not copied, so a
+    /// renderer can hold on to it across threads.
+    pub fn raster(&mut self, face: FaceId, glyph: u32, em_px: f32, sub_x: u8) -> Option<Arc<Bitmap>> {
         if !(em_px.is_finite() && em_px > 0.0 && em_px <= MAX_EM_PX) {
             return None;
         }
         let key = GlyphKey { face, glyph, size: (em_px * 64.0).round() as u32, sub_x: sub_x & 3 };
         if !self.cache.contains_key(&key) {
-            let bitmap = self.rasterise(face, glyph, key.size as f32 / 64.0, key.sub_x);
+            let bitmap = self.rasterise(face, glyph, key.size as f32 / 64.0, key.sub_x).map(Arc::new);
             if self.cache_bytes > MAX_CACHE_BYTES {
                 self.cache.clear();
                 self.cache_bytes = 0;
@@ -263,7 +264,7 @@ impl Fonts {
             self.cache_bytes += bitmap.as_ref().map_or(0, |b| b.alpha.len()) + 64;
             self.cache.insert(GlyphKey { face, glyph, size: key.size, sub_x: key.sub_x }, bitmap);
         }
-        self.cache.get(&key).and_then(Option::as_ref)
+        self.cache.get(&key).and_then(Option::clone)
     }
 
     fn rasterise(&self, face: FaceId, glyph: u32, em_px: f32, sub_x: u8) -> Option<Bitmap> {
@@ -340,14 +341,14 @@ mod tests {
     fn a_glyph_is_rasterised_once_whatever_draws_it() {
         let (mut fonts, face) = mono();
         let (_, a) = fonts.glyph(face, 'A');
-        let first = fonts.raster(face, a, 48.0, 0).expect("A has an outline").clone();
+        let first = fonts.raster(face, a, 48.0, 0).expect("A has an outline");
         assert!(first.width > 8 && first.width < 64 && first.height > 16 && first.height < 64, "{} x {}", first.width, first.height);
         assert_eq!(first.alpha.len(), (first.width * first.height) as usize);
         assert!(first.alpha.iter().any(|v| *v > 200), "some of it is solid");
         assert!(first.alpha.iter().any(|v| *v == 0), "some of it is empty");
         assert!(first.top < 0 && first.top > -64, "it stands on the baseline: top {}", first.top);
         assert_eq!(fonts.cached(), 1);
-        assert_eq!(fonts.raster(face, a, 48.0, 0), Some(&first));
+        assert!(fonts.raster(face, a, 48.0, 0).is_some_and(|again| Arc::ptr_eq(&again, &first)), "the same bitmap, not a copy");
         assert_eq!(fonts.cached(), 1, "the second request was answered from the cache");
         // Another sub-pixel position and another size are other bitmaps.
         assert!(fonts.raster(face, a, 48.0, 2).is_some());
@@ -370,8 +371,8 @@ mod tests {
         for bad in [0.0, -4.0, f32::NAN, f32::INFINITY, 1.0e9] {
             assert_eq!(fonts.raster(face, a, bad, 0), None, "{bad}");
         }
-        let missing = fonts.raster(face, 0, 16.0, 0).cloned();
-        assert_eq!(fonts.raster(face, 1 << 20, 16.0, 0).cloned(), missing, "a glyph number no font has is the missing glyph");
+        let missing = fonts.raster(face, 0, 16.0, 0);
+        assert_eq!(fonts.raster(face, 1 << 20, 16.0, 0), missing, "a glyph number no font has is the missing glyph");
     }
 
     #[test]
@@ -424,8 +425,8 @@ mod tests {
             let (_, a) = fonts.glyph(face, 'A');
             let (_, b) = fonts.glyph(bold, 'A');
             let ink = |bm: &Bitmap| bm.alpha.iter().map(|v| *v as u64).sum::<u64>();
-            let light = ink(fonts.raster(face, a, 48.0, 0).unwrap());
-            let dark = ink(fonts.raster(bold, b, 48.0, 0).unwrap());
+            let light = ink(&fonts.raster(face, a, 48.0, 0).unwrap());
+            let dark = ink(&fonts.raster(bold, b, 48.0, 0).unwrap());
             assert!(dark > light, "bold has more ink: {dark} against {light}");
         } else {
             eprintln!("skipped: {} has no bolder face here", regular.family);

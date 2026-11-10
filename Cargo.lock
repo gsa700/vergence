@@ -4595,6 +4595,15 @@ name = "vergence-protocol"
 version = "0.1.0"
 
 [[package]]
+name = "vergence-render"
+version = "0.1.0"
+dependencies = [
+ "png 0.18.1",
+ "vergence-scene",
+ "vergence-text",
+]
+
+[[package]]
 name = "vergence-scene"
 version = "0.1.0"
 

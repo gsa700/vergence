@@ -58,8 +58,8 @@ Five crates, each usable without the ones after it.
 3. **`vergence-render`**: turns a scene into pixels, two ways.
    - **GPU**: rectangles and glyphs as instanced quads, glyphs from an
      atlas texture, each monitor at its exact scale. A terminal screen is
-     two instances a cell; 3792 x 2118 pixels is about 30,000 cells, which
-     is small work for any GPU. Only changed rows are sent again.
+     two instances a cell; 3792 x 2118 pixels is about 5,300 cells at the
+     terminal's size, which is small work for any GPU. Only changed rows are sent again.
    - **CPU, the reference**: the same scene rasterised in software, in
      bands across the cores. It is what tests compare the GPU against, what
      runs on a machine without a GPU (canary), and what draws a window that
@@ -112,7 +112,7 @@ borrowing. Nothing new comes in.
 
 1. **Scene, text and the CPU renderer.** No window. A command-line tool
    renders a scene file to a PNG. Golden-image tests; a test scene that is
-   a full terminal screen of coloured cells at 3792 x 2118. The font
+   a full terminal screen of coloured cells at 3792 x 2118 (5,338 cells). The font
    fallback and the glyph cache with their tests. Runs on all three
    machines.
 2. **A window, in software.** `vergence-wl` and `vergence-ui`: a window
@@ -173,16 +173,45 @@ borrowing. Nothing new comes in.
     one that can draw.
   - Outlines are not hinted. Fine at scale 2 and 3; to be judged on the
     1080p monitor when the renderer draws.
-  Next in step 1: the CPU renderer in `vergence-render` and the PNG tool.
+- **2026-11-09, step 1, third part: the CPU renderer.** `vergence-render`
+  with `Cpu` (cpu.rs): the scene is prepared once (positions to pixels at
+  the scale asked for, clips to a scissor rectangle plus shapes to test
+  against, glyphs from the text cache at the exact pixel size), then drawn
+  in bands of 32 rows on every core. Fills, rounded fills, outlines, lines
+  with round ends, tinted glyphs, pictures stretched smoothly, clips
+  (rounded and between pixels too). `render_rows` redraws a range of rows
+  to exactly what a whole render gives. `examples/vscene.rs` draws two
+  demonstration scenes to a PNG with timings. 17 tests: pixel-exact
+  shapes, a circle's area, symmetry, 1 thread against 2, 3, 6 and 16 (the
+  same picture), rows against the whole, refusals, text where it was laid
+  out, colour not rasterising again, and **the same picture on Linux and
+  FreeBSD** (hashes of a busy scene at three scales). Green on Hubble,
+  canary and Techbench. Measured on the stress test's window, 3792 x 2118
+  pixels with every cell its own colours and character:
+
+  | | cores | a frame | one core | one text row redrawn |
+  |---|---|---|---|---|
+  | Hubble (i5-8500T) | 6 | 13.5 ms | 64 ms | 2.0 ms |
+  | canary (VM) | 16 | 5.8 ms | 32 ms | 0.9 ms |
+  | Techbench | 20 | 4.1 ms | 28 ms | 1.0 ms |
+
+  That window holds 5,338 cells (158 x 34 at 13.33 units), not the "about
+  30,000" this plan guessed; acceptance 1 and the renderer notes are
+  corrected below. Acceptance 1 is met for the frame (13.5 ms against 30)
+  and at its limit for one row on Hubble (2.0 ms against "under 2"): most
+  of a row's cost is preparing the whole scene again, which the window
+  code in step 2 avoids by keeping the prepared scene between frames.
+  With that, **step 1 is complete**. Next: step 2, the window.
 
 ## Acceptance
 
 Every step: `cargo test --workspace` green on Hubble, canary and Techbench;
 no new warnings.
 
-1. The CPU renderer draws the full-screen cell scene (about 30,000 cells,
-   every one its own colours) in under 30 ms on Hubble using all six
-   cores, and a one-row change in under 2 ms. Golden images match on all
+1. The CPU renderer draws the full-screen cell scene (5,338 cells, every
+   one its own colours) in under 30 ms on Hubble using all six cores, and
+   a one-row change in under 2 ms. **Met 2026-11-09** for the frame
+   (13.5 ms); one row is 2.0 ms, to come down in step 2 (Progress). Golden images match on all
    three machines, FreeBSD included. The scene decoder survives the fuzz
    test.
 2. The demo window is sharp on both of Hubble's monitors (a screenshot of
