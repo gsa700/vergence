@@ -37,12 +37,15 @@
 //! The desktop's settings are followed while the terminal runs: the two
 //! files are looked at once a second, and a change of fonts, colours or
 //! button side shows at the next frame.
-//! Panes and the right-click menu come next.
+//! The right button opens a menu (menu.rs) with copy, paste and the tab
+//! commands; where a program has the mouse, Shift and the right button.
+//! Panes come next.
 
 mod bar;
 #[allow(dead_code)]
 #[path = "../../vergence-term/src/grid.rs"]
 mod grid;
+mod menu;
 mod mouse;
 #[allow(dead_code)]
 #[path = "../../vergence-term/src/pty.rs"]
@@ -65,6 +68,7 @@ use std::{
 
 use bar::{BAR_H, Layout, Part, WinButton};
 use grid::{Cell, Color as CellColor, Grid, MouseMode};
+use menu::{Item, Menu};
 use scrollbar::Scrollbar;
 use select::{Pos, Selection, Unit};
 use vergence_scene::{Color, Glyph, Point, Rect, Scene};
@@ -397,6 +401,9 @@ struct Terminal {
     reported: Option<Button>,
     /// The screen cell the program was last told the pointer is on.
     reported_cell: Option<(usize, usize)>,
+    /// The right-click menu, while it is open, and the line of it under the pointer.
+    menu: Option<Menu>,
+    menu_hover: Option<Item>,
     /// A settings file was written since it was last read.
     settings_changed: Arc<AtomicBool>,
     /// How many tabs to open with (`--tabs N`; one unless asked).
@@ -428,6 +435,8 @@ impl Terminal {
             shift: false,
             reported: None,
             reported_cell: None,
+            menu: None,
+            menu_hover: None,
             settings_changed: Arc::new(AtomicBool::new(false)),
             open_with: 1,
         }
@@ -501,6 +510,60 @@ impl Terminal {
         }
         self.selecting = true;
         window.redraw();
+    }
+
+    /// The front tab's selected text, if there is any.
+    fn selected_text(&self) -> Option<String> {
+        let s = lock(&self.sessions.get(self.shown)?.screen);
+        s.selection.and_then(|sel| sel.text(&s.grid))
+    }
+
+    /// Input while the menu is open is the menu's: a press on a line does
+    /// what it says, a press anywhere else or Escape closes it. True if the
+    /// input was used up here.
+    fn menu_input(&mut self, input: &Input, window: &mut Window) -> bool {
+        let Some(menu) = &self.menu else { return false };
+        match input {
+            Input::PointerMoved { x, y } => {
+                let over = menu.at(*x, *y);
+                window.set_cursor(Cursor::Default);
+                if over != self.menu_hover {
+                    self.menu_hover = over;
+                    window.redraw();
+                }
+                true
+            }
+            Input::Button { button, pressed: true, x, y, .. } => {
+                let chosen = if *button == Button::Left { menu.at(*x, *y) } else { None };
+                // A press on the menu's own ground, between its lines, leaves it open.
+                if chosen.is_none() && *button == Button::Left && menu.contains(*x, *y) {
+                    return true;
+                }
+                self.menu = None;
+                self.menu_hover = None;
+                window.redraw();
+                match chosen {
+                    Some(Item::Copy) => {
+                        if let Some(text) = self.selected_text() {
+                            window.copy(&text);
+                        }
+                    }
+                    Some(Item::Paste) => window.paste(),
+                    Some(Item::NewTab) => self.new_tab(window),
+                    Some(Item::CloseTab) => self.close_tab(self.shown, window),
+                    None => {}
+                }
+                true
+            }
+            Input::Button { .. } | Input::Scroll { .. } => true,
+            Input::Key { sym: sym::ESCAPE, pressed: true, .. } | Input::Focus(false) => {
+                self.menu = None;
+                self.menu_hover = None;
+                window.redraw();
+                matches!(input, Input::Key { .. })
+            }
+            _ => false,
+        }
     }
 
     /// The scrollbar of the tab in front, if it has one now.
@@ -717,6 +780,9 @@ impl App for Terminal {
             Input::Focus(false) => self.shift = false,
             _ => {}
         }
+        if self.menu_input(input, window) {
+            return;
+        }
         match input {
             Input::PointerMoved { y, .. } if self.thumb.is_some() => self.drag_thumb(*y, self.thumb.unwrap_or(0.0), window),
             Input::Button { button: Button::Left, pressed: false, .. } if self.thumb.is_some() => self.thumb = None,
@@ -767,6 +833,11 @@ impl App for Terminal {
                     self.reported = Some(*button);
                 }
                 (Button::Left, None) if *y >= BAR_H => self.press_text(*x, *y, *modifiers, window),
+                (Button::Right, None) if *y >= BAR_H => {
+                    self.menu = Some(Menu::new(*x, *y, (self.width, self.height), self.selected_text().is_some()));
+                    self.menu_hover = None;
+                    window.redraw();
+                }
                 (Button::Left, Some(Part::Button(WinButton::Close))) => window.close(),
                 (Button::Left, Some(Part::Button(WinButton::Minimize))) => window.minimize(),
                 (Button::Left, Some(Part::Button(WinButton::Maximize))) => {
@@ -1019,6 +1090,10 @@ impl App for Terminal {
             scene.glyphs(font, size, p.bg, Point::new(at.x + 8.0, at.y + 2.0 + mt.baseline), glyphs);
         }
         scene.pop_clip();
+        drop(guard);
+        if let Some(menu) = &self.menu {
+            menu.draw(&mut scene, fonts, mt.ui, self.settings.ui_size, p.accent, self.menu_hover);
+        }
         scene
     }
 }

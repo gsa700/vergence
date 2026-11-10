@@ -475,7 +475,16 @@ borrowing. Nothing new comes in.
     left to right, 10 to 14 points, in one running window.
   Tests (2 new: 33 in `vterm`, 24 in `vergence-term`) green on Hubble,
   canary and Techbench.
-  Still to do in step 4: panes and the right-click menu.
+- **Step 4, seventh part (2026-11-09): the right-click menu.** `menu.rs`:
+  Copy (greyed with nothing selected), Paste, New tab and Close tab,
+  each with its keys, drawn in the window over the terminal and kept
+  inside it. The right button opens it at the pointer (Shift and the
+  right button where a program has the mouse); a press on a line does
+  what it says, a press elsewhere or Escape closes it. The split lines
+  join it with panes. Tests (2 new, 35 in `vterm`) green on Hubble,
+  canary and Techbench; its picture checked from the CPU renderer, its
+  use awaits a hand test.
+  Still to do in step 4: panes.
 
 ## Acceptance
 
