@@ -119,7 +119,11 @@ impl Selection {
         for row in sr..=er {
             let line = grid.abs_line(row).unwrap_or(&[]);
             let text: String = match self.span(row, line.len()) {
-                Some((a, b)) => line[a..=b].iter().filter(|c| c.width != 0).map(|c| c.c).collect(),
+                Some((a, b)) => {
+                    let mut text = String::new();
+                    line[a..=b].iter().filter(|c| c.width != 0).for_each(|c| c.push_to(&mut text));
+                    text
+                }
                 None => String::new(),
             };
             out.push(text.trim_end().to_string());
@@ -184,6 +188,12 @@ mod tests {
         assert_eq!(s.span(0, 60), Some((1, 4)));
         assert_eq!(s.text(&g).as_deref(), Some("日本"));
         assert_eq!(Selection::start(&g, Unit::Word, (4, 0)).text(&g).as_deref(), Some("a日本b"));
+    }
+
+    #[test]
+    fn marks_are_copied_with_their_character() {
+        let g = grid("cafe\u{301} au lait");
+        assert_eq!(Selection::start(&g, Unit::Word, (1, 0)).text(&g).as_deref(), Some("cafe\u{301}"));
     }
 
     #[test]

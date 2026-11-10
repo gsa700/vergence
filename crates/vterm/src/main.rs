@@ -34,7 +34,10 @@
 //! keeps the mouse for selecting.
 //! A thin scrollbar at the right edge (scrollbar.rs) shows where the view
 //! is in the scrollback and can be dragged.
-//! Panes and the settings followed live come next.
+//! The desktop's settings are followed while the terminal runs: the two
+//! files are looked at once a second, and a change of fonts, colours or
+//! button side shows at the next frame.
+//! Panes and the right-click menu come next.
 
 mod bar;
 #[allow(dead_code)]
@@ -53,7 +56,10 @@ mod vt;
 use std::{
     collections::HashMap,
     io::Write,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -91,9 +97,34 @@ fn font_name(value: &str, family: &str, points: f32) -> (String, f32) {
     }
 }
 
-fn config(name: &str) -> String {
+fn config_path(name: &str) -> Option<std::path::PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")));
-    base.and_then(|b| std::fs::read_to_string(b.join("vergence").join(name)).ok()).unwrap_or_default()
+    base.map(|b| b.join("vergence").join(name))
+}
+
+fn config(name: &str) -> String {
+    config_path(name).and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default()
+}
+
+/// Sets `changed` and wakes the window whenever one of the settings files
+/// is written (looked at once a second, by their modification times, as
+/// the first terminal does; the session bus will tell us instead when the
+/// toolkit speaks it).
+fn watch_settings(changed: Arc<AtomicBool>, waker: Waker) {
+    let stamp = |name: &str| config_path(name).and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok());
+    let stamps = move || [stamp("desktop.toml"), stamp("settings.toml")];
+    std::thread::spawn(move || {
+        let mut seen = stamps();
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+            let now = stamps();
+            if now != seen {
+                seen = now;
+                changed.store(true, Ordering::SeqCst);
+                waker.wake();
+            }
+        }
+    });
 }
 
 impl Settings {
@@ -366,6 +397,8 @@ struct Terminal {
     reported: Option<Button>,
     /// The screen cell the program was last told the pointer is on.
     reported_cell: Option<(usize, usize)>,
+    /// A settings file was written since it was last read.
+    settings_changed: Arc<AtomicBool>,
     /// How many tabs to open with (`--tabs N`; one unless asked).
     open_with: usize,
 }
@@ -395,6 +428,7 @@ impl Terminal {
             shift: false,
             reported: None,
             reported_cell: None,
+            settings_changed: Arc::new(AtomicBool::new(false)),
             open_with: 1,
         }
     }
@@ -620,6 +654,7 @@ impl App for Terminal {
 
     fn waker(&mut self, waker: Waker) {
         self.waker = Some(waker.clone());
+        watch_settings(self.settings_changed.clone(), waker.clone());
         for _ in 0..self.open_with {
             match Session::start(self.fits.0, self.fits.1, waker.clone()) {
                 Ok(s) => self.sessions.push(s),
@@ -632,6 +667,14 @@ impl App for Terminal {
     }
 
     fn woken(&mut self, window: &mut Window) {
+        if self.settings_changed.swap(false, Ordering::SeqCst) {
+            // Colours, fonts and the buttons' side as they are now; the cell's size is
+            // worked out again at the next frame, and the grids follow it.
+            self.palette = palette();
+            self.settings = Settings::from_text(&config("settings.toml"));
+            self.metrics = None;
+            window.redraw();
+        }
         // Tabs whose program has ended go; the window goes with the last.
         let mut index = 0;
         while index < self.sessions.len() {
@@ -907,6 +950,15 @@ impl App for Terminal {
             // Glyphs, each at its cell: a run for each stretch in one font and colour.
             let mut run: Option<(u32, Color, Vec<Glyph>)> = None;
             let origin = Point::new(PAD, top + mt.baseline);
+            let mut put = |scene: &mut Scene, font: u32, fg: Color, placed: Glyph| match &mut run {
+                Some((f, c, glyphs)) if *f == font && *c == fg => glyphs.push(placed),
+                _ => {
+                    if let Some((f, c, glyphs)) = run.take() {
+                        scene.glyphs(f, size, c, origin, glyphs);
+                    }
+                    run = Some((font, fg, vec![placed]));
+                }
+            };
             for (col, cell) in line.iter().enumerate() {
                 if cell.width == 0 || cell.c == ' ' {
                     continue;
@@ -916,20 +968,22 @@ impl App for Terminal {
                 if st.dim {
                     fg.a = 153;
                 }
-                let (face, glyph) = fonts.glyph(if st.bold { mt.bold } else { mt.regular }, cell.c);
+                let own = if st.bold { mt.bold } else { mt.regular };
+                let (face, glyph) = fonts.glyph(own, cell.c);
                 let font = number(&mut scene, fonts, face);
-                let placed = Glyph { id: glyph, x: col as f32 * cw, y: 0.0 };
-                match &mut run {
-                    Some((f, c, glyphs)) if *f == font && *c == fg => glyphs.push(placed),
-                    _ => {
-                        if let Some((f, c, glyphs)) = run.take() {
-                            scene.glyphs(f, size, c, origin, glyphs);
-                        }
-                        run = Some((font, fg, vec![placed]));
-                    }
+                put(&mut scene, font, fg, Glyph { id: glyph, x: col as f32 * cw, y: 0.0 });
+                // Combining marks, drawn on the character. Fonts make them one of two ways:
+                // with no advance, drawn back over what came before the pen (so the pen
+                // goes after the character), or as wide as a cell, drawn in place (so it
+                // goes where the character's did).
+                for mark in cell.marks.into_iter().filter(|m| *m != '\0') {
+                    let (face, glyph) = fonts.glyph(own, mark);
+                    let font = number(&mut scene, fonts, face);
+                    let after = fonts.advance(face, glyph, size) < cw * 0.5;
+                    put(&mut scene, font, fg, Glyph { id: glyph, x: (col + if after { cell.width.max(1) as usize } else { 0 }) as f32 * cw, y: 0.0 });
                 }
             }
-            if let Some((f, c, glyphs)) = run {
+            if let Some((f, c, glyphs)) = run.take() {
                 scene.glyphs(f, size, c, origin, glyphs);
             }
             // What is selected, tinted over its text.

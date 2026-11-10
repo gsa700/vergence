@@ -454,8 +454,28 @@ borrowing. Nothing new comes in.
   pointer) and the view follows the drag. The "lines back" label moved
   left of it. Tests (2 new, 31 in `vterm`) green on Hubble, canary and
   Techbench; seen in a screenshot on Hubble, the drag awaits a hand test.
-  Still to do in step 4: panes, the right-click menu, settings followed
-  live, and combining marks kept on their cell.
+- **Step 4, sixth part (2026-11-09): combining marks and live settings.**
+  - A cell of the screen (`grid.rs`, shared with the first terminal)
+    now keeps up to two combining marks with its character; before, they
+    were dropped. A mark goes on the character printed last (under the
+    cursor when the line is full, on the left half of a double-width
+    one), takes no cell, and is copied with its character. `vterm` draws
+    each mark on its character: after it for a font whose marks have no
+    advance, in its place for one whose marks are a cell wide. This is
+    placement without the font's own mark tables, enough for a fixed-pitch
+    face. `e` + U+0301 shows as é (acceptance 4), and "Việt", with two
+    marks on one letter, matches the precomposed form in a screenshot on
+    Hubble. The first terminal keeps the marks but does not draw them.
+  - The settings are followed while the terminal runs: `settings.toml`
+    and `desktop.toml` are looked at once a second (as the first terminal
+    does; the session bus replaces this when the toolkit speaks it), and
+    the colour scheme, both fonts and the buttons' side change at the
+    next frame, the grids following the new cell size. Checked on Hubble
+    against a copy of the configuration: Tango to Catppuccin, buttons
+    left to right, 10 to 14 points, in one running window.
+  Tests (2 new: 33 in `vterm`, 24 in `vergence-term`) green on Hubble,
+  canary and Techbench.
+  Still to do in step 4: panes and the right-click menu.
 
 ## Acceptance
 

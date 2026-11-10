@@ -47,11 +47,31 @@ pub struct Cell {
     pub style: Style,
     /// 2: the left half of a double-width character; 0: its right half.
     pub width: u8,
+    /// Combining marks on the character (the accent of an `e` sent as two
+    /// characters), in the order they came; '\0' where there is none. A
+    /// third mark on one character is dropped.
+    pub marks: [char; 2],
+}
+
+const NO_MARKS: [char; 2] = ['\0'; 2];
+
+impl Cell {
+    /// The cell's text: its character and the marks on it.
+    pub fn push_to(&self, out: &mut String) {
+        out.push(self.c);
+        out.extend(self.marks.iter().filter(|m| **m != '\0'));
+    }
+}
+
+/// A mark that is drawn on the character before it.
+fn combining(c: char) -> bool {
+    let u = c as u32;
+    (0x0300..=0x036f).contains(&u) || (0x1ab0..=0x1aff).contains(&u) || (0x20d0..=0x20ff).contains(&u)
 }
 
 impl Default for Cell {
     fn default() -> Self {
-        Cell { c: ' ', style: Style::default(), width: 1 }
+        Cell { c: ' ', style: Style::default(), width: 1, marks: NO_MARKS }
     }
 }
 
@@ -174,8 +194,33 @@ impl Grid {
     }
 
     /// A blank cell in the current background (erasing uses the pen's background).
+    /// A combining mark goes on the character printed last: the one before
+    /// the cursor, or under it when the line is full. It takes no cell.
+    fn mark(&mut self, c: char) {
+        let y = self.cy;
+        let mut x = if self.wrap_next {
+            self.cx
+        } else if self.cx > 0 {
+            self.cx - 1
+        } else {
+            return;
+        };
+        if self.lines[y][x].width == 0 && x > 0 {
+            // The right half of a double-width character: the mark is on the character.
+            x -= 1;
+        }
+        let cell = &mut self.lines[y][x];
+        if cell.c == ' ' {
+            return;
+        }
+        if let Some(slot) = cell.marks.iter_mut().find(|m| **m == '\0') {
+            *slot = c;
+            self.dirty = true;
+        }
+    }
+
     fn blank(&self) -> Cell {
-        Cell { c: ' ', style: Style { bg: self.pen.bg, ..Style::default() }, width: 1 }
+        Cell { c: ' ', style: Style { bg: self.pen.bg, ..Style::default() }, width: 1, marks: NO_MARKS }
     }
 
     pub fn resize(&mut self, cols: usize, rows: usize) {
@@ -388,6 +433,9 @@ impl Perform for Grid {
     fn print(&mut self, c: char) {
         let w = width(c);
         if w == 0 {
+            if combining(c) {
+                self.mark(c);
+            }
             return;
         }
         if self.wrap_next {
@@ -409,9 +457,9 @@ impl Perform for Grid {
             }
         }
         let (x, y) = (self.cx, self.cy);
-        self.lines[y][x] = Cell { c, style: self.pen, width: w as u8 };
+        self.lines[y][x] = Cell { c, style: self.pen, width: w as u8, marks: NO_MARKS };
         if w == 2 {
-            self.lines[y][x + 1] = Cell { c: ' ', style: self.pen, width: 0 };
+            self.lines[y][x + 1] = Cell { c: ' ', style: self.pen, width: 0, marks: NO_MARKS };
         }
         if x + w >= self.cols {
             self.cx = self.cols - 1;
@@ -648,7 +696,11 @@ impl Grid {
     pub fn text(&self) -> String {
         self.lines
             .iter()
-            .map(|l| l.iter().filter(|c| c.width != 0).map(|c| c.c).collect::<String>().trim_end().to_string())
+            .map(|l| {
+                let mut text = String::new();
+                l.iter().filter(|c| c.width != 0).for_each(|c| c.push_to(&mut text));
+                text.trim_end().to_string()
+            })
             .collect::<Vec<_>>()
             .join("\n")
             .trim_end()
@@ -709,6 +761,29 @@ mod tests {
         assert_eq!(l[1].style.fg, Color::Indexed(200));
         assert_eq!(l[2].style.fg, Color::Rgb(1, 2, 3));
         assert_eq!(l[3].style, Style::default());
+    }
+
+    #[test]
+    fn combining_marks_stay_on_their_character() {
+        let mut g = Grid::new(6, 2);
+        feed(&mut g, "e\u{301}a\u{308}x");
+        assert_eq!((g.line(0)[0].c, g.line(0)[0].marks), ('e', ['\u{301}', '\0']));
+        assert_eq!(g.line(0)[1].marks[0], '\u{308}');
+        assert_eq!((g.line(0)[2].c, g.cx), ('x', 3), "a mark takes no cell");
+        assert_eq!(g.text(), "e\u{301}a\u{308}x");
+        // Two marks are kept, a third is dropped; a mark with nothing before it too.
+        let mut g = Grid::new(6, 2);
+        feed(&mut g, "\u{301}e\u{323}\u{302}\u{301}");
+        assert_eq!(g.line(0)[0].marks, ['\u{323}', '\u{302}']);
+        assert_eq!(g.text(), "e\u{323}\u{302}");
+        // On the last column (the cursor waits there) and on a wide character.
+        let mut g = Grid::new(4, 2);
+        feed(&mut g, "abcd\u{301}日\u{301}");
+        assert_eq!(g.line(0)[3].marks[0], '\u{301}');
+        assert_eq!((g.line(1)[0].c, g.line(1)[0].marks[0]), ('日', '\u{301}'));
+        // Written over, the marks go with the character.
+        feed(&mut g, "\rz");
+        assert_eq!((g.line(1)[0].c, g.line(1)[0].marks), ('z', NO_MARKS));
     }
 
     #[test]
