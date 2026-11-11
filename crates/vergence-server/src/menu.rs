@@ -204,7 +204,7 @@ impl Server {
         let ids = (0..3 + entries.len()).map(|_| Id::new()).collect();
         let mut m = OpenMenu { at: slot.loc, entries, hover: None, ids, commit: CommitCounter::default(), labels: HashMap::new() };
         // Beside the icon, on the side `towards` names, a little off the dock.
-        let off = vergence_shell::GAP;
+        let off = vergence_look::SHELF_POPUP_GAP as i32;
         m.at = match towards {
             Edge::Left => (slot.loc.x - off - WIDTH, slot.loc.y),
             Edge::Right => (slot.loc.x + slot.size.w + off, slot.loc.y),

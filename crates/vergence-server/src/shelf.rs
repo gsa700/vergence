@@ -20,14 +20,16 @@
 // ~/.config/vergence/desktop.toml:
 //
 //     [shelf]
-//     hide = false     # true: at an edge, the dock slides away (a sliver
-//                      # of it stays, as LXDE's panel does) and the windows
-//                      # have the whole screen; the pointer on the sliver, or
-//                      # a press on it, brings it back (step 6)
+//     hide = "never"   # "windows" (or true): at an edge, the dock slides
+//                      # away while a window covers where it stands;
+//                      # "always": away until the pointer comes. Away, a
+//                      # sliver stays (as LXDE's panel does) and windows have
+//                      # the whole screen; the pointer on the sliver, or a
+//                      # press on it, brings it out (step 6)
 //     pinned = ["firefox", "vergence-term"]   # entry ids, in their order
 //     opacity = 1.0    # the panel's, 0.3 to 1
 //     place = "edge"   # or "free", with x, y and upright; edge = "right",
-//                      # "left", "top", "bottom"; screen = "<id>"; gap = 6;
+//                      # "left", "top", "bottom"; screen = "<id>"; gap = 1;
 //                      # keep-clear = true
 //
 // The screen is the primary one ([displays] primary, else the first in
@@ -125,7 +127,9 @@ fn apps_stamp() -> Vec<Option<SystemTime>> {
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ShelfConfig {
-    pub hide: bool,
+    /// false or "never"; true or "windows": out of the way while a window
+    /// covers it; "always": away until the pointer comes to it.
+    pub hide: HideSetting,
     /// "edge" (along an edge, the default) or "free" (where it was put).
     pub place: Option<String>,
     /// "right" (the default), "left", "top" or "bottom".
@@ -148,6 +152,45 @@ pub struct ShelfConfig {
     /// Pinned applications, by desktop entry id, in their order on the dock.
     #[serde(default)]
     pub pinned: Vec<String>,
+}
+
+/// How `hide` is written: a word, or true and false (true is "windows").
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum HideSetting {
+    Flag(bool),
+    Word(String),
+}
+
+impl Default for HideSetting {
+    fn default() -> Self {
+        HideSetting::Flag(false)
+    }
+}
+
+/// When the dock gets out of the way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hide {
+    Never,
+    /// While a window covers where it stands (Dave, 2026-11-10: "visible
+    /// unless a window came over it ... several desktops do this").
+    Windows,
+    /// Always, until the pointer comes to its sliver.
+    Always,
+}
+
+impl HideSetting {
+    pub fn mode(&self) -> Hide {
+        match self {
+            HideSetting::Flag(true) => Hide::Windows,
+            HideSetting::Flag(false) => Hide::Never,
+            HideSetting::Word(w) => match w.trim().to_ascii_lowercase().as_str() {
+                "windows" | "dodge" | "true" => Hide::Windows,
+                "always" => Hide::Always,
+                _ => Hide::Never,
+            },
+        }
+    }
 }
 
 /// What the menu of an application's icon can do.
@@ -324,6 +367,9 @@ pub struct Shelf {
     pub out: bool,
     slide: Option<(std::time::Instant, bool)>,
     away: Option<std::time::Instant>,
+    /// Brought out by the pointer or a press on its sliver: out until the
+    /// pointer has been away from it a while.
+    peek: bool,
 }
 
 /// A window drawn smaller, somewhere else: on its way into the dock or out.
@@ -494,7 +540,17 @@ impl Server {
         let at = self.shelf.config.placement();
         let mut dock = self.shelf.dragged.or_else(|| self.shelf_screen().and_then(|s| vergence_shell::dock(rect(s), &at, items)).map(rectangle));
         // Hidden: moved out past its edge as far as it is slid away.
-        // As LXDE's panel hides: a sliver of it stays at the edge to be found.
+        // Out or away as the mode says, judged where the dock stands when out.
+        if self.shelf_hides()
+            && let Some(full) = dock
+        {
+            let want = self.shelf_want_out(full);
+            let going = self.shelf.slide.map_or(self.shelf.out, |s| s.1);
+            if want != going {
+                self.shelf_slide(want);
+            }
+        }
+        // Away, as LXDE's panel hides: a sliver of it stays at the edge to be found.
         if self.shelf_hides()
             && let (Some(d), Place::Edge(edge)) = (dock.as_mut(), at.place)
         {
@@ -516,7 +572,7 @@ impl Server {
     /// they have the whole screen.
     fn shelf_placement(&self) -> Placement {
         let mut at = self.shelf.config.placement();
-        if self.shelf.config.hide && matches!(at.place, Place::Edge(_)) {
+        if self.shelf.config.hide.mode() != Hide::Never && matches!(at.place, Place::Edge(_)) {
             at.keep_clear = false;
         }
         at
@@ -525,7 +581,20 @@ impl Server {
     /// The dock hides itself now: `hide` is set, it is at an edge, and it is
     /// not being held or dragged.
     fn shelf_hides(&self) -> bool {
-        self.shelf.config.hide && matches!(self.shelf.config.placement().place, Place::Edge(_)) && self.shelf.held.is_none() && self.shelf.dragged.is_none()
+        self.shelf.config.hide.mode() != Hide::Never && matches!(self.shelf.config.placement().place, Place::Edge(_)) && self.shelf.held.is_none() && self.shelf.dragged.is_none()
+    }
+
+    /// Whether the dock should be out now, standing at `full` when it is.
+    fn shelf_want_out(&self, full: Rectangle<i32, Logical>) -> bool {
+        if self.shelf.peek || self.menu.is_some() || self.launcher_is_open() {
+            return true;
+        }
+        match self.shelf.config.hide.mode() {
+            Hide::Never => true,
+            Hide::Always => false,
+            // Out unless a window on the desktop overlaps where it stands.
+            Hide::Windows => !self.space.elements().any(|w| self.space.element_geometry(w).is_some_and(|g| g.overlaps(full))),
+        }
     }
 
     /// How far out the dock is, 0 (away) to 1 (shown).
@@ -577,15 +646,21 @@ impl Server {
             }
             return;
         }
-        let going_out = matches!(self.shelf.slide, Some((_, true))) || self.shelf.out && self.shelf.slide.is_none();
+        let going_out = self.shelf.slide.map_or(self.shelf.out, |s| s.1);
+        let on_dock = self.shelf.dock.is_some_and(|d| d.to_f64().contains(at));
         if !going_out {
             // The sliver touched: out at once, as LXDE's panel comes.
-            if self.shelf.dock.is_some_and(|d| d.to_f64().contains(at)) {
+            if on_dock {
+                self.shelf.peek = true;
                 self.shelf_slide(true);
             }
             return;
         }
-        // Out: near the dock (or its menu open) it stays.
+        if !self.shelf.peek {
+            // Out because nothing covers it: it stays until something does.
+            return;
+        }
+        // Brought out by the pointer: near it (or its menu open) it stays.
         let margin = 24.0;
         let near = self.shelf.dock.is_some_and(|d| {
             let d = d.to_f64();
@@ -598,7 +673,10 @@ impl Server {
             let wait = smithay::reexports::calloop::timer::Timer::from_duration(AWAY);
             let _ = self.loop_handle.insert_source(wait, |_, _, state| {
                 if state.shelf.away.is_some_and(|t| t.elapsed() >= AWAY - std::time::Duration::from_millis(20)) && state.menu.is_none() && !state.launcher_is_open() {
-                    state.shelf_slide(false);
+                    // Back to what the mode says (the next frame decides).
+                    state.shelf.peek = false;
+                    state.shelf.away = None;
+                    state.redraw_all();
                 }
                 smithay::reexports::calloop::timer::TimeoutAction::Drop
             });
@@ -814,6 +892,7 @@ impl Server {
         // A press on a hidden dock's sliver (a finger has no hover) brings it
         // out, and does nothing else.
         if self.shelf_hides() && self.shelf_shown() < 1.0 {
+            self.shelf.peek = true;
             self.shelf_slide(true);
             return;
         }
@@ -1038,7 +1117,7 @@ impl Server {
         };
         let mut out = format!(
             "dock {},{} {}x{} {:?} gap {} keep-clear {} on screen {},{} {}x{}; work area {},{} {}x{}; hide {}{hidden}",
-            dock.loc.x, dock.loc.y, dock.size.w, dock.size.h, at.place, at.gap, at.keep_clear, s.loc.x, s.loc.y, s.size.w, s.size.h, w.loc.x, w.loc.y, w.size.w, w.size.h, self.shelf.config.hide
+            dock.loc.x, dock.loc.y, dock.size.w, dock.size.h, at.place, at.gap, at.keep_clear, s.loc.x, s.loc.y, s.size.w, s.size.h, w.loc.x, w.loc.y, w.size.w, w.size.h, format!("{:?}", self.shelf.config.hide.mode()).to_lowercase()
         );
         for (i, (item, windows)) in items.iter().enumerate() {
             let place = running::slot(rect(dock), i, at.upright()).map_or("no room".to_string(), |s| format!("{},{}", s.x, s.y));

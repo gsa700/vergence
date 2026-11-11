@@ -51,6 +51,8 @@ const SWATCHES: [&str; 8] = ["#3b82f6", "#8b5cf6", "#ec4899", "#ef4444", "#e05a0
 /// The accent where the user names none: the settings app's own blue.
 /// The dock's edges: as shown, and as desktop.toml writes them.
 const DOCK_EDGES: [(&str, &str); 4] = [("Right edge", "right"), ("Left edge", "left"), ("Top edge", "top"), ("Bottom edge", "bottom")];
+/// When the dock hides: as shown, and as desktop.toml writes it.
+const DOCK_HIDE: [(&str, &str); 3] = [("Never", "never"), ("When a window covers it", "windows"), ("Always", "always")];
 const DEFAULT_ACCENT: Color = Color::rgb(0x3b, 0x82, 0xf6);
 const WHITE: Color = Color::rgb(255, 255, 255);
 
@@ -91,7 +93,7 @@ enum Message {
     /// A dock slider let go: what it shows is saved.
     DockSave,
     DockKeepClear(bool),
-    DockHide(bool),
+    DockHide(usize),
     PinAdd(usize),
     PinMove(usize, bool),
     PinRemove(usize),
@@ -544,9 +546,12 @@ impl App {
             Message::DockKeepClear(on) => self.save_table("shelf", |t| {
                 t.insert("keep-clear".into(), on.into());
             }),
-            Message::DockHide(on) => self.save_table("shelf", |t| {
-                t.insert("hide".into(), on.into());
-            }),
+            Message::DockHide(i) => {
+                let word = DOCK_HIDE.get(i).map_or("never", |h| h.1);
+                self.save_table("shelf", |t| {
+                    t.insert("hide".into(), word.into());
+                });
+            }
             Message::PinAdd(i) => {
                 let unpinned = self.unpinned();
                 if let Some(id) = unpinned.get(i).map(|e| e.id.clone()) {
@@ -1075,6 +1080,17 @@ impl App {
         (self.dock_gap, self.dock_opacity) = (gap, opacity);
     }
 
+    /// When the dock hides, as a place in DOCK_HIDE: `hide` is a word, or
+    /// true ("windows") and false ("never").
+    fn dock_hide(&self) -> usize {
+        let word = match self.shelf().and_then(|t| t.get("hide")) {
+            Some(toml::Value::Boolean(true)) => "windows".to_string(),
+            Some(toml::Value::String(w)) => w.trim().to_ascii_lowercase(),
+            _ => "never".to_string(),
+        };
+        DOCK_HIDE.iter().position(|h| h.1 == word).unwrap_or(0)
+    }
+
     /// The pinned applications' entry ids, in their order on the dock.
     fn pinned(&self) -> Vec<String> {
         self.shelf().and_then(|t| t.get("pinned")).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default()
@@ -1137,7 +1153,11 @@ impl App {
             switch(flag("keep-clear", true), Message::DockKeepClear).name("Keep windows clear"),
         ));
         let look = vec![
-            setting("Hide automatically", "Out of the way until the pointer reaches its edge.", switch(flag("hide", false), Message::DockHide).name("Hide automatically")),
+            setting(
+                "Hide",
+                "Out of the way, a sliver left at its edge; the pointer there brings it back. Windows then have the whole screen.",
+                choice(DOCK_HIDE.iter().map(|h| h.0.to_string()).collect(), Some(self.dock_hide()), Message::DockHide).width(Length::Fixed(220.0)).name("Hide"),
+            ),
             setting(
                 "Opacity",
                 "Less, and the desktop shows through the dock. Its icons stay solid.",

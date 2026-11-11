@@ -65,8 +65,11 @@ pub const SHAPE_HOVER: u8 = 41;
 /// ground, and the line along the side that faces the windows.
 pub const SHELF_W: f32 = 48.0;
 /// The room between the shelf and the screen's edge, and between it and
-/// the windows' work area: the shelf floats, like a dock.
-pub const SHELF_GAP: f32 = 6.0;
+/// the windows' work area, unless the settings say another: the shelf
+/// floats, like a dock, a hair off its edge (Dave, 2026-11-10: 1 point).
+pub const SHELF_GAP: f32 = 1.0;
+/// How far the apps popup and an icon's menu stand off the dock.
+pub const SHELF_POPUP_GAP: f32 = 6.0;
 pub const SHELF_ICON: f32 = 32.0;
 pub const SHELF: Rgb = Rgb(32, 35, 44);
 pub const SHELF_EDGE: Rgb = Rgb(64, 68, 80);

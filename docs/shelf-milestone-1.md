@@ -516,23 +516,33 @@ one.
 - **Step 6, first part (2026-11-10): the Dock page and hiding.**
   - The settings app (now on the project's own toolkit, toolkit milestone
     2) has a **Dock** page: where (an edge; "Where you put it" shown while
-    it floats), the screen (when there are several), the gap (0 to 64
+    it floats), the screen (when there are several), the gap (0 to 24
     points), keep windows clear, hide automatically, opacity (30 to 100%),
     and the pinned applications with up, down and Unpin, and a choice of
     installed applications to pin. It writes `[shelf]`; the server follows
     within a second. The app reads desktop.toml again when a page opens
     and when its window has the keyboard again, since the server writes
     the file too (a drag, a pin from the dock).
-  - **`hide = true` works, as LXDE's panel hides** (Dave, 2026-11-10): at
-    an edge, windows have the whole screen and the dock slides out past
-    the edge in 160 ms, leaving a 3-point sliver; the pointer on the
-    sliver brings it straight back, and 0.7 s away from it (no menu or
-    apps popup open) sends it off again. A press on the sliver only
-    brings it out, so a finger, which has no hover, can find it too. A
-    floating or dragged dock never hides. `vctl shelf` says "(away now)"
-    while it is hidden.
-  - On Hubble: hidden with the pointer mid-screen, out at the sliver, away
-    again after leaving; work area 1280 x 720 (the whole screen).
+  - **Hiding** (Dave, 2026-11-10), at an edge: `hide = "windows"` (or
+    `true`, as Dave meant "autohide": "visible unless a window came over
+    it, then it will hide. several desktops do this") keeps the dock out
+    until a window overlaps where it stands, then slides it away;
+    `hide = "always"` keeps it away until it is wanted; `"never"` (or
+    `false`) is the default. Away, it slides past the edge in 160 ms and
+    leaves a 3-point sliver, **as LXDE's panel hides**; the pointer on the
+    sliver, or a press on it (a finger has no hover), brings it straight
+    out, and once the pointer has been away from it for 0.7 s (no menu or
+    apps popup open) the mode decides again. Windows have the whole screen
+    in both modes. A floating or dragged dock never hides. `vctl shelf`
+    says the mode and "(away now)". The settings page offers Never, When a
+    window covers it, Always.
+  - The gap's default is 1 point (Dave: "the 1px should be the default"),
+    at most 24; the apps popup and an icon's menu keep their own 6 points
+    off the dock (`vergence_look::SHELF_POPUP_GAP`).
+  - On Hubble: "always": hidden with the pointer mid-screen, out at the
+    sliver, away again after leaving. "windows": out with nothing over it;
+    the settings window moved over its place sent it away, moved back
+    brought it out. Work area 1280 x 720 (the whole screen) in both.
   - **Parked (Dave, 2026-11-10: "undecided ... revisit when we have a bunch
     of screens again"):** docks on more than one screen (the `screens`
     list of the original plan) against the one movable dock with its

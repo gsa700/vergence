@@ -82,7 +82,7 @@ impl Server {
         let Some(screen) = screen else { return };
         let area = self.work_area(screen);
         let (w, h) = (WIDTH.min(area.size.w), HEIGHT.min(area.size.h));
-        let gap = vergence_shell::GAP;
+        let gap = vergence_look::SHELF_POPUP_GAP as i32;
         let (x, y) = match self.shelf.dock {
             Some(d) => match self.shelf_side(d) {
                 Edge::Left => (d.loc.x - gap - w, d.loc.y),

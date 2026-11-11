@@ -58,7 +58,7 @@ pub const STRIP_W: i32 = vergence_look::SHELF_W as i32;
 pub const GAP: i32 = vergence_look::SHELF_GAP as i32;
 /// The widest room the settings may ask for, and how near an edge the dock
 /// must be dropped to settle along it.
-pub const MAX_GAP: i32 = 64;
+pub const MAX_GAP: i32 = 24;
 pub const SNAP: i32 = 40;
 
 /// An edge of a screen.
@@ -228,7 +228,9 @@ mod tests {
     const SMALL: Rect = Rect::new(0, 180, 1280, 720);
     const LARGE: Rect = Rect::new(1280, 0, 1920, 1080);
 
-    const RIGHT: Placement = Placement { place: Place::Edge(Edge::Right), gap: GAP, keep_clear: true };
+    // The arithmetic is checked with a gap of 6, whatever the default is.
+    const T_GAP: i32 = 6;
+    const RIGHT: Placement = Placement { place: Place::Edge(Edge::Right), gap: T_GAP, keep_clear: true };
 
     fn at(edge: Edge) -> Placement {
         Placement { place: Place::Edge(edge), ..RIGHT }
@@ -236,7 +238,7 @@ mod tests {
 
     #[test]
     fn the_band_runs_along_its_edge_and_is_the_same_depth_everywhere() {
-        assert_eq!(Placement::default(), RIGHT);
+        assert_eq!(Placement::default(), Placement { gap: GAP, ..RIGHT });
         assert_eq!(column(SMALL, &RIGHT), Some(Rect::new(1280 - 60, 180, 60, 720)));
         assert_eq!(column(LARGE, &RIGHT), Some(Rect::new(1280 + 1920 - 60, 0, 60, 1080)));
         assert_eq!(column(LARGE, &at(Edge::Left)), Some(Rect::new(1280, 0, 60, 1080)));
@@ -265,10 +267,10 @@ mod tests {
         // More than the screen can hold: as long as it allows, a gap from both ends.
         let full = dock(SMALL, &RIGHT, 40).unwrap();
         assert_eq!(full.h, 14 * 48);
-        assert!(full.y >= SMALL.y + GAP && full.bottom() <= SMALL.bottom() - GAP);
+        assert!(full.y >= SMALL.y + T_GAP && full.bottom() <= SMALL.bottom() - T_GAP);
         // It stands inside its band, a gap from the screen's edge and from the windows.
         let (d, band) = (dock(LARGE, &RIGHT, 5).unwrap(), column(LARGE, &RIGHT).unwrap());
-        assert!(band.holds(&d) && d.x - band.x == GAP && band.right() - d.right() == GAP);
+        assert!(band.holds(&d) && d.x - band.x == T_GAP && band.right() - d.right() == T_GAP);
         assert_eq!(dock(Rect::new(0, 0, 100, 500), &RIGHT, 3), None);
         // The places of its items are the ones `running` gives for it.
         assert_eq!(running::slot(d, 0, true), Some(Rect::new(d.x, d.y + 48, 48, 48)));
