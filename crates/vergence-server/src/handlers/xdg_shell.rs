@@ -69,6 +69,14 @@ impl XdgShellHandler for Server {
         }
     }
 
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        // The window goes to its icon on the shelf (shelf.rs).
+        let found = self.space.elements().find(|w| w.toplevel() == Some(&surface)).cloned();
+        if let Some(w) = found {
+            self.minimise(&w);
+        }
+    }
+
     fn unmaximize_request(&mut self, surface: ToplevelSurface) {
         let found = self.space.elements().find(|w| w.toplevel() == Some(&surface)).cloned();
         if let Some(w) = found

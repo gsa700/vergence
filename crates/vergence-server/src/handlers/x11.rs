@@ -183,6 +183,19 @@ impl XwmHandler for Server {
         }
     }
 
+    fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Some(w) = self.window_for_x11(&window) {
+            self.minimise(&w);
+        }
+    }
+
+    fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let found = self.shelf.minimised.iter().map(|(w, _)| w).find(|w| w.x11_surface() == Some(&window)).cloned();
+        if let Some(w) = found {
+            self.unminimise(&w);
+        }
+    }
+
     fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         if let Some(w) = self.window_for_x11(&window)
             && self.restore.contains_key(&w)

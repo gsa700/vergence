@@ -166,6 +166,10 @@ pub struct Shelf {
     said: Option<Rectangle<i32, Logical>>,
     /// The dock as it was last drawn or pressed: what a point is tested against.
     dock: Option<Rectangle<i32, Logical>>,
+    /// Minimised windows, each with the place it goes back to. They are on no
+    /// screen (the server's space does not hold them); their application's icon
+    /// on the shelf is where they are.
+    pub minimised: Vec<(Window, Point<i32, Logical>)>,
 }
 
 impl Shelf {
@@ -200,8 +204,10 @@ impl Server {
     /// The applications with a window open, in the order they started, and each
     /// item's windows.
     pub fn shelf_items(&mut self) -> Vec<(running::Item, Vec<Window>)> {
-        // The windows that are someone's (not menus or tooltips), oldest first.
-        let open: Vec<Window> = self.space.elements().cloned().collect();
+        // The windows that are someone's (not menus or tooltips), oldest first;
+        // the minimised ones with them.
+        self.shelf.minimised.retain(|(w, _)| w.alive());
+        let open: Vec<Window> = self.space.elements().cloned().chain(self.shelf.minimised.iter().map(|(w, _)| w.clone())).collect();
         self.shelf.order.retain(|w| w.alive() && open.contains(w));
         for w in open {
             if !self.shelf.order.contains(&w) {
@@ -320,10 +326,72 @@ impl Server {
         self.shelf.dock.is_some_and(|r| r.to_f64().contains(at))
     }
 
-    /// A press on the strip. On an application with one window: that window
-    /// comes forward and has the keyboard. With several: a list of them opens
-    /// beside the icon. True if a list opened (the press's release is then the
-    /// list's, not a window's).
+    /// Minimise a window: it leaves the screen and stays as its application's
+    /// icon, and the keyboard goes to the window that is then in front.
+    pub fn minimise(&mut self, w: &Window) {
+        if w.x11_surface().is_some_and(|x| x.is_override_redirect()) || self.is_minimised(w) {
+            return;
+        }
+        let Some(at) = self.space.element_location(w) else { return };
+        tracing::info!("shelf: minimised {:?}", self.window_title(w));
+        self.shelf.minimised.push((w.clone(), at));
+        self.space.unmap_elem(w);
+        w.set_activated(false);
+        if let Some(t) = w.toplevel() {
+            t.send_pending_configure();
+        }
+        let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+        let front = self.space.elements().next_back().cloned();
+        match front {
+            Some(front) => self.focus_window(&front, serial),
+            None => {
+                if let Some(k) = self.seat.get_keyboard() {
+                    k.set_focus(self, None, serial);
+                }
+            }
+        }
+        self.redraw_all();
+    }
+
+    pub fn is_minimised(&self, w: &Window) -> bool {
+        self.shelf.minimised.iter().any(|(m, _)| m == w)
+    }
+
+    /// Bring a minimised window back to where it was, in front, with the keyboard.
+    pub fn unminimise(&mut self, w: &Window) {
+        let Some(index) = self.shelf.minimised.iter().position(|(m, _)| m == w) else { return };
+        let (w, mut at) = self.shelf.minimised.remove(index);
+        if !w.alive() {
+            return;
+        }
+        // Its screen may have gone meanwhile: then onto the one under the pointer.
+        let size = w.geometry().size;
+        let centre: Point<i32, Logical> = (at.x + size.w / 2, at.y + size.h / 2).into();
+        let on_a_screen = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).any(|g| g.contains(centre));
+        if !on_a_screen && let Some(out) = self.output_at_pointer() {
+            let area = self.work_area(out);
+            at = (area.loc.x + 40, area.loc.y + 40).into();
+        }
+        tracing::info!("shelf: back {:?}", self.window_title(&w));
+        self.space.map_element(w.clone(), at, true);
+        self.focus_window(&w, smithay::utils::SERIAL_COUNTER.next_serial());
+        self.redraw_all();
+    }
+
+    /// To a window from the shelf: back if it is minimised, else forward.
+    pub fn shelf_to_window(&mut self, w: &Window) {
+        if self.is_minimised(w) {
+            self.unminimise(w);
+        } else {
+            self.focus_window(w, smithay::utils::SERIAL_COUNTER.next_serial());
+        }
+    }
+
+    /// A press on the dock. On an application with one window: that window
+    /// comes forward and has the keyboard, or comes back if it was minimised,
+    /// or, if it is the one that has the keyboard already, is minimised (Dave,
+    /// 2026-11-09). With several: a list of them opens beside the icon. True if
+    /// a list opened (the press's release is then the list's, not a window's).
     pub fn shelf_press(&mut self, at: Point<f64, Logical>) -> bool {
         let items = self.shelf_items();
         let Some(strip) = self.shelf_dock(items.len()) else { return false };
@@ -333,7 +401,12 @@ impl Server {
             [] => false,
             [only] => {
                 tracing::info!("shelf: to {}", item.name);
-                self.focus_window(&only.clone(), smithay::utils::SERIAL_COUNTER.next_serial());
+                let only = only.clone();
+                if item.focused && !self.is_minimised(&only) {
+                    self.minimise(&only);
+                } else {
+                    self.shelf_to_window(&only);
+                }
                 false
             }
             several => {
@@ -385,7 +458,8 @@ impl Server {
                 let r = dock;
                 for (i, (item, windows)) in items.iter().enumerate() {
                     let place = running::slot(rect(r), i).map_or("no room".to_string(), |s| format!("{},{}", s.x, s.y));
-                    out.push_str(&format!("\n{i} {:?} \"{}\" icon \"{}\" windows {}{} at {place}", item.key, item.name, item.icon, windows.len(), if item.focused { " focused" } else { "" }));
+                    let away = windows.iter().filter(|w| self.is_minimised(w)).count();
+                    out.push_str(&format!("\n{i} {:?} \"{}\" icon \"{}\" windows {}{}{} at {place}", item.key, item.name, item.icon, windows.len(), if away > 0 { format!(" ({away} minimised)") } else { String::new() }, if item.focused { " focused" } else { "" }));
                 }
                 out
             }
@@ -405,9 +479,11 @@ impl Server {
             Some(vergence_protocol::bus::SettingValue::Rgb(r, g, b)) => Color::rgb((r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8),
             _ => colour(vergence_look::ACCENT),
         };
+        // An application all of whose windows are minimised is there, but faint.
+        let away: Vec<bool> = items.iter().map(|(_, windows)| windows.iter().all(|w| self.is_minimised(w))).collect();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        for ((item, windows), icon) in items.iter().zip(&icons) {
-            (&item.key, &item.name, windows.len(), item.focused, icon.is_some()).hash(&mut hasher);
+        for (((item, windows), icon), away) in items.iter().zip(&icons).zip(&away) {
+            (&item.key, &item.name, windows.len(), item.focused, icon.is_some(), away).hash(&mut hasher);
         }
         (accent.r, accent.g, accent.b).hash(&mut hasher);
         let key = (strip.size.h, scale.to_bits(), hasher.finish());
@@ -428,13 +504,16 @@ impl Server {
                 // The mark, on the windows' side: short and grey for an application that
                 // is running, long and in the accent for the one that has the keyboard.
                 let (mark_h, mark) = if item.focused { (18.0, accent) } else { (6.0, colour(vergence_look::INK_UNFOCUSED)) };
-                scene.fill_rounded(SceneRect::new(3.0, slot.y as f32 + (slot.h as f32 - mark_h) / 2.0, 3.0, mark_h), 1.5, mark);
+                let faint = away[index];
+                if !faint {
+                    scene.fill_rounded(SceneRect::new(3.0, slot.y as f32 + (slot.h as f32 - mark_h) / 2.0, 3.0, mark_h), 1.5, mark);
+                }
                 match icon {
                     Some(icon) => {
                         // In the middle of its square, at its own shape.
                         let (iw, ih) = (icon.width as f32 / scale as f32, icon.height as f32 / scale as f32);
                         let picture = scene.image(Image { width: icon.width, height: icon.height, rgba: icon.rgba.clone() });
-                        scene.draw_image(picture, SceneRect::new(square.x + (square.w - iw) / 2.0, square.y + (square.h - ih) / 2.0, iw, ih), 1.0);
+                        scene.draw_image(picture, SceneRect::new(square.x + (square.w - iw) / 2.0, square.y + (square.h - ih) / 2.0, iw, ih), if faint { 0.45 } else { 1.0 });
                     }
                     None => {
                         // No icon (yet, or at all): a tile with the name's first letter.

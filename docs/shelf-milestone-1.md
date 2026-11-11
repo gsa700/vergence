@@ -247,9 +247,25 @@ one.
   terminal's with two windows and the second of the list. Two windows
   of one title are two lines that read the same; the screen each is on
   is to be added beside the title where it is not the shelf's.
+- **Step 3, third part (2026-11-10): minimise.** The server has a
+  minimised state: a minimised window is on no screen and is kept, with
+  the place it goes back to, by the shelf, whose items count it with the
+  rest. The request is honoured from Wayland windows (the terminal's
+  own button) and X11 ones, which may also ask to come back. The
+  keyboard goes to the window then in front. An application all of
+  whose windows are minimised keeps its icon, faint and without a mark.
+  From the dock: a click on a minimised application brings its window
+  back to its place, in front, with the keyboard; a click on the
+  application that has the keyboard, when it has one window, minimises
+  it (decided 2026-11-09); in the list of several windows a minimised
+  one comes back. A window whose screen went while it was minimised
+  comes back on the screen under the pointer. Driven through `vctl` on
+  Hubble: minimised from the dock and from the terminal's button, and
+  back, each time to the same place.
+  Not done here: the server's own title bars have no minimise button
+  yet, and a minimised window is not told apart in the list.
   Still to do in step 3: the name beside an icon the pointer rests on,
-  and minimise (with it, a click on the focused application's only
-  window minimises it).
+  and that button.
 - **The shelf is a dock (Dave, 2026-11-10).** "Like a dock, rounded
   with the same radius as all the other elements": a panel as tall as
   the apps button's place and its items, in the middle of the screen's

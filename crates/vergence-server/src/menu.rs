@@ -230,7 +230,7 @@ impl Server {
             Entry::Window(w, title) => {
                 tracing::info!("shelf: to window {title:?}");
                 if smithay::utils::IsAlive::alive(w) {
-                    self.focus_window(&w.clone(), smithay::utils::SERIAL_COUNTER.next_serial());
+                    self.shelf_to_window(&w.clone());
                 }
             }
             Entry::Exit => {
