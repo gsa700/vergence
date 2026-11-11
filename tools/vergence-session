@@ -44,6 +44,12 @@ if [ -z "$LIBSEAT_BACKEND" ] && [ ! -d /run/systemd/system ]; then
     export LIBSEAT_BACKEND=seatd
 fi
 export XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=Vergence
+# GTK programs (Firefox among them) read the desktop's settings from the
+# settings portal only when told to; the server's D-Bus edge is that portal,
+# and so they get our window buttons' layout, theme and fonts. What else
+# they ask a portal for (a file dialog) we answer "unknown", and they use
+# their own (seen with Firefox on kepler, 2026-11-10).
+export GTK_USE_PORTAL=${GTK_USE_PORTAL:-1}
 # The development control socket (vctl; src/control.rs): any program running as
 # the user can drive the session through it, so this is what makes a session a
 # development session. On from a checkout; off when installed, unless asked.
