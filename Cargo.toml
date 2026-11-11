@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/vergence-edid", "crates/vergence-profile", "crates/vergence-xsettings", "crates/vergd", "crates/vergence-harness", "crates/vergence-server", "crates/vergence-settings", "crates/vergence-protocol", "crates/vergence-dbus", "crates/vergence-term", "crates/vergence-scene", "crates/vergence-text", "crates/vergence-render", "crates/vergence-wl", "crates/vergence-ui", "crates/vergence-look", "crates/vergence-shell"]
+members = ["crates/vergence-edid", "crates/vergence-profile", "crates/vergence-xsettings", "crates/vergd", "crates/vergence-harness", "crates/vergence-server", "crates/vergence-settings", "crates/vergence-protocol", "crates/vergence-dbus", "crates/vergence-term", "crates/vergence-scene", "crates/vergence-text", "crates/vergence-render", "crates/vergence-wl", "crates/vergence-ui", "crates/vergence-look", "crates/vergence-shell", "crates/vergence-widgets"]
 
 [workspace.package]
 version = "0.1.0"
@@ -21,6 +21,7 @@ vergence-wl = { path = "crates/vergence-wl" }
 vergence-ui = { path = "crates/vergence-ui" }
 vergence-look = { path = "crates/vergence-look" }
 vergence-shell = { path = "crates/vergence-shell" }
+vergence-widgets = { path = "crates/vergence-widgets" }
 
 # drm-rs 0.14.1 with the FreeBSD DRM node fixes (patches/README.md).
 [patch.crates-io]

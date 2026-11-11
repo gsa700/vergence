@@ -2,7 +2,7 @@
 
 Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Vergence-Whitepaper.md,
 the current milestone is docs/bus-milestone-1.md (the session bus; the server's is docs/server-milestone-1.md; phase 1's, frozen, are docs/milestone-1.md to -4.md), status is in README.md.
-The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md, the current work since 2026-11-10: step 1 (the strip and the work area; crates/vergence-shell, the server's shelf.rs) is in; its Progress says how far it has come.
+The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md: steps 1 to 5 are in (the dock, applications, clicks, minimise, pins, session restore, the apps button and popup; crates/vergence-shell, the server's shelf.rs); step 6 waits for the settings app's move. The current work since 2026-11-10 is docs/toolkit-milestone-2.md: widgets (crates/vergence-widgets), the settings app moved onto them, iced removed; its Progress says how far it has come.
 **Order of work since 2026-11-09 (whitepaper §9):** our own toolkit's drawing and text core with the terminal on it (§6.10; docs/toolkit-milestone-1.md, closed 2026-11-10: the terminal, crates/vergence-term, is on it and its iced interface is gone; the look both the server and the toolkit draw with is crates/vergence-look, and the window bar is vergence_ui::bar), then the shelf on the same drawing code, then widgets and the settings app, then iced is removed. GPU first; a CPU reference renderer for tests and GPU-less machines (canary).
 
 - **Started 2026-11-06** (Dave's go). The source lives here on Control (the

@@ -205,6 +205,7 @@ enum Command {
     Minimize,
     Copy(String),
     Paste,
+    Timer(u64, Option<Instant>),
 }
 
 /// What a program may ask of its window while it handles input.
@@ -260,7 +261,28 @@ impl Window {
     pub fn paste(&mut self) {
         self.commands.push(Command::Paste);
     }
+
+    /// Asks for [`App::timer`] to be called with `id` at `at` (at once if
+    /// that has passed). Asking again for the same `id` moves the time;
+    /// each request is answered once.
+    pub fn wake_at(&mut self, id: u64, at: Instant) {
+        self.commands.push(Command::Timer(id, Some(at)));
+    }
+
+    /// [`Window::wake_at`] `after` from now.
+    pub fn wake_after(&mut self, id: u64, after: Duration) {
+        self.wake_at(id, Instant::now() + after);
+    }
+
+    /// Forgets the timer `id`, if it has not gone off.
+    pub fn cancel_timer(&mut self, id: u64) {
+        self.commands.push(Command::Timer(id, None));
+    }
 }
+
+/// The most timers a window keeps at once; asking for more drops the
+/// latest-due.
+const MAX_TIMERS: usize = 256;
 
 /// A way for another thread to get the window's attention: [`App::woken`]
 /// is then called on the window's thread. However many times it is used
@@ -309,6 +331,9 @@ pub trait App {
     /// Another thread used the [`Waker`].
     fn woken(&mut self, _window: &mut Window) {}
 
+    /// The time asked for with [`Window::wake_at`] has come.
+    fn timer(&mut self, _id: u64, _window: &mut Window) {}
+
     /// True while the picture changes by itself: a new frame is then drawn
     /// every time the monitor is ready for one.
     fn animating(&self) -> bool {
@@ -319,6 +344,18 @@ pub trait App {
     /// drawing it took. Return false to close the window.
     fn shown(&mut self, _frame: &Frame, _draw_ms: f64) -> bool {
         true
+    }
+}
+
+/// Sets, moves or (with no time) forgets the timer `id`.
+fn set_timer(timers: &mut Vec<(u64, Instant)>, id: u64, at: Option<Instant>) {
+    timers.retain(|t| t.0 != id);
+    if let Some(at) = at {
+        timers.push((id, at));
+        if timers.len() > MAX_TIMERS {
+            timers.sort_by_key(|t| t.1);
+            timers.truncate(MAX_TIMERS);
+        }
     }
 }
 
@@ -429,6 +466,8 @@ struct Runner {
     /// The pipe other threads wake the window through, and its flag.
     wake: std::fs::File,
     wake_pending: Arc<AtomicBool>,
+    /// The program's timers: its id for each, and when it is due.
+    timers: Vec<(u64, Instant)>,
 }
 
 /// Opens the window and runs until it is closed. `size` is the size asked
@@ -573,6 +612,7 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         inbox: Vec::new(),
         wake: wake_read.into(),
         wake_pending,
+        timers: Vec::new(),
     };
     runner.run(app)
 }
@@ -584,10 +624,8 @@ impl Runner {
             let now = Instant::now();
             let repeat = self.repeat.as_ref().map(|r| r.next.saturating_duration_since(now));
             let paste = self.paste.as_ref().map(|p| (p.started + PASTE_TIMEOUT).saturating_duration_since(now));
-            let wait = match (repeat, paste) {
-                (Some(a), Some(b)) => Some(a.min(b)),
-                (a, b) => a.or(b),
-            };
+            let timer = self.timers.iter().map(|t| t.1).min().map(|t| t.saturating_duration_since(now));
+            let wait = [repeat, paste, timer].into_iter().flatten().min();
             let pipe = self.paste.as_ref().map(|p| p.pipe.as_raw_fd());
             let (events, [pipe_ready, woken]) = self.client.dispatch_or([pipe, Some(self.wake.as_raw_fd())], wait)?;
             for event in events {
@@ -605,6 +643,7 @@ impl Runner {
                 self.tell(app, input)?;
             }
             self.repeat_due(app)?;
+            self.timers_due(app)?;
             if self.configured && self.dirty && self.frame_callback.is_none() && !self.closing {
                 self.dirty = false;
                 self.draw(app)?;
@@ -658,6 +697,7 @@ impl Runner {
                     }
                 }
                 Command::Paste => self.start_paste()?,
+                Command::Timer(id, at) => set_timer(&mut self.timers, id, at),
             }
         }
         Ok(())
@@ -944,6 +984,25 @@ impl Runner {
     /// Repeats the held key as often as is due. A program that falls behind
     /// gets the repeats it missed at once, at most a few: it catches up, it
     /// does not run on after the key is released.
+    /// Tells the program of every timer that is due, the earliest first.
+    /// A timer set again while this runs waits for the next turn.
+    fn timers_due(&mut self, app: &mut dyn App) -> io::Result<()> {
+        let now = Instant::now();
+        let mut due: Vec<(u64, Instant)> = Vec::new();
+        self.timers.retain(|t| {
+            let keep = t.1 > now;
+            if !keep {
+                due.push(*t);
+            }
+            keep
+        });
+        due.sort_by_key(|t| t.1);
+        for (id, _) in due {
+            self.with_window(app, |app, window| app.timer(id, window))?;
+        }
+        Ok(())
+    }
+
     fn repeat_due(&mut self, app: &mut dyn App) -> io::Result<()> {
         let step = Duration::from_secs_f64(1.0 / self.repeat_rate.max(1) as f64);
         for _ in 0..4 {
@@ -1095,5 +1154,25 @@ mod tests {
         assert_eq!(o("[terminal]\nopacity = 7\n", "[terminal]"), 1.0);
         assert_eq!(o("[terminal]\nopacity = glass\n[appearance]\nwindow-opacity = 0.7\n", "[terminal]"), 0.7);
         assert_eq!(o("[shelf]\nopacity = 0.5\n", "[shelf]"), 0.5);
+    }
+
+    #[test]
+    fn timers_are_set_moved_forgotten_and_bounded() {
+        use super::set_timer;
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let mut timers = Vec::new();
+        set_timer(&mut timers, 1, Some(t0 + Duration::from_millis(500)));
+        set_timer(&mut timers, 2, Some(t0 + Duration::from_millis(100)));
+        set_timer(&mut timers, 1, Some(t0 + Duration::from_millis(50)));
+        assert_eq!(timers.len(), 2, "asking again moves the timer");
+        assert!(timers.contains(&(1, t0 + Duration::from_millis(50))));
+        set_timer(&mut timers, 2, None);
+        assert_eq!(timers, vec![(1, t0 + Duration::from_millis(50))]);
+        for id in 0..(super::MAX_TIMERS as u64 + 10) {
+            set_timer(&mut timers, 1000 + id, Some(t0 + Duration::from_millis(id)));
+        }
+        assert_eq!(timers.len(), super::MAX_TIMERS);
+        assert!(!timers.iter().any(|t| t.0 == 1000 + super::MAX_TIMERS as u64 + 9), "the latest-due goes");
     }
 }

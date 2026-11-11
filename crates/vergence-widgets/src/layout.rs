@@ -1,0 +1,374 @@
+//! Laying a tree of elements out: each gets its rectangle, in reference
+//! units, in a flat list in drawing order (a parent before its children).
+
+use vergence_scene::{Color, Rect};
+
+use crate::element::{Align, ButtonLook, Element, Kind, Label, Length, Weight};
+
+/// A widget's name between builds: its place in the tree, or the key its
+/// program gave it, under its parent's id.
+pub type Id = u64;
+
+/// How text is measured: by the fonts in a window, by a stand-in in tests.
+pub trait Measure {
+    /// The width of one line of `text`.
+    fn width(&mut self, size: f32, weight: Weight, text: &str) -> f32;
+    /// How far a line's tallest glyphs rise above its baseline, and the
+    /// distance from one line's baseline to the next.
+    fn line(&mut self, size: f32, weight: Weight) -> (f32, f32);
+}
+
+/// One line of a laid-out label, placed in the label's rectangle.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Line {
+    pub text: String,
+    pub x: f32,
+    pub baseline: f32,
+    pub width: f32,
+}
+
+pub(crate) enum What<M> {
+    Space,
+    Rule { color: Option<Color> },
+    Label { lines: Vec<Line>, size: f32, weight: Weight, color: Option<Color>, dim: bool },
+    Panel { fill: Option<Color>, edge: Option<(Color, f32)>, radius: f32 },
+    Button { on_press: Option<M>, look: ButtonLook },
+    Group,
+}
+
+pub(crate) struct Node<M> {
+    pub id: Id,
+    pub rect: Rect,
+    pub parent: Option<usize>,
+    pub what: What<M>,
+    pub name: Option<String>,
+}
+
+pub(crate) fn child_id(parent: Id, index: usize, key: Option<u64>) -> Id {
+    // splitmix64 of the parent's id and the child's place or key; a key is
+    // kept apart from places by its top bit.
+    let tag = match key {
+        Some(k) => k | (1 << 63),
+        None => index as u64,
+    };
+    // The +1 and the constant keep a first child from sharing its parent's id
+    // (zero would hash to zero).
+    let mut z = (parent ^ 0x2545_f491_4f6c_dd1d).rotate_left(17).wrapping_add(tag.wrapping_add(1).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+pub(crate) struct Layout<'a> {
+    pub measure: &'a mut dyn Measure,
+    /// The size of text that does not name one.
+    pub text_size: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Size {
+    w: f32,
+    h: f32,
+}
+
+impl Layout<'_> {
+    /// Lays `root` out in `area`, appending to `out`.
+    pub fn run<M>(&mut self, root: Element<M>, area: Rect, out: &mut Vec<Node<M>>) {
+        let natural = self.measure(&root, area.w);
+        let w = clamp_w(&root, resolve(root.width, area.w, natural.w));
+        let h = resolve(root.height, area.h, self.measure(&root, w).h);
+        self.arrange(root, Rect::new(area.x, area.y, w, h), None, child_id(0, 0, None), out);
+    }
+
+    fn lines(&mut self, l: &Label, width: Option<f32>) -> (Vec<Line>, f32) {
+        let size = l.size.unwrap_or(self.text_size);
+        let (ascent, step) = self.measure.line(size, l.weight);
+        let mut lines: Vec<(String, f32)> = Vec::new();
+        for para in l.text.split('\n') {
+            match width.filter(|_| l.wrap) {
+                None => lines.push((para.to_string(), self.measure.width(size, l.weight, para))),
+                Some(max) => {
+                    let mut cur = String::new();
+                    let mut cur_w = 0.0;
+                    for word in para.split(' ').filter(|w| !w.is_empty()) {
+                        let trial = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
+                        let trial_w = self.measure.width(size, l.weight, &trial);
+                        if trial_w > max && !cur.is_empty() {
+                            lines.push((std::mem::take(&mut cur), cur_w));
+                            cur_w = self.measure.width(size, l.weight, word);
+                            cur = word.to_string();
+                        } else {
+                            (cur, cur_w) = (trial, trial_w);
+                        }
+                    }
+                    lines.push((cur, cur_w));
+                }
+            }
+        }
+        let out = lines.into_iter().enumerate().map(|(i, (text, w))| Line { text, x: 0.0, baseline: (ascent + i as f32 * step).round(), width: w }).collect::<Vec<_>>();
+        let height = (out.len() as f32 * step).ceil();
+        (out, height)
+    }
+
+    /// The size `e` would like, with at most `avail` across.
+    fn measure<M>(&mut self, e: &Element<M>, avail: f32) -> Size {
+        let avail = e.max_width.map_or(avail, |m| avail.min(m));
+        let avail = match e.width {
+            Length::Fixed(w) => w,
+            _ => avail,
+        };
+        let content = match &e.kind {
+            Kind::Space => Size { w: 0.0, h: 0.0 },
+            Kind::Rule { thickness, .. } => Size { w: *thickness, h: *thickness },
+            Kind::Label(l) => {
+                let (lines, h) = self.lines(l, Some(avail));
+                Size { w: lines.iter().map(|l| l.width).fold(0.0, f32::max).ceil(), h }
+            }
+            Kind::Panel { child, padding, .. } | Kind::Button { child, padding, .. } => {
+                let inner = (avail - padding.width()).max(0.0);
+                let c = self.measure(child, inner);
+                let cw = match child.width {
+                    Length::Fixed(w) => w,
+                    _ => c.w,
+                };
+                let ch = match child.height {
+                    Length::Fixed(h) => h,
+                    _ => c.h,
+                };
+                Size { w: cw + padding.width(), h: ch + padding.height() }
+            }
+            Kind::Row { children, spacing, .. } => {
+                let natural: f32 = children.iter().map(|c| self.main_natural(c, avail, true)).sum::<f32>() + gaps(children.len(), *spacing);
+                let room = if e.width == Length::Shrink { natural.min(avail) } else { avail };
+                let widths = self.distribute(children, room, *spacing, true, avail);
+                let h = children.iter().zip(&widths).map(|(c, w)| self.cross(c, *w)).fold(0.0, f32::max);
+                Size { w: natural, h }
+            }
+            Kind::Column { children, spacing, .. } => {
+                let mut w: f32 = 0.0;
+                let mut h = gaps(children.len(), *spacing);
+                for c in children {
+                    let s = self.measure(c, avail);
+                    let cw = clamp_w(c, match c.width {
+                        Length::Fixed(f) => f,
+                        _ => s.w,
+                    });
+                    w = w.max(cw);
+                    h += match c.height {
+                        Length::Fixed(f) => f,
+                        _ => self.measure(c, cw.min(avail)).h,
+                    };
+                }
+                Size { w, h }
+            }
+            Kind::Stack { children } => children.iter().fold(Size { w: 0.0, h: 0.0 }, |a, c| {
+                let s = self.measure(c, avail);
+                Size { w: a.w.max(s.w), h: a.h.max(s.h) }
+            }),
+        };
+        Size {
+            w: clamp_w(e, match e.width {
+                Length::Fixed(w) => w,
+                _ => content.w,
+            }),
+            h: match e.height {
+                Length::Fixed(h) => h,
+                _ => content.h,
+            },
+        }
+    }
+
+    /// A child's natural length along a row (`across`) or a column.
+    fn main_natural<M>(&mut self, c: &Element<M>, avail: f32, across: bool) -> f32 {
+        let len = if across { c.width } else { c.height };
+        match len {
+            Length::Fixed(v) => v,
+            _ => {
+                let s = self.measure(c, avail);
+                if across { s.w } else { s.h }
+            }
+        }
+    }
+
+    /// A row child's height at width `w`.
+    fn cross<M>(&mut self, c: &Element<M>, w: f32) -> f32 {
+        match c.height {
+            Length::Fixed(h) => h,
+            _ => self.measure(c, w).h,
+        }
+    }
+
+    /// Shares `room` along a row (`across`) or a column among `children`:
+    /// fixed and shrinking ones first, then what is left by weight among
+    /// the filling ones. `avail` is the width the children may measure in
+    /// (a column's children are measured at their own widths beforehand).
+    fn distribute<M>(&mut self, children: &[Element<M>], room: f32, spacing: f32, across: bool, avail: f32) -> Vec<f32> {
+        let mut out = vec![0.0; children.len()];
+        let mut used = gaps(children.len(), spacing);
+        let mut weights = 0u32;
+        for (i, c) in children.iter().enumerate() {
+            let len = if across { c.width } else { c.height };
+            match len {
+                Length::Fill(w) => weights += w.max(1) as u32,
+                _ => {
+                    out[i] = self.main_natural(c, avail, across);
+                    if across {
+                        out[i] = clamp_w(c, out[i]);
+                    }
+                    used += out[i];
+                }
+            }
+        }
+        let left = (room - used).max(0.0);
+        if weights > 0 {
+            for (i, c) in children.iter().enumerate() {
+                if let Length::Fill(w) = if across { c.width } else { c.height } {
+                    out[i] = left * w.max(1) as f32 / weights as f32;
+                    if across {
+                        out[i] = clamp_w(c, out[i]);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn arrange<M>(&mut self, e: Element<M>, rect: Rect, parent: Option<usize>, id: Id, out: &mut Vec<Node<M>>) {
+        let me = out.len();
+        let name = e.name;
+        let push = |out: &mut Vec<Node<M>>, what: What<M>| out.push(Node { id, rect, parent, what, name: name.clone() });
+        match e.kind {
+            Kind::Space => push(out, What::Space),
+            Kind::Rule { color, .. } => push(out, What::Rule { color }),
+            Kind::Label(l) => {
+                let (mut lines, _) = self.lines(&l, Some(rect.w));
+                for line in &mut lines {
+                    line.x = match l.align {
+                        Align::Start => 0.0,
+                        Align::Center => ((rect.w - line.width) / 2.0).round(),
+                        Align::End => (rect.w - line.width).round(),
+                    };
+                }
+                let size = l.size.unwrap_or(self.text_size);
+                push(out, What::Label { lines, size, weight: l.weight, color: l.color, dim: l.dim });
+            }
+            Kind::Panel { child, padding, fill, edge, radius, align_x, align_y } => {
+                push(out, What::Panel { fill, edge, radius });
+                let inner = Rect::new(rect.x + padding.left, rect.y + padding.top, (rect.w - padding.width()).max(0.0), (rect.h - padding.height()).max(0.0));
+                self.place_one(*child, inner, align_x, align_y, me, id, out);
+            }
+            Kind::Button { child, padding, on_press, look } => {
+                push(out, What::Button { on_press, look });
+                let inner = Rect::new(rect.x + padding.left, rect.y + padding.top, (rect.w - padding.width()).max(0.0), (rect.h - padding.height()).max(0.0));
+                self.place_one(*child, inner, Align::Center, Align::Center, me, id, out);
+            }
+            Kind::Row { children, spacing, align } => {
+                push(out, What::Group);
+                let widths = self.distribute(&children, rect.w, spacing, true, rect.w);
+                let mut x = rect.x;
+                for (i, (c, w)) in children.into_iter().zip(widths).enumerate() {
+                    let h = match c.height {
+                        Length::Fill(_) => rect.h,
+                        Length::Fixed(h) => h,
+                        Length::Shrink => self.measure(&c, w).h.min(rect.h),
+                    };
+                    let y = rect.y + offset(align, rect.h, h);
+                    let cid = child_id(id, i, c.key);
+                    self.arrange(c, Rect::new(x, y, w, h), Some(me), cid, out);
+                    x += w + spacing;
+                }
+            }
+            Kind::Column { children, spacing, align } => {
+                push(out, What::Group);
+                let widths: Vec<f32> = children
+                    .iter()
+                    .map(|c| {
+                        clamp_w(c, match c.width {
+                            Length::Fill(_) => rect.w,
+                            Length::Fixed(w) => w,
+                            Length::Shrink => self.measure(c, rect.w).w.min(rect.w),
+                        })
+                    })
+                    .collect();
+                // Heights at each child's own width.
+                let mut heights = vec![0.0; children.len()];
+                let mut used = gaps(children.len(), spacing);
+                let mut weights = 0u32;
+                for (i, c) in children.iter().enumerate() {
+                    match c.height {
+                        Length::Fill(w) => weights += w.max(1) as u32,
+                        Length::Fixed(h) => heights[i] = h,
+                        Length::Shrink => heights[i] = self.measure(c, widths[i]).h,
+                    }
+                    used += heights[i];
+                }
+                let left = (rect.h - used).max(0.0);
+                for (i, c) in children.iter().enumerate() {
+                    if let Length::Fill(w) = c.height {
+                        heights[i] = left * w.max(1) as f32 / weights.max(1) as f32;
+                    }
+                }
+                let mut y = rect.y;
+                for (i, c) in children.into_iter().enumerate() {
+                    let x = rect.x + offset(align, rect.w, widths[i]);
+                    let cid = child_id(id, i, c.key);
+                    self.arrange(c, Rect::new(x, y, widths[i], heights[i]), Some(me), cid, out);
+                    y += heights[i] + spacing;
+                }
+            }
+            Kind::Stack { children } => {
+                push(out, What::Group);
+                for (i, c) in children.into_iter().enumerate() {
+                    let cid = child_id(id, i, c.key);
+                    self.place_one_id(c, rect, Align::Start, Align::Start, me, cid, out);
+                }
+            }
+        }
+    }
+
+    /// Places the one child of a panel or button in `inner`.
+    fn place_one<M>(&mut self, child: Element<M>, inner: Rect, ax: Align, ay: Align, parent: usize, parent_id: Id, out: &mut Vec<Node<M>>) {
+        let cid = child_id(parent_id, 0, child.key);
+        self.place_one_id(child, inner, ax, ay, parent, cid, out);
+    }
+
+    fn place_one_id<M>(&mut self, child: Element<M>, inner: Rect, ax: Align, ay: Align, parent: usize, cid: Id, out: &mut Vec<Node<M>>) {
+        let natural = self.measure(&child, inner.w);
+        let w = clamp_w(&child, match child.width {
+            Length::Fill(_) => inner.w,
+            Length::Fixed(w) => w,
+            Length::Shrink => natural.w.min(inner.w),
+        });
+        let h = match child.height {
+            Length::Fill(_) => inner.h,
+            Length::Fixed(h) => h,
+            Length::Shrink => self.measure(&child, w).h,
+        };
+        let r = Rect::new(inner.x + offset(ax, inner.w, w), inner.y + offset(ay, inner.h, h), w, h);
+        self.arrange(child, r, Some(parent), cid, out);
+    }
+}
+
+fn gaps(n: usize, spacing: f32) -> f32 {
+    n.saturating_sub(1) as f32 * spacing
+}
+
+fn offset(align: Align, room: f32, len: f32) -> f32 {
+    match align {
+        Align::Start => 0.0,
+        Align::Center => ((room - len) / 2.0).max(0.0).round(),
+        Align::End => (room - len).max(0.0),
+    }
+}
+
+fn resolve(len: Length, room: f32, natural: f32) -> f32 {
+    match len {
+        Length::Fill(_) => room,
+        Length::Fixed(v) => v,
+        Length::Shrink => natural.min(room),
+    }
+}
+
+fn clamp_w<M>(e: &Element<M>, w: f32) -> f32 {
+    e.max_width.map_or(w, |m| w.min(m))
+}

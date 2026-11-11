@@ -80,6 +80,48 @@ pub const MENU: Rgb = Rgb(43, 46, 59);
 pub const MENU_INK: Rgb = Rgb(235, 235, 235);
 pub const MENU_INK_OFF: Rgb = Rgb(128, 128, 134);
 
+/// The grounds and inks of a window built of widgets (the settings app's,
+/// first; moved here 2026-11-10 so every tool of ours shares them). `hover`
+/// is laid over what the pointer is on, at `hover_alpha` (0 to 255).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Palette {
+    /// The side list of pages.
+    pub sidebar: Rgb,
+    /// A page's ground.
+    pub page: Rgb,
+    /// A group of settings on a page.
+    pub card: Rgb,
+    /// Edges and dividing lines.
+    pub line: Rgb,
+    /// Text that explains.
+    pub dim: Rgb,
+    pub text: Rgb,
+    pub hover: Rgb,
+    pub hover_alpha: u8,
+}
+
+pub const PALETTE_DARK: Palette = Palette {
+    sidebar: Rgb(0x26, 0x26, 0x28),
+    page: Rgb(0x1c, 0x1c, 0x1e),
+    card: Rgb(0x2c, 0x2c, 0x2e),
+    line: Rgb(0x3a, 0x3a, 0x3c),
+    dim: Rgb(0xa1, 0xa1, 0xa6),
+    text: Rgb(0xf2, 0xf2, 0xf2),
+    hover: Rgb(255, 255, 255),
+    hover_alpha: 20,
+};
+
+pub const PALETTE_LIGHT: Palette = Palette {
+    sidebar: Rgb(0xe7, 0xe5, 0xe2),
+    page: Rgb(0xf7, 0xf7, 0xf6),
+    card: Rgb(0xec, 0xeb, 0xea),
+    line: Rgb(0xd9, 0xd8, 0xd6),
+    dim: Rgb(0x6e, 0x6e, 0x73),
+    text: Rgb(0x1d, 0x1d, 0x1f),
+    hover: Rgb(0, 0, 0),
+    hover_alpha: 15,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
