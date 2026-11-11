@@ -159,6 +159,21 @@ impl Server {
             "shelf" => self.shelf_report(),
             "session" => self.session_report(),
             "apps" => self.launcher_report(),
+            // A finger: `touch down|move <x> <y> [finger]`, `touch up [finger]`; alone, a report.
+            "touch" => {
+                let number = |i: usize| args.get(i).and_then(|a| a.parse::<f64>().ok());
+                let time = smithay::backend::input::InputTime::now();
+                let finger = |i: usize| smithay::backend::input::TouchSlot::from(args.get(i).and_then(|a| a.parse::<u32>().ok()).or(Some(0)));
+                match (args.first().copied(), number(1), number(2)) {
+                    (Some("down"), Some(x), Some(y)) => self.touch_down(finger(3), (x, y).into(), time),
+                    (Some("move"), Some(x), Some(y)) => self.touch_motion(finger(3), (x, y).into(), time),
+                    (Some("up"), ..) => self.touch_up(finger(1), time),
+                    (None, ..) => return self.touch_report(),
+                    _ => return "touch down|move <x> <y> [finger], touch up [finger]".into(),
+                }
+                self.touch_frame();
+                "touched".into()
+            }
             // Keys by name and text by letter, as a US keyboard has them (the kernel's
             // key numbers; what they type is the session's layout's to say).
             "key" | "type" => {
@@ -263,7 +278,7 @@ impl Server {
                 self.loop_signal.stop();
                 "quitting".into()
             }
-            _ => "commands: shot, windows, shelf, session, apps, key <name>, type <text>, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
+            _ => "commands: shot, windows, shelf, session, apps, key <name>, type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
         }
     }
 

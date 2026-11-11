@@ -428,6 +428,31 @@ one.
     only tried at the right edge; windows under the popup still get the
     pointer's motion.
 
+- **Touch, the plain version (2026-11-10; Dave: "do the cheap version.
+  touch keyboard later if ever": basic touch beside a keyboard and,
+  later, a spoken interface).** Server `touch.rs`.
+  - A finger on a window is the window's: it comes forward, has the
+    keyboard, and gets the touch as Wayland touch (every finger). A first
+    finger anywhere else (the dock, a menu, the applications popup, a
+    notification, a server title bar, the desktop) is the pointer with
+    its left button held, so a tap is a click and a drag a drag.
+  - A panel is on one screen, never across all: `[[touch.panel]]` in
+    desktop.toml ties a panel's name to a screen's id; without a tie, or
+    with its screen away, the primary one. The log names each panel and
+    its screen at its first touch. A touch that wakes the screens goes no
+    further, as a key does.
+  - `vctl touch down|move <x> <y> [finger]`, `touch up [finger]`, and
+    `vctl touch` alone for a report. On Hubble with these: a tap on the
+    apps button opens the popup, a tap on a cell starts the application,
+    a finger on a window focuses it, the dock is dragged to the left edge
+    and back, two fingers on a window are both the window's.
+  - Not yet: the real panel under a real finger (Hubble's 4K has one,
+    plugged in; Dave); the tie made by touching the screen (settings
+    app); hit areas forgiving of a finger; a long press as the right
+    button; the arrow stays where the finger last was; our own toolkit
+    does not read touch (the terminal ignores a finger); an on-screen
+    keyboard is not planned.
+
 ## Acceptance
 
 Every step: `cargo test --workspace` green on Hubble, canary and Techbench,

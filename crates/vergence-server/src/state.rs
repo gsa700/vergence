@@ -106,6 +106,8 @@ pub struct Server {
     pub resume: crate::session::Session,
     /// The applications popup (launcher.rs).
     pub launcher: crate::launcher::Launcher,
+    /// Touch panels and the fingers on them (touch.rs).
+    pub touch: crate::touch::Touch,
     /// The idle clock, screens off and sleep (energy.rs).
     pub energy: crate::energy::Energy,
     pub popups: PopupManager,
@@ -172,6 +174,7 @@ impl Server {
         // Notify clients that we have a pointer (mouse)
         // Here we assume that there is always pointer plugged in
         seat.add_pointer();
+        seat.add_touch();
 
         // A space represents a two-dimensional plane. Windows and Outputs can be mapped onto it.
         //
@@ -231,6 +234,7 @@ impl Server {
             shelf: crate::shelf::Shelf::load(),
             resume: Default::default(),
             launcher: Default::default(),
+            touch: Default::default(),
             energy: crate::energy::Energy::new(),
             popups,
             seat,

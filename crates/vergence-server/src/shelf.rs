@@ -443,6 +443,7 @@ impl Server {
 
     /// Read the shelf's settings again (at start, and when desktop.toml changes).
     pub fn shelf_reload(&mut self) {
+        self.touch_reload();
         let (config, primary) = load();
         if config != self.shelf.config || primary != self.shelf.primary {
             self.shelf.config = config;
@@ -772,6 +773,14 @@ impl Server {
             .filter(|(item, windows)| !windows.is_empty() && self.shelf.apps.iter().any(|e| e.id == item.key && !e.terminal && !e.exec.is_empty()))
             .map(|(item, _)| item.key.clone())
             .collect()
+    }
+
+    /// Nothing rests on the dock any more (a finger that tapped it has gone).
+    pub fn shelf_unhover(&mut self) {
+        if self.shelf.hover.take().is_some() || self.shelf.named {
+            self.shelf.named = false;
+            self.redraw_all();
+        }
     }
 
     /// A right press on the dock: on an application's icon, its menu (pin or

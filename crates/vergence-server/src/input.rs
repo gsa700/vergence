@@ -83,11 +83,32 @@ impl Server {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         // The idle clock (energy.rs). A key or button that only woke the screens
         // goes no further; pointer motion does, so the pointer is where the hand put it.
-        if self.energy_activity() && matches!(event, InputEvent::Keyboard { .. } | InputEvent::PointerButton { .. }) {
+        if self.energy_activity() && matches!(event, InputEvent::Keyboard { .. } | InputEvent::PointerButton { .. } | InputEvent::TouchDown { .. }) {
             return;
         }
         match event {
             InputEvent::Keyboard { event, .. } => self.handle_key(event.key_code(), event.state(), Event::time(&event)),
+            // Touch (touch.rs): where on its panel a finger is, put on the panel's screen.
+            InputEvent::TouchDown { event, .. } => {
+                use smithay::backend::input::{Device, TouchEvent};
+                if let Some(screen) = self.touch_screen(&event.device().name()) {
+                    let at = event.position_transformed(screen.size) + screen.loc.to_f64();
+                    self.touch_down(event.slot(), at, Event::time(&event));
+                }
+            }
+            InputEvent::TouchMotion { event, .. } => {
+                use smithay::backend::input::{Device, TouchEvent};
+                if let Some(screen) = self.touch_screen(&event.device().name()) {
+                    let at = event.position_transformed(screen.size) + screen.loc.to_f64();
+                    self.touch_motion(event.slot(), at, Event::time(&event));
+                }
+            }
+            InputEvent::TouchUp { event, .. } => {
+                use smithay::backend::input::TouchEvent;
+                self.touch_up(event.slot(), Event::time(&event));
+            }
+            InputEvent::TouchCancel { event, .. } => self.touch_cancel(Event::time(&event)),
+            InputEvent::TouchFrame { .. } => self.touch_frame(),
             InputEvent::PointerMotion { event, .. } => {
                 // A mouse on the real monitors (stage 2): moved by its delta, kept on the outputs.
                 use smithay::backend::input::PointerMotionEvent;
