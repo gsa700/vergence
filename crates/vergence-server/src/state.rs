@@ -54,6 +54,9 @@ pub struct Server {
     /// Xwayland's window manager, once Xwayland is ready.
     pub xwm: Option<smithay::xwayland::X11Wm>,
     pub xdisplay: Option<u32>,
+    /// Xwayland has been started in this session (it is not stopped again
+    /// before the session ends: that would close the X11 applications).
+    pub xwayland_started: bool,
     /// Xwayland's client scale, and the XSETTINGS thread's channel: a poke
     /// republishes (settings.rs, when settings.toml changes).
     pub x_scale: f64,
@@ -210,6 +213,7 @@ impl Server {
             xwayland_shell_state,
             xwm: None,
             xdisplay: None,
+            xwayland_started: false,
             x_scale: 1.0,
             xsettings_tx: None,
             xdg_decoration_state,
@@ -303,7 +307,25 @@ impl Server {
     }
 }
 
+/// desktop.toml's `[x11] enabled`: whether X11 applications are to run (through
+/// Xwayland). Off unless it says true.
+pub fn x11_wanted() -> bool {
+    let Some(home) = std::env::var_os("HOME") else { return false };
+    let text = std::fs::read_to_string(std::path::Path::new(&home).join(".config/vergence/desktop.toml")).unwrap_or_default();
+    text.parse::<toml::Table>().ok().and_then(|t| t.get("x11").and_then(|x| x.get("enabled")).and_then(|v| v.as_bool())).unwrap_or(false)
+}
+
 impl Server {
+    /// The settings changed: Xwayland is started if X11 applications are now
+    /// wanted and it has not been (turning it off waits for the next session).
+    pub fn x11_follow(&mut self) {
+        if !self.xwayland_started && x11_wanted() {
+            tracing::info!("Xwayland: turned on in the settings");
+            self.xwayland_started = true;
+            self.start_xwayland(|| ());
+        }
+    }
+
     /// Rootless Xwayland for X11 apps. When it is ready: its window manager, the
     /// X default pointer, DISPLAY for children, then `ready` (starts the first app).
     pub fn start_xwayland(&mut self, ready: impl FnOnce() + 'static) {

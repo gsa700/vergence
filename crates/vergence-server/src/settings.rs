@@ -261,6 +261,8 @@ impl Server {
                 state.energy_reload();
                 // The shelf's settings and the primary screen (shelf.rs).
                 state.shelf_reload();
+                // X11 applications turned on (state.rs).
+                state.x11_follow();
                 let new = load();
                 let diff = changed(&state.settings.current, &new);
                 state.settings.current = new;

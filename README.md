@@ -17,12 +17,12 @@ monitor setup by its EDIDs, puts its arrangement back, puts every window back
 (also across scale changes), is the desktop's XSETTINGS manager, and scales
 in Mode A (everything the same physical size: a 200-unit box measured 52.9 mm
 on a 103 ppi and a 163 ppi monitor in GTK 3/4, Qt, Electron and Avalonia) or
-Mode B (native pixels, per-monitor factors). Waiting for real monitors (a
-14" 4K, a 32" 4K) for the final checks.
+Mode B (native pixels, per-monitor factors). Phase 1 was frozen on
+2026-11-07 and `vergd` retired on 2026-11-10; git keeps it.
 
 Crates: `vergence-edid` (EDID parser), `vergence-profile` (profile keys,
 arrangements, window memory, scaling), `vergence-xsettings` (XSETTINGS wire
-format), `vergd` (the daemon), `vergence-harness` (EDID sweeps, fake
+format), `vergence-harness` (EDID sweeps, fake
 monitors, size measurement), `vergence-server` (the phase 2 server),
 `vergence-protocol` (the native protocol: session bus messages, wire format,
 the `vbus` tool), `vergence-dbus` (our own D-Bus wire protocol, for the bus's

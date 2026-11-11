@@ -67,9 +67,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The D-Bus edge (dbus.rs); sets DBUS_SESSION_BUS_ADDRESS unless one is set.
     crate::dbus::listen(&mut state);
 
-    // X11 apps through Xwayland; the first app starts once it is ready (or failed),
-    // so it inherits DISPLAY.
-    state.start_xwayland(spawn_client);
+    // X11 apps through Xwayland, if the settings ask for it (off by default since
+    // 2026-11-10: Dave runs no X11-only programs); the first app then starts once
+    // it is ready (or failed), so it inherits DISPLAY.
+    if crate::state::x11_wanted() {
+        state.xwayland_started = true;
+        state.start_xwayland(spawn_client);
+    } else {
+        tracing::info!("Xwayland: off ([x11] enabled = true in desktop.toml turns it on)");
+        spawn_client();
+    }
 
     event_loop.run(None, &mut state, move |_| {
         // Server is running

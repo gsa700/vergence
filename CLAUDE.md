@@ -10,14 +10,12 @@ The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md: s
   dev boxes: `tools/sync-hubble.sh [host]` (rsync; keeps the host's build output;
   default hubble, also kepler and techbench), then `cargo test --workspace`
   there: Hubble, kepler and Techbench for every change. Fake monitors for tests: docs/milestone-1.md, "Found on Hubble".
-- **vergd runs in Dave's Xfce session on Hubble** (tools/install-autostart.sh:
-  ~/.local/bin/vergd, log ~/.local/state/vergence/vergd.log, profiles
-  ~/.config/vergence/profiles.toml, windows.toml, settings.toml,
-  session.env). Before a test that plugs fake monitors, stop it or expect it
-  to act; after rebuilding, rerun the install script to update the running
-  copy. It is the XSETTINGS manager (Xfce's Appearance dialog no longer
-  applies); run `xfconf-query` only with the session's
-  DBUS_SESSION_BUS_ADDRESS, or a stray xfconfd appears.
+- **vergd, phase 1's X11 daemon, is retired** (Dave, 2026-11-10): removed
+  from the workspace with tools/install-autostart.sh; git keeps it (last as
+  `crates/vergd` in 4a2f00f). Its files' formats live on in vergence-profile
+  and vergence-xsettings, which the server uses. **X11 applications are off
+  by default** in a Vergence session since the same day: desktop.toml
+  `[x11] enabled = true` (the settings app's Windows page) starts Xwayland.
 - **The phase 2 server on Hubble's real monitors**: Hubble has no display
   manager since 2026-11-07 (lightdm disabled: its Wayland sessions were
   fragile on FreeBSD without logind; `sudo sysrc lightdm_enable=YES` brings it
@@ -37,7 +35,7 @@ The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md: s
   fake13). Avalonia on FreeBSD needs the natives in ~/vergence-native
   (BsdProbe's libSkiaSharp 119, libc-epoll, HarfBuzz link).
 - **Names:** the project and its crates are `vergence` / `vergence-*`; the
-  phase 1 daemon is `vergd`. "Verge" for short in conversation.
+  phase 1 daemon was `vergd` (retired). "Verge" for short in conversation.
 - **Rust throughout** (whitepaper §8). EDID, profile and rules logic live in
   library crates the server reuses.
 - **No borrowing unless absolutely necessary, and always ask Dave first**

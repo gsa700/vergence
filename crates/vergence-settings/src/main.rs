@@ -91,6 +91,8 @@ enum Message {
     TermScheme(String),
     // Windows.
     Layout(winbar::Layout),
+    /// X11 applications (Xwayland) on or off: desktop.toml [x11] enabled.
+    X11(bool),
     // The dock (desktop.toml [shelf]; the server reads it within a second).
     DockEdge(usize),
     DockScreen(usize),
@@ -507,6 +509,9 @@ impl App {
                 }
             }
             Message::Layout(l) => self.set_x(winbar::KEY, &winbar::format(l)),
+            Message::X11(on) => self.save_table("x11", |t| {
+                t.insert("enabled".into(), on.into());
+            }),
             Message::Outputs(outputs, setup) => {
                 let current = self.current_output().map(|o| o.id.clone());
                 self.outputs = outputs;
@@ -1399,6 +1404,11 @@ impl App {
                     setting("Maximize", "Fills the screen. Double-clicking the title bar does too.", switch(l.maximize, move |on| Message::Layout(winbar::Layout { maximize: on, ..l })).name("Maximize")),
                     setting("Close", "Always there.", label("On").dim()),
                 ]),
+                self.group(Some("Older applications"), vec![setting(
+                    "X11 applications",
+                    "Through Xwayland, for programs with no Wayland support. Turning it on starts it at once; turning it off takes effect the next time Vergence starts.",
+                    switch(self.desktop.get("x11").and_then(|t| t.get("enabled")).and_then(|v| v.as_bool()).unwrap_or(false), Message::X11).name("X11 applications"),
+                )]),
                 self.status_line(),
             ],
         )
