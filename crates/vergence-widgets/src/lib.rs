@@ -25,8 +25,9 @@ mod theme;
 mod ui;
 
 use std::io;
+use std::time::Instant;
 
-pub use element::{Align, ButtonLook, Element, Length, Padding, Weight, button, column, label, panel, row, rule, space, stack, vrule};
+pub use element::{Align, ButtonLook, Element, Fit, Length, Padding, Touch, Weight, button, choice, column, drawing, field, label, panel, picture, row, rule, scroll, slider, space, stack, switch, vrule};
 pub use layout::{Id, Line, Measure};
 pub use theme::{Theme, parse_hex};
 pub use ui::{Meaning, Response, Ui};
@@ -118,10 +119,21 @@ struct Host<P: Program> {
     print_tree: bool,
 }
 
+/// The toolkit's own timer (the caret's blink).
+const TOOLKIT_TIMER: u64 = 1 << 63;
+
 impl<P: Program> Host<P> {
     fn changed(&mut self, window: &mut Window) {
         self.stale = true;
         window.redraw();
+    }
+
+    /// Asks for the toolkit's next wake, or forgets it.
+    fn rearm(&self, window: &mut Window) {
+        match self.ui.next_timer() {
+            Some(at) => window.wake_at(TOOLKIT_TIMER, at),
+            None => window.cancel_timer(TOOLKIT_TIMER),
+        }
     }
 }
 
@@ -144,15 +156,21 @@ impl<P: Program> vergence_ui::App for Host<P> {
             let root = self.program.view(&self.theme);
             let mut measure = FontsMeasure { fonts, family: &self.theme.font };
             self.ui.layout(root, frame.width, frame.height, &mut measure, self.theme.text_size);
+            self.ui.set_reduced_motion(self.theme.reduced_motion);
             self.stale = false;
             self.laid_at = (frame.width, frame.height);
             if self.print_tree {
                 eprint!("{}", self.ui.meaning_text());
             }
         }
+        self.ui.advance(Instant::now());
         let mut scene = Scene::new(frame.width, frame.height);
         self.ui.draw(&mut scene, fonts, &self.theme);
         scene
+    }
+
+    fn animating(&self) -> bool {
+        self.ui.animating()
     }
 
     fn input(&mut self, input: &Input, window: &mut Window) {
@@ -162,6 +180,12 @@ impl<P: Program> vergence_ui::App for Host<P> {
         }
         if r.redraw {
             window.redraw();
+        }
+        if let Some(text) = &r.copy {
+            window.copy(text);
+        }
+        if r.paste {
+            window.paste();
         }
         let any = !r.messages.is_empty();
         for m in r.messages {
@@ -173,6 +197,7 @@ impl<P: Program> vergence_ui::App for Host<P> {
         if !r.used && self.program.input(input, window) {
             self.changed(window);
         }
+        self.rearm(window);
     }
 
     fn waker(&mut self, waker: Waker) {
@@ -186,7 +211,11 @@ impl<P: Program> vergence_ui::App for Host<P> {
     }
 
     fn timer(&mut self, id: u64, window: &mut Window) {
-        if id < 1 << 63 && self.program.timer(id, window) {
+        if id == TOOLKIT_TIMER {
+            // The caret blinks.
+            window.redraw();
+            self.rearm(window);
+        } else if id < TOOLKIT_TIMER && self.program.timer(id, window) {
             self.changed(window);
         }
     }

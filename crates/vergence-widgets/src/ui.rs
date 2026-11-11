@@ -1,13 +1,16 @@
 //! A laid-out tree at work: what the pointer, a finger and the keyboard do
 //! to it, how it is drawn, and what it means.
 
-use vergence_render::text;
-use vergence_scene::{Color, Rect, Scene};
-use vergence_text::Fonts;
-use vergence_ui::{Button as MouseButton, Cursor, Input, sym, touch::Phase};
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
-use crate::element::{ButtonLook, Element};
-use crate::layout::{Id, Layout, Measure, Node, What};
+use vergence_render::text;
+use vergence_scene::{Color, Point, Rect, Scene};
+use vergence_text::{FaceId, Fonts};
+use vergence_ui::{Button as MouseButton, Cursor, Input, Modifiers, sym, touch::Phase};
+
+use crate::element::{ButtonLook, Element, FIELD_PAD_H, Fit, Touch};
+use crate::layout::{CHEVRON, Id, Layout, Measure, Node, What};
 use crate::theme::Theme;
 
 /// What a press is being made with.
@@ -28,11 +31,15 @@ pub struct Response<M> {
     pub cursor: Option<Cursor>,
     /// The widgets used the input; otherwise the program may.
     pub used: bool,
+    /// Text to put on the clipboard.
+    pub copy: Option<String>,
+    /// The clipboard's text is wanted (it comes back as `Input::Paste`).
+    pub paste: bool,
 }
 
 impl<M> Default for Response<M> {
     fn default() -> Self {
-        Response { messages: Vec::new(), redraw: false, cursor: None, used: false }
+        Response { messages: Vec::new(), redraw: false, cursor: None, used: false, copy: None, paste: false }
     }
 }
 
@@ -48,9 +55,78 @@ pub struct Meaning {
     pub depth: usize,
 }
 
+/// A field's own copy of its text while it is being typed in.
+#[derive(Debug, Default)]
+struct FieldState {
+    text: String,
+    /// What the field last sent, or was last given: while the program's
+    /// value is this, the field's own text stands (a key typed before the
+    /// tree is built again is not lost).
+    sent: String,
+    /// The caret and the other end of the selection, as byte offsets.
+    caret: usize,
+    anchor: usize,
+    /// How far the text is moved left to keep the caret in view.
+    shift: f32,
+    /// Where each character boundary is drawn, from the text's start.
+    stops: Vec<(usize, f32)>,
+}
+
+#[derive(Debug, Default)]
+struct ScrollState {
+    offset: f32,
+    /// Points a second, from a flick; 0 when still.
+    velocity: f32,
+}
+
+#[derive(Debug)]
+struct SwitchState {
+    shown: bool,
+    changed: Option<Instant>,
+}
+
+/// Something being dragged.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Drag {
+    Slider { id: Id, with: With, value: f32 },
+    Select { id: Id },
+    Bar { id: Id, grab: f32 },
+    /// A finger on a scrolling place: it scrolls once it has moved.
+    Flick { id: Id, finger: i32, start: f32, last: f32, at: Instant, moved: bool, velocity: f32 },
+    Drawing { id: Id, with: With },
+}
+
+fn drag_id(d: &Drag) -> Id {
+    match *d {
+        Drag::Slider { id, .. } | Drag::Select { id } | Drag::Bar { id, .. } | Drag::Flick { id, .. } | Drag::Drawing { id, .. } => id,
+    }
+}
+
+/// An open choice list.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Open {
+    id: Id,
+    hl: Option<usize>,
+    offset: f32,
+}
+
+const BLINK: Duration = Duration::from_millis(530);
+const SLIDE: Duration = Duration::from_millis(120);
+const DOUBLE: Duration = Duration::from_millis(400);
+/// A finger moves this far before a press becomes a scroll.
+const SLOP: f32 = 8.0;
+/// Points scrolled for each unit of the wheel's value (15 a notch).
+const WHEEL: f32 = 2.0;
+const BAR_W: f32 = 6.0;
+/// The longest text a field holds, in bytes.
+pub(crate) const MAX_FIELD: usize = 4096;
+const ITEM_PAD: f32 = 4.0;
+const THUMB: f32 = 16.0;
+
 /// Widgets laid out, and what they remember between builds.
 pub struct Ui<M> {
     nodes: Vec<Node<M>>,
+    size: (f32, f32),
     hover: Option<Id>,
     pressed: Option<(Id, With)>,
     /// Where a finger is, by its id.
@@ -58,11 +134,43 @@ pub struct Ui<M> {
     focus: Option<Id>,
     /// The focus is shown: it was moved with the keyboard.
     ring: bool,
+    fields: HashMap<Id, FieldState>,
+    scrolls: HashMap<Id, ScrollState>,
+    switches: HashMap<Id, SwitchState>,
+    drag: Option<Drag>,
+    open: Option<Open>,
+    /// When the caret was last shown at once (it blinks from there).
+    blink: Instant,
+    steady: bool,
+    /// The last click on a field, for double and triple clicks.
+    click: Option<(Instant, Id, u8)>,
+    /// The drawing the pointer is over.
+    over_drawing: Option<Id>,
+    /// When momentum was last moved on.
+    last_tick: Option<Instant>,
 }
 
 impl<M> Default for Ui<M> {
     fn default() -> Self {
-        Ui { nodes: Vec::new(), hover: None, pressed: None, fingers: Vec::new(), focus: None, ring: false }
+        Ui {
+            nodes: Vec::new(),
+            size: (0.0, 0.0),
+            hover: None,
+            pressed: None,
+            fingers: Vec::new(),
+            focus: None,
+            ring: false,
+            fields: HashMap::new(),
+            scrolls: HashMap::new(),
+            switches: HashMap::new(),
+            drag: None,
+            open: None,
+            blink: Instant::now(),
+            steady: false,
+            click: None,
+            over_drawing: None,
+            last_tick: None,
+        }
     }
 }
 
@@ -70,11 +178,72 @@ fn inside(r: &Rect, x: f32, y: f32) -> bool {
     x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h
 }
 
+fn meet(a: Rect, b: Rect) -> Rect {
+    let x = a.x.max(b.x);
+    let y = a.y.max(b.y);
+    Rect::new(x, y, ((a.x + a.w).min(b.x + b.w) - x).max(0.0), ((a.y + a.h).min(b.y + b.h) - y).max(0.0))
+}
+
 fn over(base: Color, top: Color) -> Color {
     // `top` laid over `base` at its alpha; the result keeps `base`'s alpha.
     let a = top.a as u32;
     let mix = |b: u8, t: u8| ((b as u32 * (255 - a) + t as u32 * a + 127) / 255) as u8;
     Color { r: mix(base.r, top.r), g: mix(base.g, top.g), b: mix(base.b, top.b), a: base.a.max(top.a) }
+}
+
+fn alpha(c: Color, a: u8) -> Color {
+    Color { a, ..c }
+}
+
+fn prev_char(s: &str, i: usize) -> usize {
+    s[..i].char_indices().next_back().map_or(0, |(j, _)| j)
+}
+
+fn next_char(s: &str, i: usize) -> usize {
+    s[i..].chars().next().map_or(i, |c| i + c.len_utf8())
+}
+
+fn prev_word(s: &str, i: usize) -> usize {
+    let mut j = i;
+    while j > 0 && s[..j].ends_with(char::is_whitespace) {
+        j = prev_char(s, j);
+    }
+    while j > 0 && !s[..j].ends_with(char::is_whitespace) {
+        j = prev_char(s, j);
+    }
+    j
+}
+
+fn next_word(s: &str, i: usize) -> usize {
+    let mut j = i;
+    while j < s.len() && s[j..].starts_with(char::is_whitespace) {
+        j = next_char(s, j);
+    }
+    while j < s.len() && !s[j..].starts_with(char::is_whitespace) {
+        j = next_char(s, j);
+    }
+    j
+}
+
+/// The nearest character boundary at or before `i`.
+fn boundary(s: &str, i: usize) -> usize {
+    let mut i = i.min(s.len());
+    while !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// A slider's value at a fraction along it, kept to its step.
+fn slider_value(min: f32, max: f32, step: f32, f: f32) -> f32 {
+    let v = min + (max - min) * f.clamp(0.0, 1.0);
+    let v = if step > 0.0 { min + ((v - min) / step).round() * step } else { v };
+    v.clamp(min, max)
+}
+
+/// Where a slider's thumb travels: inset by its radius.
+fn slider_track(r: &Rect) -> (f32, f32) {
+    (r.x + THUMB / 2.0, (r.w - THUMB).max(1.0))
 }
 
 impl<M: Clone> Ui<M> {
@@ -88,32 +257,173 @@ impl<M: Clone> Ui<M> {
         let mut nodes = Vec::new();
         Layout { measure, text_size }.run(root, Rect::new(0.0, 0.0, width, height), &mut nodes);
         self.nodes = nodes;
+        self.size = (width, height);
         let alive = |id: Option<Id>, nodes: &[Node<M>]| id.filter(|id| nodes.iter().any(|n| n.id == *id && n.active()));
         self.hover = alive(self.hover, &self.nodes);
-        self.focus = alive(self.focus, &self.nodes);
+        self.focus = alive(self.focus, &self.nodes).filter(|id| self.nodes.iter().any(|n| n.id == *id && n.focusable()));
         if self.pressed.is_some_and(|(id, _)| alive(Some(id), &self.nodes).is_none()) {
             self.pressed = None;
         }
+        if self.open.is_some_and(|o| alive(Some(o.id), &self.nodes).is_none()) {
+            self.open = None;
+        }
+        let ids: HashSet<Id> = self.nodes.iter().map(|n| n.id).collect();
+        if self.drag.is_some_and(|d| !ids.contains(&drag_id(&d))) {
+            self.drag = None;
+        }
+        self.fields.retain(|id, _| ids.contains(id));
+        self.scrolls.retain(|id, _| ids.contains(id));
+        self.switches.retain(|id, _| ids.contains(id));
+        let now = Instant::now();
+        for n in &self.nodes {
+            match &n.what {
+                What::Field { value, .. } => {
+                    let f = self.fields.entry(n.id).or_default();
+                    if *value != f.sent {
+                        f.text = value.clone();
+                        f.sent = value.clone();
+                    }
+                    f.caret = boundary(&f.text, f.caret);
+                    f.anchor = boundary(&f.text, f.anchor);
+                }
+                What::Scroll { content } => {
+                    let s = self.scrolls.entry(n.id).or_default();
+                    s.offset = s.offset.clamp(0.0, (content - n.rect.h).max(0.0));
+                }
+                What::Switch { on, .. } => {
+                    let s = self.switches.entry(n.id).or_insert(SwitchState { shown: *on, changed: None });
+                    if s.shown != *on {
+                        s.shown = *on;
+                        s.changed = Some(now);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
-    /// The topmost widget that takes input at `x`, `y`.
-    fn target(&self, x: f32, y: f32) -> Option<Id> {
-        self.nodes.iter().rev().find(|n| n.active() && inside(&n.rect, x, y)).map(|n| n.id)
+    /// The caret is steady rather than blinking, and switches do not slide
+    /// (the desktop's reduced motion).
+    pub fn set_reduced_motion(&mut self, steady: bool) {
+        self.steady = steady;
+    }
+
+    fn index(&self, id: Id) -> Option<usize> {
+        self.nodes.iter().position(|n| n.id == id)
     }
 
     fn node(&self, id: Id) -> Option<&Node<M>> {
         self.nodes.iter().find(|n| n.id == id)
     }
 
-    /// What pressing `id` sends.
-    fn activate(&self, id: Id, r: &mut Response<M>) {
-        if let Some(Node { what: What::Button { on_press: Some(m), .. }, .. }) = self.node(id) {
-            r.messages.push(m.clone());
+    /// How far node `i` is moved up by the scrolling places it is in.
+    fn offset_of(&self, i: usize) -> f32 {
+        let mut d = 0.0;
+        let mut p = self.nodes[i].parent;
+        while let Some(q) = p {
+            if let What::Scroll { .. } = self.nodes[q].what {
+                d += self.scrolls.get(&self.nodes[q].id).map_or(0.0, |s| s.offset);
+            }
+            p = self.nodes[q].parent;
+        }
+        d
+    }
+
+    /// Node `i`'s rectangle as it is on the screen.
+    fn shown(&self, i: usize) -> Rect {
+        let r = self.nodes[i].rect;
+        Rect::new(r.x, r.y - self.offset_of(i), r.w, r.h)
+    }
+
+    /// The part of the window node `i` can be seen in: inside every
+    /// scrolling place around it.
+    fn clip_of(&self, i: usize) -> Rect {
+        let mut c = Rect::new(0.0, 0.0, self.size.0, self.size.1);
+        let mut p = self.nodes[i].parent;
+        while let Some(q) = p {
+            if let What::Scroll { .. } = self.nodes[q].what {
+                c = meet(c, self.shown(q));
+            }
+            p = self.nodes[q].parent;
+        }
+        c
+    }
+
+    fn hit(&self, i: usize, x: f32, y: f32) -> bool {
+        inside(&self.shown(i), x, y) && inside(&self.clip_of(i), x, y)
+    }
+
+    /// The topmost widget that takes input at `x`, `y`.
+    fn target(&self, x: f32, y: f32) -> Option<Id> {
+        (0..self.nodes.len()).rev().find(|&i| self.nodes[i].active() && self.hit(i, x, y)).map(|i| self.nodes[i].id)
+    }
+
+    /// The innermost scrolling place at `x`, `y` that has more than it shows.
+    fn scroller_at(&self, x: f32, y: f32) -> Option<usize> {
+        (0..self.nodes.len()).rev().find(|&i| matches!(self.nodes[i].what, What::Scroll { content } if content > self.nodes[i].rect.h + 0.5) && self.hit(i, x, y))
+    }
+
+    /// The nearest scrolling place around node `i`.
+    fn scroller_of(&self, i: usize) -> Option<usize> {
+        let mut p = self.nodes[i].parent;
+        while let Some(q) = p {
+            if let What::Scroll { .. } = self.nodes[q].what {
+                return Some(q);
+            }
+            p = self.nodes[q].parent;
+        }
+        None
+    }
+
+    /// Moves scrolling place `i` by `dy`; true if it moved.
+    fn scroll_by(&mut self, i: usize, dy: f32) -> bool {
+        let What::Scroll { content } = self.nodes[i].what else { return false };
+        let max = (content - self.nodes[i].rect.h).max(0.0);
+        let s = self.scrolls.entry(self.nodes[i].id).or_default();
+        let before = s.offset;
+        s.offset = (s.offset + dy).clamp(0.0, max);
+        s.offset != before
+    }
+
+    /// The scrollbar's thumb of scrolling place `i`, if it has one.
+    fn thumb(&self, i: usize) -> Option<Rect> {
+        let What::Scroll { content } = self.nodes[i].what else { return None };
+        let r = self.shown(i);
+        if content <= r.h + 0.5 {
+            return None;
+        }
+        let offset = self.scrolls.get(&self.nodes[i].id).map_or(0.0, |s| s.offset);
+        let h = (r.h * r.h / content).max(24.0).min(r.h);
+        let y = r.y + (r.h - h) * offset / (content - r.h);
+        Some(Rect::new(r.x + r.w - BAR_W - 2.0, y, BAR_W, h))
+    }
+
+    /// Scrolls the places around node `i` so that it can be seen.
+    fn reveal(&mut self, i: usize) {
+        let mut child = i;
+        while let Some(s) = self.scroller_of(child) {
+            let r = self.shown(i);
+            let area = self.shown(s);
+            let dy = if r.y < area.y {
+                r.y - area.y - 8.0
+            } else if r.y + r.h > area.y + area.h {
+                (r.y + r.h - (area.y + area.h) + 8.0).min(r.y - area.y)
+            } else {
+                0.0
+            };
+            if dy != 0.0 {
+                self.scroll_by(s, dy);
+            }
+            child = s;
         }
     }
 
     fn focusables(&self) -> Vec<Id> {
-        self.nodes.iter().filter(|n| n.active()).map(|n| n.id).collect()
+        self.nodes.iter().filter(|n| n.focusable()).map(|n| n.id).collect()
+    }
+
+    pub fn focused(&self) -> Option<Id> {
+        self.focus
     }
 
     #[cfg(test)]
@@ -121,109 +431,469 @@ impl<M: Clone> Ui<M> {
         self.nodes.iter().map(|n| n.id).collect()
     }
 
-    pub fn focused(&self) -> Option<Id> {
-        self.focus
+    #[cfg(test)]
+    pub(crate) fn scroll_offset(&self) -> f32 {
+        self.scrolls.values().map(|s| s.offset).sum()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn field_text(&self) -> Option<(String, usize, usize)> {
+        let f = self.fields.get(&self.focus?)?;
+        Some((f.text.clone(), f.anchor, f.caret))
+    }
+
+    /// True while something moves by itself (a flick's momentum, a switch's
+    /// slide): a frame is wanted every time the monitor can show one.
+    pub fn animating(&self) -> bool {
+        let now = Instant::now();
+        self.scrolls.values().any(|s| s.velocity != 0.0) || (!self.steady && self.switches.values().any(|s| s.changed.is_some_and(|t| now.duration_since(t) < SLIDE)))
+    }
+
+    /// Moves momentum on to `now`. Called before each frame.
+    pub fn advance(&mut self, now: Instant) {
+        let dt = self.last_tick.map_or(0.0, |t| now.saturating_duration_since(t).as_secs_f32()).min(0.1);
+        self.last_tick = Some(now);
+        if dt == 0.0 {
+            return;
+        }
+        let moving: Vec<(usize, f32)> = (0..self.nodes.len()).filter_map(|i| self.scrolls.get(&self.nodes[i].id).filter(|s| s.velocity != 0.0).map(|s| (i, s.velocity))).collect();
+        for (i, v) in moving {
+            let moved = self.scroll_by(i, v * dt);
+            if let Some(s) = self.scrolls.get_mut(&self.nodes[i].id) {
+                s.velocity *= (-4.0 * dt).exp();
+                if !moved || s.velocity.abs() < 20.0 {
+                    s.velocity = 0.0;
+                }
+            }
+        }
+    }
+
+    /// When the toolkit wants to be woken next (the caret's blink).
+    pub fn next_timer(&self) -> Option<Instant> {
+        if self.steady {
+            return None;
+        }
+        let focused_field = self.focus.and_then(|id| self.node(id)).is_some_and(|n| matches!(n.what, What::Field { .. }));
+        if !focused_field {
+            return None;
+        }
+        let since = Instant::now().saturating_duration_since(self.blink);
+        let n = since.as_millis() / BLINK.as_millis() + 1;
+        Some(self.blink + BLINK * n as u32)
+    }
+
+    /// The caret is drawn now.
+    fn caret_on(&self) -> bool {
+        self.steady || (Instant::now().saturating_duration_since(self.blink).as_millis() / BLINK.as_millis()).is_multiple_of(2)
+    }
+
+    fn caret_moved(&mut self) {
+        self.blink = Instant::now();
+    }
+
+    /// What pressing `id` does (a button, a switch, a choice's opening).
+    fn activate(&mut self, id: Id, r: &mut Response<M>) {
+        let Some(i) = self.index(id) else { return };
+        match &self.nodes[i].what {
+            What::Button { on_press: Some(m), .. } => r.messages.push(m.clone()),
+            What::Switch { on, on_toggle: Some(f) } => r.messages.push(f(!*on)),
+            What::Choice { selected, on_select: Some(_), .. } => {
+                self.open = Some(Open { id, hl: *selected, offset: 0.0 });
+                self.reveal_open();
+            }
+            _ => {}
+        }
+        r.redraw = true;
+    }
+
+    /// The open list's place, the height of an item, and how many there are.
+    fn list_rect(&self) -> Option<(Rect, f32, usize)> {
+        let o = self.open?;
+        let i = self.index(o.id)?;
+        let What::Choice { options, step, .. } = &self.nodes[i].what else { return None };
+        let at = self.shown(i);
+        let item = (step + 2.0 * ITEM_PAD).ceil();
+        let (w, h) = self.size;
+        let full = options.len() as f32 * item + 8.0;
+        let below = h - (at.y + at.h) - 8.0;
+        let above = at.y - 8.0;
+        let (y, lh) = if full <= below || below >= above {
+            (at.y + at.h + 2.0, full.min(below.max(item + 8.0)))
+        } else {
+            let lh = full.min(above);
+            (at.y - 2.0 - lh, lh)
+        };
+        let lw = at.w.max(120.0).min(w - 16.0);
+        let x = at.x.min(w - 8.0 - lw).max(8.0);
+        Some((Rect::new(x, y.max(4.0), lw, lh), item, options.len()))
+    }
+
+    /// The item of the open list at `x`, `y`.
+    fn item_at(&self, x: f32, y: f32) -> Option<usize> {
+        let (r, item, n) = self.list_rect()?;
+        if !inside(&r, x, y) {
+            return None;
+        }
+        let k = ((y - r.y - 4.0 + self.open?.offset) / item).floor();
+        (k >= 0.0 && (k as usize) < n).then_some(k as usize)
+    }
+
+    fn reveal_open(&mut self) {
+        let Some((r, item, n)) = self.list_rect() else { return };
+        let Some(o) = self.open.as_mut() else { return };
+        let max = (n as f32 * item + 8.0 - r.h).max(0.0);
+        if let Some(h) = o.hl {
+            let top = h as f32 * item;
+            if top < o.offset {
+                o.offset = top;
+            } else if top + item > o.offset + r.h - 8.0 {
+                o.offset = top + item - (r.h - 8.0);
+            }
+        }
+        o.offset = o.offset.clamp(0.0, max);
+    }
+
+    fn choose(&mut self, k: usize, r: &mut Response<M>) {
+        if let Some(o) = self.open.take()
+            && let Some(Node { what: What::Choice { on_select: Some(f), .. }, .. }) = self.node(o.id)
+        {
+            r.messages.push(f(k));
+        }
+        r.redraw = true;
+        r.used = true;
+    }
+
+    /// A slider's value at `x`.
+    fn slider_at(&self, i: usize, x: f32) -> Option<f32> {
+        let What::Slider { min, max, step, .. } = self.nodes[i].what else { return None };
+        let (x0, w) = slider_track(&self.shown(i));
+        Some(slider_value(min, max, step, (x - x0) / w))
+    }
+
+    fn slider_send(&mut self, id: Id, value: f32, r: &mut Response<M>) {
+        let before = match self.drag {
+            Some(Drag::Slider { id: d, value, .. }) if d == id => Some(value),
+            _ => None,
+        };
+        if let Some(Drag::Slider { value: v, .. }) = self.drag.as_mut() {
+            *v = value;
+        }
+        let was = before.or_else(|| match self.node(id).map(|n| &n.what) {
+            Some(What::Slider { value, .. }) => Some(*value),
+            _ => None,
+        });
+        if let Some(Node { what: What::Slider { on_change: Some(f), .. }, .. }) = self.node(id)
+            && was.is_none_or(|w| (value - w).abs() > f32::EPSILON)
+        {
+            r.messages.push(f(value));
+        }
+        r.redraw = true;
+        r.used = true;
+    }
+
+    fn slider_release(&mut self, id: Id, r: &mut Response<M>) {
+        if let Some(Node { what: What::Slider { on_release: Some(m), .. }, .. }) = self.node(id) {
+            r.messages.push(m.clone());
+        }
+        r.redraw = true;
+        r.used = true;
+    }
+
+    /// Tells a drawing of `t`, in its own coordinates.
+    fn tell_drawing(&self, id: Id, t: Touch, r: &mut Response<M>) {
+        let Some(i) = self.index(id) else { return };
+        let What::Drawing { on_touch: Some(f), .. } = &self.nodes[i].what else { return };
+        let o = self.shown(i);
+        let local = match t {
+            Touch::Press { x, y } => Touch::Press { x: x - o.x, y: y - o.y },
+            Touch::Move { x, y, pressed } => Touch::Move { x: x - o.x, y: y - o.y, pressed },
+            Touch::Release { x, y } => Touch::Release { x: x - o.x, y: y - o.y },
+            Touch::Leave => Touch::Leave,
+        };
+        r.messages.extend(f(local));
+        r.used = true;
+    }
+
+    /// The byte offset in field `i`'s text nearest to `x` on the screen.
+    fn field_offset(&self, i: usize, x: f32) -> usize {
+        let Some(f) = self.fields.get(&self.nodes[i].id) else { return 0 };
+        let local = x - (self.shown(i).x + FIELD_PAD_H) + f.shift;
+        f.stops.iter().min_by(|a, b| (a.1 - local).abs().total_cmp(&(b.1 - local).abs())).map_or(f.text.len(), |s| s.0)
+    }
+
+    /// Sends field `id`'s text if it changed.
+    fn field_changed(&mut self, id: Id, r: &mut Response<M>) {
+        let Some(i) = self.index(id) else { return };
+        let What::Field { on_input: Some(f), .. } = &self.nodes[i].what else { return };
+        let Some(state) = self.fields.get_mut(&id) else { return };
+        if state.text != state.sent {
+            state.sent = state.text.clone();
+            r.messages.push(f(state.text.clone()));
+        }
+    }
+
+    /// Types `text` into field `id` over its selection: its first line,
+    /// without control characters, as much as the field has room for.
+    fn field_insert(&mut self, id: Id, text: &str, r: &mut Response<M>) {
+        let editable = self.node(id).is_some_and(|n| matches!(n.what, What::Field { on_input: Some(_), .. }));
+        let Some(f) = self.fields.get_mut(&id).filter(|_| editable) else { return };
+        let clean: String = text.chars().take_while(|c| *c != '\n' && *c != '\r').filter(|c| !c.is_control()).collect();
+        let (a, b) = (f.caret.min(f.anchor), f.caret.max(f.anchor));
+        let room = MAX_FIELD.saturating_sub(f.text.len() - (b - a));
+        let cut = boundary(&clean, room);
+        f.text.replace_range(a..b, &clean[..cut]);
+        f.caret = a + cut;
+        f.anchor = f.caret;
+        self.caret_moved();
+        self.field_changed(id, r);
+        r.redraw = true;
+        r.used = true;
+    }
+
+    /// A key in the focused field. True if the field used it.
+    fn field_key(&mut self, id: Id, key: u32, text: Option<&str>, m: Modifiers, r: &mut Response<M>) -> bool {
+        let Some(i) = self.index(id) else { return false };
+        let (secret, editable, submit) = match &self.nodes[i].what {
+            What::Field { secret, on_input, on_submit, .. } => (*secret, on_input.is_some(), on_submit.clone()),
+            _ => return false,
+        };
+        let command = m.ctrl || m.logo;
+        let letter = char::from_u32(key).map(|c| c.to_ascii_lowercase());
+        let Some(f) = self.fields.get_mut(&id) else { return false };
+        let (a, b) = (f.caret.min(f.anchor), f.caret.max(f.anchor));
+        let selected = a != b;
+        let mut edited = false;
+        let mut moved = true;
+        match key {
+            sym::LEFT | sym::RIGHT | sym::HOME | sym::END => {
+                let to = match key {
+                    sym::LEFT if selected && !m.shift => a,
+                    sym::RIGHT if selected && !m.shift => b,
+                    sym::LEFT if command || m.alt => prev_word(&f.text, f.caret),
+                    sym::RIGHT if command || m.alt => next_word(&f.text, f.caret),
+                    sym::LEFT => prev_char(&f.text, f.caret),
+                    sym::RIGHT => next_char(&f.text, f.caret),
+                    sym::HOME => 0,
+                    _ => f.text.len(),
+                };
+                f.caret = to;
+                if !m.shift {
+                    f.anchor = to;
+                }
+            }
+            sym::BACKSPACE | sym::DELETE if editable => {
+                let (from, to) = if selected {
+                    (a, b)
+                } else if key == sym::BACKSPACE {
+                    (if command || m.alt { prev_word(&f.text, f.caret) } else { prev_char(&f.text, f.caret) }, f.caret)
+                } else {
+                    (f.caret, if command || m.alt { next_word(&f.text, f.caret) } else { next_char(&f.text, f.caret) })
+                };
+                f.text.replace_range(from..to, "");
+                f.caret = from;
+                f.anchor = from;
+                edited = from != to;
+            }
+            sym::RETURN => {
+                if let Some(m) = submit {
+                    r.messages.push(m);
+                }
+                moved = false;
+            }
+            _ if command && !m.alt => match letter {
+                Some('a') => {
+                    f.anchor = 0;
+                    f.caret = f.text.len();
+                }
+                Some(c @ ('c' | 'x')) => {
+                    // A secret is never copied.
+                    if selected && !secret {
+                        r.copy = Some(f.text[a..b].to_string());
+                        if c == 'x' && editable {
+                            f.text.replace_range(a..b, "");
+                            f.caret = a;
+                            f.anchor = a;
+                            edited = true;
+                        }
+                    }
+                }
+                Some('v') => {
+                    r.paste = editable;
+                    moved = false;
+                }
+                _ => return false,
+            },
+            _ => match text.filter(|t| !t.is_empty() && !t.chars().any(char::is_control) && !m.alt) {
+                Some(t) => {
+                    let t = t.to_string();
+                    self.field_insert(id, &t, r);
+                    return true;
+                }
+                None => return false,
+            },
+        }
+        if edited {
+            self.field_changed(id, r);
+        }
+        if moved {
+            self.caret_moved();
+        }
+        r.redraw = true;
+        r.used = true;
+        true
+    }
+
+    /// Selects the word around `at` in field `id`.
+    fn select_word(&mut self, id: Id, at: usize) {
+        let Some(f) = self.fields.get_mut(&id) else { return };
+        let word = |c: char| c.is_alphanumeric() || c == '_';
+        let mut a = at;
+        while a > 0 && f.text[..a].chars().next_back().is_some_and(word) {
+            a = prev_char(&f.text, a);
+        }
+        let mut b = at;
+        while b < f.text.len() && f.text[b..].chars().next().is_some_and(word) {
+            b = next_char(&f.text, b);
+        }
+        f.anchor = a;
+        f.caret = b;
+    }
+
+    /// A press of the pointer or a finger at `x`, `y` on whatever is there.
+    fn press_at(&mut self, x: f32, y: f32, with: With, r: &mut Response<M>) {
+        let Some(id) = self.target(x, y) else {
+            // The bare ground: a field being typed in there loses the keys.
+            if self.focus.and_then(|f| self.node(f)).is_some_and(|n| matches!(n.what, What::Field { .. })) {
+                self.focus = None;
+                r.redraw = true;
+            }
+            return;
+        };
+        let i = self.index(id).expect("a target is in the tree");
+        self.ring = false;
+        r.redraw = true;
+        r.used = true;
+        match &self.nodes[i].what {
+            What::Slider { value, .. } => {
+                let start = *value;
+                self.focus = Some(id);
+                self.drag = Some(Drag::Slider { id, with, value: start });
+                if let Some(v) = self.slider_at(i, x) {
+                    self.slider_send(id, v, r);
+                }
+            }
+            What::Field { .. } => {
+                self.focus = Some(id);
+                let at = self.field_offset(i, x);
+                let now = Instant::now();
+                let count = match self.click {
+                    Some((t, cid, n)) if cid == id && now.duration_since(t) < DOUBLE && with == With::Pointer => n % 3 + 1,
+                    _ => 1,
+                };
+                self.click = Some((now, id, count));
+                match count {
+                    2 => self.select_word(id, at),
+                    3 => {
+                        if let Some(f) = self.fields.get_mut(&id) {
+                            f.anchor = 0;
+                            f.caret = f.text.len();
+                        }
+                    }
+                    _ => {
+                        if let Some(f) = self.fields.get_mut(&id) {
+                            f.caret = at;
+                            f.anchor = at;
+                        }
+                        if with == With::Pointer {
+                            self.drag = Some(Drag::Select { id });
+                        }
+                    }
+                }
+                self.caret_moved();
+            }
+            What::Drawing { .. } => {
+                self.drag = Some(Drag::Drawing { id, with });
+                self.tell_drawing(id, Touch::Press { x, y }, r);
+            }
+            // Buttons, switches and choices act when they are let go.
+            _ => self.pressed = Some((id, with)),
+        }
     }
 
     pub fn input(&mut self, input: &Input) -> Response<M> {
         let mut r = Response::default();
         match *input {
-            Input::PointerMoved { x, y } => {
-                let t = self.target(x, y);
-                if t != self.hover {
-                    self.hover = t;
-                    r.redraw = true;
-                }
-                r.cursor = Some(if t.is_some() { Cursor::Pointer } else { Cursor::Default });
-                r.used = t.is_some() || self.pressed.is_some();
-            }
+            Input::PointerMoved { x, y } => self.pointer_moved(x, y, &mut r),
             Input::PointerLeft => {
                 if self.hover.take().is_some() {
                     r.redraw = true;
                 }
+                if let Some(d) = self.over_drawing.take() {
+                    self.tell_drawing(d, Touch::Leave, &mut r);
+                }
             }
-            Input::Button { button: MouseButton::Left, pressed, x, y, .. } => {
+            Input::Button { button: MouseButton::Left, pressed: true, x, y, .. } => {
                 // Judged where the pointer was at this press, not where it is now.
-                let t = self.target(x, y);
-                if pressed {
-                    if let Some(id) = t {
-                        self.pressed = Some((id, With::Pointer));
-                        self.ring = false;
-                        r.redraw = true;
+                if self.open.is_some() {
+                    self.press_with_list_open(x, y, &mut r);
+                } else if let Some(s) = self.scroller_at(x, y)
+                    && let Some(t) = self.thumb(s)
+                    && x >= t.x - 2.0
+                {
+                    let grab = if inside(&t, x, y) { y - t.y } else { t.h / 2.0 };
+                    self.drag = Some(Drag::Bar { id: self.nodes[s].id, grab });
+                    self.bar_to(s, y, grab);
+                    r.redraw = true;
+                    r.used = true;
+                } else {
+                    self.press_at(x, y, With::Pointer, &mut r);
+                }
+            }
+            Input::Button { button: MouseButton::Left, pressed: false, x, y, .. } => {
+                match self.drag.take() {
+                    Some(Drag::Slider { id, with: With::Pointer, .. }) => self.slider_release(id, &mut r),
+                    Some(Drag::Drawing { id, with: With::Pointer }) => self.tell_drawing(id, Touch::Release { x, y }, &mut r),
+                    Some(Drag::Select { .. } | Drag::Bar { .. }) => {
                         r.used = true;
+                        r.redraw = true;
                     }
-                } else if let Some((id, With::Pointer)) = self.pressed {
+                    other => self.drag = other,
+                }
+                if let Some((id, With::Pointer)) = self.pressed {
                     self.pressed = None;
-                    if t == Some(id) {
+                    if self.target(x, y) == Some(id) {
                         self.activate(id, &mut r);
                     }
                     r.redraw = true;
                     r.used = true;
                 }
             }
-            Input::Touch { id: finger, phase, x, y } => match phase {
-                Phase::Down => {
-                    self.fingers.retain(|f| f.0 != finger);
-                    self.fingers.push((finger, x, y));
-                    if self.pressed.is_none()
-                        && let Some(id) = self.target(x, y)
+            Input::Scroll { x, y, dy, .. } => {
+                if self.open.is_some() {
+                    if let Some((lr, item, n)) = self.list_rect()
+                        && let Some(o) = self.open.as_mut()
                     {
-                        self.pressed = Some((id, With::Finger(finger)));
-                        self.ring = false;
-                        r.redraw = true;
-                        r.used = true;
+                        let max = (n as f32 * item + 8.0 - lr.h).max(0.0);
+                        o.offset = (o.offset + dy * WHEEL).clamp(0.0, max);
                     }
-                }
-                Phase::Moved => {
-                    if let Some(f) = self.fingers.iter_mut().find(|f| f.0 == finger) {
-                        (f.1, f.2) = (x, y);
-                    }
-                    r.used = self.pressed.is_some_and(|p| p.1 == With::Finger(finger));
-                    r.redraw = r.used;
-                }
-                Phase::Up | Phase::Cancelled => {
-                    self.fingers.retain(|f| f.0 != finger);
-                    if let Some((id, With::Finger(f))) = self.pressed
-                        && f == finger
-                    {
-                        self.pressed = None;
-                        if phase == Phase::Up && self.target(x, y) == Some(id) {
-                            self.activate(id, &mut r);
-                        }
-                        r.redraw = true;
-                        r.used = true;
-                    }
-                }
-            },
-            Input::Key { sym: key, pressed: true, repeat, composing: false, modifiers, .. } => {
-                let plain = !modifiers.ctrl && !modifiers.alt && !modifiers.logo;
-                if key == sym::TAB && plain {
-                    let list = self.focusables();
-                    if !list.is_empty() {
-                        let at = self.focus.and_then(|f| list.iter().position(|i| *i == f));
-                        let next = match (at, modifiers.shift) {
-                            (None, false) => 0,
-                            (None, true) => list.len() - 1,
-                            (Some(i), false) => (i + 1) % list.len(),
-                            (Some(i), true) => (i + list.len() - 1) % list.len(),
-                        };
-                        self.focus = Some(list[next]);
-                        self.ring = true;
-                        r.redraw = true;
-                        r.used = true;
-                    }
-                } else if (key == sym::RETURN || key == ' ' as u32) && plain && !modifiers.shift && !repeat {
-                    if let Some(id) = self.focus {
-                        self.pressed = Some((id, With::Key));
-                        self.activate(id, &mut r);
-                        r.redraw = true;
-                        r.used = true;
-                    }
-                } else if key == sym::ESCAPE && self.ring {
-                    self.ring = false;
                     r.redraw = true;
+                    r.used = true;
+                } else if let Some(s) = self.scroller_at(x, y) {
+                    if let Some(st) = self.scrolls.get_mut(&self.nodes[s].id) {
+                        st.velocity = 0.0;
+                    }
+                    r.redraw = self.scroll_by(s, dy * WHEEL);
+                    r.used = true;
+                    // What is now under the pointer, which did not move.
+                    let t = self.target(x, y);
+                    if t != self.hover {
+                        self.hover = t;
+                        r.redraw = true;
+                    }
                 }
             }
+            Input::Touch { id: finger, phase, x, y } => self.touch(finger, phase, x, y, &mut r),
+            Input::Key { sym: key, ref text, pressed: true, repeat, composing: false, modifiers } => self.key(key, text.as_deref(), repeat, modifiers, &mut r),
             Input::Key { sym: key, pressed: false, .. } if key == sym::RETURN || key == ' ' as u32 => {
                 if let Some((_, With::Key)) = self.pressed {
                     self.pressed = None;
@@ -231,14 +901,348 @@ impl<M: Clone> Ui<M> {
                     r.used = true;
                 }
             }
+            Input::Paste(ref text) => {
+                if let Some(id) = self.focus {
+                    self.field_insert(id, text, &mut r);
+                }
+            }
             Input::Focus(false) => {
                 self.pressed = None;
                 self.fingers.clear();
+                match self.drag.take() {
+                    Some(Drag::Slider { id, .. }) => self.slider_release(id, &mut r),
+                    Some(Drag::Drawing { id, .. }) => self.tell_drawing(id, Touch::Leave, &mut r),
+                    _ => {}
+                }
                 r.redraw = true;
             }
             _ => {}
         }
         r
+    }
+
+    fn bar_to(&mut self, s: usize, y: f32, grab: f32) {
+        let What::Scroll { content } = self.nodes[s].what else { return };
+        let area = self.shown(s);
+        let Some(t) = self.thumb(s) else { return };
+        let room = (area.h - t.h).max(1.0);
+        let f = ((y - grab - area.y) / room).clamp(0.0, 1.0);
+        let want = f * (content - area.h);
+        let have = self.scrolls.get(&self.nodes[s].id).map_or(0.0, |st| st.offset);
+        self.scroll_by(s, want - have);
+    }
+
+    fn pointer_moved(&mut self, x: f32, y: f32, r: &mut Response<M>) {
+        match self.drag {
+            Some(Drag::Slider { id, with: With::Pointer, .. }) => {
+                if let Some(v) = self.index(id).and_then(|i| self.slider_at(i, x)) {
+                    self.slider_send(id, v, r);
+                }
+            }
+            Some(Drag::Select { id }) => {
+                if let Some(i) = self.index(id) {
+                    let at = self.field_offset(i, x);
+                    if let Some(f) = self.fields.get_mut(&id) {
+                        f.caret = at;
+                    }
+                    self.caret_moved();
+                    r.redraw = true;
+                }
+            }
+            Some(Drag::Bar { id, grab }) => {
+                if let Some(s) = self.index(id) {
+                    self.bar_to(s, y, grab);
+                    r.redraw = true;
+                }
+            }
+            Some(Drag::Drawing { id, with: With::Pointer }) => self.tell_drawing(id, Touch::Move { x, y, pressed: true }, r),
+            _ => {}
+        }
+        if self.open.is_some() {
+            let hl = self.item_at(x, y);
+            if let Some(o) = self.open.as_mut()
+                && hl.is_some()
+                && o.hl != hl
+            {
+                o.hl = hl;
+                r.redraw = true;
+            }
+            r.cursor = Some(Cursor::Default);
+            r.used = true;
+            return;
+        }
+        let t = self.target(x, y);
+        if t != self.hover {
+            self.hover = t;
+            r.redraw = true;
+        }
+        let what = t.and_then(|id| self.node(id)).map(|n| &n.what);
+        r.cursor = Some(match (what, self.drag) {
+            (_, Some(Drag::Select { .. })) | (Some(What::Field { .. }), _) => Cursor::Text,
+            (Some(What::Drawing { .. }), _) | (None, _) => Cursor::Default,
+            (Some(_), _) => Cursor::Pointer,
+        });
+        // A drawing hears the pointer pass over it.
+        let drawing = t.filter(|id| self.node(*id).is_some_and(|n| matches!(n.what, What::Drawing { .. })));
+        if self.drag.is_none() {
+            if self.over_drawing != drawing
+                && let Some(d) = self.over_drawing
+            {
+                self.tell_drawing(d, Touch::Leave, r);
+            }
+            self.over_drawing = drawing;
+            if let Some(d) = drawing {
+                self.tell_drawing(d, Touch::Move { x, y, pressed: false }, r);
+            }
+        }
+        r.used |= t.is_some() || self.pressed.is_some() || self.drag.is_some();
+    }
+
+    fn press_with_list_open(&mut self, x: f32, y: f32, r: &mut Response<M>) {
+        if let Some(k) = self.item_at(x, y) {
+            self.choose(k, r);
+        } else if self.list_rect().is_some_and(|(lr, _, _)| inside(&lr, x, y)) {
+            r.used = true;
+        } else {
+            // Anywhere else closes the list, and does nothing more.
+            self.open = None;
+            r.redraw = true;
+            r.used = true;
+        }
+    }
+
+    fn touch(&mut self, finger: i32, phase: Phase, x: f32, y: f32, r: &mut Response<M>) {
+        let now = Instant::now();
+        match phase {
+            Phase::Down => {
+                self.fingers.retain(|f| f.0 != finger);
+                self.fingers.push((finger, x, y));
+                if self.drag.is_some() || self.pressed.is_some() {
+                    return;
+                }
+                if self.open.is_some() {
+                    self.press_with_list_open(x, y, r);
+                    return;
+                }
+                let grabs = self.target(x, y).and_then(|id| self.node(id)).map(|n| matches!(n.what, What::Slider { .. } | What::Drawing { .. } | What::Field { .. }));
+                match grabs {
+                    // These take a finger at once: it drags them, not the page.
+                    Some(true) => self.press_at(x, y, With::Finger(finger), r),
+                    _ => {
+                        if let Some(s) = self.scroller_at(x, y) {
+                            if let Some(st) = self.scrolls.get_mut(&self.nodes[s].id) {
+                                st.velocity = 0.0;
+                            }
+                            self.drag = Some(Drag::Flick { id: self.nodes[s].id, finger, start: y, last: y, at: now, moved: false, velocity: 0.0 });
+                            r.used = true;
+                        }
+                        if grabs.is_some() {
+                            self.press_at(x, y, With::Finger(finger), r);
+                        }
+                    }
+                }
+            }
+            Phase::Moved => {
+                if let Some(f) = self.fingers.iter_mut().find(|f| f.0 == finger) {
+                    (f.1, f.2) = (x, y);
+                }
+                match self.drag {
+                    Some(Drag::Flick { id, finger: f, start, last, at, moved, velocity }) if f == finger => {
+                        let moved = moved || (y - start).abs() > SLOP;
+                        let mut v = velocity;
+                        if moved {
+                            // The press it began as is not a press.
+                            if self.pressed.is_some_and(|p| p.1 == With::Finger(finger)) {
+                                self.pressed = None;
+                            }
+                            if let Some(s) = self.index(id) {
+                                self.scroll_by(s, last - y);
+                            }
+                            let dt = now.saturating_duration_since(at).as_secs_f32().max(0.004);
+                            v = 0.6 * ((last - y) / dt) + 0.4 * velocity;
+                        }
+                        self.drag = Some(Drag::Flick { id, finger, start, last: if moved { y } else { last }, at: now, moved, velocity: v });
+                        r.redraw = true;
+                        r.used = true;
+                    }
+                    Some(Drag::Slider { id, with: With::Finger(f), .. }) if f == finger => {
+                        if let Some(v) = self.index(id).and_then(|i| self.slider_at(i, x)) {
+                            self.slider_send(id, v, r);
+                        }
+                    }
+                    Some(Drag::Drawing { id, with: With::Finger(f) }) if f == finger => self.tell_drawing(id, Touch::Move { x, y, pressed: true }, r),
+                    _ => {
+                        r.used = self.pressed.is_some_and(|p| p.1 == With::Finger(finger));
+                        r.redraw = r.used;
+                    }
+                }
+            }
+            Phase::Up | Phase::Cancelled => {
+                self.fingers.retain(|f| f.0 != finger);
+                let up = phase == Phase::Up;
+                match self.drag {
+                    Some(Drag::Flick { id, finger: f, moved, velocity, at, .. }) if f == finger => {
+                        self.drag = None;
+                        // A flick goes on by itself; a finger that stopped before lifting does not.
+                        if up && moved && now.saturating_duration_since(at) < Duration::from_millis(80) && velocity.abs() > 100.0 {
+                            if let Some(st) = self.scrolls.get_mut(&id) {
+                                st.velocity = velocity.clamp(-6000.0, 6000.0);
+                            }
+                            self.last_tick = Some(now);
+                        }
+                        r.used = true;
+                        r.redraw = true;
+                    }
+                    Some(Drag::Slider { id, with: With::Finger(f), .. }) if f == finger => {
+                        self.drag = None;
+                        self.slider_release(id, r);
+                    }
+                    Some(Drag::Drawing { id, with: With::Finger(f) }) if f == finger => {
+                        self.drag = None;
+                        self.tell_drawing(id, if up { Touch::Release { x, y } } else { Touch::Leave }, r);
+                    }
+                    _ => {}
+                }
+                if let Some((id, With::Finger(f))) = self.pressed
+                    && f == finger
+                {
+                    self.pressed = None;
+                    if up && self.target(x, y) == Some(id) {
+                        self.activate(id, r);
+                    }
+                    r.redraw = true;
+                    r.used = true;
+                }
+            }
+        }
+    }
+
+    fn key(&mut self, key: u32, text: Option<&str>, repeat: bool, m: Modifiers, r: &mut Response<M>) {
+        let plain = !m.ctrl && !m.alt && !m.logo;
+        let press = (key == sym::RETURN || key == ' ' as u32) && plain && !m.shift && !repeat;
+        // An open list has the keys.
+        if let Some(o) = self.open {
+            let n = match self.node(o.id).map(|n| &n.what) {
+                Some(What::Choice { options, .. }) => options.len(),
+                _ => 0,
+            };
+            match key {
+                sym::UP | sym::DOWN | sym::HOME | sym::END | sym::PAGE_UP | sym::PAGE_DOWN if n > 0 => {
+                    let cur = o.hl.map_or(-1, |h| h as isize);
+                    let to = match key {
+                        sym::UP => cur - 1,
+                        sym::DOWN => cur + 1,
+                        sym::PAGE_UP => cur - 8,
+                        sym::PAGE_DOWN => cur + 8,
+                        sym::HOME => 0,
+                        _ => n as isize - 1,
+                    };
+                    if let Some(op) = self.open.as_mut() {
+                        op.hl = Some(to.clamp(0, n as isize - 1) as usize);
+                    }
+                    self.reveal_open();
+                }
+                _ if press => match o.hl {
+                    Some(k) => self.choose(k, r),
+                    None => self.open = None,
+                },
+                sym::ESCAPE | sym::TAB => self.open = None,
+                _ => {}
+            }
+            r.redraw = true;
+            r.used = true;
+            return;
+        }
+        // The focused field next: everything but Tab.
+        if let Some(id) = self.focus
+            && key != sym::TAB
+            && self.node(id).is_some_and(|n| matches!(n.what, What::Field { .. }))
+            && self.field_key(id, key, text, m, r)
+        {
+            return;
+        }
+        if key == sym::TAB && plain {
+            let list = self.focusables();
+            if !list.is_empty() {
+                let at = self.focus.and_then(|f| list.iter().position(|i| *i == f));
+                let next = match (at, m.shift) {
+                    (None, false) => 0,
+                    (None, true) => list.len() - 1,
+                    (Some(i), false) => (i + 1) % list.len(),
+                    (Some(i), true) => (i + list.len() - 1) % list.len(),
+                };
+                self.focus = Some(list[next]);
+                self.ring = true;
+                if let Some(i) = self.index(list[next]) {
+                    self.reveal(i);
+                }
+                if let Some(f) = self.fields.get_mut(&list[next]) {
+                    // A field reached with Tab has all its text chosen.
+                    f.anchor = 0;
+                    f.caret = f.text.len();
+                }
+                self.caret_moved();
+                r.redraw = true;
+                r.used = true;
+            }
+            return;
+        }
+        let focused = self.focus.and_then(|id| self.index(id));
+        if let Some(i) = focused {
+            let id = self.nodes[i].id;
+            match &self.nodes[i].what {
+                What::Button { .. } | What::Switch { .. } if press => {
+                    self.pressed = Some((id, With::Key));
+                    self.activate(id, r);
+                    r.used = true;
+                    return;
+                }
+                What::Choice { .. } if press || key == sym::DOWN && plain => {
+                    self.activate(id, r);
+                    r.used = true;
+                    return;
+                }
+                What::Slider { min, max, step, value, .. } if plain => {
+                    let (min, max, value) = (*min, *max, *value);
+                    let unit = if *step > 0.0 { *step } else { (max - min) / 100.0 };
+                    let to = match key {
+                        sym::LEFT | sym::DOWN => Some(value - unit),
+                        sym::RIGHT | sym::UP => Some(value + unit),
+                        sym::PAGE_DOWN => Some(value - unit * 10.0),
+                        sym::PAGE_UP => Some(value + unit * 10.0),
+                        sym::HOME => Some(min),
+                        sym::END => Some(max),
+                        _ => None,
+                    };
+                    if let Some(v) = to {
+                        self.slider_send(id, v.clamp(min, max), r);
+                        self.slider_release(id, r);
+                        return;
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Page keys move the page the focus is on, or the first that scrolls.
+        if matches!(key, sym::PAGE_UP | sym::PAGE_DOWN | sym::HOME | sym::END) && plain {
+            let s = focused.and_then(|i| self.scroller_of(i)).or_else(|| (0..self.nodes.len()).find(|&i| matches!(self.nodes[i].what, What::Scroll { .. })));
+            if let Some(s) = s {
+                let page = (self.nodes[s].rect.h - 40.0).max(20.0);
+                let dy = match key {
+                    sym::PAGE_UP => -page,
+                    sym::PAGE_DOWN => page,
+                    sym::HOME => -1e9,
+                    _ => 1e9,
+                };
+                r.redraw = self.scroll_by(s, dy);
+                r.used = true;
+            }
+            return;
+        }
+        if key == sym::ESCAPE && self.ring {
+            self.ring = false;
+            r.redraw = true;
+        }
     }
 
     /// Is `id` held down, with what holds it still on it?
@@ -252,37 +1256,77 @@ impl<M: Clone> Ui<M> {
     }
 
     /// Draws the widgets into `scene`.
-    pub fn draw(&self, scene: &mut Scene, fonts: &mut Fonts, theme: &Theme) {
-        let mut ink: Vec<Color> = Vec::with_capacity(self.nodes.len());
+    pub fn draw(&mut self, scene: &mut Scene, fonts: &mut Fonts, theme: &Theme) {
+        let now = Instant::now();
         let face = |fonts: &mut Fonts, weight: u16| fonts.face(&theme.font, weight, false).or_else(|| fonts.face("sans-serif", weight, false));
-        for n in &self.nodes {
+        let mut ink: Vec<Color> = Vec::with_capacity(self.nodes.len());
+        // The scrolling places being drawn into, the innermost last.
+        let mut open: Vec<usize> = Vec::new();
+        let mut field_stops: Vec<(Id, Vec<(usize, f32)>, f32)> = Vec::new();
+        let ancestor = |nodes: &[Node<M>], a: usize, mut i: usize| {
+            while let Some(p) = nodes[i].parent {
+                if p == a {
+                    return true;
+                }
+                i = p;
+            }
+            false
+        };
+        let ring = |scene: &mut Scene, r: Rect, radius: f32| {
+            let g = 2.0;
+            scene.stroke(Rect::new(r.x - g, r.y - g, r.w + 2.0 * g, r.h + 2.0 * g), radius + g, 2.0, theme.accent);
+        };
+        let edge_c = if theme.high_contrast { theme.text } else { theme.line };
+        let white = Color::rgb(255, 255, 255);
+        for i in 0..self.nodes.len() {
+            while let Some(&top) = open.last() {
+                if ancestor(&self.nodes, top, i) {
+                    break;
+                }
+                open.pop();
+                scene.pop_clip();
+                self.draw_bar(scene, top, theme);
+            }
+            let n = &self.nodes[i];
             let inherited = n.parent.map_or(theme.text, |p| ink[p]);
             let mut mine = inherited;
+            let r = self.shown(i);
+            let seen = {
+                let v = meet(r, self.clip_of(i));
+                v.w > 0.0 && v.h > 0.0
+            };
+            let ringed = self.ring && self.focus == Some(n.id);
             match &n.what {
                 What::Space | What::Group => {}
+                What::Scroll { .. } => {
+                    scene.push_clip(r, 0.0);
+                    open.push(i);
+                }
+                // Out of sight in a scrolling place: not drawn.
+                _ if !seen => {}
                 What::Rule { color } => {
-                    scene.fill(n.rect, color.unwrap_or(theme.line));
+                    scene.fill(r, color.unwrap_or(theme.line));
                 }
                 What::Label { lines, size, weight, color, dim } => {
                     let col = color.unwrap_or(if *dim { theme.dim } else { inherited });
                     if let Some(f) = face(fonts, *weight) {
                         for l in lines {
-                            text(scene, fonts, f, *size, col, vergence_scene::Point::new(n.rect.x + l.x, n.rect.y + l.baseline), &l.text);
+                            text(scene, fonts, f, *size, col, Point::new(r.x + l.x, r.y + l.baseline), &l.text);
                         }
                     }
                 }
                 What::Panel { fill, edge, radius } => {
                     if let Some(f) = fill {
-                        scene.fill_rounded(n.rect, *radius, *f);
+                        scene.fill_rounded(r, *radius, *f);
                     }
                     if let Some((c, w)) = edge {
-                        scene.stroke(n.rect, *radius, *w, *c);
+                        scene.stroke(r, *radius, *w, *c);
                     }
                 }
                 What::Button { on_press, look } => {
                     let on = on_press.is_some();
                     let hot = on && self.hover == Some(n.id);
-                    let down = on && self.held(n.id, &n.rect);
+                    let down = on && self.held(n.id, &r);
                     let tint = |base: Option<Color>| -> Option<Color> {
                         let h = theme.hover;
                         let t = if down { Color { a: h.a.saturating_mul(2), ..h } } else { h };
@@ -293,9 +1337,7 @@ impl<M: Clone> Ui<M> {
                         }
                     };
                     let radius = vergence_look::RADIUS;
-                    let edge_c = if theme.high_contrast { theme.text } else { theme.line };
-                    let white = Color::rgb(255, 255, 255);
-                    let (fill, edge, r, i) = match *look {
+                    let (fill, edge, rad, i_c) = match *look {
                         ButtonLook::Normal => (tint(Some(theme.page)), Some((edge_c, 1.0)), radius, theme.text),
                         ButtonLook::Plain => (tint(None), None, radius, inherited),
                         ButtonLook::Accent => (tint(Some(theme.accent)), Some((theme.accent, 1.0)), radius, white),
@@ -303,20 +1345,213 @@ impl<M: Clone> Ui<M> {
                         ButtonLook::Custom { fill, edge, radius } => (tint(fill), edge, radius, inherited),
                     };
                     if let Some(f) = fill {
-                        scene.fill_rounded(n.rect, r, f);
+                        scene.fill_rounded(r, rad, f);
                     }
                     if let Some((c, w)) = edge {
-                        scene.stroke(n.rect, r, w, c);
+                        scene.stroke(r, rad, w, c);
                     }
-                    mine = if on { i } else { theme.dim };
-                    if self.ring && self.focus == Some(n.id) {
-                        let g = 2.0;
-                        scene.stroke(Rect::new(n.rect.x - g, n.rect.y - g, n.rect.w + 2.0 * g, n.rect.h + 2.0 * g), r + g, 2.0, theme.accent);
+                    mine = if on { i_c } else { theme.dim };
+                    if ringed {
+                        ring(scene, r, rad);
                     }
+                }
+                What::Switch { on, on_toggle } => {
+                    let usable = on_toggle.is_some();
+                    let t = match self.switches.get(&n.id).and_then(|s| s.changed) {
+                        Some(at) if !self.steady => (now.saturating_duration_since(at).as_secs_f32() / SLIDE.as_secs_f32()).min(1.0),
+                        _ => 1.0,
+                    };
+                    let pos = if *on { t } else { 1.0 - t };
+                    let off_c = if theme.high_contrast { theme.dim } else { over(theme.line, alpha(theme.text, 40)) };
+                    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * pos).round() as u8;
+                    let mut track = Color::rgb(l(off_c.r, theme.accent.r), l(off_c.g, theme.accent.g), l(off_c.b, theme.accent.b));
+                    if !usable {
+                        track = alpha(track, 110);
+                    }
+                    scene.fill_rounded(r, r.h / 2.0, track);
+                    let d = r.h - 4.0;
+                    let kx = r.x + 2.0 + (r.w - 4.0 - d) * pos;
+                    scene.fill_rounded(Rect::new(kx, r.y + 2.0, d, d), d / 2.0, if usable { white } else { alpha(white, 160) });
+                    if usable && self.hover == Some(n.id) {
+                        scene.fill_rounded(r, r.h / 2.0, theme.hover);
+                    }
+                    if ringed {
+                        ring(scene, r, r.h / 2.0);
+                    }
+                }
+                What::Slider { min, max, value, marks, on_change, .. } => {
+                    let usable = on_change.is_some();
+                    let v = match self.drag {
+                        Some(Drag::Slider { id, value, .. }) if id == n.id => value,
+                        _ => *value,
+                    };
+                    let (x0, w) = slider_track(&r);
+                    let f = ((v - min) / (max - min)).clamp(0.0, 1.0);
+                    let cy = r.y + (r.h / 2.0).round() - if marks.is_empty() { 0.0 } else { 2.0 };
+                    let line = if theme.high_contrast { theme.dim } else { over(theme.line, alpha(theme.text, 30)) };
+                    scene.fill_rounded(Rect::new(x0, cy - 2.0, w, 4.0), 2.0, line);
+                    scene.fill_rounded(Rect::new(x0, cy - 2.0, w * f, 4.0), 2.0, if usable { theme.accent } else { theme.dim });
+                    for m in marks {
+                        let mf = ((m - min) / (max - min)).clamp(0.0, 1.0);
+                        scene.fill(Rect::new((x0 + w * mf - 0.5).round(), cy + 5.0, 1.0, 5.0), theme.dim);
+                    }
+                    let thumb = Rect::new(x0 + w * f - THUMB / 2.0, cy - THUMB / 2.0, THUMB, THUMB);
+                    let held = matches!(self.drag, Some(Drag::Slider { id, .. }) if id == n.id);
+                    let mut tc = white;
+                    if held || self.hover == Some(n.id) {
+                        tc = over(tc, alpha(Color::rgb(0, 0, 0), 25));
+                    }
+                    scene.fill_rounded(thumb, THUMB / 2.0, tc);
+                    scene.stroke(thumb, THUMB / 2.0, 1.0, if theme.high_contrast { theme.text } else { alpha(Color::rgb(0, 0, 0), 60) });
+                    if ringed {
+                        ring(scene, thumb, THUMB / 2.0);
+                    }
+                }
+                What::Field { placeholder, secret, on_input, size, baseline, .. } => {
+                    let focused = self.focus == Some(n.id);
+                    let usable = on_input.is_some();
+                    let radius = vergence_look::RADIUS;
+                    scene.fill_rounded(r, radius, if usable { theme.page } else { theme.card });
+                    if focused {
+                        scene.stroke(r, radius, 2.0, theme.accent);
+                    } else {
+                        scene.stroke(r, radius, 1.0, edge_c);
+                    }
+                    let inner = Rect::new(r.x + FIELD_PAD_H, r.y + 1.0, (r.w - 2.0 * FIELD_PAD_H).max(0.0), (r.h - 2.0).max(0.0));
+                    if let Some(f) = face(fonts, 400) {
+                        let state = self.fields.get(&n.id);
+                        let now_text = state.map_or("", |s| s.text.as_str());
+                        let shown_text: String = if *secret { "\u{2022}".repeat(now_text.chars().count()) } else { now_text.to_string() };
+                        // Where each character boundary falls: a glyph for each character.
+                        let (runs, total) = fonts.layout(f, *size, &shown_text);
+                        let xs: Vec<f32> = runs.iter().flat_map(|run| run.glyphs.iter().map(|g| g.x)).collect();
+                        let mut stops: Vec<(usize, f32)> = now_text.char_indices().filter(|(_, c)| !c.is_control()).map(|(b, _)| b).zip(xs.iter().copied()).collect();
+                        stops.push((now_text.len(), total));
+                        let (caret, anchor) = state.map_or((0, 0), |s| (s.caret, s.anchor));
+                        let at = |b: usize| stops.iter().find(|s| s.0 == b).map_or(total, |s| s.1);
+                        let mut shift = state.map_or(0.0, |s| s.shift);
+                        let cx = at(caret);
+                        if cx - shift > inner.w - 2.0 {
+                            shift = cx - inner.w + 2.0;
+                        }
+                        if cx < shift {
+                            shift = cx;
+                        }
+                        shift = shift.clamp(0.0, (total - inner.w + 2.0).max(0.0));
+                        scene.push_clip(inner, 0.0);
+                        if focused && caret != anchor {
+                            let (a, b) = (at(caret.min(anchor)), at(caret.max(anchor)));
+                            scene.fill(Rect::new(inner.x + a - shift, r.y + 4.0, b - a, r.h - 8.0), alpha(theme.accent, 90));
+                        }
+                        if now_text.is_empty() {
+                            text(scene, fonts, f, *size, theme.dim, Point::new(inner.x, r.y + baseline), placeholder);
+                        } else {
+                            text(scene, fonts, f, *size, if usable { theme.text } else { theme.dim }, Point::new(inner.x - shift, r.y + baseline), &shown_text);
+                        }
+                        if focused && caret == anchor && self.caret_on() {
+                            scene.fill(Rect::new((inner.x + cx - shift).round() - 0.5, r.y + 4.0, 1.5, r.h - 8.0), theme.text);
+                        }
+                        scene.pop_clip();
+                        field_stops.push((n.id, stops, shift));
+                    }
+                }
+                What::Choice { options, selected, on_select, size, baseline, .. } => {
+                    let usable = on_select.is_some();
+                    let hot = usable && (self.hover == Some(n.id) || self.open.is_some_and(|o| o.id == n.id));
+                    let radius = vergence_look::RADIUS;
+                    let fill = if hot { over(theme.page, theme.hover) } else { theme.page };
+                    scene.fill_rounded(r, radius, fill);
+                    scene.stroke(r, radius, 1.0, edge_c);
+                    let col = if usable { theme.text } else { theme.dim };
+                    let inner = Rect::new(r.x + FIELD_PAD_H, r.y, (r.w - 2.0 * FIELD_PAD_H - CHEVRON).max(0.0), r.h);
+                    if let (Some(f), Some(k)) = (face(fonts, 400), *selected) {
+                        scene.push_clip(inner, 0.0);
+                        text(scene, fonts, f, *size, col, Point::new(inner.x, r.y + baseline), &options[k]);
+                        scene.pop_clip();
+                    }
+                    // The arrow: a small V.
+                    let (ax, ay) = (r.x + r.w - FIELD_PAD_H - 5.0, r.y + r.h / 2.0);
+                    scene.line(Point::new(ax - 4.0, ay - 2.0), Point::new(ax, ay + 2.0), 1.5, theme.dim);
+                    scene.line(Point::new(ax, ay + 2.0), Point::new(ax + 4.0, ay - 2.0), 1.5, theme.dim);
+                    if ringed {
+                        ring(scene, r, radius);
+                    }
+                }
+                What::Picture { image, fit, radius, opacity } => {
+                    let (iw, ih) = (image.width.max(1) as f32, image.height.max(1) as f32);
+                    let dest = match fit {
+                        Fit::Stretch => r,
+                        Fit::Contain | Fit::Cover => {
+                            let k = if *fit == Fit::Contain { (r.w / iw).min(r.h / ih) } else { (r.w / iw).max(r.h / ih) };
+                            let (w, h) = (iw * k, ih * k);
+                            Rect::new(r.x + (r.w - w) / 2.0, r.y + (r.h - h) / 2.0, w, h)
+                        }
+                    };
+                    let id = scene.image((**image).clone());
+                    scene.push_clip(r, *radius);
+                    scene.draw_image(id, dest, *opacity);
+                    scene.pop_clip();
+                }
+                What::Drawing { draw, .. } => {
+                    scene.push_clip(r, 0.0);
+                    draw(scene, r, theme);
+                    scene.pop_clip();
                 }
             }
             ink.push(mine);
         }
+        while let Some(top) = open.pop() {
+            scene.pop_clip();
+            self.draw_bar(scene, top, theme);
+        }
+        for (id, stops, shift) in field_stops {
+            if let Some(f) = self.fields.get_mut(&id) {
+                f.stops = stops;
+                f.shift = shift;
+            }
+        }
+        self.draw_list(scene, fonts, theme);
+    }
+
+    fn draw_bar(&self, scene: &mut Scene, i: usize, theme: &Theme) {
+        if let Some(t) = self.thumb(i) {
+            let held = matches!(self.drag, Some(Drag::Bar { id, .. }) if id == self.nodes[i].id);
+            scene.fill_rounded(t, BAR_W / 2.0, alpha(theme.text, if held { 150 } else { 80 }));
+        }
+    }
+
+    /// The open choice's list, in front of everything.
+    fn draw_list(&self, scene: &mut Scene, fonts: &mut Fonts, theme: &Theme) {
+        let Some(o) = self.open else { return };
+        let Some((r, item, _)) = self.list_rect() else { return };
+        let Some(Node { what: What::Choice { options, selected, size, step, .. }, .. }) = self.node(o.id) else { return };
+        let ground = if theme.dark { over(theme.card, alpha(Color::rgb(255, 255, 255), 10)) } else { Color::rgb(255, 255, 255) };
+        // A shadow, then the list.
+        scene.fill_rounded(Rect::new(r.x - 1.0, r.y + 1.0, r.w + 2.0, r.h + 2.0), vergence_look::RADIUS + 1.0, alpha(Color::rgb(0, 0, 0), 50));
+        scene.fill_rounded(r, vergence_look::RADIUS, ground);
+        scene.stroke(r, vergence_look::RADIUS, 1.0, if theme.high_contrast { theme.text } else { theme.line });
+        let face: Option<FaceId> = fonts.face(&theme.font, 400, false).or_else(|| fonts.face("sans-serif", 400, false));
+        let bold: Option<FaceId> = fonts.face(&theme.font, 600, false).or(face);
+        let ascent = face.map_or(size * 0.8, |f| fonts.metrics(f, *size).ascent);
+        let inner = Rect::new(r.x + 4.0, r.y + 4.0, r.w - 8.0, r.h - 8.0);
+        scene.push_clip(inner, 0.0);
+        for (k, opt) in options.iter().enumerate() {
+            let y = inner.y + k as f32 * item - o.offset;
+            if y + item < inner.y || y > inner.y + inner.h {
+                continue;
+            }
+            let row = Rect::new(inner.x, y, inner.w, item);
+            let hl = o.hl == Some(k);
+            if hl {
+                scene.fill_rounded(row, vergence_look::RADIUS, theme.accent);
+            }
+            let col = if hl { Color::rgb(255, 255, 255) } else { theme.text };
+            // The chosen one in semibold.
+            if let Some(f) = if *selected == Some(k) { bold } else { face } {
+                text(scene, fonts, f, *size, col, Point::new(row.x + FIELD_PAD_H, (y + (item - step) / 2.0 + ascent).round()), opt);
+            }
+        }
+        scene.pop_clip();
     }
 
     /// Every widget's meaning, in reading order.
@@ -339,23 +1574,54 @@ impl<M: Clone> Ui<M> {
                 }
                 d
             };
+            let mut states = Vec::new();
+            if self.focus == Some(n.id) {
+                states.push("focused");
+            }
+            let named = |fallback: String| n.name.clone().unwrap_or(fallback);
+            let bounds = self.shown(i);
+            let mk = |role, name, value: Option<String>, states| Some(Meaning { role, name, value, states, bounds, depth });
+            let off = |usable: bool, states: &mut Vec<&'static str>| {
+                if !usable {
+                    states.insert(0, "off");
+                }
+            };
             let m = match &n.what {
                 What::Label { lines, .. } if !parent_in_button => {
                     let text = lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join(" ");
-                    Some(Meaning { role: "label", name: n.name.clone().unwrap_or(text), value: None, states: vec![], bounds: n.rect, depth })
+                    mk("label", named(text), None, states)
                 }
                 What::Button { on_press, .. } => {
-                    let mut states = Vec::new();
-                    if on_press.is_none() {
-                        states.push("off");
-                    }
-                    if self.focus == Some(n.id) {
-                        states.push("focused");
-                    }
-                    let name = n.name.clone().unwrap_or_else(|| self.text_under(i));
-                    Some(Meaning { role: "button", name, value: None, states, bounds: n.rect, depth })
+                    off(on_press.is_some(), &mut states);
+                    mk("button", named(self.text_under(i)), None, states)
                 }
-                What::Rule { .. } => Some(Meaning { role: "separator", name: String::new(), value: None, states: vec![], bounds: n.rect, depth }),
+                What::Rule { .. } => mk("separator", String::new(), None, states),
+                What::Switch { on, on_toggle } => {
+                    off(on_toggle.is_some(), &mut states);
+                    mk("switch", named(String::new()), Some(if *on { "on" } else { "off" }.into()), states)
+                }
+                What::Slider { value, on_change, .. } => {
+                    off(on_change.is_some(), &mut states);
+                    mk("slider", named(String::new()), Some(format!("{value}")), states)
+                }
+                What::Field { value, secret, on_input, .. } => {
+                    off(on_input.is_some(), &mut states);
+                    if *secret {
+                        // Contract 3: a secret's text never leaves the program.
+                        states.insert(0, "secret");
+                    }
+                    mk("text field", named(String::new()), (!*secret).then(|| value.clone()), states)
+                }
+                What::Choice { options, selected, on_select, .. } => {
+                    off(on_select.is_some(), &mut states);
+                    if self.open.is_some_and(|o| o.id == n.id) {
+                        states.push("open");
+                    }
+                    mk("choice", named(String::new()), selected.map(|k| options[k].clone()), states)
+                }
+                What::Scroll { .. } => mk("scroll area", named(String::new()), None, states),
+                What::Picture { .. } => mk("picture", named(String::new()), None, states),
+                What::Drawing { .. } => mk("drawing", named(String::new()), None, states),
                 _ => None,
             };
             slot.push(m.as_ref().map(|_| out.len()));
@@ -399,8 +1665,22 @@ impl<M: Clone> Ui<M> {
 }
 
 impl<M> Node<M> {
-    /// Takes input: a button that sends something.
+    /// Takes the pointer: something that does something.
     pub(crate) fn active(&self) -> bool {
-        matches!(self.what, What::Button { on_press: Some(_), .. })
+        match &self.what {
+            What::Button { on_press, .. } => on_press.is_some(),
+            What::Switch { on_toggle, .. } => on_toggle.is_some(),
+            What::Slider { on_change, .. } => on_change.is_some(),
+            // A field that cannot be changed can still be selected and copied from.
+            What::Field { .. } => true,
+            What::Choice { on_select, .. } => on_select.is_some(),
+            What::Drawing { on_touch, .. } => on_touch.is_some(),
+            _ => false,
+        }
+    }
+
+    /// Takes the keyboard's focus.
+    pub(crate) fn focusable(&self) -> bool {
+        self.active() && !matches!(self.what, What::Drawing { .. })
     }
 }

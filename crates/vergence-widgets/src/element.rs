@@ -1,6 +1,10 @@
 //! What a program builds: a tree of elements, from its state.
 
-use vergence_scene::Color;
+use std::sync::Arc;
+
+use vergence_scene::{Color, Image, Rect, Scene};
+
+use crate::theme::Theme;
 
 /// How much room an element takes along one axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -90,6 +94,32 @@ pub(crate) struct Label {
     pub wrap: bool,
 }
 
+/// What a [drawing](drawing) is told of the pointer or a finger, in its own
+/// coordinates. A press holds the drawing's attention until it is let go.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Touch {
+    Press { x: f32, y: f32 },
+    Move { x: f32, y: f32, pressed: bool },
+    Release { x: f32, y: f32 },
+    /// The pointer left, or the system took a finger back.
+    Leave,
+}
+
+/// How a picture fills its place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Fit {
+    /// All of it, as large as fits; the rest of the place is left.
+    #[default]
+    Contain,
+    /// The whole place, the picture's edges cut off as needed.
+    Cover,
+    /// Stretched to the place.
+    Stretch,
+}
+
+pub(crate) type Draw = Box<dyn Fn(&mut Scene, Rect, &Theme)>;
+pub(crate) type OnTouch<M> = Box<dyn Fn(Touch) -> Option<M>>;
+
 pub(crate) enum Kind<M> {
     Space,
     Rule { color: Option<Color>, thickness: f32 },
@@ -99,6 +129,13 @@ pub(crate) enum Kind<M> {
     Row { children: Vec<Element<M>>, spacing: f32, align: Align },
     Column { children: Vec<Element<M>>, spacing: f32, align: Align },
     Stack { children: Vec<Element<M>> },
+    Switch { on: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
+    Slider { min: f32, max: f32, step: f32, value: f32, marks: Vec<f32>, on_change: Option<Box<dyn Fn(f32) -> M>>, on_release: Option<M> },
+    Field { value: String, placeholder: String, secret: bool, on_input: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
+    Choice { options: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>> },
+    Scroll { child: Box<Element<M>> },
+    Picture { image: Arc<Image>, fit: Fit, radius: f32, opacity: f32 },
+    Drawing { draw: Draw, on_touch: Option<OnTouch<M>> },
 }
 
 /// One piece of a window: built from the program's state each time it
@@ -246,7 +283,7 @@ impl<M> Element<M> {
     }
 
     pub fn radius(mut self, radius: f32) -> Self {
-        if let Kind::Panel { radius: r, .. } = &mut self.kind {
+        if let Kind::Panel { radius: r, .. } | Kind::Picture { radius: r, .. } = &mut self.kind {
             *r = radius;
         }
         self
@@ -263,6 +300,72 @@ impl<M> Element<M> {
     pub fn look(mut self, look: ButtonLook) -> Self {
         if let Kind::Button { look: l, .. } = &mut self.kind {
             *l = look;
+        }
+        self
+    }
+
+    /// What a slider sends when it is let go (after its last change).
+    pub fn on_release(mut self, message: M) -> Self {
+        if let Kind::Slider { on_release, .. } = &mut self.kind {
+            *on_release = Some(message);
+        }
+        self
+    }
+
+    /// A slider's step (0: any value).
+    pub fn step(mut self, step: f32) -> Self {
+        if let Kind::Slider { step: s, .. } = &mut self.kind {
+            *s = step.max(0.0);
+        }
+        self
+    }
+
+    /// Values a slider marks under its track (and its thumb settles on
+    /// when let go near one).
+    pub fn marks(mut self, marks: Vec<f32>) -> Self {
+        if let Kind::Slider { marks: m, .. } = &mut self.kind {
+            *m = marks;
+        }
+        self
+    }
+
+    /// The text a field shows while it is empty.
+    pub fn placeholder(mut self, text: impl Into<String>) -> Self {
+        if let Kind::Field { placeholder, .. } = &mut self.kind {
+            *placeholder = text.into();
+        }
+        self
+    }
+
+    /// What a field sends when Enter is pressed in it.
+    pub fn on_submit(mut self, message: M) -> Self {
+        if let Kind::Field { on_submit, .. } = &mut self.kind {
+            *on_submit = Some(message);
+        }
+        self
+    }
+
+    /// A field whose text is never shown, copied or told (Contract 3):
+    /// a password's.
+    pub fn secret(mut self) -> Self {
+        if let Kind::Field { secret, .. } = &mut self.kind {
+            *secret = true;
+        }
+        self
+    }
+
+    /// How a picture fills its place.
+    pub fn fit(mut self, fit: Fit) -> Self {
+        if let Kind::Picture { fit: f, .. } = &mut self.kind {
+            *f = fit;
+        }
+        self
+    }
+
+    /// A picture's opacity, 0 to 1.
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        if let Kind::Picture { opacity: o, .. } = &mut self.kind {
+            *o = opacity.clamp(0.0, 1.0);
         }
         self
     }
@@ -323,4 +426,85 @@ pub fn column<M>(children: Vec<Element<M>>) -> Element<M> {
 /// Children over one another, the last in front, each the stack's size.
 pub fn stack<M>(children: Vec<Element<M>>) -> Element<M> {
     Element::new(Kind::Stack { children }, Length::Shrink, Length::Shrink)
+}
+
+/// On or off. Without `on_toggle` it is off and cannot be changed.
+pub fn switch<M>(on: bool, on_toggle: impl Fn(bool) -> M + 'static) -> Element<M> {
+    Element::new(Kind::Switch { on, on_toggle: Some(Box::new(on_toggle)) }, Length::Fixed(SWITCH_W), Length::Fixed(SWITCH_H))
+}
+
+pub(crate) const SWITCH_W: f32 = 36.0;
+pub(crate) const SWITCH_H: f32 = 20.0;
+pub(crate) const SLIDER_H: f32 = 20.0;
+/// A field's and a choice's height: text of 13 with room above and below.
+pub(crate) const FIELD_PAD_V: f32 = 5.0;
+pub(crate) const FIELD_PAD_H: f32 = 8.0;
+
+/// A value from `min` to `max`, dragged, clicked or moved with the keys.
+pub fn slider<M>(min: f32, max: f32, value: f32, on_change: impl Fn(f32) -> M + 'static) -> Element<M> {
+    let (min, max) = if max > min { (min, max) } else { (min, min + 1.0) };
+    Element::new(
+        Kind::Slider { min, max, step: 0.0, value: value.clamp(min, max), marks: Vec::new(), on_change: Some(Box::new(on_change)), on_release: None },
+        Length::Fixed(200.0),
+        Length::Fixed(SLIDER_H),
+    )
+}
+
+/// One line of text to type into. The field sends its whole text after
+/// each change; the program keeps it and gives it back in `value`.
+pub fn field<M>(value: impl Into<String>, on_input: impl Fn(String) -> M + 'static) -> Element<M> {
+    Element::new(
+        Kind::Field { value: value.into(), placeholder: String::new(), secret: false, on_input: Some(Box::new(on_input)), on_submit: None },
+        Length::FILL,
+        Length::Shrink,
+    )
+}
+
+/// One of a list: a button showing the chosen one, opening the list.
+pub fn choice<M>(options: Vec<String>, selected: Option<usize>, on_select: impl Fn(usize) -> M + 'static) -> Element<M> {
+    let selected = selected.filter(|i| *i < options.len());
+    Element::new(Kind::Choice { options, selected, on_select: Some(Box::new(on_select)) }, Length::Shrink, Length::Shrink)
+}
+
+/// One child, taller than its place, moved up and down within it.
+pub fn scroll<M>(child: Element<M>) -> Element<M> {
+    Element::new(Kind::Scroll { child: Box::new(child) }, Length::FILL, Length::FILL)
+}
+
+/// A picture already decoded (decoding is done away from the window's
+/// thread: whitepaper §6.10, isolation). Its size is its own in pixels,
+/// as reference units, unless given.
+pub fn picture<M>(image: Arc<Image>) -> Element<M> {
+    let (w, h) = (image.width as f32, image.height as f32);
+    Element::new(Kind::Picture { image, fit: Fit::Contain, radius: 0.0, opacity: 1.0 }, Length::Fixed(w), Length::Fixed(h))
+}
+
+/// A place the program draws itself: `draw` is given the scene, the
+/// place, and the theme; `on_touch`, if any, is told of the pointer and
+/// fingers in the place's own coordinates.
+pub fn drawing<M>(draw: impl Fn(&mut Scene, Rect, &Theme) + 'static) -> Element<M> {
+    Element::new(Kind::Drawing { draw: Box::new(draw), on_touch: None }, Length::FILL, Length::Fixed(100.0))
+}
+
+impl<M> Element<M> {
+    /// What a drawing does with the pointer and fingers.
+    pub fn on_touch(mut self, f: impl Fn(Touch) -> Option<M> + 'static) -> Self {
+        if let Kind::Drawing { on_touch, .. } = &mut self.kind {
+            *on_touch = Some(Box::new(f));
+        }
+        self
+    }
+
+    /// A switch, slider, field or choice that is shown but cannot be used.
+    pub fn disabled(mut self) -> Self {
+        match &mut self.kind {
+            Kind::Switch { on_toggle, .. } => *on_toggle = None,
+            Kind::Slider { on_change, on_release, .. } => (*on_change, *on_release) = (None, None),
+            Kind::Field { on_input, on_submit, .. } => (*on_input, *on_submit) = (None, None),
+            Kind::Choice { on_select, .. } => *on_select = None,
+            Kind::Button { on_press, .. } => *on_press = None,
+            _ => {}
+        }
+        self
+    }
 }

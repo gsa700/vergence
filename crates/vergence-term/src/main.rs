@@ -157,6 +157,17 @@ impl Settings {
 const EDGE_TICK: Duration = Duration::from_millis(40);
 /// Lines the view moves for one notch of the wheel.
 const WHEEL_LINES: isize = 3;
+/// The terminal's timers (`Window::wake_after`).
+const TIMER_LONG_PRESS: u64 = 1;
+const TIMER_FLICK: u64 = 2;
+/// A flick: the least speed that throws the text (units a second), the
+/// most, how fast it slows (a fraction of its speed lost a second, as an
+/// exponent), where it stops, and how often it moves the text.
+const FLICK_MIN: f32 = 300.0;
+const FLICK_MAX: f32 = 8000.0;
+const FLICK_FRICTION: f32 = 3.0;
+const FLICK_STOP: f32 = 40.0;
+const FLICK_TICK: std::time::Duration = std::time::Duration::from_millis(16);
 
 /// The terminal's colours: its ground and text, the cursor, and the 16 named ones.
 struct Palette {
@@ -528,6 +539,11 @@ struct Terminal {
     /// A finger's drag that began on the bar is the pointer's, button held:
     /// where it is now.
     finger_pointer: Option<(f32, f32)>,
+    /// Where the finger now dragging came down.
+    drag_from: Option<(f32, f32)>,
+    /// A flick going on by itself: its speed (units a second), where it
+    /// began, and when it last moved the text.
+    flick: Option<(f32, (f32, f32), Instant)>,
     /// The last press on the text: when, on which cell, and which in a row it was (1 to 3).
     presses: Option<(Instant, Pos, usize)>,
     /// The selection is held past the top (true) or bottom edge, at this column: the view scrolls.
@@ -592,6 +608,18 @@ impl Terminal {
         }
     }
 
+    /// A finger dragged `dy` on the text it came down on at `from`: the
+    /// text goes with it, a line for every line's height.
+    fn finger_drag(&mut self, dy: f32, from: (f32, f32), window: &mut Window) {
+        let line = self.cell().map_or(18.0, |(_, h)| h.max(1.0));
+        self.dragged += dy;
+        let lines = (self.dragged / line).trunc();
+        self.dragged -= lines * line;
+        if lines != 0.0 {
+            self.finger_scroll(from.0, from.1, lines as isize, window);
+        }
+    }
+
     fn new() -> Terminal {
         Terminal {
             tabs: Vec::new(),
@@ -616,6 +644,8 @@ impl Terminal {
             dragged: 0.0,
             dragged_lines: 0,
             finger_pointer: None,
+            drag_from: None,
+            flick: None,
             presses: None,
             edge: None,
             edge_tick: Instant::now(),
@@ -1234,6 +1264,37 @@ impl App for Terminal {
         }
     }
 
+    fn timer(&mut self, id: u64, window: &mut Window) {
+        let now = Instant::now();
+        match id {
+            // A finger held still on the text is the right button there: the menu.
+            TIMER_LONG_PRESS => {
+                if let Some(vergence_ui::touch::Gesture::LongPress { x, y }) = self.fingers.long_press(now)
+                    && y >= BAR_H
+                {
+                    let modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false };
+                    self.input(&Input::PointerMoved { x, y }, window);
+                    self.input(&Input::Button { button: Button::Right, pressed: true, x, y, modifiers }, window);
+                    self.input(&Input::Button { button: Button::Right, pressed: false, x, y, modifiers }, window);
+                }
+            }
+            TIMER_FLICK => {
+                let Some((v, from, last)) = self.flick else { return };
+                let dt = now.saturating_duration_since(last).as_secs_f32().min(0.1);
+                self.finger_drag(v * dt, from, window);
+                let v = v * (-FLICK_FRICTION * dt).exp();
+                if v.abs() < FLICK_STOP {
+                    self.flick = None;
+                    (self.dragged, self.dragged_lines) = (0.0, 0);
+                } else {
+                    self.flick = Some((v, from, now));
+                    window.wake_after(TIMER_FLICK, FLICK_TICK);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn woken(&mut self, window: &mut Window) {
         // Asked once the window has shown a frame: a request made before the
         // server has placed the window is lost to the place it remembers.
@@ -1306,8 +1367,17 @@ impl App for Terminal {
         // A finger (vergence_ui::touch): a tap is a click where it tapped; a
         // drag up or down scrolls what is under where the finger came down,
         // the text moving with the finger.
-        if let Input::Touch { .. } = input {
-            use vergence_ui::touch::Gesture;
+        if let Input::Touch { phase, .. } = input {
+            use vergence_ui::touch::{Gesture, LONG_PRESS, Phase};
+            match phase {
+                // A finger coming down stops a flick, and may be a long press.
+                Phase::Down => {
+                    self.flick = None;
+                    window.wake_after(TIMER_LONG_PRESS, LONG_PRESS);
+                }
+                Phase::Up | Phase::Cancelled => window.cancel_timer(TIMER_LONG_PRESS),
+                Phase::Moved => {}
+            }
             match self.fingers.read(input) {
                 Some(Gesture::Tap { x, y }) => {
                     let modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false };
@@ -1328,23 +1398,28 @@ impl App for Terminal {
                     self.input(&Input::PointerMoved { x, y }, window);
                 }
                 Some(Gesture::Drag { dy, from, .. }) => {
-                    let line = self.cell().map_or(18.0, |(_, h)| h.max(1.0));
-                    self.dragged += dy;
-                    let lines = (self.dragged / line).trunc();
-                    self.dragged -= lines * line;
-                    if lines != 0.0 {
-                        self.finger_scroll(from.0, from.1, lines as isize, window);
-                    }
+                    window.cancel_timer(TIMER_LONG_PRESS);
+                    self.drag_from = Some(from);
+                    self.finger_drag(dy, from, window);
                 }
-                Some(Gesture::DragEnd) => {
-                    (self.dragged, self.dragged_lines) = (0.0, 0);
+                Some(Gesture::DragEnd { vy, .. }) => {
+                    // A flick of the text goes on, slowing, after the finger lifts.
+                    if self.finger_pointer.is_none()
+                        && let Some(from) = self.drag_from.take()
+                        && vy.abs() > FLICK_MIN
+                    {
+                        self.flick = Some((vy.clamp(-FLICK_MAX, FLICK_MAX), from, Instant::now()));
+                        window.wake_after(TIMER_FLICK, FLICK_TICK);
+                    } else {
+                        (self.dragged, self.dragged_lines) = (0.0, 0);
+                    }
                     if let Some((x, y)) = self.finger_pointer.take() {
                         let modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false };
                         self.input(&Input::Button { button: Button::Left, pressed: false, x, y, modifiers }, window);
                         self.input(&Input::PointerLeft, window);
                     }
                 }
-                None => {}
+                Some(Gesture::LongPress { .. }) | None => {}
             }
             return;
         }

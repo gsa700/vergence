@@ -1,9 +1,11 @@
 //! Laying a tree of elements out: each gets its rectangle, in reference
 //! units, in a flat list in drawing order (a parent before its children).
 
-use vergence_scene::{Color, Rect};
+use std::sync::Arc;
 
-use crate::element::{Align, ButtonLook, Element, Kind, Label, Length, Weight};
+use vergence_scene::{Color, Image, Rect};
+
+use crate::element::{Align, ButtonLook, Draw, Element, FIELD_PAD_H, FIELD_PAD_V, Fit, Kind, Label, Length, OnTouch, Weight};
 
 /// A widget's name between builds: its place in the tree, or the key its
 /// program gave it, under its parent's id.
@@ -34,6 +36,15 @@ pub(crate) enum What<M> {
     Panel { fill: Option<Color>, edge: Option<(Color, f32)>, radius: f32 },
     Button { on_press: Option<M>, look: ButtonLook },
     Group,
+    Switch { on: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
+    Slider { min: f32, max: f32, step: f32, value: f32, marks: Vec<f32>, on_change: Option<Box<dyn Fn(f32) -> M>>, on_release: Option<M> },
+    /// `baseline`: of the text, below the field's top.
+    Field { value: String, placeholder: String, secret: bool, on_input: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, size: f32, baseline: f32 },
+    Choice { options: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>>, size: f32, baseline: f32, step: f32 },
+    /// `content`: the height of what is in it.
+    Scroll { content: f32 },
+    Picture { image: Arc<Image>, fit: Fit, radius: f32, opacity: f32 },
+    Drawing { draw: Draw, on_touch: Option<OnTouch<M>> },
 }
 
 pub(crate) struct Node<M> {
@@ -165,6 +176,15 @@ impl Layout<'_> {
                 let s = self.measure(c, avail);
                 Size { w: a.w.max(s.w), h: a.h.max(s.h) }
             }),
+            Kind::Switch { .. } => Size { w: crate::element::SWITCH_W, h: crate::element::SWITCH_H },
+            Kind::Slider { .. } => Size { w: 200.0, h: crate::element::SLIDER_H },
+            Kind::Field { .. } => Size { w: 120.0, h: self.field_height() },
+            Kind::Choice { options, .. } => {
+                let widest = options.iter().map(|o| self.measure.width(self.text_size, 400, o)).fold(0.0, f32::max);
+                Size { w: (widest + 2.0 * FIELD_PAD_H + CHEVRON).ceil(), h: self.field_height() }
+            }
+            Kind::Scroll { child } => self.measure(child, avail),
+            Kind::Picture { .. } | Kind::Drawing { .. } => Size { w: 0.0, h: 0.0 },
         };
         Size {
             w: clamp_w(e, match e.width {
@@ -176,6 +196,15 @@ impl Layout<'_> {
                 _ => content.h,
             },
         }
+    }
+
+    fn field_height(&mut self) -> f32 {
+        (self.measure.line(self.text_size, 400).1 + 2.0 * FIELD_PAD_V).ceil()
+    }
+
+    fn field_baseline(&mut self, h: f32) -> f32 {
+        let (ascent, step) = self.measure.line(self.text_size, 400);
+        ((h - step) / 2.0 + ascent).round()
     }
 
     /// A child's natural length along a row (`across`) or a column.
@@ -323,6 +352,38 @@ impl Layout<'_> {
                     self.place_one_id(c, rect, Align::Start, Align::Start, me, cid, out);
                 }
             }
+            Kind::Switch { on, on_toggle } => push(out, What::Switch { on, on_toggle }),
+            Kind::Slider { min, max, step, value, marks, on_change, on_release } => push(out, What::Slider { min, max, step, value, marks, on_change, on_release }),
+            Kind::Field { value, placeholder, secret, on_input, on_submit } => {
+                let baseline = self.field_baseline(rect.h);
+                push(out, What::Field { value, placeholder, secret, on_input, on_submit, size: self.text_size, baseline });
+            }
+            Kind::Choice { options, selected, on_select } => {
+                let baseline = self.field_baseline(rect.h);
+                let step = self.measure.line(self.text_size, 400).1;
+                push(out, What::Choice { options, selected, on_select, size: self.text_size, baseline, step });
+            }
+            Kind::Picture { image, fit, radius, opacity } => push(out, What::Picture { image, fit, radius, opacity }),
+            Kind::Drawing { draw, on_touch } => push(out, What::Drawing { draw, on_touch }),
+            Kind::Scroll { child } => {
+                push(out, What::Scroll { content: rect.h });
+                // The child as tall as it needs (or the place, if more), at the place's width.
+                let w = clamp_w(&child, match child.width {
+                    Length::Fixed(w) => w,
+                    Length::Shrink => self.measure(&child, rect.w).w.min(rect.w),
+                    Length::Fill(_) => rect.w,
+                });
+                let natural = match child.height {
+                    Length::Fixed(h) => h,
+                    _ => self.measure(&child, w).h,
+                };
+                let h = natural.max(rect.h);
+                let cid = child_id(id, 0, child.key);
+                self.arrange(*child, Rect::new(rect.x, rect.y, w, h), Some(me), cid, out);
+                if let What::Scroll { content } = &mut out[me].what {
+                    *content = h;
+                }
+            }
         }
     }
 
@@ -348,6 +409,9 @@ impl Layout<'_> {
         self.arrange(child, r, Some(parent), cid, out);
     }
 }
+
+/// Room for a choice's arrow.
+pub(crate) const CHEVRON: f32 = 18.0;
 
 fn gaps(n: usize, spacing: f32) -> f32 {
     n.saturating_sub(1) as f32 * spacing

@@ -230,6 +230,60 @@ The terminal's bar stays in `vergence_ui::bar` for now.
     `vctl`, three clicks on + and one Return on − gave 2, the look button
     turned the window light, Tab showed the ring and a click took it away.
 
+- **Step 2 (2026-11-10): the rest of the widgets, and the terminal's
+  touch.**
+  - Switch (click, tap, Space or Enter; slides in 120 ms unless motion is
+    reduced; one that cannot be changed is drawn faded); Slider (a press
+    jumps the thumb there and drags it, a finger the same, the arrow
+    keys, Page Up/Down by ten steps, Home and End; a step, marks under
+    the track, a message as it moves and another when it is let go). The
+    wheel does not move a slider: on a page that scrolls it would take
+    the page's wheel.
+  - Field: the caret, a selection by dragging, Shift and the arrows,
+    double-click for a word and triple for all; Ctrl or Super with the
+    arrows by words, A, C, X, V; Backspace and Delete (by words with
+    Ctrl); Enter sends `on_submit`; pasted text keeps its first line and
+    loses control characters; 4096 bytes at most, cut on a character's
+    edge. **A key typed before the tree is built again is not lost**: the
+    field keeps its own text while the program's value is what it last
+    sent. Tab into a field chooses all its text. The caret blinks on the
+    toolkit's own timer, steady when motion is reduced. A secret field
+    shows dots, is never copied, and its meaning has no value.
+  - Choice: a click, a tap, Space, Enter or Down opens its list in front
+    of everything, inside the window (below, or above where there is
+    more room), scrolled when long; the arrows, Page Up/Down, Home, End,
+    Enter, Space and a click choose; Escape, Tab or a press elsewhere
+    close it, and that press does nothing else.
+  - Scroll: the wheel, a finger (a press becomes a scroll after it moves
+    8 points, and is then no press; a flick goes on, slowing, frame by
+    frame), the scrollbar's thumb dragged or its track pressed, Page
+    Up/Down, Home and End; Tab scrolls the focused control into view;
+    what is out of view is not drawn, and input is judged against what
+    is shown. Its place is kept when the tree is built again.
+  - Picture (contain, cover or stretch; rounded; opacity) from pixels the
+    program decoded; Drawing (the program draws into its place and hears
+    the pointer and fingers in its own coordinates, held while pressed).
+  - Meanings: switch (on or off), slider (its value), text field (its
+    text, never a secret's), choice (the chosen item; open), scroll
+    area, picture, drawing; "off" for what cannot be used.
+  - `vergence_ui::touch`: a long press (held still 500 ms, asked for
+    after a timer) and a drag's end with the finger's speed. **The
+    terminal**: a long press on the text is the right button there (the
+    menu); a flick of the text goes on, slowing, on a 16 ms timer, until
+    another finger comes down. Both open items from toolkit milestone 1.
+  - Tests: 11 more in `vergence-widgets` (24 in all) with a fuzz test of
+    every kind of input on a page of every widget (20,000 rounds by
+    default; 400,000 clean on Hubble with `FUZZ_ITERS`), and 2 more of
+    the touch reader.
+  - Whole workspace green: Hubble 313, Techbench 313, kepler 314,
+    canary 314.
+  - The demo has every widget. On Hubble through `vctl`: Tab down the
+    page scrolled to each control, the slider moved by the keys, both
+    fields typed in, the choice opened above itself (no room below) and
+    chose, the scrollbar dragged, the picture covered its place, the
+    drawing's dot dragged. Not yet tried by hand: a finger on the
+    widgets, the terminal's long press and flick.
+
 ## Decided (Dave, 2026-11-10 20:00)
 
 1. Widgets in a new crate, `vergence-widgets`.
