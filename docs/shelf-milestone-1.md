@@ -495,6 +495,24 @@ one.
     milestone): a long press in our own windows, a flick's momentum;
     pinch waits for the terminal to have a font size to change.
 
+- **Seen through (2026-11-10; Dave: the terminal and maybe the dock now,
+  the option for our own programs).**
+  - vergence-ui: `opacity_setting(text, "[program]")`: `opacity` in the
+    program's own table of desktop.toml, else `window-opacity` under
+    `[appearance]` (the desktop's word for every program of ours), else
+    1; kept between 0.3 and 1. A test. A window's buffer has alpha when
+    its background does (both renderers already multiply alpha in, as
+    Wayland wants it); a buffer made opaque is not reused once the
+    background is not.
+  - The terminal: its ground has that opacity (`[terminal] opacity`),
+    read again when desktop.toml changes; text, the cursor, coloured
+    cells and the bar stay as they are.
+  - The dock: `[shelf] opacity`, its panel only.
+  - On Hubble: the terminal at 0.8 and the dock at 0.7 over the
+    wallpaper, in a screenshot.
+  - Not yet: blur of what is behind (the server's to do); the bar and
+    server-drawn title bars seen through; a page in the settings app.
+
 ## Acceptance
 
 Every step: `cargo test --workspace` green on Hubble, canary and Techbench,

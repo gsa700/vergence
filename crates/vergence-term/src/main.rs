@@ -501,6 +501,9 @@ struct Terminal {
     next_id: u64,
     waker: Option<Waker>,
     palette: Palette,
+    /// How opaque the ground is (vergence_ui::opacity_setting): less than 1,
+    /// the desktop shows through behind the text.
+    opacity: f32,
     settings: Settings,
     metrics: Option<Metrics>,
     focused: bool,
@@ -596,6 +599,7 @@ impl Terminal {
             next_id: 1,
             waker: None,
             palette: palette(),
+            opacity: vergence_ui::opacity_setting(&config("desktop.toml"), "[terminal]"),
             settings: Settings::from_text(&config("settings.toml")),
             metrics: None,
             focused: false,
@@ -1206,7 +1210,8 @@ impl App for Terminal {
     }
 
     fn background(&self) -> Color {
-        self.palette.bg
+        let bg = self.palette.bg;
+        Color::rgba(bg.r, bg.g, bg.b, (self.opacity * 255.0).round() as u8)
     }
 
     fn animating(&self) -> bool {
@@ -1241,6 +1246,7 @@ impl App for Terminal {
             // Colours, fonts and the buttons' side as they are now; the cell's size is
             // worked out again at the next frame, and the grids follow it.
             self.palette = palette();
+            self.opacity = vergence_ui::opacity_setting(&config("desktop.toml"), "[terminal]");
             self.settings = Settings::from_text(&config("settings.toml"));
             self.metrics = None;
             window.redraw();
@@ -1557,7 +1563,11 @@ impl App for Terminal {
         let mut scene = Scene::new(frame.width, frame.height);
         // Room for as much as the last frame held, so the list is not grown step by step.
         scene.commands.reserve(self.last_commands);
-        scene.fill(Rect::new(0.0, 0.0, frame.width, frame.height), self.palette.bg);
+        // The ground is the window's background; drawn again here only when
+        // nothing is to show through it.
+        if self.opacity >= 1.0 {
+            scene.fill(Rect::new(0.0, 0.0, frame.width, frame.height), self.palette.bg);
+        }
         let size = self.settings.mono_size;
         if self.metrics.is_none() {
             // The settings' fonts, or the machine's own if it does not have them.

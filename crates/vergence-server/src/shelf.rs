@@ -22,6 +22,7 @@
 //     [shelf]
 //     hide = false     # read; does nothing until step 6
 //     pinned = ["firefox", "vergence-term"]   # entry ids, in their order
+//     opacity = 1.0    # the panel's, 0.3 to 1
 //     place = "edge"   # or "free", with x, y and upright; edge = "right",
 //                      # "left", "top", "bottom"; screen = "<id>"; gap = 6;
 //                      # keep-clear = true
@@ -138,6 +139,9 @@ pub struct ShelfConfig {
     /// At an edge: windows keep out of the dock's column (true).
     #[serde(rename = "keep-clear")]
     pub keep_clear: Option<bool>,
+    /// How opaque the dock's panel is, 0.3 to 1 (1): less, and the desktop
+    /// shows through it. Its icons and marks stay as they are.
+    pub opacity: Option<f32>,
     /// Pinned applications, by desktop entry id, in their order on the dock.
     #[serde(default)]
     pub pinned: Vec<String>,
@@ -940,6 +944,8 @@ impl Server {
             (&item.key, &item.name, windows.len(), item.focused, icon.is_some(), away).hash(&mut hasher);
         }
         starting.hash(&mut hasher);
+        let glass = (self.shelf.config.opacity.filter(|o| o.is_finite()).unwrap_or(1.0).clamp(0.3, 1.0) * 255.0).round() as u8;
+        glass.hash(&mut hasher);
         (accent.r, accent.g, accent.b).hash(&mut hasher);
         // Level or upright, and which side faces the windows (its marks are on the other).
         let upright = self.shelf.config.placement().upright();
@@ -951,7 +957,8 @@ impl Server {
             // on nothing (the desktop shows at its corners).
             let (w, h) = (strip.size.w as f32, strip.size.h as f32);
             let mut scene = Scene::new(w, h);
-            scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, colour(vergence_look::SHELF));
+            let panel = vergence_look::SHELF;
+            scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, Color::rgba(panel.0, panel.1, panel.2, glass));
             scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, colour(vergence_look::SHELF_EDGE));
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             let face = fonts.face("sans-serif", 700, false).or_else(|| fonts.face("sans-serif", 400, false));

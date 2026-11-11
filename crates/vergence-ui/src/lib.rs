@@ -117,6 +117,32 @@ pub enum Input {
     Paste(String),
 }
 
+/// How opaque a program's window ground is to be, from desktop.toml's text:
+/// `opacity` in the program's own table (`section`, as "[terminal]") if it
+/// is there, else `window-opacity` under `[appearance]`, the desktop's word
+/// for every program of ours, else 1. From 0.3 (less could not be read
+/// on) to 1 (nothing shows through). A program gives its
+/// [`App::background`] that much alpha and draws its ground no other way;
+/// what it draws on top (text, its bar) stays as it is.
+pub fn opacity_setting(text: &str, section: &str) -> f32 {
+    let (mut own, mut desktop) = (None, None);
+    let mut within = "";
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            within = line;
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else { continue };
+        let value = value.split('#').next().unwrap_or("").trim().parse::<f32>().ok().filter(|v| v.is_finite());
+        match key.trim() {
+            "opacity" if within == section => own = value.or(own),
+            "window-opacity" if within == "[appearance]" => desktop = value.or(desktop),
+            _ => {}
+        }
+    }
+    own.or(desktop).unwrap_or(1.0).clamp(0.3, 1.0)
+}
+
 /// The pointer's shape over the window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cursor {
@@ -306,6 +332,8 @@ struct Buffer {
     id: u32,
     width: u32,
     height: u32,
+    /// Made to be seen through (its format has alpha).
+    alpha: bool,
     /// The server is showing it, or may yet: not to be drawn into.
     busy: bool,
 }
@@ -1013,15 +1041,16 @@ impl Runner {
             self.client.destroy_buffer(id)?;
         }
         let stride = pw as usize * 4;
-        let index = match self.buffers.iter().position(|b| !b.busy && (b.width, b.height) == (pw, ph)) {
+        let alpha = background.a != 255;
+        let index = match self.buffers.iter().position(|b| !b.busy && (b.width, b.height, b.alpha) == (pw, ph, alpha)) {
             Some(i) => i,
             None => {
                 let file = ShmFile::new(stride * ph as usize)?;
                 let pool = self.client.create_pool(self.shm, file.fd(), file.len() as i32)?;
-                let format = if background.a == 255 { wl::FORMAT_XRGB8888 } else { wl::FORMAT_ARGB8888 };
+                let format = if alpha { wl::FORMAT_ARGB8888 } else { wl::FORMAT_XRGB8888 };
                 let id = self.client.create_buffer(pool, 0, pw as i32, ph as i32, stride as i32, format)?;
                 self.client.destroy_pool(pool)?;
-                self.buffers.push(Buffer { file, id, width: pw, height: ph, busy: false });
+                self.buffers.push(Buffer { file, id, width: pw, height: ph, alpha, busy: false });
                 self.buffers.len() - 1
             }
         };
@@ -1049,5 +1078,22 @@ impl Runner {
             self.closing = true;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_program_s_opacity_is_its_own_word_or_the_desktop_s() {
+        use super::opacity_setting as o;
+        assert_eq!(o("", "[terminal]"), 1.0);
+        assert_eq!(o("[appearance]\nwindow-opacity = 0.9\n", "[terminal]"), 0.9);
+        assert_eq!(o("[appearance]\nwindow-opacity = 0.9\n[terminal]\nopacity = 0.8 # mine\n", "[terminal]"), 0.8);
+        assert_eq!(o("[terminal]\nopacity = 0.8\n", "[settings]"), 1.0, "another program's word");
+        // Kept readable, and nonsense is no word at all.
+        assert_eq!(o("[terminal]\nopacity = 0.05\n", "[terminal]"), 0.3);
+        assert_eq!(o("[terminal]\nopacity = 7\n", "[terminal]"), 1.0);
+        assert_eq!(o("[terminal]\nopacity = glass\n[appearance]\nwindow-opacity = 0.7\n", "[terminal]"), 0.7);
+        assert_eq!(o("[shelf]\nopacity = 0.5\n", "[shelf]"), 0.5);
     }
 }
