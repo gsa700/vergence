@@ -10,7 +10,7 @@
 // Cards stack down from the top-right corner of the monitor the pointer was on
 // when the first of them appeared, sized in points like the menu and title
 // bars, so they are the same physical size on every monitor; text is
-// rasterised at each monitor's own pixels. Light or dark follows the
+// rasterized at each monitor's own pixels. Light or dark follows the
 // color-scheme setting. A click on a card runs its "default" action (if it has
 // one) and closes it; other actions are buttons under the text. Cards expire
 // after their timeout (when the app leaves it to the server: 5 s, 10 s for a

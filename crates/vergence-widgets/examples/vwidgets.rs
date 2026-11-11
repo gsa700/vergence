@@ -46,7 +46,7 @@ fn desktop() -> String {
     dir.and_then(|d| std::fs::read_to_string(d.join("vergence/desktop.toml")).ok()).unwrap_or_default()
 }
 
-/// A picture to show: a wash of colour, 160 x 90.
+/// A picture to show: a wash of color, 160 x 90.
 fn wash() -> Image {
     let (w, h) = (160u32, 90u32);
     let mut rgba = Vec::with_capacity((w * h * 4) as usize);
@@ -111,7 +111,7 @@ impl Program for Demo {
         let fields = card(vec![
             setting(
                 "Custom accent",
-                "Any colour as #rrggbb; Enter applies it to this window.",
+                "Any color as #rrggbb; Enter applies it to this window.",
                 field(&self.accent, Msg::Accent).placeholder("#rrggbb").on_submit(Msg::AccentApply).width(Length::Fixed(140.0)).name("Custom accent"),
             ),
             setting(
@@ -125,7 +125,7 @@ impl Program for Demo {
         let (dx, dy, dragging) = (self.dot.0, self.dot.1, self.dragging);
         let pictures = card(vec![
             row(vec![
-                picture(self.picture.clone()).fit(fit).radius(8.0).width(Length::Fixed(200.0)).height(Length::Fixed(80.0)).name("A wash of colour"),
+                picture(self.picture.clone()).fit(fit).radius(8.0).width(Length::Fixed(200.0)).height(Length::Fixed(80.0)).name("A wash of color"),
                 drawing(move |scene, _fonts, r, t| {
                     scene.fill_rounded(r, 8.0, t.page);
                     scene.stroke(r, 8.0, 1.0, t.line);

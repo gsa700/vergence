@@ -20,7 +20,7 @@
 // SCALE (Dave, 2026-11-08: "always try and default to the native scale if
 // possible for maximum sharpness ... most people have one screen"). A screen's
 // default is calculated as the whitepaper says (§3, Contract 1: its pixels and
-// millimetres from the EDID, and how far away it is, a built-in laptop panel
+// millimeters from the EDID, and how far away it is, a built-in laptop panel
 // assumed at laptop distance, everything else at desk distance), then snapped
 // to the nearest whole number when that is within 25%: whole numbers are sharp
 // in every toolkit and need no resampling, and most single monitors get 1x,

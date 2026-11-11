@@ -61,12 +61,12 @@ fn the_scale_decides_the_pixels() {
 }
 
 #[test]
-fn colours_blend_over_what_is_there() {
+fn colors_blend_over_what_is_there() {
     let mut s = Scene::new(4.0, 4.0);
     s.fill(Rect::new(0.0, 0.0, 4.0, 4.0), Color::rgba(255, 255, 255, 128));
     let p = draw(&s, 1.0, BLACK);
     assert!(near(p.pixel(1, 1)[0], 128) && p.pixel(1, 1)[3] == 255, "{:?}", p.pixel(1, 1));
-    // Over nothing: alpha is multiplied into the colour.
+    // Over nothing: alpha is multiplied into the color.
     let p = draw(&s, 1.0, CLEAR);
     assert_eq!(p.pixel(1, 1), [128, 128, 128, 128]);
     assert_eq!(p.straight_rgba()[..4], [255, 255, 255, 128]);
@@ -224,14 +224,14 @@ fn a_picture_is_stretched_smoothly() {
     let p = draw(&s, 1.0, BLACK);
     assert!(near(p.pixel(1, 1)[0], 128), "{:?}", p.pixel(1, 1));
     assert_eq!(p.pixel(0, 0), [0, 0, 0, 255]);
-    // A clear texel does not darken its neighbour's colour.
+    // A clear texel does not darken its neighbor's color.
     let mut s = Scene::new(8.0, 2.0);
     let half = s.image(Image { width: 2, height: 1, rgba: vec![255, 255, 255, 255, 0, 0, 0, 0] });
     s.draw_image(half, Rect::new(0.0, 0.0, 8.0, 2.0), 1.0);
     let p = draw(&s, 1.0, CLEAR);
     let fading = p.straight_rgba();
     let px = &fading[4 * 4..4 * 4 + 4];
-    assert!(px[3] > 30 && px[3] < 220 && px[0] > 250, "white at part strength, not grey: {px:?}");
+    assert!(px[3] > 30 && px[3] < 220 && px[0] > 250, "white at part strength, not gray: {px:?}");
 }
 
 struct Rng(u64);
@@ -435,16 +435,16 @@ fn text_is_drawn_where_it_was_laid_out() {
 }
 
 #[test]
-fn colour_does_not_rasterise_a_glyph_again() {
+fn color_does_not_rasterize_a_glyph_again() {
     let (mut fonts, face) = mono();
     let mut s = Scene::new(200.0, 60.0);
-    text(&mut s, &mut fonts, face, 14.0, RED, Point::new(4.0, 20.0), "colour");
+    text(&mut s, &mut fonts, face, 14.0, RED, Point::new(4.0, 20.0), "color");
     Cpu::new().render(&s, &mut fonts, 2.0, BLACK).unwrap();
     let kept = fonts.cached();
     assert!(kept >= 4 && kept <= 6, "one bitmap per different letter: {kept}");
-    // The same word in forty other colours, at the same place across the line.
+    // The same word in forty other colors, at the same place across the line.
     for i in 0..40u8 {
-        text(&mut s, &mut fonts, face, 14.0, Color::rgb(i * 6, 255 - i * 6, i), Point::new(4.0, 20.0), "colour");
+        text(&mut s, &mut fonts, face, 14.0, Color::rgb(i * 6, 255 - i * 6, i), Point::new(4.0, 20.0), "color");
     }
     Cpu::new().render(&s, &mut fonts, 2.0, BLACK).unwrap();
     assert_eq!(fonts.cached(), kept);

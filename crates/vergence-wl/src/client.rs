@@ -797,7 +797,7 @@ mod tests {
         // Another program asks for it: the request comes with a pipe to write into.
         let (read_end, write_end) = crate::conn::pipe().unwrap();
         server.send(Writer::new(source, 1).string("text/plain").fd(std::os::fd::AsRawFd::as_raw_fd(&write_end))).unwrap();
-        // Then someone else copies: ours is cancelled, and theirs is offered in two kinds.
+        // Then someone else copies: ours is canceled, and theirs is offered in two kinds.
         server.send(Writer::new(source, 2)).unwrap();
         let offer = 0xff00_0001u32;
         server.send(Writer::new(device, 0).uint(offer)).unwrap();

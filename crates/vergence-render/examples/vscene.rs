@@ -5,7 +5,7 @@
 //!     cargo run --release -p vergence-render --example vscene -- shapes out.png --scale 2 --threads 1
 //!
 //! `term` is the stress test's window (toolkit milestone 1): 1264 x 706
-//! reference units of terminal, every cell its own colours and its own
+//! reference units of terminal, every cell its own colors and its own
 //! character. `shapes` is one of everything. `--size WxH` changes the
 //! window, `--scene file` also writes the scene's bytes, `--gpu` draws it on
 //! the GPU as well and compares (the PNG is then the GPU's picture).
@@ -40,7 +40,7 @@ const TEXT: Color = Color::rgb(235, 235, 235);
 fn bar(s: &mut Scene, fonts: &mut Fonts, tabs: &[&str]) {
     let ui = fonts.face("sans-serif", 400, false);
     s.fill(Rect::new(0.0, 0.0, s.width, 36.0), BAR);
-    for (i, name) in ["close", "minimise"].iter().enumerate() {
+    for (i, name) in ["close", "minimize"].iter().enumerate() {
         let (cx, cy) = (22.0 + i as f32 * 34.0, 20.0);
         if *name == "close" {
             s.line(Point::new(cx - 5.0, cy - 5.0), Point::new(cx + 5.0, cy + 5.0), 1.25, TEXT);
@@ -71,11 +71,11 @@ fn bar(s: &mut Scene, fonts: &mut Fonts, tabs: &[&str]) {
     s.line(Point::new(x + 10.0, 21.0), Point::new(x + 22.0, 21.0), 1.25, TEXT);
 }
 
-/// A terminal full of cells, each with its own colours and character.
+/// A terminal full of cells, each with its own colors and character.
 fn term(fonts: &mut Fonts, w: f32, h: f32) -> (Scene, usize, f32) {
     let mut s = Scene::new(w, h);
     s.fill(Rect::new(0.0, 0.0, w, h), PANE);
-    bar(&mut s, fonts, &["btop", "htop", "seq", "colour", "cursor", "unicode"]);
+    bar(&mut s, fonts, &["btop", "htop", "seq", "color", "cursor", "unicode"]);
     let mono = fonts.face("monospace", 400, false).expect("a monospace font");
     let size = 13.33;
     let m = fonts.metrics(mono, size);
@@ -174,7 +174,7 @@ fn main() {
     let first = ms(&mut || pixmap = Some(cpu.render(&scene, &mut fonts, scale, background).expect("it renders")));
     let mut pixmap = pixmap.expect("rendered");
     let again = (0..5).map(|_| ms(&mut || pixmap = cpu.render(&scene, &mut fonts, scale, background).expect("it renders"))).fold(f64::MAX, f64::min);
-    println!("{} x {} pixels at scale {scale}, {} threads: first frame {first:.1} ms (glyphs rasterised: {}), then {again:.1} ms a frame", pixmap.width, pixmap.height, cpu.threads(), fonts.cached());
+    println!("{} x {} pixels at scale {scale}, {} threads: first frame {first:.1} ms (glyphs rasterized: {}), then {again:.1} ms a frame", pixmap.width, pixmap.height, cpu.threads(), fonts.cached());
     // One line of text redrawn, as when a terminal row changes.
     let row = (pixmap.height / 2)..(pixmap.height / 2 + (cell_h * scale).ceil() as u32);
     let line = (0..20).map(|_| ms(&mut || cpu.render_rows(&scene, &mut fonts, scale, background, &mut pixmap, row.clone()).expect("it renders"))).fold(f64::MAX, f64::min);

@@ -186,7 +186,7 @@ mod tests {
         let (x, y) = snap(&s, 0, 1500, 100, 40);
         let moved = r("a", x, y, 1170, 658);
         assert!(!overlaps(&moved, &s[1]));
-        // Below B, centred under it.
+        // Below B, centered under it.
         assert_eq!(snap(&s, 0, 1480, 1100, 40), (1485, 1013));
     }
 

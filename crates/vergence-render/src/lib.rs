@@ -10,12 +10,12 @@
 //!
 //! A scene is in reference units; a renderer is told the scale (pixels per
 //! unit) of the monitor it draws for, so the same scene comes out sharp at
-//! any density. Glyphs come from `vergence_text`'s cache, rasterised at the
-//! exact pixel size and tinted here, so colour costs nothing.
+//! any density. Glyphs come from `vergence_text`'s cache, rasterized at the
+//! exact pixel size and tinted here, so color costs nothing.
 //!
 //! The result is a [`Pixmap`]: 8-bit RGBA with alpha multiplied in, rows
-//! from the top. Colours are blended as they are stored (sRGB values, no
-//! linearisation), which is what toolkits and terminals do and what the GPU
+//! from the top. Colors are blended as they are stored (sRGB values, no
+//! linearization), which is what toolkits and terminals do and what the GPU
 //! renderer will match.
 //!
 //! A renderer takes a scene from anyone: it validates before it draws, and
@@ -83,7 +83,7 @@ pub fn pixel_size(scene: &Scene, scale: f32) -> Result<(u32, u32), RenderError> 
 }
 
 /// A picture: `width` x `height` pixels, four bytes each (red, green, blue,
-/// alpha, with alpha multiplied into the colours), rows from the top.
+/// alpha, with alpha multiplied into the colors), rows from the top.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pixmap {
     pub width: u32,

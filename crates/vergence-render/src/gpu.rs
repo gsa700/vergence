@@ -150,8 +150,8 @@ float cover(vec4 r, float radius, vec2 p) {
     if (!(row && col)) {
         return edge(r.x, r.z, p.x) * edge(r.y, r.w, p.y);
     }
-    vec2 centre = (r.xy + r.zw) * 0.5;
-    vec2 q = abs(p + 0.5 - centre) - ((r.zw - r.xy) * 0.5 - radius);
+    vec2 center = (r.xy + r.zw) * 0.5;
+    vec2 q = abs(p + 0.5 - center) - ((r.zw - r.xy) * 0.5 - radius);
     float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
     return clamp(0.5 - d, 0.0, 1.0);
 }
@@ -160,7 +160,7 @@ void main() {
     vec2 p = floor(gl_FragCoord.xy);
     int kind = int(v_param.x);
     float c = 0.0;
-    vec4 colour = v_color;
+    vec4 color = v_color;
     if (kind == 0) {
         c = cover(v_shape, v_param.y, p);
     } else if (kind == 1) {
@@ -179,7 +179,7 @@ void main() {
         c = texelFetch(u_atlas, ivec2(p - v_uv.zw + v_uv.xy), 0).r;
     } else {
         // A picture stretched to v_shape: between four of its pixels, mixed
-        // with alpha multiplied in so a clear one's colour does not bleed.
+        // with alpha multiplied in so a clear one's color does not bleed.
         vec2 size = v_param.zw;
         vec2 uv = clamp((p + 0.5 - v_shape.xy) / (v_shape.zw - v_shape.xy) * size - 0.5, vec2(0.0), size - 1.0);
         ivec2 t0 = ivec2(floor(uv));
@@ -196,17 +196,17 @@ void main() {
         if (mixed.a <= 0.0) {
             discard;
         }
-        colour = vec4(mixed.rgb / mixed.a, mixed.a);
+        color = vec4(mixed.rgb / mixed.a, mixed.a);
     }
     c = clamp(c, 0.0, 1.0);
     if (v_clip_param.y > 0.5) {
         c *= cover(v_clip, v_clip_param.x, p);
     }
-    float a = colour.a * c;
+    float a = color.a * c;
     if (a <= 0.0) {
         discard;
     }
-    o_color = vec4(colour.rgb * a, a);
+    o_color = vec4(color.rgb * a, a);
 }
 "#;
 
@@ -350,7 +350,7 @@ impl Gpu {
             let p = (egl.eglGetProcAddress)(c"glEGLImageTargetTexture2DOES".as_ptr());
             (!p.is_null()).then(|| std::mem::transmute::<*mut c_void, unsafe extern "C" fn(u32, *mut c_void)>(p))
         };
-        // SAFETY: EGL calls on a display that initialised; every result is checked.
+        // SAFETY: EGL calls on a display that initialized; every result is checked.
         let context = unsafe {
             if (egl.eglBindAPI)(gl::EGL_OPENGL_ES_API) == 0 {
                 return Err(GpuError::Egl("eglBindAPI", (egl.eglGetError)()));
@@ -651,7 +651,7 @@ impl Gpu {
             (gl.glClearColor)(background.r as f32 / 255.0 * a, background.g as f32 / 255.0 * a, background.b as f32 / 255.0 * a, a);
             (gl.glClear)(gl::GL_COLOR_BUFFER_BIT);
             (gl.glEnable)(gl::GL_BLEND);
-            // Colours leave the fragment program with alpha multiplied in.
+            // Colors leave the fragment program with alpha multiplied in.
             (gl.glBlendFunc)(gl::GL_ONE, gl::GL_ONE_MINUS_SRC_ALPHA);
             (gl.glUseProgram)(self.program);
             (gl.glUniform2f)(self.size_uniform, w as f32, h as f32);
@@ -734,7 +734,7 @@ impl Gpu {
                 _ => batches.push(Batch { first, count: 1, image }),
             }
         }
-        let colour = |c: [u8; 4]| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, c[3] as f32 / 255.0];
+        let color = |c: [u8; 4]| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, c[3] as f32 / 255.0];
         let whole = |b: [i32; 4]| [b[0] as f32, b[1] as f32, b[2] as f32, b[3] as f32];
         for p in prims.iter() {
             let chain = &chains[p.chain as usize];
@@ -783,7 +783,7 @@ impl Gpu {
                     let fill = |data: &mut Vec<f32>, batches: &mut Vec<Batch>, r: RRect, c: Color| {
                         let bounds = intersect(r.bounds(), scissor);
                         if bounds[0] < bounds[2] && bounds[1] < bounds[3] && c.a != 0 {
-                            emit(data, batches, [whole(bounds), rect(&r), [0.0; 4], [KIND_FILL, r.radius, 0.0, 0.0], colour([c.r, c.g, c.b, c.a]), [0.0; 4], clip, clip_param], None);
+                            emit(data, batches, [whole(bounds), rect(&r), [0.0; 4], [KIND_FILL, r.radius, 0.0, 0.0], color([c.r, c.g, c.b, c.a]), [0.0; 4], clip, clip_param], None);
                         }
                     };
                     // Where each glyph of this grid is in the atlas, and its box: a screen
@@ -851,14 +851,14 @@ impl Gpu {
                             let bounds = intersect([px, py, px + w, py + h], scissor);
                             if bounds[0] < bounds[2] && bounds[1] < bounds[3] {
                                 let ink = cell.ink;
-                                emit(&mut data, &mut batches, [whole(bounds), [0.0; 4], [0.0; 4], [KIND_GLYPH, 0.0, 0.0, 0.0], colour([ink.r, ink.g, ink.b, ink.a]), [u as f32, v as f32, px as f32, py as f32], clip, clip_param], None);
+                                emit(&mut data, &mut batches, [whole(bounds), [0.0; 4], [0.0; 4], [KIND_GLYPH, 0.0, 0.0, 0.0], color([ink.r, ink.g, ink.b, ink.a]), [u as f32, v as f32, px as f32, py as f32], clip, clip_param], None);
                             }
                         }
                     }
                     continue;
                 }
             }
-            emit(&mut data, &mut batches, [whole(p.bounds), shape, inner, param, colour(p.color), uv, clip, clip_param], image);
+            emit(&mut data, &mut batches, [whole(p.bounds), shape, inner, param, color(p.color), uv, clip, clip_param], image);
         }
         Ok((data, batches))
     }
@@ -902,7 +902,7 @@ impl Drop for Gpu {
     }
 }
 
-/// An initialised EGL display: on the first GPU render node that works,
+/// An initialized EGL display: on the first GPU render node that works,
 /// else Mesa's surfaceless platform.
 #[allow(clippy::type_complexity)]
 fn open_display(egl: &Egl) -> Option<(*mut c_void, Option<(Gbm, *mut c_void)>)> {

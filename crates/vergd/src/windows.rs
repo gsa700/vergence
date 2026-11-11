@@ -96,7 +96,7 @@ struct Win {
     xid: u32,
     id: WindowId,
     /// Ordinary application window that shows in the taskbar and is not
-    /// minimised.
+    /// minimized.
     eligible: bool,
     x: i32,
     y: i32,
@@ -240,7 +240,7 @@ fn monitors(setup: &Setup) -> Vec<(String, String, i32, i32, i32, i32)> {
         .collect()
 }
 
-/// Where a window is, as the store keeps it; None if its centre is on no
+/// Where a window is, as the store keeps it; None if its center is on no
 /// lit monitor.
 fn setting_of(w: &Win, setup: &Setup, render: u32) -> Option<WindowSetting> {
     let cx = w.x + w.w as i32 / 2;
@@ -308,7 +308,7 @@ fn place(
     if same {
         return Ok(false);
     }
-    // Un-maximise first: a maximised window ignores moves.
+    // Un-maximize first: a maximized window ignores moves.
     if w.max_h || w.max_v {
         client_message(conn, root, w.xid, a.state, [0, a.max_h, a.max_v, SOURCE_TOOL, 0])?;
     }
@@ -353,7 +353,7 @@ fn overlap(a: Rect, b: Rect) -> i64 {
 
 /// Where to move a window (its frame, `r`) so it is fully on one of
 /// `areas`, or None if at least half of it is visible already. The area it
-/// overlaps most wins, else the one nearest its centre; the window moves as
+/// overlaps most wins, else the one nearest its center; the window moves as
 /// little as it can, and keeps its top-left corner on screen if it is
 /// larger than the area.
 fn rescue_target(r: Rect, areas: &[Rect]) -> Option<(usize, i32, i32)> {

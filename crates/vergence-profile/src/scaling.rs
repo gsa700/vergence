@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The reference viewing distance of the CSS pixel, in millimetres.
+/// The reference viewing distance of the CSS pixel, in millimeters.
 pub const REFERENCE_DISTANCE_MM: u32 = 710;
 /// Scales are rounded to this step.
 pub const STEP: f64 = 0.25;
@@ -77,7 +77,7 @@ pub fn implausible(px: (u32, u32), mm: (u32, u32)) -> Option<&'static str> {
     if !(40.0..=600.0).contains(&d) {
         return Some("the EDID's size gives an impossible density");
     }
-    // Pixel and millimetre aspect ratios must roughly agree (square pixels).
+    // Pixel and millimeter aspect ratios must roughly agree (square pixels).
     let ratio = (px.0 as f64 / px.1 as f64) / (mm.0 as f64 / mm.1 as f64);
     if !(0.85..=1.15).contains(&ratio) {
         return Some("the EDID's size does not match its resolution's shape");

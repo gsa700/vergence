@@ -12,7 +12,7 @@ case "$n" in
     1) command -v btop >/dev/null 2>&1 && exec btop; exec top ;;
     2) command -v htop >/dev/null 2>&1 && exec htop; exec top ;;
     3) exec "$flood" time "$VSTRESS_DIR/seq.log" seq 1 1000000 ;;
-    4) exec "$flood" colour "$VSTRESS_DIR/colour.log" ;;
+    4) exec "$flood" color "$VSTRESS_DIR/color.log" ;;
     5) exec "$flood" cursor "$VSTRESS_DIR/cursor.log" ;;
     6) exec "$flood" unicode "$VSTRESS_DIR/unicode.log" ;;
     *) exec /bin/sh ;;

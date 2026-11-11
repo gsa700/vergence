@@ -19,7 +19,7 @@
 //!
 //!   vergence-harness measure <window title>...
 //!       Find each size box (tools/sizebox) and print its size on the panel
-//!       in millimetres (milestone 4, acceptance 3).
+//!       in millimeters (milestone 4, acceptance 3).
 
 mod db;
 mod fake;

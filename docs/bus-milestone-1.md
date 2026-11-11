@@ -113,7 +113,7 @@ Live session, ~4 minutes with the settings app, Firefox and AlbumWall
 (`vctl dbus`). Unanswered calls by count: org.gnome.Mutter.IdleMonitor
 GetIdletime 14 (Firefox polls idle time), org.gtk.vfs mount tracker 7,
 org.freedesktop.portal.Settings ReadOne 5 + a portal property read
-(Slint, Avalonia: colour scheme), portal Inhibit and GNOME SessionManager
+(Slint, Avalonia: color scheme), portal Inhibit and GNOME SessionManager
 Inhibit 1 each (Firefox), com.canonical.AppMenu.Registrar 1 (Avalonia),
 org.a11y.Bus 1. Firefox owned its single-instance name; AlbumWall owned
 org.mpris.MediaPlayer2.albumwall. No notification was attempted in the run.
@@ -148,7 +148,7 @@ color-scheme ("prefer-dark") to gdbus monitor, and the same three as one
 
 - `vergence-server/src/notify.rs`: one notification service. Cards stack
   down from the top-right of the monitor the pointer was on when the stack
-  started, 340 points wide, text rasterised at each monitor's pixels,
+  started, 340 points wide, text rasterized at each monitor's pixels,
   summary (2 lines) and body (4 lines, ellipsis), action buttons; light or
   dark from the color-scheme setting; a red edge for critical ones. A click
   runs the "default" action (if any) or a button's action, then closes the
@@ -182,8 +182,8 @@ the new protocol messages.
 
 - Server (`wallpaper.rs`): `[[wallpaper.monitor]]` entries (id = the
   monitor's EDID hash, as window memory names it; label for people; image,
-  mode, color each optional over `[wallpaper]`; image "" = colour only).
-  The background colour is per monitor too. The id comes from the output's
+  mode, color each optional over `[wallpaper]`; image "" = color only).
+  The background color is per monitor too. The id comes from the output's
   own MonitorId: the first version read it from the backend, which is out
   of the state during a frame, so every monitor fell back to its port name
   and no entry matched (found live, fixed the same hour).

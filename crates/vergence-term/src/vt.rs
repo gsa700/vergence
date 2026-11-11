@@ -1,7 +1,7 @@
 // The escape-sequence parser (our own, after the DEC ANSI parser state machine
 // described at vt100.net/emu/dec_ansi_parser): bytes in, actions out. UTF-8 is
 // decoded in the ground state. Device control strings and SOS/PM/APC strings
-// are recognised and ignored.
+// are recognized and ignored.
 
 /// What the parser found. The terminal (grid.rs) acts on these.
 pub trait Perform {

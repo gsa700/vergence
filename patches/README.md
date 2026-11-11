@@ -14,7 +14,7 @@ crashed on the real monitors and sway did not:
    `drm/N`, as libdrm does.
 2. `dev_path`: `old_id & id_mask + ty.minor_base()` parses as
    `old_id & (id_mask + base)` in Rust, so the render node of a primary node
-   came out as `renderD0`. Parenthesised (FreeBSD and the other-BSD variant).
+   came out as `renderD0`. Parenthesiz (FreeBSD and the other-BSD variant).
 3. Still open, cosmetic: the node's display name uses `minor()` ("renderD2").
 
 With it, anvil drives both of Hubble's monitors. Upstream:

@@ -6,7 +6,7 @@
 #   tools/vterm-stress/run.sh [MINUTES] [vterm options]
 #
 # Opens one vterm with six tabs: btop, htop, `seq 1 1000000` again and again,
-# the colour flood, the cursor test, the Unicode flood (examples/flood.rs).
+# the color flood, the cursor test, the Unicode flood (examples/flood.rs).
 # Every minute it writes a line to the report: each job's rate over that
 # minute, the terminal's memory, and how much of a core each of its threads
 # took. The report and the jobs' own logs stay in the directory it names.
@@ -55,13 +55,13 @@ last() { if [ -f "$1" ]; then wc -l < "$1" | tr -d ' '; else echo 0; fi; }
 
 minute=0
 [ -d /proc/"$pid"/task ] && threads > "$dir/before"
-for f in seq colour cursor unicode; do eval "seen_$f=0"; done
+for f in seq color cursor unicode; do eval "seen_$f=0"; done
 while [ "$minute" -lt "$minutes" ]; do
     sleep 60
     minute=$((minute + 1))
     kill -0 "$pid" 2>/dev/null || { echo "minute $minute: vterm is GONE" | tee -a "$dir/report.txt"; exit 1; }
     line="minute $minute:"
-    for f in seq colour cursor unicode; do
+    for f in seq color cursor unicode; do
         eval "from=\$seen_$f"
         now=$(last "$dir/$f.log")
         eval "seen_$f=$now"

@@ -20,9 +20,9 @@ screen, the picture browser, About). Its iced use, counted:
 | `text` | 33 | labels, notes, values beside sliders |
 | `container` | 18 | cards, the sidebar, padding, fills and edges |
 | `button` | 14 | sidebar items, swatches, Left/Right, Make primary, Add, Remove, Up, Cancel, wallpaper tiles |
-| `pick_list` | 8 | style, themes, icons, pointer, fonts and sizes, terminal colours, energy times, fit |
-| `toggler` | 6 | contrast, motion, key repeat, minimise/maximise, same-as-primary |
-| `text_input` | 4 | custom accent, key-repeat test, sleep command, background colour |
+| `pick_list` | 8 | style, themes, icons, pointer, fonts and sizes, terminal colors, energy times, fit |
+| `toggler` | 6 | contrast, motion, key repeat, minimize/maximize, same-as-primary |
+| `text_input` | 4 | custom accent, key-repeat test, sleep command, background color |
 | `slider` | 4 | key delay and rate, scale (with marks), size |
 | `scrollable` | 2 | the page, the picture browser's list |
 | `image` | 1 | wallpaper thumbnails (decoded on a thread already, `thumbs.rs`) |
@@ -73,7 +73,7 @@ never sees a scale except to draw.
 
 **Widgets** (the whitepaper's list, and what the settings app needs):
 
-- **Label**: text in a size, weight and colour; wraps to its width;
+- **Label**: text in a size, weight and color; wraps to its width;
   aligned.
 - **Panel**: a box with a fill, an edge and the one radius
   (`vergence_look::RADIUS`, 5), around one child. Cards, the sidebar.
@@ -108,7 +108,7 @@ never sees a scale except to draw.
 
 **Focus and the keyboard.** Every widget that takes input takes focus;
 Tab and Shift+Tab move it in reading order; a focused widget shows a ring
-in the accent colour. Every page of the settings app must be usable with
+in the accent color. Every page of the settings app must be usable with
 the keyboard alone. Escape closes an open list.
 
 **Meaning (Contract 3).** As the tree is laid out, each widget records its
@@ -128,10 +128,10 @@ thread and the `Waker`: work runs on a thread, puts its answer in a channel
 and wakes the window; the window reads the channel in `woken`. The bus
 watcher for screens is one such thread for the program's life.
 
-**The look.** Colours, the radius and sizes come from `vergence-look`, with
+**The look.** Colors, the radius and sizes come from `vergence-look`, with
 the light and dark sets, high contrast and the accent from desktop.toml
 `[appearance]` read live, as the terminal reads them today. The settings
-app's own colours (its sidebar, page and card greys) move into
+app's own colors (its sidebar, page and card grays) move into
 `vergence-look` so another tool of ours can share them. `[settings]
 opacity` follows the rule the terminal and the dock follow
 (`opacity_setting`).
@@ -192,9 +192,9 @@ The terminal's bar stays in `vergence_ui::bar` for now.
     wait is cut short by the next timer as by a key repeat; asking again
     for an id moves it; at most 256 are kept (the latest-due go).
   - `vergence-look`: `Palette`, `PALETTE_DARK` and `PALETTE_LIGHT`, the
-    settings app's greys (sidebar, page, card, line, dim, text, hover).
+    settings app's grays (sidebar, page, card, line, dim, text, hover).
   - New crate `vergence-widgets`:
-    - `Element`: label (size, weight, colour, dim, wrapping, alignment),
+    - `Element`: label (size, weight, color, dim, wrapping, alignment),
       panel (ground, edge, radius, padding, alignment of its child),
       button (any child; Normal, Accent, Plain, Chosen and the program's
       own looks; off without a message), row, column, stack, space,
@@ -302,13 +302,13 @@ The terminal's bar stays in `vergence_ui::bar` for now.
   - Toolkit changes for it: `row(..).wrap()`; a drawing's `draw` gets
     `&mut Fonts`; `Program::scale`; a button that cannot be pressed is
     faded; a chosen button's meaning says "selected".
-  - The look: `vergence-look`'s palette is the old app's greys, so the
+  - The look: `vergence-look`'s palette is the old app's grays, so the
     pages match. Before and after screenshots of every page on Hubble's
     4K: the same layout, wording, wrapping and controls; the sidebar's
     lines are a point closer.
   - Checked on Hubble with a throwaway HOME holding copies of Dave's two
     files (his were not touched): an accent swatch, high contrast, Style
-    Dark (choice by keys), the title bar's side and Maximise, the key
+    Dark (choice by keys), the title bar's side and Maximize, the key
     repeat delay by dragging, screens-off by choice, a wallpaper tile,
     the scrollbar to the page's end, the picture browser (two pictures
     picked, Cancel). desktop.toml and settings.toml came out with exactly
@@ -338,13 +338,13 @@ The terminal's bar stays in `vergence_ui::bar` for now.
      removed (ab7e126^): Appearance (style choice, eight swatches and
      none, custom accent field with Enter, high contrast, reduce motion);
      Theme and fonts (GTK theme, icons, pointer, interface and monospace
-     family and size, terminal colours); Windows (preview, left/right,
-     minimise, maximise, close shown on); Keyboard (repeat switch, delay
+     family and size, terminal colors); Windows (preview, left/right,
+     minimize, maximize, close shown on); Keyboard (repeat switch, delay
      and speed sliders saved on release, test field); Energy (screens
      off, sleep, sleep command with Enter); Screens (overview with drag,
      double-click and size; per screen: map, scale slider with marks and
      its stick, Default, shown at, size, same as primary, make primary,
-     fit, background colour with Enter, the picture grid, your pictures
+     fit, background color with Enter, the picture grid, your pictures
      with remove and the two add buttons, the browser with up, pick,
      cancel and add); About. All are in the new app. Tried by hand
      (through `vctl`, throwaway HOME): every Appearance and Windows
@@ -355,7 +355,7 @@ The terminal's bar stays in `vergence_ui::bar` for now.
   2. *Keyboard alone, finger alone.* Tab reaches every control (the
      sidebar's pages are buttons); Dave's hands owed for both.
   3. *No click lost under load.* The six-tab stress test running on
-     Hubble (seq 0.79 to 0.85 s, colour 8,500 to 8,700 lines/s, parsers at
+     Hubble (seq 0.79 to 0.85 s, color 8,500 to 8,700 lines/s, parsers at
      about two cores), the demo's + pressed 50 times through `vctl` as
      fast as it would send them: the count read 50 (the tree was built
      21 times; several presses fell in one frame). **Met.**
@@ -387,7 +387,7 @@ The terminal's bar stays in `vergence_ui::bar` for now.
 
 1. Widgets in a new crate, `vergence-widgets`.
 2. Choice lists drawn inside the window; popup surfaces later.
-3. The settings app's greys move into `vergence-look` and are kept.
+3. The settings app's grays move into `vergence-look` and are kept.
 
 ## Not in this milestone
 

@@ -12,7 +12,7 @@
 //! - [`Command::Fill`] and [`Command::Stroke`]: a rectangle, corners rounded
 //!   or not, filled or outlined;
 //! - [`Command::Line`]: a straight line of a given width, round ends;
-//! - [`Command::Glyphs`]: glyphs of one font at one size in one colour, each
+//! - [`Command::Glyphs`]: glyphs of one font at one size in one color, each
 //!   placed by the toolkit's text code. The font is named by family, weight
 //!   and slant in the scene's font table, so a renderer anywhere can find it;
 //! - [`Command::Image`]: a picture from the scene's image table, stretched
@@ -22,7 +22,7 @@
 //! - [`Command::Cells`]: a grid of equal cells, each with its own ground,
 //!   ink and glyph: a terminal's screen in one command of sixteen bytes a
 //!   cell, where fills and glyph runs would take two commands for every
-//!   cell whose colours are its own (added 2026-11-10, toolkit step 5).
+//!   cell whose colors are its own (added 2026-11-10, toolkit step 5).
 //!
 //! Layers with their own opacity, gradients and paths come when a tool needs
 //! them.
@@ -63,7 +63,7 @@ pub const MAX_CLIP_DEPTH: usize = 64;
 /// glyphs, against [`MAX_SCENE_GLYPHS`].)
 pub const MAX_GRID_COLUMNS: usize = 1 << 12;
 
-/// A colour: sRGB, alpha not multiplied in.
+/// A color: sRGB, alpha not multiplied in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Color {
     pub r: u8,
@@ -143,7 +143,7 @@ pub struct Cell {
     /// What is behind the cell; alpha 0 for nothing (what was drawn before
     /// the grid shows).
     pub ground: Color,
-    /// The colour of the glyph, and of the underline.
+    /// The color of the glyph, and of the underline.
     pub ink: Color,
     /// The glyph's number in the font `font` (0 is a font's own "no such
     /// character" box, and is drawn like any other). Looked at only with
@@ -180,7 +180,7 @@ pub enum Command {
     PopClip,
     /// A grid of cells, `columns` to the row, rows downwards from `origin`
     /// (the first cell's top-left corner), each `cell_w` by `cell_h`. Drawn
-    /// a row at a time: the grounds, neighbours of one colour as a single
+    /// a row at a time: the grounds, neighbors of one color as a single
     /// rectangle (so no seam shows between them at a scale where a cell's
     /// edge is not on a pixel's); the underlines, one unit thick and one
     /// unit above the row's foot; then the glyphs at `size`, each with its

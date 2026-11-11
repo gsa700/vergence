@@ -36,7 +36,7 @@ Per monitor setup (profile key), per window:
   titles.
 - **Where:** the monitor (by EDID ID, as in milestone 2) and the position
   **relative to that monitor's corner**, so moving a monitor in the
-  arrangement does not throw its windows off; the size; maximised
+  arrangement does not throw its windows off; the size; maximized
   (horizontally, vertically), fullscreen; the workspace (decision 3).
 
 Only ordinary application windows: `_NET_WM_WINDOW_TYPE_NORMAL`, not
@@ -55,8 +55,8 @@ taskbar.
   change are ignored.
 - **Restoring on a setup change:** after milestone 2 has put the monitors
   back (and the desktop has settled), every open window with a remembered
-  place for the new setup is moved there: un-maximise first, move and
-  resize with `_NET_MOVERESIZE_WINDOW`, then re-maximise or fullscreen,
+  place for the new setup is moved there: un-maximize first, move and
+  resize with `_NET_MOVERESIZE_WINDOW`, then re-maximize or fullscreen,
   then the workspace.
 - **Shadows and borders:** positions are stored as the window's visible
   frame. `_GTK_FRAME_EXTENTS` and `_NET_FRAME_EXTENTS` are subtracted and
@@ -92,9 +92,9 @@ taskbar.
 
 ## Acceptance (on Hubble, with the fake monitor; windows on the fake are invisible, which is fine)
 
-1. Two xfce4-terminals and Mousepad on the fake, one maximised; unplug
+1. Two xfce4-terminals and Mousepad on the fake, one maximized; unplug
    (xfwm4 moves them to the ASUS); replug: each back on the fake, same place,
-   size and maximised state.
+   size and maximized state.
 2. The same after moving the fake from HDMI-1 to HDMI-3 (monitors, not
    ports) and after moving the fake's position in the arrangement (windows
    follow their monitor).
@@ -111,12 +111,12 @@ taskbar.
 
 ## Results on Hubble (2026-11-06, fake monitor right of the ASUS)
 
-Two xfce4-terminals (one maximised), xclock and Mousepad on the fake.
+Two xfce4-terminals (one maximized), xclock and Mousepad on the fake.
 
 - **5, evacuation not learned:** on unplug xfwm4 moved all four onto the
   ASUS; windows.toml was byte for byte unchanged. Pass.
 - **1, back on replug:** all four back with the same position, size and
-  maximised state. Pass.
+  maximized state. Pass.
 - **4, drift:** 10 more unplug/replug cycles; not one pixel moved. Pass.
 - **6, moved by hand:** Mousepad moved on the fake, then unplug/replug: back
   at its new place. Pass.
@@ -127,8 +127,8 @@ Two xfce4-terminals (one maximised), xclock and Mousepad on the fake.
 
 **What xfwm4 does by itself:** on replug it moved the three normal windows
 back to the fake on its own; vergd's log shows it moved only the
-**maximised** terminal (which xfwm4 leaves on the remaining screen) on every
-cycle. The result is right either way; vergd's own part is the maximised
+**maximized** terminal (which xfwm4 leaves on the remaining screen) on every
+cycle. The result is right either way; vergd's own part is the maximized
 window, not learning the evacuation, hand-moved places, and app start
 (xfwm4 does neither of the last two).
 
@@ -139,18 +139,18 @@ a run of 6 or more digits is now dropped (`stable_role`); the window is
 known by class and order. Checked: a terminal closed and started again
 opened at its remembered place, with one entry in the file.
 
-Test tools installed on Hubble: wmctrl-fork (placing and maximising windows
+Test tools installed on Hubble: wmctrl-fork (placing and maximizing windows
 from scripts) and Thunderbird.
 
 ## Acceptance 3 on Hubble (2026-11-06 21:15): Firefox and Thunderbird
 
 Three Firefox windows (fake/workspace 1; ASUS/workspace 2; fake/workspace 3
-maximised) and Thunderbird (fake/workspace 2). Firefox set to restore its
+maximized) and Thunderbird (fake/workspace 2). Firefox set to restore its
 session (`browser.startup.page = 3` in the test profile's user.js).
 
 - **Unplug:** windows.toml unchanged. On the ASUS-alone setup vergd moved
   Firefox #1 to the place it had there before.
-- **Replug:** all four back on their monitor, place, size, maximised state
+- **Replug:** all four back on their monitor, place, size, maximized state
   and workspace, including the windows on workspaces not being shown.
   Pass.
 - **Quit and restart both:** Firefox restored three windows; vergd placed
@@ -168,7 +168,7 @@ unplugs did the same.
 place on the new setup (none remembered, or its monitor is not lit) that is
 less than half visible is moved fully onto the monitor it overlaps most, or
 else the nearest one, inside the work area (clear of the panel) and allowing
-for its title bar; it moves as little as it can. Maximised and fullscreen
+for its title bar; it moves as little as it can. Maximized and fullscreen
 windows (xfwm4 fits those itself) and skipped apps are left alone. Checked
 on Hubble: Thunderbird's ASUS-alone entry removed, fake plugged and
 unplugged; log: "brought Mail/thunderbird (3pane) #1 fully onto ASUS VS229
@@ -177,7 +177,7 @@ screen's edge. The rescued place is then remembered like any other.
 
 ## Acceptance 2 on Hubble (2026-11-06 21:49-21:56): ports and arrangement
 
-Two xfce4-terminals and a maximised third on the fake (right of the ASUS),
+Two xfce4-terminals and a maximized third on the fake (right of the ASUS),
 positions compared relative to the fake's corner.
 
 - **2a, port:** fake unplugged from HDMI-1 and plugged into HDMI-3: profile
@@ -199,9 +199,9 @@ positions compared relative to the fake's corner.
   plug (the same mistake in the profile code's "changed again" path fixed
   too).
 - **After both fixes, two full runs:** 2a, 2b, 2c pass; every window on its
-  monitor at the same relative place. The maximised window's y changes from
+  monitor at the same relative place. The maximized window's y changes from
   24 to 51 when the fake is at x=0, because the Xfce panel moves to it;
-  maximised windows fill the space below the panel, as they should.
+  maximized windows fill the space below the panel, as they should.
 
 ## Known limitation: the jump at app start (Dave, 2026-11-06 19:56)
 

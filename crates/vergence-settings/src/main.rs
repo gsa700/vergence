@@ -3,9 +3,9 @@
 // 2026-11-08).
 //
 // THE FORMAT (Dave, 2026-11-08: "similar to the macOS ... designed for desktop
-// and not mobiles"; colours from his System Settings screenshot): a warm grey
+// and not mobiles"; colors from his System Settings screenshot): a warm gray
 // sidebar of pages, the selected one filled with the desktop's accent; the page
-// on a lighter ground, its heading centred in a card, settings in soft grey
+// on a lighter ground, its heading centered in a card, settings in soft gray
 // cards with the name on the left and the control on the right. Every change
 // applies at once.
 //
@@ -46,9 +46,11 @@ use vergence_widgets::{
 
 const SCHEMES: [&str; 3] = ["default", "dark", "light"];
 const SCHEME_NAMES: [&str; 3] = ["App default", "Dark", "Light"];
-const FITS: [&str; 4] = ["Fill", "Fit", "Centre", "Stretch"];
+const FITS: [&str; 4] = ["Fill", "Fit", "Center", "Stretch"];
 const SWATCHES: [&str; 8] = ["#3b82f6", "#8b5cf6", "#ec4899", "#ef4444", "#e05a00", "#eab308", "#22c55e", "#6b7280"];
 /// The accent where the user names none: the settings app's own blue.
+/// The dock's edges: as shown, and as desktop.toml writes them.
+const DOCK_EDGES: [(&str, &str); 4] = [("Right edge", "right"), ("Left edge", "left"), ("Top edge", "top"), ("Bottom edge", "bottom")];
 const DEFAULT_ACCENT: Color = Color::rgb(0x3b, 0x82, 0xf6);
 const WHITE: Color = Color::rgb(255, 255, 255);
 
@@ -57,6 +59,7 @@ enum Page {
     Appearance,
     Theme,
     Windows,
+    Dock,
     Keyboard,
     Energy,
     Overview,
@@ -80,6 +83,18 @@ enum Message {
     TermScheme(String),
     // Windows.
     Layout(winbar::Layout),
+    // The dock (desktop.toml [shelf]; the server reads it within a second).
+    DockEdge(usize),
+    DockScreen(usize),
+    DockGap(f32),
+    DockOpacity(f32),
+    /// A dock slider let go: what it shows is saved.
+    DockSave,
+    DockKeepClear(bool),
+    DockHide(bool),
+    PinAdd(usize),
+    PinMove(usize, bool),
+    PinRemove(usize),
     // Keyboard.
     Repeat(bool),
     RepeatDelay(f32),
@@ -192,6 +207,11 @@ struct App {
     repeat_delay: f32,
     repeat_rate: f32,
     key_test: String,
+    /// The dock's gap and opacity while their sliders move (saved on release).
+    dock_gap: f32,
+    dock_opacity: f32,
+    /// What can be pinned: the installed applications, by name.
+    apps: Vec<vergence_shell::desktop::Entry>,
     mail: Mail,
     inbox: Receiver<Message>,
 }
@@ -342,14 +362,28 @@ impl App {
             repeat_delay: 0.0,
             repeat_rate: 0.0,
             key_test: String::new(),
+            dock_gap: 0.0,
+            dock_opacity: 1.0,
+            apps: vergence_shell::apps::installed(),
             mail,
             inbox,
         };
         app.repeat_delay = keyboard_int(&app.desktop, "repeat-delay", REPEAT_DELAY) as f32;
         app.repeat_rate = keyboard_int(&app.desktop, "repeat-rate", REPEAT_RATE) as f32;
+        app.dock_from_file();
         app.load_pictures();
         bus_outputs(app.mail.clone());
         app
+    }
+
+    /// desktop.toml as it is now: the server writes it too (the dock dragged,
+    /// an application pinned from the dock).
+    fn reread(&mut self) {
+        let fresh = read_desktop();
+        if fresh != self.desktop {
+            self.desktop = fresh;
+            self.dock_from_file();
+        }
     }
 
     fn save(&mut self, f: impl FnOnce(&mut toml::Table)) {
@@ -357,6 +391,7 @@ impl App {
             Ok(t) => {
                 self.desktop = t;
                 self.status.clear();
+                self.dock_from_file();
             }
             Err(e) => self.status = format!("Could not save: {e}"),
         }
@@ -411,6 +446,7 @@ impl App {
 
     fn open(&mut self, p: Page) {
         self.page = p;
+        self.reread();
         self.browser = None;
         self.arrange_drag = None;
         let scope = self.scope();
@@ -471,6 +507,68 @@ impl App {
                 }
                 let wanted: Vec<PathBuf> = self.outputs.iter().filter_map(|o| wall::shown(&self.desktop, Some(&o.id)).image).collect();
                 self.ask_thumbs(wanted);
+            }
+            Message::DockEdge(i) => {
+                // Choosing an edge docks it there; "where it was put" is only shown, not chosen.
+                if let Some(edge) = DOCK_EDGES.get(i) {
+                    let edge = edge.1;
+                    self.save_table("shelf", |t| {
+                        for k in ["x", "y", "upright"] {
+                            t.remove(k);
+                        }
+                        t.insert("place".into(), "edge".into());
+                        t.insert("edge".into(), edge.into());
+                    });
+                }
+            }
+            Message::DockScreen(i) => {
+                let id = if i == 0 { None } else { self.outputs.get(i - 1).map(|o| o.id.clone()) };
+                self.save_table("shelf", |t| match id {
+                    Some(id) => {
+                        t.insert("screen".into(), id.into());
+                    }
+                    None => {
+                        t.remove("screen");
+                    }
+                });
+            }
+            Message::DockGap(v) => self.dock_gap = v.round(),
+            Message::DockOpacity(v) => self.dock_opacity = (v * 20.0).round() / 20.0,
+            Message::DockSave => {
+                let (gap, opacity) = (self.dock_gap as i64, (self.dock_opacity as f64 * 100.0).round() / 100.0);
+                self.save_table("shelf", |t| {
+                    t.insert("gap".into(), gap.into());
+                    t.insert("opacity".into(), opacity.into());
+                });
+            }
+            Message::DockKeepClear(on) => self.save_table("shelf", |t| {
+                t.insert("keep-clear".into(), on.into());
+            }),
+            Message::DockHide(on) => self.save_table("shelf", |t| {
+                t.insert("hide".into(), on.into());
+            }),
+            Message::PinAdd(i) => {
+                let unpinned = self.unpinned();
+                if let Some(id) = unpinned.get(i).map(|e| e.id.clone()) {
+                    let mut pinned = self.pinned();
+                    pinned.push(id);
+                    self.save_pinned(pinned);
+                }
+            }
+            Message::PinMove(i, up) => {
+                let mut pinned = self.pinned();
+                let j = if up { i.checked_sub(1) } else { Some(i + 1).filter(|j| *j < pinned.len()) };
+                if let Some(j) = j.filter(|_| i < pinned.len()) {
+                    pinned.swap(i, j);
+                    self.save_pinned(pinned);
+                }
+            }
+            Message::PinRemove(i) => {
+                let mut pinned = self.pinned();
+                if i < pinned.len() {
+                    pinned.remove(i);
+                    self.save_pinned(pinned);
+                }
             }
             Message::Size(v) => self.size = if (v - 1.0).abs() < 0.035 { 1.0 } else { v },
             Message::Repeat(on) => self.save_keyboard(|t| {
@@ -554,7 +652,7 @@ impl App {
                 if parse_hex(&c).is_some() {
                     self.save_wallpaper(None, None, Some(&c));
                 } else {
-                    self.status = "Background colour: write it as #rrggbb".into();
+                    self.status = "Background color: write it as #rrggbb".into();
                 }
             }
             Message::SameAsPrimary(same) => {
@@ -715,7 +813,7 @@ impl App {
     fn save_accent(&mut self) {
         let a = self.accent_text.trim().to_string();
         if !a.is_empty() && parse_hex(&a).is_none() {
-            self.status = "Accent colour: write it as #rrggbb, or leave it empty".into();
+            self.status = "Accent color: write it as #rrggbb, or leave it empty".into();
             return;
         }
         self.save_appearance(|t| {
@@ -737,7 +835,7 @@ impl App {
         }
     }
 
-    /// A picture, fit or colour chosen: for the open screen (which then has its
+    /// A picture, fit or color chosen: for the open screen (which then has its
     /// own wallpaper) or for the primary (the default).
     fn save_wallpaper(&mut self, image: Option<Option<&Path>>, mode: Option<&str>, color: Option<&str>) {
         let scope = self.scope();
@@ -776,6 +874,7 @@ impl App {
             item("Appearance".into(), Page::Appearance, self.page == Page::Appearance, false),
             item("Theme and fonts".into(), Page::Theme, self.page == Page::Theme, false),
             item("Windows".into(), Page::Windows, self.page == Page::Windows, false),
+            item("Dock".into(), Page::Dock, self.page == Page::Dock, false),
             item("Keyboard".into(), Page::Keyboard, self.page == Page::Keyboard, false),
             item("Energy".into(), Page::Energy, self.page == Page::Energy, false),
             item(if self.outputs.is_empty() { "Wallpaper".into() } else { "Screens".into() }, screens_page, screens_selected, false),
@@ -799,8 +898,8 @@ impl App {
         let scheme = SCHEMES.iter().position(|s| *s == appearance_text(&self.desktop, "color-scheme")).unwrap_or(0);
         let accent = appearance_text(&self.desktop, "accent");
         let none_selected = accent.is_empty();
-        let text_c = self.text_colour();
-        let line_c = self.line_colour();
+        let text_c = self.text_color();
+        let line_c = self.line_color();
         let mut swatches = vec![
             button(label("\u{2715}").size(10.0).dim())
                 .padding(0.0)
@@ -828,14 +927,14 @@ impl App {
         let names: Vec<String> = SCHEME_NAMES.iter().map(|s| s.to_string()).collect();
         self.page_layout(
             "Appearance",
-            "Light or dark, the accent colour, contrast and motion. Every app that follows the desktop changes at once.",
+            "Light or dark, the accent color, contrast and motion. Every app that follows the desktop changes at once.",
             vec![
                 self.group(None, vec![
                     setting("Style", "App default lets each app choose.", choice(names, Some(scheme), Message::Scheme).width(Length::Fixed(160.0)).name("Style")),
-                    setting("Accent colour", if accent.is_empty() { "None: each app uses its own." } else { "" }, row(swatches).spacing(6.0).align(Align::Center)),
+                    setting("Accent color", if accent.is_empty() { "None: each app uses its own." } else { "" }, row(swatches).spacing(6.0).align(Align::Center)),
                     setting(
                         "Custom accent",
-                        "Any colour as #rrggbb; Enter applies it.",
+                        "Any color as #rrggbb; Enter applies it.",
                         field(&self.accent_text, Message::AccentText).placeholder("#rrggbb").on_submit(Message::AccentSubmit).width(Length::Fixed(120.0)).name("Custom accent"),
                     ),
                 ]),
@@ -893,9 +992,9 @@ impl App {
                     setting("Monospace", "Terminals and code.", font_row(true)),
                 ]),
                 self.group(Some("Terminal"), vec![setting(
-                    "Colours",
-                    "The terminal's 16 colours. Tango is the classic set that mc, htop and vim were tuned for; Catppuccin is softer.",
-                    choice(schemes.clone(), term_at, move |i| Message::TermScheme(schemes[i].clone())).width(Length::Fixed(160.0)).name("Terminal colours"),
+                    "Colors",
+                    "The terminal's 16 colors. Tango is the classic set that mc, htop and vim were tuned for; Catppuccin is softer.",
+                    choice(schemes.clone(), term_at, move |i| Message::TermScheme(schemes[i].clone())).width(Length::Fixed(160.0)).name("Terminal colors"),
                 )]),
                 self.status_line(),
             ],
@@ -964,6 +1063,128 @@ impl App {
         )
     }
 
+    fn shelf(&self) -> Option<&toml::Table> {
+        self.desktop.get("shelf").and_then(|v| v.as_table())
+    }
+
+    /// The dock's sliders follow the file when it is read.
+    fn dock_from_file(&mut self) {
+        let shelf = self.shelf();
+        let gap = shelf.and_then(|t| t.get("gap")).and_then(|v| v.as_integer()).unwrap_or(vergence_shell::GAP as i64).clamp(0, vergence_shell::MAX_GAP as i64) as f32;
+        let opacity = shelf.and_then(|t| t.get("opacity")).and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))).unwrap_or(1.0).clamp(0.3, 1.0) as f32;
+        (self.dock_gap, self.dock_opacity) = (gap, opacity);
+    }
+
+    /// The pinned applications' entry ids, in their order on the dock.
+    fn pinned(&self) -> Vec<String> {
+        self.shelf().and_then(|t| t.get("pinned")).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default()
+    }
+
+    fn save_pinned(&mut self, pinned: Vec<String>) {
+        self.save_table("shelf", |t| {
+            t.insert("pinned".into(), toml::Value::Array(pinned.into_iter().map(toml::Value::String).collect()));
+        });
+    }
+
+    /// Installed applications not pinned, by name.
+    fn unpinned(&self) -> Vec<&vergence_shell::desktop::Entry> {
+        let pinned = self.pinned();
+        self.apps.iter().filter(|e| !e.no_display && !e.hidden && !pinned.contains(&e.id)).collect()
+    }
+
+    fn app_name(&self, id: &str) -> String {
+        self.apps.iter().find(|e| e.id == id).map(|e| e.name.clone()).unwrap_or_else(|| id.to_string())
+    }
+
+    fn dock(&self) -> Element<Message> {
+        let shelf = self.shelf();
+        let text = |k: &str| shelf.and_then(|t| t.get(k)).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let flag = |k: &str, default: bool| shelf.and_then(|t| t.get(k)).and_then(|v| v.as_bool()).unwrap_or(default);
+        let free = text("place") == "free";
+        let mut edges: Vec<String> = DOCK_EDGES.iter().map(|e| e.0.to_string()).collect();
+        let at = if free {
+            edges.push("Where you put it".into());
+            Some(edges.len() - 1)
+        } else {
+            let e = text("edge");
+            Some(DOCK_EDGES.iter().position(|d| d.1 == e).unwrap_or(0))
+        };
+        let mut place = vec![setting(
+            "Where",
+            if free { "Floating where it was dragged. Choose an edge, or drag it to one, to dock it there." } else { "Drag the dock away from its edge to float it anywhere." },
+            choice(edges, at, Message::DockEdge).width(Length::Fixed(180.0)).name("Where"),
+        )];
+        if self.outputs.len() > 1 {
+            let mut screens = vec!["The primary screen".to_string()];
+            screens.extend(self.outputs.iter().map(screen_label));
+            let id = text("screen");
+            let at = self.outputs.iter().position(|o| o.id == id).map_or(0, |i| i + 1);
+            place.push(setting("Screen", "", choice(screens, Some(at), Message::DockScreen).width(Length::Fixed(180.0)).name("Screen")));
+        }
+        place.push(setting(
+            "Gap",
+            "The room between the dock, its edge and the windows.",
+            row(vec![
+                slider(0.0, vergence_shell::MAX_GAP as f32, self.dock_gap, Message::DockGap).step(1.0).marks(vec![vergence_shell::GAP as f32]).on_release(Message::DockSave).width(Length::Fixed(200.0)).name("Gap"),
+                label(format!("{:.0} pt", self.dock_gap)).width(Length::Fixed(48.0)).align(Align::End),
+            ])
+            .spacing(8.0)
+            .align(Align::Center),
+        ));
+        place.push(setting(
+            "Keep windows clear",
+            "At an edge, maximized and new windows stop short of the dock.",
+            switch(flag("keep-clear", true), Message::DockKeepClear).name("Keep windows clear"),
+        ));
+        let look = vec![
+            setting("Hide automatically", "Out of the way until the pointer reaches its edge.", switch(flag("hide", false), Message::DockHide).name("Hide automatically")),
+            setting(
+                "Opacity",
+                "Less, and the desktop shows through the dock. Its icons stay solid.",
+                row(vec![
+                    slider(0.3, 1.0, self.dock_opacity, Message::DockOpacity).step(0.05).on_release(Message::DockSave).width(Length::Fixed(200.0)).name("Opacity"),
+                    percent(self.dock_opacity),
+                ])
+                .spacing(8.0)
+                .align(Align::Center),
+            ),
+        ];
+        let pinned = self.pinned();
+        let n = pinned.len();
+        let mut pins: Vec<Element<Message>> = Vec::new();
+        for (i, id) in pinned.iter().enumerate() {
+            let small = |text: &str, m: Message, can: bool, name: String| {
+                let b = button(label(text).size(12.0)).padding(Padding::hv(3.0, 9.0)).name(name);
+                if can { b.on_press(m) } else { b }
+            };
+            let name = self.app_name(id);
+            pins.push(
+                setting(
+                    &name,
+                    id,
+                    row(vec![
+                        small("\u{2191}", Message::PinMove(i, true), i > 0, format!("Move {name} up")),
+                        small("\u{2193}", Message::PinMove(i, false), i + 1 < n, format!("Move {name} down")),
+                        small("Unpin", Message::PinRemove(i), true, format!("Unpin {name}")),
+                    ])
+                    .spacing(6.0),
+                )
+                .key(i as u64),
+            );
+        }
+        let names: Vec<String> = self.unpinned().iter().map(|e| e.name.clone()).collect();
+        pins.push(setting(
+            if n == 0 { "Pin an application" } else { "Pin another" },
+            "Pinned applications stay on the dock when they are not running. Right-click an icon on the dock to pin it too.",
+            choice(names, None, Message::PinAdd).placeholder("Choose one\u{2026}").width(Length::Fixed(200.0)).name("Pin an application"),
+        ));
+        self.page_layout(
+            "Dock",
+            "Where the dock sits and how it looks, and the applications pinned to it. It follows at once.",
+            vec![self.group(Some("Place"), place), self.group(Some("Look"), look), self.group(Some("Pinned"), pins), self.status_line()],
+        )
+    }
+
     fn windows(&self) -> Element<Message> {
         let l = winbar::parse(&theme::get(&self.xsettings, winbar::KEY));
         let side = |left: bool, text: &'static str| {
@@ -974,11 +1195,11 @@ impl App {
             "Windows",
             "The title bar: which side its controls are on, and which buttons it has. The title, tabs and everything else in the bar move to the other side.",
             vec![
-                self.group(None, vec![preview(l, self.line_colour())]),
+                self.group(None, vec![preview(l, self.line_color())]),
                 self.group(Some("Title bar"), vec![
                     setting("Controls", "Left, as on a Mac; right, as on Windows.", row(vec![side(true, "Left"), side(false, "Right")]).spacing(6.0)),
-                    setting("Minimise", "Hides the window until it is chosen again.", switch(l.minimize, move |on| Message::Layout(winbar::Layout { minimize: on, ..l })).name("Minimise")),
-                    setting("Maximise", "Fills the screen. Double-clicking the title bar does too.", switch(l.maximize, move |on| Message::Layout(winbar::Layout { maximize: on, ..l })).name("Maximise")),
+                    setting("Minimize", "Hides the window until it is chosen again.", switch(l.minimize, move |on| Message::Layout(winbar::Layout { minimize: on, ..l })).name("Minimize")),
+                    setting("Maximize", "Fills the screen. Double-clicking the title bar does too.", switch(l.maximize, move |on| Message::Layout(winbar::Layout { maximize: on, ..l })).name("Maximize")),
                     setting("Close", "Always there.", label("On").dim()),
                 ]),
                 self.status_line(),
@@ -995,7 +1216,7 @@ impl App {
             self.outputs.iter().map(|o| (o.clone(), wall::shown(&self.desktop, Some(&o.id)).image.and_then(|p| self.thumbs.get(&p).cloned()))).collect();
         let drag = if interactive { self.arrange_drag } else { None };
         let size_out = self.arrange_size.clone();
-        let (accent, line) = (self.accent(), self.line_colour());
+        let (accent, line) = (self.accent(), self.line_color());
         let d = drawing(move |scene: &mut Scene, fonts: &mut Fonts, r: Rect, t: &Theme| {
             size_out.set((r.w, r.h));
             let outputs: Vec<OutputInfo> = screens.iter().map(|s| s.0.clone()).collect();
@@ -1107,13 +1328,13 @@ impl App {
         let fits: Vec<String> = FITS.iter().map(|s| s.to_string()).collect();
         wp.push(setting("Fit", "", choice(fits, Some(fit), Message::Fit).width(Length::Fixed(140.0)).name("Fit")));
         wp.push(setting(
-            "Background colour",
+            "Background color",
             "Around a picture, or alone without one. Enter applies it.",
-            field(&self.bg_text, Message::Background).placeholder("#202020").on_submit(Message::BackgroundSubmit).width(Length::Fixed(120.0)).name("Background colour"),
+            field(&self.bg_text, Message::Background).placeholder("#202020").on_submit(Message::BackgroundSubmit).width(Length::Fixed(120.0)).name("Background color"),
         ));
         items.push(self.group(Some("Wallpaper"), wp));
         // The pictures.
-        let (accent, card) = (self.accent(), self.card_colour());
+        let (accent, card) = (self.accent(), self.card_color());
         let mut tiles_out = Vec::new();
         for (i, p) in self.files.iter().enumerate() {
             let selected = shown.image.as_deref() == Some(p.as_path());
@@ -1190,7 +1411,7 @@ impl App {
                 ),
                 row(vec![button(label("\u{2191} Up").size(12.0)).padding(Padding::hv(4.0, 10.0)).on_press(Message::BrowseUp), label(b.dir.display().to_string()).size(12.0).dim()]).spacing(10.0).align(Align::Center),
                 panel(scroll(column(entries).spacing(1.0).width(Length::FILL)).name("Folder"))
-                    .color(self.card_colour())
+                    .color(self.card_color())
                     .radius(10.0)
                     .padding(4.0)
                     .width(Length::FILL)
@@ -1227,22 +1448,22 @@ impl App {
         if self.status.is_empty() { space() } else { label(self.status.clone()).size(11.0).dim().wrap().width(Length::FILL) }
     }
 
-    // The theme's colours, for the few places that are drawn by hand.
+    // The theme's colors, for the few places that are drawn by hand.
     fn palette(&self) -> vergence_look::Palette {
         if self.dark() { vergence_look::PALETTE_DARK } else { vergence_look::PALETTE_LIGHT }
     }
 
-    fn text_colour(&self) -> Color {
+    fn text_color(&self) -> Color {
         let c = self.palette().text;
         Color::rgb(c.0, c.1, c.2)
     }
 
-    fn line_colour(&self) -> Color {
+    fn line_color(&self) -> Color {
         let c = self.palette().line;
         Color::rgb(c.0, c.1, c.2)
     }
 
-    fn card_colour(&self) -> Color {
+    fn card_color(&self) -> Color {
         let c = self.palette().card;
         Color::rgb(c.0, c.1, c.2)
     }
@@ -1276,6 +1497,7 @@ impl Program for App {
             Page::Appearance => self.appearance(),
             Page::Theme => self.theme_page(),
             Page::Windows => self.windows(),
+            Page::Dock => self.dock(),
             Page::Keyboard => self.keyboard(),
             Page::Energy => self.energy(),
             Page::Overview => self.overview(),
@@ -1294,6 +1516,15 @@ impl Program for App {
         let _ = self.mail.waker.set(waker.clone());
         // Whatever arrived before the window opened is read now.
         waker.wake();
+    }
+
+    fn input(&mut self, input: &vergence_widgets::Input, _: &mut Window) -> bool {
+        // Back to the window: what changed meanwhile is shown.
+        if *input == vergence_widgets::Input::Focus(true) {
+            self.reread();
+            return true;
+        }
+        false
     }
 
     fn woken(&mut self, _: &mut Window) -> bool {
@@ -1325,7 +1556,7 @@ impl App {
                 .align(Align::Center)
                 .width(Length::FILL),
         )
-        .color(self.card_colour())
+        .color(self.card_color())
         .radius(10.0)
         .padding(18.0)
         .width(Length::FILL)
@@ -1347,7 +1578,7 @@ impl App {
             }
             inner.push(r);
         }
-        let card = panel(column(inner).width(Length::FILL)).color(self.card_colour()).radius(10.0).padding(2.0).width(Length::FILL);
+        let card = panel(column(inner).width(Length::FILL)).color(self.card_color()).radius(10.0).padding(2.0).width(Length::FILL);
         match heading {
             Some(h) => column(vec![label(h).size(12.0).dim().weight(600), card]).spacing(6.0).width(Length::FILL),
             None => card,
@@ -1398,7 +1629,7 @@ fn scale_slider(v: f32, o: &OutputInfo, marks: &[f64]) -> Element<Message> {
     row(vec![slider(0.75, max, v, Message::Scale).step(0.01).marks(marks).on_release(Message::ScaleDone).width(Length::Fixed(260.0)).name("Scale"), percent(v)]).spacing(8.0).align(Align::Center)
 }
 
-/// A preview of a title bar in the chosen layout, in the server's colours.
+/// A preview of a title bar in the chosen layout, in the server's colors.
 fn preview(l: winbar::Layout, line: Color) -> Element<Message> {
     let d = drawing(move |scene: &mut Scene, fonts: &mut Fonts, r: Rect, t: &Theme| {
         let w = 420.0f32.min(r.w - 28.0);
@@ -1407,7 +1638,7 @@ fn preview(l: winbar::Layout, line: Color) -> Element<Message> {
         scene.fill(bar, Color::rgb(51, 61, 82));
         scene.fill(Rect::new(win.x, win.y + 32.0, win.w, 56.0), rgb(0x1e1e2e));
         scene.stroke(win, 0.0, 1.0, line);
-        // The buttons: close in red, the others grey; on the chosen side.
+        // The buttons: close in red, the others gray; on the chosen side.
         let close = rgb(0xc74d47);
         let other = Color::rgba(255, 255, 255, 140);
         let mut order = Vec::new();

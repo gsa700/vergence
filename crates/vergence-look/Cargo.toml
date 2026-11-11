@@ -1,6 +1,6 @@
 [package]
 name = "vergence-look"
-description = "Vergence's look in one place: the radius, the sizes and the colours the server and the toolkit both draw with"
+description = "Vergence's look in one place: the radius, the sizes and the colors the server and the toolkit both draw with"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -10,7 +10,7 @@
 //   and its place among open windows of that class. No titles (Dave, 2026-11-06).
 // - Positions are relative to the monitor's top-left, sizes are the content's,
 //   all in points: they mean the same physical size on every monitor.
-// - Recorded when a move or resize ends, on maximise/restore, and when the
+// - Recorded when a move or resize ends, on maximize/restore, and when the
 //   window closes. A remembered place decides before the defaults and before the
 //   app's own restore, when its monitor is there and the window fits it.
 // - ~/.config/vergence/server-windows.toml, 0600 (whitepaper §7.3), the shared
@@ -136,7 +136,7 @@ impl Server {
     }
 
     /// Where memory puts this window on the current setup: its content rectangle
-    /// and whether it was maximised. None: no place, monitor absent, no fit, or a
+    /// and whether it was maximized. None: no place, monitor absent, no fit, or a
     /// size no real window has (see MIN_W).
     pub fn remembered_place(&mut self, w: &Window) -> Option<(Rectangle<i32, Logical>, bool)> {
         let id = self.window_identity(w)?;
@@ -149,30 +149,30 @@ impl Server {
         let r = Rectangle::new((og.loc.x + s.x, og.loc.y + s.y).into(), (s.width as i32, s.height as i32).into());
         // Where the shelf's strip now stands, the window is moved clear of it (shelf.rs).
         let r = self.clear_of_shelf(r);
-        let maximised = s.max_horz && s.max_vert;
-        if !maximised && !self.fits_a_monitor(r, self.has_title(w)) {
+        let maximized = s.max_horz && s.max_vert;
+        if !maximized && !self.fits_a_monitor(r, self.has_title(w)) {
             return None;
         }
-        Some((r, maximised))
+        Some((r, maximized))
     }
 
-    /// Record where a window is now (its restore size and place if maximised).
+    /// Record where a window is now (its restore size and place if maximized).
     pub fn remember(&mut self, w: &Window) {
         if self.memory.setup.is_empty() {
             return;
         }
         let Some(id) = self.window_identity(w) else { return };
-        let maximised = self.restore.get(w).copied();
-        let Some(geo) = maximised.or_else(|| self.space.element_geometry(w)) else { return };
+        let maximized = self.restore.get(w).copied();
+        let Some(geo) = maximized.or_else(|| self.space.element_geometry(w)) else { return };
         // A window that hasn't got its size yet (1x1 before its first commit),
         // or was squeezed to it, is not a place to remember.
         if geo.size.w < MIN_W || geo.size.h < MIN_H {
             return;
         }
-        let centre = (geo.loc.x + geo.size.w / 2, geo.loc.y + geo.size.h / 2);
+        let center = (geo.loc.x + geo.size.w / 2, geo.loc.y + geo.size.h / 2);
         let Some((mon, og)) = self.space.outputs().find_map(|o| {
             let g = self.space.output_geometry(o)?;
-            g.contains(centre).then(|| (monitor_id_of(o), g))
+            g.contains(center).then(|| (monitor_id_of(o), g))
         }) else {
             return;
         };
@@ -184,8 +184,8 @@ impl Server {
             y: geo.loc.y - og.loc.y,
             width: geo.size.w.max(1) as u32,
             height: geo.size.h.max(1) as u32,
-            max_horz: maximised.is_some(),
-            max_vert: maximised.is_some(),
+            max_horz: maximized.is_some(),
+            max_vert: maximized.is_some(),
             fullscreen: false,
             desktop: None,
         };

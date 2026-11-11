@@ -73,7 +73,7 @@ impl XdgShellHandler for Server {
         // The window goes to its icon on the shelf (shelf.rs).
         let found = self.space.elements().find(|w| w.toplevel() == Some(&surface)).cloned();
         if let Some(w) = found {
-            self.minimise(&w);
+            self.minimize(&w);
         }
     }
 
@@ -257,8 +257,8 @@ impl Server {
         // the one the window is mostly on. (It used the first monitor: Firefox's
         // menus on the ASUS opened on the 14", 2026-11-07.)
         let anchor = popup.with_pending_state(|s| s.positioner.anchor_rect);
-        let centre: smithay::utils::Point<i32, smithay::utils::Logical> = (anchor.size.w / 2, anchor.size.h / 2).into();
-        let at = window_geo.loc + parent_offset + anchor.loc + centre;
+        let center: smithay::utils::Point<i32, smithay::utils::Logical> = (anchor.size.w / 2, anchor.size.h / 2).into();
+        let at = window_geo.loc + parent_offset + anchor.loc + center;
         let geos: Vec<smithay::utils::Rectangle<i32, smithay::utils::Logical>> =
             self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
         let Some(output_geo) = geos.iter().copied().find(|g| g.contains(at)).or_else(|| {

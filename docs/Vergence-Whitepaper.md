@@ -19,7 +19,7 @@ David Erickson (AB0R), with Claude · Draft 0.9 · 10 November 2026
 
 On today's Unix-like desktops, an application's size on screen depends on which monitor it happens to be on, which toolkit it was written with, and which environment variables were set when it started. Where it appears depends on whether the window system lets it choose, and on whether anything remembers where you last put it. Usually nothing does.
 
-This paper proposes a path to **app consistency**: every application the right size, in the right place and readable, on any monitor setup, for every user, including users who depend on accessibility tools. It starts with something buildable in days on an ordinary X11 desktop: a daemon that recognises monitor setups by their EDIDs, applies consistent scaling across toolkits, and remembers window layouts per setup. It ends with a long-term design for a new display server. That server rests on one authority and three contracts: geometry in visual size, placement owned by the server but negotiated with apps, and accessibility built into the protocol. Optional vector "display-list" surfaces revive the best idea of NeXTSTEP's Display PostScript.
+This paper proposes a path to **app consistency**: every application the right size, in the right place and readable, on any monitor setup, for every user, including users who depend on accessibility tools. It starts with something buildable in days on an ordinary X11 desktop: a daemon that recognizes monitor setups by their EDIDs, applies consistent scaling across toolkits, and remembers window layouts per setup. It ends with a long-term design for a new display server. That server rests on one authority and three contracts: geometry in visual size, placement owned by the server but negotiated with apps, and accessibility built into the protocol. Optional vector "display-list" surfaces revive the best idea of NeXTSTEP's Display PostScript.
 
 The design targets **Linux and FreeBSD** together: development on a Linux without systemd, with FreeBSD and Fedora tested at every milestone.
 
@@ -88,7 +88,7 @@ X11 had a Display PostScript extension (DPS/X) on Sun, DEC and SGI workstations,
 **Further principles:**
 
 1. **Derive, don't guess.** Scale comes from each panel's physical size (from its EDID) and viewing distance, not from a percentage the user tunes by eye.
-2. **Remember per setup.** Layouts are keyed to the set of connected monitors, so every setup (docked, travelling, presenting) keeps its own arrangement.
+2. **Remember per setup.** Layouts are keyed to the set of connected monitors, so every setup (docked, traveling, presenting) keeps its own arrangement.
 3. **Every phase stands alone.** Each phase delivers value even if nobody else ever adopts it.
 4. **Compatibility at the edges.** Existing X11, Wayland and D-Bus applications keep working; new capabilities are optional upgrades.
 5. **Accessibility and security are part of the design**, not afterthoughts, and neither is allowed to break the other.
@@ -105,7 +105,7 @@ A daemon that runs **alongside any EWMH-compliant window manager** (XFCE's xfwm4
 
 - Read every connected monitor's **EDID** through RandR; hash the set of EDIDs into a **profile key**.
 - Each profile stores **resolution, refresh rate, arrangement, edge alignment and scaling**.
-- On RandR hot-plug, dock/undock, or wake from sleep, recognise the setup and **apply its profile automatically**. Unknown setups get a sensible default derived from the EDIDs' physical sizes.
+- On RandR hot-plug, dock/undock, or wake from sleep, recognize the setup and **apply its profile automatically**. Unknown setups get a sensible default derived from the EDIDs' physical sizes.
 
 ### 4.2 One scaling answer for every toolkit
 
@@ -127,7 +127,7 @@ Mode A was the default until the first test on real monitors of very different d
 
 ### 4.4 Window layout memory
 
-For each window, store monitor, position, size and maximised/fullscreen state, keyed by `WM_CLASS` plus an optional title pattern, **per profile**. Restore when a window opens and when the setup changes, using EWMH requests (`_NET_MOVERESIZE_WINDOW`, `_NET_WM_STATE`). Handle GTK client-side decorations by accounting for `_GTK_FRAME_EXTENTS`, so windows don't drift a few pixels each restore.
+For each window, store monitor, position, size and maximized/fullscreen state, keyed by `WM_CLASS` plus an optional title pattern, **per profile**. Restore when a window opens and when the setup changes, using EWMH requests (`_NET_MOVERESIZE_WINDOW`, `_NET_WM_STATE`). Handle GTK client-side decorations by accounting for `_GTK_FRAME_EXTENTS`, so windows don't drift a few pixels each restore.
 
 ### 4.5 What each toolkit can use (X11)
 
@@ -140,7 +140,7 @@ For each window, store monitor, position, size and maximised/fullscreen state, k
 | **Java (Swing/JavaFX)** | `GDK_SCALE`, `sun.java2d.uiScale` | No | At launch |
 | **Old Xlib / Motif / Tk** | `Xft.dpi` for fonts at best | No | No |
 
-*Behaviour as understood at the time of writing; to be verified during implementation (see §10).* Window layout memory works for almost every application regardless of toolkit, because it acts on X windows from outside.
+*Behavior as understood at the time of writing; to be verified during implementation (see §10).* Window layout memory works for almost every application regardless of toolkit, because it acts on X windows from outside.
 
 Firefox and Thunderbird use GTK on Linux and FreeBSD, so on X11 they behave like the GTK row: one global scale, read at launch. Major third-party applications are covered in §8.2.
 
@@ -174,7 +174,7 @@ Three monitors in a row. Physical sizes are **assumed** for the calculation.
 
 **Equal physical size.** The user's percentages leave M2 about **18% larger** in physical terms (92 vs 109 ppi). The daemon corrects this from EDID physical dimensions, so a window is the same physical size on all three. Windows does not do this.
 
-**Edge alignment.** Logical heights differ (1440 / 1080 / 1692), so the profile records top or centre alignment, and the pointer and dragged windows cross edges sensibly.
+**Edge alignment.** Logical heights differ (1440 / 1080 / 1692), so the profile records top or center alignment, and the pointer and dragged windows cross edges sensibly.
 
 **Pass criteria:**
 
@@ -185,7 +185,7 @@ Three monitors in a row. Physical sizes are **assumed** for the calculation.
 
 ### 4.7 First milestone
 
-Read EDIDs, hash each setup into a profile key, and log RandR hot-plug events. Small, safe, and the foundation for everything else. It is built and tested on real hardware from the start, on a FreeBSD workstation with real monitors, with Debian alongside: a virtual machine's synthetic EDIDs and hot-plug behaviour would only be worked around, not learned from.
+Read EDIDs, hash each setup into a profile key, and log RandR hot-plug events. Small, safe, and the foundation for everything else. It is built and tested on real hardware from the start, on a FreeBSD workstation with real monitors, with Debian alongside: a virtual machine's synthetic EDIDs and hot-plug behavior would only be worked around, not learned from.
 
 The first real machine (FreeBSD 15.1, Intel UHD 630) turned up two things a Linux-first build would have missed. Xorg on FreeBSD does not re-probe its outputs when a monitor is plugged in, although the kernel reports the plug to devd; so on FreeBSD the daemon listens to devd and asks X to re-probe, and X then sends its usual RandR events. And a freshly started Xorg reads every EDID but does not publish the RandR EDID property until the first re-probe, so the daemon re-probes once when a connected output has no EDID.
 
@@ -195,7 +195,7 @@ Real-hardware testing is the slow part of phase 1 (§9), so most of it is script
 
 1. **Plug and unplug without touching a cable.** The kernel's DRM layer gives every connector two debugfs controls, on Linux and on FreeBSD (drm-kmod, through lindebugfs): `force` makes it look plugged in or unplugged, and `edid_override` makes it report any EDID. Forcing sends no hot-plug event, so the harness makes X re-probe after each change. The daemon can then be run against thousands of real monitors' EDIDs from the public linuxhw EDID database, including broken ones (zero or wrong physical size, missing serial numbers, identical twins). First results: all 174,759 EDIDs in the database parse without fault, and 2,000 of them run as fake monitors in under five minutes.
 2. **Sleep and wake, overnight.** The machine suspends and wakes in a loop (`rtcwake` on Linux; FreeBSD has no equivalent yet, so the method there is still open); after every cycle the profile and the layout must be unchanged.
-3. **Same physical size, measured.** Small test programs in GTK, Qt, Avalonia, Electron and Java each draw a box of known logical size; the harness screenshots every monitor and measures each box in millimetres using the EDID's physical size. The user's judgment of "the right size" is needed once, as a calibration, not on every run.
+3. **Same physical size, measured.** Small test programs in GTK, Qt, Avalonia, Electron and Java each draw a box of known logical size; the harness screenshots every monitor and measures each box in millimeters using the EDID's physical size. The user's judgment of "the right size" is needed once, as a calibration, not on every run.
 4. **Layout memory, scripted.** Windows (several Firefox windows and Thunderbird included) are placed, a monitor is unplugged and replugged through (1), the applications restart, and every window's position and size is compared with what was saved, with a check for drift of a few pixels per restore.
 5. **Record and replay.** Every RandR event and EDID seen on real monitors, docks and KVM switches is recorded once; the recordings become tests that run anywhere, with no monitors attached.
 
@@ -221,7 +221,7 @@ On X11, removing the input wall would need a compositing window manager **plus a
 
 Nothing in the design limits the number of monitors. A monitor setup is a list of EDIDs of any length, and window places are stored per setup, so twelve monitors are simply a larger profile. Every subset that appears (one panel unplugged, one card's four panels switched off) becomes a profile of its own, with its own remembered layout. The limits come from elsewhere. Take a workstation with three NVIDIA RTX 3060 cards: each drives up to four displays, twelve in all.
 
-**Telling twelve monitors apart.** A profile can only put a window back on "the third panel from the left" if it recognises that panel. A monitor whose EDID carries a serial number is recognised whichever port it is plugged into. Many low-cost panels report serial 0, so twelve of the same model have identical EDIDs; the daemon then tells them apart by connector, as it already does for identical twins. Layouts survive restarts and hot-plugs, but swapping two cables swaps their layouts. The new server can do no better: identity can only come from the panel or from the port.
+**Telling twelve monitors apart.** A profile can only put a window back on "the third panel from the left" if it recognizes that panel. A monitor whose EDID carries a serial number is recognized whichever port it is plugged into. Many low-cost panels report serial 0, so twelve of the same model have identical EDIDs; the daemon then tells them apart by connector, as it already does for identical twins. Layouts survive restarts and hot-plugs, but swapping two cables swaps their layouts. The new server can do no better: identity can only come from the panel or from the port.
 
 **Phase 1 (X11).** Three walls apply.
 
@@ -246,7 +246,7 @@ So in phase 1 the dependable form is **one GPU with up to four panels**; a wall 
 
 ### 6.2 One authority
 
-A single display server owns all outputs and all input, like NeXT's Window Server. It knows each panel from its EDID: physical size, subpixel layout, colour gamut, refresh capabilities. It composes **each monitor in its own buffer**, at that panel's native resolution, so no single picture of the whole desktop exists and X's desktop-size limit (§5) does not apply.
+A single display server owns all outputs and all input, like NeXT's Window Server. It knows each panel from its EDID: physical size, subpixel layout, color gamut, refresh capabilities. It composes **each monitor in its own buffer**, at that panel's native resolution, so no single picture of the whole desktop exists and X's desktop-size limit (§5) does not apply.
 
 ### 6.3 Contract 1: geometry in visual size
 
@@ -280,7 +280,7 @@ The control socket the server has for scripted tests (§9) is not this interface
 
 ### 6.6 Optional display-list surfaces
 
-An application may submit either a **bitmap** (always supported) or a **retained vector scene**: a display list of drawing commands in **the server's own minimal, validated format**. Existing serialisations such as Skia's SkPicture were not designed to be read from untrusted processes, so they are not used on the wire; toolkits convert their scenes into this format instead. For display-list surfaces the server can render the window **at any density, at any time**:
+An application may submit either a **bitmap** (always supported) or a **retained vector scene**: a display list of drawing commands in **the server's own minimal, validated format**. Existing serializations such as Skia's SkPicture were not designed to be read from untrusted processes, so they are not used on the wire; toolkits convert their scenes into this format instead. For display-list surfaces the server can render the window **at any density, at any time**:
 
 - **A window straddling two monitors is sharp on both halves.** No current desktop does this.
 - **Magnification is truly sharp:** text at 4× is re-rendered text, not enlarged pixels.
@@ -290,11 +290,11 @@ The reference implementation is in Rust, and the server's own tools are its firs
 
 ### 6.7 Other display problems addressed
 
-- **Colour:** per-monitor colour management from EDID colorimetry, so the same colour looks the same on every monitor; HDR where the panel supports it; colour-blindness filters and night light applied per output.
+- **Color:** per-monitor color management from EDID colorimetry, so the same color looks the same on every monitor; HDR where the panel supports it; color-blindness filters and night light applied per output.
 - **Timing:** each monitor on its own refresh timing (mixed 60/144 Hz, variable refresh rate); tear-free by default, with a low-latency mode for games.
 - **Text rendering per panel:** subpixel layout per panel (RGB, BGR, OLED), and hinting decided by density: hinted at low density, unhinted at high density.
 - **Pointer:** a cursor that is the same physical size on every monitor, and pointer speed consistent in physical distance across mixed-density monitors.
-- **Accessibility settings in one place:** reduced motion, high contrast, large cursor, sticky keys, all honoured by the server.
+- **Accessibility settings in one place:** reduced motion, high contrast, large cursor, sticky keys, all honored by the server.
 
 ### 6.8 The session bus: our own core, D-Bus at the edge
 
@@ -321,11 +321,11 @@ The rules: **the server always knows who is calling** (socket credentials now, a
 | D-Bus interface | Core service |
 |---|---|
 | `org.freedesktop.Notifications` | Notifications |
-| `org.freedesktop.portal.Settings` (colour scheme, accent, fonts) | Settings |
+| `org.freedesktop.portal.Settings` (color scheme, accent, fonts) | Settings |
 | AT-SPI (`org.a11y.Bus` and the accessibility bus) | Contract 3, through the AT-SPI bridge (§8.2) |
 | Others as measured: screensaver inhibit, application activation | As needed |
 
-Applications that talk to themselves over the bus keep working: a name an application owns is routed to it, so single-instance behaviour such as Firefox opening a link in the window already running still works. A name nobody owns and the edge doesn't translate gets a clean "service unknown" reply, never an automatic start. The edge only translates and routes: apart from which application owns which name, it keeps no state, and permissions are decided in the core.
+Applications that talk to themselves over the bus keep working: a name an application owns is routed to it, so single-instance behavior such as Firefox opening a link in the window already running still works. A name nobody owns and the edge doesn't translate gets a clean "service unknown" reply, never an automatic start. The edge only translates and routes: apart from which application owns which name, it keeps no state, and permissions are decided in the core.
 
 **Why not run the reference D-Bus daemon at the edge?** It would work, but it keeps the side channel's flaws (no window identity, open broadcasts, activation) and still leaves every service to be written. The subset applications actually use is small, and writing it ties every call to the server's identity and permissions.
 
@@ -342,7 +342,7 @@ The contracts above are where Vergence is new. The shell, the part of the deskto
 *Revised on 10 November 2026, when the first of it was on a screen:* the shelf is a **dock**, a rounded panel as tall as what it holds, floating a small gap in from the edge so that the desktop shows around it, and **it can be dragged**. Dropped near an edge of any screen it settles along that edge (upright at the sides, level at the top and bottom) and windows keep clear of it; dropped anywhere else it floats where it was put, over the windows. Which it does, where, the gap, and whether windows keep clear are settings. The right edge of the main monitor is where it starts.
 
 - **The apps button**, in the top corner, the easiest target on the screen. It opens a compact popup beside the shelf: a grid of every installed application, with a search field. Typing filters the grid. The same field will later run **named desktop actions** ("move this window to the left monitor", "screens off"), the list that voice control and automation use under permission (§6.5, §7), so there is one command surface for hands, voice and agents.
-- **Applications**: pinned and running, one icon each, with a mark beside those that are running. An application with several windows lists them in a small popup. The shelf on the main monitor shows the windows of every monitor, grouped by screen, except those of a monitor that has its own shelf. A minimised window goes to its application's icon; there are no separate icons for minimised windows.
+- **Applications**: pinned and running, one icon each, with a mark beside those that are running. An application with several windows lists them in a small popup. The shelf on the main monitor shows the windows of every monitor, grouped by screen, except those of a monitor that has its own shelf. A minimized window goes to its application's icon; there are no separate icons for minimized windows.
 - **Live tiles**: clock, volume, network, battery. A tile is not a small window. Its owner **publishes a value and a set of actions on the session bus (§6.8), and the server draws it** in the desktop's style. Tiles are therefore sharp at any scale, look alike whoever supplies them, are readable by a screen reader (Contract 3), and cannot draw anything misleading in the shelf. Detail (a calendar, a volume slider, a list of networks) opens in a popup beside the tile. Controls have real steps the user can set.
 
 A vertical shelf has no room for text, so names appear when the pointer rests on an icon and in the popups. If the main monitor is unplugged, the shelf moves with the primary role to another screen.
@@ -407,7 +407,7 @@ Nothing is impossible; nothing is silent.
 | Placement requests (Contract 2) | Spoofing (fake dialogs over real ones), focus stealing, hidden windows | Positions are requests; the server forbids covering another app's window or always-on-top without permission. Focus moves only on user action (activation tokens). The owning application's name in the title bar is **drawn by the server**, so it cannot be faked. |
 | Accessibility and automation (Contract 3) | A screen reader is technically a full screen reader and keylogger | Permissions for specific tools, with an indicator. **Password fields are protected**: contents never leave the app; tools see only "secure field focused". Automation can be scoped per application. Audit log. |
 | Agents (Contract 3, §6.5) | An agent that can read the tree and act is as able as the user, and can be misled by what it reads on the screen | Grants per agent and per application, with the indicator and the audit log. A seat of its own, so its input is never taken for the user's and can be stopped without stopping the user. Password fields protected as for any tool. Actions that spend, send or delete can be made to wait for the user's own confirmation. |
-| Display-list surfaces | The server interprets untrusted drawing commands | Strict validated format; per-frame complexity budgets; rasterisation in a **separate sandboxed process**: seccomp/Landlock on Linux, **Capsicum on FreeBSD**. |
+| Display-list surfaces | The server interprets untrusted drawing commands | Strict validated format; per-frame complexity budgets; rasterization in a **separate sandboxed process**: seccomp/Landlock on Linux, **Capsicum on FreeBSD**. |
 | Legacy X11 apps | X clients can spy on each other within one X server | They cannot see native apps. Untrusted X apps can each run in their own isolated rootless X server. |
 | Screen capture | Silent screen recording | Permission plus indicator, scoped to a window or a monitor. |
 | Clipboard | Background clipboard sniffing | Read only on the user's paste or by the focused app; clipboard managers need a permission. |
@@ -505,11 +505,11 @@ The development machine has Intel integrated graphics. Other machines will have 
 | NVIDIA, open source | **none**: FreeBSD has no nouveau | nouveau + NVK (Mesa); slower, newer cards first |
 | NVIDIA, proprietary | NVIDIA's driver + its DRM module for KMS | NVIDIA's driver; KMS only when its DRM module is loaded with `modeset=1` |
 
-Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit synchronisation, where the kernel makes sure a buffer is finished before anyone reads it. The phase 2 server runs on this path today, so Intel and AMD on either system should need little beyond testing. NVIDIA's proprietary driver is a different stack:
+Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit synchronization, where the kernel makes sure a buffer is finished before anyone reads it. The phase 2 server runs on this path today, so Intel and AMD on either system should need little beyond testing. NVIDIA's proprietary driver is a different stack:
 
 - **Display needs KMS switched on.** Without `modeset=1` the driver drives no monitor through KMS, and the server can't start. On a Debian 13 machine with an RTX 3060 on driver 550, used here for reference, the DRM module is loaded but nothing switches KMS on, which is the default for an install that only computes.
 - **Buffers through GBM.** NVIDIA supports GBM on Linux since driver 495, through its own GBM back end (Debian packages it as `libnvidia-egl-gbm1`). Whether NVIDIA's FreeBSD driver offers GBM well enough for a display server is not yet known (§10). If it doesn't, the server needs a second way to get scan-out buffers: EGL streams or direct allocation through NVIDIA's EGL device interface, written by the project.
-- **Explicit synchronisation.** NVIDIA doesn't do implicit sync. Without explicit sync (DRM sync objects in the kernel, and a protocol through which clients hand the server a fence with each buffer), Xwayland and GL applications flicker or show half-drawn frames. NVIDIA supports explicit sync from driver 555, so Debian 13's driver 550 predates it.
+- **Explicit synchronization.** NVIDIA doesn't do implicit sync. Without explicit sync (DRM sync objects in the kernel, and a protocol through which clients hand the server a fence with each buffer), Xwayland and GL applications flicker or show half-drawn frames. NVIDIA supports explicit sync from driver 555, so Debian 13's driver 550 predates it.
 
 **Design decisions:**
 
@@ -562,9 +562,9 @@ The display-list renderer was phase 3 work. Step 1 brings its first version forw
 
 ## 10. Open questions and items to verify
 
-1. Exact live-update behaviour of Qt 6 and Chromium scaling on X11.
-2. Avalonia 12's X11 per-screen scaling variables and behaviour.
-3. Reliability of EDID physical-size data across real monitors, and the fallback when it is missing. In the linuxhw database 0.3% report no size at all, 0.4% an implausible one, and 6.6% give a millimetre size more than 2 cm away from their own centimetre size.
+1. Exact live-update behavior of Qt 6 and Chromium scaling on X11.
+2. Avalonia 12's X11 per-screen scaling variables and behavior.
+3. Reliability of EDID physical-size data across real monitors, and the fallback when it is missing. In the linuxhw database 0.3% report no size at all, 0.4% an implausible one, and 6.6% give a millimeter size more than 2 cm away from their own centimeter size.
 4. How to capture viewing distance simply (presets: laptop, desktop, TV; or a one-time calibration). *Partly answered (8 November 2026): it is guessed from the connector (built-in panels at laptop distance), and users change the result, a screen's scale, rather than the distance.*
 5. Status of Wayland session-restore and placement protocols, and whether the server should implement them for compatibility.
 6. Display-list format: the minimal validated command set (paths, fills, strokes, gradients, images, text runs with font references, clips, layers), and how text is shipped (glyph runs plus font identity, so the server can re-render text sharply at any density).
@@ -582,7 +582,7 @@ The display-list renderer was phase 3 work. Step 1 brings its first version forw
 
 ## Appendix A: Glossary
 
-- **EDID:** data a monitor reports about itself: manufacturer, model, serial, physical size, supported modes, colour characteristics.
+- **EDID:** data a monitor reports about itself: manufacturer, model, serial, physical size, supported modes, color characteristics.
 - **RandR:** the X11 extension for querying and configuring outputs (monitors).
 - **EWMH:** Extended Window Manager Hints; the standard by which clients and tools talk to X11 window managers.
 - **XSETTINGS:** an X11 protocol for publishing desktop settings (fonts, scale) that toolkits read live.

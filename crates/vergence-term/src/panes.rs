@@ -202,7 +202,7 @@ mod tests {
         assert!(!tree.remove(9));
         assert!(tree.remove(2));
         assert_eq!(tree.leaves(), vec![1, 3]);
-        assert_eq!(tree.layout(ROOM).0[1], (3, Rect::new(401.0, 36.0, 400.0, 401.0)), "its neighbour has the whole right side");
+        assert_eq!(tree.layout(ROOM).0[1], (3, Rect::new(401.0, 36.0, 400.0, 401.0)), "its neighbor has the whole right side");
         assert!(tree.remove(1));
         assert_eq!(tree, Node::Leaf(3));
     }

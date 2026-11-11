@@ -359,7 +359,7 @@ impl Server {
                 }
                 Hit::Close(w) if left => self.close_window(&w),
                 Hit::Maximize(w) if left => self.toggle_maximize(&w),
-                Hit::Minimize(w) if left => self.minimise(&w),
+                Hit::Minimize(w) if left => self.minimize(&w),
                 Hit::Edge(w, e) if left => grab_with = Some((w, Some(e))),
                 Hit::Title(_) | Hit::Close(_) | Hit::Maximize(_) | Hit::Minimize(_) | Hit::Edge(..) => {}
                 // The dock (shelf.rs): let go where it was pressed, an application's icon
@@ -395,8 +395,8 @@ impl Server {
         };
 
         if let Some((window, resize)) = grab_with {
-            // The press goes to the grab, not the app. Moving a maximised window
-            // takes it out of maximised (back to its size, under the pointer).
+            // The press goes to the grab, not the app. Moving a maximized window
+            // takes it out of maximized (back to its size, under the pointer).
             let start = smithay::input::pointer::GrabStartData { focus: None, button, location: pointer.current_location() };
             match resize {
                 Some(edges) => self.start_resize(window, edges, Some(start)),

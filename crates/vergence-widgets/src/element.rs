@@ -77,7 +77,7 @@ pub enum ButtonLook {
     /// Chosen among others (a selected page, a selected side): the accent's
     /// ground and white text, as [`ButtonLook::Accent`], without its edge.
     Chosen,
-    /// The program's own: a ground, an edge (colour, width), a radius.
+    /// The program's own: a ground, an edge (color, width), a radius.
     Custom { fill: Option<Color>, edge: Option<(Color, f32)>, radius: f32 },
 }
 
@@ -133,7 +133,7 @@ pub(crate) enum Kind<M> {
     Switch { on: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     Slider { min: f32, max: f32, step: f32, value: f32, marks: Vec<f32>, on_change: Option<Box<dyn Fn(f32) -> M>>, on_release: Option<M> },
     Field { value: String, placeholder: String, secret: bool, on_input: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
-    Choice { options: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>> },
+    Choice { options: Vec<String>, selected: Option<usize>, placeholder: String, on_select: Option<Box<dyn Fn(usize) -> M>> },
     Scroll { child: Box<Element<M>> },
     Picture { image: Arc<Image>, fit: Fit, radius: f32, opacity: f32 },
     Drawing { draw: Draw, on_touch: Option<OnTouch<M>> },
@@ -171,7 +171,7 @@ impl<M> Element<M> {
         self
     }
 
-    /// Tells this element from its neighbours when a list of them changes,
+    /// Tells this element from its neighbors when a list of them changes,
     /// so what it remembers (focus, hover) stays with it, not with its place.
     pub fn key(mut self, key: u64) -> Self {
         self.key = Some(key);
@@ -179,7 +179,7 @@ impl<M> Element<M> {
     }
 
     /// Its name to a screen reader, voice and automation, where its text
-    /// does not say it (a colour swatch, a button that shows a symbol).
+    /// does not say it (a color swatch, a button that shows a symbol).
     pub fn name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
         self
@@ -207,7 +207,7 @@ impl<M> Element<M> {
         self
     }
 
-    /// A label's colour (else the ink of what it is in), a rule's, a panel's ground.
+    /// A label's color (else the ink of what it is in), a rule's, a panel's ground.
     pub fn color(mut self, color: Color) -> Self {
         match &mut self.kind {
             Kind::Label(l) => l.color = Some(color),
@@ -218,7 +218,7 @@ impl<M> Element<M> {
         self
     }
 
-    /// A label in the theme's colour for text that explains.
+    /// A label in the theme's color for text that explains.
     pub fn dim(mut self) -> Self {
         if let Some(l) = self.label_mut() {
             l.dim = true;
@@ -278,7 +278,7 @@ impl<M> Element<M> {
         self
     }
 
-    /// A panel's edge: its colour and width.
+    /// A panel's edge: its color and width.
     pub fn edge(mut self, color: Color, width: f32) -> Self {
         if let Kind::Panel { edge, .. } = &mut self.kind {
             *edge = Some((color, width));
@@ -333,9 +333,9 @@ impl<M> Element<M> {
         self
     }
 
-    /// The text a field shows while it is empty.
+    /// The text a field shows while it is empty, or a choice while none is chosen.
     pub fn placeholder(mut self, text: impl Into<String>) -> Self {
-        if let Kind::Field { placeholder, .. } = &mut self.kind {
+        if let Kind::Field { placeholder, .. } | Kind::Choice { placeholder, .. } = &mut self.kind {
             *placeholder = text.into();
         }
         self
@@ -388,7 +388,7 @@ pub fn space<M>() -> Element<M> {
     Element::new(Kind::Space, Length::Shrink, Length::Shrink)
 }
 
-/// A line across a column, or down a row: the theme's line colour, one unit.
+/// A line across a column, or down a row: the theme's line color, one unit.
 pub fn rule<M>() -> Element<M> {
     Element::new(Kind::Rule { color: None, thickness: 1.0 }, Length::FILL, Length::Fixed(1.0))
 }
@@ -467,7 +467,7 @@ pub fn field<M>(value: impl Into<String>, on_input: impl Fn(String) -> M + 'stat
 /// One of a list: a button showing the chosen one, opening the list.
 pub fn choice<M>(options: Vec<String>, selected: Option<usize>, on_select: impl Fn(usize) -> M + 'static) -> Element<M> {
     let selected = selected.filter(|i| *i < options.len());
-    Element::new(Kind::Choice { options, selected, on_select: Some(Box::new(on_select)) }, Length::Shrink, Length::Shrink)
+    Element::new(Kind::Choice { options, selected, placeholder: String::new(), on_select: Some(Box::new(on_select)) }, Length::Shrink, Length::Shrink)
 }
 
 /// One child, taller than its place, moved up and down within it.

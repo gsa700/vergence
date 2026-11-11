@@ -1,4 +1,4 @@
-//! The colours, text and corners widgets are drawn with: `vergence-look`'s,
+//! The colors, text and corners widgets are drawn with: `vergence-look`'s,
 //! with the user's light or dark, accent and contrast laid over them.
 
 use vergence_look::{PALETTE_DARK, PALETTE_LIGHT, Palette, Rgb};
@@ -111,7 +111,7 @@ fn toml_value(v: &str) -> &str {
     }
 }
 
-/// "#rrggbb" to a colour.
+/// "#rrggbb" to a color.
 pub fn parse_hex(s: &str) -> Option<Color> {
     let h = s.trim().strip_prefix('#')?;
     if h.len() != 6 || !h.bytes().all(|b| b.is_ascii_hexdigit()) {

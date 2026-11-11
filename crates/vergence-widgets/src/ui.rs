@@ -1344,7 +1344,7 @@ impl<M: Clone> Ui<M> {
                         ButtonLook::Chosen => (Some(theme.accent), None, radius, white),
                         ButtonLook::Custom { fill, edge, radius } => (tint(fill), edge, radius, inherited),
                     };
-                    // One that cannot be pressed is faded, its own colour kept.
+                    // One that cannot be pressed is faded, its own color kept.
                     let fade = |c: Color| if on { c } else { Color { a: c.a / 2, ..c } };
                     if let Some(f) = fill {
                         scene.fill_rounded(r, rad, fade(f));
@@ -1458,7 +1458,7 @@ impl<M: Clone> Ui<M> {
                         field_stops.push((n.id, stops, shift));
                     }
                 }
-                What::Choice { options, selected, on_select, size, baseline, .. } => {
+                What::Choice { options, selected, placeholder, on_select, size, baseline, .. } => {
                     let usable = on_select.is_some();
                     let hot = usable && (self.hover == Some(n.id) || self.open.is_some_and(|o| o.id == n.id));
                     let radius = vergence_look::RADIUS;
@@ -1467,9 +1467,13 @@ impl<M: Clone> Ui<M> {
                     scene.stroke(r, radius, 1.0, edge_c);
                     let col = if usable { theme.text } else { theme.dim };
                     let inner = Rect::new(r.x + FIELD_PAD_H, r.y, (r.w - 2.0 * FIELD_PAD_H - CHEVRON).max(0.0), r.h);
-                    if let (Some(f), Some(k)) = (face(fonts, 400), *selected) {
+                    if let Some(f) = face(fonts, 400) {
+                        let (shown_text, c) = match *selected {
+                            Some(k) => (options[k].as_str(), col),
+                            None => (placeholder.as_str(), theme.dim),
+                        };
                         scene.push_clip(inner, 0.0);
-                        text(scene, fonts, f, *size, col, Point::new(inner.x, r.y + baseline), &options[k]);
+                        text(scene, fonts, f, *size, c, Point::new(inner.x, r.y + baseline), shown_text);
                         scene.pop_clip();
                     }
                     // The arrow: a small V.

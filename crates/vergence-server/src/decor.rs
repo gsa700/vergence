@@ -2,10 +2,10 @@
 //
 // X11 windows that do not decorate themselves, and Wayland windows that ask for
 // server-side decorations (xdg-decoration), get a title bar TITLE_H points tall
-// above their content, with maximise and close buttons at the right, and an
+// above their content, with maximize and close buttons at the right, and an
 // invisible band BORDER points wide around the whole frame for resizing. Sizes are
 // in points like everything else, so the bar is the same physical height on every
-// monitor; it is drawn with solid colours, which are sharp at any scale. Edges are
+// monitor; it is drawn with solid colors, which are sharp at any scale. Edges are
 // rounded from logical to physical the same way as the window's own position, so
 // bar and content meet without a seam.
 //
@@ -45,7 +45,7 @@ use smithay::backend::allocator::Fourcc;
 
 use crate::{Server, grabs::resize_grab::ResizeEdge};
 
-// The sizes and colours are the desktop's one look (vergence-look), which the
+// The sizes and colors are the desktop's one look (vergence-look), which the
 // toolkit's own bars are drawn with too: neither keeps a copy.
 /// The title bar's height, in points.
 pub const TITLE_H: i32 = vergence_look::TITLE_H as i32;
@@ -118,7 +118,7 @@ struct Frame {
     title: Rectangle<i32, Logical>,
     close: Rectangle<i32, Logical>,
     maximize: Rectangle<i32, Logical>,
-    /// Left of maximise; drawn and pressed only when the settings name the button.
+    /// Left of maximize; drawn and pressed only when the settings name the button.
     minimize: Rectangle<i32, Logical>,
 }
 
@@ -191,9 +191,9 @@ impl Server {
     }
 
     /// The top-most thing under `pos`: a title bar part, a resize band, or a surface.
-    /// True if the settings' window buttons include minimise (they do unless a
+    /// True if the settings' window buttons include minimize (they do unless a
     /// layout without it has been chosen): the server's title bars then have it.
-    pub fn minimise_button(&self) -> bool {
+    pub fn minimize_button(&self) -> bool {
         match self.settings.current.get(&(crate::settings::WM.to_string(), "button-layout".to_string())) {
             Some(vergence_protocol::bus::SettingValue::Str(layout)) => layout.contains("minimize"),
             _ => true,
@@ -212,7 +212,7 @@ impl Server {
                 if f.maximize.to_f64().contains(pos) {
                     return Hit::Maximize(w.clone());
                 }
-                if self.minimise_button() && f.minimize.to_f64().contains(pos) {
+                if self.minimize_button() && f.minimize.to_f64().contains(pos) {
                     return Hit::Minimize(w.clone());
                 }
                 if f.title.to_f64().contains(pos) {
@@ -254,7 +254,7 @@ impl Server {
     pub fn scene(&mut self, renderer: &mut GlesRenderer, output: &Output, scale: f64) -> Vec<SceneElement> {
         let Some(out) = self.space.output_geometry(output) else { return Vec::new() };
         let focused = self.seat.get_keyboard().and_then(|k| k.current_focus());
-        let minimise_button = self.minimise_button();
+        let minimize_button = self.minimize_button();
         self.decor.retain(|w, _| w.alive());
         // A window on its way back from the dock is put in its place when it arrives.
         self.shelf_motions_end();
@@ -302,7 +302,7 @@ impl Server {
                 if let Some(f) = frame {
                 // Front to back: title text, button marks, then the bar.
                 let text_x = f.title.loc.x + TEXT_PAD;
-                let buttons_from = if minimise_button { f.minimize.loc.x } else { f.maximize.loc.x };
+                let buttons_from = if minimize_button { f.minimize.loc.x } else { f.maximize.loc.x };
                 let logical: Size<i32, Logical> = (buttons_from - TEXT_PAD / 2 - text_x, TITLE_H).into();
                 if let Some(font) = self.title_font.as_ref()
                     && logical.w > 0
@@ -342,7 +342,7 @@ impl Server {
                 elements.push(solid(2, Rectangle::new((m.loc.x, m.loc.y + m.size.h - t).into(), (m.size.w, t).into()), BUTTON));
                 elements.push(solid(3, Rectangle::new(m.loc, (t, m.size.h).into()), BUTTON));
                 elements.push(solid(4, Rectangle::new((m.loc.x + m.size.w - t, m.loc.y).into(), (t, m.size.h).into()), BUTTON));
-                if minimise_button {
+                if minimize_button {
                     // A line along the foot of its square, as the terminal's bar draws it.
                     let n = inset(f.minimize, 7.0);
                     elements.push(solid(10, Rectangle::new((n.loc.x, n.loc.y + n.size.h - t).into(), (n.size.w, t).into()), BUTTON));

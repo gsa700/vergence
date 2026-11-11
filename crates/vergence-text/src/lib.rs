@@ -12,8 +12,8 @@
 //!   face, with kerning. Sizes and positions are in whatever unit the size
 //!   was given in (reference units for a scene).
 //! - [`Fonts::raster`] is the glyph cache: a glyph's coverage as a bitmap for
-//!   one size in pixels and one of four sub-pixel positions. **Colour is not
-//!   part of the key**, so a glyph is rasterised once however many colours
+//!   one size in pixels and one of four sub-pixel positions. **Color is not
+//!   part of the key**, so a glyph is rasterized once however many colors
 //!   it is drawn in; the renderer tints the coverage.
 //!
 //! Plain text only: left to right, one character one glyph, combining marks
@@ -22,7 +22,7 @@
 //! open (whitepaper §10, question 8). Outlines are not hinted yet, which
 //! shows at low density (the whitepaper wants hinting there).
 //!
-//! Glyph outlines are read and rasterised by ab_glyph (borrowed, whitepaper
+//! Glyph outlines are read and rasterized by ab_glyph (borrowed, whitepaper
 //! §8). The font files' own descriptions are read by sfnt.rs, which is ours
 //! and treats every file as untrusted.
 
@@ -39,7 +39,7 @@ use ab_glyph::{Font, FontVec, GlyphId, PxScale, VariableFont, point};
 use crate::db::FontDb;
 
 /// The largest font file loaded, the largest em in pixels a glyph is
-/// rasterised at, the largest bitmap, and when the cache is emptied.
+/// rasterized at, the largest bitmap, and when the cache is emptied.
 const MAX_FONT_FILE: u64 = 64 << 20;
 const MAX_EM_PX: f32 = 8192.0;
 const MAX_BITMAP: usize = 16 << 20;
@@ -258,7 +258,7 @@ impl Fonts {
     /// The glyph's coverage with the em `em_px` pixels tall, its origin
     /// `sub_x` quarter-pixels right of a whole pixel (0 to 3). None for a
     /// glyph with nothing to draw (a space), or a size that makes no sense.
-    /// Rasterised once and kept; the bitmap is shared, not copied, so a
+    /// Rasterized once and kept; the bitmap is shared, not copied, so a
     /// renderer can hold on to it across threads.
     pub fn raster(&mut self, face: FaceId, glyph: u32, em_px: f32, sub_x: u8) -> Option<Arc<Bitmap>> {
         if !(em_px.is_finite() && em_px > 0.0 && em_px <= MAX_EM_PX) {
@@ -274,7 +274,7 @@ impl Fonts {
         let bitmap = match self.cache.get(&key) {
             Some(known) => known.clone(),
             None => {
-                let bitmap = self.rasterise(face, glyph, key.size as f32 / 64.0, key.sub_x).map(Arc::new);
+                let bitmap = self.rasterize(face, glyph, key.size as f32 / 64.0, key.sub_x).map(Arc::new);
                 if self.cache_bytes > MAX_CACHE_BYTES {
                     self.cache.clear();
                     self.front.fill(None);
@@ -289,7 +289,7 @@ impl Fonts {
         bitmap
     }
 
-    fn rasterise(&self, face: FaceId, glyph: u32, em_px: f32, sub_x: u8) -> Option<Bitmap> {
+    fn rasterize(&self, face: FaceId, glyph: u32, em_px: f32, sub_x: u8) -> Option<Bitmap> {
         let l = self.loaded.get(face.0 as usize)?;
         // ab_glyph's scale is the height from ascent to descent, not the em.
         let scale = PxScale::from(em_px * l.font.height_unscaled() / l.units);
@@ -360,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn a_glyph_is_rasterised_once_whatever_draws_it() {
+    fn a_glyph_is_rasterized_once_whatever_draws_it() {
         let (mut fonts, face) = mono();
         let (_, a) = fonts.glyph(face, 'A');
         let first = fonts.raster(face, a, 48.0, 0).expect("A has an outline");

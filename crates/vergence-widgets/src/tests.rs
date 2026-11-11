@@ -68,7 +68,7 @@ fn a_row_shares_its_width() {
 }
 
 #[test]
-fn a_column_centres_and_fills() {
+fn a_column_centers_and_fills() {
     let ui = laid(
         column(vec![label("top"), space().height(Length::FILL), label("bottom")]).align(Align::Center).width(Length::FILL).height(Length::FILL),
         100.0,
@@ -225,7 +225,7 @@ fn chord(ui: &mut Ui<Msg>, c: char, ctrl: bool) -> Response<Msg> {
     ui.input(&Input::Key { sym: c as u32, text: None, pressed: true, repeat: false, composing: false, modifiers })
 }
 
-fn centre(r: Rect) -> (f32, f32) {
+fn center(r: Rect) -> (f32, f32) {
     (r.x + r.w / 2.0, r.y + r.h / 2.0)
 }
 
@@ -239,12 +239,12 @@ fn click(ui: &mut Ui<Msg>, x: f32, y: f32) -> Vec<Msg> {
 fn a_switch_flips() {
     let page = |on: bool| column(vec![switch(on, Msg::Toggle).name("Repeat"), switch(on, Msg::Toggle).name("Fixed").disabled()]);
     let mut ui = laid(page(false), 300.0, 100.0);
-    let (x, y) = centre(bounds(&ui, "Repeat"));
+    let (x, y) = center(bounds(&ui, "Repeat"));
     assert_eq!(click(&mut ui, x, y), vec![Msg::Toggle(true)]);
     ui.layout(page(true), 300.0, 100.0, &mut Fixed, 10.0);
     key(&mut ui, sym::TAB, false);
     assert_eq!(key(&mut ui, ' ' as u32, false), vec![Msg::Toggle(false)]);
-    let (x, y) = centre(bounds(&ui, "Fixed"));
+    let (x, y) = center(bounds(&ui, "Fixed"));
     assert!(click(&mut ui, x, y).is_empty(), "one that cannot be changed");
     let m = ui.meaning();
     assert_eq!((m[0].value.as_deref(), m[1].states.clone()), (Some("on"), vec!["off"]));
@@ -327,7 +327,7 @@ fn is_open(ui: &Ui<Msg>) -> bool {
 #[test]
 fn a_choice_opens_and_chooses() {
     let mut ui = laid(picker(Some(2)), 300.0, 400.0);
-    let (x, y) = centre(bounds(&ui, "Fit"));
+    let (x, y) = center(bounds(&ui, "Fit"));
     assert!(click(&mut ui, x, y).is_empty());
     assert!(is_open(&ui));
     // The list is below it: the fourth item is chosen by a click.
@@ -349,7 +349,7 @@ fn a_choice_opens_and_chooses() {
     // A click elsewhere closes the list and does nothing else.
     click(&mut ui, x, y);
     assert!(is_open(&ui));
-    let (ax, ay) = centre(bounds(&ui, "A"));
+    let (ax, ay) = center(bounds(&ui, "A"));
     assert!(click(&mut ui, ax + 250.0, ay + 300.0).is_empty());
     assert!(!is_open(&ui));
 }

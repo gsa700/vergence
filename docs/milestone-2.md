@@ -1,6 +1,6 @@
 # Milestone 2: remember each monitor setup
 
-Whitepaper §4.1. Milestone 1 recognises a monitor setup by its profile key.
+Whitepaper §4.1. Milestone 1 recognizes a monitor setup by its profile key.
 Milestone 2 makes the setup's arrangement stick: each profile stores which
 outputs are on, their resolution, refresh rate, position and the primary,
 and `vergd` puts it back whenever that setup comes back (plug, dock, wake,
@@ -82,7 +82,7 @@ Xfce's choice, and vergd learns it.
 - **When to learn:** after a burst of RandR events (the 400 ms settle from
   `watch`) where the key did **not** change, the new arrangement is the
   user's choice: save it. When the key **did** change, it is a plug, unplug
-  or wake: apply, don't learn. Changes `vergd` makes itself are recognised
+  or wake: apply, don't learn. Changes `vergd` makes itself are recognized
   (by the RandR config timestamp of its own request) and not learned back.
 - **Applying, directly over RandR** (x11rb), not by running `xrandr`:
   1. Check every mode exists on its output and the screen fits
@@ -94,7 +94,7 @@ Xfce's choice, and vergd learns it.
   4. Ungrab; read back and compare. If the result differs, log it and put
      the previous arrangement back.
 - **Safety:** `vergd apply --dry-run`; a kill switch (`vergd watch
-  --observe-only`, the milestone 1 behaviour); every apply logged with the
+  --observe-only`, the milestone 1 behavior); every apply logged with the
   before and after; never more than one apply per settle window, so a
   monitor that flaps cannot make `vergd` loop.
 - **Security (whitepaper §7.3):** still no network socket and no control

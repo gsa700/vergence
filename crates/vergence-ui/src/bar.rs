@@ -2,7 +2,7 @@
 //! the desktop's layout puts them, and either tabs with a + (the terminal:
 //! [`Layout::new`]) or the window's title ([`Layout::plain`]). It was the
 //! terminal's own until 2026-11-10 and is the toolkit's so that every tool
-//! has the same one; its sizes and colours are the desktop's one look
+//! has the same one; its sizes and colors are the desktop's one look
 //! (vergence-look), which the server's title bars are drawn with too.
 //!
 //! Where everything sits is worked out in one place ([`Layout::new`]) and
@@ -34,17 +34,17 @@ const GAP: f32 = 2.0;
 /// it is the one shown.
 const CLOSE_NEEDS: f32 = 72.0;
 
-const fn colour(c: vergence_look::Rgb) -> Color {
+const fn color(c: vergence_look::Rgb) -> Color {
     Color::rgb(c.0, c.1, c.2)
 }
 const fn shape(alpha: u8) -> Color {
     Color::rgba(255, 255, 255, alpha)
 }
-const BAR_FOCUSED: Color = colour(vergence_look::BAR_FOCUSED);
-const BAR_UNFOCUSED: Color = colour(vergence_look::BAR_UNFOCUSED);
-const INK_FOCUSED: Color = colour(vergence_look::INK_FOCUSED);
-const INK_UNFOCUSED: Color = colour(vergence_look::INK_UNFOCUSED);
-const CLOSE_HOVER: Color = colour(vergence_look::CLOSE);
+const BAR_FOCUSED: Color = color(vergence_look::BAR_FOCUSED);
+const BAR_UNFOCUSED: Color = color(vergence_look::BAR_UNFOCUSED);
+const INK_FOCUSED: Color = color(vergence_look::INK_FOCUSED);
+const INK_UNFOCUSED: Color = color(vergence_look::INK_UNFOCUSED);
+const CLOSE_HOVER: Color = color(vergence_look::CLOSE);
 const SHAPE_REST: Color = shape(vergence_look::SHAPE_REST);
 const SHAPE_HOVER: Color = shape(vergence_look::SHAPE_HOVER);
 
@@ -180,7 +180,7 @@ impl Layout {
     }
 }
 
-/// An icon's lines, centred in a box.
+/// An icon's lines, centered in a box.
 fn icon(scene: &mut Scene, r: &Rect, what: Part, size: f32, ink: Color) {
     let (cx, cy, h) = (r.x + r.w / 2.0, r.y + r.h / 2.0, size / 2.0);
     let mut line = |a: (f32, f32), b: (f32, f32)| {

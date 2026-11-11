@@ -5,13 +5,13 @@
 //! tabs, buttons, menus and scrollbars. They are to look like one thing, so
 //! the numbers both draw with live here, and neither keeps a copy: a change
 //! here changes both. Lengths are in reference units (points at 96 to the
-//! inch, whitepaper Contract 1); colours are sRGB.
+//! inch, whitepaper Contract 1); colors are sRGB.
 //!
 //! These are the defaults of a dark desktop. What the user's settings
 //! change (the accent, light or dark, contrast) is applied over them by
 //! whoever draws; this crate knows nothing of settings.
 
-/// A colour, sRGB, opaque.
+/// A color, sRGB, opaque.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgb(pub u8, pub u8, pub u8);
 
@@ -127,7 +127,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn colours_as_fractions() {
+    fn colors_as_fractions() {
         assert_eq!(Rgb(255, 0, 51).floats(), [1.0, 0.0, 0.2, 1.0]);
         assert_eq!(Rgb(0, 255, 0).floats3(), [0.0, 1.0, 0.0]);
     }

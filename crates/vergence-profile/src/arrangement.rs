@@ -172,7 +172,7 @@ pub fn same_arrangement(a: &[OutputSetting], b: &[OutputSetting]) -> bool {
 /// Row or column is decided from the monitors' **unscaled** sizes: tools
 /// that place monitors (`xrandr --right-of`, found 2026-11-06) use the mode
 /// size even when the picture is scaled, so scaled sizes can overlap a
-/// neighbour that the user put side by side.
+/// neighbor that the user put side by side.
 ///
 /// Monitors that overlap only partly (Xfce's display settings left one at
 /// x=0 and the other at x=250 on 2026-11-06) are laid out in the order of

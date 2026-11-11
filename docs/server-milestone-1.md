@@ -108,7 +108,7 @@ accessibility (Contract 3); display-list surfaces.
 - **Xwayland (2026-11-07):** rootless Xwayland started by the server
   (FreeBSD: no abstract socket; the first app starts when it is ready, so it
   inherits DISPLAY, :1 on Hubble beside Xorg's :0). X windows share the
-  Space with Wayland windows, open centred on the monitor under the pointer,
+  Space with Wayland windows, open centered on the monitor under the pointer,
   and take keyboard focus through an X11-aware focus target (X input focus /
   WM_TAKE_FOCUS, `focus.rs`); clipboard bridged. One client scale for all of
   Xwayland (VERGENCE_XWAYLAND_SCALE, default 1): X apps are the right size
@@ -122,10 +122,10 @@ accessibility (Contract 3); display-list surfaces.
 - **Title bars (2026-11-07):** drawn by the server (`decor.rs`) for X
   windows that do not decorate themselves and Wayland apps that ask for
   server-side decorations (xdg-decoration; foot does). 24 points tall, same
-  physical height on every monitor, solid colours (sharp at any scale),
+  physical height on every monitor, solid colors (sharp at any scale),
   edges rounded like window positions so bar and content meet without a
-  seam; maximise and close buttons; drag to move, double-click or the button
-  to maximise on the monitor the window is mostly on, drag a maximised
+  seam; maximize and close buttons; drag to move, double-click or the button
+  to maximize on the monitor the window is mostly on, drag a maximized
   window to restore it; invisible 6-point resize band with resize pointer
   shapes. The scene is built per window front to back, so a bar stacks with
   its window. No title text yet. Dave: "looks right".
@@ -155,19 +155,19 @@ accessibility (Contract 3); display-list surfaces.
   `restart` (exit 75; `tools/run-server-drm.sh` loops on it), `quit`. Lets
   the session on the real monitors be seen and driven over SSH.
 - **Title text (2026-11-07):** window titles in the server's title bars
-  (`text.rs`): one line rasterised with ab_glyph (pure Rust) separately for
+  (`text.rs`): one line rasterized with ab_glyph (pure Rust) separately for
   each monitor at its own pixels and drawn 1:1, so it is sharp on both; the
   desktop font from Gtk/FontName in settings.toml (Sans 10 -> Noto Sans via
-  fc-match); light on the focused window, grey otherwise; ellipsis before the
-  buttons; re-rasterised only when title, width, focus or scale changes.
+  fc-match); light on the focused window, gray otherwise; ellipsis before the
+  buttons; re-rasterized only when title, width, focus or scale changes.
   Kerning, no shaping (Latin titles; real text stack later). Checked from
   screenshots on both monitors.
 - **Placement (2026-11-07):** new windows open on the monitor under the
   pointer and fit it (`place.rs`): no larger than the monitor below a title
-  bar (when the server draws one), centred; an X app that asks for a
+  bar (when the server draws one), centered; an X app that asks for a
   position (USPosition/PPosition) gets it if the window then lies wholly on a
   monitor. Wayland windows get configure_bounds up front and are fitted and
-  centred on their first sized commit. Fixed: an X window's resize request
+  centered on their first sized commit. Fixed: an X window's resize request
   was answered with the position X last reported, not where the server had
   just put it (AlbumWall snapped back to 0,0). AlbumWall (1131 x 710 saved)
   now opens at 1131 x 658 on the 14", all on screen.
@@ -190,7 +190,7 @@ accessibility (Contract 3); display-list surfaces.
   may still need work". Remaining cost is AlbumWall's own layout per size.
 - **Apps restoring their place (2026-11-07):** a move request within 1.5 s
   of an X window mapping is the app restoring where it was (Spindle's
-  WindowPlacement sets Position ~60 ms after the window opens); honoured if
+  WindowPlacement sets Position ~60 ms after the window opens); honored if
   the window then lies wholly on a monitor, with the size it asked for when
   it opened (fitted to the pointer's monitor at map, so AlbumWall's 1264 x
   931 comes back on the ASUS). Later moves stay the server's. Fixed: the
@@ -202,15 +202,15 @@ accessibility (Contract 3); display-list surfaces.
   vergd's (Hubble's desk: 8b4a39a2..., ASUS a48cece3b53cb939); identity =
   class (X11 WM_CLASS, Wayland app_id) + index among open windows of that
   class, no titles; menus and X transients left out. Positions relative to
-  the monitor in points, sizes in points, maximised kept with its restore
-  size. Recorded at the end of a move or resize, on maximise/restore, on X
+  the monitor in points, sizes in points, maximized kept with its restore
+  size. Recorded at the end of a move or resize, on maximize/restore, on X
   configure (outside drags) and when the window closes; a remembered place
   decides before the defaults and before the app's own restore, when its
   monitor is there and the window fits. ~/.config/vergence/server-windows.toml
-  (0600, atomic write, the shared WindowStore format; `skip` honoured).
+  (0600, atomic write, the shared WindowStore format; `skip` honored).
   Tested over the control socket: xterm dragged to the ASUS, closed, reopened
-  from the 14" -> back on the ASUS; foot moved, maximised, closed, reopened
-  -> maximised on the ASUS. Not yet: moving windows when the setup changes
+  from the 14" -> back on the ASUS; foot moved, maximized, closed, reopened
+  -> maximized on the ASUS. Not yet: moving windows when the setup changes
   during a session (with hotplug).
 - **Monitor hotplug (2026-11-07):** connectors scanned on udev change events
   and every 2 s (FreeBSD's udev emulation may not pass DRM hotplug on). A new
@@ -242,7 +242,7 @@ accessibility (Contract 3); display-list surfaces.
   stretch, color`), checked every second, applied at once. Each monitor gets
   the picture at its own native pixels on a worker thread: SVG drawn by resvg
   at that size (Xfce's leaves: 79 ms at 3840x2160, 24 ms at 1920x1080), PNG/JPEG
-  resampled Catmull-Rom (1.05 s / 0.27 s for a 2048x1536 PNG); the colour shows
+  resampled Catmull-Rom (1.05 s / 0.27 s for a 2048x1536 PNG); the color shows
   until it is ready and behind "fit"/"center". First piece of the settings app
   work (docs: the app writes desktop.toml and settings.toml; the server applies).
 - **lightdm dropped (2026-11-07):** its Vergence session raced the outgoing X
@@ -265,15 +265,15 @@ accessibility (Contract 3); display-list surfaces.
   1.18 (whitepaper §8; answers open question 8 for Slint): builds on FreeBSD
   (~3.5 min first build), runs under the server as a native Wayland client
   (server title bar, fractional scale). Wallpaper page lists
-  /usr/local/share/backgrounds and ~/Pictures, mode and colour, Apply writes
+  /usr/local/share/backgrounds and ~/Pictures, mode and color, Apply writes
   desktop.toml; the server renders it (round trip checked). Known: Slint's
   winit backend sends no app_id (set_xdg_app_id has no effect; needs its winit
   attributes hook), Fluent light style, no D-Bus session bus warning, Slint's
-  licence (GPLv3 or royalty-free with attribution) to settle before publishing.
+  license (GPLv3 or royalty-free with attribution) to settle before publishing.
 - **Desktop menu (2026-11-07):** `menu.rs`. Right-click on the bare desktop:
   the apps and "Exit Vergence" (ends the session; back to the console).
   Drawn by the server like the title bars, sized in points (same physical
-  size on every monitor), labels rasterised per monitor; hover highlight;
+  size on every monitor), labels rasterized per monitor; hover highlight;
   Escape or a click outside closes it; it swallows the clicks it uses. Apps:
   `[[menu.item]] name/exec` in desktop.toml, else the installed defaults
   (Terminal = foot, Settings, Firefox, Files = Thunar, AlbumWall), started in
@@ -300,6 +300,6 @@ sharp. The only loss is when the densest monitor goes above Xwayland's scale
 Tried and backed out the same day: changing Xwayland's client scale live
 (new client scale, outputs re-sent, every X window re-configured to keep its
 size in points, X resources and XSETTINGS republished). Apps reacted on their
-own: AlbumWall (Avalonia) re-maximised itself onto the other monitor, GTK 3
+own: AlbumWall (Avalonia) re-maximized itself onto the other monitor, GTK 3
 resized its window to a size of its own choosing. Real fixes are per app: the
 native Avalonia backend (whitepaper §8.1) and GTK on Wayland.

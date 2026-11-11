@@ -247,7 +247,7 @@ fn execute(conn: &RustConnection, setup: &Setup, p: &Plan) -> Result<(), Box<dyn
             }
         }
         if p.screen != setup.screen {
-            // Millimetres at 96 dpi: only used by clients that ignore RandR.
+            // Millimeters at 96 dpi: only used by clients that ignore RandR.
             let mm = |px: u16| (px as u32 * 254 + 480) / 960;
             conn.randr_set_screen_size(setup.root, p.screen.0, p.screen.1, mm(p.screen.0), mm(p.screen.1))?
                 .check()?;

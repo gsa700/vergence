@@ -61,9 +61,9 @@ pub struct Server {
     pub xdg_decoration_state: smithay::wayland::shell::xdg::decoration::XdgDecorationState,
     /// Title bars: per-window ids for damage tracking (decor.rs).
     pub decor: std::collections::HashMap<Window, crate::decor::Decor>,
-    /// Where maximised windows go back to.
+    /// Where maximized windows go back to.
     pub restore: std::collections::HashMap<Window, smithay::utils::Rectangle<i32, Logical>>,
-    /// The last press on a title bar, for double-click to maximise.
+    /// The last press on a title bar, for double-click to maximize.
     pub last_title_press: Option<(Window, std::time::Instant)>,
     /// Monitors (connector names) still to capture for the control socket's `shot`.
     pub shot_pending: Vec<String>,

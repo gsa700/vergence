@@ -12,7 +12,7 @@ Consistency"; it was named Vergence on 2026-11-05.
 
 **Status (2026-11-06): phase 1 milestones 1 to 4 built** on real hardware,
 a FreeBSD 15.1 X11 machine (Intel UHD 630) with a real monitor and debugfs
-fake monitors of any density, not a virtual machine. `vergd` recognises each
+fake monitors of any density, not a virtual machine. `vergd` recognizes each
 monitor setup by its EDIDs, puts its arrangement back, puts every window back
 (also across scale changes), is the desktop's XSETTINGS manager, and scales
 in Mode A (everything the same physical size: a 200-unit box measured 52.9 mm

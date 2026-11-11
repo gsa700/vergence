@@ -2,7 +2,7 @@
 //! write to the terminal they run in as fast as it takes the bytes, and
 //! say how fast that was in a report file, one line a second.
 //!
-//!     flood colour  REPORT    lines, a different 24-bit colour in every cell
+//!     flood color  REPORT    lines, a different 24-bit color in every cell
 //!     flood cursor  REPORT    batches of 250 writes at random places
 //!     flood unicode REPORT    lines of wide, combining and symbol characters
 //!     flood time    REPORT COMMAND [ARGS]   COMMAND again and again, each run timed
@@ -89,11 +89,11 @@ fn flood(path: &str, what: &str, mut unit: impl FnMut(&mut Vec<u8>, &mut Random,
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (Some(job), Some(path)) = (args.first(), args.get(1)) else {
-        eprintln!("flood colour|cursor|unicode REPORT, or flood time REPORT COMMAND [ARGS]");
+        eprintln!("flood color|cursor|unicode REPORT, or flood time REPORT COMMAND [ARGS]");
         std::process::exit(2);
     };
     let result = match job.as_str() {
-        "colour" => flood(path, "colour-lines/s", |b, r, cols, _| {
+        "color" => flood(path, "color-lines/s", |b, r, cols, _| {
             for _ in 0..cols {
                 let v = r.next();
                 let _ = write!(b, "\x1b[38;2;{};{};{};48;2;{};{};{}m{}", v as u8, (v >> 8) as u8, (v >> 16) as u8, (v >> 24) as u8, (v >> 32) as u8, (v >> 40) as u8, (b'!' + (v >> 48) as u8 % 94) as char);

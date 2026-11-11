@@ -217,7 +217,7 @@ impl Server {
         if !at.overlaps(out) {
             return Vec::new();
         }
-        let colour = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
+        let color = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
         let (typed, selected) = (open.typed.clone(), open.selected);
         let (grid, field) = (open.grid(), open.field());
         let found = self.launcher_found();
@@ -244,27 +244,27 @@ impl Server {
             // Everything below is in the popup's own points.
             let local = |r: Rect| SceneRect::new((r.x - at.loc.x) as f32, (r.y - at.loc.y) as f32, r.w as f32, r.h as f32);
             let mut scene = Scene::new(w, h);
-            scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, colour(vergence_look::MENU));
-            scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, colour(vergence_look::SHELF_EDGE));
+            scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, color(vergence_look::MENU));
+            scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, color(vergence_look::SHELF_EDGE));
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             let face = fonts.face("sans-serif", 400, false);
             let bold = fonts.face("sans-serif", 700, false).or(face);
             // The search field: what has been typed and a caret, or what to do.
             let f = local(field);
-            scene.fill_rounded(f, vergence_look::RADIUS, colour(vergence_look::SHELF));
-            scene.stroke(f, vergence_look::RADIUS, vergence_look::EDGE, colour(vergence_look::ACCENT));
+            scene.fill_rounded(f, vergence_look::RADIUS, color(vergence_look::SHELF));
+            scene.stroke(f, vergence_look::RADIUS, vergence_look::EDGE, color(vergence_look::ACCENT));
             if let Some(face) = face {
                 let size = 14.0;
                 let m = fonts.metrics(face, size);
                 let base = (f.y + (f.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round();
                 scene.push_clip(SceneRect::new(f.x + 8.0, f.y, f.w - 16.0, f.h), 0.0);
                 if typed.is_empty() {
-                    vergence_render::text(&mut scene, fonts, face, size, colour(vergence_look::MENU_INK_OFF), ScenePoint::new(f.x + 14.0, base), "Type to search");
-                    scene.fill(SceneRect::new(f.x + 10.0, f.y + 8.0, 1.0, f.h - 16.0), colour(vergence_look::MENU_INK));
+                    vergence_render::text(&mut scene, fonts, face, size, color(vergence_look::MENU_INK_OFF), ScenePoint::new(f.x + 14.0, base), "Type to search");
+                    scene.fill(SceneRect::new(f.x + 10.0, f.y + 8.0, 1.0, f.h - 16.0), color(vergence_look::MENU_INK));
                 } else {
                     let (_, width) = fonts.layout(face, size, &typed);
-                    vergence_render::text(&mut scene, fonts, face, size, colour(vergence_look::MENU_INK), ScenePoint::new(f.x + 10.0, base), &typed);
-                    scene.fill(SceneRect::new(f.x + 11.0 + width, f.y + 8.0, 1.0, f.h - 16.0), colour(vergence_look::MENU_INK));
+                    vergence_render::text(&mut scene, fonts, face, size, color(vergence_look::MENU_INK), ScenePoint::new(f.x + 10.0, base), &typed);
+                    scene.fill(SceneRect::new(f.x + 11.0 + width, f.y + 8.0, 1.0, f.h - 16.0), color(vergence_look::MENU_INK));
                 }
                 scene.pop_clip();
             }
@@ -274,12 +274,12 @@ impl Server {
                 && let Some(face) = face
             {
                 let g = local(grid.area);
-                vergence_render::text(&mut scene, fonts, face, 14.0, colour(vergence_look::MENU_INK_OFF), ScenePoint::new(g.x + 2.0, g.y + 24.0), "No application of that name");
+                vergence_render::text(&mut scene, fonts, face, 14.0, color(vergence_look::MENU_INK_OFF), ScenePoint::new(g.x + 2.0, g.y + 24.0), "No application of that name");
             }
             for (index, cell, name, icon) in &cells {
                 let c = local(*cell);
                 if *index == selected {
-                    scene.fill_rounded(SceneRect::new(c.x + 2.0, c.y + 2.0, c.w - 4.0, c.h - 4.0), vergence_look::RADIUS, colour(vergence_look::SHELF_TILE));
+                    scene.fill_rounded(SceneRect::new(c.x + 2.0, c.y + 2.0, c.w - 4.0, c.h - 4.0), vergence_look::RADIUS, color(vergence_look::SHELF_TILE));
                 }
                 let square = SceneRect::new(c.x + (c.w - ICON as f32) / 2.0, c.y + 12.0, ICON as f32, ICON as f32);
                 match icon {
@@ -289,13 +289,13 @@ impl Server {
                         scene.draw_image(picture, SceneRect::new(square.x + (square.w - iw) / 2.0, square.y + (square.h - ih) / 2.0, iw, ih), 1.0);
                     }
                     None => {
-                        scene.fill_rounded(square, vergence_look::RADIUS, colour(if *index == selected { vergence_look::SHELF } else { vergence_look::SHELF_TILE }));
+                        scene.fill_rounded(square, vergence_look::RADIUS, color(if *index == selected { vergence_look::SHELF } else { vergence_look::SHELF_TILE }));
                         let letter: String = name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into());
                         if let Some(face) = bold {
                             let size = 18.0;
                             let m = fonts.metrics(face, size);
                             let (_, width) = fonts.layout(face, size, &letter);
-                            vergence_render::text(&mut scene, fonts, face, size, colour(vergence_look::INK_FOCUSED), ScenePoint::new(square.x + (square.w - width) / 2.0, square.y + ((square.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), &letter);
+                            vergence_render::text(&mut scene, fonts, face, size, color(vergence_look::INK_FOCUSED), ScenePoint::new(square.x + (square.w - width) / 2.0, square.y + ((square.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), &letter);
                         }
                     }
                 }
@@ -307,7 +307,7 @@ impl Server {
                     let room = c.w - 12.0;
                     scene.push_clip(SceneRect::new(c.x + 6.0, c.y, room, c.h), 0.0);
                     let x = if width < room { c.x + 6.0 + (room - width) / 2.0 } else { c.x + 6.0 };
-                    vergence_render::text(&mut scene, fonts, face, size, colour(vergence_look::MENU_INK), ScenePoint::new(x.round(), (square.y + square.h + 8.0 + m.ascent).round()), name);
+                    vergence_render::text(&mut scene, fonts, face, size, color(vergence_look::MENU_INK), ScenePoint::new(x.round(), (square.y + square.h + 8.0 + m.ascent).round()), name);
                     scene.pop_clip();
                 }
             }

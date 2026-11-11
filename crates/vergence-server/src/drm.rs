@@ -70,7 +70,7 @@ struct Surface {
     last: std::time::Instant,
     scale: f64,
     /// For working the scale out again (displays.rs): the monitor's id, its
-    /// mode in pixels and its size in millimetres.
+    /// mode in pixels and its size in millimeters.
     id: String,
     px: (u32, u32),
     mm: Option<(u32, u32)>,
@@ -463,7 +463,7 @@ fn connect(state: &mut Server, conn: connector::Info, crtc: crtc::Handle) {
         &DrmOutputRenderElements::default(),
     ) {
         Ok(o) => o,
-        Err(e) => return tracing::warn!("{name}: cannot initialise: {e:?}"),
+        Err(e) => return tracing::warn!("{name}: cannot initialize: {e:?}"),
     };
     b.surfaces.insert(crtc, Surface { output, drm_output, connector: name, last: std::time::Instant::now(), scale, id, px: (w as u32, h as u32), mm, edid: identity, global });
 }

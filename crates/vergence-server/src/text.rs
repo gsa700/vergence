@@ -1,6 +1,6 @@
 // Text for the server's own drawing (title bars, 2026-11-07).
 //
-// One line of text, rasterised with ab_glyph (pure Rust) straight into an
+// One line of text, rasterized with ab_glyph (pure Rust) straight into an
 // output's physical pixels, so it is sharp at every monitor's scale: each
 // monitor gets its own raster, drawn 1:1. The font is the desktop's: the family
 // and size of Gtk/FontName in ~/.config/vergence/settings.toml (vergd's file,
@@ -52,7 +52,7 @@ impl TextFont {
     }
 
     /// `text` in one line, `w` x `h` premultiplied RGBA pixels, `color` (straight
-    /// RGB 0-1), left aligned, centred vertically; cut with an ellipsis if too long.
+    /// RGB 0-1), left aligned, centered vertically; cut with an ellipsis if too long.
     /// `scale` is the output's (physical pixels per point).
     pub fn render(&self, text: &str, w: usize, h: usize, scale: f64, color: [f32; 3]) -> Vec<u8> {
         let mut out = vec![0u8; w * h * 4];

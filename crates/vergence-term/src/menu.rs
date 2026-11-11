@@ -13,12 +13,12 @@ const EDGE: f32 = 4.0;
 const ITEM_H: f32 = 28.0;
 const LINE_H: f32 = 9.0;
 
-const fn colour(c: vergence_look::Rgb) -> Color {
+const fn color(c: vergence_look::Rgb) -> Color {
     Color::rgb(c.0, c.1, c.2)
 }
-const GROUND: Color = colour(vergence_look::MENU);
-const INK: Color = colour(vergence_look::MENU_INK);
-const INK_OFF: Color = colour(vergence_look::MENU_INK_OFF);
+const GROUND: Color = color(vergence_look::MENU);
+const INK: Color = color(vergence_look::MENU_INK);
+const INK_OFF: Color = color(vergence_look::MENU_INK_OFF);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Item {

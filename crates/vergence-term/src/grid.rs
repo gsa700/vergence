@@ -753,7 +753,7 @@ mod tests {
     }
 
     #[test]
-    fn colours() {
+    fn colors() {
         let mut g = Grid::new(10, 2);
         feed(&mut g, "\x1b[1;31ma\x1b[38;5;200mb\x1b[38;2;1;2;3mc\x1b[0md");
         let l = g.line(0);

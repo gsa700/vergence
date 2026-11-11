@@ -76,7 +76,7 @@ pub fn shown(desktop: &Table, id: Option<&str>) -> Shown {
     s
 }
 
-/// Set the picture, fit and colour for all screens (`id` None) or one screen
+/// Set the picture, fit and color for all screens (`id` None) or one screen
 /// (creating its own entry; `label` names it for people reading the file).
 pub fn set(desktop: &mut Table, id: Option<&str>, label: &str, image: Option<&Path>, mode: &str, color: &str) {
     let image = image.map(|p| p.display().to_string()).unwrap_or_default();
@@ -254,7 +254,7 @@ mod tests {
         // Setting it again edits the same entry.
         set(&mut d, Some("m1"), "ASUS", None, "fit", "#000000");
         assert_eq!(monitors(&d).len(), 1);
-        assert_eq!(shown(&d, Some("m1")).image, None); // "" = the colour alone
+        assert_eq!(shown(&d, Some("m1")).image, None); // "" = the color alone
         clear_own(&mut d, "m1");
         assert_eq!(shown(&d, Some("m1")), Shown { image: Some("/a.svg".into()), mode: "fill".into(), color: "#111111".into(), own: false });
         assert!(d["wallpaper"].get("monitor").is_none());

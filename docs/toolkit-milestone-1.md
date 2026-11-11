@@ -15,19 +15,19 @@ leaves behind.
 
 One terminal, 1264 x 706 points at scale 3 (3792 x 2118 pixels) on Hubble,
 six tabs: btop, htop, an endless `seq 1 1000000`, a flood with a different
-24-bit colour in every cell, random cursor-addressed writes, a Unicode
+24-bit color in every cell, random cursor-addressed writes, a Unicode
 flood.
 
 | | iced, software | iced, GPU |
 |---|---|---|
 | `seq 1 1000000` | 5.5 to 30 s | 1.4 to 1.7 s |
-| Colour flood | ~200 lines/s | ~3,000 lines/s |
+| Color flood | ~200 lines/s | ~3,000 lines/s |
 | Cursor writes (x250) | ~170 /s | ~2,300 /s |
 | Unicode flood | ~2,000 lines/s | ~28,000 lines/s |
 | Terminal CPU | one core, pinned | one core, pinned |
 
 Both held exactly one core: every tab's parsing and all drawing share the
-interface thread. Profile, software: 64% rasterising, 20% glyph outlines and
+interface thread. Profile, software: 64% rasterizing, 20% glyph outlines and
 hinting, 4% our parser and grid. Defects found: a redraw for every read of
 output; clicks lost under load (input judged at the pointer's latest
 position); six tabs push + off the window; combining marks dropped; programs
@@ -43,17 +43,17 @@ Five crates, each usable without the ones after it.
 
 1. **`vergence-scene`**: what a window looks like, as data. A scene is a
    list of commands in reference units: filled and outlined rectangles with
-   rounded corners, lines, glyph runs (font, size, positions, colour),
+   rounded corners, lines, glyph runs (font, size, positions, color),
    images, clips and layers. This is the display-list format of whitepaper
    §6.6 in its first version, so it is written to be read from an untrusted
    process from the start: fixed-size records, every count and index
    checked, no pointers, a fuzz test. No dependencies.
 2. **`vergence-text`**: fonts and glyphs. Finds font files (the desktop's
    font from the settings, and a fallback per character through the
-   installed fonts), turns text into positioned glyphs, and rasterises a
+   installed fonts), turns text into positioned glyphs, and rasterizes a
    glyph once per (font, glyph, pixel size, subpixel offset) into a cache.
-   **Colour is not part of the key**: iced's cache missed on every new
-   colour, which is why btop cost what it did. Plain text only in this
+   **Color is not part of the key**: iced's cache missed on every new
+   color, which is why btop cost what it did. Plain text only in this
    milestone: left to right, kerning, combining marks placed on their base,
    wide characters. It reads font files with ab_glyph, as the server's
    title bars do today.
@@ -62,7 +62,7 @@ Five crates, each usable without the ones after it.
      atlas texture, each monitor at its exact scale. A terminal screen is
      two instances a cell; 3792 x 2118 pixels is about 5,300 cells at the
      terminal's size, which is small work for any GPU. Only changed rows are sent again.
-   - **CPU, the reference**: the same scene rasterised in software, in
+   - **CPU, the reference**: the same scene rasterized in software, in
      bands across the cores. It is what tests compare the GPU against, what
      runs on a machine without a GPU (canary), and what draws a window that
      changes once.
@@ -82,7 +82,7 @@ Five crates, each usable without the ones after it.
    something real to carry later.
 
 **Threads.** The interface thread handles input and builds scenes; it never
-parses program output and never rasterises. Each terminal (tab or pane) has
+parses program output and never rasterizes. Each terminal (tab or pane) has
 a thread that reads its pty and runs the parser into its own grid. One
 render thread draws. A frame takes whatever the grids hold when the server
 asks for it, so a flood in one tab costs that tab's thread and nothing else,
@@ -98,8 +98,8 @@ choice is made at start and again if the GPU is lost; a tool keeps running
 through a GPU reset.
 
 **Wayland interfaces used.** wl_compositor, wl_surface, wl_shm,
-zwp_linux_dmabuf_v1, xdg_wm_base and xdg_toplevel (move, resize, maximise,
-minimise), xdg-decoration (to say the terminal draws its own bar),
+zwp_linux_dmabuf_v1, xdg_wm_base and xdg_toplevel (move, resize, maximize,
+minimize), xdg-decoration (to say the terminal draws its own bar),
 wp-fractional-scale and wp-viewporter (the exact scale), wl_seat with
 pointer and keyboard, wp-cursor-shape, wl_data_device (clipboard). All are
 ones the server offers today.
@@ -114,7 +114,7 @@ borrowing. Nothing new comes in.
 
 1. **Scene, text and the CPU renderer.** No window. A command-line tool
    renders a scene file to a PNG. Golden-image tests; a test scene that is
-   a full terminal screen of coloured cells at 3792 x 2118 (5,338 cells). The font
+   a full terminal screen of colored cells at 3792 x 2118 (5,338 cells). The font
    fallback and the glyph cache with their tests. Runs on all three
    machines.
 2. **A window, in software.** `vergence-wl` and `vergence-ui`: a window
@@ -131,7 +131,7 @@ borrowing. Nothing new comes in.
    on the server's request, the bar (tabs that shrink to fit so + never
    leaves the window, window buttons on the configured side, tab shapes as
    now), panes with dividers, the scrollbar, selection, the right-click
-   menu, colour schemes, the settings followed live. Fixed here because
+   menu, color schemes, the settings followed live. Fixed here because
    they are in code this step rewrites or touches: combining marks kept on
    their cell, and the pty master closed in children so a dead terminal's
    programs get their hangup.
@@ -158,7 +158,7 @@ borrowing. Nothing new comes in.
   the font database with generic names and fallback per character (db.rs),
   and `Fonts`: faces, glyphs with fallback, one-line layout with kerning,
   and the glyph cache keyed by face, glyph, size and sub-pixel position,
-  never colour. ab_glyph outlines and rasterises. 23 tests, two of them
+  never color. ab_glyph outlines and rasterizes. 23 tests, two of them
   fuzz tests of the font reader (2,000,000 iterations clean); green on
   Hubble, canary and Techbench. `cargo run --example fonts` reports what a
   machine has: Hubble's 349 font files are indexed in 7.5 ms; "monospace"
@@ -169,8 +169,8 @@ borrowing. Nothing new comes in.
   - Hubble has no CJK font (the missing glyph is drawn); the first lookup
     of a character only a far-down font has costs 10 to 30 ms while
     coverage tables are read, then nothing.
-  - A colour emoji font (canary's Noto Color Emoji) is chosen as a fallback
-    but has no outlines, so nothing is drawn: colour glyphs are outside
+  - A color emoji font (canary's Noto Color Emoji) is chosen as a fallback
+    but has no outlines, so nothing is drawn: color glyphs are outside
     this milestone, and until then such a face should be passed over for
     one that can draw.
   - Outlines are not hinted. Fine at scale 2 and 3; to be judged on the
@@ -186,10 +186,10 @@ borrowing. Nothing new comes in.
   demonstration scenes to a PNG with timings. 17 tests: pixel-exact
   shapes, a circle's area, symmetry, 1 thread against 2, 3, 6 and 16 (the
   same picture), rows against the whole, refusals, text where it was laid
-  out, colour not rasterising again, and **the same picture on Linux and
+  out, color not rasterizing again, and **the same picture on Linux and
   FreeBSD** (hashes of a busy scene at three scales). Green on Hubble,
   canary and Techbench. Measured on the stress test's window, 3792 x 2118
-  pixels with every cell its own colours and character:
+  pixels with every cell its own colors and character:
 
   | | cores | a frame | one core | one text row redrawn |
   |---|---|---|---|---|
@@ -236,13 +236,13 @@ borrowing. Nothing new comes in.
   user, and the wire fuzz extended to them.
 - **2026-11-09, step 2, second part: input.** `vergence-wl` gained the
   seat, pointer and keyboard events, the pointer's shape by name
-  (wp-cursor-shape), the requests to move, resize, maximise and minimise,
+  (wp-cursor-shape), the requests to move, resize, maximize and minimize,
   a wait with a time limit (`poll`), and a bounded reader for files the
   server sends (the keymap); 21 tests, fuzz extended. `vergence-ui`
   gained `App::input` with `Input` (pointer moved and left, button,
   scroll, key with symbol, text and modifiers, focus), a `Window` handle
   for what a program may ask in return (redraw, close, move, resize,
-  cursor, title, maximise, minimise), key repeat at the server's rate, and
+  cursor, title, maximize, minimize), key repeat at the server's rate, and
   keyboard.rs, which turns keys into symbols and text with the system's
   xkbcommon through declarations of our own (3 tests). Every event is
   given to the program as it is read, a press with the position the
@@ -387,7 +387,7 @@ borrowing. Nothing new comes in.
   | | iced, software | iced, GPU | vterm |
   |---|---|---|---|
   | `seq 1 1000000` | 5.5 to 30 s | 1.4 to 1.7 s | **0.61 s** |
-  | Colour flood, lines/s | ~200 | ~3,000 | **20,700** |
+  | Color flood, lines/s | ~200 | ~3,000 | **20,700** |
   | Unicode flood, lines/s | ~2,000 | ~28,000 | **222,700** |
   | Cursor writes (x250) /s | ~170 | ~2,300 | **14,900** |
 
@@ -471,14 +471,14 @@ borrowing. Nothing new comes in.
   - The settings are followed while the terminal runs: `settings.toml`
     and `desktop.toml` are looked at once a second (as the first terminal
     does; the session bus replaces this when the toolkit speaks it), and
-    the colour scheme, both fonts and the buttons' side change at the
+    the color scheme, both fonts and the buttons' side change at the
     next frame, the grids following the new cell size. Checked on Hubble
     against a copy of the configuration: Tango to Catppuccin, buttons
     left to right, 10 to 14 points, in one running window.
   Tests (2 new: 33 in `vterm`, 24 in `vergence-term`) green on Hubble,
   canary and Techbench.
 - **Step 4, seventh part (2026-11-09): the right-click menu.** `menu.rs`:
-  Copy (greyed with nothing selected), Paste, New tab and Close tab,
+  Copy (grayed with nothing selected), Paste, New tab and Close tab,
   each with its keys, drawn in the window over the terminal and kept
   inside it. The right button opens it at the pointer (Shift and the
   right button where a program has the mouse); a press on a line does
@@ -496,7 +496,7 @@ borrowing. Nothing new comes in.
     block cursor there, an outline in the others); the line between two
     panes can be dragged (no pane below a tenth of its split); the wheel
     is the pane's under the pointer; Ctrl+Shift+W, or the program
-    ending, closes the pane, its neighbour takes the room, and the tab
+    ending, closes the pane, its neighbor takes the room, and the tab
     goes with its last pane. Selection, the scrollbar, mouse reporting
     and the "lines back" label are each pane's own. `--panes N` opens
     the first tab divided, for trying it. Three panes seen in a
@@ -541,7 +541,7 @@ borrowing. Nothing new comes in.
   applications use Ctrl), and one 6-unit margin for bar, text and
   scrollbar.
 - **Step 5 begun (2026-11-10): the stress test, kept.**
-  `crates/vterm/examples/flood.rs` holds the jobs (colour, cursor,
+  `crates/vterm/examples/flood.rs` holds the jobs (color, cursor,
   unicode, and `time` for `seq`), each writing its rate to a report;
   `tools/vterm-stress/run.sh [minutes]` opens one `vterm` with the six
   tabs through `vctl` and writes a line a minute: the rates, the memory,
@@ -549,7 +549,7 @@ borrowing. Nothing new comes in.
   `parse`). **The first figures written here (commit 17ea6fd) were
   wrong** and are withdrawn: the flood jobs asked the terminal's size
   once, as they started, when it was still 80 x 24, so "full-width"
-  colour lines were 80 columns; and the interface thread's share for a
+  color lines were 80 columns; and the interface thread's share for a
   job alone was read from an average that included starting up. The
   jobs now ask the size every second and report it.
 - **Step 5, the soak (2026-11-10).** Six tabs for 62 minutes on Hubble.
@@ -561,7 +561,7 @@ borrowing. Nothing new comes in.
   a profile recorded beside the soak, none in the stretches left alone:
   "no slow frames" is **not shown** and needs a run nobody disturbs.
 - **Step 5, the interface thread (2026-11-10).** Measured properly: one
-  tab, the colour flood at full width (135 x 38 cells, 21,700 lines/s),
+  tab, the color flood at full width (135 x 38 cells, 21,700 lines/s),
   a quiet machine, 30 Hz, CPU time by the frame (`VTERM_FRAMES=1`
   counts frames). At 17ea6fd: 6.5 ms a frame, **19.5% of a core**.
   With this part: 5.0 ms, **15.0%**. Acceptance 5 asks for under 10%:
@@ -581,7 +581,7 @@ borrowing. Nothing new comes in.
     the last frame's length. `--maximized` opens the window filling its
     screen (asked after the first frame; before it, the server's
     remembered place wins).
-  What is left is in the shape of things: a cell with colours of its
+  What is left is in the shape of things: a cell with colors of its
   own is two commands, two prepared shapes and two 128-byte instances,
   and the window waits for the parser's lock to draw. The next piece of
   toolkit work is a primitive for a grid of cells (scene, both
@@ -591,13 +591,13 @@ borrowing. Nothing new comes in.
   keeps the size it started with** (80 x 24) until it is looked at; only
   the terminals drawn are fitted to the window. So in the six-tab run
   the three floods behind btop ran at 80 x 24: `seq 1 1000000` 0.71 to
-  0.74 s; colour 12,400 to 12,600 lines/s of 80 columns; cursor 6,700
+  0.74 s; color 12,400 to 12,600 lines/s of 80 columns; cursor 6,700
   batches/s, **under acceptance 5's 10,000**; Unicode 220,000 lines/s;
   the interface thread 8% with this part's build (the machine full: the
   jobs, the kernel carrying their bytes, a video in Firefox). The
   six-tab figures at the window's real size wait for that fix. Each job
-  alone at 80 columns: cursor 19,500 batches/s, colour 36,000 lines/s;
-  colour at 135 columns, 21,700 lines/s.
+  alone at 80 columns: cursor 19,500 batches/s, color 36,000 lines/s;
+  color at 135 columns, 21,700 lines/s.
 - **Step 5, the tabs behind (2026-11-10).** Fixed: when the window's or
   the cells' size changes, every tab's terminals are fitted, not only
   the ones drawn. The six floods now all report the window's size.
@@ -626,7 +626,7 @@ borrowing. Nothing new comes in.
     "Draw" now stays up from the first output after a frame until that
     terminal is next drawn, and the parsing thread wakes the window only
     for news it has not been told: once a frame.
-  Measured as before (one tab, the colour flood at 135 x 38 cells and
+  Measured as before (one tab, the color flood at 135 x 38 cells and
   about 21,800 lines/s, 30 Hz, CPU time by the frame; the absolute
   figures move with what else the machine's GPU is doing, so builds are
   compared run beside run): 17ea6fd 8.0 ms a frame (24% of a core);
@@ -636,10 +636,10 @@ borrowing. Nothing new comes in.
 - **Step 5, six tabs at the window's real size (2026-11-10):** 135 x 38
   cells in every tab, btop shown, a video in Firefox beside it:
   `seq 1 1000000` 0.84 to 0.86 s (under 1 s: met; the slowest single
-  run 1.2 s); colour 7,500 to 7,700 lines/s and cursor 6,600 batches/s,
+  run 1.2 s); color 7,500 to 7,700 lines/s and cursor 6,600 batches/s,
   both **under acceptance 5's 10,000**; Unicode 143,000 to 151,000
   lines/s; the interface thread under half a percent; 220 MB. Each
-  flood alone passes several times over (colour 21,800 lines/s, cursor
+  flood alone passes several times over (color 21,800 lines/s, cursor
   19,400 batches/s); four at once on six cores do not, with the kernel
   carrying their bytes: the machine's limit, not the terminal's.
   Acceptance 5 now asks the two of each flood alone (Dave, 2026-11-10):
@@ -650,7 +650,7 @@ borrowing. Nothing new comes in.
   with `VERGENCE_RENDER=cpu` so `vterm` drew with the CPU renderer. Six
   tabs for three minutes (top standing in for btop), a window of 54 x 23
   cells: no crash, nothing on the terminal's error output;
-  `seq 1 1000000` 0.64 to 0.68 s; colour 63,000 lines/s; cursor 8,500
+  `seq 1 1000000` 0.64 to 0.68 s; color 63,000 lines/s; cursor 8,500
   batches/s; Unicode 920,000 lines/s; 104 MB. The interface answered:
   four tab clicks sent through `vctl` during the load, each tab on the
   screen half a second later (X screenshots). Idle, a `vterm` used no
@@ -673,11 +673,11 @@ borrowing. Nothing new comes in.
   twenty threads, in the Vergence session from GDM on one 1920 x 1080
   monitor at scale 1 and 60 Hz; the terminal's window 820 x 520 units
   (101 x 28 cells). Six tabs for three minutes, all at once:
-  `seq 1 1000000` 0.32 s; colour 50,800 lines/s; cursor 33,700
+  `seq 1 1000000` 0.32 s; color 50,800 lines/s; cursor 33,700
   batches/s; Unicode 690,000 lines/s; the interface thread under half a
   percent; 148 MB; nothing on the terminal's error output, and every
   job ended with it. One flood alone and shown, at 60 frames a second:
-  the interface thread 1.4% of a core with the colour flood (0.24 ms of
+  the interface thread 1.4% of a core with the color flood (0.24 ms of
   CPU a frame, 64,000 lines/s) and 1.2% with the cursor test (44,000
   batches/s).
 - **Step 5, the switch (2026-11-10).** `vterm` is `vergence-term` now:
@@ -707,7 +707,7 @@ borrowing. Nothing new comes in.
   225.3 to 225.4 MB from the tenth to the last. The interface thread
   under half a percent in every minute (btop shown). `seq 1 1000000`
   0.72 s on average, 1.03 s the slowest single run of some 5,000;
-  colour 9,500 lines/s and cursor 8,300 batches/s with the four floods
+  color 9,500 lines/s and cursor 8,300 batches/s with the four floods
   at once. Nothing on the terminal's error output; every job ended with
   it. The kernel log gained two lines, a USB device unplugged twice.
   The server logged one slow frame, 45 ms, in the second the test's
@@ -739,21 +739,21 @@ borrowing. Nothing new comes in.
   1920 x 1080 monitor at scale 1 and 60 Hz; the terminal 820 x 520 units,
   114 x 25 cells): the terminal and the settings app draw as they do on
   Linux. Six tabs for three minutes on its four cores: no crash, nothing
-  on the error output, `seq 1 1000000` 0.90 to 0.91 s, colour 8,700
+  on the error output, `seq 1 1000000` 0.90 to 0.91 s, color 8,700
   lines/s, cursor 4,400 batches/s, Unicode 254,000 lines/s, the
   interface thread 0.14 s of CPU in the three minutes; every job ended
   with the terminal. One flood alone and shown, at 60 frames a second:
-  colour 25,000 lines/s with the interface thread at 3.8% of a core;
+  color 25,000 lines/s with the interface thread at 3.8% of a core;
   cursor 14,400 batches/s at 3.2%. Acceptance 5's figures for a flood
   alone hold on the slowest of the four machines.
 
 - **After the milestone's steps: the look in one place, the bar in the
   toolkit (2026-11-10; Dave: yes to both, and to round window corners).**
   - `crates/vergence-look`, with nothing under it: the one corner radius
-    (5 units), the bars' heights, the border, and the colours of bars,
+    (5 units), the bars' heights, the border, and the colors of bars,
     borders, buttons and menus. The server's title bars and borders
     (`decor.rs`) and the toolkit's bar, menu and scrollbar read them from
-    there; neither keeps a copy. The server's colours move by less than
+    there; neither keeps a copy. The server's colors move by less than
     half a step of 255 (they were written as fractions).
   - The window bar is the toolkit's: `vergence_ui::bar`, moved from the
     terminal as it was, with a second form for a window without tabs
@@ -768,7 +768,7 @@ borrowing. Nothing new comes in.
     settings are all in the application. Each starts from the desktop's
     setting where there is one (fonts, light or dark, the accent) and may
     be overridden there for that application alone; what only the
-    application has (the terminal's colours, its scrollback) is simply
+    application has (the terminal's colors, its scrollback) is simply
     its own. The settings app holds the desktop's defaults. To be built
     with the widgets; what an application overrides is kept by the
     settings service in a section of its own, so that it applies live
@@ -781,7 +781,7 @@ Every step: `cargo test --workspace` green on Hubble, canary and Techbench;
 no new warnings.
 
 1. The CPU renderer draws the full-screen cell scene (5,338 cells, every
-   one its own colours) in under 30 ms on Hubble using all six cores, and
+   one its own colors) in under 30 ms on Hubble using all six cores, and
    a one-row change in under 2 ms. **Met 2026-11-09** for the frame
    (13.5 ms); one row is 2.0 ms, to come down in step 2 (Progress). Golden images match on all
    three machines, FreeBSD included. The scene decoder survives the fuzz
@@ -802,7 +802,7 @@ no new warnings.
    leaves none of its programs running.
 5. The six-tab load, same window size, on Hubble's GPU:
    - `seq 1 1000000`: under 1 s whichever tab is shown;
-   - the colour flood above 10,000 lines/s and the cursor test above
+   - the color flood above 10,000 lines/s and the cursor test above
      10,000 batches/s, **each as the only flood running** (restated by
      Dave, 2026-11-10: as first written the two were to hold with all
      six tabs at once, which four floods on six cores do not reach, the
@@ -865,6 +865,6 @@ Done, as every milestone, when it has run on Hubble (Void) and Techbench
 - The native window protocol; scenes sent to the server instead of pixels;
   remote display.
 - Text shaping for scripts that need it, right-to-left text, input
-  methods, emoji in colour.
+  methods, emoji in color.
 - A process of its own for fonts and decoding.
 - Vulkan.

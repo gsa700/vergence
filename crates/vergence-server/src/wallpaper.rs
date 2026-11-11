@@ -11,7 +11,7 @@
 //     id = "3f2a9c0e1b7d4a55"  # its EDID (vergence_profile::monitor_id), any port
 //     label = "ASUS VS229"     # for people; not used
 //     image = "..."            # each field optional: unset ones come from above;
-//     mode = "fit"             # image = "" means none (the colour alone)
+//     mode = "fit"             # image = "" means none (the color alone)
 //     color = "#000000"
 //
 // Each monitor gets the image rendered at its own native pixels, once per size:
@@ -20,13 +20,13 @@
 // monitor's picture is ready it shows the one before. The file is checked every
 // second and changes apply at once.
 //
-// Only a monitor whose own picture, fit, colour or size changed is drawn again
+// Only a monitor whose own picture, fit, color or size changed is drawn again
 // (2026-11-08: choosing a picture for one screen used to redraw both). The worker
 // keeps the last few decoded pictures, each shrunk to what the largest monitor
 // needs (an 8K JPEG is 130 MB decoded and took 1.4 s to draw again each time).
 //
 // Finished pictures are also kept on disk, in ~/.cache/vergence/wallpaper, one
-// file per picture, fit, colour and monitor size (raw pixels: reading one back
+// file per picture, fit, color and monitor size (raw pixels: reading one back
 // takes milliseconds where decoding the 8K JPEG took 2 s), so a restart shows the
 // wallpaper at once. The newest CACHE_FILES are kept.
 
@@ -105,7 +105,7 @@ pub fn desktop_path() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/vergence/desktop.toml"))
 }
 
-/// "#rrggbb" -> straight RGB 0-1 (else the default dark grey).
+/// "#rrggbb" -> straight RGB 0-1 (else the default dark gray).
 pub fn parse_color(s: &str) -> [f32; 3] {
     let h = s.trim().trim_start_matches('#');
     let v = (h.len() == 6).then(|| u32::from_str_radix(h, 16).ok()).flatten().unwrap_or(0x1a1a1a);
@@ -208,7 +208,7 @@ impl Server {
         self.redraw_all();
     }
 
-    /// The colour behind everything on an output.
+    /// The color behind everything on an output.
     pub fn background_color(&self, output: &str) -> [f32; 4] {
         let id = self.monitor_id(output);
         let c = self.wallpaper.as_ref().map(|w| parse_color(&w.config.for_monitor(&id).color)).unwrap_or([0.1, 0.1, 0.1]);
@@ -433,7 +433,7 @@ impl Source {
         Some((Source::Raster(img.to_rgba8()), false))
     }
 
-    /// The picture for a w x h output: premultiplied RGBA, the colour behind.
+    /// The picture for a w x h output: premultiplied RGBA, the color behind.
     fn render(&self, w: u32, h: u32, mode: &str, color: [f32; 3]) -> Vec<u8> {
         let (sw, sh) = match self {
             Source::Raster(i) => (i.width() as f64, i.height() as f64),

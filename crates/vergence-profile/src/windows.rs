@@ -1,6 +1,6 @@
 //! Window memory (milestone 3): where each window was on each monitor setup.
 //!
-//! A window is recognised by its class (`WM_CLASS` instance and class), its
+//! A window is recognized by its class (`WM_CLASS` instance and class), its
 //! role (`WM_WINDOW_ROLE`, often empty) and its place among open windows of
 //! the same class (0 = the first opened). **Titles are never stored**
 //! (Dave, 2026-11-06): they carry document names, email subjects and web
@@ -38,7 +38,7 @@ impl WindowId {
 pub struct WindowSetting {
     #[serde(flatten)]
     pub id: WindowId,
-    /// Monitor ID (see `crate::monitor_id`) the window's centre was on.
+    /// Monitor ID (see `crate::monitor_id`) the window's center was on.
     pub monitor: String,
     /// Position of the client window relative to the monitor's top-left,
     /// in the monitor's panel pixels (X pixels divided by its RandR scale
@@ -66,17 +66,17 @@ impl WindowSetting {
         self == o
     }
 
-    /// e.g. "+100+50 1200x900 maximised, workspace 2".
+    /// e.g. "+100+50 1200x900 maximized, workspace 2".
     pub fn describe_place(&self) -> String {
         let mut s = format!("+{}+{} {}x{}", self.x, self.y, self.width, self.height);
         if self.fullscreen {
             s.push_str(" fullscreen");
         } else if self.max_horz && self.max_vert {
-            s.push_str(" maximised");
+            s.push_str(" maximized");
         } else if self.max_horz {
-            s.push_str(" maximised across");
+            s.push_str(" maximized across");
         } else if self.max_vert {
-            s.push_str(" maximised up/down");
+            s.push_str(" maximized up/down");
         }
         match self.desktop {
             Some(ALL_DESKTOPS) => s.push_str(", all workspaces"),
@@ -221,7 +221,7 @@ mod tests {
         a.max_horz = true;
         a.max_vert = true;
         a.desktop = Some(1);
-        assert_eq!(a.describe_place(), "+5+10 800x600 maximised, workspace 2");
+        assert_eq!(a.describe_place(), "+5+10 800x600 maximized, workspace 2");
         assert_eq!(a.id.describe(), "firefox/Firefox #1");
     }
 }

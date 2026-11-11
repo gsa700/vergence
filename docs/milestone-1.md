@@ -7,7 +7,7 @@ machine in daily use.
 
 **In progress (2026-11-06): `vergd probe` and `vergd watch` done; acceptance runs next.** It is built and tested on real hardware (a FreeBSD X11
 machine with real monitors; Debian 13 second), not in a VM: QEMU's synthetic
-EDIDs and its hot-plug behaviour would be worked around instead of the real
+EDIDs and its hot-plug behavior would be worked around instead of the real
 thing. FreeBSD became the primary platform on 2026-11-06.
 
 ## What it does
@@ -72,7 +72,7 @@ With these, a script can run the daemon against thousands of real monitors'
 EDIDs from the public linuxhw EDID database (github.com/linuxhw/EDID), broken
 ones included (zero or wrong physical size, missing serials, identical
 twins). That covers whitepaper §10 item 3 far better than a shelf of
-monitors. The exact behaviour (whether `force` produces the same RandR
+monitors. The exact behavior (whether `force` produces the same RandR
 events as a real unplug) is the first thing to check on the machine.
 
 **2. Sleep and wake, overnight.** `rtcwake -m mem -s 30` suspends and wakes
@@ -82,7 +82,7 @@ is unchanged and (later) that the layout survived.
 **3. Same physical size everywhere (scaling milestones).** Small test
 programs in each toolkit (GTK, Qt, Avalonia, Electron, Java) each draw a box
 of a known logical size. The harness screenshots each monitor, measures the
-box in pixels and converts to millimetres with the EDID's physical size. Pass:
+box in pixels and converts to millimeters with the EDID's physical size. Pass:
 every toolkit's box is the same physical size on every monitor, within a
 tolerance. Dave's eye is needed once, to calibrate what "the right size" is,
 not on every run.

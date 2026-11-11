@@ -203,7 +203,7 @@ fn text_agrees_with_the_reference() {
     for scale in [1.0, 2.25, 3.0] {
         // Never more than two steps apart. How many pixels are two apart depends on the
         // font: every partly covered pixel of a glyph is rounded twice by the CPU renderer
-        // (the coverage times the colour's alpha, then the blend) and once by the GPU. At
+        // (the coverage times the color's alpha, then the blend) and once by the GPU. At
         // scale 1 most of a glyph's pixels are partly covered: 0.4% of the picture on
         // canary's Noto Sans Mono and 1.4% with Techbench's variable one, against one
         // pixel on Hubble (2026-11-09).

@@ -5,7 +5,7 @@
 //! entries read by [`desktop`]) and their icons ([`icons`]).
 //!
 //! Step 1 is here: the dock, along an edge of its screen or floating on it
-//! ([`Placement`]), the band it stands in at an edge, the **work area** the band leaves (what maximising, placing and fitting windows,
+//! ([`Placement`]), the band it stands in at an edge, the **work area** the band leaves (what maximizing, placing and fitting windows,
 //! the desktop menu and notification cards keep inside), and moving a
 //! remembered window clear of the strip. Rectangles are in points, in the
 //! desktop's own space (a screen's rectangle is where the arrangement put

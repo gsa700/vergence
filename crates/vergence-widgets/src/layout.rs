@@ -40,7 +40,7 @@ pub(crate) enum What<M> {
     Slider { min: f32, max: f32, step: f32, value: f32, marks: Vec<f32>, on_change: Option<Box<dyn Fn(f32) -> M>>, on_release: Option<M> },
     /// `baseline`: of the text, below the field's top.
     Field { value: String, placeholder: String, secret: bool, on_input: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, size: f32, baseline: f32 },
-    Choice { options: Vec<String>, selected: Option<usize>, on_select: Option<Box<dyn Fn(usize) -> M>>, size: f32, baseline: f32, step: f32 },
+    Choice { options: Vec<String>, selected: Option<usize>, placeholder: String, on_select: Option<Box<dyn Fn(usize) -> M>>, size: f32, baseline: f32, step: f32 },
     /// `content`: the height of what is in it.
     Scroll { content: f32 },
     Picture { image: Arc<Image>, fit: Fit, radius: f32, opacity: f32 },
@@ -409,10 +409,10 @@ impl Layout<'_> {
                 let baseline = self.field_baseline(rect.h);
                 push(out, What::Field { value, placeholder, secret, on_input, on_submit, size: self.text_size, baseline });
             }
-            Kind::Choice { options, selected, on_select } => {
+            Kind::Choice { options, selected, placeholder, on_select } => {
                 let baseline = self.field_baseline(rect.h);
                 let step = self.measure.line(self.text_size, 400).1;
-                push(out, What::Choice { options, selected, on_select, size: self.text_size, baseline, step });
+                push(out, What::Choice { options, selected, placeholder, on_select, size: self.text_size, baseline, step });
             }
             Kind::Picture { image, fit, radius, opacity } => push(out, What::Picture { image, fit, radius, opacity }),
             Kind::Drawing { draw, on_touch } => push(out, What::Drawing { draw, on_touch }),

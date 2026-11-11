@@ -97,7 +97,7 @@ pub fn build(s: &Spec) -> Vec<u8> {
     b[21] = s.size_mm.0.div_ceil(10) as u8;
     b[22] = s.size_mm.1.div_ceil(10) as u8;
     b[23] = 120; // gamma 2.2
-    b[24] = 0x0A; // RGB colour, preferred timing in the first descriptor
+    b[24] = 0x0A; // RGB color, preferred timing in the first descriptor
     b[25..35].copy_from_slice(&[0xEE, 0x91, 0xA3, 0x54, 0x4C, 0x99, 0x26, 0x0F, 0x50, 0x54]); // sRGB-ish
     for i in 0..8 {
         b[38 + 2 * i] = 1;

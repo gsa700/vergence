@@ -1,12 +1,12 @@
 //! `vergence-harness measure <title>...`: how big a size box is on the
-//! panel, in millimetres (milestone 4, acceptance 3; whitepaper §4.8.3).
+//! panel, in millimeters (milestone 4, acceptance 3; whitepaper §4.8.3).
 //!
 //! The window with that title is read back from the X server (GetImage on
 //! the window itself, so a compositor does not matter, and windows on a
 //! fake monitor that shows nothing can still be read). The magenta box's
 //! bounding box is in drawn pixels; dividing by the RandR factor of the
 //! monitor it is on gives panel pixels, and the monitor's physical size
-//! gives millimetres.
+//! gives millimeters.
 
 use std::error::Error;
 

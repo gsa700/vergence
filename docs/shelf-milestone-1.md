@@ -25,8 +25,8 @@ pinned or running application. Live tiles are shelf milestone 2.
 - **No work area.** `toggle_maximize` (decor.rs) fills the whole monitor,
   and `content_area` (place.rs) is the monitor less a title bar. Nothing
   can reserve an edge.
-- **No minimise.** The settings app has the Minimise switch and the
-  terminal draws the button, but the server has no minimised state: the
+- **No minimize.** The settings app has the Minimize switch and the
+  terminal draws the button, but the server has no minimized state: the
   request goes nowhere.
 - **No primary screen in the server.** `[displays] primary` is written by
   the settings app and read only there (`wall::primary`: the recorded one if
@@ -34,7 +34,7 @@ pinned or running application. Live tiles are shelf milestone 2.
 - **Keys**: Ctrl+Alt+Backspace, Escape for the menu, VT switching. No
   desktop key bindings.
 - **Drawing**: title bars, the menu and notification cards are drawn by the
-  server (solid rectangles, text rasterised per monitor at its own pixels,
+  server (solid rectangles, text rasterized per monitor at its own pixels,
   sized in points). There is no icon drawing, but `image` (PNG) and `resvg`
   (SVG) are already in the server for wallpapers and cursors.
 - **Windows know their app**: Wayland app_id or X11 WM_CLASS, as window
@@ -81,7 +81,7 @@ pinned or running application. Live tiles are shelf milestone 2.
   (`icon-theme`), then hicolor, then `/usr/share/pixmaps`; the size nearest
   to what the monitor needs (32 points times its scale), SVG preferred when
   there is one, so icons are sharp at every scale. An application with no
-  icon gets a tile with its first letter. Rasterised once per (icon, pixel
+  icon gets a tile with its first letter. Rasterized once per (icon, pixel
   size) and kept.
 - **A window belongs to the application** whose desktop entry id equals its
   app_id or WM_CLASS (case ignored), else whose StartupWMClass does, else
@@ -95,7 +95,7 @@ pinned or running application. Live tiles are shelf milestone 2.
    (the settings app's rule, moved into vergence-profile or vergence-shell
    so both use one function) and draws an empty strip on its right edge.
    A screen with a shelf has a **work area**, the monitor less the strip:
-   maximise, default placement, fitting, the menu and notification cards
+   maximize, default placement, fitting, the menu and notification cards
    stay inside it. A remembered place that the strip would cover is nudged
    left. `hide = true` is read but does nothing yet. `vctl shelf` reports
    the strip's rectangle and, later, its items.
@@ -106,13 +106,13 @@ pinned or running application. Live tiles are shelf milestone 2.
    icon file), for checking a machine over SSH.
 3. **Running applications.** One icon per application with a window open,
    in the order they started, with a mark beside it; the focused one's mark
-   is in the accent colour. The name appears beside the icon when the
+   is in the accent color. The name appears beside the icon when the
    pointer rests on it. A click: one window, focus and raise it; several, a
    short list opens to the left (title, and the screen it is on when that
-   is not the shelf's). **Minimise** arrives here, since the shelf is where
-   minimised windows go: the server honours the minimise request (Wayland
+   is not the shelf's). **Minimize** arrives here, since the shelf is where
+   minimized windows go: the server honors the minimize request (Wayland
    and X11), its own title bars gain the button when the settings name it,
-   and a minimised window comes back by its icon.
+   and a minimized window comes back by its icon.
 4. **Pinned applications.** `pinned` entries sit at the top of the
    applications part whether running or not; a click starts one (window
    memory already puts it back where it was on this setup: "remembered
@@ -158,10 +158,10 @@ one.
     them).
   - The server (`shelf.rs`): the strip on the primary screen, in front
     of every window and behind the menu and the notification cards.
-    Maximise, default placement, fitting, the rescue of a window from a
+    Maximize, default placement, fitting, the rescue of a window from a
     screen that went, the desktop menu and the notification cards use
     the work area; a remembered place the strip would cover is moved
-    left; a maximised window is fitted again when the strip moves. A
+    left; a maximized window is fitted again when the strip moves. A
     press on the strip does nothing and reaches nothing behind it.
     `[shelf] hide` is read and not acted on. `vctl shelf` says where the
     strip and the work area are.
@@ -171,7 +171,7 @@ one.
     buffer the server shows, kept until its height or scale changes.
     Its ground and edge are in `vergence-look`.
   - On Hubble (the 14" 4K alone, scale 3): the strip at 1232,0, 48 x 720
-    points; a terminal started maximised is 1232 x 720 and stops at it;
+    points; a terminal started maximized is 1232 x 720 and stops at it;
     a notification card sits 12 points left of it. Not yet looked at:
     its width with a ruler on two screens (acceptance 1; the ASUS is on
     kepler), and a second screen at all.
@@ -223,7 +223,7 @@ one.
     they started; each item's place under the apps button's. Tests.
   - The server (`shelf.rs`): the windows in the order they were first
     seen, each item's icon and mark drawn on the strip. The mark is on
-    the windows' side: short and grey for an application that is
+    the windows' side: short and gray for an application that is
     running, long and in the accent for the one with the keyboard. An
     application with no icon, or whose icon has not come yet, has a tile
     with its name's first letter. `vctl shelf` lists the items.
@@ -247,34 +247,34 @@ one.
   terminal's with two windows and the second of the list. Two windows
   of one title are two lines that read the same; the screen each is on
   is to be added beside the title where it is not the shelf's.
-- **Step 3, third part (2026-11-10): minimise.** The server has a
-  minimised state: a minimised window is on no screen and is kept, with
+- **Step 3, third part (2026-11-10): minimize.** The server has a
+  minimized state: a minimized window is on no screen and is kept, with
   the place it goes back to, by the shelf, whose items count it with the
-  rest. The request is honoured from Wayland windows (the terminal's
+  rest. The request is honored from Wayland windows (the terminal's
   own button) and X11 ones, which may also ask to come back. The
   keyboard goes to the window then in front. An application all of
-  whose windows are minimised keeps its icon, faint and without a mark.
-  From the dock: a click on a minimised application brings its window
+  whose windows are minimized keeps its icon, faint and without a mark.
+  From the dock: a click on a minimized application brings its window
   back to its place, in front, with the keyboard; a click on the
-  application that has the keyboard, when it has one window, minimises
-  it (decided 2026-11-09); in the list of several windows a minimised
-  one comes back. A window whose screen went while it was minimised
+  application that has the keyboard, when it has one window, minimizes
+  it (decided 2026-11-09); in the list of several windows a minimized
+  one comes back. A window whose screen went while it was minimized
   comes back on the screen under the pointer. Driven through `vctl` on
-  Hubble: minimised from the dock and from the terminal's button, and
+  Hubble: minimized from the dock and from the terminal's button, and
   back, each time to the same place.
 - **Step 3, last part (2026-11-10): the name, and the title bars'
   button.** When the pointer has rested half a second on an item of the
   dock, the application's name appears to the left of its icon, in a
   small rounded label drawn like the dock; it goes when the pointer
   leaves the item or presses it. The server's own title bars have a
-  minimise button, left of maximise, when the settings' window buttons
+  minimize button, left of maximize, when the settings' window buttons
   name it (`Gtk/DecorationLayout`, which the server now also offers as
   `org.gnome.desktop.wm.preferences button-layout`; without a setting,
   it is there). On Hubble through `vctl`: "Settings" beside the settings
-  app's icon; its title bar's button minimises it and the dock brings it
+  app's icon; its title bar's button minimizes it and the dock brings it
   back to its place.
   **Step 3 is done**, but for two things left for the list of several
-  windows: a minimised window is not told apart in it, and the screen a
+  windows: a minimized window is not told apart in it, and the screen a
   window is on is not named. Acceptance 3's hand checks (Firefox,
   AlbumWall, icons at two scales) are Dave's to make.
 - **The shelf is a dock (Dave, 2026-11-10).** "Like a dock, rounded
@@ -284,10 +284,10 @@ one.
   through"), its corners the one radius, drawn on nothing so the desktop
   shows around it. It stands in a column the height of the screen, the
   shelf's width and the room on both its sides (60 points); the work
-  area is the screen less that column, so a maximised window still stops
+  area is the screen less that column, so a maximized window still stops
   clear of it. `vergence-shell` has `dock` beside `strip` (the column);
   the server tests a point against the dock as it was last drawn. On
-  Hubble: a dock of two items at 1226,288, 48 x 144; a maximised
+  Hubble: a dock of two items at 1226,288, 48 x 144; a maximized
   terminal 1220 wide; a click on an icon in it still brings its window
   forward.
 - **Decided the same evening, not built: the dock moves, and all of it
@@ -338,7 +338,7 @@ one.
     the primary one. Marks, the name label and the window list are on the
     side of the dock facing the middle of its screen. A floating dock
     reserves nothing; at an edge the work area gives up its band and
-    maximised windows are refitted.
+    maximized windows are refitted.
   - Driven on Hubble with `vctl pointer/press/release`: right, left, top,
     bottom, free in the middle, restart, back to the right. Tests green on
     Hubble, Techbench, kepler, canary.
@@ -347,7 +347,7 @@ one.
     but by an edge; nothing shows where it will snap while dragging; a
     hand's drag with a real mouse (Dave).
 
-- **A minimised window goes into its icon (2026-11-10).** For 220 ms
+- **A minimized window goes into its icon (2026-11-10).** For 220 ms
   the window's picture shrinks and fades towards its application's icon
   on the dock, slow at first and quick at the end; coming back it runs
   the other way, and the window is put in its place when the picture
@@ -479,7 +479,7 @@ one.
     menu. One that comes down within 10 points of a title bar's button,
     the dock, a window's edge or a title bar is taken to have meant it.
     A window that asks to be moved from a finger's press goes with that
-    finger (`touch_move_request`; a maximised one stays), and its place
+    finger (`touch_move_request`; a maximized one stays), and its place
     is remembered when the finger lifts.
   - Terminal: a finger's drag that begins on the bar is the pointer's
     with its button held, so the window moves by its bar and a tab along
@@ -487,7 +487,7 @@ one.
     wheel, a notch for every three lines.
   - On Hubble with `vctl touch`: the long press on the terminal's icon
     opens its menu, on the desktop the desktop menu; a double tap on the
-    bar un-maximises; the window dragged by its bar goes 100 left and 80
+    bar un-maximizes; the window dragged by its bar goes 100 left and 80
     down with the finger.
   - Not tried: the forgiving reach (no server title bar was on screen);
     the mouse program's wheel; a real finger on any of this.
@@ -505,13 +505,40 @@ one.
     Wayland wants it); a buffer made opaque is not reused once the
     background is not.
   - The terminal: its ground has that opacity (`[terminal] opacity`),
-    read again when desktop.toml changes; text, the cursor, coloured
+    read again when desktop.toml changes; text, the cursor, colored
     cells and the bar stay as they are.
   - The dock: `[shelf] opacity`, its panel only.
   - On Hubble: the terminal at 0.8 and the dock at 0.7 over the
     wallpaper, in a screenshot.
   - Not yet: blur of what is behind (the server's to do); the bar and
     server-drawn title bars seen through; a page in the settings app.
+
+- **Step 6, first part (2026-11-10): the Dock page and hiding.**
+  - The settings app (now on the project's own toolkit, toolkit milestone
+    2) has a **Dock** page: where (an edge; "Where you put it" shown while
+    it floats), the screen (when there are several), the gap (0 to 64
+    points), keep windows clear, hide automatically, opacity (30 to 100%),
+    and the pinned applications with up, down and Unpin, and a choice of
+    installed applications to pin. It writes `[shelf]`; the server follows
+    within a second. The app reads desktop.toml again when a page opens
+    and when its window has the keyboard again, since the server writes
+    the file too (a drag, a pin from the dock).
+  - **`hide = true` works, as LXDE's panel hides** (Dave, 2026-11-10): at
+    an edge, windows have the whole screen and the dock slides out past
+    the edge in 160 ms, leaving a 3-point sliver; the pointer on the
+    sliver brings it straight back, and 0.7 s away from it (no menu or
+    apps popup open) sends it off again. A press on the sliver only
+    brings it out, so a finger, which has no hover, can find it too. A
+    floating or dragged dock never hides. `vctl shelf` says "(away now)"
+    while it is hidden.
+  - On Hubble: hidden with the pointer mid-screen, out at the sliver, away
+    again after leaving; work area 1280 x 720 (the whole screen).
+  - **Parked (Dave, 2026-11-10: "undecided ... revisit when we have a bunch
+    of screens again"):** docks on more than one screen (the `screens`
+    list of the original plan) against the one movable dock with its
+    screen setting. Unplugging the dock's screen already moves it to the
+    primary (`shelf_screen`: the named screen if connected, else the
+    primary).
 
 ## Acceptance
 
@@ -520,7 +547,7 @@ the server builds with no new warnings.
 
 1. On Hubble's two monitors: the strip is the same width measured with a
    ruler on both when the shelf is moved between them (primary changed in
-   Settings). A maximised window stops at the strip. Notification cards
+   Settings). A maximized window stops at the strip. Notification cards
    and the desktop menu do not cover it. A window remembered under where
    the strip now is opens clear of it. Tests: the work-area arithmetic.
 2. `vshell apps` lists Firefox, htop, Terminal and Settings on Hubble with
@@ -532,7 +559,7 @@ the server builds with no new warnings.
 3. Start Firefox, two terminals and AlbumWall: three icons, the two
    terminals sharing one. The focused application's mark follows the focus.
    The terminals' icon lists both windows and each one comes forward.
-   Minimise from the terminal's button, from Firefox's, and from a server
+   Minimize from the terminal's button, from Firefox's, and from a server
    title bar: the window goes away, its icon stays, a click brings it back
    to the same place. Icons are sharp in a screenshot of each monitor
    (`vctl shot`) at 2.25 and at 0.75.
@@ -543,7 +570,7 @@ the server builds with no new warnings.
    without starting anything; no typed letter reaches the window that had
    the focus. On Techbench the grid scrolls. Driven by `vctl` as well as by
    hand.
-6. Hide on: a maximised window uses the whole monitor, the strip returns
+6. Hide on: a maximized window uses the whole monitor, the strip returns
    at the edge and leaves again. A shelf on the second monitor shows only
    its windows. Unplug the primary: the shelf is on the other monitor
    within a second, and back after the replug.
@@ -574,7 +601,7 @@ Done, as every milestone, when it has run on Hubble (Void), on Techbench
 1. **The key that opens the apps popup** is the Super (logo) key tapped
    alone.
 2. **A click on the icon of the focused application's only window**
-   minimises it.
+   minimizes it.
 3. **The strip is 48 points wide, icons 32**, to be looked at on both
    monitors in step 1.
 4. **Icons.** The shelf reads the icon themes that are installed and draws

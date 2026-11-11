@@ -206,9 +206,9 @@ impl Server {
     pub fn touch_move_request(&mut self, surface: &WlSurface, serial: Serial) {
         let Some((slot, down)) = self.touch.on_windows.iter().find(|(_, (s, on, _))| *s == serial && on.id().same_client_as(&surface.id())).map(|(slot, (_, _, at))| (*slot, *at)) else { return };
         let Some(window) = self.space.elements().find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface)).cloned() else { return };
-        // A maximised window stays where it is.
+        // A maximized window stays where it is.
         if self.restore.contains_key(&window) {
-            tracing::info!("touch: a maximised window is not moved by a finger");
+            tracing::info!("touch: a maximized window is not moved by a finger");
             return;
         }
         let Some(from) = self.space.element_location(&window) else { return };

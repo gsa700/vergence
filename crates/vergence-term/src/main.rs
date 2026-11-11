@@ -24,7 +24,7 @@
 //! the window's buttons on the side the desktop's settings say and tabs
 //! that shrink to fit; typing, paste, the scrollback (wheel,
 //! Shift+PageUp/PageDown, Shift+Home/End), resizing, titles, the program's own copies (OSC
-//! 52), the fonts and colour scheme from the desktop's settings. Ctrl+Shift+T
+//! 52), the fonts and color scheme from the desktop's settings. Ctrl+Shift+T
 //! opens a tab, Ctrl+Shift+W closes one, Ctrl+PageUp/PageDown and
 //! Ctrl+Tab/Ctrl+Shift+Tab change tab.
 //! The mouse selects text (select.rs): a drag by characters, a second press
@@ -36,7 +36,7 @@
 //! A thin scrollbar at the right edge (scrollbar.rs) shows where the view
 //! is in the scrollback and can be dragged.
 //! The desktop's settings are followed while the terminal runs: the two
-//! files are looked at once a second, and a change of fonts, colours or
+//! files are looked at once a second, and a change of fonts, colors or
 //! button side shows at the next frame.
 //! The right button opens a menu (menu.rs) with copy, paste and the tab
 //! commands; where a program has the mouse, Shift and the right button.
@@ -169,7 +169,7 @@ const FLICK_FRICTION: f32 = 3.0;
 const FLICK_STOP: f32 = 40.0;
 const FLICK_TICK: std::time::Duration = std::time::Duration::from_millis(16);
 
-/// The terminal's colours: its ground and text, the cursor, and the 16 named ones.
+/// The terminal's colors: its ground and text, the cursor, and the 16 named ones.
 struct Palette {
     bg: Color,
     fg: Color,
@@ -181,7 +181,7 @@ const fn rgb(v: u32) -> Color {
     Color::rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
 }
 
-/// Tango: GNOME Terminal's palette, the look 16-colour programs were tuned against.
+/// Tango: GNOME Terminal's palette, the look 16-color programs were tuned against.
 const TANGO: Palette = Palette {
     bg: rgb(0x2e3436),
     fg: rgb(0xd3d7cf),
@@ -208,17 +208,17 @@ const LATTE: Palette = Palette {
     ansi: [0x5c5f77, 0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xacb0be, 0x6c6f85, 0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xbcc0cc],
 };
 
-/// "#rrggbb" -> a colour.
+/// "#rrggbb" -> a color.
 fn parse_rgb(s: &str) -> Option<Color> {
     let h = s.trim().strip_prefix('#')?;
     (h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit())).then(|| rgb(u32::from_str_radix(h, 16).unwrap_or(0)))
 }
 
-/// The colours desktop.toml asks for, as the first terminal read it:
+/// The colors desktop.toml asks for, as the first terminal read it:
 /// `[terminal] scheme` chooses Tango or Catppuccin (Catppuccin if nothing
 /// does); under `[appearance]`, `color-scheme = "light"` the light one of
 /// the pair, `contrast = "high"` the text on pure black or white, and
-/// `accent = "#rrggbb"` the colour of the cursor, the selection and the
+/// `accent = "#rrggbb"` the color of the cursor, the selection and the
 /// highlights.
 fn palette_from(text: &str) -> Palette {
     let (mut tango, mut light, mut high, mut accent) = (false, false, false, None);
@@ -276,7 +276,7 @@ impl Palette {
     fn resolve(&self, c: CellColor, default: Color, bold: bool) -> Color {
         match c {
             CellColor::Default => default,
-            // Bold makes the first 8 colours bright, as xterm does.
+            // Bold makes the first 8 colors bright, as xterm does.
             CellColor::Indexed(i) if bold && i < 8 => self.indexed(i + 8),
             CellColor::Indexed(i) => self.indexed(i),
             CellColor::Rgb(r, g, b) => Color::rgb(r, g, b),
@@ -779,7 +779,7 @@ impl Terminal {
         window.redraw();
     }
 
-    /// Closes a pane (its program is ended): its neighbour gets its room.
+    /// Closes a pane (its program is ended): its neighbor gets its room.
     /// The tab goes with its last pane.
     fn close_pane(&mut self, index: usize, id: u64, window: &mut Window) {
         let Some(tab) = self.tabs.get_mut(index) else { return };
@@ -1150,7 +1150,7 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
             let st = cell.style;
             let (mut ink, mut ground) = (p.resolve(st.fg, p.fg, st.bold), p.resolve(st.bg, p.bg, false));
             if st.inverse {
-                // The text takes the ground's colour as it is, not its bright form.
+                // The text takes the ground's color as it is, not its bright form.
                 (ink, ground) = (ground, ink);
             }
             if st.dim {
@@ -1304,7 +1304,7 @@ impl App for Terminal {
             window.set_maximized(true);
         }
         if self.settings_changed.swap(false, Ordering::SeqCst) {
-            // Colours, fonts and the buttons' side as they are now; the cell's size is
+            // Colors, fonts and the buttons' side as they are now; the cell's size is
             // worked out again at the next frame, and the grids follow it.
             self.palette = palette();
             self.opacity = vergence_ui::opacity_setting(&config("desktop.toml"), "[terminal]");
@@ -1750,7 +1750,7 @@ mod tests {
     const NONE: Modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false };
 
     #[test]
-    fn colours_follow_the_desktop() {
+    fn colors_follow_the_desktop() {
         let same = |a: &Palette, b: &Palette| (a.bg, a.fg, a.accent, a.ansi) == (b.bg, b.fg, b.accent, b.ansi);
         assert!(same(&palette_from(""), &CATPPUCCIN));
         assert!(same(&palette_from("[terminal]\nscheme = \"Tango\"\n"), &TANGO));
@@ -1759,7 +1759,7 @@ mod tests {
         assert!(same(&palette_from("[appearance]\ncolor-scheme = \"light\"\n[terminal]\nscheme = \"tango\"\n"), &TANGO_LIGHT));
         // A key of the same name in another section is not ours.
         assert!(same(&palette_from("[wallpaper]\nscheme = \"tango\"\ncontrast = \"high\"\n"), &CATPPUCCIN));
-        // High contrast: the text on black or white; the 16 colours stay.
+        // High contrast: the text on black or white; the 16 colors stay.
         let p = palette_from("[appearance]\ncontrast = \"high\"\naccent = \"#ff8800\"\n");
         assert_eq!((p.bg, p.fg, p.accent), (Color::rgb(0, 0, 0), Color::rgb(255, 255, 255), Color::rgb(0xff, 0x88, 0)));
         assert_eq!(p.ansi, CATPPUCCIN.ansi);
@@ -1817,7 +1817,7 @@ mod tests {
     }
 
     #[test]
-    fn colours_come_from_the_palette_or_the_cube() {
+    fn colors_come_from_the_palette_or_the_cube() {
         let p = TANGO;
         assert_eq!(p.resolve(CellColor::Default, p.fg, false), p.fg);
         assert_eq!(p.resolve(CellColor::Indexed(1), p.fg, false), rgb(0xcc0000));

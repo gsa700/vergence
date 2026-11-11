@@ -8,7 +8,7 @@
 //!
 //! Layout: byte order (0 = LSB first, 1 = MSB first), 3 unused bytes, serial
 //! (u32), number of settings (u32), then per setting: type (0 integer,
-//! 1 string, 2 colour), 1 unused byte, name length (u16), the name padded to
+//! 1 string, 2 color), 1 unused byte, name length (u16), the name padded to
 //! 4 bytes, the serial it last changed in (u32), and the value: i32; or
 //! length (u32) and bytes padded to 4; or red, blue, green, alpha (u16 each,
 //! in that order).
@@ -196,7 +196,7 @@ impl Settings {
 // ---- the settings file (~/.config/vergence/settings.toml), shared by vergd and the server ----
 
 /// The settings as TOML: `"Net/ThemeName" = "Adwaita"`, integers as
-/// integers, colours as `[red, green, blue, alpha]`.
+/// integers, colors as `[red, green, blue, alpha]`.
 pub fn to_toml(s: &Settings) -> String {
     let mut t = toml::Table::new();
     for (name, v) in &s.settings {
@@ -229,7 +229,7 @@ pub fn from_toml(text: &str) -> Result<Settings, String> {
                     .iter()
                     .map(|c| c.as_integer().and_then(|i| u16::try_from(i).ok()))
                     .collect::<Option<_>>()
-                    .ok_or_else(|| format!("{name}: a colour is four numbers 0-65535"))?;
+                    .ok_or_else(|| format!("{name}: a color is four numbers 0-65535"))?;
                 Value::Color(c[0], c[1], c[2], c[3])
             }
             _ => return Err(format!("{name}: must be a number, text, or [r, g, b, a]")),
@@ -249,7 +249,7 @@ mod tests {
         s.set("Gdk/WindowScalingFactor", Value::Int(2));
         s.set("Xft/DPI", Value::Int(96 * 2 * 1024));
         s.set("Gtk/ColorPalette", Value::Str("black:white".into()));
-        s.set("Test/Colour", Value::Color(1, 2, 3, 0xFFFF));
+        s.set("Test/Color", Value::Color(1, 2, 3, 0xFFFF));
         s.set("Net/CursorBlinkTime", Value::Int(-1));
         s
     }
@@ -281,7 +281,7 @@ mod tests {
     }
 
     #[test]
-    fn colour_wire_order_is_red_blue_green_alpha() {
+    fn color_wire_order_is_red_blue_green_alpha() {
         let mut s = Settings::default();
         s.set("C", Value::Color(0x1111, 0x2222, 0x3333, 0x4444));
         let b = s.encode();

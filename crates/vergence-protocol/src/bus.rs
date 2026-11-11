@@ -68,7 +68,7 @@ pub enum SettingValue {
     I32(i32),
     F64(f64),
     Str(String),
-    /// A colour, each channel 0 to 1.
+    /// A color, each channel 0 to 1.
     Rgb(f64, f64, f64),
 }
 

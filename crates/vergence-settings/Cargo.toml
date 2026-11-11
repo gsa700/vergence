@@ -15,6 +15,7 @@ vergence-scene.workspace = true
 vergence-text.workspace = true
 vergence-render.workspace = true
 vergence-look.workspace = true
+vergence-shell.workspace = true
 toml = "0.8"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 resvg = "0.45"

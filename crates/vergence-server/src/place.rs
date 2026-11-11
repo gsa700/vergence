@@ -4,7 +4,7 @@
 // larger than the monitor, its title bar (when the server draws one) on screen.
 // An app that asks for a position (X11 USPosition/PPosition, e.g. AlbumWall
 // restoring where it was) gets it when the window then lies wholly on a monitor;
-// otherwise the window is centred. Window placement memory (Contract 2, from
+// otherwise the window is centered. Window placement memory (Contract 2, from
 // vergd) comes later and will decide before these defaults.
 
 use smithay::{
@@ -54,7 +54,7 @@ impl Server {
                 return r;
             }
         }
-        Rectangle::new(centre(area, size), size)
+        Rectangle::new(center(area, size), size)
     }
 
     /// The most a mapped window may be: the monitor it is mostly on, below its title bar.
@@ -73,7 +73,7 @@ impl Server {
         Some(content_area(self.work_area(out), self.has_title(w)).size)
     }
 
-    /// Fit and centre a Wayland window once it has a size (its first commit).
+    /// Fit and center a Wayland window once it has a size (its first commit).
     pub fn place_wayland(&mut self, w: &Window) {
         let Some(t) = w.toplevel() else { return };
         self.placed.retain(|p| smithay::utils::IsAlive::alive(p));
@@ -100,7 +100,7 @@ impl Server {
             t.with_pending_state(|s| s.size = Some(fitted));
             t.send_pending_configure();
         }
-        self.space.map_element(w.clone(), centre(area, fitted), false);
+        self.space.map_element(w.clone(), center(area, fitted), false);
     }
 }
 
@@ -111,10 +111,10 @@ impl Server {
             .elements()
             .filter_map(|w| {
                 let geo = self.space.element_geometry(w)?;
-                let centre = (geo.loc.x + geo.size.w / 2, geo.loc.y + geo.size.h / 2);
+                let center = (geo.loc.x + geo.size.w / 2, geo.loc.y + geo.size.h / 2);
                 self.space.outputs().find_map(|o| {
                     let g = self.space.output_geometry(o)?;
-                    if !g.contains(centre) {
+                    if !g.contains(center) {
                         return None;
                     }
                     Some((w.clone(), crate::memory::monitor_id_of(o)?, geo.loc - g.loc))
@@ -156,19 +156,19 @@ impl Server {
                 }
                 continue;
             }
-            let centre = (geo.loc.x + geo.size.w / 2, geo.loc.y + geo.size.h / 2);
-            let on_one = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).any(|g| g.contains(centre));
+            let center = (geo.loc.x + geo.size.w / 2, geo.loc.y + geo.size.h / 2);
+            let on_one = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).any(|g| g.contains(center));
             if on_one {
                 continue;
             }
-            // Rescue: nearest monitor (by centre distance), fitted, centred.
+            // Rescue: nearest monitor (by center distance), fitted, centered.
             let Some(out) = self
                 .space
                 .outputs()
                 .filter_map(|o| self.space.output_geometry(o))
                 .min_by_key(|g| {
                     let (cx, cy) = (g.loc.x + g.size.w / 2, g.loc.y + g.size.h / 2);
-                    ((cx - centre.0) as i64).pow(2) + ((cy - centre.1) as i64).pow(2)
+                    ((cx - center.0) as i64).pow(2) + ((cy - center.1) as i64).pow(2)
                 })
             else {
                 continue;
@@ -179,7 +179,7 @@ impl Server {
             let size = self.space.element_geometry(&w).map(|g| g.size).unwrap_or(geo.size);
             let area = content_area(self.work_area(out), self.has_title(&w));
             let fitted = fit(size, area.size, w.x11_surface().and_then(|x| x.min_size()));
-            let r = Rectangle::new(centre_of(area, fitted), fitted);
+            let r = Rectangle::new(center_of(area, fitted), fitted);
             tracing::info!("hotplug: window rescued onto {:?}", r);
             self.set_rect(&w, r);
         }
@@ -210,8 +210,8 @@ impl Server {
     }
 }
 
-fn centre_of(area: Rectangle<i32, Logical>, size: Size<i32, Logical>) -> Point<i32, Logical> {
-    centre(area, size)
+fn center_of(area: Rectangle<i32, Logical>, size: Size<i32, Logical>) -> Point<i32, Logical> {
+    center(area, size)
 }
 
 /// A monitor's area below a title bar's height (when titled).
@@ -226,7 +226,7 @@ pub fn fit(size: Size<i32, Logical>, room: Size<i32, Logical>, min: Option<Size<
     (size.w.min(room.w).max(min.w).max(1), size.h.min(room.h).max(min.h).max(1)).into()
 }
 
-fn centre(area: Rectangle<i32, Logical>, size: Size<i32, Logical>) -> Point<i32, Logical> {
+fn center(area: Rectangle<i32, Logical>, size: Size<i32, Logical>) -> Point<i32, Logical> {
     (area.loc.x + ((area.size.w - size.w) / 2).max(0), area.loc.y + ((area.size.h - size.h) / 2).max(0)).into()
 }
 
@@ -245,7 +245,7 @@ mod tests {
         assert_eq!(area, r(0, 24, 1170, 634));
         let size = fit((1131, 710).into(), area.size, None);
         assert_eq!(size, (1131, 634).into());
-        assert_eq!(centre(area, size), (19, 24).into());
+        assert_eq!(center(area, size), (19, 24).into());
     }
 
     #[test]

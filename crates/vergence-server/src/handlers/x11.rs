@@ -1,6 +1,6 @@
 // X11 apps through rootless Xwayland (server milestone 1). Adapted from Smithay's
 // anvil (MIT; see LICENSE-smithay.txt), cut down: X windows live in the same Space
-// as Wayland windows, are placed centred on the monitor under the pointer, and
+// as Wayland windows, are placed centered on the monitor under the pointer, and
 // move/resize with the server's own grabs. Scale: one client scale for all of
 // Xwayland (VERGENCE_XWAYLAND_SCALE, default 1) until per-monitor X scaling lands.
 
@@ -143,7 +143,7 @@ impl XwmHandler for Server {
             geo.size = crate::place::fit(geo.size, room, window.min_size());
         }
         // A move just after mapping is the app restoring where it was (Spindle's
-        // WindowPlacement sets the position ~60 ms after the window opens): honoured
+        // WindowPlacement sets the position ~60 ms after the window opens): honored
         // if the window then lies wholly on a monitor. Later moves are the server's.
         // On that monitor it gets back the size it asked for when it opened (fitted
         // to the monitor under the pointer then), capped to the new monitor.
@@ -185,14 +185,14 @@ impl XwmHandler for Server {
 
     fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         if let Some(w) = self.window_for_x11(&window) {
-            self.minimise(&w);
+            self.minimize(&w);
         }
     }
 
     fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let found = self.shelf.minimised.iter().map(|(w, _)| w).find(|w| w.x11_surface() == Some(&window)).cloned();
+        let found = self.shelf.minimized.iter().map(|(w, _)| w).find(|w| w.x11_surface() == Some(&window)).cloned();
         if let Some(w) = found {
-            self.unminimise(&w);
+            self.unminimize(&w);
         }
     }
 

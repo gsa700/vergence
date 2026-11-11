@@ -148,12 +148,12 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
   units (X pixels / the render scale); when the scale of the current setup
   changes, vergd waits for the apps to resize and puts every window back.
   Memory recorded unscaled means the same as before. **Checked:** three
-  xfce4-terminals on the ASUS and the 4K (one maximised), three cycles of
+  xfce4-terminals on the ASUS and the 4K (one maximized), three cycles of
   `scale on` / `scale off`: scaled, each stays at the same place on its
   panel (305,229 and 585,329) at twice its X size; unscaled, every window
   is back on the same pixel; no drift between cycles. Known wrinkle: a
-  maximised window's remembered size alternates between its maximised size
-  at each scale (harmless: it is maximised again either way).
+  maximized window's remembered size alternates between its maximized size
+  at each scale (harmless: it is maximized again either way).
 - **Three monitors and the limit (23:10-23:12), acceptance 4 and 5,**
   with scaling on: ASUS alone 1:1 (scale 1); + 27" 4K: 8105x2540, scale 2;
   + 24": 12121x2540, scale 2 (24" shrunk x2.09). Each setup came back with
@@ -161,7 +161,7 @@ monitor has nearly the same scale, or for Qt/Avalonia-heavy use.
   for a fake **13.3" 4K** (332 ppi, needs 4x): refused, "screen 19651x4518
   exceeds this server's maximum 16384x16384; this setup stays at 1:1",
   toolkits back to 1. **Pass.** Fixed on the way:
-  - `xrandr --right-of` places a monitor next to its neighbour's
+  - `xrandr --right-of` places a monitor next to its neighbor's
     **unscaled** size, so scaled sizes overlapped and vergd refused a row
     the user had made; rows and columns are now detected from unscaled
     sizes.
@@ -401,7 +401,7 @@ EDID sizes (21.5" and 14" diagonals).
   (`vergence-harness measure`), and Dave's ruler read the same on both
   screens. Text size "close": the preference stays 100%.
 - Port independence with real cables (milestone 3, 2a): both monitors
-  swapped ports and the setup was recognised and restored, every window
+  swapped ports and the setup was recognized and restored, every window
   back on its monitor.
 
 **Learned**

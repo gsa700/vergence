@@ -1,4 +1,4 @@
-// iced spike: title bar with tabs, two panes of coloured monospace text (iced's
+// iced spike: title bar with tabs, two panes of colored monospace text (iced's
 // own pane grid, so splits come built in), a right-click menu.
 
 use iced::widget::{button, column, container, mouse_area, pane_grid, rich_text, row, span, stack, text, Space};

@@ -93,7 +93,7 @@ that permissions in §7.3 have a subject. Two steps:
    token in the environment (or an inherited socket) and tie the connection
    to the launch. Children inherit it, which is the known limit; a sandbox
    (Capsicum, Landlock) is what closes it, and §7.3 already plans one for
-   display-list rasterisation. Permissions attach to the launch identity, with
+   display-list rasterization. Permissions attach to the launch identity, with
    the indicator and audit log §7.3 asks for.
 
 Do not spend effort on per-application secrets before step 1: the data it
@@ -103,7 +103,7 @@ produces (who really connects, and how) decides what step 2 has to protect.
 
 Smithay's handlers (xdg_shell, X11), wallpaper decoding (`image`, `resvg`,
 on the user's own files), EDID parsing (from hardware), `vergd` (phase 1,
-frozen), settings and desktop TOML (the user's own files), text rasterising
+frozen), settings and desktop TOML (the user's own files), text rasterizing
 of notification strings (`ab_glyph`, glyph lookup only), the Xwayland
 boundary. The settings app and the terminal as Wayland clients were not
 looked at as clients.

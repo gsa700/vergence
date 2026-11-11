@@ -288,7 +288,7 @@ mod tests {
         s.set("Net/ThemeName", Value::Str("Adwaita".into()));
         s.set("Xft/DPI", Value::Int(98304));
         s.set("Xft/Hinting", Value::Int(-1));
-        s.set("Test/Colour", Value::Color(1, 2, 3, 65535));
+        s.set("Test/Color", Value::Color(1, 2, 3, 65535));
         let text = to_toml(&s);
         assert!(text.contains("\"Net/ThemeName\" = \"Adwaita\""), "{text}");
         let back = from_toml(&text).unwrap();

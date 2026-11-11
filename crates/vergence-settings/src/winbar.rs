@@ -32,7 +32,7 @@ pub fn parse(s: &str) -> Layout {
     }
 }
 
-/// Write it back: close outermost, then minimise and maximise.
+/// Write it back: close outermost, then minimize and maximize.
 pub fn format(l: Layout) -> String {
     let mut buttons = Vec::new();
     if l.left {

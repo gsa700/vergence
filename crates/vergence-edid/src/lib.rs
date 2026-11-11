@@ -54,7 +54,7 @@ pub struct DetailedTiming {
     pub v_active: u16,
     pub h_blank: u16,
     pub v_blank: u16,
-    /// Image size in millimetres; more precise than the base block's cm.
+    /// Image size in millimeters; more precise than the base block's cm.
     pub width_mm: u16,
     pub height_mm: u16,
     pub interlaced: bool,

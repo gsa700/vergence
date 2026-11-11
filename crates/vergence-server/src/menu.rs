@@ -1,6 +1,6 @@
 // The desktop menu (server milestone 1, 2026-11-07): right-click on the bare
 // desktop for a list of apps and "Exit Vergence". Drawn by the server like the
-// title bars (solid colours, text rasterised per monitor at its own pixels), sized
+// title bars (solid colors, text rasterized per monitor at its own pixels), sized
 // in points so it is the same physical size on every monitor.
 //
 // The apps: [[menu.item]] entries in ~/.config/vergence/desktop.toml

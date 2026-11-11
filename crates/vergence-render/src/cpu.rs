@@ -11,7 +11,7 @@
 //!
 //! Edges are smoothed by coverage: a straight edge by the exact area of the
 //! pixel it covers, a round corner or a line by the distance from the pixel's
-//! centre. The result does not depend on the number of threads or on which
+//! center. The result does not depend on the number of threads or on which
 //! rows were asked for: [`Cpu::render_rows`] redraws a range of rows of an
 //! existing picture to exactly what a whole render would put there.
 
@@ -89,7 +89,7 @@ impl RRect {
         if !(self.corner_row(y) && self.corner_col(x)) {
             return edge(self.x0, self.x1, x) * edge(self.y0, self.y1, y);
         }
-        // In a corner: the distance from the pixel's centre to the round edge.
+        // In a corner: the distance from the pixel's center to the round edge.
         let (cx, cy) = ((self.x0 + self.x1) / 2.0, (self.y0 + self.y1) / 2.0);
         let qx = (x as f32 + 0.5 - cx).abs() - ((self.x1 - self.x0) / 2.0 - self.radius);
         let qy = (y as f32 + 0.5 - cy).abs() - ((self.y1 - self.y0) / 2.0 - self.radius);
@@ -132,7 +132,7 @@ pub(crate) fn intersect(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
     [a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]
 }
 
-/// A colour's bytes in the target's order (alpha not multiplied in).
+/// A color's bytes in the target's order (alpha not multiplied in).
 fn straight(c: &Color, order: Order) -> [u8; 4] {
     match order {
         Order::Rgba => [c.r, c.g, c.b, c.a],
@@ -146,7 +146,7 @@ fn mul255(a: u32, b: u32) -> u32 {
     (t + (t >> 8)) >> 8
 }
 
-/// Puts colour `c` (alpha not multiplied in) over one pixel, at `cover` (0 to 255).
+/// Puts color `c` (alpha not multiplied in) over one pixel, at `cover` (0 to 255).
 #[inline]
 fn blend(dst: &mut [u8], c: [u8; 4], cover: u32) {
     let a = mul255(c[3] as u32, cover);
@@ -168,7 +168,7 @@ fn to255(cover: f32) -> u32 {
     (cover.clamp(0.0, 1.0) * 255.0 + 0.5) as u32
 }
 
-/// The same colour over the pixels x0..x1 of a row.
+/// The same color over the pixels x0..x1 of a row.
 fn span(row: &mut [u8], x0: i32, x1: i32, c: [u8; 4], cover: u32) {
     if x0 >= x1 || cover == 0 {
         return;
@@ -281,7 +281,7 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
             Command::Cells { origin, cell_w, cell_h, baseline, size, columns, cells } => {
                 // The same shapes, in the same order and by the same arithmetic, as the
                 // fills and glyph runs this command stands for: a row's grounds
-                // (neighbours of one colour as one rectangle), its underlines, its glyphs.
+                // (neighbors of one color as one rectangle), its underlines, its glyphs.
                 let columns = *columns as usize;
                 for (r, row) in cells.chunks_exact(columns).enumerate() {
                     let top = origin.y + r as f32 * cell_h;
@@ -445,7 +445,7 @@ impl Prepared<'_> {
                     let (u0, uf) = (u.floor() as usize, u - u.floor());
                     let u1 = (u0 + 1).min(iw - 1);
                     let (a, b, c, d) = (texel(u0, v0), texel(u1, v0), texel(u0, v1), texel(u1, v1));
-                    // Mixed with alpha multiplied in, so a clear texel's colour does not bleed.
+                    // Mixed with alpha multiplied in, so a clear texel's color does not bleed.
                     let mut mixed = [0.0f32; 4];
                     for (t, wgt) in [(a, (1.0 - uf) * (1.0 - vf)), (b, uf * (1.0 - vf)), (c, (1.0 - uf) * vf), (d, uf * vf)] {
                         let alpha = t[3] / 255.0 * wgt;

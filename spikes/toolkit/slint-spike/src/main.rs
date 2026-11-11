@@ -1,4 +1,4 @@
-// Slint spike: title bar with tabs, two panes of coloured monospace text, a
+// Slint spike: title bar with tabs, two panes of colored monospace text, a
 // divider, a right-click menu.
 
 slint::slint! {
