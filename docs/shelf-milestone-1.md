@@ -238,8 +238,59 @@ one.
   - On Hubble: two terminals share the terminal's icon, the settings
     app has its own with the accent mark when it has the keyboard, and
     the toolkit's demo window, which no entry owns, has a "V".
+- **Step 3, second part (2026-11-10): a click on an icon.** An
+  application with one window: the window comes forward and has the
+  keyboard. With several: a list of their titles opens beside the icon,
+  to the left of the strip (the desktop menu's own drawing and input,
+  with a new kind of entry), and the one chosen comes forward. Driven
+  through `vctl` on Hubble: the settings app's icon, then the
+  terminal's with two windows and the second of the list. Two windows
+  of one title are two lines that read the same; the screen each is on
+  is to be added beside the title where it is not the shelf's.
   Still to do in step 3: the name beside an icon the pointer rests on,
-  a click (focus and raise; a list for several windows), and minimise.
+  and minimise (with it, a click on the focused application's only
+  window minimises it).
+- **The shelf is a dock (Dave, 2026-11-10).** "Like a dock, rounded
+  with the same radius as all the other elements": a panel as tall as
+  the apps button's place and its items, in the middle of the screen's
+  right edge, 6 points in from the edge ("leave a little light showing
+  through"), its corners the one radius, drawn on nothing so the desktop
+  shows around it. It stands in a column the height of the screen, the
+  shelf's width and the room on both its sides (60 points); the work
+  area is the screen less that column, so a maximised window still stops
+  clear of it. `vergence-shell` has `dock` beside `strip` (the column);
+  the server tests a point against the dock as it was last drawn. On
+  Hubble: a dock of two items at 1226,288, 48 x 144; a maximised
+  terminal 1220 wide; a click on an icon in it still brings its window
+  forward.
+- **Decided the same evening, not built: the dock moves, and all of it
+  is a setting** (Dave: "maybe both?", "let's have it all, adjustable
+  in settings"). It can be dragged. Dropped near an edge of any screen
+  it settles there, the gap kept, lying along that edge (upright on the
+  left and right, level on the top and bottom), and windows keep clear
+  of it; dropped elsewhere it floats where it was put, over the windows,
+  and reserves nothing. Which of the two it does, the edge or the place,
+  the gap, and whether windows keep clear are in `[shelf]` in
+  desktop.toml, followed live, and get a page in the settings app when
+  that has moved to the toolkit (step 6). This replaces "the edge is the
+  right one; it is not a setting in this milestone" under Design, and
+  whitepaper §6.9's "on the right edge" becomes its default. It is a
+  step of its own, after step 3: the dock's arithmetic for four edges
+  and a free place, a level layout, the drag, the settings.
+
+- **Decided 2026-11-10, not built: session restore** (Dave: "I update a
+  kernel and need to reboot and it all comes back like I had it";
+  whitepaper §6.9). A first form is small, because its parts are here:
+  window memory puts windows back, step 2 knows how each application is
+  started, step 3 knows which are running. What is new: the list of
+  running applications written to `~/.local/state/vergence` whenever it
+  changes; each started again from its desktop entry when a session
+  begins; a setting to switch it off and a way to start clean; a clean
+  start by itself after two sessions that ended soon after a restore.
+  What an application had open is its own to restore (Firefox does; Dave:
+  "just bringing firefox back may be enough"); the terminal reopening its
+  tabs comes later, through the toolkit. It follows step 4, which adds
+  starting applications from the shelf.
 
 ## Acceptance
 

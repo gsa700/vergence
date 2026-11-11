@@ -52,6 +52,9 @@ pub struct Item {
 #[derive(Debug, Clone, PartialEq)]
 enum Entry {
     App(Item),
+    /// One of an application's windows, by its title: the list a click on the
+    /// application's icon opens beside the shelf (shelf.rs).
+    Window(smithay::desktop::Window, String),
     Separator,
     Exit,
 }
@@ -179,6 +182,25 @@ impl Server {
         self.menu = Some(m);
     }
 
+    /// The list of an application's windows, with its top-right corner at `corner`
+    /// (the left edge of the shelf, level with the application's icon), kept on
+    /// its screen's work area.
+    pub fn open_window_list(&mut self, corner: Point<i32, Logical>, windows: Vec<(smithay::desktop::Window, String)>) {
+        let entries: Vec<Entry> = windows.into_iter().map(|(w, title)| Entry::Window(w, title)).collect();
+        if entries.is_empty() {
+            return;
+        }
+        let ids = (0..3 + entries.len()).map(|_| Id::new()).collect();
+        let mut m = OpenMenu { at: corner, entries, hover: None, ids, commit: CommitCounter::default(), labels: HashMap::new() };
+        m.at.x -= WIDTH;
+        let screen = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|g| g.contains(corner) || g.contains((corner.x - 1, corner.y)));
+        if let Some(area) = screen.map(|g| self.work_area(g)) {
+            m.at.x = m.at.x.min(area.loc.x + area.size.w - WIDTH).max(area.loc.x);
+            m.at.y = m.at.y.min(area.loc.y + area.size.h - m.height()).max(area.loc.y);
+        }
+        self.menu = Some(m);
+    }
+
     pub fn close_menu(&mut self) {
         self.menu = None;
     }
@@ -203,6 +225,12 @@ impl Server {
                 tracing::info!("menu: {} ({})", item.name, item.exec);
                 if let Err(e) = crate::spawn(std::process::Command::new("sh").args(["-c", &item.exec])) {
                     tracing::warn!("menu: {}: {e}", item.exec);
+                }
+            }
+            Entry::Window(w, title) => {
+                tracing::info!("shelf: to window {title:?}");
+                if smithay::utils::IsAlive::alive(w) {
+                    self.focus_window(&w.clone(), smithay::utils::SERIAL_COUNTER.next_serial());
                 }
             }
             Entry::Exit => {
@@ -231,6 +259,7 @@ impl Server {
         for (i, e) in m.entries.iter().enumerate() {
             let label = match e {
                 Entry::App(item) => item.name.clone(),
+                Entry::Window(_, title) => title.clone(),
                 Entry::Exit => "Exit Vergence".into(),
                 Entry::Separator => continue,
             };

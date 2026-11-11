@@ -1,7 +1,11 @@
 // The shelf (whitepaper §6.9; docs/shelf-milestone-1.md, step 1).
 //
-// One strip on the right edge of the primary screen, drawn by the server. A
-// screen with the shelf has a WORK AREA, the screen less the strip: maximise,
+// A dock on the right edge of the primary screen, drawn by the server: a
+// rounded panel as tall as what it holds, floating a gap in from the edge
+// (Dave, 2026-11-10: "like a dock, rounded with the same radius as all the
+// other elements"). It stands in a column that runs the height of the screen
+// (called the strip below, as vergence-shell calls it), and a screen with the
+// shelf has a WORK AREA, the screen less that column: maximise,
 // default placement and fitting, the desktop menu and notification cards keep
 // inside it, and a remembered window the strip would cover is moved clear.
 // Where the strip is and what it leaves is vergence-shell's arithmetic; this
@@ -158,8 +162,10 @@ pub struct Shelf {
     decoder: Option<std::sync::mpsc::Sender<(String, String, u32)>>,
     /// The fonts a letter tile is written with, looked for when first needed.
     fonts: Option<vergence_text::Fonts>,
-    /// Where the strip was last reported in the log, so a move is said once.
+    /// Where the shelf's column was last reported in the log, so a move is said once.
     said: Option<Rectangle<i32, Logical>>,
+    /// The dock as it was last drawn or pressed: what a point is tested against.
+    dock: Option<Rectangle<i32, Logical>>,
 }
 
 impl Shelf {
@@ -284,9 +290,16 @@ impl Server {
         Some(Rectangle::new((o.x, o.y).into(), (o.width, o.height).into()))
     }
 
-    /// The strip, if a screen has it.
+    /// The column the shelf stands in, if a screen has it: what windows keep out of.
     pub fn shelf_rect(&self) -> Option<Rectangle<i32, Logical>> {
         vergence_shell::strip(rect(self.shelf_screen()?)).map(rectangle)
+    }
+
+    /// The dock itself, as tall as the apps button's place and `items` under it.
+    fn shelf_dock(&mut self, items: usize) -> Option<Rectangle<i32, Logical>> {
+        let dock = self.shelf_screen().and_then(|s| vergence_shell::dock(rect(s), items)).map(rectangle);
+        self.shelf.dock = dock;
+        dock
     }
 
     /// What a screen leaves for windows: all of it, less the strip if the shelf is on it.
@@ -302,9 +315,40 @@ impl Server {
         }
     }
 
-    /// True for a point on the strip: the windows behind it get nothing of the pointer.
+    /// True for a point on the dock: the windows behind it get nothing of the pointer.
     pub fn shelf_at(&self, at: Point<f64, Logical>) -> bool {
-        self.shelf_rect().is_some_and(|r| r.to_f64().contains(at))
+        self.shelf.dock.is_some_and(|r| r.to_f64().contains(at))
+    }
+
+    /// A press on the strip. On an application with one window: that window
+    /// comes forward and has the keyboard. With several: a list of them opens
+    /// beside the icon. True if a list opened (the press's release is then the
+    /// list's, not a window's).
+    pub fn shelf_press(&mut self, at: Point<f64, Logical>) -> bool {
+        let items = self.shelf_items();
+        let Some(strip) = self.shelf_dock(items.len()) else { return false };
+        let Some(index) = running::item_at(rect(strip), items.len(), at.x.floor() as i32, at.y.floor() as i32) else { return false };
+        let (item, windows) = &items[index];
+        match windows.as_slice() {
+            [] => false,
+            [only] => {
+                tracing::info!("shelf: to {}", item.name);
+                self.focus_window(&only.clone(), smithay::utils::SERIAL_COUNTER.next_serial());
+                false
+            }
+            several => {
+                let titled: Vec<(Window, String)> = several
+                    .iter()
+                    .map(|w| {
+                        let title = self.window_title(w);
+                        (w.clone(), if title.is_empty() { item.name.clone() } else { title })
+                    })
+                    .collect();
+                let top = running::slot(rect(strip), index).map_or(strip.loc.y, |s| s.y);
+                self.open_window_list((strip.loc.x, top).into(), titled);
+                true
+            }
+        }
     }
 
     /// The screens or the settings changed: say where the strip is now, and
@@ -316,7 +360,7 @@ impl Server {
         }
         self.shelf.said = now;
         match now {
-            Some(r) => tracing::info!("shelf: strip at {},{} {}x{} points", r.loc.x, r.loc.y, r.size.w, r.size.h),
+            Some(r) => tracing::info!("shelf: its column at {},{} {}x{} points", r.loc.x, r.loc.y, r.size.w, r.size.h),
             None => tracing::info!("shelf: no screen for it"),
         }
         // A maximised window fills its screen's work area, which has just changed.
@@ -332,11 +376,14 @@ impl Server {
         match (self.shelf_rect(), self.shelf_screen()) {
             (Some(r), Some(s)) => {
                 let w = self.work_area(s);
+                let items = self.shelf_items();
+                let dock = self.shelf_dock(items.len()).unwrap_or(r);
                 let mut out = format!(
-                    "strip {},{} {}x{} on screen {},{} {}x{}; work area {},{} {}x{}; hide {} (not yet acted on)",
-                    r.loc.x, r.loc.y, r.size.w, r.size.h, s.loc.x, s.loc.y, s.size.w, s.size.h, w.loc.x, w.loc.y, w.size.w, w.size.h, self.shelf.config.hide
+                    "dock {},{} {}x{} in column {},{} {}x{} on screen {},{} {}x{}; work area {},{} {}x{}; hide {} (not yet acted on)",
+                    dock.loc.x, dock.loc.y, dock.size.w, dock.size.h, r.loc.x, r.loc.y, r.size.w, r.size.h, s.loc.x, s.loc.y, s.size.w, s.size.h, w.loc.x, w.loc.y, w.size.w, w.size.h, self.shelf.config.hide
                 );
-                for (i, (item, windows)) in self.shelf_items().iter().enumerate() {
+                let r = dock;
+                for (i, (item, windows)) in items.iter().enumerate() {
                     let place = running::slot(rect(r), i).map_or("no room".to_string(), |s| format!("{},{}", s.x, s.y));
                     out.push_str(&format!("\n{i} {:?} \"{}\" icon \"{}\" windows {}{} at {place}", item.key, item.name, item.icon, windows.len(), if item.focused { " focused" } else { "" }));
                 }
@@ -348,10 +395,10 @@ impl Server {
 
     /// The strip's picture on `out`, if it is on that screen.
     pub fn shelf_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
-        let Some(strip) = self.shelf_rect().filter(|r| r.overlaps(out)) else { return Vec::new() };
         let colour = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
-        // What the strip shows: each item, its mark, and its icon once that has come.
+        // What the dock shows: each item, its mark, and its icon once that has come.
         let items = self.shelf_items();
+        let Some(strip) = self.shelf_dock(items.len()).filter(|r| r.overlaps(out)) else { return Vec::new() };
         let pixels = (running::ICON as f64 * scale).round() as u32;
         let icons: Vec<Option<Arc<Icon>>> = items.iter().map(|(item, _)| self.shelf_icon(&item.icon, pixels)).collect();
         let accent = match self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "accent-color".to_string())) {
@@ -365,12 +412,12 @@ impl Server {
         (accent.r, accent.g, accent.b).hash(&mut hasher);
         let key = (strip.size.h, scale.to_bits(), hasher.finish());
         if self.shelf.picture.as_ref().map(|(k, _)| *k) != Some(key) {
-            // The strip as a scene, in points: its ground, and a line along the side
-            // that faces the windows.
+            // The dock as a scene, in points: a rounded panel with a line around it,
+            // on nothing (the desktop shows at its corners).
             let (w, h) = (strip.size.w as f32, strip.size.h as f32);
             let mut scene = Scene::new(w, h);
-            scene.fill(SceneRect::new(0.0, 0.0, w, h), colour(vergence_look::SHELF));
-            scene.fill(SceneRect::new(0.0, 0.0, vergence_look::EDGE, h), colour(vergence_look::SHELF_EDGE));
+            scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, colour(vergence_look::SHELF));
+            scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, colour(vergence_look::SHELF_EDGE));
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             let face = fonts.face("sans-serif", 700, false).or_else(|| fonts.face("sans-serif", 400, false));
             let local = Rect::new(0, 0, strip.size.w, strip.size.h);
@@ -403,7 +450,7 @@ impl Server {
                     }
                 }
             }
-            let buffer = match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, colour(vergence_look::SHELF)) {
+            let buffer = match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) {
                 Ok(p) => MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None),
                 Err(e) => {
                     tracing::warn!("shelf: its picture could not be drawn: {e}");

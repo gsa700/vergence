@@ -299,8 +299,15 @@ impl Server {
                 Hit::Maximize(w) if left => self.toggle_maximize(&w),
                 Hit::Edge(w, e) if left => grab_with = Some((w, Some(e))),
                 Hit::Title(_) | Hit::Close(_) | Hit::Maximize(_) | Hit::Edge(..) => {}
-                // The shelf's strip: nothing on it to press yet (shelf.rs), and what
-                // is behind it is not pressed either.
+                // The shelf's strip (shelf.rs): an application's icon brings its window
+                // forward, or opens the list of its windows. What is behind the strip
+                // is never pressed.
+                Hit::Shelf if left => {
+                    if self.shelf_press(at) {
+                        self.menu_swallow = Some(button);
+                        return;
+                    }
+                }
                 Hit::Shelf => {}
                 // Right-click on the bare desktop: the desktop menu.
                 Hit::Nothing if button == BTN_RIGHT => {
