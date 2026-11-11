@@ -41,7 +41,11 @@ use crate::state::Server;
 /// Lines a notch moves when nothing says otherwise: what applications assume.
 pub const SCROLL_LINES: u32 = 3;
 
-/// A touchpad taps; a mouse does not.
+/// A touchpad taps; a mouse does not. A Logitech multi-device receiver says
+/// it has a touchpad whether or not anything paired with it has one (seen on
+/// kepler, 2026-11-10): settings given to it then reach nothing. Before the
+/// settings app shows its touchpad part only when there is one, a touchpad
+/// should count as present once it has sent something only a touchpad sends.
 fn is_touchpad(d: &Device) -> bool {
     d.config_tap_finger_count() > 0
 }
