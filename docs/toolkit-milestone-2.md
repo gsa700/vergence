@@ -317,6 +317,22 @@ The terminal's bar stays in `vergence_ui::bar` for now.
   - Not seen: the overview and the screen page's map (Hubble has one
     screen now); the browser's Add with a real folder.
 
+- **Step 4 (2026-11-10): iced leaves.** No crate depends on it since step 3;
+  now its patch (`[patch.crates-io] iced_tiny_skia`), the vendored
+  `third_party/iced_tiny_skia` and `patches/iced-tiny-skia-clip-mask.patch`
+  are gone too, and `Cargo.lock` has no iced, wgpu or cosmic-text (the
+  `tiny-skia` left is resvg's). Whitepaper §8 (the borrowed-parts table,
+  the language list, the glossary), README, CLAUDE.md and
+  patches/README.md say so; PDF rebuilt (32 pages, looked at). base64,
+  which came in with iced, is now the terminal's alone (noted in its
+  Cargo.toml).
+  - Acceptance 7: the settings binary is 6.2 MB (Hubble, release; 6.3 MB
+    on kepler), was 35 MB on iced; `Cargo.lock` lost about 3,200 lines.
+    Build time was not measured like for like (the iced tree was gone
+    from Hubble's build by then).
+  - Installed on Hubble and kepler (release, `sudo tools/install.sh`);
+    no server change, so no restart.
+
 ## Decided (Dave, 2026-11-10 20:00)
 
 1. Widgets in a new crate, `vergence-widgets`.

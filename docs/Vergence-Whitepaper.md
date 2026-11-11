@@ -434,7 +434,7 @@ On a typical desktop, any program running as the user can already read the user'
 | Smithay | The server's Wayland front end, DRM/KMS and input back ends, renderer | Borrowed for phase 2 bring-up; moving to a support role (decided 8 November 2026): the renderer is replaced with the project's own first, then the DRM/KMS and input back ends; the Wayland front end may stay as an edge |
 | libinput, libseat/seatd, xkbcommon | Input devices, seat and device access, keymaps | Borrowed through Smithay |
 | Xwayland | X11 applications (the X11 edge) | Borrowed; an X server of our own is a large project |
-| iced | The settings app (and, until 10 November 2026, the terminal) | Borrowed (MIT); chosen over Slint on 8 November 2026. **Being replaced** by the project's own toolkit (§6.10, decided 9 November 2026): the terminal moved first, on 10 November; the settings app follows, and iced is removed with it. Until then it carries two patches and workarounds (its software renderer's clip mask, multisampling off) |
+| iced | Nothing, since 10 November 2026 | **Removed.** Borrowed (MIT) for the first tools, chosen over Slint on 8 November 2026, replaced by the project's own toolkit (§6.10, decided 9 November 2026): the terminal moved on 10 November, the settings app the same evening, and iced went with its patches and workarounds |
 | ab_glyph, resvg | Title-bar text, SVG wallpapers | Borrowed; small, candidates for our own |
 | Adwaita cursor theme | The pointer | Borrowed artwork, read at run time |
 
@@ -442,7 +442,7 @@ On a typical desktop, any program running as the user can already read the user'
 
 - **Phase 1 daemon:** Rust over XCB/RandR (the `x11rb` crate). Its profile, EDID and rules logic lives in a shared crate that moves unchanged into the server.
 - **Server core:** Rust. A compositor needs steady frame timing, which rules out garbage-collected runtimes.
-- **The toolkit and the tools** (terminal, settings, the shelf's drawing): Rust, on the project's own toolkit (§6.10). The terminal is on it; the settings app uses iced until it is moved.
+- **The toolkit and the tools** (terminal, settings, the shelf's drawing): Rust, on the project's own toolkit (§6.10). The terminal and the settings app are on it (both moved on 10 November 2026).
 - **Display-list reference implementation:** Rust (§6.6).
 
 Why one language:
@@ -594,7 +594,7 @@ The display-list renderer was phase 3 work. Step 1 brings its first version forw
 - **GBM:** Generic Buffer Management, the interface through which a display server allocates GPU buffers it can show on a monitor.
 - **Mesa:** the open-source implementation of OpenGL, Vulkan and GBM used by Intel, AMD and nouveau drivers.
 - **Explicit sync:** passing a fence with each buffer that says when the GPU has finished with it, instead of leaving the kernel to work that out (implicit sync).
-- **iced:** a cross-platform GUI toolkit for Rust, with a GPU renderer (wgpu) and a software one (tiny-skia); used by the first tools and being replaced (§6.10); the terminal left it on 10 November 2026.
+- **iced:** a cross-platform GUI toolkit for Rust, with a GPU renderer (wgpu) and a software one (tiny-skia); used by the first tools and replaced (§6.10): the terminal and then the settings app left it on 10 November 2026, and it was removed.
 - **Toolkit:** the code an application draws its buttons, lists and text with. Vergence's own is described in §6.10.
 - **Multisampling:** smoothing the edges of drawn shapes by sampling each pixel several times on the GPU.
 - **Smithay:** a Rust library for building Wayland compositors.
