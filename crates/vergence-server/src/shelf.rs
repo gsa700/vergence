@@ -30,7 +30,12 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            element::{Kind, memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement}},
+            element::{
+                AsRenderElements, Kind,
+                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+                surface::WaylandSurfaceRenderElement,
+                utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
+            },
             gles::GlesRenderer,
         },
     },
@@ -266,6 +271,26 @@ pub struct Shelf {
     /// screen (the server's space does not hold them); their application's icon
     /// on the shelf is where they are.
     pub minimised: Vec<(Window, Point<i32, Logical>)>,
+    /// Minimised windows shown on their way into their icon, or out of it.
+    motions: Vec<Motion>,
+}
+
+/// A window drawn smaller, somewhere else: on its way into the dock or out.
+pub type Moving = RelocateRenderElement<RescaleRenderElement<WaylandSurfaceRenderElement<GlesRenderer>>>;
+
+/// How long a window takes into its icon or out of it.
+const MOTION: std::time::Duration = std::time::Duration::from_millis(220);
+
+/// A window on its way between its place and its application's icon. It is
+/// in the list of minimised windows throughout: going in, it is already
+/// minimised and only its picture moves; coming back, it is put in its place
+/// when the picture arrives.
+struct Motion {
+    window: Window,
+    /// Its place on the desktop: where it left, or where it is going back to.
+    place: Rectangle<i32, Logical>,
+    start: std::time::Instant,
+    back: bool,
 }
 
 impl Shelf {
@@ -477,6 +502,9 @@ impl Server {
         let Some(at) = self.space.element_location(w) else { return };
         tracing::info!("shelf: minimised {:?}", self.window_title(w));
         self.shelf.minimised.push((w.clone(), at));
+        if self.motion_wanted() {
+            self.shelf.motions.push(Motion { window: w.clone(), place: Rectangle::new(at, w.geometry().size), start: std::time::Instant::now(), back: false });
+        }
         self.space.unmap_elem(w);
         w.set_activated(false);
         if let Some(t) = w.toplevel() {
@@ -499,8 +527,86 @@ impl Server {
         self.shelf.minimised.iter().any(|(m, _)| m == w)
     }
 
-    /// Bring a minimised window back to where it was, in front, with the keyboard.
+    /// Motion on the desktop is wanted (the settings' reduce-motion is off).
+    fn motion_wanted(&self) -> bool {
+        !matches!(self.settings.current.get(&(crate::settings::INTERFACE.to_string(), "enable-animations".to_string())), Some(vergence_protocol::bus::SettingValue::Bool(false)))
+    }
+
+    /// Bring a minimised window back to where it was, in front, with the
+    /// keyboard: at once, or after its picture has come out of its icon.
     pub fn unminimise(&mut self, w: &Window) {
+        let Some(&(_, at)) = self.shelf.minimised.iter().find(|(m, _)| m == w) else { return };
+        if !self.motion_wanted() || !w.alive() {
+            self.shelf.motions.retain(|m| m.window != *w);
+            return self.unminimise_now(w);
+        }
+        // Already on its way back: nothing more to do. On its way in: it turns round.
+        if self.shelf.motions.iter().any(|m| m.window == *w && m.back) {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let mut start = now;
+        if let Some(i) = self.shelf.motions.iter().position(|m| m.window == *w) {
+            // As far out as it had come in.
+            let gone = now.duration_since(self.shelf.motions.remove(i).start).min(MOTION);
+            start = now - (MOTION - gone);
+        }
+        self.shelf.motions.push(Motion { window: w.clone(), place: Rectangle::new(at, w.geometry().size), start, back: true });
+        self.redraw_all();
+    }
+
+    /// Motions that have run their time are done with; a window that was
+    /// coming back is put in its place.
+    pub fn shelf_motions_end(&mut self) {
+        if self.shelf.motions.is_empty() {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let (done, going): (Vec<Motion>, Vec<Motion>) = std::mem::take(&mut self.shelf.motions).into_iter().partition(|m| !m.window.alive() || now.duration_since(m.start) >= MOTION);
+        self.shelf.motions = going;
+        for m in done {
+            if m.back {
+                self.unminimise_now(&m.window);
+            }
+        }
+        self.redraw_all();
+    }
+
+    /// The pictures of the windows on their way, as far as each has come:
+    /// smaller and fainter towards its application's icon on the dock.
+    pub fn shelf_motion_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+        if self.shelf.motions.is_empty() {
+            return Vec::new();
+        }
+        let items = self.shelf_items();
+        let upright = self.shelf.config.placement().upright();
+        let Some(dock) = self.shelf_dock(items.len()) else { return Vec::new() };
+        let now = std::time::Instant::now();
+        let mut elements = Vec::new();
+        for m in &self.shelf.motions {
+            let Some(index) = items.iter().position(|(_, windows)| windows.contains(&m.window)) else { continue };
+            let icon = running::slot(rect(dock), index, upright).map_or(dock, |s| rectangle(running::icon_in(s)));
+            let t = (now.duration_since(m.start).as_secs_f64() / MOTION.as_secs_f64()).clamp(0.0, 1.0);
+            // 0 at its place, 1 in the icon; slow away from its place, quick into the icon.
+            let t = if m.back { 1.0 - t } else { t };
+            let e = t * t;
+            let (w, h) = (m.place.size.w.max(1) as f64, m.place.size.h.max(1) as f64);
+            let small = (icon.size.w as f64 / w).min(icon.size.h as f64 / h).min(1.0);
+            let factor = 1.0 + (small - 1.0) * e;
+            let from = (m.place.loc.x as f64 + w / 2.0, m.place.loc.y as f64 + h / 2.0);
+            let to = (icon.loc.x as f64 + icon.size.w as f64 / 2.0, icon.loc.y as f64 + icon.size.h as f64 / 2.0);
+            let corner: Point<f64, Logical> = (from.0 + (to.0 - from.0) * e - w * factor / 2.0, from.1 + (to.1 - from.1) * e - h * factor / 2.0).into();
+            // Drawn at its own place, made smaller about its corner, then moved.
+            let origin = (m.place.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+            let render_loc = (m.place.loc - m.window.geometry().loc - out.loc).to_f64().to_physical(scale).to_i32_round();
+            let shift = (corner - m.place.loc.to_f64()).to_physical(scale).to_i32_round::<i32>();
+            let surfaces: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = m.window.render_elements(renderer, render_loc, scale.into(), (1.0 - 0.7 * e) as f32);
+            elements.extend(surfaces.into_iter().map(|s| SceneElement::Moving(RelocateRenderElement::from_element(RescaleRenderElement::from_element(s, origin, factor), shift, Relocate::Relative))));
+        }
+        elements
+    }
+
+    fn unminimise_now(&mut self, w: &Window) {
         let Some(index) = self.shelf.minimised.iter().position(|(m, _)| m == w) else { return };
         let (w, mut at) = self.shelf.minimised.remove(index);
         if !w.alive() {

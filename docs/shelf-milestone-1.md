@@ -347,6 +347,17 @@ one.
     but by an edge; nothing shows where it will snap while dragging; a
     hand's drag with a real mouse (Dave).
 
+- **A minimised window goes into its icon (2026-11-10).** For 220 ms
+  the window's picture shrinks and fades towards its application's icon
+  on the dock, slow at first and quick at the end; coming back it runs
+  the other way, and the window is put in its place when the picture
+  arrives. One turned round on its way in comes back from where it had
+  got to. Not done when the settings ask for reduced motion
+  (`enable-animations` false). The picture is the window's own surfaces
+  (Smithay's rescale and relocate elements), so a title bar the server
+  draws is not in it yet. Seen on Hubble in a frame taken mid-way; the
+  feel of it is for Dave's eye.
+
 ## Acceptance
 
 Every step: `cargo test --workspace` green on Hubble, canary and Techbench,

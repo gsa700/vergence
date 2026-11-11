@@ -70,6 +70,7 @@ smithay::backend::renderer::element::render_elements! {
     Surface = WaylandSurfaceRenderElement<GlesRenderer>,
     Solid = SolidColorRenderElement,
     Memory = MemoryRenderBufferRenderElement<GlesRenderer>,
+    Moving = crate::shelf::Moving,
 }
 
 /// What is under a point of the desktop.
@@ -255,6 +256,8 @@ impl Server {
         let focused = self.seat.get_keyboard().and_then(|k| k.current_focus());
         let minimise_button = self.minimise_button();
         self.decor.retain(|w, _| w.alive());
+        // A window on its way back from the dock is put in its place when it arrives.
+        self.shelf_motions_end();
         let windows: Vec<Window> = self.space.elements().rev().cloned().collect();
         // In front of everything: the desktop menu, if open (menu.rs).
         let mut elements = self.menu_elements(renderer, out, scale);
@@ -262,6 +265,8 @@ impl Server {
         elements.extend(self.notify_elements(renderer, out, scale));
         // Then the shelf's strip, which no window covers (shelf.rs).
         elements.extend(self.shelf_elements(renderer, out, scale));
+        // Then windows on their way into the dock or out of it.
+        elements.extend(self.shelf_motion_elements(renderer, out, scale));
         for w in windows {
             let frame = self.frame_of(&w);
             let border = self.border_of(&w);
