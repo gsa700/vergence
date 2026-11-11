@@ -756,6 +756,17 @@ impl Server {
         }
     }
 
+    /// The applications that are running and could be started again: those
+    /// with a window and a desktop entry that needs no terminal, by entry id.
+    pub fn shelf_running(&mut self) -> Vec<String> {
+        let items = self.shelf_items();
+        items
+            .iter()
+            .filter(|(item, windows)| !windows.is_empty() && self.shelf.apps.iter().any(|e| e.id == item.key && !e.terminal && !e.exec.is_empty()))
+            .map(|(item, _)| item.key.clone())
+            .collect()
+    }
+
     /// A right press on the dock: on an application's icon, its menu (pin or
     /// unpin, a new window, close).
     pub fn shelf_menu(&mut self, at: Point<f64, Logical>) {

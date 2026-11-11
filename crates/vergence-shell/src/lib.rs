@@ -15,6 +15,7 @@ pub mod apps;
 pub mod desktop;
 pub mod icons;
 pub mod running;
+pub mod session;
 
 /// A rectangle in points: its top-left corner and its size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

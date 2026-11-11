@@ -157,6 +157,7 @@ impl Server {
             }
             "windows" => self.describe_windows(),
             "shelf" => self.shelf_report(),
+            "session" => self.session_report(),
             "dbus" => self.dbus_report(),
             "notes" => self.notify_report(),
             "spawn" => {
@@ -223,7 +224,7 @@ impl Server {
                 self.loop_signal.stop();
                 "quitting".into()
             }
-            _ => "commands: shot, windows, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
+            _ => "commands: shot, windows, shelf, session, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
         }
     }
 

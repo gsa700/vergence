@@ -11,6 +11,10 @@
 # A checkout is a development session: the control socket (vctl) is on. An
 # installed session has it off (security pass 2026-11-08) unless VERGENCE_CONTROL=1
 # is in the environment or the user has created ~/.config/vergence/control-socket.
+# `vergence --clean` starts without bringing back the applications the last
+# session had running (session restore; a restart within the session restores).
+clean=
+[ "$1" = "--clean" ] && clean=1
 here=$(dirname "$(realpath "$0")")
 installed=
 if [ -n "$VERGENCE_SERVER" ]; then
@@ -74,8 +78,9 @@ tries=0
 while :; do
     started=$(date +%s)
     [ -s "$LOG" ] && mv "$LOG" "$LOG.1"
-    "$BIN" --drm > "$LOG" 2>&1
+    VERGENCE_CLEAN=$clean "$BIN" --drm > "$LOG" 2>&1
     status=$?
+    clean=
     if [ "$status" -eq 75 ]; then
         tries=0
         sleep 1

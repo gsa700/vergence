@@ -379,6 +379,29 @@ one.
     cannot yet be told what to run); dragging to reorder pins; the
     acceptance check with Firefox is Dave's (his profile, his hand).
 
+- **Session restore (2026-11-10; decided the same day).**
+  - The server keeps the list of running applications (desktop entry
+    ids; those with a window, an entry, and no need of a terminal) in
+    `~/.local/state/vergence/session.toml` (0600), written within a
+    second of a change, so it survives a crash as well as a logout. Three
+    seconds into the next session each is started from its desktop entry,
+    as a click on a pin starts it; window memory places the windows.
+  - Not restoring: `[session] restore = false` in desktop.toml;
+    `vergence --clean` for one start; and by itself after two sessions in
+    a row that ended within a minute of their restore (the rule and its
+    test are vergence-shell's `session.rs`), so an application that takes
+    the session down as it starts cannot do so for ever. A nested run
+    (not `--drm`) neither restores nor records. `vctl session` says what
+    the start came to.
+  - On Hubble: a terminal comes back after `vctl restart`; a second
+    quick restart restores and counts; the third starts clean; a session
+    that lasts a minute is forgiven; the switch in desktop.toml is obeyed.
+  - Not yet: one start for each application however many windows it had
+    (a second terminal window does not come back); what the terminal had
+    open (tabs, directories) waits for the toolkit; an application
+    started from a shell or with no entry is not restored; `--clean` is
+    not tried by hand at a console; the settings page for the switch.
+
 ## Acceptance
 
 Every step: `cargo test --workspace` green on Hubble, canary and Techbench,
