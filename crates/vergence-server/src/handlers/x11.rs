@@ -4,6 +4,7 @@
 // move/resize with the server's own grabs. Scale: one client scale for all of
 // Xwayland (VERGENCE_XWAYLAND_SCALE, default 1) until per-monitor X scaling lands.
 
+use crate::win::Win;
 use std::os::unix::io::OwnedFd;
 
 use smithay::{
@@ -39,7 +40,7 @@ impl XWaylandShellHandler for Server {
 }
 
 impl Server {
-    pub fn window_for_x11(&self, x: &X11Surface) -> Option<Window> {
+    pub fn window_for_x11(&self, x: &X11Surface) -> Option<Win> {
         self.space.elements().find(|w| w.x11_surface() == Some(x)).cloned()
     }
 }
@@ -59,7 +60,7 @@ impl XwmHandler for Server {
         // Where memory had it on this setup (memory.rs), else on a monitor and
         // fitting it (place.rs).
         let asked_size = window.geometry().size;
-        let w = Window::new_x11_window(window.clone());
+        let w = Win::from(Window::new_x11_window(window.clone()));
         let remembered = self.remembered_place(&w);
         let rect = remembered.map(|(r, _)| r).unwrap_or_else(|| self.place_x11(&window));
         let loc = rect.loc;
@@ -86,7 +87,7 @@ impl XwmHandler for Server {
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
         // Menus, tooltips: they place themselves.
         let loc = window.geometry().loc;
-        self.space.map_element(Window::new_x11_window(window), loc, true);
+        self.space.map_element(Win::from(Window::new_x11_window(window)), loc, true);
     }
 
     fn unmapped_window(&mut self, _xwm: XwmId, window: X11Surface) {
@@ -276,16 +277,17 @@ impl XwmHandler for Server {
 impl Server {
     /// Move a window with the pointer (an app's request, or Alt+left drag).
     /// `start`: the grab's start (Alt+drag), else the click the app was given.
-    pub fn start_move(&mut self, window: Window, start: Option<GrabStartData<Server>>) {
+    pub fn start_move(&mut self, window: Win, start: Option<GrabStartData<Server>>) {
         let Some(pointer) = self.seat.get_pointer() else { return };
         let Some(start_data) = start.or_else(|| pointer.grab_start_data()) else { return };
         let Some(initial_window_location) = self.space.element_location(&window) else { return };
-        let grab = MoveSurfaceGrab { start_data, window, initial_window_location };
+        let unmaximize_on_drag = self.restore.contains_key(&window);
+        let grab = MoveSurfaceGrab { start_data, window, initial_window_location, unmaximize_on_drag };
         pointer.set_grab(self, grab, SERIAL_COUNTER.next_serial(), Focus::Clear);
     }
 
     /// Resize a window with the pointer (an app's request, or Alt+right drag).
-    pub fn start_resize(&mut self, window: Window, edges: ResizeEdge, start: Option<GrabStartData<Server>>) {
+    pub fn start_resize(&mut self, window: Win, edges: ResizeEdge, start: Option<GrabStartData<Server>>) {
         let Some(pointer) = self.seat.get_pointer() else { return };
         let Some(start_data) = start.or_else(|| pointer.grab_start_data()) else { return };
         let Some(loc) = self.space.element_location(&window) else { return };

@@ -35,6 +35,7 @@
 // The screen is the primary one ([displays] primary, else the first in
 // arrangement order): vergence_profile::primary, the settings app's rule.
 
+use crate::win::Win;
 use serde::Deserialize;
 use smithay::{
     backend::{
@@ -59,7 +60,7 @@ use std::{
     time::SystemTime,
 };
 
-use smithay::{desktop::Window, reexports::calloop::channel::{Event, channel}, utils::IsAlive};
+use smithay::{reexports::calloop::channel::{Event, channel}, utils::IsAlive};
 use vergence_scene::{Color, Image, Point as ScenePoint, Rect as SceneRect, Scene};
 use vergence_shell::{Edge, Place, Placement, Rect, desktop::Entry, running};
 
@@ -200,7 +201,7 @@ pub enum Act {
     Unpin(String),
     /// Start the application (again): the entry's id.
     Start(String),
-    Close(Vec<Window>),
+    Close(Vec<Win>),
 }
 
 /// How long a started application's icon says it is starting, if no window
@@ -332,7 +333,7 @@ pub struct Shelf {
     pub apps: Vec<Entry>,
     apps_stamp: Vec<Option<SystemTime>>,
     /// The windows that get an item, in the order they were first seen.
-    order: Vec<Window>,
+    order: Vec<Win>,
     /// Icons by name and pixel size, and the thread that decodes them.
     icons: HashMap<(String, u32), Asked>,
     decoder: Option<std::sync::mpsc::Sender<(String, String, u32)>>,
@@ -356,7 +357,7 @@ pub struct Shelf {
     /// Minimized windows, each with the place it goes back to. They are on no
     /// screen (the server's space does not hold them); their application's icon
     /// on the shelf is where they are.
-    pub minimized: Vec<(Window, Point<i32, Logical>)>,
+    pub minimized: Vec<(Win, Point<i32, Logical>)>,
     /// Minimized windows shown on their way into their icon, or out of it.
     motions: Vec<Motion>,
     /// Applications started from the dock that have shown no window yet
@@ -390,7 +391,7 @@ const MOTION: std::time::Duration = std::time::Duration::from_millis(220);
 /// minimized and only its picture moves; coming back, it is put in its place
 /// when the picture arrives.
 struct Motion {
-    window: Window,
+    window: Win,
     /// Its place on the desktop: where it left, or where it is going back to.
     place: Rectangle<i32, Logical>,
     start: std::time::Instant,
@@ -428,11 +429,11 @@ impl Server {
 
     /// The dock's applications: the pinned ones, then the others with a window
     /// open in the order they started; and each item's windows.
-    pub fn shelf_items(&mut self) -> Vec<(running::Item, Vec<Window>)> {
+    pub fn shelf_items(&mut self) -> Vec<(running::Item, Vec<Win>)> {
         // The windows that are someone's (not menus or tooltips), oldest first;
         // the minimized ones with them.
         self.shelf.minimized.retain(|(w, _)| w.alive());
-        let open: Vec<Window> = self.space.elements().cloned().chain(self.shelf.minimized.iter().map(|(w, _)| w.clone())).collect();
+        let open: Vec<Win> = self.space.elements().cloned().chain(self.shelf.minimized.iter().map(|(w, _)| w.clone())).collect();
         self.shelf.order.retain(|w| w.alive() && open.contains(w));
         for w in open {
             if !self.shelf.order.contains(&w) {
@@ -441,7 +442,7 @@ impl Server {
         }
         let focused = self.seat.get_keyboard().and_then(|k| k.current_focus());
         let order = self.shelf.order.clone();
-        let mut windows: Vec<Window> = Vec::new();
+        let mut windows: Vec<Win> = Vec::new();
         let mut classes: Vec<(String, bool)> = Vec::new();
         for w in order {
             let Some(id) = self.window_identity(&w) else { continue };
@@ -452,7 +453,7 @@ impl Server {
             classes.push((if id.class.is_empty() { id.instance } else { id.class }, active));
             windows.push(w);
         }
-        let items: Vec<(running::Item, Vec<Window>)> = running::items(&self.shelf.apps, &self.shelf.config.pinned, &classes).into_iter().map(|item| {
+        let items: Vec<(running::Item, Vec<Win>)> = running::items(&self.shelf.apps, &self.shelf.config.pinned, &classes).into_iter().map(|item| {
             let theirs = item.windows.iter().map(|i| windows[*i].clone()).collect();
             (item, theirs)
         }).collect();
@@ -745,7 +746,7 @@ impl Server {
 
     /// Minimize a window: it leaves the screen and stays as its application's
     /// icon, and the keyboard goes to the window that is then in front.
-    pub fn minimize(&mut self, w: &Window) {
+    pub fn minimize(&mut self, w: &Win) {
         if w.x11_surface().is_some_and(|x| x.is_override_redirect()) || self.is_minimized(w) {
             return;
         }
@@ -773,7 +774,7 @@ impl Server {
         self.redraw_all();
     }
 
-    pub fn is_minimized(&self, w: &Window) -> bool {
+    pub fn is_minimized(&self, w: &Win) -> bool {
         self.shelf.minimized.iter().any(|(m, _)| m == w)
     }
 
@@ -784,7 +785,7 @@ impl Server {
 
     /// Bring a minimized window back to where it was, in front, with the
     /// keyboard: at once, or after its picture has come out of its icon.
-    pub fn unminimize(&mut self, w: &Window) {
+    pub fn unminimize(&mut self, w: &Win) {
         let Some(&(_, at)) = self.shelf.minimized.iter().find(|(m, _)| m == w) else { return };
         if !self.motion_wanted() || !w.alive() {
             self.shelf.motions.retain(|m| m.window != *w);
@@ -856,7 +857,7 @@ impl Server {
         elements
     }
 
-    fn unminimize_now(&mut self, w: &Window) {
+    fn unminimize_now(&mut self, w: &Win) {
         let Some(index) = self.shelf.minimized.iter().position(|(m, _)| m == w) else { return };
         let (w, mut at) = self.shelf.minimized.remove(index);
         if !w.alive() {
@@ -877,7 +878,7 @@ impl Server {
     }
 
     /// To a window from the shelf: back if it is minimized, else forward.
-    pub fn shelf_to_window(&mut self, w: &Window) {
+    pub fn shelf_to_window(&mut self, w: &Win) {
         if self.is_minimized(w) {
             self.unminimize(w);
         } else {
@@ -963,7 +964,7 @@ impl Server {
                 }
             }
             several => {
-                let titled: Vec<(Window, String)> = several
+                let titled: Vec<(Win, String)> = several
                     .iter()
                     .map(|w| {
                         let title = self.window_title(w);

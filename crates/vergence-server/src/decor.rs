@@ -19,6 +19,7 @@
 // The scene is built here, front to back, window by window, so a title bar is
 // stacked with its window (behind the windows above it).
 
+use crate::win::Win;
 use smithay::{
     backend::renderer::{
         element::{
@@ -30,7 +31,7 @@ use smithay::{
         gles::GlesRenderer,
         utils::CommitCounter,
     },
-    desktop::{Window, WindowSurfaceType},
+    desktop::WindowSurfaceType,
     output::Output,
     reexports::{
         wayland_protocols::xdg::{
@@ -75,12 +76,12 @@ smithay::backend::renderer::element::render_elements! {
 
 /// What is under a point of the desktop.
 pub enum Hit {
-    Surface(Window, WlSurface, Point<f64, Logical>),
-    Title(Window),
-    Close(Window),
-    Maximize(Window),
-    Minimize(Window),
-    Edge(Window, ResizeEdge),
+    Surface(Win, WlSurface, Point<f64, Logical>),
+    Title(Win),
+    Close(Win),
+    Maximize(Win),
+    Minimize(Win),
+    Edge(Win, ResizeEdge),
     /// The shelf's strip (shelf.rs): in front of every window.
     Shelf,
     Nothing,
@@ -153,7 +154,7 @@ fn physical(r: Rectangle<f64, Logical>, output_loc: Point<i32, Logical>, scale: 
 
 impl Server {
     /// Does the server draw this window's title bar?
-    pub fn has_title(&self, w: &Window) -> bool {
+    pub fn has_title(&self, w: &Win) -> bool {
         if let Some(x) = w.x11_surface() {
             return !x.is_override_redirect() && !x.is_decorated() && !x.is_fullscreen();
         }
@@ -166,7 +167,7 @@ impl Server {
         })
     }
 
-    fn frame_of(&self, w: &Window) -> Option<Frame> {
+    fn frame_of(&self, w: &Win) -> Option<Frame> {
         self.has_title(w).then(|| self.space.element_geometry(w).map(Frame::of)).flatten()
     }
 
@@ -174,7 +175,7 @@ impl Server {
     /// whole frame of a decorated window, or the geometry of a window that draws
     /// no frame of its own. None for fullscreen, override-redirect and
     /// client-decorated windows.
-    pub fn border_of(&self, w: &Window) -> Option<Rectangle<i32, Logical>> {
+    pub fn border_of(&self, w: &Win) -> Option<Rectangle<i32, Logical>> {
         if let Some(f) = self.frame_of(w) {
             return Some(f.whole());
         }
@@ -258,7 +259,7 @@ impl Server {
         self.decor.retain(|w, _| w.alive());
         // A window on its way back from the dock is put in its place when it arrives.
         self.shelf_motions_end();
-        let windows: Vec<Window> = self.space.elements().rev().cloned().collect();
+        let windows: Vec<Win> = self.space.elements().rev().cloned().collect();
         // In front of everything: the desktop menu, if open (menu.rs).
         let mut elements = self.menu_elements(renderer, out, scale);
         // Then notifications, in front of every window (notify.rs).
@@ -365,7 +366,7 @@ impl Server {
     }
 
     /// A window's title, as its app set it.
-    pub fn window_title(&self, w: &Window) -> String {
+    pub fn window_title(&self, w: &Win) -> String {
         if let Some(x) = w.x11_surface() {
             return x.title();
         }
@@ -379,7 +380,7 @@ impl Server {
     }
 
     /// Close a window as its app is asked to.
-    pub fn close_window(&self, w: &Window) {
+    pub fn close_window(&self, w: &Win) {
         if let Some(x) = w.x11_surface() {
             let _ = x.close();
         } else if let Some(t) = w.toplevel() {
@@ -388,7 +389,7 @@ impl Server {
     }
 
     /// Fill the monitor the window is mostly on (title bar included), or restore.
-    pub fn toggle_maximize(&mut self, w: &Window) {
+    pub fn toggle_maximize(&mut self, w: &Win) {
         if let Some(old) = self.restore.remove(w) {
             self.set_window_rect(w, old, false);
             self.remember(w);
@@ -416,7 +417,7 @@ impl Server {
         self.remember(w);
     }
 
-    fn set_window_rect(&mut self, w: &Window, rect: Rectangle<i32, Logical>, maximized: bool) {
+    fn set_window_rect(&mut self, w: &Win, rect: Rectangle<i32, Logical>, maximized: bool) {
         if let Some(x) = w.x11_surface() {
             let _ = x.set_maximized(maximized);
             let _ = x.configure(rect);

@@ -32,11 +32,11 @@
 //
 // Not yet: a way to make the tie by touching the screen (settings app).
 
+use crate::win::Win;
 use std::collections::{HashMap, HashSet};
 
 use smithay::{
     backend::input::{ButtonState, InputTime, TouchSlot},
-    desktop::Window,
     reexports::{calloop::timer::{TimeoutAction, Timer}, wayland_server::{Resource, protocol::wl_surface::WlSurface}},
     utils::Serial,
     input::touch::{DownEvent, MotionEvent, UpEvent},
@@ -55,7 +55,7 @@ const STILL: f64 = 10.0;
 /// A window going with the finger that asked to move it.
 struct Moving {
     slot: TouchSlot,
-    window: Window,
+    window: Win,
     /// Where the window was and where the finger came down.
     from: Point<i32, Logical>,
     down: Point<f64, Logical>,

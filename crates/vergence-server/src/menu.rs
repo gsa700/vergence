@@ -54,7 +54,7 @@ enum Entry {
     App(Item),
     /// One of an application's windows, by its title: the list a click on the
     /// application's icon opens beside the shelf (shelf.rs).
-    Window(smithay::desktop::Window, String),
+    Window(crate::win::Win, String),
     /// Something to do with an application on the dock, and what the menu calls it.
     Shelf(crate::shelf::Act, String),
     Separator,
@@ -186,7 +186,7 @@ impl Server {
 
     /// The list of an application's windows, beside its icon's place on the dock
     /// (`slot`) on the side `towards` names, kept on its screen's work area.
-    pub fn open_window_list(&mut self, slot: Rectangle<i32, Logical>, towards: vergence_shell::Edge, windows: Vec<(smithay::desktop::Window, String)>) {
+    pub fn open_window_list(&mut self, slot: Rectangle<i32, Logical>, towards: vergence_shell::Edge, windows: Vec<(crate::win::Win, String)>) {
         self.open_beside(slot, towards, windows.into_iter().map(|(w, title)| Entry::Window(w, title)).collect());
     }
 

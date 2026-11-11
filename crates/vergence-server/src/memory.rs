@@ -17,10 +17,10 @@
 //   WindowStore format; `skip = ["app"]` leaves an app alone. vergd's
 //   windows.toml is separate: its units are X pixels.
 
+use crate::win::Win;
 use std::{collections::HashMap, os::unix::fs::PermissionsExt, path::PathBuf};
 
 use smithay::{
-    desktop::Window,
     output::Output,
     utils::{Logical, Rectangle},
 };
@@ -46,7 +46,7 @@ pub struct Memory {
     /// The current monitor setup's key ("" until the backend knows it).
     pub setup: String,
     /// Each open window's identity (fixed when it opened: its class index).
-    ids: HashMap<Window, WindowId>,
+    ids: HashMap<Win, WindowId>,
 }
 
 fn path() -> Option<PathBuf> {
@@ -92,7 +92,7 @@ impl Memory {
 impl Server {
     /// Who a window is: class and its place among open windows of that class.
     /// None for windows the memory leaves alone (menus, skipped apps, no class).
-    pub fn window_identity(&mut self, w: &Window) -> Option<WindowId> {
+    pub fn window_identity(&mut self, w: &Win) -> Option<WindowId> {
         if let Some(id) = self.memory.ids.get(w) {
             return Some(id.clone());
         }
@@ -138,7 +138,7 @@ impl Server {
     /// Where memory puts this window on the current setup: its content rectangle
     /// and whether it was maximized. None: no place, monitor absent, no fit, or a
     /// size no real window has (see MIN_W).
-    pub fn remembered_place(&mut self, w: &Window) -> Option<(Rectangle<i32, Logical>, bool)> {
+    pub fn remembered_place(&mut self, w: &Win) -> Option<(Rectangle<i32, Logical>, bool)> {
         let id = self.window_identity(w)?;
         let s = self.memory.store.get(&self.memory.setup)?.get(&id)?.clone();
         if (s.width as i32) < MIN_W || (s.height as i32) < MIN_H {
@@ -157,7 +157,7 @@ impl Server {
     }
 
     /// Record where a window is now (its restore size and place if maximized).
-    pub fn remember(&mut self, w: &Window) {
+    pub fn remember(&mut self, w: &Win) {
         if self.memory.setup.is_empty() {
             return;
         }

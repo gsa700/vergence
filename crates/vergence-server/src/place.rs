@@ -7,8 +7,8 @@
 // otherwise the window is centered. Window placement memory (Contract 2, from
 // vergd) comes later and will decide before these defaults.
 
+use crate::win::Win;
 use smithay::{
-    desktop::Window,
     utils::{Logical, Point, Rectangle, Size},
     xwayland::X11Surface,
 };
@@ -58,7 +58,7 @@ impl Server {
     }
 
     /// The most a mapped window may be: the monitor it is mostly on, below its title bar.
-    pub fn room_for(&self, w: &Window) -> Option<Size<i32, Logical>> {
+    pub fn room_for(&self, w: &Win) -> Option<Size<i32, Logical>> {
         let geo = self.space.element_geometry(w)?;
         let out = self
             .space
@@ -74,7 +74,7 @@ impl Server {
     }
 
     /// Fit and center a Wayland window once it has a size (its first commit).
-    pub fn place_wayland(&mut self, w: &Window) {
+    pub fn place_wayland(&mut self, w: &Win) {
         let Some(t) = w.toplevel() else { return };
         self.placed.retain(|p| smithay::utils::IsAlive::alive(p));
         let size = w.geometry().size;
@@ -106,7 +106,7 @@ impl Server {
 
 impl Server {
     /// Each window's monitor (by EDID ID) and its place on it, before monitors change.
-    pub fn window_anchors(&self) -> Vec<(Window, String, Point<i32, Logical>)> {
+    pub fn window_anchors(&self) -> Vec<(Win, String, Point<i32, Logical>)> {
         self.space
             .elements()
             .filter_map(|w| {
@@ -127,8 +127,8 @@ impl Server {
     /// else, if its monitor is still there, to the same place on it (the layout may
     /// have moved it); else, if it is left on no monitor, onto the nearest one,
     /// fitted. The pointer too, if its monitor went.
-    pub fn rearrange_windows(&mut self, anchors: Vec<(Window, String, Point<i32, Logical>)>) {
-        let windows: Vec<Window> = self.space.elements().cloned().collect();
+    pub fn rearrange_windows(&mut self, anchors: Vec<(Win, String, Point<i32, Logical>)>) {
+        let windows: Vec<Win> = self.space.elements().cloned().collect();
         for w in windows {
             if w.x11_surface().is_some_and(|x| x.is_override_redirect()) {
                 continue;
@@ -196,7 +196,7 @@ impl Server {
     }
 
     /// Put a window's content at `r` (X11: configured; Wayland: asked to take the size).
-    pub fn set_rect(&mut self, w: &Window, r: Rectangle<i32, Logical>) {
+    pub fn set_rect(&mut self, w: &Win, r: Rectangle<i32, Logical>) {
         if let Some(x) = w.x11_surface() {
             let _ = x.configure(r);
         } else if let Some(t) = w.toplevel() {

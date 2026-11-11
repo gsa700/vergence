@@ -388,7 +388,7 @@ fn disconnect(state: &mut Server, crtc: crtc::Handle) {
 }
 
 /// After monitors came or went: lay them out, find the setup, put windows back.
-fn setup_changed(state: &mut Server, anchors: Vec<(smithay::desktop::Window, String, smithay::utils::Point<i32, smithay::utils::Logical>)>) {
+fn setup_changed(state: &mut Server, anchors: Vec<(crate::win::Win, String, smithay::utils::Point<i32, smithay::utils::Logical>)>) {
     // The setup first: the arrangement is kept per setup.
     let edids: Vec<Vec<u8>> = state.backend.as_ref().map(|b| b.surfaces.values().map(|s| s.edid.clone()).collect()).unwrap_or_default();
     state.set_setup(&edids);

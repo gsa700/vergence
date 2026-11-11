@@ -4,9 +4,9 @@
 //! eg. Usually whenever a user clicks on the app's titlebar and starts dragging, the compositors
 //! enters a MoveSurfaceGrab state.
 
+use crate::win::Win;
 use crate::Server;
 use smithay::{
-    desktop::Window,
     input::pointer::{
         AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
         GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
@@ -19,9 +19,17 @@ use smithay::{
 
 pub struct MoveSurfaceGrab {
     pub start_data: PointerGrabStartData<Server>,
-    pub window: Window,
+    pub window: Win,
     pub initial_window_location: Point<i32, Logical>,
+    /// A maximized window: it leaves maximized only once the pointer has
+    /// really moved, so a double-click on its title bar (whose first press
+    /// starts this grab) restores it instead of being undone by the second.
+    pub unmaximize_on_drag: bool,
 }
+
+/// How far the pointer moves before a press on a maximized window's title
+/// bar becomes a drag that takes it out of maximized.
+const DRAG: f64 = 6.0;
 
 impl PointerGrab<Server> for MoveSurfaceGrab {
     fn motion(
@@ -35,6 +43,25 @@ impl PointerGrab<Server> for MoveSurfaceGrab {
         handle.motion(data, None, event);
 
         let delta = event.location - self.start_data.location;
+        if self.unmaximize_on_drag {
+            if delta.x.hypot(delta.y) < DRAG {
+                return;
+            }
+            // Out of maximized: back to its size, under the pointer, and dragged on from there.
+            self.unmaximize_on_drag = false;
+            if let Some(old) = data.restore.get(&self.window).copied() {
+                data.toggle_maximize(&self.window);
+                let x = (event.location.x - old.size.w as f64 / 2.0).round() as i32;
+                let y = event.location.y.round() as i32 + crate::decor::TITLE_H / 2;
+                data.space.map_element(self.window.clone(), (x, y), true);
+                if let Some(xs) = self.window.x11_surface() {
+                    let _ = xs.configure(smithay::utils::Rectangle::new((x, y).into(), old.size));
+                }
+                self.initial_window_location = (x, y).into();
+                self.start_data.location = event.location;
+            }
+            return;
+        }
         let new_location = self.initial_window_location.to_f64() + delta;
         let loc = new_location.to_i32_round();
         data.space.map_element(self.window.clone(), loc, true);

@@ -233,3 +233,25 @@ fuzz test feeds the decoder random frames and descriptors.
     Hello` answered "refused (NotYet): windows on the native protocol: not
     yet". The settings app's bus client (screens) and every Wayland window
     as before.
+
+- **Step 2 (2026-11-10): the server's own element, `Win`.** `win.rs`: an
+  enum with one case today, a Smithay `Window` (Wayland or X11), that the
+  space, focus, the move and resize grabs, title bars, window memory,
+  placement, the dock, the menu and touch now hold instead of Smithay's
+  type. It answers what Smithay's space asks of an element (`SpaceElement`,
+  `IsAlive`, `WaylandFocus`, `AsRenderElements`) and passes the calls the
+  server makes (geometry, activation, surfaces, frames) to the window
+  behind it. A native window becomes its second case in step 3. 14 files,
+  about 75 lines each way; nothing behaves differently.
+  - **Found while trying it, and fixed** (it was older than this step: kepler's
+    build from before showed it, and Dave had met it on FreeBSD): a
+    double-click on a maximized window's title bar did nothing. The first
+    press took the window out of maximized at once (the "drag a maximized
+    window out" rule ran on the press, not the drag), so the second press,
+    a double-click, maximized it again. Now a maximized window leaves
+    maximized only once the pointer has moved 6 points with the button down
+    (`move_grab.rs`), for the server's title bars and an application's own
+    (the terminal's bar) alike. On Hubble: double-click restored (880 x 640),
+    double-click maximized again, a drag took it out under the pointer.
+  - Soak: an evening of Dave's normal use on Hubble and kepler, then step 3.
+

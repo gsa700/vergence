@@ -221,7 +221,7 @@ impl Server {
 
 impl Server {
     /// Raise a window and give it the keyboard (X11 windows: X focus and stacking too).
-    pub fn focus_window(&mut self, window: &smithay::desktop::Window, serial: smithay::utils::Serial) {
+    pub fn focus_window(&mut self, window: &crate::win::Win, serial: smithay::utils::Serial) {
         self.space.raise_element(window, true);
         let focus = match window.x11_surface() {
             Some(x) => {
@@ -244,7 +244,7 @@ impl Server {
     }
 
     /// The edges to resize from: the window's nearest third in each direction.
-    fn nearest_edges(&self, window: &smithay::desktop::Window, at: smithay::utils::Point<f64, smithay::utils::Logical>) -> ResizeEdge {
+    fn nearest_edges(&self, window: &crate::win::Win, at: smithay::utils::Point<f64, smithay::utils::Logical>) -> ResizeEdge {
         let Some(g) = self.space.element_geometry(window) else { return ResizeEdge::BOTTOM_RIGHT };
         let (fx, fy) = ((at.x - g.loc.x as f64) / g.size.w.max(1) as f64, (at.y - g.loc.y as f64) / g.size.h.max(1) as f64);
         let mut e = ResizeEdge::empty();
@@ -326,7 +326,7 @@ impl Server {
         }
 
         // (window, Some(edges) = resize / None = move)
-        let mut grab_with: Option<(smithay::desktop::Window, Option<ResizeEdge>)> = None;
+        let mut grab_with: Option<(crate::win::Win, Option<ResizeEdge>)> = None;
         if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
             use crate::decor::Hit;
             let at = pointer.current_location();
@@ -397,23 +397,14 @@ impl Server {
         };
 
         if let Some((window, resize)) = grab_with {
-            // The press goes to the grab, not the app. Moving a maximized window
-            // takes it out of maximized (back to its size, under the pointer).
+            // The press goes to the grab, not the app. Dragging a maximized window
+            // takes it out of maximized (back to its size, under the pointer) once
+            // the pointer has moved (move_grab.rs): a press alone does not, or a
+            // double-click on its title bar would restore and maximize it again.
             let start = smithay::input::pointer::GrabStartData { focus: None, button, location: pointer.current_location() };
             match resize {
                 Some(edges) => self.start_resize(window, edges, Some(start)),
-                None => {
-                    if let Some(old) = self.restore.get(&window).copied() {
-                        self.toggle_maximize(&window);
-                        let x = (start.location.x - old.size.w as f64 / 2.0).round() as i32;
-                        let y = start.location.y.round() as i32 + crate::decor::TITLE_H / 2;
-                        self.space.map_element(window.clone(), (x, y), true);
-                        if let Some(xs) = window.x11_surface() {
-                            let _ = xs.configure(smithay::utils::Rectangle::new((x, y).into(), old.size));
-                        }
-                    }
-                    self.start_move(window, Some(start));
-                }
+                None => self.start_move(window, Some(start)),
             }
             return;
         }

@@ -4,9 +4,10 @@
 //! eg. Usually whenever a user clicks on the app's border and starts dragging, the compositors
 //! enters a ResizeSurfaceGrab state.
 
+use crate::win::Win;
 use crate::Server;
 use smithay::{
-    desktop::{Space, Window},
+    desktop::Space,
     input::pointer::{
         AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
         GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
@@ -46,7 +47,7 @@ impl From<xdg_toplevel::ResizeEdge> for ResizeEdge {
 
 pub struct ResizeSurfaceGrab {
     start_data: PointerGrabStartData<Server>,
-    window: Window,
+    window: Win,
 
     edges: ResizeEdge,
 
@@ -57,7 +58,7 @@ pub struct ResizeSurfaceGrab {
 impl ResizeSurfaceGrab {
     pub fn start(
         start_data: PointerGrabStartData<Server>,
-        window: Window,
+        window: Win,
         edges: ResizeEdge,
         initial_window_rect: Rectangle<i32, Logical>,
     ) -> Self {
@@ -352,7 +353,7 @@ impl ResizeSurfaceState {
 }
 
 /// Should be called on `WlSurface::commit`
-pub fn handle_commit(space: &mut Space<Window>, surface: &WlSurface) -> Option<()> {
+pub fn handle_commit(space: &mut Space<Win>, surface: &WlSurface) -> Option<()> {
     let window = space
         .elements()
         .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))

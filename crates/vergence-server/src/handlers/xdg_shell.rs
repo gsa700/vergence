@@ -1,4 +1,5 @@
 // Based on Smithay's smallvil example (MIT; see LICENSE-smithay.txt), adapted for Vergence.
+use crate::win::Win;
 use smithay::{
     desktop::{PopupKind, PopupManager, Space, Window, find_popup_root_surface, get_popup_toplevel_coords},
     input::{
@@ -48,7 +49,7 @@ impl XdgShellHandler for Server {
         // The most it may be (xdg-toplevel configure_bounds): the monitor below a title bar.
         let room = crate::place::content_area(out, true).size;
         surface.with_pending_state(|s| s.bounds = Some(room));
-        let window = Window::new_wayland_window(surface);
+        let window = Win::from(Window::new_wayland_window(surface));
         self.space.map_element(window, (out.loc.x + gap, out.loc.y + gap), false);
     }
 
@@ -117,10 +118,13 @@ impl XdgShellHandler for Server {
                 .clone();
             let initial_window_location = self.space.element_location(&window).unwrap();
 
+            // A maximized window leaves maximized once it is really dragged (move_grab.rs).
+            let unmaximize_on_drag = self.restore.contains_key(&window);
             let grab = MoveSurfaceGrab {
                 start_data,
                 window,
                 initial_window_location,
+                unmaximize_on_drag,
             };
 
             pointer.set_grab(self, grab, serial, Focus::Clear);
@@ -199,7 +203,7 @@ fn check_grab(
 }
 
 /// Should be called on `WlSurface::commit`
-pub fn handle_commit(popups: &mut PopupManager, space: &Space<Window>, surface: &WlSurface) {
+pub fn handle_commit(popups: &mut PopupManager, space: &Space<Win>, surface: &WlSurface) {
     // Handle toplevel commits.
     if let Some(window) = space
         .elements()

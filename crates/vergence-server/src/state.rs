@@ -1,8 +1,9 @@
 // Based on Smithay's smallvil example (MIT; see LICENSE-smithay.txt), adapted for Vergence.
+use crate::win::Win;
 use std::{ffi::OsString, sync::Arc};
 
 use smithay::{
-    desktop::{PopupManager, Space, Window},
+    desktop::{PopupManager, Space},
     input::{Seat, SeatState},
     reexports::{
         calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, generic::Generic},
@@ -37,7 +38,7 @@ pub struct Server {
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
 
-    pub space: Space<Window>,
+    pub space: Space<Win>,
     pub loop_signal: LoopSignal,
 
     // Smithay State
@@ -63,20 +64,20 @@ pub struct Server {
     pub xsettings_tx: Option<std::sync::mpsc::Sender<()>>,
     pub xdg_decoration_state: smithay::wayland::shell::xdg::decoration::XdgDecorationState,
     /// Title bars: per-window ids for damage tracking (decor.rs).
-    pub decor: std::collections::HashMap<Window, crate::decor::Decor>,
+    pub decor: std::collections::HashMap<Win, crate::decor::Decor>,
     /// Where maximized windows go back to.
-    pub restore: std::collections::HashMap<Window, smithay::utils::Rectangle<i32, Logical>>,
+    pub restore: std::collections::HashMap<Win, smithay::utils::Rectangle<i32, Logical>>,
     /// The last press on a title bar, for double-click to maximize.
-    pub last_title_press: Option<(Window, std::time::Instant)>,
+    pub last_title_press: Option<(Win, std::time::Instant)>,
     /// Monitors (connector names) still to capture for the control socket's `shot`.
     pub shot_pending: Vec<String>,
     /// The desktop font for title text (None: titles without text).
     pub title_font: Option<crate::text::TextFont>,
     /// Wayland windows already placed (place.rs: on their first sized commit).
-    pub placed: std::collections::HashSet<Window>,
+    pub placed: std::collections::HashSet<Win>,
     /// When X11 windows were mapped (a move soon after is the app restoring its place).
     /// ... and the size the app asked for then (before fitting).
-    pub mapped_at: std::collections::HashMap<Window, (std::time::Instant, smithay::utils::Size<i32, Logical>)>,
+    pub mapped_at: std::collections::HashMap<Win, (std::time::Instant, smithay::utils::Size<i32, Logical>)>,
     /// linux-dmabuf (DRM backend): apps' GPU buffers.
     /// Where windows were, per monitor setup (memory.rs).
     pub memory: crate::memory::Memory,
