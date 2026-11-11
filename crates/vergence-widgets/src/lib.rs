@@ -75,6 +75,13 @@ pub trait Program {
     fn timer(&mut self, _id: u64, _window: &mut Window) -> bool {
         false
     }
+
+    /// The window is now drawn at `scale` pixels to the reference unit (it
+    /// opened, or moved to another monitor), for a program that prepares
+    /// pictures at their exact pixel size. True if the state changed.
+    fn scale(&mut self, _scale: f32) -> bool {
+        false
+    }
 }
 
 /// Text measured by the window's fonts, in the theme's family.
@@ -116,6 +123,7 @@ struct Host<P: Program> {
     /// The tree must be built again; the size it was laid out at.
     stale: bool,
     laid_at: (f32, f32),
+    scale: f32,
     print_tree: bool,
 }
 
@@ -151,6 +159,10 @@ impl<P: Program> vergence_ui::App for Host<P> {
     }
 
     fn scene(&mut self, frame: &Frame, fonts: &mut Fonts) -> Scene {
+        if frame.scale != self.scale {
+            self.scale = frame.scale;
+            self.stale |= self.program.scale(frame.scale);
+        }
         if self.stale || self.laid_at != (frame.width, frame.height) {
             self.theme = self.program.theme();
             let root = self.program.view(&self.theme);
@@ -225,7 +237,7 @@ impl<P: Program> vergence_ui::App for Host<P> {
 /// size asked for, in reference units.
 pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {
     let theme = program.theme();
-    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1") };
+    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1") };
     vergence_ui::run(&mut host, size)
 }
 

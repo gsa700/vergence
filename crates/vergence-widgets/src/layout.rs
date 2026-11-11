@@ -148,6 +148,12 @@ impl Layout<'_> {
                 };
                 Size { w: cw + padding.width(), h: ch + padding.height() }
             }
+            Kind::Row { children, spacing, wrap: true, .. } => {
+                let lines = self.flow(children, avail, *spacing);
+                let w = lines.iter().map(|l| l.width).fold(0.0, f32::max);
+                let h = lines.iter().map(|l| l.height).sum::<f32>() + gaps(lines.len(), *spacing);
+                Size { w, h }
+            }
             Kind::Row { children, spacing, .. } => {
                 let natural: f32 = children.iter().map(|c| self.main_natural(c, avail, true)).sum::<f32>() + gaps(children.len(), *spacing);
                 let room = if e.width == Length::Shrink { natural.min(avail) } else { avail };
@@ -196,6 +202,32 @@ impl Layout<'_> {
                 _ => content.h,
             },
         }
+    }
+
+    /// A wrapping row's children in lines no wider than `avail` (a child
+    /// wider than that has a line of its own), each child at its natural size.
+    fn flow<M>(&mut self, children: &[Element<M>], avail: f32, spacing: f32) -> Vec<FlowLine> {
+        let mut lines: Vec<FlowLine> = Vec::new();
+        for c in children {
+            let s = self.measure(c, avail);
+            let w = match c.width {
+                Length::Fixed(v) => v,
+                _ => s.w.min(avail),
+            };
+            let h = match c.height {
+                Length::Fixed(v) => v,
+                _ => self.measure(c, w).h,
+            };
+            match lines.last_mut() {
+                Some(l) if l.width + spacing + w <= avail + 0.01 => {
+                    l.width += spacing + w;
+                    l.height = l.height.max(h);
+                    l.sizes.push((w, h));
+                }
+                _ => lines.push(FlowLine { width: w, height: h, sizes: vec![(w, h)] }),
+            }
+        }
+        lines
     }
 
     fn field_height(&mut self) -> f32 {
@@ -291,7 +323,26 @@ impl Layout<'_> {
                 let inner = Rect::new(rect.x + padding.left, rect.y + padding.top, (rect.w - padding.width()).max(0.0), (rect.h - padding.height()).max(0.0));
                 self.place_one(*child, inner, Align::Center, Align::Center, me, id, out);
             }
-            Kind::Row { children, spacing, align } => {
+            Kind::Row { children, spacing, align, wrap: true } => {
+                push(out, What::Group);
+                let lines = self.flow(&children, rect.w, spacing);
+                let mut sizes: Vec<(f32, f32)> = lines.iter().flat_map(|l| l.sizes.clone()).collect::<Vec<_>>().into_iter().rev().collect();
+                let mut y = rect.y;
+                let mut iter = children.into_iter().enumerate();
+                for line in &lines {
+                    let mut x = rect.x;
+                    for _ in 0..line.sizes.len() {
+                        let Some((i, c)) = iter.next() else { break };
+                        let (w, h) = sizes.pop().unwrap_or((0.0, 0.0));
+                        let cy = y + offset(align, line.height, h);
+                        let cid = child_id(id, i, c.key);
+                        self.arrange(c, Rect::new(x, cy, w, h), Some(me), cid, out);
+                        x += w + spacing;
+                    }
+                    y += line.height + spacing;
+                }
+            }
+            Kind::Row { children, spacing, align, .. } => {
                 push(out, What::Group);
                 let widths = self.distribute(&children, rect.w, spacing, true, rect.w);
                 let mut x = rect.x;
@@ -408,6 +459,12 @@ impl Layout<'_> {
         let r = Rect::new(inner.x + offset(ax, inner.w, w), inner.y + offset(ay, inner.h, h), w, h);
         self.arrange(child, r, Some(parent), cid, out);
     }
+}
+
+struct FlowLine {
+    width: f32,
+    height: f32,
+    sizes: Vec<(f32, f32)>,
 }
 
 /// Room for a choice's arrow.

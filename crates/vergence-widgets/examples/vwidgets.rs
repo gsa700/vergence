@@ -126,7 +126,7 @@ impl Program for Demo {
         let pictures = card(vec![
             row(vec![
                 picture(self.picture.clone()).fit(fit).radius(8.0).width(Length::Fixed(200.0)).height(Length::Fixed(80.0)).name("A wash of colour"),
-                drawing(move |scene, r, t| {
+                drawing(move |scene, _fonts, r, t| {
                     scene.fill_rounded(r, 8.0, t.page);
                     scene.stroke(r, 8.0, 1.0, t.line);
                     let d = if dragging { 22.0 } else { 18.0 };

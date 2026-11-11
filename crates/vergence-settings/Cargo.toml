@@ -6,10 +6,15 @@ license.workspace = true
 publish.workspace = true
 description = "Vergence's settings app: appearance, theme and fonts, windows, screens and wallpaper"
 
-# iced (MIT; the tools' toolkit since 2026-11-08, Dave's choice after the
-# toolkit spike, spikes/toolkit/RESULTS.md). Ported from Slint the same day.
+# On the project's own toolkit since 2026-11-10 (toolkit milestone 2); iced
+# before that, Slint before iced.
 [dependencies]
-iced = { version = "0.14", features = ["image", "canvas", "advanced"] }
+vergence-widgets.workspace = true
+vergence-ui.workspace = true
+vergence-scene.workspace = true
+vergence-text.workspace = true
+vergence-render.workspace = true
+vergence-look.workspace = true
 toml = "0.8"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 resvg = "0.45"

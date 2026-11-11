@@ -1344,13 +1344,16 @@ impl<M: Clone> Ui<M> {
                         ButtonLook::Chosen => (Some(theme.accent), None, radius, white),
                         ButtonLook::Custom { fill, edge, radius } => (tint(fill), edge, radius, inherited),
                     };
+                    // One that cannot be pressed is faded, its own colour kept.
+                    let fade = |c: Color| if on { c } else { Color { a: c.a / 2, ..c } };
                     if let Some(f) = fill {
-                        scene.fill_rounded(r, rad, f);
+                        scene.fill_rounded(r, rad, fade(f));
                     }
                     if let Some((c, w)) = edge {
-                        scene.stroke(r, rad, w, c);
+                        scene.stroke(r, rad, w, fade(c));
                     }
-                    mine = if on { i_c } else { theme.dim };
+                    let strong = matches!(look, ButtonLook::Accent | ButtonLook::Chosen);
+                    mine = if on { i_c } else if strong { alpha(i_c, 170) } else { theme.dim };
                     if ringed {
                         ring(scene, r, rad);
                     }
@@ -1494,7 +1497,7 @@ impl<M: Clone> Ui<M> {
                 }
                 What::Drawing { draw, .. } => {
                     scene.push_clip(r, 0.0);
-                    draw(scene, r, theme);
+                    draw(scene, fonts, r, theme);
                     scene.pop_clip();
                 }
             }
@@ -1591,8 +1594,12 @@ impl<M: Clone> Ui<M> {
                     let text = lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join(" ");
                     mk("label", named(text), None, states)
                 }
-                What::Button { on_press, .. } => {
+                What::Button { on_press, look } => {
                     off(on_press.is_some(), &mut states);
+                    // The chosen one of several (a page, a side).
+                    if *look == ButtonLook::Chosen {
+                        states.push("selected");
+                    }
                     mk("button", named(self.text_under(i)), None, states)
                 }
                 What::Rule { .. } => mk("separator", String::new(), None, states),

@@ -284,6 +284,39 @@ The terminal's bar stays in `vergence_ui::bar` for now.
     drawing's dot dragged. Not yet tried by hand: a finger on the
     widgets, the terminal's long press and flick.
 
+- **Step 3 (2026-11-10): the settings app moves.** `crates/vergence-settings`
+  runs on `vergence-widgets`; iced is gone from its dependencies (and so
+  from the build: Cargo warns that the iced patch is unused, which step 4
+  clears up). Everything that reads and writes the settings (`disp`,
+  `theme`, `wall`, `winbar`, the save functions, the messages' handling)
+  is as it was; the pages are built of our widgets in the same shapes.
+  - iced's subscription and tasks became threads and a channel: the bus
+    watcher for screens and each preview drawer send their message and
+    wake the window (`Program::woken` reads the channel).
+  - The screens' arrangement and the title bar preview are drawings
+    (now given the fonts, to draw names and tabs); the overview's drag,
+    double-click and the screen page's map are their touches, in the
+    app's own state. The wallpaper grid is a wrapping row (new), its
+    pictures made at the tile's exact pixel size for the window's scale
+    (`Program::scale`, new, told when the scale changes).
+  - Toolkit changes for it: `row(..).wrap()`; a drawing's `draw` gets
+    `&mut Fonts`; `Program::scale`; a button that cannot be pressed is
+    faded; a chosen button's meaning says "selected".
+  - The look: `vergence-look`'s palette is the old app's greys, so the
+    pages match. Before and after screenshots of every page on Hubble's
+    4K: the same layout, wording, wrapping and controls; the sidebar's
+    lines are a point closer.
+  - Checked on Hubble with a throwaway HOME holding copies of Dave's two
+    files (his were not touched): an accent swatch, high contrast, Style
+    Dark (choice by keys), the title bar's side and Maximise, the key
+    repeat delay by dragging, screens-off by choice, a wallpaper tile,
+    the scrollbar to the page's end, the picture browser (two pictures
+    picked, Cancel). desktop.toml and settings.toml came out with exactly
+    those changes. The meaning dump names every control.
+  - Whole workspace green: Hubble 314, Techbench 314, kepler 315, canary 315.
+  - Not seen: the overview and the screen page's map (Hubble has one
+    screen now); the browser's Add with a real folder.
+
 ## Decided (Dave, 2026-11-10 20:00)
 
 1. Widgets in a new crate, `vergence-widgets`.

@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use vergence_scene::{Color, Image, Rect, Scene};
+use vergence_text::Fonts;
 
 use crate::theme::Theme;
 
@@ -117,7 +118,7 @@ pub enum Fit {
     Stretch,
 }
 
-pub(crate) type Draw = Box<dyn Fn(&mut Scene, Rect, &Theme)>;
+pub(crate) type Draw = Box<dyn Fn(&mut Scene, &mut Fonts, Rect, &Theme)>;
 pub(crate) type OnTouch<M> = Box<dyn Fn(Touch) -> Option<M>>;
 
 pub(crate) enum Kind<M> {
@@ -126,7 +127,7 @@ pub(crate) enum Kind<M> {
     Label(Label),
     Panel { child: Box<Element<M>>, padding: Padding, fill: Option<Color>, edge: Option<(Color, f32)>, radius: f32, align_x: Align, align_y: Align },
     Button { child: Box<Element<M>>, padding: Padding, on_press: Option<M>, look: ButtonLook },
-    Row { children: Vec<Element<M>>, spacing: f32, align: Align },
+    Row { children: Vec<Element<M>>, spacing: f32, align: Align, wrap: bool },
     Column { children: Vec<Element<M>>, spacing: f32, align: Align },
     Stack { children: Vec<Element<M>> },
     Switch { on: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
@@ -225,10 +226,13 @@ impl<M> Element<M> {
         self
     }
 
-    /// A label broken into lines at its width.
+    /// A label broken into lines at its width; a row's children carried
+    /// on to a new line where they do not fit (a grid of tiles).
     pub fn wrap(mut self) -> Self {
-        if let Some(l) = self.label_mut() {
-            l.wrap = true;
+        match &mut self.kind {
+            Kind::Label(l) => l.wrap = true,
+            Kind::Row { wrap, .. } => *wrap = true,
+            _ => {}
         }
         self
     }
@@ -415,7 +419,7 @@ pub fn button<M>(child: Element<M>) -> Element<M> {
 
 /// Children side by side.
 pub fn row<M>(children: Vec<Element<M>>) -> Element<M> {
-    Element::new(Kind::Row { children, spacing: 0.0, align: Align::Start }, Length::Shrink, Length::Shrink)
+    Element::new(Kind::Row { children, spacing: 0.0, align: Align::Start, wrap: false }, Length::Shrink, Length::Shrink)
 }
 
 /// Children one under another.
@@ -479,10 +483,10 @@ pub fn picture<M>(image: Arc<Image>) -> Element<M> {
     Element::new(Kind::Picture { image, fit: Fit::Contain, radius: 0.0, opacity: 1.0 }, Length::Fixed(w), Length::Fixed(h))
 }
 
-/// A place the program draws itself: `draw` is given the scene, the
-/// place, and the theme; `on_touch`, if any, is told of the pointer and
-/// fingers in the place's own coordinates.
-pub fn drawing<M>(draw: impl Fn(&mut Scene, Rect, &Theme) + 'static) -> Element<M> {
+/// A place the program draws itself: `draw` is given the scene, the fonts
+/// (for `vergence_render::text`), the place, and the theme; `on_touch`, if
+/// any, is told of the pointer and fingers in the place's own coordinates.
+pub fn drawing<M>(draw: impl Fn(&mut Scene, &mut Fonts, Rect, &Theme) + 'static) -> Element<M> {
     Element::new(Kind::Drawing { draw: Box::new(draw), on_touch: None }, Length::FILL, Length::Fixed(100.0))
 }
 

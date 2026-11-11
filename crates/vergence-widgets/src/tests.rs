@@ -419,7 +419,7 @@ fn a_finger_scrolls_and_flicks() {
 
 #[test]
 fn a_drawing_hears_in_its_own_coordinates() {
-    let page = column(vec![space().height(Length::Fixed(30.0)), drawing(|_, _, _| {}).on_touch(|t| Some(Msg::Touched(t))).name("Screens")]).width(Length::FILL);
+    let page = column(vec![space().height(Length::Fixed(30.0)), drawing(|_, _, _, _| {}).on_touch(|t| Some(Msg::Touched(t))).name("Screens")]).width(Length::FILL);
     let mut ui = laid(page, 300.0, 200.0);
     let r = bounds(&ui, "Screens");
     assert_eq!((r.y, r.h), (30.0, 100.0));
@@ -456,7 +456,7 @@ fn fuzz_page() -> Element<Msg> {
             row(vec![button(label("A")).on_press(Msg::A), switch(true, Msg::Toggle), slider(0.0, 1.0, 0.5, Msg::Value).on_release(Msg::Done)]),
             field("text", Msg::Text).on_submit(Msg::Submit),
             choice(vec!["one".into(), "two".into()], Some(0), Msg::Pick),
-            drawing(|s, r, t| {
+            drawing(|s, _, r, t| {
                 s.fill(r, t.card);
             })
             .on_touch(|t| Some(Msg::Touched(t))),
@@ -535,4 +535,16 @@ fn fuzz_input_on_every_widget() {
             assert!(a <= t.len() && c <= t.len() && t.is_char_boundary(a) && t.is_char_boundary(c));
         }
     }
+}
+
+#[test]
+fn a_wrapping_row_makes_lines() {
+    // Tiles 40 wide with gaps of 10 in 100: two to a line, three lines.
+    let tiles = (0..5).map(|i| label(format!("t{i}")).width(Length::Fixed(40.0)).height(Length::Fixed(20.0))).collect();
+    let ui = laid(column(vec![row(tiles).spacing(10.0).wrap().width(Length::FILL), label("after")]).width(Length::FILL), 100.0, 300.0);
+    assert_eq!(bounds(&ui, "t0"), Rect::new(0.0, 0.0, 40.0, 20.0));
+    assert_eq!(bounds(&ui, "t1"), Rect::new(50.0, 0.0, 40.0, 20.0));
+    assert_eq!(bounds(&ui, "t2"), Rect::new(0.0, 30.0, 40.0, 20.0));
+    assert_eq!(bounds(&ui, "t4"), Rect::new(0.0, 60.0, 40.0, 20.0));
+    assert_eq!(bounds(&ui, "after").y, 80.0, "the row is as tall as its lines");
 }
