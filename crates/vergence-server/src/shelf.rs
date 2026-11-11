@@ -841,7 +841,8 @@ impl Server {
         }
     }
 
-    /// The side of the dock its marks, names and lists are on: the one facing
+    /// The side of the dock its names and lists are on (its marks are on the
+    /// other, the outside edge): the one facing
     /// the middle of its screen (the windows' side, at an edge).
     fn shelf_side(&self, dock: Rectangle<i32, Logical>) -> Edge {
         let screen = self.shelf_screen().unwrap_or(dock);
@@ -924,7 +925,7 @@ impl Server {
         }
         starting.hash(&mut hasher);
         (accent.r, accent.g, accent.b).hash(&mut hasher);
-        // Level or upright, and which side its marks are on.
+        // Level or upright, and which side faces the windows (its marks are on the other).
         let upright = self.shelf.config.placement().upright();
         let side = self.shelf_side(strip);
         (strip.size.w, upright, side as u8).hash(&mut hasher);
@@ -943,7 +944,7 @@ impl Server {
                 let Some(slot) = running::slot(local, index, upright) else { break };
                 let at = running::icon_in(slot);
                 let square = SceneRect::new(at.x as f32, at.y as f32, at.w as f32, at.h as f32);
-                // The mark, on the windows' side: short and grey for an application that
+                // The mark: short and grey for an application that
                 // is running, long and in the accent for the one that has the keyboard.
                 let (long, mark) = match starting[index] {
                     // From 6 points to 18 and back in a second.
@@ -955,7 +956,14 @@ impl Server {
                 // No mark for one that is neither running nor starting.
                 if !faint && (!windows.is_empty() || starting[index].is_some()) {
                     let (down, along) = (slot.y as f32 + (slot.h as f32 - long) / 2.0, slot.x as f32 + (slot.w as f32 - long) / 2.0);
-                    let place = match side {
+                    // On the dock's outside edge, away from the windows (Dave, 2026-11-10).
+                    let outside = match side {
+                        Edge::Left => Edge::Right,
+                        Edge::Right => Edge::Left,
+                        Edge::Top => Edge::Bottom,
+                        Edge::Bottom => Edge::Top,
+                    };
+                    let place = match outside {
                         Edge::Left => SceneRect::new(3.0, down, 3.0, long),
                         Edge::Right => SceneRect::new(w - 6.0, down, 3.0, long),
                         Edge::Top => SceneRect::new(along, 3.0, long, 3.0),
