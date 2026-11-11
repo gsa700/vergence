@@ -14,6 +14,7 @@
 pub mod apps;
 pub mod desktop;
 pub mod icons;
+pub mod launcher;
 pub mod running;
 pub mod session;
 
