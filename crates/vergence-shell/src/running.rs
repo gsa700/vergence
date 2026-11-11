@@ -69,13 +69,18 @@ pub fn items(entries: &[Entry], windows: &[(String, bool)]) -> Vec<Item> {
     out
 }
 
-/// The place of item `index` on the strip: below the apps button's, one
-/// under the other. None for one that would not fit whole (a strip too
-/// short for all its items shows the first of them; scrolling it comes
-/// with the popup's).
-pub fn slot(strip: Rect, index: usize) -> Option<Rect> {
-    let y = strip.y + SLOT * (index as i32 + 1);
-    (y + SLOT <= strip.bottom()).then(|| Rect::new(strip.x, y, STRIP_W, SLOT))
+/// The place of item `index` in the dock: after the apps button's, one
+/// under the other in a dock that stands upright, side by side in one that
+/// lies level. None for one that would not fit whole (a dock too short for
+/// all its items shows the first of them; scrolling it comes with the
+/// popup's).
+pub fn slot(dock: Rect, index: usize, upright: bool) -> Option<Rect> {
+    let along = SLOT * (index as i32 + 1);
+    if upright {
+        (dock.y + along + SLOT <= dock.bottom()).then(|| Rect::new(dock.x, dock.y + along, STRIP_W, SLOT))
+    } else {
+        (dock.x + along + SLOT <= dock.right()).then(|| Rect::new(dock.x + along, dock.y, SLOT, STRIP_W))
+    }
 }
 
 /// The icon's square in a place: in its middle.
@@ -84,8 +89,8 @@ pub fn icon_in(slot: Rect) -> Rect {
 }
 
 /// Which of `count` items is at a point, if any.
-pub fn item_at(strip: Rect, count: usize, x: i32, y: i32) -> Option<usize> {
-    (0..count).find(|i| slot(strip, *i).is_some_and(|s| x >= s.x && x < s.right() && y >= s.y && y < s.bottom()))
+pub fn item_at(dock: Rect, count: usize, upright: bool, x: i32, y: i32) -> Option<usize> {
+    (0..count).find(|i| slot(dock, *i, upright).is_some_and(|s| x >= s.x && x < s.right() && y >= s.y && y < s.bottom()))
 }
 
 #[cfg(test)]
@@ -139,17 +144,25 @@ mod tests {
     }
 
     #[test]
-    fn items_stand_under_the_apps_button() {
+    fn items_stand_after_the_apps_button() {
         let strip = Rect::new(1232, 0, 48, 720);
-        assert_eq!(slot(strip, 0), Some(Rect::new(1232, 48, 48, 48)));
-        assert_eq!(slot(strip, 2), Some(Rect::new(1232, 144, 48, 48)));
-        assert_eq!(icon_in(slot(strip, 0).unwrap()), Rect::new(1240, 56, 32, 32));
+        assert_eq!(slot(strip, 0, true), Some(Rect::new(1232, 48, 48, 48)));
+        assert_eq!(slot(strip, 2, true), Some(Rect::new(1232, 144, 48, 48)));
+        assert_eq!(icon_in(slot(strip, 0, true).unwrap()), Rect::new(1240, 56, 32, 32));
         // 720 points hold the button and fourteen items; a fifteenth does not fit.
-        assert!(slot(strip, 13).is_some() && slot(strip, 14).is_none());
-        assert_eq!(item_at(strip, 3, 1250, 60), Some(0));
-        assert_eq!(item_at(strip, 3, 1250, 150), Some(2));
-        assert_eq!(item_at(strip, 3, 1250, 200), None, "below the last item");
-        assert_eq!(item_at(strip, 3, 1250, 20), None, "the apps button's place");
-        assert_eq!(item_at(strip, 3, 1200, 60), None, "left of the strip");
+        assert!(slot(strip, 13, true).is_some() && slot(strip, 14, true).is_none());
+        assert_eq!(item_at(strip, 3, true, 1250, 60), Some(0));
+        assert_eq!(item_at(strip, 3, true, 1250, 150), Some(2));
+        assert_eq!(item_at(strip, 3, true, 1250, 200), None, "below the last item");
+        assert_eq!(item_at(strip, 3, true, 1250, 20), None, "the apps button's place");
+        assert_eq!(item_at(strip, 3, true, 1200, 60), None, "left of the strip");
+        // A dock that lies level: side by side.
+        let level = Rect::new(100, 1026, 192, 48);
+        assert_eq!(slot(level, 0, false), Some(Rect::new(148, 1026, 48, 48)));
+        assert_eq!(icon_in(slot(level, 1, false).unwrap()), Rect::new(204, 1034, 32, 32));
+        assert!(slot(level, 2, false).is_some() && slot(level, 3, false).is_none());
+        assert_eq!(item_at(level, 3, false, 150, 1040), Some(0));
+        assert_eq!(item_at(level, 3, false, 120, 1040), None, "the apps button's place");
+        assert_eq!(item_at(level, 3, false, 150, 1000), None, "above it");
     }
 }

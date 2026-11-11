@@ -182,18 +182,27 @@ impl Server {
         self.menu = Some(m);
     }
 
-    /// The list of an application's windows, with its top-right corner at `corner`
-    /// (the left edge of the shelf, level with the application's icon), kept on
-    /// its screen's work area.
-    pub fn open_window_list(&mut self, corner: Point<i32, Logical>, windows: Vec<(smithay::desktop::Window, String)>) {
+    /// The list of an application's windows, beside its icon's place on the dock
+    /// (`slot`) on the side `towards` names, kept on its screen's work area.
+    pub fn open_window_list(&mut self, slot: Rectangle<i32, Logical>, towards: vergence_shell::Edge, windows: Vec<(smithay::desktop::Window, String)>) {
+        use vergence_shell::Edge;
         let entries: Vec<Entry> = windows.into_iter().map(|(w, title)| Entry::Window(w, title)).collect();
         if entries.is_empty() {
             return;
         }
         let ids = (0..3 + entries.len()).map(|_| Id::new()).collect();
-        let mut m = OpenMenu { at: corner, entries, hover: None, ids, commit: CommitCounter::default(), labels: HashMap::new() };
-        m.at.x -= WIDTH;
-        let screen = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|g| g.contains(corner) || g.contains((corner.x - 1, corner.y)));
+        let mut m = OpenMenu { at: slot.loc, entries, hover: None, ids, commit: CommitCounter::default(), labels: HashMap::new() };
+        // Beside the icon, on the side `towards` names, a little off the dock.
+        let off = vergence_shell::GAP;
+        m.at = match towards {
+            Edge::Left => (slot.loc.x - off - WIDTH, slot.loc.y),
+            Edge::Right => (slot.loc.x + slot.size.w + off, slot.loc.y),
+            Edge::Top => (slot.loc.x, slot.loc.y - off - m.height()),
+            Edge::Bottom => (slot.loc.x, slot.loc.y + slot.size.h + off),
+        }
+        .into();
+        let middle: Point<i32, Logical> = (slot.loc.x + slot.size.w / 2, slot.loc.y + slot.size.h / 2).into();
+        let screen = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|g| g.contains(middle));
         if let Some(area) = screen.map(|g| self.work_area(g)) {
             m.at.x = m.at.x.min(area.loc.x + area.size.w - WIDTH).max(area.loc.x);
             m.at.y = m.at.y.min(area.loc.y + area.size.h - m.height()).max(area.loc.y);

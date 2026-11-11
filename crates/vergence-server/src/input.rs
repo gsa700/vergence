@@ -250,6 +250,12 @@ impl Server {
             self.menu_swallow = Some(button);
             return;
         }
+        // A press on the dock ends here: a click on what it was on, or the end of a drag.
+        if button_state == ButtonState::Released && self.shelf.held.is_some_and(|(b, _)| b == button) {
+            let at = pointer.current_location();
+            self.shelf_release(at);
+            return;
+        }
         // Notifications take clicks on themselves (notify.rs).
         if button_state == ButtonState::Released && self.notes.swallow == Some(button) {
             self.notes.swallow = None;
@@ -301,14 +307,12 @@ impl Server {
                 Hit::Minimize(w) if left => self.minimise(&w),
                 Hit::Edge(w, e) if left => grab_with = Some((w, Some(e))),
                 Hit::Title(_) | Hit::Close(_) | Hit::Maximize(_) | Hit::Minimize(_) | Hit::Edge(..) => {}
-                // The shelf's strip (shelf.rs): an application's icon brings its window
-                // forward, or opens the list of its windows. What is behind the strip
-                // is never pressed.
+                // The dock (shelf.rs): let go where it was pressed, an application's icon
+                // brings its window forward or opens the list of its windows; moved
+                // first, the dock is dragged. What is behind the dock is never pressed.
                 Hit::Shelf if left => {
-                    if self.shelf_press(at) {
-                        self.menu_swallow = Some(button);
-                        return;
-                    }
+                    self.shelf_press(at, button);
+                    return;
                 }
                 Hit::Shelf => {}
                 // Right-click on the bare desktop: the desktop menu.

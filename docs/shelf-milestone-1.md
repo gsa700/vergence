@@ -319,6 +319,34 @@ one.
   tabs comes later, through the toolkit. It follows step 4, which adds
   starting applications from the shelf.
 
+- **The dock moves (2026-11-10; Dave: snap to any edge of any screen or
+  float anywhere, "lets have it all, adjustable in settings").**
+  - vergence-shell: `Edge`, `Place` (along an edge, or free at a point of
+    its screen, upright or level), `Placement` (place, gap, keep-clear);
+    `column`, `dock`, `work_area`, `clear_of_dock` take a placement;
+    `settle` says where a dropped dock goes: within 40 points of a
+    screen's side it lies along that side (level at the top and bottom),
+    else it floats where it was dropped, on the screen its middle is on.
+    Slots and `item_at` run down an upright dock and along a level one.
+  - Server: a press on the dock does nothing until it is let go. Let go
+    where it was pressed it is the click of before; moved more than
+    6 points first, the dock follows the pointer and settles on release.
+    Its place is written to `[shelf]` in desktop.toml (`place`, `edge`,
+    `screen`, `x`, `y`, `upright`; `gap` and `keep-clear` are read; the
+    rest of the file kept, written beside and renamed, mode 0600) and
+    is back after a restart. A screen named there that is not connected:
+    the primary one. Marks, the name label and the window list are on the
+    side of the dock facing the middle of its screen. A floating dock
+    reserves nothing; at an edge the work area gives up its band and
+    maximised windows are refitted.
+  - Driven on Hubble with `vctl pointer/press/release`: right, left, top,
+    bottom, free in the middle, restart, back to the right. Tests green on
+    Hubble, Techbench, kepler, canary.
+  - Not yet: a settings page for it (step 6); the dock keeps the way it
+    stood (upright or level) when dropped free, with no way to turn it
+    but by an edge; nothing shows where it will snap while dragging; a
+    hand's drag with a real mouse (Dave).
+
 ## Acceptance
 
 Every step: `cargo test --workspace` green on Hubble, canary and Techbench,
@@ -400,4 +428,3 @@ Done, as every milestone, when it has run on Hubble (Void), on Techbench
 - Dragging icons to reorder or to pin, badges and progress on icons, a
   desktop entry's extra actions in the right-click menu, recently used
   ordering in the grid, touch.
-- The shelf on any edge but the right.

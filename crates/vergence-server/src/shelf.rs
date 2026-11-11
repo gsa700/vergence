@@ -46,7 +46,7 @@ use std::{
 
 use smithay::{desktop::Window, reexports::calloop::channel::{Event, channel}, utils::IsAlive};
 use vergence_scene::{Color, Image, Point as ScenePoint, Rect as SceneRect, Scene};
-use vergence_shell::{Rect, desktop::Entry, running};
+use vergence_shell::{Edge, Place, Placement, Rect, desktop::Entry, running};
 
 use crate::{Server, decor::SceneElement};
 
@@ -113,6 +113,91 @@ fn apps_stamp() -> Vec<Option<SystemTime>> {
 #[serde(default)]
 pub struct ShelfConfig {
     pub hide: bool,
+    /// "edge" (along an edge, the default) or "free" (where it was put).
+    pub place: Option<String>,
+    /// "right" (the default), "left", "top" or "bottom".
+    pub edge: Option<String>,
+    /// The screen it is on, by its id; else the primary one.
+    pub screen: Option<String>,
+    /// A floating dock's top-left corner from its screen's, in points, and
+    /// whether it stands upright (the default) or lies level.
+    pub x: Option<i32>,
+    pub y: Option<i32>,
+    pub upright: Option<bool>,
+    /// The room between the dock and its edge and the windows, in points (6).
+    pub gap: Option<i32>,
+    /// At an edge: windows keep out of the dock's column (true).
+    #[serde(rename = "keep-clear")]
+    pub keep_clear: Option<bool>,
+}
+
+impl ShelfConfig {
+    /// The dock's place as vergence-shell reckons with it.
+    pub fn placement(&self) -> Placement {
+        let place = match self.place.as_deref() {
+            Some("free") => Place::Free { x: self.x.unwrap_or(0), y: self.y.unwrap_or(0), upright: self.upright.unwrap_or(true) },
+            _ => Place::Edge(match self.edge.as_deref() {
+                Some("left") => Edge::Left,
+                Some("top") => Edge::Top,
+                Some("bottom") => Edge::Bottom,
+                _ => Edge::Right,
+            }),
+        };
+        Placement { place, gap: self.gap.unwrap_or(vergence_shell::GAP), keep_clear: self.keep_clear.unwrap_or(true) }
+    }
+}
+
+/// Write the dock's place into desktop.toml's [shelf] table, the rest of the
+/// file kept (as the settings app keeps it when it writes): the file is read,
+/// the keys set, and the whole written beside it and moved into its place,
+/// readable by its owner only.
+fn save_place(screen: Option<&str>, place: Place) -> std::io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let Some(path) = crate::wallpaper::desktop_path() else { return Ok(()) };
+    let mut table: toml::Table = std::fs::read_to_string(&path).ok().and_then(|t| t.parse().ok()).unwrap_or_default();
+    let shelf = table.entry("shelf").or_insert_with(|| toml::Value::Table(Default::default()));
+    let Some(shelf) = shelf.as_table_mut() else { return Ok(()) };
+    for key in ["x", "y", "upright", "edge"] {
+        shelf.remove(key);
+    }
+    match place {
+        Place::Edge(edge) => {
+            shelf.insert("place".into(), "edge".into());
+            shelf.insert("edge".into(), match edge { Edge::Left => "left", Edge::Right => "right", Edge::Top => "top", Edge::Bottom => "bottom" }.into());
+        }
+        Place::Free { x, y, upright } => {
+            shelf.insert("place".into(), "free".into());
+            shelf.insert("x".into(), (x as i64).into());
+            shelf.insert("y".into(), (y as i64).into());
+            shelf.insert("upright".into(), upright.into());
+        }
+    }
+    match screen {
+        Some(id) => shelf.insert("screen".into(), id.into()),
+        None => shelf.remove("screen"),
+    };
+    let text = toml::to_string(&table).map_err(std::io::Error::other)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let beside = path.with_extension("toml.new");
+    {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&beside)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&beside, &path)
+}
+
+/// A press on the dock that has not been let go: where it began, where the
+/// dock was then, and whether the pointer has moved far enough since for it
+/// to be a drag and not a click.
+#[derive(Clone, Copy)]
+pub struct Held {
+    start: Point<f64, Logical>,
+    dock: Rectangle<i32, Logical>,
+    dragging: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -166,6 +251,10 @@ pub struct Shelf {
     said: Option<Rectangle<i32, Logical>>,
     /// The dock as it was last drawn or pressed: what a point is tested against.
     dock: Option<Rectangle<i32, Logical>>,
+    /// A press on the dock that is still down (and the button that made it),
+    /// and, while it is being dragged, where the dock is.
+    pub held: Option<(u32, Held)>,
+    dragged: Option<Rectangle<i32, Logical>>,
     /// The item the pointer is over, and whether it has rested there long
     /// enough for the application's name to be shown beside it.
     hover: Option<usize>,
@@ -294,36 +383,42 @@ impl Server {
         }
     }
 
-    /// The screen the shelf is on: the primary one.
+    /// The screen the shelf is on: the one its settings name, if it is
+    /// connected, else the primary one.
     pub fn shelf_screen(&self) -> Option<Rectangle<i32, Logical>> {
         let outputs = self.bus_outputs();
         let ids: Vec<String> = outputs.iter().map(|o| o.id.clone()).collect();
-        let primary = vergence_profile::primary(self.shelf.primary.as_deref(), &ids)?;
-        let o = outputs.iter().find(|o| o.id == primary)?;
+        let named = self.shelf.config.screen.as_deref().filter(|id| ids.iter().any(|i| i == id));
+        let id = named.or_else(|| vergence_profile::primary(self.shelf.primary.as_deref(), &ids))?;
+        let o = outputs.iter().find(|o| o.id == id)?;
         Some(Rectangle::new((o.x, o.y).into(), (o.width, o.height).into()))
     }
 
-    /// The column the shelf stands in, if a screen has it: what windows keep out of.
+    /// The band the dock stands in at an edge, if windows are to keep out of it.
     pub fn shelf_rect(&self) -> Option<Rectangle<i32, Logical>> {
-        vergence_shell::strip(rect(self.shelf_screen()?)).map(rectangle)
+        let at = self.shelf.config.placement();
+        vergence_shell::column(rect(self.shelf_screen()?), &at).filter(|_| at.keep_clear).map(rectangle)
     }
 
-    /// The dock itself, as tall as the apps button's place and `items` under it.
+    /// The dock itself, as long as the apps button's place and `items` after
+    /// it; while it is being dragged, where the pointer has taken it.
     fn shelf_dock(&mut self, items: usize) -> Option<Rectangle<i32, Logical>> {
-        let dock = self.shelf_screen().and_then(|s| vergence_shell::dock(rect(s), items)).map(rectangle);
+        let at = self.shelf.config.placement();
+        let dock = self.shelf.dragged.or_else(|| self.shelf_screen().and_then(|s| vergence_shell::dock(rect(s), &at, items)).map(rectangle));
         self.shelf.dock = dock;
         dock
     }
 
-    /// What a screen leaves for windows: all of it, less the strip if the shelf is on it.
+    /// What a screen leaves for windows: all of it, less the dock's band if the
+    /// shelf is on it, at an edge, and windows are to keep clear.
     pub fn work_area(&self, screen: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
-        if self.shelf_screen() == Some(screen) { rectangle(vergence_shell::work_area(rect(screen))) } else { screen }
+        if self.shelf_screen() == Some(screen) { rectangle(vergence_shell::work_area(rect(screen), &self.shelf.config.placement())) } else { screen }
     }
 
-    /// A window's place moved clear of the strip, if the strip would cover part of it.
+    /// A window's place moved clear of the dock's band, if the band would cover part of it.
     pub fn clear_of_shelf(&self, window: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
         match self.shelf_screen() {
-            Some(screen) => rectangle(vergence_shell::clear_of_strip(rect(window), rect(screen))),
+            Some(screen) => rectangle(vergence_shell::clear_of_dock(rect(window), rect(screen), &self.shelf.config.placement())),
             None => window,
         }
     }
@@ -337,7 +432,23 @@ impl Server {
     /// second, the application's name appears beside its icon (a dock that
     /// stands upright has no room for names).
     pub fn shelf_hover(&mut self, at: Point<f64, Logical>) {
-        let over = self.shelf.dock.and_then(|d| running::item_at(rect(d), self.shelf.names.len(), at.x.floor() as i32, at.y.floor() as i32));
+        // A press on the dock that moves far enough is a drag: the dock goes with
+        // the pointer until it is let go.
+        if let Some((_, held)) = self.shelf.held.as_mut() {
+            let (dx, dy) = (at.x - held.start.x, at.y - held.start.y);
+            held.dragging |= dx.abs() > 6.0 || dy.abs() > 6.0;
+            if held.dragging {
+                let to = Rectangle::new((held.dock.loc.x + dx.round() as i32, held.dock.loc.y + dy.round() as i32).into(), held.dock.size);
+                if self.shelf.dragged != Some(to) {
+                    self.shelf.dragged = Some(to);
+                    self.shelf.named = false;
+                    self.redraw_all();
+                }
+                return;
+            }
+        }
+        let upright = self.shelf.config.placement().upright();
+        let over = self.shelf.dock.and_then(|d| running::item_at(rect(d), self.shelf.names.len(), upright, at.x.floor() as i32, at.y.floor() as i32));
         if over == self.shelf.hover {
             return;
         }
@@ -418,20 +529,60 @@ impl Server {
         }
     }
 
-    /// A press on the dock. On an application with one window: that window
-    /// comes forward and has the keyboard, or comes back if it was minimised,
-    /// or, if it is the one that has the keyboard already, is minimised (Dave,
-    /// 2026-11-09). With several: a list of them opens beside the icon. True if
-    /// a list opened (the press's release is then the list's, not a window's).
-    pub fn shelf_press(&mut self, at: Point<f64, Logical>) -> bool {
-        let items = self.shelf_items();
-        // The name beside an icon goes when the icon is pressed.
+    /// A press on the dock. Nothing happens yet: let go where it was pressed
+    /// it is a click ([`Server::shelf_release`]); moved first, it drags the dock.
+    pub fn shelf_press(&mut self, at: Point<f64, Logical>, button: u32) {
         self.shelf.named = false;
-        let Some(strip) = self.shelf_dock(items.len()) else { return false };
-        let Some(index) = running::item_at(rect(strip), items.len(), at.x.floor() as i32, at.y.floor() as i32) else { return false };
+        if let Some(dock) = self.shelf.dock {
+            self.shelf.held = Some((button, Held { start: at, dock, dragging: false }));
+        }
+    }
+
+    /// The press on the dock was let go. After a drag: the dock settles along
+    /// the edge it was dropped near, of whichever screen that is, or floats
+    /// where it was dropped, and its place is written to the settings. After
+    /// a click on an application with one window: that window comes forward
+    /// and has the keyboard, or comes back if it was minimised, or, if it is
+    /// the one that has the keyboard already, is minimised (Dave, 2026-11-09).
+    /// With several: a list of them opens beside the icon.
+    pub fn shelf_release(&mut self, at: Point<f64, Logical>) {
+        let Some((_, held)) = self.shelf.held.take() else { return };
+        if held.dragging {
+            let dropped = self.shelf.dragged.take().unwrap_or(held.dock);
+            let outputs = self.bus_outputs();
+            let screens: Vec<Rect> = outputs.iter().map(|o| Rect::new(o.x, o.y, o.width, o.height)).collect();
+            let upright = self.shelf.config.placement().upright();
+            if let Some((screen, place)) = vergence_shell::settle(rect(dropped), upright, &screens) {
+                let id = outputs[screen].id.clone();
+                tracing::info!("shelf: dropped at {},{}: {place:?} on screen {id}", dropped.loc.x, dropped.loc.y);
+                let c = &mut self.shelf.config;
+                match place {
+                    Place::Edge(edge) => {
+                        c.place = Some("edge".into());
+                        c.edge = Some(match edge { Edge::Left => "left", Edge::Right => "right", Edge::Top => "top", Edge::Bottom => "bottom" }.into());
+                    }
+                    Place::Free { x, y, upright } => {
+                        c.place = Some("free".into());
+                        (c.x, c.y, c.upright) = (Some(x), Some(y), Some(upright));
+                    }
+                }
+                c.screen = Some(id.clone());
+                if let Err(e) = save_place(Some(&id), place) {
+                    tracing::warn!("shelf: its place could not be written: {e}");
+                }
+            }
+            self.shelf.picture = None;
+            self.shelf_moved();
+            self.redraw_all();
+            return;
+        }
+        let items = self.shelf_items();
+        let Some(strip) = self.shelf_dock(items.len()) else { return };
+        let upright = self.shelf.config.placement().upright();
+        let Some(index) = running::item_at(rect(strip), items.len(), upright, at.x.floor() as i32, at.y.floor() as i32) else { return };
         let (item, windows) = &items[index];
         match windows.as_slice() {
-            [] => false,
+            [] => {}
             [only] => {
                 tracing::info!("shelf: to {}", item.name);
                 let only = only.clone();
@@ -440,7 +591,6 @@ impl Server {
                 } else {
                     self.shelf_to_window(&only);
                 }
-                false
             }
             several => {
                 let titled: Vec<(Window, String)> = several
@@ -450,23 +600,37 @@ impl Server {
                         (w.clone(), if title.is_empty() { item.name.clone() } else { title })
                     })
                     .collect();
-                let top = running::slot(rect(strip), index).map_or(strip.loc.y, |s| s.y);
-                self.open_window_list((strip.loc.x, top).into(), titled);
-                true
+                let slot = running::slot(rect(strip), index, upright).map_or(strip, rectangle);
+                let towards = self.shelf_side(strip);
+                self.open_window_list(slot, towards, titled);
             }
+        }
+    }
+
+    /// The side of the dock its marks, names and lists are on: the one facing
+    /// the middle of its screen (the windows' side, at an edge).
+    fn shelf_side(&self, dock: Rectangle<i32, Logical>) -> Edge {
+        let screen = self.shelf_screen().unwrap_or(dock);
+        let (dx, dy) = (dock.loc.x + dock.size.w / 2 - (screen.loc.x + screen.size.w / 2), dock.loc.y + dock.size.h / 2 - (screen.loc.y + screen.size.h / 2));
+        match (self.shelf.config.placement().upright(), dx > 0, dy > 0) {
+            (true, true, _) => Edge::Left,
+            (true, false, _) => Edge::Right,
+            (false, _, true) => Edge::Top,
+            (false, _, false) => Edge::Bottom,
         }
     }
 
     /// The screens or the settings changed: say where the strip is now, and
     /// bring maximised windows on its screen inside the work area.
     pub fn shelf_moved(&mut self) {
-        let now = self.shelf_rect();
+        // What windows are left with on the shelf's screen is what can have changed.
+        let now = self.shelf_screen().map(|s| self.work_area(s));
         if now == self.shelf.said {
             return;
         }
         self.shelf.said = now;
         match now {
-            Some(r) => tracing::info!("shelf: its column at {},{} {}x{} points", r.loc.x, r.loc.y, r.size.w, r.size.h),
+            Some(r) => tracing::info!("shelf: {:?}; its screen's work area {},{} {}x{} points", self.shelf.config.placement().place, r.loc.x, r.loc.y, r.size.w, r.size.h),
             None => tracing::info!("shelf: no screen for it"),
         }
         // A maximised window fills its screen's work area, which has just changed.
@@ -479,25 +643,21 @@ impl Server {
 
     /// For `vctl shelf`.
     pub fn shelf_report(&mut self) -> String {
-        match (self.shelf_rect(), self.shelf_screen()) {
-            (Some(r), Some(s)) => {
-                let w = self.work_area(s);
-                let items = self.shelf_items();
-                let dock = self.shelf_dock(items.len()).unwrap_or(r);
-                let mut out = format!(
-                    "dock {},{} {}x{} in column {},{} {}x{} on screen {},{} {}x{}; work area {},{} {}x{}; hide {} (not yet acted on)",
-                    dock.loc.x, dock.loc.y, dock.size.w, dock.size.h, r.loc.x, r.loc.y, r.size.w, r.size.h, s.loc.x, s.loc.y, s.size.w, s.size.h, w.loc.x, w.loc.y, w.size.w, w.size.h, self.shelf.config.hide
-                );
-                let r = dock;
-                for (i, (item, windows)) in items.iter().enumerate() {
-                    let place = running::slot(rect(r), i).map_or("no room".to_string(), |s| format!("{},{}", s.x, s.y));
-                    let away = windows.iter().filter(|w| self.is_minimised(w)).count();
-                    out.push_str(&format!("\n{i} {:?} \"{}\" icon \"{}\" windows {}{}{} at {place}", item.key, item.name, item.icon, windows.len(), if away > 0 { format!(" ({away} minimised)") } else { String::new() }, if item.focused { " focused" } else { "" }));
-                }
-                out
-            }
-            _ => "no shelf: no screen wide enough is connected".into(),
+        let Some(s) = self.shelf_screen() else { return "no shelf: no screen is connected".into() };
+        let at = self.shelf.config.placement();
+        let w = self.work_area(s);
+        let items = self.shelf_items();
+        let Some(dock) = self.shelf_dock(items.len()) else { return "no shelf: its screen is too small for it".into() };
+        let mut out = format!(
+            "dock {},{} {}x{} {:?} gap {} keep-clear {} on screen {},{} {}x{}; work area {},{} {}x{}; hide {} (not yet acted on)",
+            dock.loc.x, dock.loc.y, dock.size.w, dock.size.h, at.place, at.gap, at.keep_clear, s.loc.x, s.loc.y, s.size.w, s.size.h, w.loc.x, w.loc.y, w.size.w, w.size.h, self.shelf.config.hide
+        );
+        for (i, (item, windows)) in items.iter().enumerate() {
+            let place = running::slot(rect(dock), i, at.upright()).map_or("no room".to_string(), |s| format!("{},{}", s.x, s.y));
+            let away = windows.iter().filter(|w| self.is_minimised(w)).count();
+            out.push_str(&format!("\n{i} {:?} \"{}\" icon \"{}\" windows {}{}{} at {place}", item.key, item.name, item.icon, windows.len(), if away > 0 { format!(" ({away} minimised)") } else { String::new() }, if item.focused { " focused" } else { "" }));
         }
+        out
     }
 
     /// The strip's picture on `out`, if it is on that screen.
@@ -519,6 +679,10 @@ impl Server {
             (&item.key, &item.name, windows.len(), item.focused, icon.is_some(), away).hash(&mut hasher);
         }
         (accent.r, accent.g, accent.b).hash(&mut hasher);
+        // Level or upright, and which side its marks are on.
+        let upright = self.shelf.config.placement().upright();
+        let side = self.shelf_side(strip);
+        (strip.size.w, upright, side as u8).hash(&mut hasher);
         let key = (strip.size.h, scale.to_bits(), hasher.finish());
         if self.shelf.picture.as_ref().map(|(k, _)| *k) != Some(key) {
             // The dock as a scene, in points: a rounded panel with a line around it,
@@ -531,15 +695,22 @@ impl Server {
             let face = fonts.face("sans-serif", 700, false).or_else(|| fonts.face("sans-serif", 400, false));
             let local = Rect::new(0, 0, strip.size.w, strip.size.h);
             for (index, ((item, _), icon)) in items.iter().zip(&icons).enumerate() {
-                let Some(slot) = running::slot(local, index) else { break };
+                let Some(slot) = running::slot(local, index, upright) else { break };
                 let at = running::icon_in(slot);
                 let square = SceneRect::new(at.x as f32, at.y as f32, at.w as f32, at.h as f32);
                 // The mark, on the windows' side: short and grey for an application that
                 // is running, long and in the accent for the one that has the keyboard.
-                let (mark_h, mark) = if item.focused { (18.0, accent) } else { (6.0, colour(vergence_look::INK_UNFOCUSED)) };
+                let (long, mark) = if item.focused { (18.0, accent) } else { (6.0, colour(vergence_look::INK_UNFOCUSED)) };
                 let faint = away[index];
                 if !faint {
-                    scene.fill_rounded(SceneRect::new(3.0, slot.y as f32 + (slot.h as f32 - mark_h) / 2.0, 3.0, mark_h), 1.5, mark);
+                    let (down, along) = (slot.y as f32 + (slot.h as f32 - long) / 2.0, slot.x as f32 + (slot.w as f32 - long) / 2.0);
+                    let place = match side {
+                        Edge::Left => SceneRect::new(3.0, down, 3.0, long),
+                        Edge::Right => SceneRect::new(w - 6.0, down, 3.0, long),
+                        Edge::Top => SceneRect::new(along, 3.0, long, 3.0),
+                        Edge::Bottom => SceneRect::new(along, h - 6.0, long, 3.0),
+                    };
+                    scene.fill_rounded(place, 1.5, mark);
                 }
                 match icon {
                     Some(icon) => {
@@ -572,9 +743,10 @@ impl Server {
             self.shelf.picture = Some((key, buffer));
         }
         self.shelf.names = items.iter().map(|(item, _)| item.name.clone()).collect();
-        // The name of the application the pointer rests on, to the left of its icon.
+        // The name of the application the pointer rests on, beside its icon on the
+        // side the windows are.
         let mut elements = Vec::new();
-        let named = self.shelf.hover.filter(|_| self.shelf.named).and_then(|i| Some((running::slot(rect(strip), i)?, self.shelf.names.get(i)?.clone())));
+        let named = self.shelf.hover.filter(|_| self.shelf.named && !self.menu_is_open() && self.shelf.dragged.is_none()).and_then(|i| Some((running::slot(rect(strip), i, upright)?, self.shelf.names.get(i)?.clone())));
         if let Some((slot, name)) = named {
             let key = (name.clone(), scale.to_bits());
             if self.shelf.label.as_ref().map(|(k, _, _)| k) != Some(&key) {
@@ -597,7 +769,16 @@ impl Server {
                 }
             }
             if let Some((_, buffer, w)) = &self.shelf.label {
-                let area: Rectangle<i32, Logical> = Rectangle::new(((strip.loc.x - 8 - w).max(out.loc.x), slot.y + (slot.h - 28) / 2).into(), (*w, 28).into());
+                let (middle, across) = (slot.y + (slot.h - 28) / 2, slot.x + (slot.w - w) / 2);
+                let (x, y) = match side {
+                    Edge::Left => (strip.loc.x - 8 - w, middle),
+                    Edge::Right => (strip.loc.x + strip.size.w + 8, middle),
+                    Edge::Top => (across, strip.loc.y - 8 - 28),
+                    Edge::Bottom => (across, strip.loc.y + strip.size.h + 8),
+                };
+                // Kept on its screen.
+                let (x, y) = (x.min(out.loc.x + out.size.w - w).max(out.loc.x), y.min(out.loc.y + out.size.h - 28).max(out.loc.y));
+                let area: Rectangle<i32, Logical> = Rectangle::new((x, y).into(), (*w, 28).into());
                 let a = (area.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
                 let b = (area.loc + area.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
                 let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
