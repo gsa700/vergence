@@ -41,6 +41,8 @@ pub const APPEARANCE: &str = "org.freedesktop.appearance";
 pub const INTERFACE: &str = "org.gnome.desktop.interface";
 pub const KEYBOARD: &str = "org.gnome.desktop.peripherals.keyboard";
 pub const WM: &str = "org.gnome.desktop.wm.preferences";
+pub const MOUSE: &str = "org.gnome.desktop.peripherals.mouse";
+pub const TOUCHPAD: &str = "org.gnome.desktop.peripherals.touchpad";
 /// Key repeat without a [keyboard] table: GNOME's defaults (500 ms, then 30 a second).
 pub const REPEAT_DELAY: u32 = 500;
 pub const REPEAT_RATE: u32 = 30;
@@ -112,6 +114,30 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
     put(KEYBOARD, "repeat", SettingValue::Bool(keyboard.get("repeat").and_then(|v| v.as_bool()).unwrap_or(true)));
     put(KEYBOARD, "delay", SettingValue::U32(int("repeat-delay", REPEAT_DELAY, 100, 2000)));
     put(KEYBOARD, "repeat-interval", SettingValue::U32((1000 + rate / 2) / rate));
+
+    // Mice and touchpads (pointer.rs), under GNOME's names.
+    let table = |name: &str| desktop.and_then(|t| t.parse::<toml::Table>().ok()).and_then(|t| t.get(name).and_then(|a| a.as_table()).cloned()).unwrap_or_default();
+    let (mouse, pad) = (table("mouse"), table("touchpad"));
+    let speed = |t: &toml::Table| t.get("speed").and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))).filter(|v| v.is_finite()).unwrap_or(0.0).clamp(-1.0, 1.0);
+    let flag = |t: &toml::Table, k: &str, d: bool| t.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
+    let lines = |t: &toml::Table| t.get("scroll-lines").and_then(|v| v.as_integer()).map_or(crate::pointer::SCROLL_LINES, |v| v.clamp(1, 10) as u32);
+    put(MOUSE, "speed", SettingValue::F64(speed(&mouse)));
+    put(MOUSE, "accel-profile", SettingValue::Str(if flag(&mouse, "acceleration", true) { "default" } else { "flat" }.into()));
+    put(MOUSE, "natural-scroll", SettingValue::Bool(flag(&mouse, "natural-scroll", false)));
+    put(MOUSE, "left-handed", SettingValue::Bool(flag(&mouse, "left-handed", false)));
+    put(MOUSE, "middle-click-emulation", SettingValue::Bool(flag(&mouse, "middle-click", false)));
+    put(MOUSE, "scroll-lines", SettingValue::U32(lines(&mouse)));
+    put(MOUSE, "double-click", SettingValue::I32(mouse.get("double-click").and_then(|v| v.as_integer()).map_or(400, |v| v.clamp(100, 2000) as i32)));
+    put(TOUCHPAD, "speed", SettingValue::F64(speed(&pad)));
+    put(TOUCHPAD, "tap-to-click", SettingValue::Bool(flag(&pad, "tap-to-click", true)));
+    put(TOUCHPAD, "tap-and-drag", SettingValue::Bool(flag(&pad, "tap-and-drag", true)));
+    put(TOUCHPAD, "natural-scroll", SettingValue::Bool(flag(&pad, "natural-scroll", true)));
+    let edge = pad.get("scroll").and_then(|v| v.as_str()) == Some("edge");
+    put(TOUCHPAD, "two-finger-scrolling-enabled", SettingValue::Bool(!edge));
+    put(TOUCHPAD, "edge-scrolling-enabled", SettingValue::Bool(edge));
+    put(TOUCHPAD, "disable-while-typing", SettingValue::Bool(flag(&pad, "disable-while-typing", true)));
+    put(TOUCHPAD, "click-method", SettingValue::Str(if pad.get("click").and_then(|v| v.as_str()) == Some("fingers") { "fingers" } else { "areas" }.into()));
+    put(TOUCHPAD, "scroll-lines", SettingValue::U32(lines(&pad)));
 
     let xs = xsettings.and_then(|t| vergence_xsettings::from_toml(t).map_err(|e| tracing::warn!("settings.toml: {e}")).ok()).unwrap_or_default();
     let xstr = |k: &str| match xs.get(k) {
@@ -190,6 +216,9 @@ impl Server {
         }
         if diff.iter().any(|s| s.namespace == KEYBOARD) {
             self.apply_key_repeat();
+        }
+        if diff.iter().any(|s| s.namespace == MOUSE || s.namespace == TOUCHPAD) {
+            self.apply_pointer_settings();
         }
         if diff.iter().any(|s| s.namespace == INTERFACE)
             && let Some(tx) = &self.xsettings_tx
@@ -306,5 +335,29 @@ mod tests {
         assert!(changed(&b, &b).is_empty());
         assert_eq!(parse_rgb("#ff0080"), Some((1.0, 0.0, 128.0 / 255.0)));
         assert_eq!(parse_rgb("red"), None);
+    }
+
+    #[test]
+    fn mice_and_touchpads_under_gnome_s_names() {
+        let get = |m: &Map, ns: &str, k: &str| m.get(&(ns.to_string(), k.to_string())).cloned();
+        // Nothing written: libinput's own speed, the touchpad as on a laptop.
+        let m = build(Some(""), None, 24);
+        assert_eq!(get(&m, MOUSE, "speed"), Some(SettingValue::F64(0.0)));
+        assert_eq!(get(&m, MOUSE, "natural-scroll"), Some(SettingValue::Bool(false)));
+        assert_eq!(get(&m, TOUCHPAD, "natural-scroll"), Some(SettingValue::Bool(true)));
+        assert_eq!(get(&m, TOUCHPAD, "tap-to-click"), Some(SettingValue::Bool(true)));
+        assert_eq!(get(&m, MOUSE, "scroll-lines"), Some(SettingValue::U32(3)));
+        assert_eq!(get(&m, MOUSE, "double-click"), Some(SettingValue::I32(400)));
+        let desktop = "[mouse]\nspeed = 2.5\nacceleration = false\nleft-handed = true\nscroll-lines = 7\ndouble-click = 600\n[touchpad]\nscroll = \"edge\"\nclick = \"fingers\"\ntap-to-click = false\n";
+        let m = build(Some(desktop), None, 24);
+        assert_eq!(get(&m, MOUSE, "speed"), Some(SettingValue::F64(1.0)), "kept to -1..1");
+        assert_eq!(get(&m, MOUSE, "accel-profile"), Some(SettingValue::Str("flat".into())));
+        assert_eq!(get(&m, MOUSE, "left-handed"), Some(SettingValue::Bool(true)));
+        assert_eq!(get(&m, MOUSE, "scroll-lines"), Some(SettingValue::U32(7)));
+        assert_eq!(get(&m, MOUSE, "double-click"), Some(SettingValue::I32(600)));
+        assert_eq!(get(&m, TOUCHPAD, "edge-scrolling-enabled"), Some(SettingValue::Bool(true)));
+        assert_eq!(get(&m, TOUCHPAD, "two-finger-scrolling-enabled"), Some(SettingValue::Bool(false)));
+        assert_eq!(get(&m, TOUCHPAD, "click-method"), Some(SettingValue::Str("fingers".into())));
+        assert_eq!(get(&m, TOUCHPAD, "tap-to-click"), Some(SettingValue::Bool(false)));
     }
 }

@@ -148,7 +148,15 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
     let libinput_for_session = libinput.clone();
     event_loop
         .handle()
-        .insert_source(LibinputInputBackend::new(libinput), |event, _, state| state.process_input_event(event))?;
+        .insert_source(LibinputInputBackend::new(libinput), |event, _, state| {
+            // Mice and touchpads are kept, to be given their settings (pointer.rs).
+            match &event {
+                smithay::backend::input::InputEvent::DeviceAdded { device } => state.pointer_device_added(device.clone()),
+                smithay::backend::input::InputEvent::DeviceRemoved { device } => state.pointer_device_removed(device),
+                _ => {}
+            }
+            state.process_input_event(event)
+        })?;
 
     // VBlank: the frame is on screen; draw the next one.
     event_loop.handle().insert_source(drm_notifier, |event, _, state| match event {

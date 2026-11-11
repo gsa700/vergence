@@ -22,6 +22,8 @@ pub struct Theme {
     pub text_size: f32,
     /// How opaque the window's ground is (`vergence_ui::opacity_setting`).
     pub opacity: f32,
+    /// The longest time between two clicks of a double-click, in ms.
+    pub double_click: u32,
 }
 
 fn c(rgb: Rgb) -> Color {
@@ -46,6 +48,7 @@ impl Theme {
             font: "sans-serif".into(),
             text_size: 13.0,
             opacity: 1.0,
+            double_click: 400,
         };
         if high_contrast {
             // Text on pure black or white, edges as strong as the text.
@@ -63,6 +66,7 @@ impl Theme {
     /// "[settings]") or `[appearance] window-opacity`.
     pub fn from_desktop(text: &str, default_dark: bool, section: &str) -> Theme {
         let (mut dark, mut accent, mut high, mut motion) = (default_dark, None, false, false);
+        let mut double_click = 400;
         let mut within = "";
         for line in text.lines().map(str::trim) {
             if line.starts_with('[') {
@@ -70,6 +74,9 @@ impl Theme {
                 continue;
             }
             let Some((key, value)) = line.split_once('=') else { continue };
+            if within == "[mouse]" && key.trim() == "double-click" {
+                double_click = toml_value(value).parse::<u32>().map_or(400, |v| v.clamp(100, 2000));
+            }
             if within != "[appearance]" {
                 continue;
             }
@@ -85,6 +92,7 @@ impl Theme {
         }
         let mut t = Theme::new(dark, accent.unwrap_or(c(vergence_look::ACCENT)), high);
         t.reduced_motion = motion;
+        t.double_click = double_click;
         t.opacity = vergence_ui::opacity_setting(text, section);
         t
     }

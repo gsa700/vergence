@@ -10,11 +10,16 @@
 // applies at once.
 //
 // Pages: Appearance; Theme and fonts; Windows (title bar controls, either side,
-// chosen buttons); Keyboard (key repeat: on, delay, rate, a box to try it); Energy
+// chosen buttons); Dock (place, gap, hiding, opacity, pinned applications);
+// Keyboard (key repeat: on, delay, rate, a box to try it); Mouse and touchpad
+// (speed, acceleration, scrolling lines, natural scrolling, primary button,
+// middle click, double-click speed; the touchpad's tapping, scrolling and
+// right click; the server's pointer.rs applies them); Energy
 // (screens off and sleep after idle, the sleep command); Screens (several screens: an overview to arrange them and
 // the size preference) with a page per screen (scale, wallpaper); About.
 //
-// Files: ~/.config/vergence/desktop.toml ([appearance], [keyboard], [wallpaper],
+// Files: ~/.config/vergence/desktop.toml ([appearance], [keyboard], [mouse],
+// [touchpad], [shelf], [wallpaper],
 // [pictures], [displays]) and settings.toml (theme, fonts, the title bar
 // layout); the server applies both within a second. The screens come from the
 // session bus (crates/vergence-protocol), followed live, on a thread of their
@@ -63,6 +68,7 @@ enum Page {
     Windows,
     Dock,
     Keyboard,
+    Pointer,
     Energy,
     Overview,
     Screen(usize),
@@ -103,6 +109,16 @@ enum Message {
     RepeatRate(f32),
     RepeatDone,
     KeyTest(String),
+    // Mouse and touchpad (desktop.toml [mouse] and [touchpad]; the server applies them).
+    /// A slider moved: which (table, key), and its value; saved on release.
+    PointerSlide(&'static str, &'static str, f32),
+    PointerSave(&'static str, &'static str),
+    PointerFlag(&'static str, &'static str, bool),
+    PrimaryButton(usize),
+    PadScroll(usize),
+    PadClick(usize),
+    /// A press on the double-click test.
+    ClickTest,
     // Energy.
     ScreensOff(String),
     SleepAfter(String),
@@ -209,6 +225,10 @@ struct App {
     repeat_delay: f32,
     repeat_rate: f32,
     key_test: String,
+    /// The mouse and touchpad sliders while they move, by (table, key).
+    sliding: HashMap<(&'static str, &'static str), f32>,
+    /// The double-click test: the last press, and how many double-clicks.
+    click_test: (Option<Instant>, u32),
     /// The dock's gap and opacity while their sliders move (saved on release).
     dock_gap: f32,
     dock_opacity: f32,
@@ -364,6 +384,8 @@ impl App {
             repeat_delay: 0.0,
             repeat_rate: 0.0,
             key_test: String::new(),
+            sliding: HashMap::new(),
+            click_test: (None, 0),
             dock_gap: 0.0,
             dock_opacity: 1.0,
             apps: vergence_shell::apps::installed(),
@@ -589,6 +611,39 @@ impl App {
                 });
             }
             Message::KeyTest(t) => self.key_test = t,
+            Message::PointerSlide(table, key, v) => {
+                self.sliding.insert((table, key), v);
+            }
+            Message::PointerSave(table, key) => {
+                if let Some(v) = self.sliding.remove(&(table, key)) {
+                    let value: toml::Value = if key == "speed" { ((v as f64 * 100.0).round() / 100.0).into() } else { (v.round() as i64).into() };
+                    self.save_table(table, |t| {
+                        t.insert(key.into(), value);
+                    });
+                }
+            }
+            Message::PointerFlag(table, key, on) => self.save_table(table, |t| {
+                t.insert(key.into(), on.into());
+            }),
+            Message::PrimaryButton(i) => self.save_table("mouse", |t| {
+                t.insert("left-handed".into(), (i == 1).into());
+            }),
+            Message::PadScroll(i) => self.save_table("touchpad", |t| {
+                t.insert("scroll".into(), if i == 1 { "edge" } else { "two-finger" }.into());
+            }),
+            Message::PadClick(i) => self.save_table("touchpad", |t| {
+                t.insert("click".into(), if i == 1 { "fingers" } else { "areas" }.into());
+            }),
+            Message::ClickTest => {
+                let limit = Duration::from_millis(self.pointer_int("mouse", "double-click", 400) as u64);
+                let now = Instant::now();
+                match self.click_test.0 {
+                    Some(at) if now.duration_since(at) <= limit => {
+                        self.click_test = (None, self.click_test.1 + 1);
+                    }
+                    _ => self.click_test.0 = Some(now),
+                }
+            }
             Message::TermScheme(name) => {
                 let v = name.to_ascii_lowercase();
                 self.save_table("terminal", |t| {
@@ -881,6 +936,7 @@ impl App {
             item("Windows".into(), Page::Windows, self.page == Page::Windows, false),
             item("Dock".into(), Page::Dock, self.page == Page::Dock, false),
             item("Keyboard".into(), Page::Keyboard, self.page == Page::Keyboard, false),
+            item("Mouse and touchpad".into(), Page::Pointer, self.page == Page::Pointer, false),
             item("Energy".into(), Page::Energy, self.page == Page::Energy, false),
             item(if self.outputs.is_empty() { "Wallpaper".into() } else { "Screens".into() }, screens_page, screens_selected, false),
         ];
@@ -1003,6 +1059,127 @@ impl App {
                 )]),
                 self.status_line(),
             ],
+        )
+    }
+
+    fn pointer_table(&self, table: &str) -> Option<&toml::Table> {
+        self.desktop.get(table).and_then(|v| v.as_table())
+    }
+
+    fn pointer_float(&self, table: &'static str, key: &'static str, default: f32) -> f32 {
+        if let Some(v) = self.sliding.get(&(table, key)) {
+            return *v;
+        }
+        self.pointer_table(table).and_then(|t| t.get(key)).and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))).map_or(default, |v| v as f32)
+    }
+
+    fn pointer_int(&self, table: &'static str, key: &'static str, default: i64) -> i64 {
+        if let Some(v) = self.sliding.get(&(table, key)) {
+            return v.round() as i64;
+        }
+        self.pointer_table(table).and_then(|t| t.get(key)).and_then(|v| v.as_integer()).unwrap_or(default)
+    }
+
+    fn pointer_flag(&self, table: &str, key: &str, default: bool) -> bool {
+        self.pointer_table(table).and_then(|t| t.get(key)).and_then(|v| v.as_bool()).unwrap_or(default)
+    }
+
+    fn pointer_word(&self, table: &str, key: &str) -> String {
+        self.pointer_table(table).and_then(|t| t.get(key)).and_then(|v| v.as_str()).unwrap_or("").to_string()
+    }
+
+    fn pointer(&self) -> Element<Message> {
+        let speed = |table: &'static str| {
+            let v = self.pointer_float(table, "speed", 0.0).clamp(-1.0, 1.0);
+            let words = if v < -0.05 { "slower" } else if v > 0.05 { "faster" } else { "standard" };
+            row(vec![
+                slider(-1.0, 1.0, v, move |v| Message::PointerSlide(table, "speed", v)).step(0.05).marks(vec![0.0]).on_release(Message::PointerSave(table, "speed")).width(Length::Fixed(220.0)).name("Pointer speed"),
+                label(words).width(Length::Fixed(72.0)).align(Align::End),
+            ])
+            .spacing(8.0)
+            .align(Align::Center)
+        };
+        let lines = |table: &'static str| {
+            let n = self.pointer_int(table, "scroll-lines", 3).clamp(1, 10);
+            row(vec![
+                slider(1.0, 10.0, n as f32, move |v| Message::PointerSlide(table, "scroll-lines", v)).step(1.0).marks(vec![3.0]).on_release(Message::PointerSave(table, "scroll-lines")).width(Length::Fixed(220.0)).name("Scrolling speed"),
+                label(if n == 1 { "1 line".to_string() } else { format!("{n} lines") }).width(Length::Fixed(72.0)).align(Align::End),
+            ])
+            .spacing(8.0)
+            .align(Align::Center)
+        };
+        let dc = self.pointer_int("mouse", "double-click", 400).clamp(200, 900);
+        let tested = match self.click_test.1 {
+            0 => "Double-click the button to try it.".to_string(),
+            1 => "One double-click so far.".to_string(),
+            n => format!("{n} double-clicks so far."),
+        };
+        let mouse = vec![
+            setting("Pointer speed", "How far the pointer goes for a move of the hand.", speed("mouse")),
+            setting(
+                "Acceleration",
+                "On: a fast move takes the pointer farther. Off: always the same distance, for precise work and games.",
+                switch(self.pointer_flag("mouse", "acceleration", true), |on| Message::PointerFlag("mouse", "acceleration", on)).name("Acceleration"),
+            ),
+            setting("Scrolling speed", "How many lines a notch of the wheel moves, in every app.", lines("mouse")),
+            setting(
+                "Natural scrolling",
+                "The content follows the wheel, as on a Mac.",
+                switch(self.pointer_flag("mouse", "natural-scroll", false), |on| Message::PointerFlag("mouse", "natural-scroll", on)).name("Natural scrolling (mouse)"),
+            ),
+            setting(
+                "Primary button",
+                "Right, for the left hand.",
+                choice(vec!["Left".into(), "Right".into()], Some(self.pointer_flag("mouse", "left-handed", false) as usize), Message::PrimaryButton).width(Length::Fixed(120.0)).name("Primary button"),
+            ),
+            setting(
+                "Middle click",
+                "Pressing both buttons together is a middle click, for mice without one.",
+                switch(self.pointer_flag("mouse", "middle-click", false), |on| Message::PointerFlag("mouse", "middle-click", on)).name("Middle click"),
+            ),
+            setting(
+                "Double-click speed",
+                &format!("How quickly the two clicks must come: {dc} ms. {tested}"),
+                row(vec![
+                    slider(200.0, 900.0, dc as f32, |v| Message::PointerSlide("mouse", "double-click", v)).step(10.0).marks(vec![400.0]).on_release(Message::PointerSave("mouse", "double-click")).width(Length::Fixed(160.0)).name("Double-click speed"),
+                    button(label("Try it")).on_press(Message::ClickTest).name("Double-click test"),
+                ])
+                .spacing(8.0)
+                .align(Align::Center),
+            ),
+        ];
+        let pad_scroll = (self.pointer_word("touchpad", "scroll") == "edge") as usize;
+        let pad_click = (self.pointer_word("touchpad", "click") == "fingers") as usize;
+        let pad = vec![
+            setting("Pointer speed", "", speed("touchpad")),
+            setting("Tap to click", "A tap is a click; two fingers, a right click.", switch(self.pointer_flag("touchpad", "tap-to-click", true), |on| Message::PointerFlag("touchpad", "tap-to-click", on)).name("Tap to click")),
+            setting("Tap and drag", "Tap, then touch again and move: a drag.", switch(self.pointer_flag("touchpad", "tap-and-drag", true), |on| Message::PointerFlag("touchpad", "tap-and-drag", on)).name("Tap and drag")),
+            setting(
+                "Natural scrolling",
+                "The content follows the fingers, as on a phone.",
+                switch(self.pointer_flag("touchpad", "natural-scroll", true), |on| Message::PointerFlag("touchpad", "natural-scroll", on)).name("Natural scrolling (touchpad)"),
+            ),
+            setting(
+                "Scrolling",
+                "",
+                choice(vec!["Two fingers".into(), "Along the edge".into()], Some(pad_scroll), Message::PadScroll).width(Length::Fixed(160.0)).name("Scrolling"),
+            ),
+            setting("Scrolling speed", "", lines("touchpad")),
+            setting(
+                "Right click",
+                "On the pad's bottom right corner, or with two fingers anywhere.",
+                choice(vec!["Bottom right corner".into(), "Two fingers".into()], Some(pad_click), Message::PadClick).width(Length::Fixed(180.0)).name("Right click"),
+            ),
+            setting(
+                "Off while typing",
+                "A palm on the pad does nothing while keys are being typed.",
+                switch(self.pointer_flag("touchpad", "disable-while-typing", true), |on| Message::PointerFlag("touchpad", "disable-while-typing", on)).name("Off while typing"),
+            ),
+        ];
+        self.page_layout(
+            "Mouse and touchpad",
+            "How the pointer moves and scrolls. Changes apply at once, to every mouse or touchpad plugged in.",
+            vec![self.group(Some("Mouse"), mouse), self.group(Some("Touchpad"), pad), label("The touchpad settings apply when one is connected.").size(11.0).dim(), self.status_line()],
         )
     }
 
@@ -1504,6 +1681,7 @@ impl Program for App {
         let text = toml::to_string(&self.desktop).unwrap_or_default();
         let mut t = Theme::new(self.dark(), self.accent(), appearance_text(&self.desktop, "contrast") == "high");
         t.reduced_motion = self.desktop.get("appearance").and_then(|a| a.get("reduced-motion")).and_then(|v| v.as_bool()).unwrap_or(false);
+        t.double_click = self.desktop.get("mouse").and_then(|a| a.get("double-click")).and_then(|v| v.as_integer()).map_or(400, |v| v.clamp(100, 2000) as u32);
         t.opacity = vergence_ui::opacity_setting(&text, "[settings]");
         let (family, _) = theme::split_font(&theme::get(&self.xsettings, theme::FONT));
         if !family.trim().is_empty() {
@@ -1519,6 +1697,7 @@ impl Program for App {
             Page::Windows => self.windows(),
             Page::Dock => self.dock(),
             Page::Keyboard => self.keyboard(),
+            Page::Pointer => self.pointer(),
             Page::Energy => self.energy(),
             Page::Overview => self.overview(),
             Page::Screen(_) if self.browser.is_some() => self.browser_page(),

@@ -112,7 +112,6 @@ struct Open {
 
 const BLINK: Duration = Duration::from_millis(530);
 const SLIDE: Duration = Duration::from_millis(120);
-const DOUBLE: Duration = Duration::from_millis(400);
 /// A finger moves this far before a press becomes a scroll.
 const SLOP: f32 = 8.0;
 /// Points scrolled for each unit of the wheel's value (15 a notch).
@@ -142,6 +141,8 @@ pub struct Ui<M> {
     /// When the caret was last shown at once (it blinks from there).
     blink: Instant,
     steady: bool,
+    /// The longest time between the clicks of a double-click.
+    double: Duration,
     /// The last click on a field, for double and triple clicks.
     click: Option<(Instant, Id, u8)>,
     /// The drawing the pointer is over.
@@ -167,6 +168,7 @@ impl<M> Default for Ui<M> {
             open: None,
             blink: Instant::now(),
             steady: false,
+            double: Duration::from_millis(400),
             click: None,
             over_drawing: None,
             last_tick: None,
@@ -306,6 +308,11 @@ impl<M: Clone> Ui<M> {
     /// (the desktop's reduced motion).
     pub fn set_reduced_motion(&mut self, steady: bool) {
         self.steady = steady;
+    }
+
+    /// The longest time between two clicks of a double-click (the desktop's).
+    pub fn set_double_click(&mut self, ms: u32) {
+        self.double = Duration::from_millis(ms.clamp(100, 2000) as u64);
     }
 
     fn index(&self, id: Id) -> Option<usize> {
@@ -787,7 +794,7 @@ impl<M: Clone> Ui<M> {
                 let at = self.field_offset(i, x);
                 let now = Instant::now();
                 let count = match self.click {
-                    Some((t, cid, n)) if cid == id && now.duration_since(t) < DOUBLE && with == With::Pointer => n % 3 + 1,
+                    Some((t, cid, n)) if cid == id && now.duration_since(t) < self.double && with == With::Pointer => n % 3 + 1,
                     _ => 1,
                 };
                 self.click = Some((now, id, count));

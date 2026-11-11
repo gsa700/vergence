@@ -170,11 +170,13 @@ impl Server {
             }
             InputEvent::PointerAxis { event, .. } => {
                 let source = event.source();
+                // The lines a notch moves (pointer.rs): every amount scaled alike.
+                let k = self.scroll_factor(source);
 
-                let horizontal_amount = event
+                let horizontal_amount = k * event
                     .amount(Axis::Horizontal)
                     .unwrap_or_else(|| event.amount_v120(Axis::Horizontal).unwrap_or(0.0) * 15.0 / 120.);
-                let vertical_amount = event
+                let vertical_amount = k * event
                     .amount(Axis::Vertical)
                     .unwrap_or_else(|| event.amount_v120(Axis::Vertical).unwrap_or(0.0) * 15.0 / 120.);
                 // The wheel scrolls the applications popup while it is open.
@@ -182,8 +184,8 @@ impl Server {
                     self.launcher_scroll(vertical_amount);
                     return;
                 }
-                let horizontal_amount_discrete = event.amount_v120(Axis::Horizontal);
-                let vertical_amount_discrete = event.amount_v120(Axis::Vertical);
+                let horizontal_amount_discrete = event.amount_v120(Axis::Horizontal).map(|v| v * k);
+                let vertical_amount_discrete = event.amount_v120(Axis::Vertical).map(|v| v * k);
 
                 let mut frame = AxisFrame::new(event.time()).source(source);
                 if horizontal_amount != 0.0 {

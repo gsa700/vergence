@@ -108,6 +108,8 @@ pub struct Server {
     pub launcher: crate::launcher::Launcher,
     /// Touch panels and the fingers on them (touch.rs).
     pub touch: crate::touch::Touch,
+    /// Mice and touchpads, kept to be given the settings again when they change (pointer.rs).
+    pub pointer_devices: Vec<smithay::reexports::input::Device>,
     /// The idle clock, screens off and sleep (energy.rs).
     pub energy: crate::energy::Energy,
     pub popups: PopupManager,
@@ -234,6 +236,7 @@ impl Server {
             shelf: crate::shelf::Shelf::load(),
             resume: Default::default(),
             launcher: Default::default(),
+            pointer_devices: Vec::new(),
             touch: Default::default(),
             energy: crate::energy::Energy::new(),
             popups,

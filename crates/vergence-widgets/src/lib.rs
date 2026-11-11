@@ -242,6 +242,7 @@ impl<P: Program> Host<P> {
             let mut measure = FontsMeasure { fonts, family: &self.theme.font };
             self.ui.layout(root, frame.width, frame.height, &mut measure, self.theme.text_size);
             self.ui.set_reduced_motion(self.theme.reduced_motion);
+            self.ui.set_double_click(self.theme.double_click);
             self.stale = false;
             self.laid_at = (frame.width, frame.height);
             if self.print_tree {
