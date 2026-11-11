@@ -263,6 +263,8 @@ impl Server {
         let mut elements = self.menu_elements(renderer, out, scale);
         // Then notifications, in front of every window (notify.rs).
         elements.extend(self.notify_elements(renderer, out, scale));
+        // Then the applications popup, if open (launcher.rs).
+        elements.extend(self.launcher_elements(renderer, out, scale));
         // Then the shelf's strip, which no window covers (shelf.rs).
         elements.extend(self.shelf_elements(renderer, out, scale));
         // Then windows on their way into the dock or out of it.

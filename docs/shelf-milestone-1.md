@@ -402,6 +402,32 @@ one.
     started from a shell or with no entry is not restored; `--clean` is
     not tried by hand at a console; the settings page for the switch.
 
+- **Step 5 (2026-11-10): the apps button and popup.**
+  - vergence-shell `launcher.rs`: which applications a typed word finds
+    and in what order, the grid (cells, hit test, scrolling to show the
+    selection), the arrows. Three tests.
+  - Server `launcher.rs`: nine dots at the dock's head are the button. The
+    popup (536 by 452 points, less on a small screen) opens beside the
+    dock on the windows' side, kept on the work area: a search field and
+    the grid, icon and name, drawn like the dock. While it is open every
+    key is its own (Ctrl+Alt+Backspace and the console keys excepted):
+    typing filters, Backspace, arrows, Enter starts the selected one,
+    Escape closes; a click on an application starts it, a click anywhere
+    else closes; the pointer over a cell selects it; the wheel scrolls.
+    Super pressed and let go with nothing else between opens or closes
+    it. Starting goes the way a pin's click does (the starting mark).
+  - `vctl key <name>`, `vctl type <text>` (the kernel's key numbers of a
+    US keyboard, through the same path as the keyboard), `vctl apps`.
+    The keyboard's handling moved into `handle_key` for it.
+  - On Hubble by `vctl`: Super opens, "term" leaves Terminal, Enter
+    starts it, arrows move, Escape closes, the button toggles, a click
+    elsewhere closes, a click on AlbumWall's cell starts it.
+  - Not yet: a real keyboard and mouse on it (Dave); scrolling seen with
+    more applications than fit (Hubble has six); the popup under a
+    dock that floats or lies level is placed by the same rule but was
+    only tried at the right edge; windows under the popup still get the
+    pointer's motion.
+
 ## Acceptance
 
 Every step: `cargo test --workspace` green on Hubble, canary and Techbench,

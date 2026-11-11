@@ -21,9 +21,65 @@ enum KeyAction {
     Quit,
     Vt(i32),
     CloseMenu,
+    /// Super was tapped alone: open or close the applications popup.
+    Apps,
+    /// A key for the open popup: its keysym and the character it types.
+    Popup(u32, Option<char>),
+    /// Kept from the apps, with nothing else to do.
+    Nothing,
 }
 
 impl Server {
+    /// A key went down or up: the keyboard, and the control socket's `key` and
+    /// `type`, both come here.
+    pub fn handle_key(&mut self, code: smithay::input::keyboard::Keycode, state: smithay::backend::input::KeyState, time: smithay::backend::input::InputTime) {
+        use smithay::input::keyboard::keysyms;
+        let serial = SERIAL_COUNTER.next_serial();
+        let pressed = state == smithay::backend::input::KeyState::Pressed;
+        // Ctrl+Alt+Backspace quits; Ctrl+Alt+Fn switches consoles (stage 2).
+        let action = self.seat.get_keyboard().unwrap().input::<KeyAction, _>(self, code, state, serial, time, |st, mods, handle| {
+            let sym = handle.modified_sym().raw();
+            let is_super = sym == keysyms::KEY_Super_L || sym == keysyms::KEY_Super_R;
+            if pressed {
+                if mods.ctrl && mods.alt && sym == keysyms::KEY_BackSpace {
+                    return FilterResult::Intercept(KeyAction::Quit);
+                }
+                if st.menu_is_open() && sym == keysyms::KEY_Escape {
+                    return FilterResult::Intercept(KeyAction::CloseMenu);
+                }
+                let vt1 = keysyms::KEY_XF86Switch_VT_1;
+                if (vt1..vt1 + 12).contains(&sym) {
+                    return FilterResult::Intercept(KeyAction::Vt((sym - vt1 + 1) as i32));
+                }
+                // Super alone, until anything else is pressed.
+                st.launcher.super_alone = is_super;
+            } else if is_super && std::mem::take(&mut st.launcher.super_alone) {
+                // Super was tapped: the applications popup (launcher.rs).
+                return FilterResult::Intercept(KeyAction::Apps);
+            }
+            // While the popup is open the keyboard is its own.
+            if st.launcher_is_open() {
+                return FilterResult::Intercept(if pressed && !is_super { KeyAction::Popup(sym, handle.modified_sym().key_char()) } else { KeyAction::Nothing });
+            }
+            FilterResult::Forward
+        });
+        match action {
+            Some(KeyAction::Quit) => self.loop_signal.stop(),
+            Some(KeyAction::CloseMenu) => self.close_menu(),
+            Some(KeyAction::Vt(n)) => {
+                if let Some(session) = self.session.as_mut() {
+                    use smithay::backend::session::Session;
+                    if let Err(e) = session.change_vt(n) {
+                        tracing::warn!("console {n}: {e:?}");
+                    }
+                }
+            }
+            Some(KeyAction::Apps) => self.launcher_toggle(),
+            Some(KeyAction::Popup(sym, typed)) => self.launcher_key(sym, typed),
+            Some(KeyAction::Nothing) | None => {}
+        }
+    }
+
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         // The idle clock (energy.rs). A key or button that only woke the screens
         // goes no further; pointer motion does, so the pointer is where the hand put it.
@@ -31,48 +87,7 @@ impl Server {
             return;
         }
         match event {
-            InputEvent::Keyboard { event, .. } => {
-                let serial = SERIAL_COUNTER.next_serial();
-                let time = Event::time(&event);
-
-                // Ctrl+Alt+Backspace quits; Ctrl+Alt+Fn switches consoles (stage 2).
-                let action = self.seat.get_keyboard().unwrap().input::<KeyAction, _>(
-                    self,
-                    event.key_code(),
-                    event.state(),
-                    serial,
-                    time,
-                    |st, mods, handle| {
-                        let sym = handle.modified_sym().raw();
-                        if event.state() == smithay::backend::input::KeyState::Pressed {
-                            if mods.ctrl && mods.alt && sym == smithay::input::keyboard::keysyms::KEY_BackSpace {
-                                return FilterResult::Intercept(KeyAction::Quit);
-                            }
-                            if st.menu_is_open() && sym == smithay::input::keyboard::keysyms::KEY_Escape {
-                                return FilterResult::Intercept(KeyAction::CloseMenu);
-                            }
-                            let vt1 = smithay::input::keyboard::keysyms::KEY_XF86Switch_VT_1;
-                            if (vt1..vt1 + 12).contains(&sym) {
-                                return FilterResult::Intercept(KeyAction::Vt((sym - vt1 + 1) as i32));
-                            }
-                        }
-                        FilterResult::Forward
-                    },
-                );
-                match action {
-                    Some(KeyAction::Quit) => self.loop_signal.stop(),
-                    Some(KeyAction::CloseMenu) => self.close_menu(),
-                    Some(KeyAction::Vt(n)) => {
-                        if let Some(session) = self.session.as_mut() {
-                            use smithay::backend::session::Session;
-                            if let Err(e) = session.change_vt(n) {
-                                tracing::warn!("console {n}: {e:?}");
-                            }
-                        }
-                    }
-                    None => {}
-                }
-            }
+            InputEvent::Keyboard { event, .. } => self.handle_key(event.key_code(), event.state(), Event::time(&event)),
             InputEvent::PointerMotion { event, .. } => {
                 // A mouse on the real monitors (stage 2): moved by its delta, kept on the outputs.
                 use smithay::backend::input::PointerMotionEvent;
@@ -138,6 +153,11 @@ impl Server {
                 let vertical_amount = event
                     .amount(Axis::Vertical)
                     .unwrap_or_else(|| event.amount_v120(Axis::Vertical).unwrap_or(0.0) * 15.0 / 120.);
+                // The wheel scrolls the applications popup while it is open.
+                if self.launcher_is_open() {
+                    self.launcher_scroll(vertical_amount);
+                    return;
+                }
                 let horizontal_amount_discrete = event.amount_v120(Axis::Horizontal);
                 let vertical_amount_discrete = event.amount_v120(Axis::Vertical);
 
@@ -225,6 +245,7 @@ impl Server {
         self.menu_hover(pos);
         self.notify_hover(pos);
         self.shelf_hover(pos);
+        self.launcher_hover(pos);
         let under = self.surface_under(pos);
         pointer.motion(self, under, &MotionEvent { location: pos, serial, time });
         pointer.frame(self);
@@ -254,6 +275,16 @@ impl Server {
         if button_state == ButtonState::Released && self.shelf.held.is_some_and(|(b, _)| b == button) {
             let at = pointer.current_location();
             self.shelf_release(at);
+            return;
+        }
+        // A button with Super held is not a tap of Super.
+        self.launcher.super_alone = false;
+        // The applications popup takes the clicks while it is open: on an
+        // application, or elsewhere to close it.
+        if button_state == ButtonState::Pressed && self.launcher_is_open() {
+            let at = pointer.current_location();
+            self.launcher_press(at);
+            self.menu_swallow = Some(button);
             return;
         }
         // Notifications take clicks on themselves (notify.rs).

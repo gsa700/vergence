@@ -62,9 +62,9 @@ use crate::{Server, decor::SceneElement};
 /// An icon as pixels: its size, and four bytes a pixel (red, green, blue,
 /// alpha, not multiplied in), as a scene wants a picture.
 pub struct Icon {
-    width: u32,
-    height: u32,
-    rgba: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
 }
 
 /// An icon the strip has asked for: on its way, or as it came back (None:
@@ -279,7 +279,7 @@ pub struct Shelf {
     picture: Option<((i32, u64, u64), MemoryRenderBuffer)>,
     /// The applications this machine has (vergence-shell), read again when a
     /// directory of desktop entries changes.
-    apps: Vec<Entry>,
+    pub apps: Vec<Entry>,
     apps_stamp: Vec<Option<SystemTime>>,
     /// The windows that get an item, in the order they were first seen.
     order: Vec<Window>,
@@ -287,11 +287,11 @@ pub struct Shelf {
     icons: HashMap<(String, u32), Asked>,
     decoder: Option<std::sync::mpsc::Sender<(String, String, u32)>>,
     /// The fonts a letter tile is written with, looked for when first needed.
-    fonts: Option<vergence_text::Fonts>,
+    pub fonts: Option<vergence_text::Fonts>,
     /// Where the shelf's column was last reported in the log, so a move is said once.
     said: Option<Rectangle<i32, Logical>>,
     /// The dock as it was last drawn or pressed: what a point is tested against.
-    dock: Option<Rectangle<i32, Logical>>,
+    pub dock: Option<Rectangle<i32, Logical>>,
     /// A press on the dock that is still down (and the button that made it),
     /// and, while it is being dragged, where the dock is.
     pub held: Option<(u32, Held)>,
@@ -398,7 +398,7 @@ impl Server {
     }
 
     /// The icon `name` at `pixels`, if it has been decoded; asked for if not.
-    fn shelf_icon(&mut self, name: &str, pixels: u32) -> Option<Arc<Icon>> {
+    pub fn shelf_icon(&mut self, name: &str, pixels: u32) -> Option<Arc<Icon>> {
         if name.is_empty() {
             return None;
         }
@@ -728,7 +728,14 @@ impl Server {
         let items = self.shelf_items();
         let Some(strip) = self.shelf_dock(items.len()) else { return };
         let upright = self.shelf.config.placement().upright();
-        let Some(index) = running::item_at(rect(strip), items.len(), upright, at.x.floor() as i32, at.y.floor() as i32) else { return };
+        let Some(index) = running::item_at(rect(strip), items.len(), upright, at.x.floor() as i32, at.y.floor() as i32) else {
+            // The dock's head is the apps button.
+            let head = Rectangle::new(strip.loc, (running::SLOT, running::SLOT).into());
+            if head.to_f64().contains(at) {
+                self.launcher_toggle();
+            }
+            return;
+        };
         let (item, windows) = &items[index];
         match windows.as_slice() {
             [] => self.shelf_act(Act::Start(item.key.clone())),
@@ -844,7 +851,7 @@ impl Server {
     /// The side of the dock its names and lists are on (its marks are on the
     /// other, the outside edge): the one facing
     /// the middle of its screen (the windows' side, at an edge).
-    fn shelf_side(&self, dock: Rectangle<i32, Logical>) -> Edge {
+    pub fn shelf_side(&self, dock: Rectangle<i32, Logical>) -> Edge {
         let screen = self.shelf_screen().unwrap_or(dock);
         let (dx, dy) = (dock.loc.x + dock.size.w / 2 - (screen.loc.x + screen.size.w / 2), dock.loc.y + dock.size.h / 2 - (screen.loc.y + screen.size.h / 2));
         match (self.shelf.config.placement().upright(), dx > 0, dy > 0) {
@@ -939,6 +946,11 @@ impl Server {
             scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, colour(vergence_look::SHELF_EDGE));
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             let face = fonts.face("sans-serif", 700, false).or_else(|| fonts.face("sans-serif", 400, false));
+            // The apps button at its head: nine dots.
+            for i in 0..9 {
+                let (column, row) = ((i % 3) as f32, (i / 3) as f32);
+                scene.fill_rounded(SceneRect::new(14.0 + column * 8.0, 14.0 + row * 8.0, 4.0, 4.0), 1.0, colour(vergence_look::INK_UNFOCUSED));
+            }
             let local = Rect::new(0, 0, strip.size.w, strip.size.h);
             for (index, ((item, windows), icon)) in items.iter().zip(&icons).enumerate() {
                 let Some(slot) = running::slot(local, index, upright) else { break };

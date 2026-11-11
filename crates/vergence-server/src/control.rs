@@ -158,6 +158,45 @@ impl Server {
             "windows" => self.describe_windows(),
             "shelf" => self.shelf_report(),
             "session" => self.session_report(),
+            "apps" => self.launcher_report(),
+            // Keys by name and text by letter, as a US keyboard has them (the kernel's
+            // key numbers; what they type is the session's layout's to say).
+            "key" | "type" => {
+                let codes: Vec<u32> = if cmd == "key" {
+                    match args.first().copied().unwrap_or("") {
+                        "Escape" => vec![1],
+                        "Return" => vec![28],
+                        "BackSpace" => vec![14],
+                        "Tab" => vec![15],
+                        "space" => vec![57],
+                        "Up" => vec![103],
+                        "Down" => vec![108],
+                        "Left" => vec![105],
+                        "Right" => vec![106],
+                        "Super" => vec![125],
+                        other => return format!("key: no key {other} (Escape, Return, BackSpace, Tab, space, Up, Down, Left, Right, Super)"),
+                    }
+                } else {
+                    const ROWS: [(&str, u32); 4] = [("1234567890-=", 2), ("qwertyuiop", 16), ("asdfghjkl", 30), ("zxcvbnm,.", 44)];
+                    let text = args.join(" ");
+                    let mut codes = Vec::new();
+                    for c in text.chars() {
+                        let code = if c == ' ' { Some(57) } else { ROWS.iter().find_map(|(row, first)| row.find(c).map(|i| first + i as u32)) };
+                        match code {
+                            Some(code) => codes.push(code),
+                            None => return format!("type: no key for {c:?} (small letters, digits, space, - = , .)"),
+                        }
+                    }
+                    codes
+                };
+                for code in &codes {
+                    for state in [smithay::backend::input::KeyState::Pressed, smithay::backend::input::KeyState::Released] {
+                        let time = smithay::backend::input::InputTime::now();
+                        self.handle_key((code + 8).into(), state, time);
+                    }
+                }
+                format!("{} keys", codes.len())
+            }
             "dbus" => self.dbus_report(),
             "notes" => self.notify_report(),
             "spawn" => {
@@ -224,7 +263,7 @@ impl Server {
                 self.loop_signal.stop();
                 "quitting".into()
             }
-            _ => "commands: shot, windows, shelf, session, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
+            _ => "commands: shot, windows, shelf, session, apps, key <name>, type <text>, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
         }
     }
 

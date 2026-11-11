@@ -104,6 +104,8 @@ pub struct Server {
     pub shelf: crate::shelf::Shelf,
     /// Session restore: what is running, as recorded (session.rs).
     pub resume: crate::session::Session,
+    /// The applications popup (launcher.rs).
+    pub launcher: crate::launcher::Launcher,
     /// The idle clock, screens off and sleep (energy.rs).
     pub energy: crate::energy::Energy,
     pub popups: PopupManager,
@@ -228,6 +230,7 @@ impl Server {
             displays: crate::displays::load(),
             shelf: crate::shelf::Shelf::load(),
             resume: Default::default(),
+            launcher: Default::default(),
             energy: crate::energy::Energy::new(),
             popups,
             seat,
