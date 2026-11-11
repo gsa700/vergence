@@ -6,10 +6,11 @@
 //! Our own code, with no dependencies (§8, "Our own parts").
 
 pub mod bus;
+pub mod sock;
+pub mod window;
 pub mod wire;
 
 use std::{
-    io::{Read, Write},
     os::unix::net::UnixStream,
     path::PathBuf,
 };
@@ -83,6 +84,8 @@ impl From<WireError> for ClientError {
 pub struct Client {
     stream: UnixStream,
     reader: FrameReader,
+    /// Descriptors that came with what has been read, not yet claimed.
+    fds: std::collections::VecDeque<std::os::fd::OwnedFd>,
     serial: u32,
     events: std::collections::VecDeque<ServerMsg>,
     pub client_id: u32,
@@ -97,7 +100,7 @@ impl Client {
 
     pub fn connect_to(path: &std::path::Path, app_id: &str) -> Result<Client, ClientError> {
         let stream = UnixStream::connect(path)?;
-        let mut c = Client { stream, reader: FrameReader::new(), serial: 0, events: Default::default(), client_id: 0 };
+        let mut c = Client { stream, reader: FrameReader::new(), fds: Default::default(), serial: 0, events: Default::default(), client_id: 0 };
         c.send(&ClientMsg::Hello { version: VERSION, app_id: app_id.into() })?;
         match c.read()? {
             ServerMsg::Welcome { client_id, .. } => c.client_id = client_id,
@@ -113,17 +116,18 @@ impl Client {
     }
 
     pub fn send(&mut self, m: &ClientMsg) -> Result<(), ClientError> {
-        self.stream.write_all(&m.encode()?)?;
+        let (bytes, fds) = m.encode_with_fds()?;
+        sock::send_all(&self.stream, &bytes, &fds)?;
         Ok(())
     }
 
     fn read(&mut self) -> Result<ServerMsg, ClientError> {
         loop {
             if let Some(f) = self.reader.next_frame()? {
-                return Ok(ServerMsg::decode(&f)?);
+                return Ok(ServerMsg::decode_with_fds(&f, &mut self.fds)?);
             }
             let mut buf = [0u8; 4096];
-            let n = self.stream.read(&mut buf)?;
+            let n = sock::recv_with_fds(&self.stream, &mut buf, &mut self.fds, 64)?;
             if n == 0 {
                 return Err(ClientError::Io(std::io::ErrorKind::UnexpectedEof.into()));
             }
@@ -164,6 +168,7 @@ pub fn reply_serial(m: &ServerMsg) -> Option<u32> {
         ServerMsg::Welcome { .. } | ServerMsg::NotificationClosed { .. } | ServerMsg::ActionInvoked { .. } => return None,
         ServerMsg::Pong { serial } | ServerMsg::Done { serial } | ServerMsg::Notified { serial, .. } => *serial,
         ServerMsg::Error { serial, .. } | ServerMsg::Outputs { serial, .. } | ServerMsg::Settings { serial, .. } => *serial,
+        ServerMsg::Window(w) => return w.reply_serial(),
     };
     (s != 0).then_some(s)
 }

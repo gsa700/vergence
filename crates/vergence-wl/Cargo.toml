@@ -10,3 +10,4 @@ publish.workspace = true
 # few C library calls it needs (sendmsg, recvmsg, memfd_create, mmap) are
 # declared in the source, as vergence-term's pty.rs does.
 [dependencies]
+vergence-protocol.workspace = true

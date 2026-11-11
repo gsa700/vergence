@@ -14,7 +14,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    io::{ErrorKind, Read, Write},
+    io::{ErrorKind, Write},
     os::unix::{fs::PermissionsExt, net::{UnixListener, UnixStream}},
     path::PathBuf,
 };
@@ -29,6 +29,8 @@ use crate::Server;
 
 /// Most bytes a client may leave unread before it is disconnected.
 const OUTBOX_MAX: usize = 1 << 20;
+/// Descriptors kept for a client's messages to claim; past these, more are closed.
+const MAX_WAITING_FDS: usize = 64;
 
 #[derive(Default)]
 pub struct Bus {
@@ -42,6 +44,9 @@ pub struct Bus {
 struct Conn {
     stream: UnixStream,
     reader: FrameReader,
+    /// Descriptors that came with what has been read, not yet claimed by a
+    /// message (native windows' pictures, the clipboard's pipes).
+    fds: std::collections::VecDeque<std::os::fd::OwnedFd>,
     /// Set by Hello: the app id the client gave (recorded, not trusted, §7.4).
     app_id: Option<String>,
     uid: u32,
@@ -113,6 +118,7 @@ impl Server {
             Conn {
                 stream: write_half,
                 reader: FrameReader::new(),
+                fds: Default::default(),
                 app_id: None,
                 uid,
                 topics: HashSet::new(),
@@ -126,17 +132,17 @@ impl Server {
 
     /// Read what has arrived and answer it; false when the connection is
     /// finished (its source is then removed).
-    fn bus_readable(&mut self, id: u32, mut stream: &UnixStream) -> bool {
+    fn bus_readable(&mut self, id: u32, stream: &UnixStream) -> bool {
         let mut buf = [0u8; 8192];
         let mut eof = false;
         loop {
-            match stream.read(&mut buf) {
+            let Some(c) = self.bus.clients.get_mut(&id) else { return false };
+            match vergence_protocol::sock::recv_with_fds(stream, &mut buf, &mut c.fds, MAX_WAITING_FDS) {
                 Ok(0) => {
                     eof = true;
                     break;
                 }
                 Ok(n) => {
-                    let Some(c) = self.bus.clients.get_mut(&id) else { return false };
                     c.reader.push(&buf[..n]);
                     if c.reader.pending() > OUTBOX_MAX {
                         tracing::warn!("bus: client {id} sent an oversized burst");
@@ -159,8 +165,15 @@ impl Server {
                 break;
             }
             match c.reader.next_frame() {
-                Ok(Some(frame)) => match ClientMsg::decode(&frame) {
+                Ok(Some(frame)) => match ClientMsg::decode_with_fds(&frame, &mut c.fds) {
                     Ok(m) => self.bus_handle(id, m),
+                    // A window message that does not add up (its descriptors may
+                    // be out of step with its frames): the connection ends.
+                    Err(u) if vergence_protocol::window::is_window_opcode(frame.opcode) => {
+                        tracing::warn!("bus: client {id}: window message {}: {}; disconnecting", frame.opcode, u.error);
+                        eof = true;
+                        break;
+                    }
                     Err(u) => {
                         let hello = self.bus.clients.get(&id).is_some_and(|c| c.app_id.is_some());
                         let code = if hello { u.code } else { ErrorCode::NoHello };
@@ -250,6 +263,12 @@ impl Server {
                 c.topics.remove(&topic);
                 self.bus_send(id, ServerMsg::Done { serial });
             }
+            // Windows on the native protocol (native milestone 1): understood,
+            // and answered "not yet" until step 3 puts them on the screen.
+            ClientMsg::Window(req) => match req.serial() {
+                Some(serial) => self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::NotYet, message: "windows on the native protocol: not yet".into() }),
+                None => tracing::debug!("bus: client {id}: {req:?} (no windows yet)"),
+            },
         }
     }
 

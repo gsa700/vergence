@@ -234,3 +234,42 @@ fn random_frames_never_panic() {
         let _ = feed(&mut rng, &mut reader, &bytes);
     }
 }
+
+/// Window messages (native milestone 1): random and mutated frames, with a
+/// random number of real descriptors waiting beside them. Nothing may panic;
+/// a message never takes more descriptors than were there; what is refused
+/// takes none it does not own (they close when dropped).
+#[test]
+fn window_messages_with_descriptors() {
+    use std::collections::VecDeque;
+    use std::os::fd::OwnedFd;
+    use vergence_protocol::window::{Buffer, Damage, Fd, Node, Place, WinEvent, WinRequest};
+    let mut rng = Rng::new(0x5eed_0f_f1e5);
+    let pipe = || Fd::new(vergence_protocol::sock::pipe().unwrap().0);
+    // Good messages to mutate from.
+    let seeds: Vec<WinRequest> = vec![
+        WinRequest::Create { serial: 1, window: 1, role: "main".into(), token: String::new(), title: "t".into(), width: 640.0, height: 480.0, own_frame: false, parent: 0, place: Place::Anywhere },
+        WinRequest::Attach { window: 1, buffer: Buffer::Shm { fd: pipe(), width: 64, height: 32, stride: 256, format: 0 }, damage: vec![Damage { x: 0, y: 0, w: 8, h: 8 }] },
+        WinRequest::Meaning { window: 1, focus: 2, caret: None, nodes: vec![Node { id: 2, parent: 0, role: "button".into(), name: "OK".into(), value: None, states: vec![], x: 0.0, y: 0.0, w: 10.0, h: 10.0 }] },
+        WinRequest::Copy { input_serial: 3, kinds: vec!["text/plain".into()] },
+    ];
+    let encoded: Vec<Vec<u8>> = seeds.iter().map(|m| m.encode().unwrap().0).collect();
+    let events = [WinEvent::Keymap { fd: pipe(), size: 10 }.encode().unwrap().0, WinEvent::ClipboardData { serial: 1, fd: pipe() }.encode().unwrap().0];
+    for round in 0..iters() {
+        let mut data = if rng.below(3) == 0 { events[rng.below(events.len())].clone() } else { encoded[rng.below(encoded.len())].clone() };
+        for _ in 0..rng.below(4) {
+            mutate(&mut rng, &mut data);
+        }
+        let opcode = 100 + rng.below(20) as u16;
+        let payload = if data.len() > 6 { &data[6..] } else { &[][..] };
+        let waiting = rng.below(4);
+        let mut fds: VecDeque<OwnedFd> = (0..waiting).map(|_| vergence_protocol::sock::pipe().unwrap().0).collect();
+        let before = fds.len();
+        if round % 2 == 0 {
+            let _ = WinRequest::decode(opcode, payload, &mut fds);
+        } else {
+            let _ = WinEvent::decode(opcode, payload, &mut fds);
+        }
+        assert!(fds.len() <= before);
+    }
+}

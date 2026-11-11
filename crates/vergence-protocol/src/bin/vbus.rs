@@ -1,6 +1,7 @@
 // vbus: talk to a running vergence-server's session bus (whitepaper §6.8).
 //
 //   vbus ping                 round trip to the server
+//   vbus window [title]       ask for a native window (native milestone 1)
 //   vbus outputs              the monitors, once
 //   vbus settings             the desktop settings, once
 //   vbus watch <topic>        subscribe and print every event (Ctrl+C ends)
@@ -102,7 +103,29 @@ fn run(socket: Option<std::path::PathBuf>, args: &[String]) -> Result<(), Box<dy
                 }
             }
         }
-        _ => return Err("usage: vbus [--socket <path>] ping | outputs | settings | watch <topic> | notify <summary> [body]".into()),
+        // Ask for a native window (native milestone 1) and say what the server answers.
+        Some("window") => {
+            let title = args.get(1).cloned().unwrap_or_else(|| "vbus".into());
+            let req = |serial| {
+                ClientMsg::Window(vergence_protocol::window::WinRequest::Create {
+                    serial,
+                    window: 1,
+                    role: "test".into(),
+                    token: String::new(),
+                    title: title.clone(),
+                    width: 400.0,
+                    height: 300.0,
+                    own_frame: false,
+                    parent: 0,
+                    place: vergence_protocol::window::Place::Anywhere,
+                })
+            };
+            match c.request(req) {
+                Ok(m) => println!("{m:?}"),
+                Err(e) => println!("the server answered: {e}"),
+            }
+        }
+        _ => return Err("usage: vbus [--socket <path>] ping | outputs | settings | watch <topic> | notify <summary> [body] | window [title]".into()),
     }
     Ok(())
 }

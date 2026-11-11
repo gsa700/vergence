@@ -78,6 +78,11 @@ impl Encoder {
         self
     }
 
+    pub fn u64(&mut self, v: u64) -> &mut Self {
+        self.buf.extend_from_slice(&v.to_le_bytes());
+        self
+    }
+
     pub fn i32(&mut self, v: i32) -> &mut Self {
         self.buf.extend_from_slice(&v.to_le_bytes());
         self
@@ -153,6 +158,10 @@ impl<'a> Decoder<'a> {
 
     pub fn u32(&mut self) -> Result<u32, WireError> {
         Ok(u32::from_le_bytes(self.array()?))
+    }
+
+    pub fn u64(&mut self) -> Result<u64, WireError> {
+        Ok(u64::from_le_bytes(self.array()?))
     }
 
     pub fn i32(&mut self) -> Result<i32, WireError> {

@@ -95,6 +95,9 @@ pub enum ErrorCode {
     BadMessage,
     /// Not allowed for this client (§7).
     Denied,
+    /// Understood, but this server does not do it yet (native windows,
+    /// before native milestone 1's step 3).
+    NotYet,
     /// A code from a newer server.
     Other(u16),
 }
@@ -107,6 +110,7 @@ impl ErrorCode {
             ErrorCode::UnknownTopic => 3,
             ErrorCode::BadMessage => 4,
             ErrorCode::Denied => 5,
+            ErrorCode::NotYet => 6,
             ErrorCode::Other(v) => v,
         }
     }
@@ -118,6 +122,7 @@ impl ErrorCode {
             3 => ErrorCode::UnknownTopic,
             4 => ErrorCode::BadMessage,
             5 => ErrorCode::Denied,
+            6 => ErrorCode::NotYet,
             v => ErrorCode::Other(v),
         }
     }
@@ -172,6 +177,8 @@ pub enum ClientMsg {
     Notify { serial: u32, replaces: u32, summary: String, body: String, urgency: u8, timeout_ms: i32, actions: Vec<(String, String)> },
     /// Close one of this client's notifications. Reply: Done, or an error.
     CloseNotification { serial: u32, id: u32 },
+    /// Windows (window.rs).
+    Window(crate::window::WinRequest),
 }
 
 /// Server to client.
@@ -197,6 +204,8 @@ pub enum ServerMsg {
     NotificationClosed { id: u32, reason: u32 },
     /// The user chose an action on one of this client's notifications.
     ActionInvoked { id: u32, key: String },
+    /// Windows (window.rs).
+    Window(crate::window::WinEvent),
 }
 
 mod op {
@@ -302,11 +311,35 @@ impl ClientMsg {
                 e.u32(*serial).u32(*id);
                 e
             }
+            // Its descriptors are lost here: send it with encode_with_fds.
+            ClientMsg::Window(w) => return w.encode().map(|(bytes, _)| bytes),
         };
         e.finish()
     }
 
+    /// The frame and the descriptors that go beside it (borrowed from the
+    /// message, which must outlive the write).
+    pub fn encode_with_fds(&self) -> Result<(Vec<u8>, Vec<std::os::fd::RawFd>), WireError> {
+        match self {
+            ClientMsg::Window(w) => w.encode(),
+            m => Ok((m.encode()?, Vec::new())),
+        }
+    }
+
+    /// As [`ClientMsg::decode`], taking the descriptors a message carries
+    /// from `fds`. A window message that does not decode is an error to end
+    /// the connection with (its descriptors may be out of step).
+    pub fn decode_with_fds(frame: &Frame, fds: &mut dyn crate::window::FdSource) -> Result<ClientMsg, Unknown> {
+        if crate::window::is_window_opcode(frame.opcode) {
+            return crate::window::WinRequest::decode(frame.opcode, &frame.payload, fds).map(ClientMsg::Window).map_err(|error| Unknown { serial: 0, code: ErrorCode::BadMessage, error });
+        }
+        ClientMsg::decode(frame)
+    }
+
     pub fn decode(frame: &Frame) -> Result<ClientMsg, Unknown> {
+        if crate::window::is_window_opcode(frame.opcode) {
+            return ClientMsg::decode_with_fds(frame, &mut crate::window::NoFds);
+        }
         let mut d = Decoder::new(&frame.payload);
         let bad = |serial: u32, error: WireError| Unknown { serial, code: ErrorCode::BadMessage, error };
         match frame.opcode {
@@ -418,11 +451,32 @@ impl ServerMsg {
                 e.u32(*id).str(key);
                 e
             }
+            // Its descriptors are lost here: send it with encode_with_fds.
+            ServerMsg::Window(w) => return w.encode().map(|(bytes, _)| bytes),
         };
         e.finish()
     }
 
+    /// The frame and the descriptors that go beside it.
+    pub fn encode_with_fds(&self) -> Result<(Vec<u8>, Vec<std::os::fd::RawFd>), WireError> {
+        match self {
+            ServerMsg::Window(w) => w.encode(),
+            m => Ok((m.encode()?, Vec::new())),
+        }
+    }
+
+    /// As [`ServerMsg::decode`], taking the descriptors a message carries from `fds`.
+    pub fn decode_with_fds(frame: &Frame, fds: &mut dyn crate::window::FdSource) -> Result<ServerMsg, WireError> {
+        if crate::window::is_window_opcode(frame.opcode) {
+            return crate::window::WinEvent::decode(frame.opcode, &frame.payload, fds).map(ServerMsg::Window);
+        }
+        ServerMsg::decode(frame)
+    }
+
     pub fn decode(frame: &Frame) -> Result<ServerMsg, WireError> {
+        if crate::window::is_window_opcode(frame.opcode) {
+            return ServerMsg::decode_with_fds(frame, &mut crate::window::NoFds);
+        }
         let mut d = Decoder::new(&frame.payload);
         Ok(match frame.opcode {
             op::WELCOME => ServerMsg::Welcome { version: d.u32()?, client_id: d.u32()? },

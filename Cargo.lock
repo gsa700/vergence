@@ -2297,6 +2297,9 @@ dependencies = [
 [[package]]
 name = "vergence-wl"
 version = "0.1.0"
+dependencies = [
+ "vergence-protocol",
+]
 
 [[package]]
 name = "vergence-xsettings"
