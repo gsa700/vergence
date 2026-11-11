@@ -27,7 +27,7 @@
 //! clip at once (the CPU renderer does it; this one says so and refuses).
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::{CStr, c_char, c_void},
     fmt,
     os::fd::{AsRawFd, FromRawFd, OwnedFd},
@@ -331,6 +331,11 @@ pub struct Gpu {
     target: Option<(u32, u32, u32, u32)>,
     /// A one-pixel texture, bound where no picture is needed.
     blank: u32,
+    /// The pictures of the last frame, each as a texture, by where its
+    /// pixels are. Held (so the address cannot be another picture's) until
+    /// a frame goes by without it: a program that shows the same picture
+    /// frame after frame has it sent to the GPU once.
+    pictures: HashMap<usize, (std::sync::Arc<vergence_scene::Image>, u32)>,
 }
 
 impl Gpu {
@@ -433,6 +438,7 @@ impl Gpu {
                 atlas: Atlas { texture: atlas_texture, size, x: 0, y: 0, row: 0, places: HashMap::default(), held: Vec::new() },
                 target: None,
                 blank,
+                pictures: HashMap::default(),
             })
         }
     }
@@ -657,18 +663,25 @@ impl Gpu {
             (gl.glActiveTexture)(gl::GL_TEXTURE1);
             (gl.glBindTexture)(gl::GL_TEXTURE_2D, self.blank);
             let stride = (FLOATS * 4) as i32;
-            let mut picture = 0u32;
+            let mut used: HashSet<usize> = HashSet::default();
             for batch in &batches {
                 if let Some(index) = batch.image {
                     let im = &prepared.images[index];
-                    if picture == 0 {
-                        (gl.glGenTextures)(1, &mut picture);
+                    let key = std::sync::Arc::as_ptr(im) as usize;
+                    used.insert(key);
+                    match self.pictures.get(&key) {
+                        Some((_, texture)) => (gl.glBindTexture)(gl::GL_TEXTURE_2D, *texture),
+                        None => {
+                            let mut texture = 0u32;
+                            (gl.glGenTextures)(1, &mut texture);
+                            (gl.glBindTexture)(gl::GL_TEXTURE_2D, texture);
+                            (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST as i32);
+                            (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST as i32);
+                            (gl.glPixelStorei)(gl::GL_UNPACK_ALIGNMENT, 1);
+                            (gl.glTexImage2D)(gl::GL_TEXTURE_2D, 0, gl::GL_RGBA8 as i32, im.width as i32, im.height as i32, 0, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, im.rgba.as_ptr() as *const c_void);
+                            self.pictures.insert(key, (im.clone(), texture));
+                        }
                     }
-                    (gl.glBindTexture)(gl::GL_TEXTURE_2D, picture);
-                    (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST as i32);
-                    (gl.glTexParameteri)(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST as i32);
-                    (gl.glPixelStorei)(gl::GL_UNPACK_ALIGNMENT, 1);
-                    (gl.glTexImage2D)(gl::GL_TEXTURE_2D, 0, gl::GL_RGBA8 as i32, im.width as i32, im.height as i32, 0, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, im.rgba.as_ptr() as *const c_void);
                 }
                 // ES 3.0 has no "first instance": the attributes are pointed at the batch's first.
                 let base = batch.first * FLOATS * 4;
@@ -684,9 +697,14 @@ impl Gpu {
             } else {
                 (gl.glFinish)();
             }
-            if picture != 0 {
-                (gl.glDeleteTextures)(1, &picture);
-            }
+            // Pictures this frame did not show are let go.
+            self.pictures.retain(|key, (_, texture)| {
+                let keep = used.contains(key);
+                if !keep {
+                    (gl.glDeleteTextures)(1, texture);
+                }
+                keep
+            });
             let error = (gl.glGetError)();
             if error != 0 {
                 return Err(GpuError::Gl(error));
@@ -870,6 +888,9 @@ impl Drop for Gpu {
                 }
                 (gl.glDeleteTextures)(1, &self.atlas.texture);
                 (gl.glDeleteTextures)(1, &self.blank);
+                for (_, texture) in self.pictures.values() {
+                    (gl.glDeleteTextures)(1, texture);
+                }
                 (gl.glDeleteBuffers)(1, &self.buffer);
                 (gl.glDeleteVertexArrays)(1, &self.vertex_array);
                 (gl.glDeleteProgram)(self.program);

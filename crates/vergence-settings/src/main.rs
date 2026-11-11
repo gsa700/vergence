@@ -1009,7 +1009,7 @@ impl App {
                 let (o, thumb) = &screens[i];
                 scene.fill(tile, Color::rgb(0, 0, 0));
                 if let Some(img) = thumb {
-                    let id = scene.image((**img).clone());
+                    let id = scene.image(img.clone());
                     scene.draw_image(id, tile, 1.0);
                 }
                 let band = 34.0f32.min(tile.h / 2.0);

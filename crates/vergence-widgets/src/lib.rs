@@ -14,7 +14,8 @@
 //! **Meaning is built in** (Contract 3): as the tree is laid out every
 //! widget has a role, a name, a value, its states and its bounds
 //! ([`Ui::meaning`]). `VERGENCE_UI_TREE=1` in the environment prints it
-//! each time the tree is laid out.
+//! each time the tree is laid out; `VERGENCE_UI_FRAMES=1` prints how long
+//! each frame took to draw, and with what.
 //!
 //! Timers: a program's own ids for [`Window::wake_at`] are below 2^63; the
 //! toolkit keeps those above for its widgets.
@@ -125,6 +126,9 @@ struct Host<P: Program> {
     laid_at: (f32, f32),
     scale: f32,
     print_tree: bool,
+    print_frames: bool,
+    /// How long the last scene took to build (laid out and described), in ms.
+    scene_ms: f64,
 }
 
 /// The toolkit's own timer (the caret's blink).
@@ -159,30 +163,22 @@ impl<P: Program> vergence_ui::App for Host<P> {
     }
 
     fn scene(&mut self, frame: &Frame, fonts: &mut Fonts) -> Scene {
-        if frame.scale != self.scale {
-            self.scale = frame.scale;
-            self.stale |= self.program.scale(frame.scale);
-        }
-        if self.stale || self.laid_at != (frame.width, frame.height) {
-            self.theme = self.program.theme();
-            let root = self.program.view(&self.theme);
-            let mut measure = FontsMeasure { fonts, family: &self.theme.font };
-            self.ui.layout(root, frame.width, frame.height, &mut measure, self.theme.text_size);
-            self.ui.set_reduced_motion(self.theme.reduced_motion);
-            self.stale = false;
-            self.laid_at = (frame.width, frame.height);
-            if self.print_tree {
-                eprint!("{}", self.ui.meaning_text());
-            }
-        }
-        self.ui.advance(Instant::now());
-        let mut scene = Scene::new(frame.width, frame.height);
-        self.ui.draw(&mut scene, fonts, &self.theme);
+        let began = Instant::now();
+        let scene = self.build(frame, fonts);
+        self.scene_ms = began.elapsed().as_secs_f64() * 1e3;
         scene
     }
 
     fn animating(&self) -> bool {
         self.ui.animating()
+    }
+
+    fn shown(&mut self, frame: &Frame, draw_ms: f64) -> bool {
+        if self.print_frames {
+            // `drawn_by` is the frame before's; this one's is told with the next.
+            eprintln!("frame {} {:.2} ms, scene {:.2} ms (before: {})", frame.number, draw_ms, self.scene_ms, frame.drawn_by);
+        }
+        true
     }
 
     fn input(&mut self, input: &Input, window: &mut Window) {
@@ -233,11 +229,37 @@ impl<P: Program> vergence_ui::App for Host<P> {
     }
 }
 
+impl<P: Program> Host<P> {
+    /// The frame's scene: the tree built again if anything changed, then drawn.
+    fn build(&mut self, frame: &Frame, fonts: &mut Fonts) -> Scene {
+        if frame.scale != self.scale {
+            self.scale = frame.scale;
+            self.stale |= self.program.scale(frame.scale);
+        }
+        if self.stale || self.laid_at != (frame.width, frame.height) {
+            self.theme = self.program.theme();
+            let root = self.program.view(&self.theme);
+            let mut measure = FontsMeasure { fonts, family: &self.theme.font };
+            self.ui.layout(root, frame.width, frame.height, &mut measure, self.theme.text_size);
+            self.ui.set_reduced_motion(self.theme.reduced_motion);
+            self.stale = false;
+            self.laid_at = (frame.width, frame.height);
+            if self.print_tree {
+                eprint!("{}", self.ui.meaning_text());
+            }
+        }
+        self.ui.advance(Instant::now());
+        let mut scene = Scene::new(frame.width, frame.height);
+        self.ui.draw(&mut scene, fonts, &self.theme);
+        scene
+    }
+}
+
 /// Opens the program's window and runs until it is closed. `size` is the
 /// size asked for, in reference units.
 pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {
     let theme = program.theme();
-    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1") };
+    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0 };
     vergence_ui::run(&mut host, size)
 }
 

@@ -333,6 +333,56 @@ The terminal's bar stays in `vergence_ui::bar` for now.
   - Installed on Hubble and kepler (release, `sudo tools/install.sh`);
     no server change, so no restart.
 
+- **Acceptance checks (2026-11-10, evening).**
+  1. *Parity.* The iced app's controls, read from its code before it was
+     removed (ab7e126^): Appearance (style choice, eight swatches and
+     none, custom accent field with Enter, high contrast, reduce motion);
+     Theme and fonts (GTK theme, icons, pointer, interface and monospace
+     family and size, terminal colours); Windows (preview, left/right,
+     minimise, maximise, close shown on); Keyboard (repeat switch, delay
+     and speed sliders saved on release, test field); Energy (screens
+     off, sleep, sleep command with Enter); Screens (overview with drag,
+     double-click and size; per screen: map, scale slider with marks and
+     its stick, Default, shown at, size, same as primary, make primary,
+     fit, background colour with Enter, the picture grid, your pictures
+     with remove and the two add buttons, the browser with up, pick,
+     cancel and add); About. All are in the new app. Tried by hand
+     (through `vctl`, throwaway HOME): every Appearance and Windows
+     control, delay, screens-off, a picture, the browser's pick and
+     cancel. By sight only: the rest. **Not yet seen at all: the overview
+     and the map** (no second screen on Hubble; canary's nested session
+     has two, but too small to judge).
+  2. *Keyboard alone, finger alone.* Tab reaches every control (the
+     sidebar's pages are buttons); Dave's hands owed for both.
+  3. *No click lost under load.* The six-tab stress test running on
+     Hubble (seq 0.79 to 0.85 s, colour 8,500 to 8,700 lines/s, parsers at
+     about two cores), the demo's + pressed 50 times through `vctl` as
+     fast as it would send them: the count read 50 (the tree was built
+     21 times; several presses fell in one frame). **Met.**
+  4. *Idle costs nothing.* The installed settings app on Hubble, left
+     alone 30 s: 0 CPU ticks. **Met.** (RSS 141 MB, mostly the 38
+     previews.)
+  5. *Scrolling the longest page* (Screens with its 38 pictures,
+     scrollbar dragged down and up, 880 x 640 points at scale 3 = 5.1
+     megapixels, `VERGENCE_UI_FRAMES=1`). First run on the GPU: median 20
+     ms, 12 of it building the scene; `perf`: 28% copying memory, every
+     visible picture copied into each frame's scene. Fixed:
+     `vergence_scene::Scene::images` holds `Arc<Image>` (a program's
+     picture is shared, not copied) and the GPU renderer keeps a
+     picture's texture while frames keep showing it. Now: scene 0.5 ms;
+     **frame median 8.9 ms, p95 9.7 ms on the GPU: just over the 8 ms
+     asked.** What is left is the wait for the card to finish
+     (`glFinish`, as the terminal found in milestone 1; explicit sync is
+     to replace it); the CPU's part is about 0.5 ms. With the CPU
+     renderer on Hubble at the same 5.1 megapixels: median 43 ms. On
+     canary the nested session's screens are 390 x 488 and 600 x 750
+     points, the window was fitted to 330 x 464, and its frames (0.3 ms)
+     say nothing about the target; **canary's figure is still owed** (a
+     larger nested screen, or a real display).
+  6. *Meaning.* The dump names every control on every page tried, with
+     its role, value and states. **Met.**
+  7. Recorded under step 4. **Met.**
+
 ## Decided (Dave, 2026-11-10 20:00)
 
 1. Widgets in a new crate, `vergence-widgets`.

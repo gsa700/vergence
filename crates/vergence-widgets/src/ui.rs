@@ -1490,7 +1490,7 @@ impl<M: Clone> Ui<M> {
                             Rect::new(r.x + (r.w - w) / 2.0, r.y + (r.h - h) / 2.0, w, h)
                         }
                     };
-                    let id = scene.image((**image).clone());
+                    let id = scene.image(image.clone());
                     scene.push_clip(r, *radius);
                     scene.draw_image(id, dest, *opacity);
                     scene.pop_clip();

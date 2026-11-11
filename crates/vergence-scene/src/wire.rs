@@ -317,7 +317,7 @@ impl Scene {
             if image_bytes > MAX_IMAGE_BYTES {
                 return Err(DecodeError::TooMany("image bytes"));
             }
-            images.push(Image { width, height, rgba: r.take(len)?.to_vec() });
+            images.push(Image { width, height, rgba: r.take(len)?.to_vec() }.into());
         }
 
         let n = r.count(MAX_COMMANDS, MIN_COMMAND, "commands")?;

@@ -36,6 +36,7 @@
 pub mod wire;
 
 use std::fmt;
+use std::sync::Arc;
 
 /// The wire format's version (wire.rs).
 pub const VERSION: u16 = 1;
@@ -231,7 +232,9 @@ pub struct Scene {
     pub width: f32,
     pub height: f32,
     pub fonts: Vec<FontRef>,
-    pub images: Vec<Image>,
+    /// Shared, not copied: a program that shows the same picture frame
+    /// after frame hands the scene the same pixels each time.
+    pub images: Vec<Arc<Image>>,
     pub commands: Vec<Command>,
 }
 
@@ -249,9 +252,10 @@ impl Scene {
         (self.fonts.len() - 1) as u32
     }
 
-    /// Adds a picture and returns its index.
-    pub fn image(&mut self, image: Image) -> u32 {
-        self.images.push(image);
+    /// Adds a picture (its own, or one shared with the program) and
+    /// returns its index.
+    pub fn image(&mut self, image: impl Into<Arc<Image>>) -> u32 {
+        self.images.push(image.into());
         (self.images.len() - 1) as u32
     }
 
@@ -582,13 +586,13 @@ mod tests {
         s.fonts[1].family = "Mono\nSans".into();
         assert_eq!(s.validate(), Err(SceneError::BadFont(1)));
         let mut s = sample();
-        s.images[0].rgba.pop();
+        Arc::make_mut(&mut s.images[0]).rgba.pop();
         assert_eq!(s.validate(), Err(SceneError::BadImage(0)));
         let mut s = sample();
-        s.images.push(Image { width: 0, height: 4, rgba: vec![] });
+        s.images.push(Image { width: 0, height: 4, rgba: vec![] }.into());
         assert_eq!(s.validate(), Err(SceneError::BadImage(1)));
         let mut s = sample();
-        s.images.push(Image { width: MAX_IMAGE_SIDE + 1, height: 1, rgba: vec![] });
+        s.images.push(Image { width: MAX_IMAGE_SIDE + 1, height: 1, rgba: vec![] }.into());
         assert_eq!(s.validate(), Err(SceneError::BadImage(1)));
     }
 

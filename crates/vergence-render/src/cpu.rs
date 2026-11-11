@@ -194,7 +194,7 @@ pub(crate) struct Prepared<'a> {
     pub(crate) faces: Vec<Option<FaceId>>,
     /// For each band, the shapes that touch it, in drawing order.
     bands: Vec<Vec<u32>>,
-    pub(crate) images: &'a [Image],
+    pub(crate) images: &'a [std::sync::Arc<Image>],
     order: Order,
 }
 
