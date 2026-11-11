@@ -3,7 +3,13 @@
 Drafted 2026-11-10 (Dave: "lets go on Vergence"; the agreed order after
 shelf step 5 is "widgets + the settings app's move, then shelf step 6 in
 the new settings app"). **Accepted 2026-11-10 20:00** (Dave: "yes to all
-three, go": the three open questions answered as proposed; see Decided).
+three, go": the three open questions answered as proposed; see Decided). **Closed 2026-11-10 22:18**
+(Dave: "close it and commit"): steps 1 to 4 done, acceptance met but for
+two items carried forward, as milestone 1 closed: the screens overview
+and map are still to be seen with two screens connected, and scrolling's
+8.9 ms against 8 waits for explicit sync (the CPU renderer's figure, once
+canary's, is now to come from kepler; canary was dropped the same
+evening).
 
 The goal: the settings app runs on our own toolkit, every page doing what it
 does today, and iced leaves the workspace. When this milestone closes, shelf
@@ -353,7 +359,9 @@ The terminal's bar stays in `vergence_ui::bar` for now.
      and the map** (no second screen on Hubble; canary's nested session
      has two, but too small to judge).
   2. *Keyboard alone, finger alone.* Tab reaches every control (the
-     sidebar's pages are buttons); Dave's hands owed for both.
+     sidebar's pages are buttons). Dave went through the settings app by
+     keyboard, mouse and touch on Hubble (2026-11-10, 22:17: "i did"), no
+     fault reported. **Met.**
   3. *No click lost under load.* The six-tab stress test running on
      Hubble (seq 0.79 to 0.85 s, color 8,500 to 8,700 lines/s, parsers at
      about two cores), the demo's + pressed 50 times through `vctl` as
