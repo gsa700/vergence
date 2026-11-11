@@ -516,6 +516,10 @@ struct Terminal {
     maximized: bool,
     bar_press: Option<Instant>,
     held: Option<Held>,
+    /// Taps and drags, read from the fingers on the window.
+    fingers: vergence_ui::touch::Reader,
+    /// How far a finger has dragged that has not yet come to a whole line.
+    dragged: f32,
     /// The last press on the text: when, on which cell, and which in a row it was (1 to 3).
     presses: Option<(Instant, Pos, usize)>,
     /// The selection is held past the top (true) or bottom edge, at this column: the view scrolls.
@@ -547,6 +551,24 @@ struct Terminal {
 }
 
 impl Terminal {
+    /// A finger dragged `lines` lines down (up, if negative) on the pane at
+    /// x, y: the text goes with it. In the scrollback that is the way back
+    /// through it; a full-screen program, which has none, gets arrow keys, as
+    /// it does from the wheel.
+    fn finger_scroll(&mut self, x: f32, y: f32, lines: isize, window: &mut Window) {
+        let Some((id, _)) = self.pane_at(x, y).filter(|_| y >= BAR_H) else { return };
+        let Some(session) = self.session_mut(id) else { return };
+        let mut s = lock(&session.screen);
+        if s.grid.alt {
+            let key = if s.grid.app_cursor { "\x1bO" } else { "\x1b[" }.to_string() + if lines > 0 { "A" } else { "B" };
+            drop(s);
+            session.pty.write(key.repeat(lines.unsigned_abs().min(60)).as_bytes());
+        } else {
+            s.scroll_by(lines);
+            window.redraw();
+        }
+    }
+
     fn new() -> Terminal {
         Terminal {
             tabs: Vec::new(),
@@ -566,6 +588,8 @@ impl Terminal {
             maximized: false,
             bar_press: None,
             held: None,
+            fingers: Default::default(),
+            dragged: 0.0,
             presses: None,
             edge: None,
             edge_tick: Instant::now(),
@@ -1250,6 +1274,33 @@ impl App for Terminal {
             Input::Button { modifiers, .. } => self.shift = modifiers.shift,
             Input::Focus(false) => self.shift = false,
             _ => {}
+        }
+        // A finger (vergence_ui::touch): a tap is a click where it tapped; a
+        // drag up or down scrolls what is under where the finger came down,
+        // the text moving with the finger.
+        if let Input::Touch { .. } = input {
+            use vergence_ui::touch::Gesture;
+            match self.fingers.read(input) {
+                Some(Gesture::Tap { x, y }) => {
+                    let modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false };
+                    self.input(&Input::PointerMoved { x, y }, window);
+                    self.input(&Input::Button { button: Button::Left, pressed: true, x, y, modifiers }, window);
+                    self.input(&Input::Button { button: Button::Left, pressed: false, x, y, modifiers }, window);
+                    self.input(&Input::PointerLeft, window);
+                }
+                Some(Gesture::Drag { dy, from, .. }) => {
+                    let line = self.cell().map_or(18.0, |(_, h)| h.max(1.0));
+                    self.dragged += dy;
+                    let lines = (self.dragged / line).trunc();
+                    self.dragged -= lines * line;
+                    if lines != 0.0 {
+                        self.finger_scroll(from.0, from.1, lines as isize, window);
+                    }
+                }
+                Some(Gesture::DragEnd) => self.dragged = 0.0,
+                None => {}
+            }
+            return;
         }
         if self.menu_input(input, window) {
             return;

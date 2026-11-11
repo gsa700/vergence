@@ -449,9 +449,28 @@ one.
   - Not yet: the real panel under a real finger (Hubble's 4K has one,
     plugged in; Dave); the tie made by touching the screen (settings
     app); hit areas forgiving of a finger; a long press as the right
-    button; the arrow stays where the finger last was; our own toolkit
-    does not read touch (the terminal ignores a finger); an on-screen
-    keyboard is not planned.
+    button; the arrow stays where the finger last was; an on-screen
+    keyboard is not planned. (Our own toolkit reads touch from the next
+    entry on.)
+
+- **Touch in our own toolkit (2026-11-10).**
+  - vergence-wl: `wl_touch` from the seat (down, up, motion, frame,
+    cancel), in the fuzz test's list with the rest.
+  - vergence-ui: `Input::Touch { id, phase, x, y }`, each finger as it
+    is; a finger's press counts as a button's for what needs a serial.
+    `touch::Reader` reads the two things a finger most often means out
+    of the first finger: a tap (lifted within 10 units of where it came
+    down) and a drag (how far since the last told). Three tests.
+  - The terminal: a tap is a click where it tapped (tabs, the bar's
+    buttons, a pane); a drag up or down scrolls the pane under where the
+    finger came down, a line for a line's height, the text going with
+    the finger (arrow keys to a full-screen program, as from the wheel).
+  - On Hubble with `vctl touch`: 200 lines printed, a finger dragged 280
+    points down shows "16 lines back"; a tap on the bar's + opens a tab.
+  - Not yet: a real finger; a long press (select, paste, the menu); a
+    flick's momentum; pinch for the font's size; dragging the window by
+    its bar with a finger; a program that asked for the mouse does not
+    get a finger's drag as wheel reports.
 
 ## Acceptance
 

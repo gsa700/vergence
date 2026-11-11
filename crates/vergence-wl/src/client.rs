@@ -48,6 +48,7 @@ pub enum Interface {
     Seat,
     Pointer,
     Keyboard,
+    Touch,
     CursorShapeManager,
     CursorShapeDevice,
     DataDeviceManager,
@@ -110,6 +111,7 @@ pub const STATE_ACTIVATED: u32 = 4;
 /// `wl_seat` capabilities.
 pub const SEAT_POINTER: u32 = 1;
 pub const SEAT_KEYBOARD: u32 = 2;
+pub const SEAT_TOUCH: u32 = 4;
 
 /// `xdg_toplevel.resize` edges.
 pub const EDGE_TOP: u32 = 1;
@@ -157,7 +159,7 @@ pub enum Event {
     DecorationMode { decoration: u32, mode: u32 },
     SurfaceEnter { surface: u32, output: u32 },
     SurfaceLeave { surface: u32, output: u32 },
-    /// What the seat has: [`SEAT_POINTER`], [`SEAT_KEYBOARD`].
+    /// What the seat has: [`SEAT_POINTER`], [`SEAT_KEYBOARD`], [`SEAT_TOUCH`].
     SeatCapabilities { seat: u32, capabilities: u32 },
     /// The pointer came onto a surface, at x, y in the surface's units.
     PointerEnter { serial: u32, surface: u32, x: f64, y: f64 },
@@ -169,6 +171,15 @@ pub enum Event {
     PointerAxis { time: u32, axis: u32, value: f64 },
     /// The pointer events since the last frame belong together.
     PointerFrame,
+    /// A finger came down on a surface, at x, y in the surface's units. `id`
+    /// tells it from the other fingers until it lifts.
+    TouchDown { serial: u32, time: u32, surface: u32, id: i32, x: f64, y: f64 },
+    TouchUp { serial: u32, time: u32, id: i32 },
+    TouchMotion { time: u32, id: i32, x: f64, y: f64 },
+    /// The touch events since the last frame belong together.
+    TouchFrame,
+    /// The server took every finger's touch back: what they began is dropped.
+    TouchCancel,
     /// The keyboard's map: `size` bytes of text in the file descriptor that
     /// came with it ([`Client::take_fd`]). `format` 1 is xkb.
     Keymap { format: u32, size: u32 },
@@ -234,6 +245,11 @@ pub fn decode(interface: Interface, object: u32, opcode: u16, arguments: &[u8]) 
         (Interface::Pointer, 3) => Event::PointerButton { serial: r.uint()?, time: r.uint()?, button: r.uint()?, pressed: r.uint()? == 1 },
         (Interface::Pointer, 4) => Event::PointerAxis { time: r.uint()?, axis: r.uint()?, value: r.fixed()? },
         (Interface::Pointer, 5) => Event::PointerFrame,
+        (Interface::Touch, 0) => Event::TouchDown { serial: r.uint()?, time: r.uint()?, surface: r.uint()?, id: r.int()?, x: r.fixed()?, y: r.fixed()? },
+        (Interface::Touch, 1) => Event::TouchUp { serial: r.uint()?, time: r.uint()?, id: r.int()? },
+        (Interface::Touch, 2) => Event::TouchMotion { time: r.uint()?, id: r.int()?, x: r.fixed()?, y: r.fixed()? },
+        (Interface::Touch, 3) => Event::TouchFrame,
+        (Interface::Touch, 4) => Event::TouchCancel,
         (Interface::Keyboard, 0) => Event::Keymap { format: r.uint()?, size: r.uint()? },
         (Interface::Keyboard, 1) => Event::KeyboardEnter { serial: r.uint()?, surface: r.uint()? },
         (Interface::Keyboard, 2) => Event::KeyboardLeave { serial: r.uint()?, surface: r.uint()? },
@@ -491,6 +507,12 @@ impl Client {
     pub fn get_pointer(&mut self, seat: u32) -> io::Result<u32> {
         let id = self.create(Interface::Pointer);
         self.send(Writer::new(seat, 0).uint(id))?;
+        Ok(id)
+    }
+
+    pub fn get_touch(&mut self, seat: u32) -> io::Result<u32> {
+        let id = self.create(Interface::Touch);
+        self.send(Writer::new(seat, 2).uint(id))?;
         Ok(id)
     }
 

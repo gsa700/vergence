@@ -33,6 +33,7 @@
 
 pub mod bar;
 pub mod keyboard;
+pub mod touch;
 
 use std::{
     collections::HashMap,
@@ -107,6 +108,9 @@ pub enum Input {
     /// `composing`: the key went into a dead-key or compose sequence that is
     /// not finished; it types nothing and should not be taken as a command.
     Key { sym: u32, text: Option<String>, pressed: bool, repeat: bool, composing: bool, modifiers: Modifiers },
+    /// A finger on the window ([`touch`]): `id` tells it from the others
+    /// while it is down. Where it lifted is where it last was.
+    Touch { id: i32, phase: touch::Phase, x: f32, y: f32 },
     /// The window gained or lost the keyboard.
     Focus(bool),
     /// The clipboard's text, asked for with [`Window::paste`].
@@ -341,6 +345,9 @@ struct Runner {
     seat: Option<u32>,
     cursor_shape_manager: Option<u32>,
     pointer: Option<u32>,
+    touch: Option<u32>,
+    /// The fingers that are down, and where each last was.
+    fingers: Vec<(i32, f32, f32)>,
     keyboard_object: Option<u32>,
     cursor_device: Option<u32>,
     data_manager: Option<u32>,
@@ -498,6 +505,8 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         seat,
         cursor_shape_manager,
         pointer: None,
+        touch: None,
+        fingers: Vec::new(),
         keyboard_object: None,
         cursor_device: None,
         data_manager,
@@ -737,6 +746,9 @@ impl Runner {
                         self.cursor_device = Some(self.client.get_cursor_shape_device(manager, pointer)?);
                     }
                 }
+                if capabilities & wl::SEAT_TOUCH != 0 && self.touch.is_none() {
+                    self.touch = Some(self.client.get_touch(seat)?);
+                }
                 if capabilities & wl::SEAT_KEYBOARD != 0 && self.keyboard_object.is_none() {
                     self.keyboard_object = Some(self.client.get_keyboard(seat)?);
                 }
@@ -773,6 +785,37 @@ impl Runner {
                 let modifiers = self.modifiers();
                 self.tell(app, Input::Button { button, pressed, x, y, modifiers })?;
             }
+            Event::TouchDown { serial, id, x, y, .. } => {
+                // A finger's press is as good as a button's for what needs one
+                // (the clipboard, moving the window).
+                self.press_serial = serial;
+                self.input_serial = serial;
+                let (x, y) = (x as f32, y as f32);
+                self.fingers.retain(|f| f.0 != id);
+                if self.fingers.len() < 16 {
+                    self.fingers.push((id, x, y));
+                }
+                self.tell(app, Input::Touch { id, phase: touch::Phase::Down, x, y })?;
+            }
+            Event::TouchMotion { id, x, y, .. } => {
+                let (x, y) = (x as f32, y as f32);
+                if let Some(finger) = self.fingers.iter_mut().find(|f| f.0 == id) {
+                    (finger.1, finger.2) = (x, y);
+                    self.tell(app, Input::Touch { id, phase: touch::Phase::Moved, x, y })?;
+                }
+            }
+            Event::TouchUp { id, .. } => {
+                if let Some(index) = self.fingers.iter().position(|f| f.0 == id) {
+                    let (_, x, y) = self.fingers.remove(index);
+                    self.tell(app, Input::Touch { id, phase: touch::Phase::Up, x, y })?;
+                }
+            }
+            Event::TouchCancel => {
+                for (id, x, y) in std::mem::take(&mut self.fingers) {
+                    self.tell(app, Input::Touch { id, phase: touch::Phase::Cancelled, x, y })?;
+                }
+            }
+            Event::TouchFrame => {}
             Event::PointerAxis { axis, value, .. } => {
                 let (x, y) = self.pointer_at.unwrap_or_default();
                 let (dx, dy) = if axis == 0 { (0.0, value as f32) } else { (value as f32, 0.0) };

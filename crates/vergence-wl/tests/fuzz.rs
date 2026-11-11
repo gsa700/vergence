@@ -28,7 +28,7 @@ fn iters() -> usize {
     std::env::var("FUZZ_ITERS").ok().and_then(|v| v.parse().ok()).unwrap_or(20_000)
 }
 
-const INTERFACES: [Interface; 28] = [
+const INTERFACES: [Interface; 29] = [
     Interface::Display,
     Interface::Registry,
     Interface::Callback,
@@ -49,6 +49,7 @@ const INTERFACES: [Interface; 28] = [
     Interface::Seat,
     Interface::Pointer,
     Interface::Keyboard,
+    Interface::Touch,
     Interface::CursorShapeManager,
     Interface::CursorShapeDevice,
     Interface::DataDeviceManager,
