@@ -565,7 +565,8 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: crtc::Handle) {
     let scale = smithay::utils::Scale::from(s.scale);
 
     let mut elements: Vec<OutputElements> = Vec::new();
-    if geo.to_f64().contains(pointer_at) {
+    // No pointer is drawn while a finger was the last to point (touch.rs).
+    if geo.to_f64().contains(pointer_at) && !state.touch.fingers_last {
         let at = (pointer_at - geo.loc.to_f64()).to_physical(scale);
         let time = state.start_time.elapsed();
         for d in state.pointer_image.elements(&mut b.renderer, at, s.scale, time) {

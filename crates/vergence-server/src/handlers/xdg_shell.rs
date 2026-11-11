@@ -124,6 +124,9 @@ impl XdgShellHandler for Server {
             };
 
             pointer.set_grab(self, grab, serial, Focus::Clear);
+        } else {
+            // Not a pointer's press: a finger's, perhaps (touch.rs).
+            self.touch_move_request(wl_surface, serial);
         }
     }
 

@@ -518,8 +518,13 @@ struct Terminal {
     held: Option<Held>,
     /// Taps and drags, read from the fingers on the window.
     fingers: vergence_ui::touch::Reader,
-    /// How far a finger has dragged that has not yet come to a whole line.
+    /// How far a finger has dragged that has not yet come to a whole line,
+    /// and the lines not yet come to a wheel's notch.
     dragged: f32,
+    dragged_lines: isize,
+    /// A finger's drag that began on the bar is the pointer's, button held:
+    /// where it is now.
+    finger_pointer: Option<(f32, f32)>,
     /// The last press on the text: when, on which cell, and which in a row it was (1 to 3).
     presses: Option<(Instant, Pos, usize)>,
     /// The selection is held past the top (true) or bottom edge, at this column: the view scrolls.
@@ -556,7 +561,22 @@ impl Terminal {
     /// through it; a full-screen program, which has none, gets arrow keys, as
     /// it does from the wheel.
     fn finger_scroll(&mut self, x: f32, y: f32, lines: isize, window: &mut Window) {
-        let Some((id, _)) = self.pane_at(x, y).filter(|_| y >= BAR_H) else { return };
+        let Some((id, area)) = self.pane_at(x, y).filter(|_| y >= BAR_H) else { return };
+        // A program that asked for the mouse gets the wheel, a notch for every
+        // WHEEL_LINES lines the finger has gone.
+        let mouse = self.session_mut(id).is_some_and(|session| {
+            let s = lock(&session.screen);
+            s.grid.mouse != MouseMode::Off && s.scroll == 0
+        });
+        if mouse {
+            self.dragged_lines += lines;
+            while self.dragged_lines.abs() >= WHEEL_LINES {
+                let up = self.dragged_lines > 0;
+                self.dragged_lines -= if up { WHEEL_LINES } else { -WHEEL_LINES };
+                self.report(id, area, if up { mouse::Action::WheelUp } else { mouse::Action::WheelDown }, x, y, Modifiers::default());
+            }
+            return;
+        }
         let Some(session) = self.session_mut(id) else { return };
         let mut s = lock(&session.screen);
         if s.grid.alt {
@@ -590,6 +610,8 @@ impl Terminal {
             held: None,
             fingers: Default::default(),
             dragged: 0.0,
+            dragged_lines: 0,
+            finger_pointer: None,
             presses: None,
             edge: None,
             edge_tick: Instant::now(),
@@ -1288,6 +1310,17 @@ impl App for Terminal {
                     self.input(&Input::Button { button: Button::Left, pressed: false, x, y, modifiers }, window);
                     self.input(&Input::PointerLeft, window);
                 }
+                // A drag that began on the bar is the pointer's with its button
+                // held: the window is moved by its bar, a tab along the row.
+                Some(Gesture::Drag { x, y, from, .. }) if from.1 < BAR_H => {
+                    if self.finger_pointer.is_none() {
+                        let modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false };
+                        self.input(&Input::PointerMoved { x: from.0, y: from.1 }, window);
+                        self.input(&Input::Button { button: Button::Left, pressed: true, x: from.0, y: from.1, modifiers }, window);
+                    }
+                    self.finger_pointer = Some((x, y));
+                    self.input(&Input::PointerMoved { x, y }, window);
+                }
                 Some(Gesture::Drag { dy, from, .. }) => {
                     let line = self.cell().map_or(18.0, |(_, h)| h.max(1.0));
                     self.dragged += dy;
@@ -1297,7 +1330,14 @@ impl App for Terminal {
                         self.finger_scroll(from.0, from.1, lines as isize, window);
                     }
                 }
-                Some(Gesture::DragEnd) => self.dragged = 0.0,
+                Some(Gesture::DragEnd) => {
+                    (self.dragged, self.dragged_lines) = (0.0, 0);
+                    if let Some((x, y)) = self.finger_pointer.take() {
+                        let modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false };
+                        self.input(&Input::Button { button: Button::Left, pressed: false, x, y, modifiers }, window);
+                        self.input(&Input::PointerLeft, window);
+                    }
+                }
                 None => {}
             }
             return;

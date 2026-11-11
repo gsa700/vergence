@@ -472,6 +472,29 @@ one.
     its bar with a finger; a program that asked for the mouse does not
     get a finger's drag as wheel reports.
 
+- **Touch, the rest that needs no clock in the toolkit (2026-11-10,
+  after Dave's finger on Hubble's 4K: "all good").**
+  - Server: a finger held still half a second on a dock icon is the right
+    button there (the icon's menu), on the bare desktop the desktop's
+    menu. One that comes down within 10 points of a title bar's button,
+    the dock, a window's edge or a title bar is taken to have meant it.
+    A window that asks to be moved from a finger's press goes with that
+    finger (`touch_move_request`; a maximised one stays), and its place
+    is remembered when the finger lifts.
+  - Terminal: a finger's drag that begins on the bar is the pointer's
+    with its button held, so the window moves by its bar and a tab along
+    the row; in a program that asked for the mouse a finger's drag is the
+    wheel, a notch for every three lines.
+  - On Hubble with `vctl touch`: the long press on the terminal's icon
+    opens its menu, on the desktop the desktop menu; a double tap on the
+    bar un-maximises; the window dragged by its bar goes 100 left and 80
+    down with the finger.
+  - Not tried: the forgiving reach (no server title bar was on screen);
+    the mouse program's wheel; a real finger on any of this.
+  - Waiting for the toolkit to have a clock of its own (widgets
+    milestone): a long press in our own windows, a flick's momentum;
+    pinch waits for the terminal to have a font size to change.
+
 ## Acceptance
 
 Every step: `cargo test --workspace` green on Hubble, canary and Techbench,

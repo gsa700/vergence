@@ -110,6 +110,7 @@ impl Server {
             InputEvent::TouchCancel { event, .. } => self.touch_cancel(Event::time(&event)),
             InputEvent::TouchFrame { .. } => self.touch_frame(),
             InputEvent::PointerMotion { event, .. } => {
+                self.touch_mouse_back();
                 // A mouse on the real monitors (stage 2): moved by its delta, kept on the outputs.
                 use smithay::backend::input::PointerMotionEvent;
                 let pointer = self.seat.get_pointer().unwrap();
@@ -128,6 +129,7 @@ impl Server {
                 self.pointer_to(pos, Event::time(&event));
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
+                self.touch_mouse_back();
                 // The position in the host window, mapped through the output it is over
                 // (1c): its left edge in logical space plus the offset at its scale.
                 let w = self.window_px;
@@ -163,6 +165,7 @@ impl Server {
                 pointer.frame(self);
             }
             InputEvent::PointerButton { event, .. } => {
+                self.touch_mouse_back();
                 self.handle_button(event.button_code(), event.state(), Event::time(&event));
             }
             InputEvent::PointerAxis { event, .. } => {

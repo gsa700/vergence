@@ -250,6 +250,7 @@ impl Server {
                     return "pointer <x> <y>".into();
                 };
                 let t = smithay::backend::input::InputTime::now();
+                self.touch_mouse_back();
                 self.pointer_to((x, y).into(), t);
                 format!("pointer at {x},{y}")
             }
