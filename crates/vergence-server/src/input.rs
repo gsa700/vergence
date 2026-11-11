@@ -314,6 +314,12 @@ impl Server {
                     self.shelf_press(at, button);
                     return;
                 }
+                // Right-click on an application's icon: its menu.
+                Hit::Shelf if button == BTN_RIGHT => {
+                    self.shelf_menu(at);
+                    self.menu_swallow = Some(button);
+                    return;
+                }
                 Hit::Shelf => {}
                 // Right-click on the bare desktop: the desktop menu.
                 Hit::Nothing if button == BTN_RIGHT => {

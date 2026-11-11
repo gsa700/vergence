@@ -21,6 +21,10 @@
 //
 //     [shelf]
 //     hide = false     # read; does nothing until step 6
+//     pinned = ["firefox", "vergence-term"]   # entry ids, in their order
+//     place = "edge"   # or "free", with x, y and upright; edge = "right",
+//                      # "left", "top", "bottom"; screen = "<id>"; gap = 6;
+//                      # keep-clear = true
 //
 // The screen is the primary one ([displays] primary, else the first in
 // arrangement order): vergence_profile::primary, the settings app's rule.
@@ -134,7 +138,24 @@ pub struct ShelfConfig {
     /// At an edge: windows keep out of the dock's column (true).
     #[serde(rename = "keep-clear")]
     pub keep_clear: Option<bool>,
+    /// Pinned applications, by desktop entry id, in their order on the dock.
+    #[serde(default)]
+    pub pinned: Vec<String>,
 }
+
+/// What the menu of an application's icon can do.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Act {
+    Pin(String),
+    Unpin(String),
+    /// Start the application (again): the entry's id.
+    Start(String),
+    Close(Vec<Window>),
+}
+
+/// How long a started application's icon says it is starting, if no window
+/// of it appears.
+const STARTING: std::time::Duration = std::time::Duration::from_secs(15);
 
 impl ShelfConfig {
     /// The dock's place as vergence-shell reckons with it.
@@ -157,11 +178,17 @@ impl ShelfConfig {
 /// the keys set, and the whole written beside it and moved into its place,
 /// readable by its owner only.
 fn save_place(screen: Option<&str>, place: Place) -> std::io::Result<()> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let Some(path) = crate::wallpaper::desktop_path() else { return Ok(()) };
-    let mut table: toml::Table = std::fs::read_to_string(&path).ok().and_then(|t| t.parse().ok()).unwrap_or_default();
-    let shelf = table.entry("shelf").or_insert_with(|| toml::Value::Table(Default::default()));
-    let Some(shelf) = shelf.as_table_mut() else { return Ok(()) };
+    save(|shelf| set_place(shelf, screen, place))
+}
+
+/// Write the pinned applications there, the same way.
+fn save_pinned(pinned: &[String]) -> std::io::Result<()> {
+    save(|shelf| {
+        shelf.insert("pinned".into(), toml::Value::Array(pinned.iter().map(|p| p.as_str().into()).collect()));
+    })
+}
+
+fn set_place(shelf: &mut toml::Table, screen: Option<&str>, place: Place) {
     for key in ["x", "y", "upright", "edge"] {
         shelf.remove(key);
     }
@@ -181,6 +208,15 @@ fn save_place(screen: Option<&str>, place: Place) -> std::io::Result<()> {
         Some(id) => shelf.insert("screen".into(), id.into()),
         None => shelf.remove("screen"),
     };
+}
+
+fn save(change: impl FnOnce(&mut toml::Table)) -> std::io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let Some(path) = crate::wallpaper::desktop_path() else { return Ok(()) };
+    let mut table: toml::Table = std::fs::read_to_string(&path).ok().and_then(|t| t.parse().ok()).unwrap_or_default();
+    let shelf = table.entry("shelf").or_insert_with(|| toml::Value::Table(Default::default()));
+    let Some(shelf) = shelf.as_table_mut() else { return Ok(()) };
+    change(shelf);
     let text = toml::to_string(&table).map_err(std::io::Error::other)?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -273,6 +309,9 @@ pub struct Shelf {
     pub minimised: Vec<(Window, Point<i32, Logical>)>,
     /// Minimised windows shown on their way into their icon, or out of it.
     motions: Vec<Motion>,
+    /// Applications started from the dock that have shown no window yet
+    /// (entry id, when started, how many windows it had then).
+    starting: Vec<(String, std::time::Instant, usize)>,
 }
 
 /// A window drawn smaller, somewhere else: on its way into the dock or out.
@@ -322,8 +361,8 @@ impl Server {
         }
     }
 
-    /// The applications with a window open, in the order they started, and each
-    /// item's windows.
+    /// The dock's applications: the pinned ones, then the others with a window
+    /// open in the order they started; and each item's windows.
     pub fn shelf_items(&mut self) -> Vec<(running::Item, Vec<Window>)> {
         // The windows that are someone's (not menus or tooltips), oldest first;
         // the minimised ones with them.
@@ -348,10 +387,14 @@ impl Server {
             classes.push((if id.class.is_empty() { id.instance } else { id.class }, active));
             windows.push(w);
         }
-        running::items(&self.shelf.apps, &classes).into_iter().map(|item| {
+        let items: Vec<(running::Item, Vec<Window>)> = running::items(&self.shelf.apps, &self.shelf.config.pinned, &classes).into_iter().map(|item| {
             let theirs = item.windows.iter().map(|i| windows[*i].clone()).collect();
             (item, theirs)
-        }).collect()
+        }).collect();
+        // An application is starting until a window more of it is there, or it has had its time.
+        let now = std::time::Instant::now();
+        self.shelf.starting.retain(|(key, since, had)| now.duration_since(*since) < STARTING && items.iter().find(|(i, _)| i.key == *key).map_or(0, |(_, w)| w.len()) <= *had);
+        items
     }
 
     /// The icon `name` at `pixels`, if it has been decoded; asked for if not.
@@ -688,7 +731,7 @@ impl Server {
         let Some(index) = running::item_at(rect(strip), items.len(), upright, at.x.floor() as i32, at.y.floor() as i32) else { return };
         let (item, windows) = &items[index];
         match windows.as_slice() {
-            [] => {}
+            [] => self.shelf_act(Act::Start(item.key.clone())),
             [only] => {
                 tracing::info!("shelf: to {}", item.name);
                 let only = only.clone();
@@ -710,6 +753,80 @@ impl Server {
                 let towards = self.shelf_side(strip);
                 self.open_window_list(slot, towards, titled);
             }
+        }
+    }
+
+    /// A right press on the dock: on an application's icon, its menu (pin or
+    /// unpin, a new window, close).
+    pub fn shelf_menu(&mut self, at: Point<f64, Logical>) {
+        self.shelf.named = false;
+        let items = self.shelf_items();
+        let Some(dock) = self.shelf_dock(items.len()) else { return };
+        let upright = self.shelf.config.placement().upright();
+        let Some(index) = running::item_at(rect(dock), items.len(), upright, at.x.floor() as i32, at.y.floor() as i32) else { return };
+        let (item, windows) = &items[index];
+        // Only an application with a desktop entry can be started or pinned.
+        let known = self.shelf.apps.iter().any(|e| e.id == item.key);
+        let mut acts = Vec::new();
+        if known {
+            acts.push((Act::Start(item.key.clone()), if windows.is_empty() { "Open" } else { "New window" }.to_string()));
+            acts.push(if item.pinned { (Act::Unpin(item.key.clone()), "Unpin".to_string()) } else { (Act::Pin(item.key.clone()), "Pin".to_string()) });
+        }
+        match windows.len() {
+            0 => {}
+            1 => acts.push((Act::Close(windows.clone()), "Close".to_string())),
+            n => acts.push((Act::Close(windows.clone()), format!("Close all {n} windows"))),
+        }
+        let slot = running::slot(rect(dock), index, upright).map_or(dock, rectangle);
+        let towards = self.shelf_side(dock);
+        self.open_shelf_menu(slot, towards, acts);
+    }
+
+    /// Do what an entry of an icon's menu says (or a click on a pinned
+    /// application that is not running: start it).
+    pub fn shelf_act(&mut self, act: Act) {
+        match act {
+            Act::Pin(key) => {
+                if !self.shelf.config.pinned.contains(&key) {
+                    self.shelf.config.pinned.push(key);
+                }
+                self.shelf_save_pinned();
+            }
+            Act::Unpin(key) => {
+                self.shelf.config.pinned.retain(|p| *p != key);
+                self.shelf_save_pinned();
+            }
+            Act::Start(key) => {
+                let Some(entry) = self.shelf.apps.iter().find(|e| e.id == key).cloned() else { return };
+                let Some((program, args)) = entry.exec.split_first() else { return };
+                if entry.terminal {
+                    // Our terminal cannot yet be told what to run.
+                    tracing::warn!("shelf: {} wants a terminal to run in: not started", entry.name);
+                    return;
+                }
+                // The entry's own arguments, with no shell between.
+                match crate::spawn(std::process::Command::new(program).args(args)) {
+                    Ok(pid) => {
+                        tracing::info!("shelf: started {} (pid {pid})", entry.name);
+                        let had = self.shelf_items().iter().find(|(i, _)| i.key == key).map_or(0, |(_, w)| w.len());
+                        self.shelf.starting.retain(|(k, ..)| *k != key);
+                        self.shelf.starting.push((key, std::time::Instant::now(), had));
+                    }
+                    Err(e) => tracing::warn!("shelf: {} could not be started: {e}", entry.name),
+                }
+            }
+            Act::Close(windows) => {
+                for w in windows.iter().filter(|w| w.alive()) {
+                    self.close_window(w);
+                }
+            }
+        }
+        self.redraw_all();
+    }
+
+    fn shelf_save_pinned(&mut self) {
+        if let Err(e) = save_pinned(&self.shelf.config.pinned) {
+            tracing::warn!("shelf: the pinned applications could not be written: {e}");
         }
     }
 
@@ -779,11 +896,22 @@ impl Server {
             _ => colour(vergence_look::ACCENT),
         };
         // An application all of whose windows are minimised is there, but faint.
-        let away: Vec<bool> = items.iter().map(|(_, windows)| windows.iter().all(|w| self.is_minimised(w))).collect();
+        let away: Vec<bool> = items.iter().map(|(_, windows)| !windows.is_empty() && windows.iter().all(|w| self.is_minimised(w))).collect();
+        // One that is starting says so with a mark that grows and shrinks, ten
+        // steps a second (a still one where motion is not wanted).
+        let moving = self.motion_wanted();
+        let starting: Vec<Option<u8>> = items
+            .iter()
+            .map(|(item, _)| {
+                let (_, since, _) = self.shelf.starting.iter().find(|(key, ..)| *key == item.key)?;
+                Some(if moving { ((since.elapsed().as_millis() / 100) % 10) as u8 } else { 5 })
+            })
+            .collect();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         for (((item, windows), icon), away) in items.iter().zip(&icons).zip(&away) {
             (&item.key, &item.name, windows.len(), item.focused, icon.is_some(), away).hash(&mut hasher);
         }
+        starting.hash(&mut hasher);
         (accent.r, accent.g, accent.b).hash(&mut hasher);
         // Level or upright, and which side its marks are on.
         let upright = self.shelf.config.placement().upright();
@@ -800,15 +928,21 @@ impl Server {
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             let face = fonts.face("sans-serif", 700, false).or_else(|| fonts.face("sans-serif", 400, false));
             let local = Rect::new(0, 0, strip.size.w, strip.size.h);
-            for (index, ((item, _), icon)) in items.iter().zip(&icons).enumerate() {
+            for (index, ((item, windows), icon)) in items.iter().zip(&icons).enumerate() {
                 let Some(slot) = running::slot(local, index, upright) else { break };
                 let at = running::icon_in(slot);
                 let square = SceneRect::new(at.x as f32, at.y as f32, at.w as f32, at.h as f32);
                 // The mark, on the windows' side: short and grey for an application that
                 // is running, long and in the accent for the one that has the keyboard.
-                let (long, mark) = if item.focused { (18.0, accent) } else { (6.0, colour(vergence_look::INK_UNFOCUSED)) };
+                let (long, mark) = match starting[index] {
+                    // From 6 points to 18 and back in a second.
+                    Some(step) => (6.0 + 12.0 * (1.0 - (step as f32 - 5.0).abs() / 5.0), accent),
+                    None if item.focused => (18.0, accent),
+                    None => (6.0, colour(vergence_look::INK_UNFOCUSED)),
+                };
                 let faint = away[index];
-                if !faint {
+                // No mark for one that is neither running nor starting.
+                if !faint && (!windows.is_empty() || starting[index].is_some()) {
                     let (down, along) = (slot.y as f32 + (slot.h as f32 - long) / 2.0, slot.x as f32 + (slot.w as f32 - long) / 2.0);
                     let place = match side {
                         Edge::Left => SceneRect::new(3.0, down, 3.0, long),

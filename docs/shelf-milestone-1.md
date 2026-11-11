@@ -63,7 +63,7 @@ pinned or running application. Live tiles are shelf milestone 2.
 
       [shelf]
       hide = false                 # true: shown only when the pointer reaches the edge
-      pinned = ["firefox", "vergence-term"]   # desktop entry ids, top to bottom
+      pinned = ["firefox", "vergence-term"]   # desktop entry ids, in their order on the dock
       screens = ["<id>"]           # other screens with a shelf of their own (step 6)
 
   The edge is the right one. It is not a setting in this milestone.
@@ -357,6 +357,27 @@ one.
   (Smithay's rescale and relocate elements), so a title bar the server
   draws is not in it yet. Seen on Hubble in a frame taken mid-way; the
   feel of it is for Dave's eye.
+
+- **Step 4 (2026-11-10): pinned applications.**
+  - vergence-shell: `running::items` takes the pinned ids: those come
+    first, in their order, running or not (an id no entry has, or one
+    named twice, adds nothing), then the others as before. A test.
+  - Server: `pinned` in `[shelf]`, written the way the dock's place is.
+    A click on a pinned application that is not running starts it: the
+    entry's own arguments, no shell between. Right-click on an icon:
+    Open or New window, Pin or Unpin, Close (or "Close all N windows");
+    an application with no desktop entry has only Close. A started
+    application's mark is in the accent and grows and shrinks, ten steps
+    a second, until a window more of it is there or 15 seconds have gone
+    (a still mark when reduced motion is asked for). One that is neither
+    running nor starting has no mark.
+  - On Hubble by `vctl`: pin the terminal, close it, restart the session
+    (still there, not running), start it by a click, a second window by
+    the menu, unpin, close both; the starting mark seen with an entry
+    that opens no window.
+  - Not yet: an entry with `Terminal=true` is not started (our terminal
+    cannot yet be told what to run); dragging to reorder pins; the
+    acceptance check with Firefox is Dave's (his profile, his hand).
 
 ## Acceptance
 

@@ -55,6 +55,8 @@ enum Entry {
     /// One of an application's windows, by its title: the list a click on the
     /// application's icon opens beside the shelf (shelf.rs).
     Window(smithay::desktop::Window, String),
+    /// Something to do with an application on the dock, and what the menu calls it.
+    Shelf(crate::shelf::Act, String),
     Separator,
     Exit,
 }
@@ -185,8 +187,17 @@ impl Server {
     /// The list of an application's windows, beside its icon's place on the dock
     /// (`slot`) on the side `towards` names, kept on its screen's work area.
     pub fn open_window_list(&mut self, slot: Rectangle<i32, Logical>, towards: vergence_shell::Edge, windows: Vec<(smithay::desktop::Window, String)>) {
+        self.open_beside(slot, towards, windows.into_iter().map(|(w, title)| Entry::Window(w, title)).collect());
+    }
+
+    /// The menu of a right-click on an application's icon, placed as its list
+    /// of windows is.
+    pub fn open_shelf_menu(&mut self, slot: Rectangle<i32, Logical>, towards: vergence_shell::Edge, acts: Vec<(crate::shelf::Act, String)>) {
+        self.open_beside(slot, towards, acts.into_iter().map(|(act, label)| Entry::Shelf(act, label)).collect());
+    }
+
+    fn open_beside(&mut self, slot: Rectangle<i32, Logical>, towards: vergence_shell::Edge, entries: Vec<Entry>) {
         use vergence_shell::Edge;
-        let entries: Vec<Entry> = windows.into_iter().map(|(w, title)| Entry::Window(w, title)).collect();
         if entries.is_empty() {
             return;
         }
@@ -242,6 +253,10 @@ impl Server {
                     self.shelf_to_window(&w.clone());
                 }
             }
+            Entry::Shelf(act, label) => {
+                tracing::info!("shelf: {label}");
+                self.shelf_act(act.clone());
+            }
             Entry::Exit => {
                 tracing::info!("menu: exit");
                 self.loop_signal.stop();
@@ -269,6 +284,7 @@ impl Server {
             let label = match e {
                 Entry::App(item) => item.name.clone(),
                 Entry::Window(_, title) => title.clone(),
+                Entry::Shelf(_, label) => label.clone(),
                 Entry::Exit => "Exit Vergence".into(),
                 Entry::Separator => continue,
             };

@@ -46,13 +46,24 @@ pub struct Item {
     pub windows: Vec<usize>,
     /// One of its windows has the keyboard.
     pub focused: bool,
+    /// It is pinned: it has its place whether it is running or not.
+    pub pinned: bool,
 }
 
-/// The items for these windows (each its class and whether it has the
-/// keyboard), given in the order they were opened: one item for each
-/// application, in the order of each one's first window.
-pub fn items(entries: &[Entry], windows: &[(String, bool)]) -> Vec<Item> {
+/// The dock's items: first the pinned applications (entry ids, in their
+/// order, running or not; an id no entry has is left out), then one item
+/// for each other application with a window, in the order of each one's
+/// first window. The windows are given in the order they were opened, each
+/// with its class and whether it has the keyboard.
+pub fn items(entries: &[Entry], pinned: &[String], windows: &[(String, bool)]) -> Vec<Item> {
     let mut out: Vec<Item> = Vec::new();
+    for id in pinned {
+        if let Some(e) = entries.iter().find(|e| e.id == *id && !e.hidden)
+            && !out.iter().any(|i| i.key == e.id)
+        {
+            out.push(Item { key: e.id.clone(), name: e.name.clone(), icon: e.icon.clone(), windows: Vec::new(), focused: false, pinned: true });
+        }
+    }
     for (index, (class, focused)) in windows.iter().enumerate() {
         let (key, name, icon) = match owner(entries, class) {
             Some(e) => (e.id.clone(), e.name.clone(), e.icon.clone()),
@@ -63,7 +74,7 @@ pub fn items(entries: &[Entry], windows: &[(String, bool)]) -> Vec<Item> {
                 item.windows.push(index);
                 item.focused |= focused;
             }
-            None => out.push(Item { key, name, icon, windows: vec![index], focused: *focused }),
+            None => out.push(Item { key, name, icon, windows: vec![index], focused: *focused, pinned: false }),
         }
     }
     out
@@ -132,15 +143,28 @@ mod tests {
     }
 
     #[test]
+    fn pinned_applications_come_first_running_or_not() {
+        let e = entries();
+        let w = |class: &str, focused: bool| (class.to_string(), focused);
+        let pinned: Vec<String> = ["firefox", "no-such-app", "vergence-term", "firefox"].iter().map(|s| s.to_string()).collect();
+        let got = items(&e, &pinned, &[w("xterm", false), w("vergence-term", true)]);
+        let summary: Vec<(&str, usize, bool, bool)> = got.iter().map(|i| (i.key.as_str(), i.windows.len(), i.focused, i.pinned)).collect();
+        // Firefox is not running and has its place; the terminal's window is under its pin;
+        // an id nothing has, and one named twice, add nothing.
+        assert_eq!(summary, [("firefox", 0, false, true), ("vergence-term", 1, true, true), ("xterm", 1, false, false)]);
+        assert_eq!(got[1].windows, [1]);
+    }
+
+    #[test]
     fn one_item_for_each_application_in_the_order_they_started() {
         let e = entries();
         let w = |class: &str, focused: bool| (class.to_string(), focused);
-        let got = items(&e, &[w("vergence-term", false), w("firefox", false), w("XTerm", false), w("vergence-term", true), w("xterm", false)]);
+        let got = items(&e, &[], &[w("vergence-term", false), w("firefox", false), w("XTerm", false), w("vergence-term", true), w("xterm", false)]);
         let summary: Vec<(&str, &str, usize, bool)> = got.iter().map(|i| (i.key.as_str(), i.name.as_str(), i.windows.len(), i.focused)).collect();
         assert_eq!(summary, [("vergence-term", "Terminal", 2, true), ("firefox", "Firefox", 1, false), ("xterm", "XTerm", 2, false)]);
         assert_eq!(got[0].windows, [0, 3]);
         assert_eq!((got[0].icon.as_str(), got[2].icon.as_str()), ("vergence-term", ""), "no entry, no icon name: a letter");
-        assert!(items(&e, &[]).is_empty());
+        assert!(items(&e, &[], &[]).is_empty());
     }
 
     #[test]
