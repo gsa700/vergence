@@ -1,7 +1,7 @@
 #!/bin/bash
 # Copy this working tree (committed or not) to a dev box, at ~/src/vergence,
 # for building and testing there (see CLAUDE.md): hubble (Void Linux, the
-# default), kepler (FreeBSD on real hardware), canary (FreeBSD VM), techbench
+# default), kepler (FreeBSD on real hardware), techbench
 # (Fedora).
 #
 # rsync sends only what changed and deletes files removed here, but never

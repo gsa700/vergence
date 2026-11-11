@@ -38,7 +38,7 @@ toolkit.
 
 Language: Rust throughout (whitepaper §8). The terminal has been on the project's own
 toolkit since 2026-11-10 (whitepaper §6.10; docs/toolkit-milestone-1.md), and the settings app since the same evening (docs/toolkit-milestone-2.md); iced is gone. Platforms (since 2026-11-09): a
-Linux without systemd, Void on Hubble, for development; FreeBSD (a second
-machine, and the VM canary as the build gate) and Fedora (Techbench) at every
+Linux without systemd, Void on Hubble, for development; FreeBSD (kepler, a
+second Lenovo Tiny) and Fedora (Techbench) at every
 milestone. Install on a system with `sudo tools/install.sh` after
 `cargo build --release` (see the script's header). Whitepaper Draft 0.9.

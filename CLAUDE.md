@@ -3,13 +3,13 @@
 Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Vergence-Whitepaper.md,
 the current milestone is docs/bus-milestone-1.md (the session bus; the server's is docs/server-milestone-1.md; phase 1's, frozen, are docs/milestone-1.md to -4.md), status is in README.md.
 The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md: steps 1 to 5 are in (the dock, applications, clicks, minimize, pins, session restore, the apps button and popup; crates/vergence-shell, the server's shelf.rs); step 6 waits for the settings app's move. The current work since 2026-11-10 is docs/toolkit-milestone-2.md: widgets (crates/vergence-widgets), the settings app moved onto them, iced removed; its Progress says how far it has come.
-**Order of work since 2026-11-09 (whitepaper §9):** our own toolkit's drawing and text core with the terminal on it (§6.10; docs/toolkit-milestone-1.md, closed 2026-11-10: the terminal, crates/vergence-term, is on it and its iced interface is gone; the look both the server and the toolkit draw with is crates/vergence-look, and the window bar is vergence_ui::bar), then the shelf on the same drawing code, then widgets and the settings app (docs/toolkit-milestone-2.md; crates/vergence-widgets), then iced is removed (done 2026-11-10). GPU first; a CPU reference renderer for tests and GPU-less machines (canary).
+**Order of work since 2026-11-09 (whitepaper §9):** our own toolkit's drawing and text core with the terminal on it (§6.10; docs/toolkit-milestone-1.md, closed 2026-11-10: the terminal, crates/vergence-term, is on it and its iced interface is gone; the look both the server and the toolkit draw with is crates/vergence-look, and the window bar is vergence_ui::bar), then the shelf on the same drawing code, then widgets and the settings app (docs/toolkit-milestone-2.md; crates/vergence-widgets), then iced is removed (done 2026-11-10). GPU first; a CPU reference renderer for tests and GPU-less machines (`VERGENCE_RENDER=cpu`).
 
 - **Started 2026-11-06** (Dave's go). The source lives here on Control (the
   main git copy, pushed to GitHub; Control has no Rust). Build and test on the
   dev boxes: `tools/sync-hubble.sh [host]` (rsync; keeps the host's build output;
-  default hubble, also kepler, canary and techbench), then `cargo test --workspace`
-  there. Fake monitors for tests: docs/milestone-1.md, "Found on Hubble".
+  default hubble, also kepler and techbench), then `cargo test --workspace`
+  there: Hubble, kepler and Techbench for every change. Fake monitors for tests: docs/milestone-1.md, "Found on Hubble".
 - **vergd runs in Dave's Xfce session on Hubble** (tools/install-autostart.sh:
   ~/.local/bin/vergd, log ~/.local/state/vergence/vergd.log, profiles
   ~/.config/vergence/profiles.toml, windows.toml, settings.toml,
@@ -59,10 +59,11 @@ The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md: s
   `. ~/.cargo/env` over ssh; `tools/sync-hubble.sh kepler`; passwordless
   sudo; Vergence installed under /usr/local, `vergence` from its text
   console starts the session, and ~/.config/vergence/control-socket is
-  there so `vctl` works), and a build-and-test gate on the VM canary
-  (`tools/sync-hubble.sh canary`; passwordless sudo there; no display
-  device, so a session there is the server nested in its Xfce: see
-  docs/toolkit-milestone-1.md, "canary in software"). The second Linux is
+  there so `vctl` works). **canary**, the FreeBSD VM that was the build gate
+  while FreeBSD had no hardware, is **dropped** (Dave, 2026-11-10): kepler
+  covers FreeBSD; the VM is not synced or tested any more. (It has no
+  display device; a session there was the server nested in its Xfce, see
+  docs/toolkit-milestone-1.md, "canary in software".) The second Linux is
   **Fedora on
   Techbench** (Fedora 45, Intel UHD 770), replacing Debian 13, which had been
   picked for hosting the X11 daemon. Techbench is Dave's workstation, not a
@@ -77,8 +78,8 @@ The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md: s
   Hubble (socket in /run/user/1000). Techbench is normally headless: the two
   monitors move between it and Hubble. Keep
   Linux-only interfaces (udev, systemd, logind, /sys) out of the core; where
-  the platforms must differ, say so in the code and the docs. VMs (canary)
-  are for build checks only. A milestone is done when it builds and passes
+  the platforms must differ, say so in the code and the docs. VMs are for
+  build checks only. A milestone is done when it builds and passes
   its tests on all three and has run on the FreeBSD and Fedora machines.
 - **Installing on a system**: `cargo build --release`, then `sudo tools/install.sh`
   (binaries, `vergence-session` and the `vergence` console command in
