@@ -224,6 +224,7 @@ impl Server {
         let serial = SERIAL_COUNTER.next_serial();
         self.menu_hover(pos);
         self.notify_hover(pos);
+        self.shelf_hover(pos);
         let under = self.surface_under(pos);
         pointer.motion(self, under, &MotionEvent { location: pos, serial, time });
         pointer.frame(self);
@@ -269,7 +270,7 @@ impl Server {
             let hit = self.hit(at);
             let left = button == BTN_LEFT;
             match &hit {
-                Hit::Surface(w, ..) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Edge(w, _) => {
+                Hit::Surface(w, ..) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Minimize(w) | Hit::Edge(w, _) => {
                     self.focus_window(&w.clone(), serial)
                 }
                 Hit::Shelf | Hit::Nothing => {}
@@ -297,8 +298,9 @@ impl Server {
                 }
                 Hit::Close(w) if left => self.close_window(&w),
                 Hit::Maximize(w) if left => self.toggle_maximize(&w),
+                Hit::Minimize(w) if left => self.minimise(&w),
                 Hit::Edge(w, e) if left => grab_with = Some((w, Some(e))),
-                Hit::Title(_) | Hit::Close(_) | Hit::Maximize(_) | Hit::Edge(..) => {}
+                Hit::Title(_) | Hit::Close(_) | Hit::Maximize(_) | Hit::Minimize(_) | Hit::Edge(..) => {}
                 // The shelf's strip (shelf.rs): an application's icon brings its window
                 // forward, or opens the list of its windows. What is behind the strip
                 // is never pressed.

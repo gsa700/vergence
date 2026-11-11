@@ -78,6 +78,7 @@ pub enum Hit {
     Title(Window),
     Close(Window),
     Maximize(Window),
+    Minimize(Window),
     Edge(Window, ResizeEdge),
     /// The shelf's strip (shelf.rs): in front of every window.
     Shelf,
@@ -86,7 +87,7 @@ pub enum Hit {
 
 /// The ids of one window's bar parts, for damage tracking, and its title rasters.
 pub struct Decor {
-    ids: [Id; 10],
+    ids: [Id; 11],
     commit: CommitCounter,
     active: bool,
     /// One title raster per output scale (key: the scale's bits).
@@ -116,6 +117,8 @@ struct Frame {
     title: Rectangle<i32, Logical>,
     close: Rectangle<i32, Logical>,
     maximize: Rectangle<i32, Logical>,
+    /// Left of maximise; drawn and pressed only when the settings name the button.
+    minimize: Rectangle<i32, Logical>,
 }
 
 impl Frame {
@@ -123,7 +126,8 @@ impl Frame {
         let title = Rectangle::new((content.loc.x, content.loc.y - TITLE_H).into(), (content.size.w, TITLE_H).into());
         let close = Rectangle::new((title.loc.x + title.size.w - TITLE_H, title.loc.y).into(), (TITLE_H, TITLE_H).into());
         let maximize = Rectangle::new((close.loc.x - TITLE_H, title.loc.y).into(), (TITLE_H, TITLE_H).into());
-        Frame { content, title, close, maximize }
+        let minimize = Rectangle::new((maximize.loc.x - TITLE_H, title.loc.y).into(), (TITLE_H, TITLE_H).into());
+        Frame { content, title, close, maximize, minimize }
     }
 
     /// Title bar and content.
@@ -186,6 +190,15 @@ impl Server {
     }
 
     /// The top-most thing under `pos`: a title bar part, a resize band, or a surface.
+    /// True if the settings' window buttons include minimise (they do unless a
+    /// layout without it has been chosen): the server's title bars then have it.
+    pub fn minimise_button(&self) -> bool {
+        match self.settings.current.get(&(crate::settings::WM.to_string(), "button-layout".to_string())) {
+            Some(vergence_protocol::bus::SettingValue::Str(layout)) => layout.contains("minimize"),
+            _ => true,
+        }
+    }
+
     pub fn hit(&self, pos: Point<f64, Logical>) -> Hit {
         if self.shelf_at(pos) {
             return Hit::Shelf;
@@ -197,6 +210,9 @@ impl Server {
                 }
                 if f.maximize.to_f64().contains(pos) {
                     return Hit::Maximize(w.clone());
+                }
+                if self.minimise_button() && f.minimize.to_f64().contains(pos) {
+                    return Hit::Minimize(w.clone());
                 }
                 if f.title.to_f64().contains(pos) {
                     return Hit::Title(w.clone());
@@ -237,6 +253,7 @@ impl Server {
     pub fn scene(&mut self, renderer: &mut GlesRenderer, output: &Output, scale: f64) -> Vec<SceneElement> {
         let Some(out) = self.space.output_geometry(output) else { return Vec::new() };
         let focused = self.seat.get_keyboard().and_then(|k| k.current_focus());
+        let minimise_button = self.minimise_button();
         self.decor.retain(|w, _| w.alive());
         let windows: Vec<Window> = self.space.elements().rev().cloned().collect();
         // In front of everything: the desktop menu, if open (menu.rs).
@@ -278,7 +295,8 @@ impl Server {
                 if let Some(f) = frame {
                 // Front to back: title text, button marks, then the bar.
                 let text_x = f.title.loc.x + TEXT_PAD;
-                let logical: Size<i32, Logical> = (f.maximize.loc.x - TEXT_PAD / 2 - text_x, TITLE_H).into();
+                let buttons_from = if minimise_button { f.minimize.loc.x } else { f.maximize.loc.x };
+                let logical: Size<i32, Logical> = (buttons_from - TEXT_PAD / 2 - text_x, TITLE_H).into();
                 if let Some(font) = self.title_font.as_ref()
                     && logical.w > 0
                     && !title.is_empty()
@@ -317,6 +335,11 @@ impl Server {
                 elements.push(solid(2, Rectangle::new((m.loc.x, m.loc.y + m.size.h - t).into(), (m.size.w, t).into()), BUTTON));
                 elements.push(solid(3, Rectangle::new(m.loc, (t, m.size.h).into()), BUTTON));
                 elements.push(solid(4, Rectangle::new((m.loc.x + m.size.w - t, m.loc.y).into(), (t, m.size.h).into()), BUTTON));
+                if minimise_button {
+                    // A line along the foot of its square, as the terminal's bar draws it.
+                    let n = inset(f.minimize, 7.0);
+                    elements.push(solid(10, Rectangle::new((n.loc.x, n.loc.y + n.size.h - t).into(), (n.size.w, t).into()), BUTTON));
+                }
                 elements.push(solid(5, f.title.to_f64(), if active { BAR_ACTIVE } else { BAR_INACTIVE }));
                 }
             }

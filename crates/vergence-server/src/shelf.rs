@@ -166,6 +166,13 @@ pub struct Shelf {
     said: Option<Rectangle<i32, Logical>>,
     /// The dock as it was last drawn or pressed: what a point is tested against.
     dock: Option<Rectangle<i32, Logical>>,
+    /// The item the pointer is over, and whether it has rested there long
+    /// enough for the application's name to be shown beside it.
+    hover: Option<usize>,
+    named: bool,
+    /// The items' names as last drawn, and the name's picture for a scale.
+    names: Vec<String>,
+    label: Option<((String, u64), MemoryRenderBuffer, i32)>,
     /// Minimised windows, each with the place it goes back to. They are on no
     /// screen (the server's space does not hold them); their application's icon
     /// on the shelf is where they are.
@@ -326,6 +333,30 @@ impl Server {
         self.shelf.dock.is_some_and(|r| r.to_f64().contains(at))
     }
 
+    /// The pointer moved. Over an item of the dock, and resting there half a
+    /// second, the application's name appears beside its icon (a dock that
+    /// stands upright has no room for names).
+    pub fn shelf_hover(&mut self, at: Point<f64, Logical>) {
+        let over = self.shelf.dock.and_then(|d| running::item_at(rect(d), self.shelf.names.len(), at.x.floor() as i32, at.y.floor() as i32));
+        if over == self.shelf.hover {
+            return;
+        }
+        self.shelf.hover = over;
+        if std::mem::take(&mut self.shelf.named) {
+            self.redraw_all();
+        }
+        if over.is_some() {
+            let rest = smithay::reexports::calloop::timer::Timer::from_duration(std::time::Duration::from_millis(500));
+            let _ = self.loop_handle.insert_source(rest, move |_, _, state| {
+                if state.shelf.hover == over && !state.shelf.named {
+                    state.shelf.named = true;
+                    state.redraw_all();
+                }
+                smithay::reexports::calloop::timer::TimeoutAction::Drop
+            });
+        }
+    }
+
     /// Minimise a window: it leaves the screen and stays as its application's
     /// icon, and the keyboard goes to the window that is then in front.
     pub fn minimise(&mut self, w: &Window) {
@@ -394,6 +425,8 @@ impl Server {
     /// a list opened (the press's release is then the list's, not a window's).
     pub fn shelf_press(&mut self, at: Point<f64, Logical>) -> bool {
         let items = self.shelf_items();
+        // The name beside an icon goes when the icon is pressed.
+        self.shelf.named = false;
         let Some(strip) = self.shelf_dock(items.len()) else { return false };
         let Some(index) = running::item_at(rect(strip), items.len(), at.x.floor() as i32, at.y.floor() as i32) else { return false };
         let (item, windows) = &items[index];
@@ -538,14 +571,49 @@ impl Server {
             };
             self.shelf.picture = Some((key, buffer));
         }
-        let Some((_, buffer)) = &self.shelf.picture else { return Vec::new() };
+        self.shelf.names = items.iter().map(|(item, _)| item.name.clone()).collect();
+        // The name of the application the pointer rests on, to the left of its icon.
+        let mut elements = Vec::new();
+        let named = self.shelf.hover.filter(|_| self.shelf.named).and_then(|i| Some((running::slot(rect(strip), i)?, self.shelf.names.get(i)?.clone())));
+        if let Some((slot, name)) = named {
+            let key = (name.clone(), scale.to_bits());
+            if self.shelf.label.as_ref().map(|(k, _, _)| k) != Some(&key) {
+                let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
+                if let Some(face) = fonts.face("sans-serif", 400, false) {
+                    let size = 13.5;
+                    let m = fonts.metrics(face, size);
+                    let (_, width) = fonts.layout(face, size, &name);
+                    let (w, h) = ((width + 20.0).ceil().min(480.0), 28.0);
+                    let mut scene = Scene::new(w, h);
+                    scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, colour(vergence_look::MENU));
+                    scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, colour(vergence_look::SHELF_EDGE));
+                    scene.push_clip(SceneRect::new(8.0, 0.0, w - 16.0, h), 0.0);
+                    vergence_render::text(&mut scene, fonts, face, size, colour(vergence_look::MENU_INK), ScenePoint::new(10.0, ((h - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), &name);
+                    scene.pop_clip();
+                    if let Ok(p) = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) {
+                        let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+                        self.shelf.label = Some((key, buffer, w as i32));
+                    }
+                }
+            }
+            if let Some((_, buffer, w)) = &self.shelf.label {
+                let area: Rectangle<i32, Logical> = Rectangle::new(((strip.loc.x - 8 - w).max(out.loc.x), slot.y + (slot.h - 28) / 2).into(), (*w, 28).into());
+                let a = (area.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+                let b = (area.loc + area.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+                let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
+                if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(area.size), Kind::Unspecified) {
+                    elements.push(SceneElement::Memory(el));
+                }
+            }
+        }
+        let Some((_, buffer)) = &self.shelf.picture else { return elements };
         // Placed on whole pixels, as everything the server draws is.
         let a = (strip.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let b = (strip.loc + strip.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
-        match MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(strip.size), Kind::Unspecified) {
-            Ok(el) => vec![SceneElement::Memory(el)],
-            Err(_) => Vec::new(),
+        if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(strip.size), Kind::Unspecified) {
+            elements.push(SceneElement::Memory(el));
         }
+        elements
     }
 }

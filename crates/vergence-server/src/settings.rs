@@ -40,6 +40,7 @@ use crate::Server;
 pub const APPEARANCE: &str = "org.freedesktop.appearance";
 pub const INTERFACE: &str = "org.gnome.desktop.interface";
 pub const KEYBOARD: &str = "org.gnome.desktop.peripherals.keyboard";
+pub const WM: &str = "org.gnome.desktop.wm.preferences";
 /// Key repeat without a [keyboard] table: GNOME's defaults (500 ms, then 30 a second).
 pub const REPEAT_DELAY: u32 = 500;
 pub const REPEAT_RATE: u32 = 30;
@@ -131,6 +132,11 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
         if let Some(v) = xstr(x) {
             put(INTERFACE, key, SettingValue::Str(v));
         }
+    }
+    // Which window buttons, and on which side ("close,minimize:" or
+    // ":minimize,maximize,close"): the server's own title bars follow it too.
+    if let Some(v) = xstr("Gtk/DecorationLayout") {
+        put(WM, "button-layout", SettingValue::Str(v));
     }
     // Cursor size in points (the same on every monitor): the server's, not
     // XSETTINGS' pixel value, which is scaled for X apps.

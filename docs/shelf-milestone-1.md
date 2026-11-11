@@ -262,10 +262,21 @@ one.
   comes back on the screen under the pointer. Driven through `vctl` on
   Hubble: minimised from the dock and from the terminal's button, and
   back, each time to the same place.
-  Not done here: the server's own title bars have no minimise button
-  yet, and a minimised window is not told apart in the list.
-  Still to do in step 3: the name beside an icon the pointer rests on,
-  and that button.
+- **Step 3, last part (2026-11-10): the name, and the title bars'
+  button.** When the pointer has rested half a second on an item of the
+  dock, the application's name appears to the left of its icon, in a
+  small rounded label drawn like the dock; it goes when the pointer
+  leaves the item or presses it. The server's own title bars have a
+  minimise button, left of maximise, when the settings' window buttons
+  name it (`Gtk/DecorationLayout`, which the server now also offers as
+  `org.gnome.desktop.wm.preferences button-layout`; without a setting,
+  it is there). On Hubble through `vctl`: "Settings" beside the settings
+  app's icon; its title bar's button minimises it and the dock brings it
+  back to its place.
+  **Step 3 is done**, but for two things left for the list of several
+  windows: a minimised window is not told apart in it, and the screen a
+  window is on is not named. Acceptance 3's hand checks (Firefox,
+  AlbumWall, icons at two scales) are Dave's to make.
 - **The shelf is a dock (Dave, 2026-11-10).** "Like a dock, rounded
   with the same radius as all the other elements": a panel as tall as
   the apps button's place and its items, in the middle of the screen's
