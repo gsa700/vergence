@@ -234,3 +234,37 @@ mod tests {
         assert_eq!(fds.len(), 2, "the rest were closed, not kept");
     }
 }
+
+#[repr(C)]
+struct PollFd {
+    fd: i32,
+    events: i16,
+    revents: i16,
+}
+
+const POLLIN: i16 = 1;
+
+unsafe extern "C" {
+    fn poll(fds: *mut PollFd, count: std::ffi::c_ulong, timeout_ms: i32) -> i32;
+}
+
+/// Waits until one of `fds` can be read (or has been closed at its far
+/// end), or `timeout` passes (None: no limit). Returns, for each, whether it
+/// is ready; a None in `fds` is not watched. The same on Linux and FreeBSD
+/// (struct pollfd and POLLIN agree). Moved here from vergence-wl on
+/// 2026-11-11, so the toolkit's native and Wayland roads share it.
+pub fn poll_readable(fds: &[Option<RawFd>], timeout: Option<std::time::Duration>) -> io::Result<Vec<bool>> {
+    let ms = timeout.map_or(-1, |t| t.as_millis().min(i32::MAX as u128) as i32);
+    let mut set: Vec<PollFd> = fds.iter().map(|f| PollFd { fd: f.unwrap_or(-1), events: POLLIN, revents: 0 }).collect();
+    loop {
+        // SAFETY: `set` holds `set.len()` valid pollfds (a negative descriptor is skipped).
+        let n = unsafe { poll(set.as_mut_ptr(), set.len() as std::ffi::c_ulong, ms) };
+        if n >= 0 {
+            return Ok(set.iter().zip(fds).map(|(p, f)| f.is_some() && p.revents != 0).collect());
+        }
+        let e = io::Error::last_os_error();
+        if e.kind() != io::ErrorKind::Interrupted {
+            return Err(e);
+        }
+    }
+}

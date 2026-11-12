@@ -253,6 +253,15 @@ impl FrameReader {
     pub fn pending(&self) -> usize {
         self.buf.len()
     }
+
+    /// Whether a whole frame (or a malformed length, which next_frame
+    /// reports) is held, without taking it.
+    pub fn has_frame(&self) -> bool {
+        self.buf.len() >= 4 && {
+            let len = u32::from_le_bytes(self.buf[..4].try_into().unwrap()) as usize;
+            !(2..=MAX_FRAME).contains(&len) || self.buf.len() >= 4 + len
+        }
+    }
 }
 
 #[cfg(test)]

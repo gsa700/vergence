@@ -28,19 +28,6 @@ const MAX_WAITING_FDS: usize = 256;
 use vergence_protocol::sock::{self, MAX_FDS};
 pub use vergence_protocol::sock::pipe;
 
-#[repr(C)]
-struct PollFd {
-    fd: i32,
-    events: i16,
-    revents: i16,
-}
-
-const POLLIN: i16 = 1;
-
-unsafe extern "C" {
-    fn poll(fds: *mut PollFd, count: std::ffi::c_ulong, timeout_ms: i32) -> i32;
-}
-
 pub struct Connection {
     stream: UnixStream,
     incoming: Vec<u8>,
@@ -123,24 +110,10 @@ impl Connection {
     pub fn wait_also(&mut self, others: [Option<RawFd>; 2], timeout: Option<std::time::Duration>) -> io::Result<(bool, [bool; 2])> {
         let buffered = wire::split(&self.incoming).is_ok_and(|m| m.is_some());
         // With a message already in hand, only look at what is ready now.
-        let ms = if buffered { 0 } else { timeout.map_or(-1, |t| t.as_millis().min(i32::MAX as u128) as i32) };
-        let mut fds = [
-            PollFd { fd: self.stream.as_raw_fd(), events: POLLIN, revents: 0 },
-            PollFd { fd: others[0].unwrap_or(-1), events: POLLIN, revents: 0 },
-            PollFd { fd: others[1].unwrap_or(-1), events: POLLIN, revents: 0 },
-        ];
-        loop {
-            // SAFETY: three valid pollfds (a negative descriptor is skipped by poll), and the count says so.
-            let n = unsafe { poll(fds.as_mut_ptr(), 3, ms) };
-            if n >= 0 {
-                // Readable, or closed or in error: a read will say which.
-                return Ok((buffered || fds[0].revents != 0, [others[0].is_some() && fds[1].revents != 0, others[1].is_some() && fds[2].revents != 0]));
-            }
-            let e = io::Error::last_os_error();
-            if e.kind() != io::ErrorKind::Interrupted {
-                return Err(e);
-            }
-        }
+        let wait = if buffered { Some(std::time::Duration::ZERO) } else { timeout };
+        // Readable, or closed or in error: a read will say which.
+        let ready = sock::poll_readable(&[Some(self.stream.as_raw_fd()), others[0], others[1]], wait)?;
+        Ok((buffered || ready[0], [ready[1], ready[2]]))
     }
 
     /// Waits for input and takes what has arrived. Ok(0): the server closed

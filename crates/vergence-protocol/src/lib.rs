@@ -161,6 +161,41 @@ impl Client {
         }
         self.read()
     }
+
+    // For a client with an event loop of its own (the toolkit's native road):
+    // poll `raw_fd`, call `read_ready` when it is readable, then take what
+    // `try_event` has, none of which blocks.
+
+    /// The connection's descriptor, to poll.
+    pub fn raw_fd(&self) -> std::os::fd::RawFd {
+        std::os::fd::AsRawFd::as_raw_fd(&self.stream)
+    }
+
+    /// Whether messages are already here, read and not yet taken (poll would
+    /// not say so).
+    pub fn has_buffered(&mut self) -> bool {
+        !self.events.is_empty() || self.reader.has_frame()
+    }
+
+    /// One read, after poll said the connection is readable. Ok(false): the
+    /// server closed it.
+    pub fn read_ready(&mut self) -> Result<bool, ClientError> {
+        let mut buf = [0u8; 16 * 1024];
+        let n = sock::recv_with_fds(&self.stream, &mut buf, &mut self.fds, 64)?;
+        self.reader.push(&buf[..n]);
+        Ok(n > 0)
+    }
+
+    /// The next message already read, if there is one; never waits.
+    pub fn try_event(&mut self) -> Result<Option<ServerMsg>, ClientError> {
+        if let Some(m) = self.events.pop_front() {
+            return Ok(Some(m));
+        }
+        match self.reader.next_frame()? {
+            Some(f) => Ok(Some(ServerMsg::decode_with_fds(&f, &mut self.fds)?)),
+            None => Ok(None),
+        }
+    }
 }
 
 /// The serial a server message answers, if it is a reply (events have 0).

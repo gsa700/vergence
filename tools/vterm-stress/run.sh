@@ -15,6 +15,9 @@
 #
 # ("vterm" was the terminal's name while the first one, on iced, still stood.)
 #
+# VERGENCE_UI_WAYLAND=1 opens it over Wayland instead of the native protocol
+# (to compare the toolkit's two roads, native milestone 1 acceptance 2).
+#
 # With VTERM_FRAMES=1 in the environment the terminal counts its frames and
 # times tab changes on its error output (vterm.log), which clicks.sh reads.
 #
@@ -31,6 +34,7 @@ export VSTRESS_DIR="$dir"
 export VSTRESS_FLOOD="$root/target/release/examples/flood"
 export SHELL="$here/vterm-stress/shell.sh"
 ${VTERM_FRAMES:+export VTERM_FRAMES=1}
+${VERGENCE_UI_WAYLAND:+export VERGENCE_UI_WAYLAND=1}
 exec "$root/target/release/vergence-term" --tabs 6 $* 2>"$dir/vterm.log"
 START
 chmod +x "$dir/start.sh"

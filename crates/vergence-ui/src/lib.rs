@@ -30,9 +30,15 @@
 //! Contract 1). It is never told to scale anything: the same scene is drawn
 //! sharper on a denser monitor, and drawn again when the window moves to
 //! another.
+//!
+//! **Two roads** (native milestone 1, step 5): in a Vergence session the
+//! window opens on the project's own protocol ([`native`]); elsewhere, or if
+//! the server will not, over Wayland (the rest of this file). A program
+//! cannot tell which: the same calls and the same input either way.
 
 pub mod bar;
 pub mod keyboard;
+mod native;
 pub mod touch;
 
 use std::{
@@ -473,6 +479,11 @@ struct Runner {
 /// Opens the window and runs until it is closed. `size` is the size asked
 /// for, in reference units; the server may give another.
 pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
+    // The native road first, in a Vergence session; it returns before
+    // telling the program anything if the window is to be opened over Wayland.
+    if native::run(app, size)?.is_some() {
+        return Ok(());
+    }
     let mut client = Client::connect()?;
     let registry = client.get_registry()?;
     let ready = client.sync()?;

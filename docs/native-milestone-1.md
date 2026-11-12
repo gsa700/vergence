@@ -357,3 +357,53 @@ fuzz test feeds the decoder random frames and descriptors.
   - **Not yet seen**: the wheel (vctl has no scroll command), a finger (no
     touch panel on Hubble now; the code path is the pointer's), X11's half
     of the clipboard (X11 is off by default), a live run on kepler.
+
+- **Step 5 (2026-11-11): the toolkit on it.** `vergence-ui` has two roads
+  behind the same `App`: `native.rs` opens the window on the native
+  protocol when the session names its bus (`VERGENCE_BUS`, which the
+  server sets for what it starts), and `run()` falls back to the Wayland
+  runner when the server refuses (or outside a Vergence session) before the
+  program has been told anything. `VERGENCE_UI_WAYLAND=1` keeps to Wayland,
+  to compare. Nothing in a program changed: the terminal and the settings
+  app went native as they were.
+  - The native runner follows the Wayland one event for event (the same
+    keyboard and touch modules, timers, waker, paste limits and repeat);
+    the differences are the protocol's: shared memory is copied at attach
+    (one buffer for every frame), GPU buffers come free by step 4's rule
+    (at a frame, all but the one showing), cursor shapes and edge bits are
+    the same numbers as Wayland's. The poll moved to
+    `vergence_protocol::sock::poll_readable` (vergence-wl uses it too), and
+    the protocol's client gained a non-blocking side (`raw_fd`,
+    `read_ready`, `try_event`).
+  - **Window memory bridges the roads**: a native window (role "main")
+    with no memory yet takes its program's role-less one, where the same
+    program's Wayland window was, so the move forgot no one's places.
+  - **Parity, on Hubble**: session restore brought the terminal back
+    natively by itself; the settings app opened natively and drew at scale
+    3; typing and running commands in the native terminal; its translucent
+    ground (opacity, alpha pictures); a second terminal drawn by the CPU
+    renderer (`VERGENCE_RENDER=cpu`); minimize by the terminal's own button
+    and back from the dock's list; copy in one native terminal and paste in
+    the other, through the server; the Wayland road still runs on request.
+  - **Acceptance 2 (the six-tab stress test, two minutes each road)**:
+
+    | | native | Wayland |
+    |---|---|---|
+    | `seq 1 1000000` | 0.66 s | 0.65 s |
+    | Color flood, lines/s | 12,600 | 9,900 |
+    | Cursor writes /s | 8,100 | 8,000 |
+    | Unicode flood, lines/s | 215,000 | 205,000 |
+    | Memory | 163 MB | 199 MB |
+
+    Within 10% (`seq` 2%), the floods the same or faster natively. The
+    tab-click test drew every change it saw within one frame on both
+    roads, but saw 33 changes of 50 on both: `clicks.sh` takes the last
+    terminal listed as its window and, with a second terminal open, worked
+    the tab positions out from the wrong one's width. To fix in the tool
+    (pick the stress test's own window by its pid).
+  - `tools/vterm-stress/run.sh` passes `VERGENCE_UI_WAYLAND` through.
+  - Tests: 322 green on Hubble, kepler and Techbench.
+  - **Not yet seen**: the wheel and a finger on the toolkit (the same code
+    as the Wayland road's), a Vergence session on kepler or Techbench with
+    the native road, outside a Vergence session (GNOME on Techbench: no
+    `VERGENCE_BUS`, so Wayland by the code; not run).

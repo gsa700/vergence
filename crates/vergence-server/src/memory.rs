@@ -145,7 +145,15 @@ impl Server {
     /// size no real window has (see MIN_W).
     pub fn remembered_place(&mut self, w: &Win) -> Option<(Rectangle<i32, Logical>, bool)> {
         let id = self.window_identity(w)?;
-        let s = self.memory.store.get(&self.memory.setup)?.get(&id)?.clone();
+        let profile = self.memory.store.get(&self.memory.setup)?;
+        // A native window (a role) with no memory yet takes its program's
+        // role-less one: where the same program's Wayland window was (our tools
+        // before the native road, 2026-11-11), so moving roads forgets nothing.
+        let s = match profile.get(&id) {
+            Some(s) => s.clone(),
+            None if !id.role.is_empty() => profile.get(&WindowId { role: String::new(), ..id.clone() })?.clone(),
+            None => return None,
+        };
         if (s.width as i32) < MIN_W || (s.height as i32) < MIN_H {
             return None;
         }
