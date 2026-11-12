@@ -83,7 +83,11 @@ impl Server {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         // The idle clock (energy.rs). A key or button that only woke the screens
         // goes no further; pointer motion does, so the pointer is where the hand put it.
-        if self.energy_activity() && matches!(event, InputEvent::Keyboard { .. } | InputEvent::PointerButton { .. } | InputEvent::TouchDown { .. }) {
+        // Only what a person does counts: a device coming or going is not input
+        // (2026-11-11, Hubble: the 14" monitor's USB touchscreen dropped off when the
+        // screens went off and came back ~14 s later, waking them every 10 min all night).
+        let by_hand = !matches!(event, InputEvent::DeviceAdded { .. } | InputEvent::DeviceRemoved { .. } | InputEvent::TouchCancel { .. } | InputEvent::Special(_));
+        if by_hand && self.energy_activity() && matches!(event, InputEvent::Keyboard { .. } | InputEvent::PointerButton { .. } | InputEvent::TouchDown { .. }) {
             return;
         }
         match event {
