@@ -85,6 +85,10 @@ pub struct Backend {
     manager: Manager,
     scanner: DrmScanner,
     surfaces: HashMap<crtc::Handle, Surface>,
+    /// Monitors that came back while the screens were off (energy.rs), set up by
+    /// screens_on. Setting one up turns it on, and a monitor that drops off in
+    /// standby (Techbench's ASUS, 2026-11-12) then woke and dropped again.
+    waiting: Vec<(connector::Handle, crtc::Handle)>,
 }
 
 pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(), Box<dyn std::error::Error>> {
@@ -139,6 +143,7 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
         manager,
         scanner: DrmScanner::new(),
         surfaces: HashMap::new(),
+        waiting: Vec::new(),
     });
     state.session = Some(session.clone());
 
@@ -283,12 +288,25 @@ fn scan(state: &mut Server, startup: bool) {
             }
             DrmScanEvent::Connected { connector, crtc: Some(crtc) } => {
                 let handle = connector.handle();
-                tracing::info!("hotplug: {}-{} connected; setting up in 1 s", connector.interface().as_str(), connector.interface_id());
+                // While the screens are off, a monitor in standby may come and go every
+                // few seconds (Techbench's ASUS: every 10 s, all night): debug only.
+                if state.energy.screens_off {
+                    tracing::debug!("hotplug: {}-{} connected", connector.interface().as_str(), connector.interface_id());
+                } else {
+                    tracing::info!("hotplug: {}-{} connected; setting up in 1 s", connector.interface().as_str(), connector.interface_id());
+                }
                 let _ = state.loop_handle.insert_source(Timer::from_duration(Duration::from_secs(1)), move |_, _, st| {
-                    let info = st.backend.as_ref().and_then(|b| b.manager.device().get_connector(handle, true).ok());
-                    if let Some(info) = info.filter(|i| i.state() == connector::State::Connected) {
-                        let anchors = st.window_anchors();
-                        connect(st, info, crtc);
+                    if st.energy.screens_off {
+                        if let Some(b) = st.backend.as_mut() {
+                            if !b.waiting.contains(&(handle, crtc)) {
+                                tracing::info!("hotplug: screens are off; setting it up when they come on");
+                                b.waiting.push((handle, crtc));
+                            }
+                        }
+                        return TimeoutAction::Drop;
+                    }
+                    let anchors = st.window_anchors();
+                    if connect_if_there(st, handle, crtc) {
                         setup_changed(st, anchors);
                         render(st, crtc);
                     }
@@ -296,7 +314,11 @@ fn scan(state: &mut Server, startup: bool) {
                 });
             }
             DrmScanEvent::Disconnected { connector, crtc: Some(crtc) } => {
-                tracing::info!("hotplug: {}-{} disconnected", connector.interface().as_str(), connector.interface_id());
+                if state.energy.screens_off {
+                    tracing::debug!("hotplug: {}-{} disconnected", connector.interface().as_str(), connector.interface_id());
+                } else {
+                    tracing::info!("hotplug: {}-{} disconnected", connector.interface().as_str(), connector.interface_id());
+                }
                 disconnect(state, crtc);
                 changed = true;
             }
@@ -322,8 +344,14 @@ fn scan(state: &mut Server, startup: bool) {
                 }
                 tracing::info!("hotplug: {}-{} modes changed ({running:?} -> {want:?})", connector.interface().as_str(), connector.interface_id());
                 disconnect(state, crtc);
-                connect(state, connector, crtc);
                 changed = true;
+                if state.energy.screens_off {
+                    if let Some(b) = state.backend.as_mut() {
+                        b.waiting.push((connector.handle(), crtc));
+                    }
+                    continue;
+                }
+                connect(state, connector, crtc);
                 render(state, crtc);
             }
             _ => {}
@@ -378,6 +406,18 @@ mod tests {
 }
 
 /// The monitor at `crtc` is gone: its output leaves the desktop and the clients.
+/// Set up a monitor the scanner reported, if it is still connected.
+fn connect_if_there(state: &mut Server, handle: connector::Handle, crtc: crtc::Handle) -> bool {
+    let info = state.backend.as_ref().and_then(|b| b.manager.device().get_connector(handle, true).ok());
+    match info.filter(|i| i.state() == connector::State::Connected) {
+        Some(info) => {
+            connect(state, info, crtc);
+            true
+        }
+        None => false,
+    }
+}
+
 fn disconnect(state: &mut Server, crtc: crtc::Handle) {
     let Some(b) = state.backend.as_mut() else { return };
     let Some(s) = b.surfaces.remove(&crtc) else { return };
@@ -696,6 +736,20 @@ pub fn screens_off(state: &mut Server) {
 /// Energy (energy.rs): every monitor back on, each with a full frame (the first
 /// queued frame after a clear enables the CRTC again).
 pub fn screens_on(state: &mut Server) {
+    let waiting = state.backend.as_mut().map(|b| std::mem::take(&mut b.waiting)).unwrap_or_default();
+    if !waiting.is_empty() {
+        let anchors = state.window_anchors();
+        let mut changed = false;
+        for (handle, crtc) in waiting {
+            let up = state.backend.as_ref().is_some_and(|b| b.surfaces.contains_key(&crtc));
+            if !up {
+                changed |= connect_if_there(state, handle, crtc);
+            }
+        }
+        if changed {
+            setup_changed(state, anchors);
+        }
+    }
     let crtcs: Vec<crtc::Handle> = state
         .backend
         .as_mut()
