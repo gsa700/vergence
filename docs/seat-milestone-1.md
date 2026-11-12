@@ -160,6 +160,33 @@ Smithay's own; nothing of ours runs in its callbacks.
   menu and a tap outside closing it, a tap on the settings app's sidebar
   (native touch), taps on a dock icon. Hubble's touchscreen (now on
   kepler's hardware) by hand still.
+- **Step 5 done** (2026-11-12): input.rs rewritten in our own words (the
+  scroll frame and the motion clamp were the last of smallvil's there; its
+  attribution is gone); focus.rs was already ours and now says why it has
+  no native kind; borrowed-review.md §1 and §2 and the whitepaper's §8
+  table updated (1,025 lines of smallvil's input code gone or rewritten;
+  xkbcommon also used directly); CLAUDE.md's keyboard-lock rule is
+  history.
+
+### Acceptance, where it stands (2026-11-12, evening)
+
+1. Tests: **met on Techbench** (366, the seat's fuzz test with a million
+   events among them). Hubble and kepler green through step 2; after steps
+   3 to 5 still to run (both machines were being moved and kepler
+   reinstalled that evening).
+2. **Partly met on Techbench** by `vctl`: clicks 50 of 50 on both roads,
+   typing and Ctrl chords in the terminal on both roads. Still to do:
+   repeat and the volume keys (Hubble's ALSA), Firefox, foot, an X11
+   program, the clipboard both ways, a drag and drop; Hubble and kepler.
+3. **Partly met on Techbench**: title bars (drag, double-click, buttons,
+   resize), the dock (click, menu), the apps popup and its keys, the desktop
+   menu, by mouse and by finger (`vctl touch`). Still to do: Alt+drag (by
+   hand), dragging the dock, notification cards, hiding docks, a real
+   touchscreen.
+4. **Met**: no `native_pointer_`, no swallow flag, no `PointerGrab` of
+   ours, nothing of ours in a `KeyboardTarget` callback.
+5. **Met**: smallvil's grabs gone, input.rs rewritten (borrowed-review.md
+   §1 has the counts).
 
 ## Acceptance
 

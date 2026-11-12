@@ -15,10 +15,17 @@ time, or when one of them gets in the way.
 ### Smithay's smallvil example (MIT)
 
 Where: `crates/vergence-server`, the files whose first line says "Based on
-Smithay's smallvil example": `main.rs` (141 lines today), `input.rs` (427),
-`state.rs` (423), `winit.rs` (184), `handlers/compositor.rs` (64),
-`handlers/xdg_shell.rs` (311), `grabs/mod.rs` (6), `grabs/move_grab.rs`
-(193), `grabs/resize_grab.rs` (399). License: `LICENSE-smithay.txt`.
+Smithay's smallvil example": `main.rs` (144 lines today), `state.rs` (417),
+`winit.rs` (189), `handlers/mod.rs` (177), `handlers/compositor.rs` (64),
+`handlers/xdg_shell.rs` (251). License: `LICENSE-smithay.txt`.
+
+**Seat milestone 1 (2026-11-12) took out the input part:** `grabs/` (598
+lines, the move and resize grabs) is deleted, replaced by our own in
+`dispatch.rs`; `input.rs` (427 lines then, 267 now) is rewritten in our own
+words and no longer carries the attribution; `xdg_shell.rs` lost its grab
+code (311 to 251). The decisions themselves are crates/vergence-seat (no
+Smithay in it). So 1,025 lines of smallvil's input code are gone or
+rewritten; 1,242 lines of files still marked as smallvil's remain.
 
 The server started from it on 2026-11-07 and these files have been rewritten
 heavily since (energy, touch, the shelf, `Win`, keyboard repeat, placement),
@@ -77,11 +84,21 @@ AlbumWall." The seams are where our own code already stands beside it:
 4. **The DRM/KMS and input back ends**, last: thin wrappers over the OS's
    interfaces, which are not borrowing (the drm-rs patch goes with them).
 
+Step 1 is done (seat milestone 1, 2026-11-12, docs/seat-milestone-1.md):
+every pointer, keyboard and touch event goes through our seat; Smithay's
+pointer, keyboard and touch are called only for Wayland and X11 surfaces;
+the parallel native paths and the keyboard lock hazard are gone. Kept on
+purpose (Dave, 2026-11-12): Smithay's drag and drop between Wayland
+programs (the seat's Edge grab), and its keyboard as the Wayland edge, fed
+every key beside our own xkb state.
+
 ### libinput, libseat/seatd, xkbcommon (through Smithay)
 
 Input devices, seat and device access, keymaps. C libraries every Wayland
 desktop uses. Review: keep unless one of them blocks us (FreeBSD support
 included); xkbcommon's keymap handling is the most likely to stay for good.
+Since seat milestone 1 the server also uses xkbcommon directly (the same
+crate and version Smithay builds on) for its own keyboard state, keys.rs.
 
 ### Xwayland
 

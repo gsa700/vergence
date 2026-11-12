@@ -1,7 +1,8 @@
-// Input from the devices: the idle clock, keys (through our own xkb state,
-// keys.rs, and the seat's key filter), keyboard focus, touch (touch.rs) and the
-// pointer, which goes to the seat (dispatch.rs). Begun from Smithay's smallvil example (MIT; see
-// LICENSE-smithay.txt); the pointer part is ours since seat milestone 1.
+// Input from the devices (seat milestone 1): the idle clock first; then keys,
+// through our own xkb state (keys.rs) and the seat's key filter; keyboard
+// focus, which the seat is told of; touch, put on its panel's screen
+// (touch.rs); and the pointer, kept on the screens and handed to the seat
+// (dispatch.rs).
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, Event, InputBackend, InputEvent,
@@ -119,22 +120,10 @@ impl Server {
             InputEvent::TouchCancel { event, .. } => self.touch_cancel(Event::time(&event)),
             InputEvent::TouchFrame { .. } => self.touch_frame(),
             InputEvent::PointerMotion { event, .. } => {
-                self.touch_mouse_back();
-                // A mouse on the real monitors (stage 2): moved by its delta, kept on the outputs.
+                // A mouse or touchpad on the real monitors: moved by its delta, kept on the screens.
                 use smithay::backend::input::PointerMotionEvent;
-                let pointer = self.seat.get_pointer().unwrap();
-                let mut pos = pointer.current_location() + event.delta();
-                let mut bounds: Option<smithay::utils::Rectangle<i32, smithay::utils::Logical>> = None;
-                for o in self.space.outputs() {
-                    if let Some(g) = self.space.output_geometry(o) {
-                        bounds = Some(bounds.map_or(g, |b| b.merge(g)));
-                    }
-                }
-                if let Some(b) = bounds {
-                    pos.x = pos.x.clamp(b.loc.x as f64, (b.loc.x + b.size.w) as f64 - 1.0);
-                    pos.y = pos.y.clamp(b.loc.y as f64, (b.loc.y + b.size.h) as f64 - 1.0);
-                }
-                let _ = pointer;
+                self.touch_mouse_back();
+                let pos = self.on_screens(self.pointer_location() + event.delta());
                 self.pointer_to(pos, Event::time(&event));
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
@@ -165,52 +154,36 @@ impl Server {
                 self.handle_button(event.button_code(), event.state(), Event::time(&event));
             }
             InputEvent::PointerAxis { event, .. } => {
+                // A wheel notch or a touchpad's scroll, each axis scaled by the
+                // lines a notch moves (pointer.rs). A wheel that gives no smooth
+                // amount moves 15 a notch (libinput's v120 counts 120 a notch).
                 let source = event.source();
-                // The lines a notch moves (pointer.rs): every amount scaled alike.
                 let k = self.scroll_factor(source);
-
-                let horizontal_amount = k * event
-                    .amount(Axis::Horizontal)
-                    .unwrap_or_else(|| event.amount_v120(Axis::Horizontal).unwrap_or(0.0) * 15.0 / 120.);
-                let vertical_amount = k * event
-                    .amount(Axis::Vertical)
-                    .unwrap_or_else(|| event.amount_v120(Axis::Vertical).unwrap_or(0.0) * 15.0 / 120.);
-                let horizontal_amount_discrete = event.amount_v120(Axis::Horizontal).map(|v| v * k);
-                let vertical_amount_discrete = event.amount_v120(Axis::Vertical).map(|v| v * k);
-
+                let amount = |axis| k * event.amount(axis).unwrap_or_else(|| event.amount_v120(axis).unwrap_or(0.0) * 15.0 / 120.0);
+                let notches = |axis| event.amount_v120(axis).map(|v| v * k);
                 let mut frame = AxisFrame::new(event.time()).source(source);
-                if horizontal_amount != 0.0 {
-                    frame = frame.value(Axis::Horizontal, horizontal_amount);
-                    if let Some(discrete) = horizontal_amount_discrete {
-                        frame = frame.v120(Axis::Horizontal, discrete as i32);
+                for axis in [Axis::Horizontal, Axis::Vertical] {
+                    if amount(axis) != 0.0 {
+                        frame = frame.value(axis, amount(axis));
+                        if let Some(n) = notches(axis) {
+                            frame = frame.v120(axis, n as i32);
+                        }
+                    }
+                    // Fingers lifted off the touchpad: that axis's scroll ends (kinetic scrolling stops there).
+                    if source == AxisSource::Finger && event.amount(axis) == Some(0.0) {
+                        frame = frame.stop(axis);
                     }
                 }
-                if vertical_amount != 0.0 {
-                    frame = frame.value(Axis::Vertical, vertical_amount);
-                    if let Some(discrete) = vertical_amount_discrete {
-                        frame = frame.v120(Axis::Vertical, discrete as i32);
-                    }
-                }
-
-                if source == AxisSource::Finger {
-                    if event.amount(Axis::Horizontal) == Some(0.0) {
-                        frame = frame.stop(Axis::Horizontal);
-                    }
-                    if event.amount(Axis::Vertical) == Some(0.0) {
-                        frame = frame.stop(Axis::Vertical);
-                    }
-                }
-
-                // Who scrolls is the seat's: a window (Wayland through the frame,
-                // native with the same amounts over the bus) or the open popup (dispatch.rs).
-                let wire_source = match source {
+                // Who scrolls is the seat's: a Wayland window gets the frame, a
+                // native one the same amounts over the bus, the open popup its grid (dispatch.rs).
+                let wire = match source {
                     AxisSource::Wheel => 0,
                     AxisSource::Finger => 1,
                     AxisSource::Continuous => 2,
                     AxisSource::WheelTilt => 3,
                 };
-                let (v120x, v120y) = (horizontal_amount_discrete.unwrap_or(0.0) as i32, vertical_amount_discrete.unwrap_or(0.0) as i32);
-                self.pointer_axis(frame, wire_source, horizontal_amount, vertical_amount, v120x, v120y, Event::time(&event));
+                let v120 = |axis| notches(axis).unwrap_or(0.0) as i32;
+                self.pointer_axis(frame, wire, amount(Axis::Horizontal), amount(Axis::Vertical), v120(Axis::Horizontal), v120(Axis::Vertical), Event::time(&event));
             }
             _ => {}
         }
@@ -275,6 +248,16 @@ impl Server {
             self.native_keyboard_leave(&old);
         }
         self.input.seat.focus(None);
+    }
+
+    /// A point kept on the screens (the pointer cannot leave the desktop).
+    fn on_screens(&self, mut pos: smithay::utils::Point<f64, smithay::utils::Logical>) -> smithay::utils::Point<f64, smithay::utils::Logical> {
+        let all = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).reduce(|a, b| a.merge(b));
+        if let Some(b) = all {
+            pos.x = pos.x.clamp(b.loc.x as f64, (b.loc.x + b.size.w) as f64 - 1.0);
+            pos.y = pos.y.clamp(b.loc.y as f64, (b.loc.y + b.size.h) as f64 - 1.0);
+        }
+        pos
     }
 
     /// The window that has the keyboard, any kind.
