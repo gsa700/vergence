@@ -1,0 +1,12 @@
+[package]
+name = "vergence-seat"
+description = "Vergence's seat: who gets each pointer, keyboard and touch event, focus and grabs, as plain decisions (docs/seat-milestone-1.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Our own code only, no dependencies. No Smithay: the server tells the seat
+# what is under a point and applies what the seat decides; the rules are
+# tested here on every platform (as vergence-shell's are for the dock).
+[dependencies]

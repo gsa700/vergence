@@ -2199,6 +2199,10 @@ name = "vergence-scene"
 version = "0.1.0"
 
 [[package]]
+name = "vergence-seat"
+version = "0.1.0"
+
+[[package]]
 name = "vergence-server"
 version = "0.1.0"
 dependencies = [
