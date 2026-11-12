@@ -46,6 +46,11 @@ impl<M> Default for Response<M> {
 /// What a widget is, to a screen reader, voice or automation (Contract 3).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Meaning {
+    /// The widget's id, stable while the tree keeps its shape (child_id), and
+    /// its nearest ancestor with a meaning's (0: the window itself). For the
+    /// native protocol's tree (Contract 3, native milestone 1 step 6).
+    pub id: u64,
+    pub parent: u64,
     pub role: &'static str,
     pub name: String,
     pub value: Option<String>,
@@ -1577,24 +1582,26 @@ impl<M: Clone> Ui<M> {
         let mut in_button: Vec<bool> = Vec::with_capacity(self.nodes.len());
         for (i, n) in self.nodes.iter().enumerate() {
             let parent_in_button = n.parent.is_some_and(|p| in_button[p] || matches!(self.nodes[p].what, What::Button { .. }));
-            let depth = {
-                let mut d = 0;
+            let (depth, parent) = {
+                let (mut d, mut first) = (0, None);
                 let mut p = n.parent;
                 while let Some(q) = p {
                     if slot[q].is_some() {
                         d += 1;
+                        first.get_or_insert(self.nodes[q].id);
                     }
                     p = self.nodes[q].parent;
                 }
-                d
+                (d, first.unwrap_or(0))
             };
+            let id = n.id;
             let mut states = Vec::new();
             if self.focus == Some(n.id) {
                 states.push("focused");
             }
             let named = |fallback: String| n.name.clone().unwrap_or(fallback);
             let bounds = self.shown(i);
-            let mk = |role, name, value: Option<String>, states| Some(Meaning { role, name, value, states, bounds, depth });
+            let mk = |role, name, value: Option<String>, states| Some(Meaning { id, parent, role, name, value, states, bounds, depth });
             let off = |usable: bool, states: &mut Vec<&'static str>| {
                 if !usable {
                     states.insert(0, "off");

@@ -129,6 +129,9 @@ struct Host<P: Program> {
     print_frames: bool,
     /// How long the last scene took to build (laid out and described), in ms.
     scene_ms: f64,
+    /// The meaning last handed to the server (Contract 3): sent again only
+    /// when it differs.
+    meaning_sent: Option<vergence_ui::MeaningTree>,
 }
 
 /// The toolkit's own timer (the caret's blink).
@@ -171,6 +174,34 @@ impl<P: Program> vergence_ui::App for Host<P> {
 
     fn animating(&self) -> bool {
         self.ui.animating()
+    }
+
+    /// The tree's meaning for the server (native road), when it has changed
+    /// since the last frame: layout, focus, values and states all show in it.
+    fn meaning(&mut self) -> Option<vergence_ui::MeaningTree> {
+        let mut tree = vergence_ui::MeaningTree::default();
+        for m in self.ui.meaning() {
+            if m.states.contains(&"focused") {
+                tree.focus = m.id;
+            }
+            tree.nodes.push(vergence_ui::MeaningNode {
+                id: m.id,
+                parent: m.parent,
+                role: m.role.to_string(),
+                name: m.name,
+                value: m.value,
+                states: m.states.iter().map(|s| s.to_string()).collect(),
+                x: m.bounds.x,
+                y: m.bounds.y,
+                w: m.bounds.w,
+                h: m.bounds.h,
+            });
+        }
+        if self.meaning_sent.as_ref() == Some(&tree) {
+            return None;
+        }
+        self.meaning_sent = Some(tree.clone());
+        Some(tree)
     }
 
     fn shown(&mut self, frame: &Frame, draw_ms: f64) -> bool {
@@ -260,7 +291,7 @@ impl<P: Program> Host<P> {
 /// size asked for, in reference units.
 pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {
     let theme = program.theme();
-    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0 };
+    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None };
     vergence_ui::run(&mut host, size)
 }
 

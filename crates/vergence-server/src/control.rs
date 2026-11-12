@@ -156,6 +156,8 @@ impl Server {
                 format!("shot: next frame of each monitor -> {}/<connector>.png", dir.display())
             }
             "windows" => self.describe_windows(),
+            // Native windows' meaning (Contract 3, native.rs).
+            "tree" => self.native_tree_report(),
             "shelf" => self.shelf_report(),
             "session" => self.session_report(),
             "apps" => self.launcher_report(),

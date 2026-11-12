@@ -407,3 +407,56 @@ fuzz test feeds the decoder random frames and descriptors.
     as the Wayland road's), a Vergence session on kepler or Techbench with
     the native road, outside a Vergence session (GNOME on Techbench: no
     `VERGENCE_BUS`, so Wayland by the code; not run).
+
+- **Step 6 (2026-11-11): Contract 2 and Contract 3, first versions.**
+  - **Placement**: the server places a native window by window memory
+    first (where the user last left it, by identity), then where the
+    window asks (`Place::Monitor` by the monitor's id, or `Place::Parent`
+    from its parent window) when that puts it wholly on a monitor, then on
+    the monitor under the pointer. A `Place` request later moves it on the
+    same terms and is remembered. In the toolkit: `App::place()` when the
+    window opens, `Window::ask_place()` later (native road only; Wayland
+    lets no client place its window). On Hubble: asked for 100,120 and put
+    there; `p` asked for 40,40 and it moved; reopened with no request and
+    memory brought it back to 40,40 (acceptance 4); asked for 5000,5000 and
+    refused, centered instead.
+  - **Meaning**: the toolkit's tree (`Ui::meaning`) now carries each
+    widget's stable id and its nearest meaningful ancestor's; the widgets
+    host hands it to vergence-ui after each frame when it has changed
+    (`App::meaning`), and the native road sends it (`WinRequest::Meaning`),
+    cut to fit one 64 KB frame (names and values at most 512 characters;
+    pieces come when a window needs more). The server keeps each window's
+    tree; `vctl tree` prints it indented, the focused widget marked. On
+    Hubble: the settings app's 40 widgets with their names, the selected
+    page, the choice's and switches' values; a click into "Custom accent"
+    marked it focused and typing showed its value live (acceptance 5). A
+    secret field's text never leaves the program: the toolkit sends no
+    value and a "secret" state (its test; no program of ours has a secret
+    field yet). The terminal, drawn without the widgets, sends no tree yet.
+  - Every request of the window protocol now has a handler in the server.
+  - Tests: the meaning budget (5,000 nodes of 2,000-character names cut to
+    fit one frame and still encoded) and a small tree whole; meaning's
+    parent links and stable ids. 325 green on Hubble, kepler and Techbench.
+
+## Acceptance, where it stands (2026-11-11, after step 6)
+
+1. Native on Hubble: **met** (terminal and settings app, `vctl windows`).
+   On kepler and Techbench: installed and tested there, not yet run in a
+   session there.
+2. Stress test: **rates met** (step 5's table). Clicks: 33 of 50 on both
+   roads, from the click tool picking the wrong window; fix the tool,
+   then run again.
+3. Clipboard: native and Wayland both ways **met** with the terminal on
+   Hubble (step 4); **Firefox not yet tried**.
+4. Placement by request and memory: **met**.
+5. `vctl tree`: **met** (secret by the toolkit's test).
+6. Wayland applications as before: the terminal's Wayland road runs;
+   **Firefox, AlbumWall and foot not yet tried** in this build. Step 2's
+   soak was clean.
+7. Fuzz (a million frames, step 1) and refusals (the lying client, step
+   3): **met**.
+8. Outside a Vergence session: Wayland by the code (no `VERGENCE_BUS`);
+   **not yet run** under GNOME or Xfce.
+
+To close the milestone: the runs on kepler and Techbench, Firefox (3, 6),
+the click tool, and one run outside a Vergence session.

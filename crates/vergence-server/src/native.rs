@@ -35,6 +35,14 @@
 // paste is given the read end of a pipe whose write end goes to whoever has
 // the clipboard (a Wayland client, X11, or another native client, which
 // hears ClipboardSend). Native clients hear ClipboardOffer when it changes.
+//
+// Placement (Contract 2, step 6): window memory by identity first (where the
+// user last left it), then where the window asks to be (a point of a monitor
+// by its id, or of its parent window), when that puts it wholly on a
+// monitor, then the monitor under the pointer. A later Place request moves
+// it on the same terms. Meaning (Contract 3, step 6): each window's tree as
+// it last sent it, kept for `vctl tree`; nothing else reads it yet, and a
+// secret field's text never arrives (the toolkit keeps it).
 
 use std::{
     os::{fd::AsFd, unix::fs::FileExt},
@@ -101,6 +109,8 @@ struct State {
     frame_wanted: bool,
     /// The pointer's shape over it, as it asked (step 4).
     cursor: smithay::input::pointer::CursorIcon,
+    /// Its meaning as last sent (Contract 3): the focused widget, the caret, the tree.
+    meaning: Option<(u64, Option<(f64, f64, f64, f64)>, Vec<vergence_protocol::window::Node>)>,
 }
 
 /// Native windows' share of the pointer and the keyboard (step 4).
@@ -243,7 +253,7 @@ impl Server {
     /// A window message from bus client `client` (bus.rs).
     pub fn native_request(&mut self, client: u32, req: WinRequest) {
         match req {
-            WinRequest::Create { serial, window, role, title, width, height, own_frame, .. } => {
+            WinRequest::Create { serial, window, role, title, width, height, own_frame, parent, place, .. } => {
                 if window == 0 || self.natives.contains_key(&(client, window)) {
                     return self.native_refuse(client, serial, ErrorCode::BadMessage, format!("window id {window} is 0 or in use"));
                 }
@@ -275,13 +285,16 @@ impl Server {
                         picture: None,
                         frame_wanted: false,
                         cursor: smithay::input::pointer::CursorIcon::Default,
+                        meaning: None,
                     }),
                     user_data: UserDataMap::new(),
                 });
                 let w = Win::Native(n.clone());
-                // Where it goes: memory first (by identity, memory.rs), else fitted
-                // and centered on the monitor under the pointer (place.rs).
-                let (rect, maximized) = match self.remembered_place(&w) {
+                // Where it goes: memory first (by identity, memory.rs), then where it
+                // asked to be if that is allowed, else fitted and centered on the
+                // monitor under the pointer (place.rs).
+                let asked_place = self.native_place_rect(client, parent, &place, asked, &w);
+                let (rect, maximized) = match self.remembered_place(&w).or(asked_place.map(|r| (r, false))) {
                     Some(r) => r,
                     None => {
                         let out = self.output_at_pointer().unwrap_or_default();
@@ -393,10 +406,93 @@ impl Server {
                     self.minimize(&w);
                 }
             }
+            WinRequest::Place { window, place } => {
+                let Some(w) = self.natives.get(&(client, window)).cloned() else { return };
+                let Some(geo) = self.space.element_geometry(&w) else { return };
+                match self.native_place_rect(client, 0, &place, geo.size, &w) {
+                    Some(r) => {
+                        tracing::info!("native: client {client} window {window} placed at {},{} as asked", r.loc.x, r.loc.y);
+                        self.space.map_element(w.clone(), r.loc, false);
+                        self.remember(&w);
+                    }
+                    None => tracing::info!("native: client {client} window {window} asked for {place:?}: not allowed"),
+                }
+            }
+            WinRequest::Meaning { window, focus, caret, nodes } => {
+                if let Some(Win::Native(n)) = self.natives.get(&(client, window)) {
+                    n.state.lock().unwrap().meaning = Some((focus, caret, nodes));
+                }
+            }
             WinRequest::Copy { kinds, .. } => self.native_copy(client, kinds),
             WinRequest::Paste { serial, kind } => self.native_paste(client, serial, kind),
-            // Placement requests and meaning: later in the milestone.
-            other => tracing::debug!("native: client {client}: {other:?} (not yet)"),
+        }
+    }
+
+    /// Where a window that asked for `place` would go with `size` (content),
+    /// if the request is allowed: wholly on a monitor, below its title bar if
+    /// the server draws one. None: Anywhere, an unknown monitor or parent, or
+    /// a place that would leave it partly off every monitor.
+    fn native_place_rect(&self, client: u32, parent: u32, place: &vergence_protocol::window::Place, size: Size<i32, Logical>, w: &Win) -> Option<Rectangle<i32, Logical>> {
+        use vergence_protocol::window::Place;
+        let finite = |v: f64| v.is_finite().then_some(v.round() as i32);
+        let at: Point<i32, Logical> = match place {
+            Place::Anywhere => return None,
+            Place::Monitor { id, x, y } => {
+                let out = self.space.outputs().find(|o| crate::memory::monitor_id_of(o).as_deref() == Some(id.as_str()))?;
+                let og = self.space.output_geometry(out)?;
+                (og.loc.x + finite(*x)?, og.loc.y + finite(*y)?).into()
+            }
+            Place::Parent { x, y } => {
+                let p = self.natives.get(&(client, parent))?;
+                let loc = self.space.element_location(p)?;
+                (loc.x + finite(*x)?, loc.y + finite(*y)?).into()
+            }
+        };
+        let r = Rectangle::new(at, size);
+        self.fits_a_monitor(r, self.has_title(w)).then_some(r)
+    }
+
+    /// For `vctl tree`: every native window's meaning as it last sent it,
+    /// indented by the tree, the focused widget marked. Values are shown;
+    /// a secret field has none (the toolkit never sends it).
+    pub fn native_tree_report(&self) -> String {
+        let mut out = Vec::new();
+        let mut keys: Vec<&(u32, u32)> = self.natives.keys().collect();
+        keys.sort();
+        for k in keys {
+            let Some(Win::Native(n)) = self.natives.get(k) else { continue };
+            let s = n.state.lock().unwrap();
+            out.push(format!("window {:?} ({}, client {} window {})", s.title, n.app_id, n.client, n.id));
+            let Some((focus, caret, nodes)) = &s.meaning else {
+                out.push("  (no meaning sent)".into());
+                continue;
+            };
+            let depth_of = |mut id: u64| -> usize {
+                let mut d = 0;
+                while let Some(p) = nodes.iter().find(|m| m.id == id).map(|m| m.parent).filter(|p| *p != 0) {
+                    d += 1;
+                    id = p;
+                    if d > 64 {
+                        break;
+                    }
+                }
+                d
+            };
+            for m in nodes {
+                let value = m.value.as_ref().map(|v| format!(" = {v:?}")).unwrap_or_default();
+                let states = if m.states.is_empty() { String::new() } else { format!(" [{}]", m.states.join(", ")) };
+                let mark = if m.id == *focus { "> " } else { "  " };
+                out.push(format!("{mark}{}{} {:?}{value}{states} at {:.0},{:.0} {:.0}x{:.0}", "  ".repeat(depth_of(m.id)), m.role, m.name, m.x, m.y, m.w, m.h));
+            }
+            if let Some((x, y, w, h)) = caret {
+                out.push(format!("  caret at {x:.0},{y:.0} {w:.0}x{h:.0}"));
+            }
+            out.push(format!("  {} widgets, focus {}", nodes.len(), if *focus == 0 { "none".to_string() } else { format!("{focus:#x}") }));
+        }
+        if out.is_empty() {
+            "no native windows".into()
+        } else {
+            out.join("\n")
         }
     }
 

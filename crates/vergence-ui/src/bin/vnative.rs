@@ -2,6 +2,7 @@
 //! step 3), to try the server's side before the toolkit has a native road.
 //!
 //!     vnative [--title T] [--size WxH] [--own-frame] [--frames N] [--short-file] [--gpu]
+//!             [--role R] [--place MONITOR_ID:X,Y]
 //!
 //! It asks for a window, draws a gradient with a border at the scale it is
 //! told, and then moves a bar one step for every frame the server offers,
@@ -19,6 +20,11 @@
 //!
 //! The clipboard: `c` copies a line of text, `v` pastes and prints what
 //! came; offers and requests are printed.
+//!
+//! Placement (Contract 2): `--role` gives the window another identity (so
+//! window memory has no place for it yet), `--place` asks for a point of a
+//! monitor by its id (`vbus outputs` lists them) when it opens, and `p`
+//! asks again for 40,40 of the same monitor later.
 //!
 //! `--gpu` draws with the toolkit's GPU renderer into GPU buffers (dmabuf)
 //! instead of shared memory: two of them, taken in turn. A buffer is free
@@ -95,6 +101,7 @@ const CROSSHAIR: u16 = 8;
 const KEY_ESC: u32 = 1;
 const KEY_C: u32 = 46;
 const KEY_V: u32 = 47;
+const KEY_P: u32 = 25;
 const COPIED: &str = "copied from vnative, a native window";
 const TEXT: &str = "text/plain;charset=utf-8";
 
@@ -197,19 +204,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
+    let role = arg("--role").unwrap_or_else(|| "main".into());
+    // MONITOR_ID:X,Y (the id may hold colons; the last one splits).
+    let place = arg("--place")
+        .and_then(|p| {
+            let (id, xy) = p.rsplit_once(':')?;
+            let (x, y) = xy.split_once(',')?;
+            Some(Place::Monitor { id: id.to_string(), x: x.parse().ok()?, y: y.parse().ok()? })
+        })
+        .unwrap_or(Place::Anywhere);
+    let monitor = match &place {
+        Place::Monitor { id, .. } => Some(id.clone()),
+        _ => None,
+    };
     let mut c = Client::connect("vnative")?;
     let reply = c.request(|serial| {
         ClientMsg::Window(WinRequest::Create {
             serial,
             window: WINDOW,
-            role: "main".into(),
+            role: role.clone(),
             token: String::new(),
             title: title.clone(),
             width,
             height,
             own_frame,
             parent: 0,
-            place: Place::Anywhere,
+            place: place.clone(),
         })
     })?;
     if let ServerMsg::Window(WinEvent::Created { token, .. }) = &reply {
@@ -336,6 +356,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 if key == KEY_C && pressed {
                     c.send(&ClientMsg::Window(WinRequest::Copy { input_serial: serial, kinds: vec![TEXT.into(), "text/plain".into()] }))?;
+                }
+                if key == KEY_P && pressed && let Some(id) = &monitor {
+                    c.send(&ClientMsg::Window(WinRequest::Place { window: WINDOW, place: Place::Monitor { id: id.clone(), x: 40.0, y: 40.0 } }))?;
+                    println!("asked for 40,40 of {id}");
                 }
                 if key == KEY_V && pressed {
                     let s = c.next_serial();

@@ -135,6 +135,23 @@ fn a_long_wrapped_text_is_measured_about_once() {
     assert_eq!(m.bounds.h, ((2000.0f32 / 12.0).ceil() * 12.5).ceil(), "{}", ui.meaning_text());
 }
 
+#[test]
+fn meaning_links_each_widget_to_its_nearest_meaningful_ancestor() {
+    // A scroll area holding a column (no meaning of its own) of a label and a
+    // button whose text is its name: both point at the scroll area; the
+    // scroll area at the window (0). Ids are the widgets' own, stable.
+    let page = || scroll(column(vec![label("Hello"), button(label("Save")).on_press(Msg::A)]).width(Length::FILL)).name("Page");
+    let ui = laid(page(), 300.0, 200.0);
+    let m = ui.meaning();
+    let roles: Vec<&str> = m.iter().map(|m| m.role).collect();
+    assert_eq!(roles, vec!["scroll area", "label", "button"], "{}", ui.meaning_text());
+    assert_eq!(m[0].parent, 0);
+    assert_eq!((m[1].parent, m[2].parent), (m[0].id, m[0].id));
+    assert!(m.iter().all(|x| x.id != 0));
+    let again = laid(page(), 300.0, 200.0).meaning();
+    assert_eq!(m.iter().map(|x| x.id).collect::<Vec<_>>(), again.iter().map(|x| x.id).collect::<Vec<_>>(), "stable");
+}
+
 fn two_buttons() -> Element<Msg> {
     row(vec![button(label("A")).on_press(Msg::A), button(label("B")).on_press(Msg::B), button(label("off"))]).spacing(10.0)
 }

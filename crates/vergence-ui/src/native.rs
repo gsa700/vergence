@@ -33,14 +33,14 @@ use vergence_protocol::{
     bus::{ClientMsg, ServerMsg},
     shm::{ShmFile, read_shared},
     sock,
-    window::{Buffer, Fd, Place, Plane, SHM_ARGB8888, SHM_XRGB8888, WinEvent, WinRequest},
+    window::{Buffer, Fd, MAX_NODES, MAX_STATES, Node, Plane, SHM_ARGB8888, SHM_XRGB8888, WinEvent, WinRequest},
 };
 use vergence_render::{Cpu, Gpu, GpuBuffer, GpuError, Order, Target, pixel_size};
 use vergence_scene::{Color, Scene};
 use vergence_text::Fonts;
 
 use crate::{
-    App, Button, Command, Cursor, Frame, GPU_BUFFERS, Input, MAX_KEYMAP, MAX_PASTE, Modifiers, PASTE_TIMEOUT, Paste, Repeat, TEXT_KINDS, Waker, Window, keyboard, other, set_timer,
+    App, Button, Command, Cursor, Frame, GPU_BUFFERS, Input, MAX_KEYMAP, MeaningTree, MAX_PASTE, Modifiers, PASTE_TIMEOUT, Paste, Repeat, TEXT_KINDS, Waker, Window, keyboard, other, set_timer,
     touch,
 };
 
@@ -117,7 +117,7 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
         return Ok(None);
     }
     let Ok(mut client) = Client::connect(&app.app_id()) else { return Ok(None) };
-    let (title, own_frame) = (app.title(), app.own_frame());
+    let (title, own_frame, place) = (app.title(), app.own_frame(), app.place());
     let created = client.request(|serial| {
         ClientMsg::Window(WinRequest::Create {
             serial,
@@ -129,7 +129,7 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
             height: size.1.max(1) as f64,
             own_frame,
             parent: 0,
-            place: Place::Anywhere,
+            place,
         })
     });
     match created {
@@ -258,6 +258,7 @@ impl Native {
                 }
                 Command::Paste => self.start_paste()?,
                 Command::Timer(id, at) => set_timer(&mut self.timers, id, at),
+                Command::Place(place) => self.send(WinRequest::Place { window: WINDOW, place })?,
             }
         }
         Ok(())
@@ -601,6 +602,75 @@ impl Native {
         if !app.shown(&frame, t.elapsed().as_secs_f64() * 1e3) {
             self.closing = true;
         }
+        // The window's meaning, when it has changed (Contract 3).
+        if let Some(tree) = app.meaning() {
+            self.send(meaning_request(&tree))?;
+        }
         Ok(())
+    }
+}
+
+/// The most of a meaning message's frame its nodes may fill (the protocol's
+/// frames are at most 64 KB), and the longest name or value sent. A tree
+/// that does not fit is cut at a node (a first version: Contract 3's tree in
+/// pieces comes when a window needs more).
+const MEANING_BUDGET: usize = 60 * 1024;
+const MEANING_TEXT: usize = 512;
+
+/// The tree as the protocol's Meaning request, within its limits.
+fn meaning_request(tree: &MeaningTree) -> WinRequest {
+    let cut = |s: &str| -> String { s.chars().take(MEANING_TEXT).collect() };
+    let mut nodes = Vec::new();
+    let mut used = 64;
+    for n in tree.nodes.iter().take(MAX_NODES) {
+        let node = Node {
+            id: n.id,
+            parent: n.parent,
+            role: cut(&n.role),
+            name: cut(&n.name),
+            value: n.value.as_deref().map(cut),
+            states: n.states.iter().take(MAX_STATES).map(|s| cut(s)).collect(),
+            x: n.x as f64,
+            y: n.y as f64,
+            w: n.w as f64,
+            h: n.h as f64,
+        };
+        // Its share of the frame: ids and bounds, the strings with their lengths.
+        let size = 8 + 8 + 32 + 4 * (3 + node.states.len()) + 1 + node.role.len() + node.name.len() + node.value.as_ref().map_or(0, String::len) + node.states.iter().map(String::len).sum::<usize>();
+        if used + size > MEANING_BUDGET {
+            break;
+        }
+        used += size;
+        nodes.push(node);
+    }
+    let caret = tree.caret.map(|(x, y, w, h)| (x as f64, y as f64, w as f64, h as f64));
+    WinRequest::Meaning { window: WINDOW, focus: tree.focus, caret, nodes }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(i: u64, name_len: usize) -> crate::MeaningNode {
+        crate::MeaningNode { id: i + 1, parent: 0, role: "label".into(), name: "n".repeat(name_len), value: Some("v".repeat(name_len)), states: vec!["focused".into(); 20], x: 0.0, y: 0.0, w: 1.0, h: 1.0 }
+    }
+
+    #[test]
+    fn a_tree_too_big_for_one_message_is_cut_to_fit_and_still_encodes() {
+        // 5,000 widgets with 2,000-character names: far past the 64 KB frame.
+        let tree = MeaningTree { focus: 1, caret: None, nodes: (0..5000).map(|i| node(i, 2000)).collect() };
+        let req = meaning_request(&tree);
+        let WinRequest::Meaning { nodes, .. } = &req else { panic!("not a Meaning") };
+        assert!(!nodes.is_empty() && nodes.len() < 5000, "{} nodes kept", nodes.len());
+        assert!(nodes.iter().all(|n| n.name.chars().count() <= MEANING_TEXT && n.states.len() <= MAX_STATES));
+        let bytes = ClientMsg::Window(req).encode().expect("fits one frame");
+        assert!(bytes.len() <= 64 * 1024, "{} bytes", bytes.len());
+    }
+
+    #[test]
+    fn a_small_tree_goes_whole() {
+        let tree = MeaningTree { focus: 2, caret: Some((1.0, 2.0, 1.0, 14.0)), nodes: (0..40).map(|i| node(i, 12)).collect() };
+        let WinRequest::Meaning { focus, caret, nodes, .. } = meaning_request(&tree) else { panic!() };
+        assert_eq!((focus, nodes.len(), caret), (2, 40, Some((1.0, 2.0, 1.0, 14.0))));
     }
 }

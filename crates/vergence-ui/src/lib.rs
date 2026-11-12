@@ -61,6 +61,37 @@ use vergence_wl::{
 };
 
 pub use keyboard::{Modifiers, sym};
+/// Where a window asks to be (Contract 2): the server decides. Asked for by
+/// [`App::place`] when the window opens and [`Window::ask_place`] later; the
+/// native road only (Wayland lets no client place its window).
+pub use vergence_protocol::window::Place;
+
+/// One widget of a window's meaning (Contract 3), for the server: its stable
+/// id and its nearest ancestor's with a meaning (0: the window), what it is,
+/// its name, its value (never a secret's), its states, and its bounds in the
+/// window in reference units.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeaningNode {
+    pub id: u64,
+    pub parent: u64,
+    pub role: String,
+    pub name: String,
+    pub value: Option<String>,
+    pub states: Vec<String>,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+/// A window's whole meaning: its widgets, the focused one's id (0: none) and
+/// the text caret, if a field has one.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MeaningTree {
+    pub focus: u64,
+    pub caret: Option<(f32, f32, f32, f32)>,
+    pub nodes: Vec<MeaningNode>,
+}
 
 /// The largest keymap accepted from the server.
 const MAX_KEYMAP: usize = 4 << 20;
@@ -212,6 +243,7 @@ enum Command {
     Copy(String),
     Paste,
     Timer(u64, Option<Instant>),
+    Place(Place),
 }
 
 /// What a program may ask of its window while it handles input.
@@ -284,6 +316,12 @@ impl Window {
     pub fn cancel_timer(&mut self, id: u64) {
         self.commands.push(Command::Timer(id, None));
     }
+
+    /// Asks to be somewhere else (Contract 2); the server decides. Native
+    /// road only.
+    pub fn ask_place(&mut self, place: Place) {
+        self.commands.push(Command::Place(place));
+    }
 }
 
 /// The most timers a window keeps at once; asking for more drops the
@@ -350,6 +388,17 @@ pub trait App {
     /// drawing it took. Return false to close the window.
     fn shown(&mut self, _frame: &Frame, _draw_ms: f64) -> bool {
         true
+    }
+
+    /// Where the window asks to be when it opens (Contract 2).
+    fn place(&self) -> Place {
+        Place::Anywhere
+    }
+
+    /// The window's meaning (Contract 3), when it has changed since it was
+    /// last asked: asked after each frame on the native road. None: as before.
+    fn meaning(&mut self) -> Option<MeaningTree> {
+        None
     }
 }
 
@@ -709,6 +758,8 @@ impl Runner {
                 }
                 Command::Paste => self.start_paste()?,
                 Command::Timer(id, at) => set_timer(&mut self.timers, id, at),
+                // Wayland lets no client place its window.
+                Command::Place(_) => {}
             }
         }
         Ok(())
