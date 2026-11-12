@@ -198,3 +198,19 @@ service, ALSA's `alsactl`) still restores levels at boot.
     this" on HDMI 1 moved the default there and the page's "Default" with
     it; restored afterwards (default back, `~/.asoundrc` removed, 69%).
   - 331 tests green on Hubble, kepler and Techbench.
+
+- **Step 4 (2026-11-11): the volume keys.** The server intercepts
+  `XF86AudioRaiseVolume`, `XF86AudioLowerVolume` and `XF86AudioMute` in
+  its key filter (never passed to applications) and changes the default
+  output through vergence-sound (`sound.rs`): 5% a press to the nearest
+  multiple of 5, up also unmuting, mute toggling; an output without a
+  volume of ours says so. The level shows for 1.5 s as a notification of
+  the server's own (a new `Origin::Server`), each press replacing the
+  last. Where PipeWire has the sound the keys do nothing yet. `vctl key`
+  knows `VolumeUp`, `VolumeDown` and `Mute`.
+  - On Hubble, through `vctl`, checked with `amixer`: 83% up to 85, 90,
+    down to 85, muted (`[off]`), up to 90 and unmuted; "Muted / Speakers
+    and headphones" shown at the top right; put back to 69% afterwards.
+    (It was at 83% before the test, not the 69% left after step 3: not yet
+    explained.)
+  - A test of the step; 332 tests green on Hubble, kepler and Techbench.

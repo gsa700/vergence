@@ -2221,6 +2221,7 @@ dependencies = [
  "vergence-render",
  "vergence-scene",
  "vergence-shell",
+ "vergence-sound",
  "vergence-text",
  "vergence-xsettings",
  "x11rb 0.13.2",

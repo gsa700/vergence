@@ -69,6 +69,8 @@ pub struct Server {
     pub natives: std::collections::HashMap<(u32, u32), Win>,
     /// Native windows' pointer focus and keymaps sent (native.rs).
     pub native_input: crate::native::NativeInput,
+    /// The volume keys' level display, as a notification of the server's own (sound.rs).
+    pub volume_note: u32,
     /// Where maximized windows go back to.
     pub restore: std::collections::HashMap<Win, smithay::utils::Rectangle<i32, Logical>>,
     /// The last press on a title bar, for double-click to maximize.
@@ -225,6 +227,7 @@ impl Server {
             decor: Default::default(),
             natives: Default::default(),
             native_input: Default::default(),
+            volume_note: 0,
             restore: Default::default(),
             last_title_press: None,
             shot_pending: Vec::new(),

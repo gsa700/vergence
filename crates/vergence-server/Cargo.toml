@@ -23,6 +23,7 @@ vergence-render.workspace = true
 vergence-edid.workspace = true
 vergence-xsettings.workspace = true
 vergence-protocol.workspace = true
+vergence-sound.workspace = true
 vergence-dbus.workspace = true
 x11rb = "0.13"
 png = "0.18"

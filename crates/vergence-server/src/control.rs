@@ -208,7 +208,11 @@ impl Server {
                         "Left" => vec![105],
                         "Right" => vec![106],
                         "Super" => vec![125],
-                        other => return format!("key: no key {other} (Escape, Return, BackSpace, Tab, space, Up, Down, Left, Right, Super)"),
+                        // The volume keys (KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP).
+                        "Mute" => vec![113],
+                        "VolumeDown" => vec![114],
+                        "VolumeUp" => vec![115],
+                        other => return format!("key: no key {other} (Escape, Return, BackSpace, Tab, space, Up, Down, Left, Right, Super, Mute, VolumeDown, VolumeUp)"),
                     }
                 } else {
                     const ROWS: [(&str, u32); 4] = [("1234567890-=", 2), ("qwertyuiop", 16), ("asdfghjkl", 30), ("zxcvbnm,.", 44)];

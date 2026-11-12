@@ -27,6 +27,8 @@ enum KeyAction {
     Popup(u32, Option<char>),
     /// Kept from the apps, with nothing else to do.
     Nothing,
+    /// A volume key (sound milestone 1, step 4): +5, -5, or 0 to mute or unmute.
+    Volume(i8),
 }
 
 impl Server {
@@ -46,6 +48,13 @@ impl Server {
                 }
                 if st.menu_is_open() && sym == keysyms::KEY_Escape {
                     return FilterResult::Intercept(KeyAction::CloseMenu);
+                }
+                // The volume keys, for the default output (sound.rs), never the apps'.
+                match sym {
+                    keysyms::KEY_XF86AudioRaiseVolume => return FilterResult::Intercept(KeyAction::Volume(5)),
+                    keysyms::KEY_XF86AudioLowerVolume => return FilterResult::Intercept(KeyAction::Volume(-5)),
+                    keysyms::KEY_XF86AudioMute => return FilterResult::Intercept(KeyAction::Volume(0)),
+                    _ => {}
                 }
                 let vt1 = keysyms::KEY_XF86Switch_VT_1;
                 if (vt1..vt1 + 12).contains(&sym) {
@@ -76,6 +85,7 @@ impl Server {
             }
             Some(KeyAction::Apps) => self.launcher_toggle(),
             Some(KeyAction::Popup(sym, typed)) => self.launcher_key(sym, typed),
+            Some(KeyAction::Volume(step)) => self.volume_key(step),
             Some(KeyAction::Nothing) | None => {}
         }
     }

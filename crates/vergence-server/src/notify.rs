@@ -64,6 +64,8 @@ pub enum Origin {
     DBus(u32),
     /// A session bus client.
     Bus(u32),
+    /// The server itself (the volume keys' level, sound.rs).
+    Server,
 }
 
 pub struct Request {
@@ -244,6 +246,7 @@ impl Server {
         match origin {
             Origin::DBus(conn) => self.dbus_notification_closed(conn, id, reason),
             Origin::Bus(client) => self.bus_notification_closed(client, id, reason),
+            Origin::Server => {}
         }
     }
 
@@ -251,6 +254,7 @@ impl Server {
         match origin {
             Origin::DBus(conn) => self.dbus_action_invoked(conn, id, key),
             Origin::Bus(client) => self.bus_action_invoked(client, id, key),
+            Origin::Server => {}
         }
     }
 
