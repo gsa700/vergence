@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Vergence's terminal: tabs in the window's bar, split panes, sharp at every scale, on the project's own toolkit"
+description = "Vergence's terminal: tabs in the window's bar, split panes, sharp at every scale, on vergence-ui, the project's own toolkit"
 
 # The terminal is the project's own throughout: parser, screen and pty
 # (vt.rs, grid.rs, pty.rs), and since 2026-11-10 its interface, on the

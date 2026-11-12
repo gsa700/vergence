@@ -1,6 +1,6 @@
 [package]
 name = "vergence-wl"
-description = "Vergence's own client side of the Wayland wire protocol, for the toolkit (whitepaper §6.10)"
+description = "Vergence's own client side of the Wayland wire protocol, for the vergence-ui toolkit (whitepaper §6.10)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

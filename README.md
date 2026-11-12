@@ -26,18 +26,18 @@ format), `vergence-harness` (EDID sweeps, fake
 monitors, size measurement), `vergence-server` (the phase 2 server),
 `vergence-protocol` (the native protocol: session bus messages, wire format,
 the `vbus` tool), `vergence-dbus` (our own D-Bus wire protocol, for the bus's
-D-Bus edge), `vergence-settings` (settings app prototype). `tools/sizebox`: one size-box program per
+D-Bus edge), `vergence-settings` (the settings app), `vergence-term` (the terminal); the toolkit, **vergence-ui**: `vergence-ui` (a window, its input and frames), `vergence-widgets`, `vergence-scene` (the display list), `vergence-render` (GPU and CPU reference renderers), `vergence-text`, `vergence-wl` (our own Wayland client code). `tools/sizebox`: one size-box program per
 toolkit.
 
 | Phase | What | Status |
 |---|---|---|
 | 1 | X11 consistency daemon: EDID profiles, scaling modes, layout memory | Milestone 1 done except real monitors and an automated sleep loop ([docs/milestone-1.md](docs/milestone-1.md)); milestone 2 built and running on Hubble ([docs/milestone-2.md](docs/milestone-2.md)); milestone 3, window memory, acceptance 1-7 pass ([docs/milestone-3.md](docs/milestone-3.md)); milestone 4, scaling, built: Mode A and B, acceptance 1-7 pass except Java and Qt-in-Mode-B findings ([docs/milestone-4.md](docs/milestone-4.md)); frozen since 2026-11-07 except blockers |
-| 2 | Display server | The daily session on Hubble since 2026-11-07, on the real monitors ([docs/server-milestone-1.md](docs/server-milestone-1.md)); session bus step 1, the core bus, done 2026-11-08 ([docs/bus-milestone-1.md](docs/bus-milestone-1.md)); installed as a session on Void since 2026-11-09. Next, in order (whitepaper §9): the project's own toolkit with the terminal on it (§6.10), the shell ([docs/shelf-milestone-1.md](docs/shelf-milestone-1.md)), widgets and the settings app, the native window protocol |
+| 2 | Display server | The daily session on Hubble since 2026-11-07, on the real monitors ([docs/server-milestone-1.md](docs/server-milestone-1.md)); session bus step 1, the core bus, done 2026-11-08 ([docs/bus-milestone-1.md](docs/bus-milestone-1.md)); installed as a session on Void since 2026-11-09. Done, in the order of work (whitepaper §9): the toolkit, vergence-ui, with the terminal on it (§6.10; [docs/toolkit-milestone-1.md](docs/toolkit-milestone-1.md)), widgets and the settings app on them ([docs/toolkit-milestone-2.md](docs/toolkit-milestone-2.md)), both closed 2026-11-10; the shell begun ([docs/shelf-milestone-1.md](docs/shelf-milestone-1.md)). Now: the native window protocol ([docs/native-milestone-1.md](docs/native-milestone-1.md)), steps 1 and 2 done |
 | 3 | Accessibility contract, display-list surfaces, Avalonia backend | Research |
 | 4 | Remote display over display lists | Research |
 
 Language: Rust throughout (whitepaper §8). The terminal has been on the project's own
-toolkit since 2026-11-10 (whitepaper §6.10; docs/toolkit-milestone-1.md), and the settings app since the same evening (docs/toolkit-milestone-2.md); iced is gone. Platforms (since 2026-11-09): a
+toolkit, vergence-ui, since 2026-11-10 (whitepaper §6.10; docs/toolkit-milestone-1.md), and the settings app since the same evening (docs/toolkit-milestone-2.md); iced is gone. Platforms (since 2026-11-09): a
 Linux without systemd, Void on Hubble, for development; FreeBSD (kepler, a
 second Lenovo Tiny) and Fedora (Techbench) at every
 milestone. Install on a system with `sudo tools/install.sh` after

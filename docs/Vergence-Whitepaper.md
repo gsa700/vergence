@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "10 November 2026 — Draft 0.9"
+date: "11 November 2026 — Draft 0.9"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.9 · 10 November 2026
+David Erickson (AB0R), with Claude · Draft 0.9 · 11 November 2026
 
 ---
 
@@ -286,7 +286,7 @@ An application may submit either a **bitmap** (always supported) or a **retained
 - **Magnification is truly sharp:** text at 4× is re-rendered text, not enlarged pixels.
 - **Remote display sends drawing commands instead of video**, the network transparency X promised, done properly.
 
-The reference implementation is in Rust, and the server's own tools are its first clients, through the project's toolkit (§6.10), whose scenes are in this format. Its renderer is the project's own unless a borrowed one, such as Vello, is decided to be necessary (§8). **Avalonia is the first outside toolkit to adopt it** (§8.1): it already draws a retained scene, which converts naturally. Display PostScript died because every application had to speak it; here it is an optional upgrade over bitmaps.
+The reference implementation is in Rust, and the server's own tools are its first clients, through the project's toolkit, vergence-ui (§6.10), whose scenes are in this format. Its renderer is the project's own unless a borrowed one, such as Vello, is decided to be necessary (§8). **Avalonia is the first outside toolkit to adopt it** (§8.1): it already draws a retained scene, which converts naturally. Display PostScript died because every application had to speak it; here it is an optional upgrade over bitmaps.
 
 ### 6.7 Other display problems addressed
 
@@ -337,7 +337,7 @@ The contracts above are where Vergence is new. The shell, the part of the deskto
 
 **What it borrows, and from where.** Window Maker (1997), the free descendant of NeXTSTEP's desktop, had three ideas worth keeping: one icon for each running application, small live tiles ("dockapps") instead of a tray of unrelated icons, and a menu on the bare desktop. It aged badly because its tiles were a fixed 64 pixels, dockapps were ordinary windows drawn by whatever program supplied them, and nothing showed what was installed. From current desktops Vergence takes the compact application list of macOS, a popup rather than a view that takes over the whole screen.
 
-**One shelf.** A single strip holds everything a top bar and a dock would hold between them, drawn by the server with the same drawing code as the project's toolkit (§6.10). It stands on the **right edge** of the main monitor (the primary screen in the settings app) and is always visible; hiding it until the pointer reaches the edge is an option. Any other monitor can have a shelf of its own, switched on in that screen's settings. Its width is set in reference units (Contract 1), so it is the same physical size on every monitor. From top to bottom it has three parts:
+**One shelf.** A single strip holds everything a top bar and a dock would hold between them, drawn by the server with the same drawing code as vergence-ui, the project's toolkit (§6.10). It stands on the **right edge** of the main monitor (the primary screen in the settings app) and is always visible; hiding it until the pointer reaches the edge is an option. Any other monitor can have a shelf of its own, switched on in that screen's settings. Its width is set in reference units (Contract 1), so it is the same physical size on every monitor. From top to bottom it has three parts:
 
 *Revised on 10 November 2026, when the first of it was on a screen:* the shelf is a **dock**, a rounded panel as tall as what it holds, floating a small gap in from the edge so that the desktop shows around it, and **it can be dragged**. Dropped near an edge of any screen it settles along that edge (upright at the sides, level at the top and bottom) and windows keep clear of it; dropped anywhere else it floats where it was put, over the windows. Which it does, where, the gap, and whether windows keep clear are settings. The right edge of the main monitor is where it starts.
 
@@ -362,9 +362,9 @@ A vertical shelf has no room for text, so names appear when the pointer rests on
 - **Dialogs** stay attached to the window they belong to and move with it.
 - **The desktop** is wallpaper only, with no icons on it; a right-click on it opens a short menu of applications.
 
-### 6.10 The toolkit: the tools' own
+### 6.10 The toolkit: vergence-ui, the tools' own
 
-The project's own tools (the terminal, the settings app, later a file manager and whatever else the desktop itself needs) are drawn with a **toolkit written by the project**. This was decided on 9 November 2026, after two days of building them on a borrowed one (§8): its software renderer rebuilt a window-sized mask for every run of text, its GPU renderer lost small drawings when multisampling was on, clicks went missing under load because input was judged at the pointer's latest position, and it has no route to Contract 3. Each fault had a workaround; the lesson, the same one the author's music applications taught, is that the workarounds cost more than the part. With two tools to move, the cheapest moment is now.
+The project's own tools (the terminal, the settings app, later a file manager and whatever else the desktop itself needs) are drawn with a **toolkit written by the project**, called **vergence-ui** after its main crate (named 11 November 2026). It is that crate and the ones under it: vergence-scene (the display list, §6.6), vergence-render (the GPU renderer and the CPU reference renderer), vergence-text (fonts, fallback, glyphs), vergence-widgets (widgets, layout and their meaning) and vergence-wl (the project's own Wayland client code). The toolkit was decided on 9 November 2026, after two days of building them on a borrowed one (§8): its software renderer rebuilt a window-sized mask for every run of text, its GPU renderer lost small drawings when multisampling was on, clicks went missing under load because input was judged at the pointer's latest position, and it has no route to Contract 3. Each fault had a workaround; the lesson, the same one the author's music applications taught, is that the workarounds cost more than the part. With two tools to move, the cheapest moment is now.
 
 It is not a general-purpose toolkit. It is what this desktop's tools need, and it carries the design's priorities down to the level where a button is drawn:
 
@@ -434,7 +434,7 @@ On a typical desktop, any program running as the user can already read the user'
 | Smithay | The server's Wayland front end, DRM/KMS and input back ends, renderer | Borrowed for phase 2 bring-up; moving to a support role (decided 8 November 2026): the renderer is replaced with the project's own first, then the DRM/KMS and input back ends; the Wayland front end may stay as an edge |
 | libinput, libseat/seatd, xkbcommon | Input devices, seat and device access, keymaps | Borrowed through Smithay |
 | Xwayland | X11 applications (the X11 edge) | Borrowed; an X server of our own is a large project |
-| iced | Nothing, since 10 November 2026 | **Removed.** Borrowed (MIT) for the first tools, chosen over Slint on 8 November 2026, replaced by the project's own toolkit (§6.10, decided 9 November 2026): the terminal moved on 10 November, the settings app the same evening, and iced went with its patches and workarounds |
+| iced | Nothing, since 10 November 2026 | **Removed.** Borrowed (MIT) for the first tools, chosen over Slint on 8 November 2026, replaced by the project's own toolkit, vergence-ui (§6.10, decided 9 November 2026): the terminal moved on 10 November, the settings app the same evening, and iced went with its patches and workarounds |
 | ab_glyph, resvg | Title-bar text, SVG wallpapers | Borrowed; small, candidates for our own |
 | Adwaita cursor theme | The pointer | Borrowed artwork, read at run time |
 
@@ -442,7 +442,7 @@ On a typical desktop, any program running as the user can already read the user'
 
 - **Phase 1 daemon:** Rust over XCB/RandR (the `x11rb` crate). Its profile, EDID and rules logic lives in a shared crate that moves unchanged into the server.
 - **Server core:** Rust. A compositor needs steady frame timing, which rules out garbage-collected runtimes.
-- **The toolkit and the tools** (terminal, settings, the shelf's drawing): Rust, on the project's own toolkit (§6.10). The terminal and the settings app are on it (both moved on 10 November 2026).
+- **The toolkit and the tools** (terminal, settings, the shelf's drawing): Rust, on vergence-ui, the project's own toolkit (§6.10). The terminal and the settings app are on it (both moved on 10 November 2026).
 - **Display-list reference implementation:** Rust (§6.6).
 
 Why one language:
@@ -569,7 +569,7 @@ The display-list renderer was phase 3 work. Step 1 brings its first version forw
 5. Status of Wayland session-restore and placement protocols, and whether the server should implement them for compatibility.
 6. Display-list format: the minimal validated command set (paths, fills, strokes, gradients, images, text runs with font references, clips, layers), and how text is shipped (glyph runs plus font identity, so the server can re-render text sharply at any density).
 7. FreeBSD specifics: DRM/KMS driver coverage for the target GPUs beyond Intel (§8.3); libinput and seat management; a suspend-and-wake loop for testing.
-8. The tools' user interface. *Answered (9 November 2026): the project's own toolkit (§6.10) replaces iced.* Open within it: text shaping for scripts that need it, right-to-left text and input methods, and whether font reading and shaping are written by the project or borrowed; which GPU interface the renderer uses first (OpenGL ES through EGL, which every target has today, or Vulkan); and how much isolation each platform allows for decoding and parsing.
+8. The tools' user interface. *Answered (9 November 2026): the project's own toolkit, vergence-ui (§6.10), replaces iced.* Open within it: text shaping for scripts that need it, right-to-left text and input methods, and whether font reading and shaping are written by the project or borrowed; which GPU interface the renderer uses first (OpenGL ES through EGL, which every target has today, or Vulkan); and how much isolation each platform allows for decoding and parsing.
 9. The scope of the native Avalonia backend: which parts of Avalonia's platform interfaces it must implement, and how its automation peers map to Contract 3.
 10. Firefox and Thunderbird: confirm that Firefox on X11 has no per-monitor scaling; check whether Mozilla implements (or plans) the Wayland session-restore protocol; how well heuristics match several Firefox windows to saved layouts; the scope of an AT-SPI bridge into Contract 3.
 11. Many monitors on several GPUs (§5.1): NVIDIA's FreeBSD driver with more than one card (Xinerama versus PRIME output sinks for phase 1; its DRM/KMS support for phase 2); how many monitors report a real EDID serial number (the linuxhw database can answer this), since identical panels without one are told apart only by port.
@@ -595,7 +595,7 @@ The display-list renderer was phase 3 work. Step 1 brings its first version forw
 - **Mesa:** the open-source implementation of OpenGL, Vulkan and GBM used by Intel, AMD and nouveau drivers.
 - **Explicit sync:** passing a fence with each buffer that says when the GPU has finished with it, instead of leaving the kernel to work that out (implicit sync).
 - **iced:** a cross-platform GUI toolkit for Rust, with a GPU renderer (wgpu) and a software one (tiny-skia); used by the first tools and replaced (§6.10): the terminal and then the settings app left it on 10 November 2026, and it was removed.
-- **Toolkit:** the code an application draws its buttons, lists and text with. Vergence's own is described in §6.10.
+- **Toolkit:** the code an application draws its buttons, lists and text with. Vergence's own, vergence-ui, is described in §6.10.
 - **Multisampling:** smoothing the edges of drawn shapes by sampling each pixel several times on the GPU.
 - **Smithay:** a Rust library for building Wayland compositors.
 - **Vello:** a Rust GPU renderer for 2D vector graphics.

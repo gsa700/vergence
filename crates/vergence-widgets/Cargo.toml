@@ -1,6 +1,6 @@
 [package]
 name = "vergence-widgets"
-description = "Vergence's toolkit: widgets, their layout and their meaning (whitepaper §6.10)"
+description = "vergence-ui, Vergence's toolkit: widgets, their layout and their meaning (whitepaper §6.10)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

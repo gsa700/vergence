@@ -1,6 +1,6 @@
 [package]
 name = "vergence-ui"
-description = "Vergence's toolkit: a window, its input and its frames (whitepaper §6.10)"
+description = "vergence-ui, Vergence's toolkit: a window, its input and its frames (whitepaper §6.10)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
