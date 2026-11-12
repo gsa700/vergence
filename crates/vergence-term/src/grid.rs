@@ -95,6 +95,13 @@ pub struct Grid {
     /// The cursor is past the last column: the next character wraps first.
     wrap_next: bool,
     saved: (usize, usize, Style),
+    /// Character sets (VT100): G0 and G1, each ASCII or DEC Special Graphics
+    /// (true), and whether G1 is the one in use (Shift Out). ncurses draws
+    /// boxes this way (mc, htop, dialog): ESC ( 0, then letters (2026-11-11:
+    /// mc on kepler drew "lqqqk" for a frame). Saved with the cursor.
+    charsets: [bool; 2],
+    shift_out: bool,
+    saved_charsets: ([bool; 2], bool),
     pen: Style,
     top: usize,
     bottom: usize,
@@ -157,6 +164,9 @@ impl Grid {
             cy: 0,
             wrap_next: false,
             saved: (0, 0, Style::default()),
+            charsets: [false; 2],
+            shift_out: false,
+            saved_charsets: ([false; 2], false),
             pen: Style::default(),
             top: 0,
             bottom: rows - 1,
@@ -399,7 +409,7 @@ impl Grid {
                 (true, 47) | (true, 1047) => self.set_alt(on),
                 (true, 1049) => {
                     if on {
-                        self.saved = (self.cx, self.cy, self.pen);
+                        self.save_cursor();
                         self.set_alt(true);
                     } else {
                         self.set_alt(false);
@@ -431,6 +441,7 @@ impl Grid {
 
 impl Perform for Grid {
     fn print(&mut self, c: char) {
+        let c = if self.charsets[self.shift_out as usize] { special_graphics(c) } else { c };
         let w = width(c);
         if w == 0 {
             if combining(c) {
@@ -488,6 +499,9 @@ impl Perform for Grid {
                 self.cx = 0;
                 self.wrap_next = false;
             }
+            // Shift Out and Shift In: G1, then G0 again.
+            0x0e => self.shift_out = true,
+            0x0f => self.shift_out = false,
             _ => {}
         }
         self.dirty = true;
@@ -600,7 +614,7 @@ impl Perform for Grid {
             'm' if private.is_none() => self.sgr(params),
             'h' => self.mode(private_q, params, true),
             'l' => self.mode(private_q, params, false),
-            's' if private.is_none() => self.saved = (self.cx, self.cy, self.pen),
+            's' if private.is_none() => self.save_cursor(),
             'u' if private.is_none() => self.restore_cursor(),
             'n' if private.is_none() => match raw(0) {
                 5 => self.out.extend_from_slice(b"\x1b[0n"),
@@ -618,11 +632,24 @@ impl Perform for Grid {
     }
 
     fn esc(&mut self, intermediates: &[u8], last: u8) {
+        // Designating a character set: ESC ( for G0, ESC ) for G1; "0" is DEC
+        // Special Graphics (line drawing), anything else ("B", "A", "U") ASCII.
+        // Other intermediates (ESC # 8 and the like): not yet.
+        if let [i] = intermediates {
+            if let Some(g) = match i {
+                b'(' => Some(0),
+                b')' => Some(1),
+                _ => None,
+            } {
+                self.charsets[g] = last == b'0';
+            }
+            return;
+        }
         if !intermediates.is_empty() {
-            return; // Character sets (ESC ( B): UTF-8 only.
+            return;
         }
         match last {
-            b'7' => self.saved = (self.cx, self.cy, self.pen),
+            b'7' => self.save_cursor(),
             b'8' => self.restore_cursor(),
             b'D' => self.linefeed(),
             b'E' => {
@@ -679,6 +706,13 @@ impl Grid {
         self.cx = x.min(self.cols - 1);
         self.cy = y.min(self.rows - 1);
         self.pen = pen;
+        (self.charsets, self.shift_out) = self.saved_charsets;
+    }
+
+    /// DECSC / CSI s: the cursor, its pen and the character sets.
+    fn save_cursor(&mut self) {
+        self.saved = (self.cx, self.cy, self.pen);
+        self.saved_charsets = (self.charsets, self.shift_out);
     }
 
     /// Delete lines / scroll up without sending lines to the scrollback.
@@ -708,6 +742,46 @@ impl Grid {
     }
 }
 
+/// DEC Special Graphics: what the VT100 drew for ` through ~ when line
+/// drawing was chosen (the table xterm and the VT100 manual give).
+fn special_graphics(c: char) -> char {
+    match c {
+        '_' => '\u{a0}',
+        '`' => '◆',
+        'a' => '▒',
+        'b' => '␉',
+        'c' => '␌',
+        'd' => '␍',
+        'e' => '␊',
+        'f' => '°',
+        'g' => '±',
+        'h' => '␤',
+        'i' => '␋',
+        'j' => '┘',
+        'k' => '┐',
+        'l' => '┌',
+        'm' => '└',
+        'n' => '┼',
+        'o' => '⎺',
+        'p' => '⎻',
+        'q' => '─',
+        'r' => '⎼',
+        's' => '⎽',
+        't' => '├',
+        'u' => '┤',
+        'v' => '┴',
+        'w' => '┬',
+        'x' => '│',
+        'y' => '≤',
+        'z' => '≥',
+        '{' => 'π',
+        '|' => '≠',
+        '}' => '£',
+        '~' => '·',
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -715,6 +789,30 @@ mod tests {
 
     fn feed(g: &mut Grid, s: &str) {
         Parser::new().advance(g, s.as_bytes());
+    }
+
+    #[test]
+    fn line_drawing_as_ncurses_sends_it() {
+        // mc's frame, as ncurses draws it with TERM=xterm-256color.
+        let mut g = Grid::new(10, 3);
+        feed(&mut g, "\x1b(0lqqk\x1b(B ok\r\n\x1b(0x  x\r\nmqqj\x1b(B");
+        assert_eq!(g.text(), "┌──┐ ok\n│  │\n└──┘", "line drawing until ESC ( B, letters after it");
+    }
+
+    #[test]
+    fn shift_out_uses_g1_and_shift_in_goes_back() {
+        let mut g = Grid::new(10, 1);
+        feed(&mut g, "\x1b)0q\x0eq\x0fq");
+        assert_eq!(g.text(), "q─q", "only while G1 is shifted in, and G1 is line drawing");
+    }
+
+    #[test]
+    fn character_sets_are_saved_with_the_cursor() {
+        let mut g = Grid::new(10, 1);
+        // Saved at column 0 with line drawing on; a letter in ASCII; restored: back
+        // at column 0, line drawing again, so the second q draws a line over it.
+        feed(&mut g, "\x1b(0\x1b7\x1b(Bq\x1b8q");
+        assert_eq!(g.text(), "─");
     }
 
     #[test]
