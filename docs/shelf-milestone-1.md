@@ -567,8 +567,33 @@ one.
    FreeBSD).
 5. **Met on Hubble** for the popup: Super opens it, typing filters, Enter
    starts the entry (htop, not Firefox, to keep Dave's profile out of it).
-1, 3, 6 need Hubble's two monitors (the second is on Techbench now); 4 and
-the Techbench parts of 2 and 5 are still to run.
+2026-11-12, on Techbench (Fedora, the dev session; Dave's go):
+
+2. **Met on Techbench and kepler**: Techbench lists 65 entries (a full
+   GNOME's worth), none crashing the parser; Firefox, htop, Terminal and
+   Settings each with an icon file (Terminal and Settings since `sudo
+   tools/install.sh` that day; a session from a checkout has no entries of
+   its own). Three entries have no icon file and get the letter tile.
+   kepler lists 5, all with icons. FOUND: GNOME's "Terminal" and
+   "Settings" have the same names as ours; the popup shows two of each.
+4. **Met on Techbench**, by `vctl` (Settings stood in for Firefox, to keep
+   Dave's profile out): the pins survived `vctl restart`; Close from the
+   icon's menu left the pinned icon; a click started Settings at its last
+   place (819,343); Unpin while open kept the icon until Close, then it
+   went. Session restore now brings back what was running (added
+   2026-11-10, after this check was written), so "not running" after the
+   restart holds only for what was closed. FOUND, not reproduced: on the
+   first restart only the terminal was in session.toml although Settings
+   and AlbumWall were open too; the second restart restored both
+   (its log was overwritten). A `vctl restart` within a minute of a
+   restore counts as a strike, as a crash does.
+5. **Met on Techbench**, by `vctl`: Super opened the popup; "fire" left
+   Firefox alone in the grid; Escape closed it with nothing started; no
+   letter reached the focused terminal (its prompt stayed empty); "htop",
+   Enter started htop in a terminal. The grid's scrolling needs a wheel
+   (vctl has none): by hand.
+
+1, 3, 6 need Hubble's two monitors (the second is on Techbench now).
 
 ## Acceptance
 
