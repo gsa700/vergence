@@ -51,6 +51,32 @@ replaces its Wayland-facing parts for our own tools; the renderer is a
 candidate for vergence-render; the DRM and input back ends are the last and
 hardest (they wrap the OS interfaces, which are not borrowing).
 
+**What the native milestone showed (2026-11-11, steps 2 to 4).** Smithay
+assumes every window is a Wayland or X11 window, and each native feature
+went around it rather than through it: its `Window` knows only those two
+(hence `Win`); pointer and touch focus are typed as `WlSurface` (native
+windows run on a parallel pointer and touch path); the keyboard focus
+callback holds the keyboard's lock (the server froze when our code read
+the keymap there); useful pieces are private (the cursor-shape table was
+rewritten). Dave: "we spend enough time working around other people's code
+pretty soon it's easier to do our own. As we saw on Deadwax and
+AlbumWall." The seams are where our own code already stands beside it:
+`Win`, the native pointer focus, `ClipOwner`.
+
+**Order of replacement, after native milestone 1 (agreed 2026-11-11):**
+
+1. **The seat**: our own input dispatch, focus and grabs, with Wayland
+   surfaces one kind of target among others. Removes the parallel pointer
+   and touch paths and the keyboard lock hazard.
+2. **The window space and the renderer**: the server draws with
+   vergence-render, as the toolkit does; `Win` becomes the server's own
+   element without Smithay's `Window` behind every case.
+3. **The Wayland front end**: kept as long as other people's applications
+   speak Wayland. It is the part Smithay does best and was always meant to
+   be an edge.
+4. **The DRM/KMS and input back ends**, last: thin wrappers over the OS's
+   interfaces, which are not borrowing (the drm-rs patch goes with them).
+
 ### libinput, libseat/seatd, xkbcommon (through Smithay)
 
 Input devices, seat and device access, keymaps. C libraries every Wayland
