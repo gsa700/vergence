@@ -518,12 +518,44 @@ struct Runner {
     paste: Option<Paste>,
     /// Input made here rather than read from the server, to give the program next.
     inbox: Vec<Input>,
+    /// The bar is ours to draw: the program leaves its frame to the server
+    /// ([`App::own_frame`] false) and the server draws none (no decoration
+    /// protocol, as GNOME's; or it answered "client side"). The program's
+    /// scene and input are then below [`bar::BAR_H`].
+    frame: bool,
+    own_frame: bool,
+    /// The server draws no border either: ours, and the band inside it
+    /// that resizes the window ([`vergence_look::EDGE`], [`vergence_look::RESIZE_BAND`]).
+    edges: bool,
+    /// The edges the pointer is on, in that band.
+    on_edge: Option<Edges>,
+    /// Our bar's buttons, left and right ([`bar::desktop_layout`]), and
+    /// the flag the settings file's watcher raises when it is written.
+    buttons: (Vec<bar::WinButton>, Vec<bar::WinButton>),
+    layout_changed: Arc<AtomicBool>,
+    /// What the pointer is over in our bar, and the button pressed there.
+    bar_hover: Option<bar::Part>,
+    bar_pressed: Option<bar::Part>,
+    /// The pointer is on our bar (the program was told it left).
+    in_bar: bool,
+    /// The server's word: the window is active, maximized (our bar's look and its button).
+    active: bool,
+    maximized: bool,
     /// The pipe other threads wake the window through, and its flag.
     wake: std::fs::File,
     wake_pending: Arc<AtomicBool>,
     /// The program's timers: its id for each, and when it is due.
     timers: Vec<(u64, Instant)>,
 }
+
+/// Whether the server offered no decoration protocol, so that a window
+/// leaving its frame to the server would get none: true means we draw it.
+fn decoration_manager_offered(offered: &[(Interface, u32, u32)]) -> bool {
+    !offered.iter().any(|o| o.0 == Interface::DecorationManager)
+}
+
+/// Our bar's title size (the settings app's interface text).
+const BAR_FONT_SIZE: f32 = 13.0;
 
 /// Opens the window and runs until it is closed. `size` is the size asked
 /// for, in reference units; the server may give another.
@@ -573,6 +605,10 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
             None => Ok(None),
         }
     };
+    // Our bar when the server will draw none (it may still say so later),
+    // and our border for any window then.
+    let undecorated = decoration_manager_offered(&offered);
+    let frame = !app.own_frame() && undecorated;
     let need = |id: Option<u32>, what: &str| id.ok_or_else(|| other(format!("the display server has no {what}")));
     let compositor = need(bind(&mut client, Interface::Compositor)?, "wl_compositor")?;
     let shm = need(bind(&mut client, Interface::Shm)?, "wl_shm")?;
@@ -618,7 +654,28 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
 
     let (wake_read, wake_write) = vergence_wl::conn::pipe()?;
     let wake_pending = Arc::new(AtomicBool::new(false));
-    app.waker(Waker { pipe: Arc::new(wake_write.into()), pending: wake_pending.clone() });
+    let wake_pipe: Arc<std::fs::File> = Arc::new(wake_write.into());
+    app.waker(Waker { pipe: wake_pipe.clone(), pending: wake_pending.clone() });
+    // The settings file, looked at once a second as the terminal does: a
+    // bar of ours follows the button layout the moment it is changed (the
+    // settings app's own window included, which stays in front meanwhile).
+    let layout_changed = Arc::new(AtomicBool::new(false));
+    if !app.own_frame() {
+        let (changed, waker) = (layout_changed.clone(), Waker { pipe: wake_pipe, pending: wake_pending.clone() });
+        let stamp = || bar::settings_path().and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok());
+        std::thread::Builder::new().name("settings".into()).spawn(move || {
+            let mut seen = stamp();
+            loop {
+                std::thread::sleep(Duration::from_secs(1));
+                let now = stamp();
+                if now != seen {
+                    seen = now;
+                    changed.store(true, Ordering::SeqCst);
+                    waker.wake();
+                }
+            }
+        })?;
+    }
 
     let mut runner = Runner {
         client,
@@ -647,7 +704,7 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         fonts: Fonts::system(),
         started: Instant::now(),
         width: size.0.max(1),
-        height: size.1.max(1),
+        height: size.1.max(1) + if frame { bar::BAR_H as u32 } else { 0 },
         suggested: None,
         scale120: 120,
         configured: false,
@@ -670,6 +727,17 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         copied: None,
         paste: None,
         inbox: Vec::new(),
+        frame,
+        own_frame: app.own_frame(),
+        edges: undecorated,
+        on_edge: None,
+        buttons: bar::desktop_layout(),
+        layout_changed,
+        bar_hover: None,
+        bar_pressed: None,
+        in_bar: false,
+        active: true,
+        maximized: false,
         wake: wake_read.into(),
         wake_pending,
         timers: Vec::new(),
@@ -697,6 +765,13 @@ impl Runner {
                 let mut drain = [0u8; 64];
                 let _ = self.wake.read(&mut drain);
                 self.wake_pending.store(false, Ordering::SeqCst);
+                if self.layout_changed.swap(false, Ordering::SeqCst) {
+                    let buttons = bar::desktop_layout();
+                    if buttons != self.buttons {
+                        self.buttons = buttons;
+                        self.dirty |= self.frame;
+                    }
+                }
                 self.with_window(app, |app, window| app.woken(window))?;
             }
             for input in std::mem::take(&mut self.inbox) {
@@ -738,7 +813,7 @@ impl Runner {
                 Command::Cursor(cursor) => {
                     if cursor != self.cursor {
                         self.cursor = cursor;
-                        if let (Some(device), Some(_)) = (self.cursor_device, self.pointer_at) {
+                        if let (Some(device), Some(_), false) = (self.cursor_device, self.pointer_at, self.in_bar) {
                             self.client.set_cursor_shape(device, self.enter_serial, cursor.wire())?;
                         }
                     }
@@ -816,9 +891,25 @@ impl Runner {
     fn handle(&mut self, event: Event, app: &mut dyn App) -> io::Result<()> {
         match event {
             Event::Ping { serial } => self.client.pong(self.wm_base, serial)?,
-            Event::ToplevelConfigure { width, height, .. } => {
+            Event::ToplevelConfigure { width, height, states, .. } => {
                 if width > 0 && height > 0 {
                     self.suggested = Some((width as u32, height as u32));
+                }
+                let (active, maximized) = (states.contains(&wl::STATE_ACTIVATED), states.contains(&wl::STATE_MAXIMIZED));
+                if (self.frame || self.edges) && (active, maximized) != (self.active, self.maximized) {
+                    self.dirty = true;
+                }
+                (self.active, self.maximized) = (active, maximized);
+            }
+            Event::DecorationMode { mode, .. } => {
+                // The server's answer to our request: it may draw no bar after all.
+                let frame = !self.own_frame && mode == wl::DECORATION_CLIENT;
+                if frame != self.frame {
+                    let bar_h = bar::BAR_H as u32;
+                    self.height = if frame { self.height + bar_h } else { self.height.saturating_sub(bar_h).max(1) };
+                    self.frame = frame;
+                    self.edges = frame;
+                    self.dirty = true;
                 }
             }
             Event::Configure { serial, .. } => {
@@ -890,16 +981,21 @@ impl Runner {
                 if let Some(device) = self.cursor_device {
                     self.client.set_cursor_shape(device, serial, self.cursor.wire())?;
                 }
-                self.tell(app, Input::PointerMoved { x: x as f32, y: y as f32 })?;
+                self.in_bar = false;
+                self.pointer_moved(app, x as f32, y as f32)?;
             }
             Event::PointerLeave { .. } => {
                 self.pointer_at = None;
-                self.tell(app, Input::PointerLeft)?;
+                if self.bar_hover.take().is_some() {
+                    self.dirty = true;
+                }
+                self.bar_pressed = None;
+                self.on_edge = None;
+                if !std::mem::take(&mut self.in_bar) {
+                    self.tell(app, Input::PointerLeft)?;
+                }
             }
-            Event::PointerMotion { x, y, .. } => {
-                self.pointer_at = Some((x as f32, y as f32));
-                self.tell(app, Input::PointerMoved { x: x as f32, y: y as f32 })?;
-            }
+            Event::PointerMotion { x, y, .. } => self.pointer_moved(app, x as f32, y as f32)?,
             Event::PointerButton { serial, button, pressed, .. } => {
                 if pressed {
                     self.press_serial = serial;
@@ -912,15 +1008,31 @@ impl Runner {
                     other => Button::Other(other),
                 };
                 let (x, y) = self.pointer_at.unwrap_or_default();
-                let modifiers = self.modifiers();
-                self.tell(app, Input::Button { button, pressed, x, y, modifiers })?;
+                if let Some(edges) = self.on_edge {
+                    if pressed && button == Button::Left && let Some(seat) = self.seat {
+                        self.client.start_resize(self.toplevel, seat, serial, edges.wire())?;
+                    }
+                    return Ok(());
+                }
+                match self.to_app(x, y) {
+                    Some((x, y)) => {
+                        let modifiers = self.modifiers();
+                        self.tell(app, Input::Button { button, pressed, x, y, modifiers })?;
+                    }
+                    None if button == Button::Left => self.bar_button(x, y, pressed)?,
+                    None => {}
+                }
             }
             Event::TouchDown { serial, id, x, y, .. } => {
                 // A finger's press is as good as a button's for what needs one
                 // (the clipboard, moving the window).
                 self.press_serial = serial;
                 self.input_serial = serial;
-                let (x, y) = (x as f32, y as f32);
+                let Some((x, y)) = self.to_app(x as f32, y as f32) else {
+                    // A finger on our bar: a button at once, else the window moves.
+                    self.bar_button(x as f32, y as f32, true)?;
+                    return self.bar_button(x as f32, y as f32, false);
+                };
                 self.fingers.retain(|f| f.0 != id);
                 if self.fingers.len() < 16 {
                     self.fingers.push((id, x, y));
@@ -928,7 +1040,7 @@ impl Runner {
                 self.tell(app, Input::Touch { id, phase: touch::Phase::Down, x, y })?;
             }
             Event::TouchMotion { id, x, y, .. } => {
-                let (x, y) = (x as f32, y as f32);
+                let (x, y) = (x as f32, y as f32 - self.bar_h());
                 if let Some(finger) = self.fingers.iter_mut().find(|f| f.0 == id) {
                     (finger.1, finger.2) = (x, y);
                     self.tell(app, Input::Touch { id, phase: touch::Phase::Moved, x, y })?;
@@ -948,6 +1060,7 @@ impl Runner {
             Event::TouchFrame => {}
             Event::PointerAxis { axis, value, .. } => {
                 let (x, y) = self.pointer_at.unwrap_or_default();
+                let Some((x, y)) = self.to_app(x, y) else { return Ok(()) };
                 let (dx, dy) = if axis == 0 { (0.0, value as f32) } else { (value as f32, 0.0) };
                 self.tell(app, Input::Scroll { x, y, dx, dy })?;
             }
@@ -1028,6 +1141,124 @@ impl Runner {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Our bar's height, when we draw one.
+    fn bar_h(&self) -> f32 {
+        if self.frame { bar::BAR_H } else { 0.0 }
+    }
+
+    /// A point of the window as the program knows it (below our bar), or
+    /// None if it is on our bar.
+    fn to_app(&self, x: f32, y: f32) -> Option<(f32, f32)> {
+        let h = self.bar_h();
+        (y >= h).then_some((x, y - h))
+    }
+
+    fn bar_layout(&self) -> bar::Layout {
+        bar::Layout::plain(self.width as f32, &self.buttons.0, &self.buttons.1)
+    }
+
+    /// The pointer moved to (x, y) of the window: our bar's hover, or the
+    /// program's input (it is told the pointer left when it goes onto the bar).
+    fn pointer_moved(&mut self, app: &mut dyn App, x: f32, y: f32) -> io::Result<()> {
+        self.pointer_at = Some((x, y));
+        // Our border's band: it resizes, before the bar or the program sees the pointer.
+        let edge = self.edge_at(x, y);
+        if edge != self.on_edge {
+            self.on_edge = edge;
+            if let Some(device) = self.cursor_device {
+                let shape = match edge {
+                    Some(e) => Cursor::Resize(e).wire(),
+                    None if self.to_app(x, y).is_none() => Cursor::Default.wire(),
+                    None => self.cursor.wire(),
+                };
+                self.client.set_cursor_shape(device, self.enter_serial, shape)?;
+            }
+        }
+        if edge.is_some() {
+            if self.bar_hover.take().is_some() {
+                self.dirty = true;
+            }
+            if !self.in_bar {
+                self.in_bar = true;
+                self.tell(app, Input::PointerLeft)?;
+            }
+            return Ok(());
+        }
+        let hover = if self.frame { self.bar_layout().at(x, y) } else { None };
+        if hover != self.bar_hover {
+            self.bar_hover = hover;
+            self.dirty = true;
+        }
+        match self.to_app(x, y) {
+            Some((x, y)) => {
+                if std::mem::take(&mut self.in_bar)
+                    && let Some(device) = self.cursor_device
+                {
+                    self.client.set_cursor_shape(device, self.enter_serial, self.cursor.wire())?;
+                }
+                self.tell(app, Input::PointerMoved { x, y })
+            }
+            None => {
+                if !self.in_bar {
+                    self.in_bar = true;
+                    if let Some(device) = self.cursor_device {
+                        self.client.set_cursor_shape(device, self.enter_serial, Cursor::Default.wire())?;
+                    }
+                    self.tell(app, Input::PointerLeft)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// The edges of the window (x, y) is within the resizing band of, when
+    /// we draw the border; none while maximized.
+    fn edge_at(&self, x: f32, y: f32) -> Option<Edges> {
+        if !self.edges || self.maximized {
+            return None;
+        }
+        let band = vergence_look::RESIZE_BAND;
+        let (w, h) = (self.width as f32, self.height as f32);
+        let e = Edges { top: y < band, bottom: y >= h - band, left: x < band, right: x >= w - band };
+        (e.top || e.bottom || e.left || e.right).then_some(e)
+    }
+
+    /// A press or release on our bar: a button does its work when released
+    /// over it; a press anywhere else moves the window.
+    fn bar_button(&mut self, x: f32, y: f32, pressed: bool) -> io::Result<()> {
+        let part = self.bar_layout().at(x, y);
+        if pressed {
+            match part {
+                Some(bar::Part::Button(_)) => self.bar_pressed = part,
+                _ => {
+                    if let Some(seat) = self.seat {
+                        self.client.start_move(self.toplevel, seat, self.press_serial)?;
+                    }
+                }
+            }
+            return Ok(());
+        }
+        if self.bar_pressed.take().is_some_and(|p| Some(p) == part) {
+            match part {
+                Some(bar::Part::Button(bar::WinButton::Close)) => self.closing = true,
+                Some(bar::Part::Button(bar::WinButton::Minimize)) => self.client.set_minimized(self.toplevel)?,
+                Some(bar::Part::Button(bar::WinButton::Maximize)) => self.client.set_maximized(self.toplevel, !self.maximized)?,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Our bar over the program's scene, which is moved down below it.
+    fn add_bar(&mut self, scene: &mut Scene, title: &str) {
+        scene.translate(0.0, bar::BAR_H);
+        scene.height += bar::BAR_H;
+        let layout = self.bar_layout();
+        let font = self.fonts.face("sans-serif", 400, false);
+        let look = bar::Look { focused: self.active, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font, font_size: BAR_FONT_SIZE, titles: &[], title, shown: 0, hover: self.bar_hover };
+        bar::draw(scene, &mut self.fonts, &layout, &look);
     }
 
     fn key(&mut self, app: &mut dyn App, key: u32, pressed: bool, repeat: bool) -> io::Result<()> {
@@ -1140,8 +1371,17 @@ impl Runner {
 
     fn draw(&mut self, app: &mut dyn App) -> io::Result<()> {
         let t = Instant::now();
-        let frame = Frame { width: self.width as f32, height: self.height as f32, scale: self.scale120 as f32 / 120.0, time: self.started.elapsed().as_secs_f64(), number: self.frames, drawn_by: self.drawn_by };
-        let scene = app.scene(&frame, &mut self.fonts);
+        let bar_h = self.bar_h();
+        let frame = Frame { width: self.width as f32, height: (self.height as f32 - bar_h).max(1.0), scale: self.scale120 as f32 / 120.0, time: self.started.elapsed().as_secs_f64(), number: self.frames, drawn_by: self.drawn_by };
+        let mut scene = app.scene(&frame, &mut self.fonts);
+        if self.frame {
+            self.add_bar(&mut scene, &app.title());
+        }
+        if self.edges && !self.maximized {
+            // The line the server draws round a window, in the same colors.
+            let c = if self.active { vergence_look::EDGE_FOCUSED } else { vergence_look::EDGE_UNFOCUSED };
+            scene.stroke(vergence_scene::Rect::new(0.0, 0.0, scene.width, scene.height), 0.0, vergence_look::EDGE, Color::rgb(c.0, c.1, c.2));
+        }
         let background = app.background();
         let (pw, ph) = pixel_size(&scene, frame.scale).map_err(other)?;
         if let Some(id) = self.draw_on_gpu(&scene, frame.scale, background, pw, ph)? {

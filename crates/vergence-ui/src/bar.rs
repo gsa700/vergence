@@ -55,6 +55,30 @@ pub enum WinButton {
     Maximize,
 }
 
+/// The desktop's button layout from Vergence's settings file
+/// (`~/.config/vergence/settings.toml`, `"Gtk/DecorationLayout" = "..."`,
+/// the settings app's Windows page), else minimize, maximize, close on the
+/// right: what the terminal's bar follows, and the toolkit's own bar where
+/// the server draws none.
+pub fn desktop_layout() -> (Vec<WinButton>, Vec<WinButton>) {
+    let text = settings_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    decoration_layout(&layout_setting(&text).unwrap_or_else(|| ":minimize,maximize,close".into()))
+}
+
+/// Vergence's settings file, which holds the button layout.
+pub fn settings_path() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")));
+    base.map(|b| b.join("vergence/settings.toml"))
+}
+
+/// The `"Gtk/DecorationLayout"` line's value in settings.toml's text.
+pub fn layout_setting(text: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let (k, v) = line.split_once('=')?;
+        (k.trim().trim_matches('"') == "Gtk/DecorationLayout").then(|| v.trim().trim_matches('"').to_string())
+    })
+}
+
 /// GTK's decoration layout ("close,minimize:" or ":minimize,maximize,close"):
 /// the buttons left of the colon and right of it.
 pub fn decoration_layout(layout: &str) -> (Vec<WinButton>, Vec<WinButton>) {
@@ -303,6 +327,8 @@ mod tests {
         assert_eq!(decoration_layout("menu:close"), (vec![], vec![WinButton::Close]));
         assert_eq!(decoration_layout("close"), (vec![], vec![WinButton::Close]));
         assert_eq!(decoration_layout(""), (vec![], vec![]));
+        assert_eq!(layout_setting("[settings]\n\"Gtk/DecorationLayout\" = \"close,minimize:\"\n").as_deref(), Some("close,minimize:"));
+        assert_eq!(layout_setting("[settings]\n\"Gtk/FontName\" = \"Sans 10\"\n"), None);
     }
 
     #[test]

@@ -299,6 +299,32 @@ impl Scene {
         self
     }
 
+    /// Moves everything drawn so far by (dx, dy): a scene made for a part
+    /// of a window put in its place (the toolkit's fallback bar above a
+    /// program's scene). Glyphs and cells move with their origins.
+    pub fn translate(&mut self, dx: f32, dy: f32) -> &mut Self {
+        let r = |r: &mut Rect| {
+            r.x += dx;
+            r.y += dy;
+        };
+        let p = |p: &mut Point| {
+            p.x += dx;
+            p.y += dy;
+        };
+        for c in &mut self.commands {
+            match c {
+                Command::Fill { rect, .. } | Command::Stroke { rect, .. } | Command::Image { rect, .. } | Command::PushClip { rect, .. } => r(rect),
+                Command::Line { from, to, .. } => {
+                    p(from);
+                    p(to);
+                }
+                Command::Glyphs { origin, .. } | Command::Cells { origin, .. } => p(origin),
+                Command::PopClip => {}
+            }
+        }
+        self
+    }
+
     /// A grid of cells ([`Command::Cells`]); `cells` holds whole rows of `columns`.
     #[allow(clippy::too_many_arguments)]
     pub fn cells(&mut self, origin: Point, cell_w: f32, cell_h: f32, baseline: f32, size: f32, columns: u32, cells: Vec<Cell>) -> &mut Self {
@@ -496,6 +522,28 @@ fn rect_ok(r: &Rect) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_translated_scene_moves_whole() {
+        let mut s = sample();
+        let before = s.commands.clone();
+        s.translate(0.0, 30.0);
+        for (a, b) in before.iter().zip(&s.commands) {
+            match (a, b) {
+                (Command::Fill { rect: ra, .. }, Command::Fill { rect: rb, .. }) | (Command::Stroke { rect: ra, .. }, Command::Stroke { rect: rb, .. }) | (Command::PushClip { rect: ra, .. }, Command::PushClip { rect: rb, .. }) | (Command::Image { rect: ra, .. }, Command::Image { rect: rb, .. }) => {
+                    assert_eq!((rb.x, rb.y, rb.w, rb.h), (ra.x, ra.y + 30.0, ra.w, ra.h));
+                }
+                (Command::Line { from: fa, to: ta, .. }, Command::Line { from: fb, to: tb, .. }) => assert_eq!((fb.y, tb.y), (fa.y + 30.0, ta.y + 30.0)),
+                (Command::Glyphs { origin: oa, glyphs: ga, .. }, Command::Glyphs { origin: ob, glyphs: gb, .. }) => {
+                    assert_eq!((ob.x, ob.y), (oa.x, oa.y + 30.0));
+                    assert_eq!(ga, gb, "glyphs stay where they are on their origin");
+                }
+                (Command::PopClip, Command::PopClip) | (Command::Cells { .. }, Command::Cells { .. }) => {}
+                other => panic!("the commands changed kind: {other:?}"),
+            }
+        }
+        assert!(s.validate().is_ok());
+    }
 
     fn sample() -> Scene {
         let mut s = Scene::new(640.0, 400.0);

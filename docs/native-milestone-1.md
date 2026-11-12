@@ -469,9 +469,25 @@ fuzz test feeds the decoder random frames and descriptors.
    rerun. Step 2's soak was clean.
 7. Fuzz and refusals: **met**; the fuzz test rerun at a million
    iterations on Hubble, 2026-11-11 (5.5 s).
-8. Outside a Vergence session: Wayland by the code (no `VERGENCE_BUS`);
-   **not yet run** (GNOME on Techbench; Xfce on Hubble is X11 only, where
-   vergence-ui has no road).
+8. Outside a Vergence session: **met** under GNOME on Techbench (Xfce on
+   Hubble is X11 only, where vergence-ui has no road): the terminal and the
+   settings app open over Wayland. The settings app came up with no bar:
+   GNOME draws none and has no decoration protocol. The toolkit now draws
+   one itself where the server will not (no `zxdg_decoration_manager_v1`,
+   or it answers "client side"): `vergence_ui::bar` above the program's
+   scene (moved down by `Scene::translate`, input shifted to match),
+   minimize, maximize and close by the desktop's button layout (Vergence's
+   settings.toml, watched once a second as the terminal does, so a change
+   on the Windows page shows at once), a drag moves the window; and for
+   every window there, the terminal's too, the server's 1-point border in
+   the same colors with a 6-point band inside it that resizes. Checked by
+   Dave in GNOME, 2026-11-11.
 
-To close the milestone: a Techbench session (1, 2, 3, 6) and GNOME on
-Techbench (8), both from Dave's GDM.
+Techbench in a Vergence session (2026-11-11, from GDM): 1 met (native,
+the meaning tree of 40 widgets); 2 met, clicks 50 of 50 on both roads and
+the native road ahead on the floods (seq 0.31 s against 0.35, color 51k
+against 35k, Unicode 700k against 560k a second); 3 met, Firefox both
+ways; 6 met, Firefox and AlbumWall (foot is not installed there).
+
+**All eight met on Hubble, kepler and Techbench: the milestone is closed
+(2026-11-11).**
