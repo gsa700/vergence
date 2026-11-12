@@ -14,6 +14,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 bitflags = "2.2.1"
 xcursor = "0.3"
+# xkbcommon used directly (seat milestone 1, step 3; Dave 2026-11-12): the same
+# library and version Smithay builds on, for our own xkb state (keys.rs).
+xkbcommon = { version = "0.9", default-features = false }
 vergence-profile.workspace = true
 vergence-look.workspace = true
 vergence-shell.workspace = true

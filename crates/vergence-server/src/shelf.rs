@@ -440,17 +440,13 @@ impl Server {
                 self.shelf.order.push(w);
             }
         }
-        let focused = self.seat.get_keyboard().and_then(|k| k.current_focus());
+        let focused = self.keyboard_window();
         let order = self.shelf.order.clone();
         let mut windows: Vec<Win> = Vec::new();
         let mut classes: Vec<(String, bool)> = Vec::new();
         for w in order {
             let Some(id) = self.window_identity(&w) else { continue };
-            let active = focused.as_ref().is_some_and(|k| match k {
-                crate::focus::KeyboardFocus::X11(x) => w.x11_surface() == Some(x),
-                crate::focus::KeyboardFocus::Wayland(s) => w.toplevel().is_some_and(|t| t.wl_surface() == s),
-                crate::focus::KeyboardFocus::Native(n) => &w == n,
-            });
+            let active = focused.as_ref() == Some(&w);
             classes.push((if id.class.is_empty() { id.instance } else { id.class }, active));
             windows.push(w);
         }
@@ -766,11 +762,7 @@ impl Server {
         let front = self.space.elements().next_back().cloned();
         match front {
             Some(front) => self.focus_window(&front, serial),
-            None => {
-                if let Some(k) = self.seat.get_keyboard() {
-                    k.set_focus(self, None, serial);
-                }
-            }
+            None => self.unfocus_all(),
         }
         self.redraw_all();
     }

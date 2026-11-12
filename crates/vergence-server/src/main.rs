@@ -4,6 +4,7 @@
 mod handlers;
 
 mod dispatch;
+mod keys;
 mod input;
 mod state;
 mod winit;

@@ -100,6 +100,12 @@ impl Seat {
         KeyOut::Forward(self.keyboard.focus)
     }
 
+    /// Something other than a key or button came between Super's press and
+    /// release (a finger on the panel): it is not a tap of Super.
+    pub fn interrupt_super(&mut self) {
+        self.keyboard.super_alone = false;
+    }
+
     /// The server gave a window the keyboard by itself (a new window, a
     /// click on its dock icon, one brought back from minimized), or took it
     /// from all (None).
@@ -156,6 +162,14 @@ mod tests {
         seat.key(Key::Super, true, none());
         seat.button(BTN_LEFT, true, Some(s1()), Mods { logo: true, ..none() }, 0);
         assert_eq!(seat.key(Key::Super, false, none()), KeyOut::Forward(Some(W1)));
+    }
+
+    #[test]
+    fn a_finger_between_supers_press_and_release_is_not_a_tap() {
+        let mut seat = Seat::new();
+        seat.key(Key::Super, true, none());
+        seat.interrupt_super();
+        assert_eq!(seat.key(Key::Super, false, none()), KeyOut::Forward(None));
     }
 
     #[test]

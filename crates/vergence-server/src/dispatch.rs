@@ -34,7 +34,7 @@ use smithay::{
 };
 use vergence_seat::{Edges, Out, Part, Target, WinId};
 
-use crate::{decor::Hit, focus::KeyboardFocus, state::Server, win::Win};
+use crate::{decor::Hit, state::Server, win::Win};
 
 bitflags::bitflags! {
     /// The edges a resize moves (the same bits as the seat's `Edges`, the
@@ -105,6 +105,17 @@ pub struct Dispatch {
     /// A Wayland window resized from its top or left: kept anchored as its
     /// commits arrive, until the one after the resize ended.
     anchored: Option<(Win, ResizeEdge, Rectangle<i32, Logical>, bool)>,
+    /// Our own xkb state (keys.rs), from Smithay's keymap before the first key.
+    pub keys: Option<crate::keys::Keys>,
+    /// The native window that has the keyboard (Smithay's focus is none then).
+    pub keyboard_native: Option<Win>,
+}
+
+impl Dispatch {
+    /// The window the seat calls `id`.
+    pub fn window(&self, id: WinId) -> Option<Win> {
+        self.wins.get(&id).cloned()
+    }
 }
 
 impl Server {
@@ -135,7 +146,7 @@ impl Server {
 
     /// Before each event: the seat knows which menu is open, and forgets
     /// windows and surfaces that have gone.
-    fn dispatch_sync(&mut self) {
+    pub fn dispatch_sync(&mut self) {
         let menu = if self.launcher_is_open() {
             Some(vergence_seat::Menu::Popup)
         } else if self.menu_is_open() {
@@ -243,8 +254,6 @@ impl Server {
     /// A button pressed or released. The mouse, a pointing finger and `vctl
     /// press`/`release` come here.
     pub fn handle_button(&mut self, button: u32, state: ButtonState, time: InputTime) {
-        // A button with Super held is not a tap of Super (the key filter is input.rs's until step 3).
-        self.launcher.super_alone = false;
         self.dispatch_sync();
         let pos = self.pointer_location();
         let under = self.target_at(pos);
@@ -350,17 +359,7 @@ impl Server {
                         self.focus_window(&w, SERIAL_COUNTER.next_serial());
                     }
                 }
-                Out::Unfocus => {
-                    self.space.elements().for_each(|w| {
-                        w.set_activated(false);
-                        if let Some(t) = w.toplevel() {
-                            t.send_pending_configure();
-                        }
-                    });
-                    if let Some(k) = self.seat.get_keyboard() {
-                        k.set_focus(self, Option::<KeyboardFocus>::None, SERIAL_COUNTER.next_serial());
-                    }
-                }
+                Out::Unfocus => self.unfocus_all(),
                 Out::Maximize(id) => {
                     if let Some(w) = self.input.wins.get(&id).cloned() {
                         self.toggle_maximize(&w);

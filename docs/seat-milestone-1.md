@@ -134,6 +134,20 @@ Smithay's own; nothing of ours runs in its callbacks.
   green; their sessions not yet run (both went off the network that
   evening). By hand still: Alt+drag, Firefox, an X11 program, a drag and
   drop, the touchscreen.
+- **Step 3 done** (2026-11-12): the keyboard through the seat. The server
+  keeps its own xkb state (crates/vergence-server/src/keys.rs; xkbcommon
+  used directly, the keymap read back from Smithay's before the first key);
+  the seat's key filter decides every key; Smithay's keyboard is fed every
+  key and delivers only to Wayland and X11 windows; a native window has the
+  keyboard, its keys and modifiers from the server, never through
+  `KeyboardTarget` (focus.rs has no native kind any more). Who has the
+  keyboard is the seat's (`keyboard_window`: the dock's active mark, title
+  bars, the clipboard rule). Found on Techbench: the seat must be told
+  which menu is open before each key too (a popup opened by Super did not
+  get the next keys). On Techbench by `vctl`: typing and Ctrl chords in the
+  native terminal and over Wayland, Super's popup taking the keys and
+  Escape closing it with nothing leaking. The volume keys reach the sound
+  code, which declines on Techbench (PipeWire): to check on Hubble.
 
 ## Acceptance
 

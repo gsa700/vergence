@@ -118,13 +118,6 @@ struct State {
 pub struct NativeInput {
     /// Bus clients that have been sent the keymap.
     keymap_sent: std::collections::HashSet<u32>,
-    /// The seat's keymap as xkb text, read before the first native window
-    /// takes the keyboard (native_prepare_keymap). It cannot be read in the
-    /// focus callback: Smithay calls KeyboardTarget::enter holding the
-    /// keyboard's lock, and with_xkb_state takes the same lock (2026-11-11:
-    /// the first click on a native window froze the server on Hubble). The
-    /// server never changes its keymap while it runs.
-    keymap_text: Option<String>,
     /// The kinds of data on the clipboard as last offered, for clients that
     /// come later.
     clip_kinds: Option<Vec<String>>,
@@ -563,6 +556,9 @@ impl Server {
         }
         self.space.unmap_elem(w);
         self.restore.remove(w);
+        if self.input.keyboard_native.as_ref() == Some(w) {
+            self.input.keyboard_native = None;
+        }
         n.kill();
         tracing::info!("native: {:?} window {} closed", n.app_id, n.id);
     }
@@ -750,9 +746,10 @@ impl Server {
         self.key_repeat()
     }
 
-    /// Keyboard focus came to a native window (focus.rs): the keymap first, if
-    /// this client hasn't had it, and the repeat, then enter.
-    pub fn native_keyboard_enter(&mut self, n: &NativeWindow, serial: u32) {
+    /// The keyboard came to a native window (input.rs, focus_window): the
+    /// keymap first, if this client hasn't had it, and the repeat, then enter.
+    pub fn native_keyboard_enter(&mut self, w: &Win, serial: u32) {
+        let Win::Native(n) = w else { return };
         if self.native_input.keymap_sent.insert(n.client) {
             match self.native_keymap() {
                 Ok((fd, size)) => self.bus_send(n.client, ServerMsg::Window(WinEvent::Keymap { fd, size })),
@@ -764,38 +761,29 @@ impl Server {
         self.bus_send(n.client, ServerMsg::Window(WinEvent::KeyboardEnter { window: n.id, serial }));
     }
 
-    pub fn native_keyboard_leave(&mut self, n: &NativeWindow) {
+    pub fn native_keyboard_leave(&mut self, w: &Win) {
+        let Win::Native(n) = w else { return };
         self.bus_send(n.client, ServerMsg::Window(WinEvent::KeyboardLeave { window: n.id }));
     }
 
     /// A key: the evdev code (xkb's minus 8), as Wayland sends it.
-    pub fn native_key(&mut self, n: &NativeWindow, xkb_code: u32, pressed: bool, serial: u32, time_ms: u32) {
+    pub fn native_key(&mut self, w: &Win, xkb_code: u32, pressed: bool, serial: u32, time_ms: u32) {
+        let Win::Native(n) = w else { return };
         let key = xkb_code.saturating_sub(8);
         self.bus_send(n.client, ServerMsg::Window(WinEvent::Key { window: n.id, serial, time_ms, key, pressed }));
     }
 
-    pub fn native_modifiers(&mut self, n: &NativeWindow, m: &smithay::input::keyboard::ModifiersState) {
-        let s = m.serialized;
-        self.bus_send(n.client, ServerMsg::Window(WinEvent::Modifiers { depressed: s.depressed, latched: s.latched, locked: s.locked, group: s.layout_effective }));
+    /// The modifiers now, from our own xkb state (keys.rs).
+    pub fn native_modifiers(&mut self, w: &Win) {
+        let Win::Native(n) = w else { return };
+        let Some((depressed, latched, locked, group)) = self.input.keys.as_ref().map(|k| k.serialized()) else { return };
+        self.bus_send(n.client, ServerMsg::Window(WinEvent::Modifiers { depressed, latched, locked, group }));
     }
 
-    /// Read the seat's keymap, once, outside any keyboard callback (see
-    /// `NativeInput::keymap_text`). Called before a native window is given
-    /// the keyboard.
-    pub fn native_prepare_keymap(&mut self) {
-        if self.native_input.keymap_text.is_some() {
-            return;
-        }
-        let Some(keyboard) = self.seat.get_keyboard() else { return };
-        let text = keyboard.with_xkb_state(self, |ctx| ctx.xkb().lock().unwrap().keymap_as_string());
-        self.native_input.keymap_text = Some(text);
-    }
-
-    /// The keymap read by native_prepare_keymap (NUL-terminated, as Wayland's),
+    /// The keymap (keys.rs: Smithay's own, read before the first key), NUL-terminated as Wayland's,
     /// in an anonymous file the client maps read-only (vergence_protocol::shm).
-    /// Never touches the keyboard: this runs inside its focus callback.
     fn native_keymap(&mut self) -> std::io::Result<(vergence_protocol::window::Fd, u32)> {
-        let text = self.native_input.keymap_text.clone().ok_or_else(|| std::io::Error::other("keymap not read yet"))?;
+        let text = self.input.keys.as_ref().map(|k| k.text.clone()).ok_or_else(|| std::io::Error::other("keymap not read yet"))?;
         let mut bytes = text.into_bytes();
         bytes.push(0);
         let mut shm = vergence_protocol::shm::ShmFile::new(bytes.len())?;
@@ -821,7 +809,7 @@ impl Server {
     /// from the background).
     fn native_copy(&mut self, client: u32, kinds: Vec<String>) {
         use smithay::wayland::selection::{SelectionTarget, data_device::set_data_device_selection};
-        let focused = matches!(self.seat.get_keyboard().and_then(|k| k.current_focus()), Some(crate::focus::KeyboardFocus::Native(w)) if w.native().is_some_and(|n| n.client == client));
+        let focused = self.keyboard_window().is_some_and(|w| w.native().is_some_and(|n| n.client == client));
         if !focused {
             return tracing::debug!("native: client {client} copied without the keyboard; ignored");
         }

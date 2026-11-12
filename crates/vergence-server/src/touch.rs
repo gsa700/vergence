@@ -128,7 +128,8 @@ impl Server {
     /// A finger came down at `at`. The touch panel, and the control socket's
     /// `touch`, both come here.
     pub fn touch_down(&mut self, slot: TouchSlot, at: Point<f64, Logical>, time: InputTime) {
-        self.launcher.super_alone = false;
+        // Anything but Super between its press and release: not a tap of it.
+        self.input.seat.interrupt_super();
         if !self.touch.fingers_last {
             self.touch.fingers_last = true;
             self.redraw_all();

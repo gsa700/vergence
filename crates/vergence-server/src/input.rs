@@ -1,6 +1,6 @@
-// Input from the devices: the idle clock, keys (the key filter, until the seat
-// has it in step 3), touch (touch.rs) and the pointer, which goes to the seat
-// (dispatch.rs). Begun from Smithay's smallvil example (MIT; see
+// Input from the devices: the idle clock, keys (through our own xkb state,
+// keys.rs, and the seat's key filter), keyboard focus, touch (touch.rs) and the
+// pointer, which goes to the seat (dispatch.rs). Begun from Smithay's smallvil example (MIT; see
 // LICENSE-smithay.txt); the pointer part is ours since seat milestone 1.
 use smithay::{
     backend::input::{
@@ -17,77 +17,71 @@ use smithay::{
 use crate::{focus::KeyboardFocus, state::Server};
 
 
-/// What a key does before any app sees it.
-enum KeyAction {
-    Quit,
-    Vt(i32),
-    CloseMenu,
-    /// Super was tapped alone: open or close the applications popup.
-    Apps,
-    /// A key for the open popup: its keysym and the character it types.
-    Popup(u32, Option<char>),
-    /// Kept from the apps, with nothing else to do.
-    Nothing,
-    /// A volume key (sound milestone 1, step 4): +5, -5, or 0 to mute or unmute.
-    Volume(i8),
-}
-
 impl Server {
     /// A key went down or up: the keyboard, and the control socket's `key` and
-    /// `type`, both come here.
+    /// `type`, both come here. Our own xkb state says what the key is (keys.rs),
+    /// the seat says whose it is (vergence-seat's key filter), and then:
+    /// Smithay's keyboard is fed it in every case, so its state stays right,
+    /// and delivers it only to a Wayland or X11 window that has the keyboard;
+    /// a native window has it from us over the bus.
     pub fn handle_key(&mut self, code: smithay::input::keyboard::Keycode, state: smithay::backend::input::KeyState, time: smithay::backend::input::InputTime) {
-        use smithay::input::keyboard::keysyms;
-        let serial = SERIAL_COUNTER.next_serial();
+        use vergence_seat::keyboard::KeyOut;
         let pressed = state == smithay::backend::input::KeyState::Pressed;
-        // Ctrl+Alt+Backspace quits; Ctrl+Alt+Fn switches consoles (stage 2).
-        let action = self.seat.get_keyboard().unwrap().input::<KeyAction, _>(self, code, state, serial, time, |st, mods, handle| {
-            let sym = handle.modified_sym().raw();
-            let is_super = sym == keysyms::KEY_Super_L || sym == keysyms::KEY_Super_R;
-            if pressed {
-                if mods.ctrl && mods.alt && sym == keysyms::KEY_BackSpace {
-                    return FilterResult::Intercept(KeyAction::Quit);
+        // The seat knows which menu is open (the popup may have opened from the keyboard).
+        self.dispatch_sync();
+        self.keys_ready();
+        let Some(keys) = self.input.keys.as_mut() else { return };
+        let key = keys.feed(code, pressed);
+        let mods = keys.mods();
+        let out = self.input.seat.key(crate::keys::seat_key(key.sym), pressed, mods);
+        let native = match out {
+            KeyOut::Forward(Some(id)) => self.input.window(id).filter(|w| w.native().is_some()),
+            _ => None,
+        };
+        let to_smithay = matches!(out, KeyOut::Forward(_)) && native.is_none();
+        let serial = SERIAL_COUNTER.next_serial();
+        if let Some(k) = self.seat.get_keyboard() {
+            k.input::<(), _>(self, code, state, serial, time, |_, _, _| if to_smithay { FilterResult::Forward } else { FilterResult::Intercept(()) });
+        }
+        if key.mods_changed
+            && let Some(n) = self.input.keyboard_native.clone()
+        {
+            self.native_modifiers(&n);
+        }
+        match out {
+            KeyOut::Forward(_) => {
+                if let Some(w) = native {
+                    self.native_key(&w, code.raw(), pressed, serial.into(), time.millis());
                 }
-                if st.menu_is_open() && sym == keysyms::KEY_Escape {
-                    return FilterResult::Intercept(KeyAction::CloseMenu);
-                }
-                // The volume keys, for the default output (sound.rs), never the apps'.
-                match sym {
-                    keysyms::KEY_XF86AudioRaiseVolume => return FilterResult::Intercept(KeyAction::Volume(5)),
-                    keysyms::KEY_XF86AudioLowerVolume => return FilterResult::Intercept(KeyAction::Volume(-5)),
-                    keysyms::KEY_XF86AudioMute => return FilterResult::Intercept(KeyAction::Volume(0)),
-                    _ => {}
-                }
-                let vt1 = keysyms::KEY_XF86Switch_VT_1;
-                if (vt1..vt1 + 12).contains(&sym) {
-                    return FilterResult::Intercept(KeyAction::Vt((sym - vt1 + 1) as i32));
-                }
-                // Super alone, until anything else is pressed.
-                st.launcher.super_alone = is_super;
-            } else if is_super && std::mem::take(&mut st.launcher.super_alone) {
-                // Super was tapped: the applications popup (launcher.rs).
-                return FilterResult::Intercept(KeyAction::Apps);
             }
-            // While the popup is open the keyboard is its own.
-            if st.launcher_is_open() {
-                return FilterResult::Intercept(if pressed && !is_super { KeyAction::Popup(sym, handle.modified_sym().key_char()) } else { KeyAction::Nothing });
-            }
-            FilterResult::Forward
-        });
-        match action {
-            Some(KeyAction::Quit) => self.loop_signal.stop(),
-            Some(KeyAction::CloseMenu) => self.close_menu(),
-            Some(KeyAction::Vt(n)) => {
+            KeyOut::Quit => self.loop_signal.stop(),
+            KeyOut::CloseMenu => self.close_menu(),
+            KeyOut::Vt(n) => {
                 if let Some(session) = self.session.as_mut() {
                     use smithay::backend::session::Session;
-                    if let Err(e) = session.change_vt(n) {
+                    if let Err(e) = session.change_vt(n as i32) {
                         tracing::warn!("console {n}: {e:?}");
                     }
                 }
             }
-            Some(KeyAction::Apps) => self.launcher_toggle(),
-            Some(KeyAction::Popup(sym, typed)) => self.launcher_key(sym, typed),
-            Some(KeyAction::Volume(step)) => self.volume_key(step),
-            Some(KeyAction::Nothing) | None => {}
+            KeyOut::Apps => self.launcher_toggle(),
+            KeyOut::Popup => self.launcher_key(key.sym, key.typed),
+            KeyOut::Volume(step) => self.volume_key(step),
+            KeyOut::Swallow => {}
+        }
+    }
+
+    /// Our xkb state, from Smithay's keymap, before the first key (not inside
+    /// any keyboard callback: this runs at the top of handle_key and focus_window).
+    pub fn keys_ready(&mut self) {
+        if self.input.keys.is_some() {
+            return;
+        }
+        let Some(keyboard) = self.seat.get_keyboard() else { return };
+        let text = keyboard.with_xkb_state(self, |ctx| ctx.xkb().lock().unwrap().keymap_as_string());
+        self.input.keys = crate::keys::Keys::from_text(text);
+        if self.input.keys.is_none() {
+            tracing::error!("keyboard: the keymap could not be read back");
         }
     }
 
@@ -224,15 +218,13 @@ impl Server {
 }
 
 impl Server {
-    /// Raise a window and give it the keyboard (X11 windows: X focus and stacking too).
+    /// Raise a window and give it the keyboard (X11 windows: X focus and
+    /// stacking too). A Wayland or X11 window has it through Smithay's
+    /// keyboard; a native window from us (native.rs), Smithay's focus being
+    /// none then. The seat is told either way.
     pub fn focus_window(&mut self, window: &crate::win::Win, serial: smithay::utils::Serial) {
         self.space.raise_element(window, true);
-        // A native window (native.rs) takes the keyboard as a focus of its own
-        // kind (focus.rs): its keys go over the bus. Its keymap is read now,
-        // before set_focus, whose callback must not touch the keyboard.
-        if window.native().is_some() {
-            self.native_prepare_keymap();
-        }
+        self.keys_ready();
         let focus = match (window.x11_surface(), window.toplevel()) {
             (Some(x), _) => {
                 if let Some(wm) = self.xwm.as_mut() {
@@ -241,7 +233,7 @@ impl Server {
                 Some(KeyboardFocus::X11(x.clone()))
             }
             (None, Some(t)) => Some(KeyboardFocus::Wayland(t.wl_surface().clone())),
-            (None, None) => window.native().map(|_| KeyboardFocus::Native(window.clone())),
+            (None, None) => None,
         };
         for w in self.space.elements() {
             w.set_activated(w == window);
@@ -252,5 +244,41 @@ impl Server {
         if let Some(k) = self.seat.get_keyboard() {
             k.set_focus(self, focus, serial);
         }
+        let native = window.native().is_some().then(|| window.clone());
+        if self.input.keyboard_native != native {
+            if let Some(old) = self.input.keyboard_native.take() {
+                self.native_keyboard_leave(&old);
+            }
+            if let Some(new) = native {
+                self.native_keyboard_enter(&new, serial.into());
+                self.native_modifiers(&new);
+                self.input.keyboard_native = Some(new);
+            }
+        }
+        let id = self.win_id(window);
+        self.input.seat.focus(Some(id));
+    }
+
+    /// No window has the keyboard (a press on the bare desktop, the last
+    /// window minimized).
+    pub fn unfocus_all(&mut self) {
+        self.space.elements().for_each(|w| {
+            w.set_activated(false);
+            if let Some(t) = w.toplevel() {
+                t.send_pending_configure();
+            }
+        });
+        if let Some(k) = self.seat.get_keyboard() {
+            k.set_focus(self, Option::<KeyboardFocus>::None, SERIAL_COUNTER.next_serial());
+        }
+        if let Some(old) = self.input.keyboard_native.take() {
+            self.native_keyboard_leave(&old);
+        }
+        self.input.seat.focus(None);
+    }
+
+    /// The window that has the keyboard, any kind.
+    pub fn keyboard_window(&self) -> Option<crate::win::Win> {
+        self.input.seat.keyboard_focus().and_then(|id| self.input.window(id)).filter(|w| smithay::utils::IsAlive::alive(w))
     }
 }

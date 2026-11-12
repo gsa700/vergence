@@ -41,9 +41,6 @@ const ICON: i32 = 32;
 #[derive(Default)]
 pub struct Launcher {
     open: Option<Open>,
-    /// Super is down and nothing else has been pressed since: let go now, it
-    /// was a tap, and the popup opens (or closes).
-    pub super_alone: bool,
     picture: Option<(u64, MemoryRenderBuffer)>,
 }
 

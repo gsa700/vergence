@@ -265,7 +265,7 @@ impl Server {
     /// Everything on `output`, front to back: each window with its title bar.
     pub fn scene(&mut self, renderer: &mut GlesRenderer, output: &Output, scale: f64) -> Vec<SceneElement> {
         let Some(out) = self.space.output_geometry(output) else { return Vec::new() };
-        let focused = self.seat.get_keyboard().and_then(|k| k.current_focus());
+        let focused = self.keyboard_window();
         let minimize_button = self.minimize_button();
         self.decor.retain(|w, _| w.alive());
         // A window on its way back from the dock is put in its place when it arrives.
@@ -290,11 +290,7 @@ impl Server {
             }
             if frame.is_some() || border.is_some() {
                 let title = self.window_title(&w);
-                let active = focused.as_ref().is_some_and(|k| match k {
-                    crate::focus::KeyboardFocus::X11(x) => w.x11_surface() == Some(x),
-                    crate::focus::KeyboardFocus::Wayland(s) => w.toplevel().is_some_and(|t| t.wl_surface() == s),
-                crate::focus::KeyboardFocus::Native(n) => &w == n,
-                });
+                let active = focused.as_ref() == Some(&w);
                 let d = self.decor.entry(w.clone()).or_insert_with(Decor::new);
                 if d.active != active {
                     d.active = active;
