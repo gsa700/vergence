@@ -106,6 +106,7 @@ enum Page {
     Keyboard,
     Pointer,
     Energy,
+    Sound,
     Overview,
     Screen(usize),
     About,
@@ -117,6 +118,12 @@ enum Page {
 #[derive(Debug, Clone)]
 enum Message {
     Go(Page),
+    // Sound: an output's volume (as it slides), its mute, making it the
+    // default, and its test tone.
+    SoundVolume(String, f32),
+    SoundMute(String, bool),
+    SoundDefault(String),
+    SoundTone(String),
     // Appearance.
     Scheme(usize),
     Accent(Option<&'static str>),
@@ -229,6 +236,10 @@ struct ArrangeDrag {
 
 struct App {
     page: Page,
+    /// The Sound page (vergence-sound): the system, read when the page opens,
+    /// and its outputs as last read.
+    sound: Option<Box<dyn vergence_sound::Sound>>,
+    sound_outputs: Vec<vergence_sound::Output>,
     desktop: toml::Table,
     xsettings: vergence_xsettings::Settings,
     status: String,
@@ -400,6 +411,8 @@ impl App {
             accent_text: appearance_text(&desktop, "accent"),
             size: disp::size(&desktop) as f32,
             sleep_cmd: energy_cmd(&desktop),
+            sound: None,
+            sound_outputs: Vec::new(),
             desktop,
             xsettings: theme::read(),
             status: String::new(),
@@ -512,6 +525,9 @@ impl App {
     fn open(&mut self, p: Page) {
         self.page = p;
         self.reread();
+        if p == Page::Sound {
+            self.sound_read();
+        }
         self.browser = None;
         self.arrange_drag = None;
         let scope = self.scope();
@@ -647,6 +663,18 @@ impl App {
             }),
             Message::RepeatDelay(v) => self.repeat_delay = v,
             Message::RepeatRate(v) => self.repeat_rate = v,
+            Message::SoundVolume(id, v) => self.sound_do(|s| s.set_volume(&id, v.round() as u8)),
+            Message::SoundMute(id, on) => self.sound_do(|s| s.set_muted(&id, on)),
+            Message::SoundDefault(id) => self.sound_do(|s| s.set_default(&id)),
+            Message::SoundTone(id) => {
+                // 1.5 s of tone on its own thread (the window keeps answering),
+                // through a sound system of its own.
+                std::thread::spawn(move || {
+                    if let Some(mut s) = vergence_sound::open() {
+                        let _ = s.tone(&id, 2, &[1, 2]);
+                    }
+                });
+            }
             Message::RepeatDone => {
                 let (delay, rate) = (self.repeat_delay.round() as i64, self.repeat_rate.round() as i64);
                 self.save_keyboard(|t| {
@@ -981,6 +1009,7 @@ impl App {
             item("Dock".into(), Page::Dock, self.page == Page::Dock, false),
             item("Keyboard".into(), Page::Keyboard, self.page == Page::Keyboard, false),
             item("Mouse and touchpad".into(), Page::Pointer, self.page == Page::Pointer, false),
+            item("Sound".into(), Page::Sound, self.page == Page::Sound, false),
             item("Energy".into(), Page::Energy, self.page == Page::Energy, false),
             item(if self.outputs.is_empty() { "Wallpaper".into() } else { "Screens".into() }, screens_page, screens_selected, false),
         ];
@@ -1288,6 +1317,81 @@ impl App {
                 self.status_line(),
             ],
         )
+    }
+
+    /// The sound system and its outputs, read again.
+    fn sound_read(&mut self) {
+        if self.sound.is_none() {
+            self.sound = vergence_sound::open();
+        }
+        self.sound_outputs = self.sound.as_mut().and_then(|s| s.outputs().ok()).unwrap_or_default();
+    }
+
+    /// A change to the sound system, then the outputs read again; a refusal
+    /// goes to the status line in words.
+    fn sound_do(&mut self, change: impl FnOnce(&mut dyn vergence_sound::Sound) -> std::io::Result<()>) {
+        let Some(s) = self.sound.as_mut() else { return };
+        match change(s.as_mut()) {
+            Ok(()) => self.status.clear(),
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                // FreeBSD's default output (hw.snd.default_unit) is root's.
+                self.status = "Choosing the output needs root on this system; the sound helper that does it for you comes next (for now: sudo vsound default <id>).".into();
+            }
+            Err(e) => self.status = format!("Sound: {e}"),
+        }
+        self.sound_read();
+    }
+
+    fn sound_page(&self) -> Element<Message> {
+        let title = "Sound";
+        let about = "Where sound goes, and how loud. A program that does not choose plays to the default output.";
+        let Some(system) = self.sound.as_ref().map(|s| s.system()) else {
+            #[cfg(target_os = "linux")]
+            let why = if vergence_sound::pipewire_running() {
+                "PipeWire manages sound on this machine. Vergence will speak to it in a later milestone; until then, use its own tools."
+            } else {
+                "No sound system Vergence knows was found."
+            };
+            #[cfg(not(target_os = "linux"))]
+            let why = "No sound system Vergence knows was found.";
+            return self.page_layout(title, about, vec![self.group(None, vec![setting(why, "", space())])]);
+        };
+        let mut groups = Vec::new();
+        for o in &self.sound_outputs {
+            let id = o.id.clone();
+            let chosen = if o.default {
+                label("Default").dim()
+            } else {
+                let id = id.clone();
+                button(label("Use this").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::SoundDefault(id)).name(&format!("Use {}", o.name))
+            };
+            let vol_id = id.clone();
+            let mute_id = id.clone();
+            let tone_id = id.clone();
+            let volume = if o.adjustable {
+                setting(
+                    "Volume",
+                    &format!("{}%", o.volume),
+                    slider(0.0, 100.0, o.volume as f32, move |v| Message::SoundVolume(vol_id.clone(), v)).step(1.0).width(Length::Fixed(220.0)).name(&format!("{} volume", o.name)),
+                )
+            } else {
+                setting("Volume", "Set on the monitor or device itself.", space())
+            };
+            groups.push(self.group(
+                Some(&o.name),
+                vec![
+                    setting(if o.default { "Sound goes here" } else { "Not the default" }, &o.detail, chosen),
+                    volume,
+                    setting("Mute", "", switch(o.muted, move |on| Message::SoundMute(mute_id.clone(), on)).name(&format!("Mute {}", o.name))),
+                    setting("Test sound", "A short tone, quiet.", button(label("Play").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::SoundTone(tone_id)).name(&format!("Test {}", o.name))),
+                ],
+            ));
+        }
+        if groups.is_empty() {
+            groups.push(self.group(None, vec![setting("No outputs", system, space())]));
+        }
+        groups.push(self.status_line());
+        self.page_layout(title, about, groups)
     }
 
     fn shelf(&self) -> Option<&toml::Table> {
@@ -1803,6 +1907,7 @@ impl Program for App {
             Page::Keyboard => self.keyboard(),
             Page::Pointer => self.pointer(),
             Page::Energy => self.energy(),
+            Page::Sound => self.sound_page(),
             Page::Overview => self.overview(),
             Page::Screen(_) if self.browser.is_some() => self.browser_page(),
             Page::Screen(_) => self.screen(),

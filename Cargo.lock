@@ -2240,6 +2240,7 @@ dependencies = [
  "vergence-render",
  "vergence-scene",
  "vergence-shell",
+ "vergence-sound",
  "vergence-text",
  "vergence-ui",
  "vergence-widgets",

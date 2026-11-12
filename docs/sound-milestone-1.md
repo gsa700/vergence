@@ -181,3 +181,20 @@ service, ALSA's `alsactl`) still restores levels at boot.
     HDMI 1 in a new `~/.asoundrc` and back, the file then removed; the
     tone played. Tests: ALSA's card lines, `.asoundrc` defaults, and the
     range conversions. 331 green on Hubble, kepler and Techbench.
+
+- **Step 3 (2026-11-11): the Sound page.** The settings app's new page,
+  between Mouse and touchpad and Energy: each output as a group under its
+  name, "Default" or "Use this", a volume slider (or "set on the monitor
+  or device itself" where there is no volume of ours to set: an output now
+  says whether it is `adjustable`), a mute switch and a "Play" button for
+  the test tone (on a thread of its own, the window answering meanwhile).
+  The outputs are read when the page opens and after every change; a
+  refusal goes to the status line in words (FreeBSD's default output:
+  "needs root ... the sound helper that does it for you comes next"). On a
+  machine where PipeWire has the sound the page says so. Every control is
+  in the meaning tree by name.
+  - On Hubble, by clicks through `vctl`, each checked with `amixer`: the
+    mute switch off and on; the slider's middle set 51% (44 of 87); "Use
+    this" on HDMI 1 moved the default there and the page's "Default" with
+    it; restored afterwards (default back, `~/.asoundrc` removed, 69%).
+  - 331 tests green on Hubble, kepler and Techbench.

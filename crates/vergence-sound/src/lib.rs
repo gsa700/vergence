@@ -26,6 +26,8 @@ pub struct Output {
     pub detail: String,
     /// 0 to 100.
     pub volume: u8,
+    /// Whether the volume can be set here (an HDMI output's is the monitor's).
+    pub adjustable: bool,
     pub muted: bool,
     /// Where sound goes when a program does not choose.
     pub default: bool,

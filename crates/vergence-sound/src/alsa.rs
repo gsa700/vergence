@@ -217,7 +217,8 @@ impl Sound for Alsa {
                 Err(_) => continue,
             };
             for (dev, pcm_name) in playback_devices(card) {
-                let (name, volume, muted) = match Self::hdmi_index(card, dev, &pcm_name) {
+                let hdmi = Self::hdmi_index(card, dev, &pcm_name);
+                let (name, volume, muted) = match hdmi {
                     Some(k) => {
                         let muted = find(&cs, "IEC958 Playback Switch", k).and_then(|c| read(&f, c).ok()).is_some_and(|(_, _, v)| v == 0);
                         (format!("HDMI or DisplayPort {}", k + 1), 100, muted)
@@ -235,7 +236,8 @@ impl Sound for Alsa {
                         (name, volume, muted)
                     }
                 };
-                out.push(Output { id: format!("hw:{card},{dev}"), name, detail: format!("{card_name}: {pcm_name}"), volume, muted, default: (card, dev) == default });
+                let adjustable = hdmi.is_none() && find(&cs, "Master Playback Volume", 0).is_some();
+                out.push(Output { id: format!("hw:{card},{dev}"), name, detail: format!("{card_name}: {pcm_name}"), volume, adjustable, muted, default: (card, dev) == default });
             }
         }
         Ok(out)

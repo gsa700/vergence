@@ -136,7 +136,7 @@ impl Sound for Oss {
             let detail = sysctl_string(&format!("dev.pcm.{unit}.%desc")).unwrap_or_default();
             let volume = Self::mixer(unit, mixer_read(SOUND_MIXER_VOLUME), 0).map(level_percent).unwrap_or(0);
             let muted = Self::mixer(unit, mixer_read(SOUND_MIXER_MUTE), 0).is_ok_and(|mask| mask & (1 << SOUND_MIXER_VOLUME) != 0);
-            out.push(Output { id: format!("pcm{unit}"), name: Self::name(unit, &detail), detail, volume, muted, default: unit as i32 == default });
+            out.push(Output { id: format!("pcm{unit}"), name: Self::name(unit, &detail), detail, volume, adjustable: true, muted, default: unit as i32 == default });
         }
         Ok(out)
     }

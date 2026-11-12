@@ -25,7 +25,8 @@ fn main() {
         [] => sound.outputs().map(|outs| {
             println!("{}:", sound.system());
             for o in outs {
-                println!("{} {:<6} {:<22} {:>3}%{} ({})", if o.default { "*" } else { " " }, o.id, o.name, o.volume, if o.muted { " muted" } else { "" }, o.detail);
+                let volume = if o.adjustable { format!("{:>3}%", o.volume) } else { "   -".into() };
+                println!("{} {:<6} {:<22} {volume}{} ({})", if o.default { "*" } else { " " }, o.id, o.name, if o.muted { " muted" } else { "" }, o.detail);
             }
         }),
         ["volume", id, v] => match v.parse::<u8>() {
