@@ -65,6 +65,8 @@ pub struct Server {
     pub xdg_decoration_state: smithay::wayland::shell::xdg::decoration::XdgDecorationState,
     /// Title bars: per-window ids for damage tracking (decor.rs).
     pub decor: std::collections::HashMap<Win, crate::decor::Decor>,
+    /// Windows on the native protocol, by (bus client, window id) (native.rs).
+    pub natives: std::collections::HashMap<(u32, u32), Win>,
     /// Where maximized windows go back to.
     pub restore: std::collections::HashMap<Win, smithay::utils::Rectangle<i32, Logical>>,
     /// The last press on a title bar, for double-click to maximize.
@@ -219,6 +221,7 @@ impl Server {
             xsettings_tx: None,
             xdg_decoration_state,
             decor: Default::default(),
+            natives: Default::default(),
             restore: Default::default(),
             last_title_press: None,
             shot_pending: Vec::new(),

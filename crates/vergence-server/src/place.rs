@@ -226,7 +226,7 @@ pub fn fit(size: Size<i32, Logical>, room: Size<i32, Logical>, min: Option<Size<
     (size.w.min(room.w).max(min.w).max(1), size.h.min(room.h).max(min.h).max(1)).into()
 }
 
-fn center(area: Rectangle<i32, Logical>, size: Size<i32, Logical>) -> Point<i32, Logical> {
+pub(crate) fn center(area: Rectangle<i32, Logical>, size: Size<i32, Logical>) -> Point<i32, Logical> {
     (area.loc.x + ((area.size.w - size.w) / 2).max(0), area.loc.y + ((area.size.h - size.h) / 2).max(0)).into()
 }
 

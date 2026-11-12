@@ -156,7 +156,22 @@ impl PointerGrab<Server> for ResizeSurfaceGrab {
             let _ = &data;
             return;
         }
-        let xdg = self.window.toplevel().unwrap();
+        if let crate::win::Win::Native(n) = &self.window {
+            // Native (native.rs): the new size by configure (paced by the client's
+            // acknowledgements); the top and left edges move the window, as X11's.
+            let mut loc = self.initial_rect.loc;
+            if self.edges.intersects(ResizeEdge::LEFT) {
+                loc.x += self.initial_rect.size.w - self.last_window_size.w;
+            }
+            if self.edges.intersects(ResizeEdge::TOP) {
+                loc.y += self.initial_rect.size.h - self.last_window_size.h;
+            }
+            let n = n.clone();
+            data.native_configure(&n, self.last_window_size, false);
+            data.space.map_element(self.window.clone(), loc, true);
+            return;
+        }
+        let Some(xdg) = self.window.toplevel() else { return };
         xdg.with_pending_state(|state| {
             state.states.set(xdg_toplevel::State::Resizing);
             state.size = Some(self.last_window_size);

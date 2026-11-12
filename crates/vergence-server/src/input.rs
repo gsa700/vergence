@@ -227,14 +227,18 @@ impl Server {
     /// Raise a window and give it the keyboard (X11 windows: X focus and stacking too).
     pub fn focus_window(&mut self, window: &crate::win::Win, serial: smithay::utils::Serial) {
         self.space.raise_element(window, true);
-        let focus = match window.x11_surface() {
-            Some(x) => {
+        // A native window (native.rs) has no Wayland or X11 surface to give the
+        // keyboard: it is raised and activated, and the keyboard leaves the others
+        // (its own keyboard input comes in step 4).
+        let focus = match (window.x11_surface(), window.toplevel()) {
+            (Some(x), _) => {
                 if let Some(wm) = self.xwm.as_mut() {
                     let _ = wm.raise_window(x);
                 }
-                KeyboardFocus::X11(x.clone())
+                Some(KeyboardFocus::X11(x.clone()))
             }
-            None => KeyboardFocus::Wayland(window.toplevel().unwrap().wl_surface().clone()),
+            (None, Some(t)) => Some(KeyboardFocus::Wayland(t.wl_surface().clone())),
+            (None, None) => None,
         };
         for w in self.space.elements() {
             w.set_activated(w == window);
@@ -243,7 +247,7 @@ impl Server {
             }
         }
         if let Some(k) = self.seat.get_keyboard() {
-            k.set_focus(self, Some(focus), serial);
+            k.set_focus(self, focus, serial);
         }
     }
 
@@ -337,7 +341,7 @@ impl Server {
             let hit = self.hit(at);
             let left = button == BTN_LEFT;
             match &hit {
-                Hit::Surface(w, ..) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Minimize(w) | Hit::Edge(w, _) => {
+                Hit::Surface(w, ..) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Minimize(w) | Hit::Edge(w, _) | Hit::Native(w) => {
                     self.focus_window(&w.clone(), serial)
                 }
                 Hit::Shelf | Hit::Nothing => {}
@@ -349,6 +353,12 @@ impl Server {
                     grab_with = Some((w, edges));
                 }
                 Hit::Surface(..) => {}
+                // Alt+drag works on native windows too; other presses wait for step 4.
+                Hit::Native(w) if keyboard.modifier_state().alt && (left || button == BTN_RIGHT) => {
+                    let edges = (!left).then(|| self.nearest_edges(&w, at));
+                    grab_with = Some((w, edges));
+                }
+                Hit::Native(_) => {}
                 Hit::Title(w) if left => {
                     let now = std::time::Instant::now();
                     let double = self

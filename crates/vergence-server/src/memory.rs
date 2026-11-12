@@ -96,7 +96,12 @@ impl Server {
         if let Some(id) = self.memory.ids.get(w) {
             return Some(id.clone());
         }
-        let (instance, class) = if let Some(x) = w.x11_surface() {
+        let mut role = String::new();
+        let (instance, class) = if let Some(n) = w.native() {
+            // A native window says who it is (Contract 2): its application id and role.
+            role = n.role.clone();
+            (n.app_id.clone(), n.app_id.clone())
+        } else if let Some(x) = w.x11_surface() {
             if x.is_override_redirect() || x.is_transient_for().is_some() {
                 return None;
             }
@@ -123,11 +128,11 @@ impl Server {
             .memory
             .ids
             .values()
-            .filter(|i| i.instance == instance && i.class == class)
+            .filter(|i| i.instance == instance && i.class == class && i.role == role)
             .map(|i| i.index)
             .collect();
         let index = (0..).find(|i| !taken.contains(i)).unwrap_or(0);
-        let id = WindowId { instance, class, role: String::new(), index };
+        let id = WindowId { instance, class, role, index };
         if self.memory.store.skips(&id) {
             return None;
         }

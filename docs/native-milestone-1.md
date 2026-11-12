@@ -255,3 +255,54 @@ fuzz test feeds the decoder random frames and descriptors.
     double-click maximized again, a drag took it out under the pointer.
   - Soak: an evening of Dave's normal use on Hubble and kepler, then step 3.
 
+
+- **Step 3 (2026-11-11): native windows on the screen.** `native.rs` in the
+  server: a native window is `Win::Native`, the second case of step 2's
+  element. On `Create` the server places it (window memory by identity
+  first, then fitted and centered on the monitor under the pointer),
+  answers `Created` with a token (`app/role/index`, memory's key) and a
+  `Configure` (size in reference units, the monitor's exact scale), and
+  shows it with its first picture.
+  - **Pictures** are shared memory, the two formats now named in
+    `vergence-protocol` (`SHM_ARGB8888`, `SHM_XRGB8888`: DRM fourcc codes).
+    The server reads the damaged rows with `pread` instead of mapping the
+    client's file: a client that shrinks its file gets a short read and
+    loses its connection, where a mapping would take the server down with
+    SIGBUS (no signal handling needed, the same on Linux and FreeBSD). A
+    picture that claims more than its file holds is refused before
+    reading. The pixels go into a `MemoryRenderBuffer`, drawn by the scene
+    (`decor.rs`) 1:1 at the scale they were drawn for.
+  - **Frames**: an attach asks for the next; after drawing a monitor the
+    window is on, the server sends `Frame` (both back ends). A window that
+    moves to a monitor of another scale is sent a new `Configure`.
+  - **Configure pacing**: one configure waits for the client to
+    acknowledge the last; a newer size waits meanwhile, so a resize drag
+    sends one size per acknowledgement, as X11's sync request does.
+  - **The server's frame and its parts**: title bars for windows that do
+    not draw their own, close (sends `Close`), maximize and restore (by
+    configure), minimize to the dock and back, the border band's resize
+    (the resize grab's native path), Alt+drag; the dock's icon and window
+    memory by identity (`memory.rs`: application id and role).
+  - **Fixed on the way**: `focus_window` unwrapped a Wayland surface
+    (a click on a native window would have stopped the server), and the
+    resize grab did the same; both now handle windows without one.
+  - `vnative` (vergence-protocol's second tool, installed with the rest)
+    draws a window natively and counts frames; `--short-file` lies about
+    its picture. The shared-memory helper moved from vergence-wl to
+    `vergence_protocol::shm` (vergence-wl re-exports it), as `sock` did.
+  - Tests: the damage copy (only its rectangle, through a stride, clipped,
+    a short file an error). 318 green on Hubble, kepler and Techbench.
+  - **On Hubble** (14" 4K at scale 3, 30 Hz): a 480 x 320 window drawn at
+    1440 x 960 pixels under the server's title bar; 240 frames in 8.1 s,
+    a median 33 ms apart (the monitor's pace), the moving bar sent as two
+    damage strips; maximize (1280 x 696) and restore; close by its
+    button; moved to 150,300, closed, and opened there again by memory;
+    resized from its right edge 480 to 587 (configures 527, 557, 587 as
+    acknowledged); minimized to the dock and back. The lying client was
+    disconnected ("picture of 5535360 bytes in a file of 5529600") and the
+    server stayed up. The terminal (Wayland) ran alongside throughout.
+  - **Not yet seen**: a move between monitors of different scales (Hubble
+    had one monitor connected; the code path is the same `Configure`); a
+    live run on kepler (built and tested there; its session is Dave's).
+    Until step 4 a native window gets no input of its own, so its title
+    bar draws as unfocused even when it is in front.

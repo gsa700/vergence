@@ -30,6 +30,7 @@ mod launcher;
 mod touch;
 mod pointer;
 mod win;
+mod native;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;

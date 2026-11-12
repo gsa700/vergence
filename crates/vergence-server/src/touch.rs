@@ -166,7 +166,7 @@ impl Server {
         let button = |h: &Hit| matches!(h, Hit::Close(_) | Hit::Maximize(_) | Hit::Minimize(_));
         let wanted: &dyn Fn(&Hit) -> bool = match self.hit(at) {
             Hit::Title(_) => &button,
-            Hit::Nothing => &|h: &Hit| !matches!(h, Hit::Nothing | Hit::Surface(..)),
+            Hit::Nothing => &|h: &Hit| !matches!(h, Hit::Nothing | Hit::Surface(..) | Hit::Native(_)),
             _ => return at,
         };
         let d = REACH * 0.7;

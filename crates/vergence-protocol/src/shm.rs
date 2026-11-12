@@ -1,5 +1,7 @@
 //! Memory shared with the display server: where a window's pixels are put
-//! when they are drawn in software (`wl_shm`).
+//! when they are drawn in software (`wl_shm` on Wayland, a picture's
+//! `Buffer::Shm` on the native protocol). Moved here from vergence-wl on
+//! 2026-11-11 so both roads use one copy, as `sock` was.
 //!
 //! An anonymous file (`memfd_create`, which Linux and FreeBSD both have) of
 //! the size asked for, mapped into this process. The server maps the same

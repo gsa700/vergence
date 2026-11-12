@@ -82,6 +82,8 @@ pub enum Hit {
     Maximize(Win),
     Minimize(Win),
     Edge(Win, ResizeEdge),
+    /// The body of a native window (native.rs): its input comes in step 4.
+    Native(Win),
     /// The shelf's strip (shelf.rs): in front of every window.
     Shelf,
     Nothing,
@@ -155,6 +157,9 @@ fn physical(r: Rectangle<f64, Logical>, output_loc: Point<i32, Logical>, scale: 
 impl Server {
     /// Does the server draw this window's title bar?
     pub fn has_title(&self, w: &Win) -> bool {
+        if let Some(n) = w.native() {
+            return !n.own_frame;
+        }
         if let Some(x) = w.x11_surface() {
             return !x.is_override_redirect() && !x.is_decorated() && !x.is_fullscreen();
         }
@@ -243,6 +248,10 @@ impl Server {
                 continue;
             }
             let Some(loc) = self.space.element_location(w) else { continue };
+            if w.native().is_some() {
+                // No surfaces: the window's own rectangle (what covers it is above).
+                return Hit::Native(w.clone());
+            }
             let render_loc = loc - w.geometry().loc;
             if let Some((s, p)) = w.surface_under(pos - render_loc.to_f64(), WindowSurfaceType::ALL) {
                 return Hit::Surface(w.clone(), s, (p + render_loc).to_f64());
@@ -352,6 +361,19 @@ impl Server {
                 }
             }
             let Some(loc) = self.space.element_location(&w) else { continue };
+            // A native window's picture (native.rs), drawn 1:1 at the scale it was
+            // drawn for, from the window's top left corner.
+            if let Some(n) = w.native() {
+                if let Some(p) = n.picture() {
+                    let at = (loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+                    let whole = Rectangle::<f64, Logical>::from_size((p.px.w as f64, p.px.h as f64).into());
+                    match MemoryRenderBufferRenderElement::from_buffer(renderer, at.to_f64(), &p.buffer, None, Some(whole), Some(p.logical), Kind::Unspecified) {
+                        Ok(e) => elements.push(SceneElement::Memory(e)),
+                        Err(e) => tracing::warn!("native window picture: {e:?}"),
+                    }
+                }
+                continue;
+            }
             let render_loc = (loc - w.geometry().loc - out.loc).to_f64().to_physical(scale).to_i32_round();
             let surfaces: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = w.render_elements(renderer, render_loc, scale.into(), 1.0);
             elements.extend(surfaces.into_iter().map(SceneElement::Surface));
@@ -367,6 +389,9 @@ impl Server {
 
     /// A window's title, as its app set it.
     pub fn window_title(&self, w: &Win) -> String {
+        if let Some(n) = w.native() {
+            return n.title();
+        }
         if let Some(x) = w.x11_surface() {
             return x.title();
         }
@@ -380,7 +405,10 @@ impl Server {
     }
 
     /// Close a window as its app is asked to.
-    pub fn close_window(&self, w: &Win) {
+    pub fn close_window(&mut self, w: &Win) {
+        if let Some(n) = w.native() {
+            return self.native_close(n);
+        }
         if let Some(x) = w.x11_surface() {
             let _ = x.close();
         } else if let Some(t) = w.toplevel() {
@@ -418,7 +446,9 @@ impl Server {
     }
 
     fn set_window_rect(&mut self, w: &Win, rect: Rectangle<i32, Logical>, maximized: bool) {
-        if let Some(x) = w.x11_surface() {
+        if let Win::Native(n) = w {
+            self.native_configure(n, rect.size, maximized);
+        } else if let Some(x) = w.x11_surface() {
             let _ = x.set_maximized(maximized);
             let _ = x.configure(rect);
         } else if let Some(t) = w.toplevel() {

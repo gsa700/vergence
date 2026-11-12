@@ -306,7 +306,10 @@ impl Server {
                     });
                     ("wayland", title, app)
                 }
-                _ => ("?", String::new(), String::new()),
+                _ => match w.native() {
+                    Some(n) => ("native", n.title(), n.app_id.clone()),
+                    None => ("?", String::new(), String::new()),
+                },
             };
             out.push(format!("{i} {kind} {title:?} {class:?} {geo:?} on {on:?} title-bar={}", self.has_title(w)));
         }

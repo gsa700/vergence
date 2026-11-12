@@ -653,6 +653,8 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: crtc::Handle) {
             Some(output.clone())
         });
     }
+    // Native windows on this monitor that wait for a frame, and scale changes (native.rs).
+    state.native_frames(&output);
     state.space.refresh();
     state.popups.cleanup();
     let _ = state.display_handle.flush_clients();

@@ -145,6 +145,11 @@ pub fn init_winit(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Res
                     window.send_frame(&v.output, start, Some(Duration::ZERO), |_, _| Some(v.output.clone()));
                 }
             }
+            // Native windows that wait for a frame, and scale changes (native.rs).
+            let drawn: Vec<smithay::output::Output> = virtuals.iter().map(|v| v.output.clone()).collect();
+            for o in &drawn {
+                state.native_frames(o);
+            }
 
             state.space.refresh();
             state.popups.cleanup();

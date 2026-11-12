@@ -77,6 +77,12 @@ pub const MAX_STATES: usize = 16;
 /// A picture's longest side, in pixels.
 pub const MAX_SIDE: u32 = 16_384;
 
+/// Shared-memory picture formats, as DRM fourcc codes (the same numbering as
+/// a GPU buffer's): four bytes a pixel, blue, green, red, then alpha (or
+/// unused), little-endian; alpha premultiplied. The server shows these two.
+pub const SHM_ARGB8888: u32 = u32::from_le_bytes(*b"AR24");
+pub const SHM_XRGB8888: u32 = u32::from_le_bytes(*b"XR24");
+
 /// A part of a picture that changed, in its pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Damage {

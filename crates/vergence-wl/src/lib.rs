@@ -16,7 +16,8 @@
 
 pub mod client;
 pub mod conn;
-pub mod shm;
+/// Shared memory: moved to vergence-protocol on 2026-11-11 (native windows use it too).
+pub use vergence_protocol::shm;
 pub mod wire;
 
 pub use client::{Client, Event, Interface};

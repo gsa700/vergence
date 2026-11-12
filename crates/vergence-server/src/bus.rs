@@ -263,17 +263,13 @@ impl Server {
                 c.topics.remove(&topic);
                 self.bus_send(id, ServerMsg::Done { serial });
             }
-            // Windows on the native protocol (native milestone 1): understood,
-            // and answered "not yet" until step 3 puts them on the screen.
-            ClientMsg::Window(req) => match req.serial() {
-                Some(serial) => self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::NotYet, message: "windows on the native protocol: not yet".into() }),
-                None => tracing::debug!("bus: client {id}: {req:?} (no windows yet)"),
-            },
+            // Windows on the native protocol (native milestone 1, native.rs).
+            ClientMsg::Window(req) => self.native_request(id, req),
         }
     }
 
     /// Queue a message for a client and write what the socket takes now.
-    fn bus_send(&mut self, id: u32, m: ServerMsg) {
+    pub(crate) fn bus_send(&mut self, id: u32, m: ServerMsg) {
         let bytes = match m.encode() {
             Ok(b) => b,
             Err(e) => return tracing::warn!("bus: can't encode {m:?}: {e}"),
@@ -339,6 +335,16 @@ impl Server {
         }
     }
 
+    /// The application id a client gave in its Hello (recorded, not trusted, §7.4).
+    pub(crate) fn bus_app_id(&self, id: u32) -> String {
+        self.bus.clients.get(&id).and_then(|c| c.app_id.clone()).unwrap_or_default()
+    }
+
+    /// End a client's connection (a native window message that did not add up).
+    pub(crate) fn bus_end(&mut self, id: u32) {
+        self.bus_close(id);
+    }
+
     /// End a connection after its last queued message: shut it down so its
     /// read source sees EOF and removes it.
     fn bus_close(&mut self, id: u32) {
@@ -357,6 +363,8 @@ impl Server {
             }
             tracing::debug!("bus: client {id} ({:?}) left", c.app_id);
         }
+        // Its native windows go with it (native.rs).
+        self.native_forget(id);
     }
 
     /// The monitors as the bus describes them, left to right.

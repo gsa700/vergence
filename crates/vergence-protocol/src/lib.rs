@@ -9,6 +9,7 @@ pub mod bus;
 pub mod sock;
 pub mod window;
 pub mod wire;
+pub mod shm;
 
 use std::{
     os::unix::net::UnixStream,
