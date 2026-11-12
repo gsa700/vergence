@@ -100,10 +100,16 @@ The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md: s
   user. Security pass 2026-11-08: docs/security-pass-2026-11-08.md; the
   fuzz tests (vergence-protocol, vergence-dbus, vergence-term) run with
   `cargo test`; `FUZZ_ITERS=<n>` for a long run.
+- **License: `Apache-2.0 OR GPL-2.0-or-later`** (Dave, 2026-11-11): the
+  workspace `license` field, LICENSE-APACHE, LICENSE-GPL, README's License
+  section. After adding or updating a dependency, rerun `python3
+  tools/notices.py` on a dev box (needs cargo) to regenerate
+  THIRD-PARTY-NOTICES.md (`--check` says whether it is current). Before
+  adding a dependency, check its license: anything copyleft (GPL, LGPL, MPL,
+  EPL) or unusual needs Dave's word, besides the borrowing rule.
 - **GitHub: private `gsa700/vergence`** (origin, created 2026-11-06 at
-  Dave's go). Push after committing. Going public is Dave's call (needs
-  license files; the whitepaper byline has his callsign, the ASUS test EDID
-  its serial). The rules of the app repos apply: author email is the no-reply address
+  Dave's go). Push after committing. Going public is Dave's call (the
+  whitepaper byline has his callsign, the ASUS test EDID its serial). The rules of the app repos apply: author email is the no-reply address
   (298062495+gsa700@users.noreply.github.com), no LAN addresses, no personal
   email, keys or tokens in any file or commit.
 - **The whitepaper** is edited here (docs/Vergence-Whitepaper.md). After an
