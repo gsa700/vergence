@@ -2,8 +2,10 @@
 
 Drafted 2026-11-11 (Dave: "write the Smithay plan"), the first step of
 Smithay's replacement in docs/borrowed-review.md's order, agreed the same
-day after native milestone 1 closed. **A draft: three questions for Dave
-at the end.**
+day after native milestone 1 closed. **Accepted 2026-11-12: Dave answered
+(a) to all three questions at the end** (xkbcommon used directly for the
+seat's own keyboard state; the seat in its own crate, `vergence-seat`;
+Smithay's drag and drop kept for now).
 
 The goal: every pointer, keyboard and touch event in the server goes
 through **one dispatcher of our own** that decides who gets it: a Wayland
@@ -154,7 +156,7 @@ Smithay's own; nothing of ours runs in its callbacks.
   but the seat is built so they are a grab and a filter entry each.
 - Tablets and gestures beyond what the server does now (nothing).
 
-## Questions for Dave
+## Questions for Dave (answered 2026-11-12: (a), (a), (a))
 
 1. **The keyboard's state.** (a) Smithay's `KeyboardHandle` stays the
    Wayland edge, fed every key, and our seat keeps a second xkb state
