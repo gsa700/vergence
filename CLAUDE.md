@@ -44,7 +44,9 @@ The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md: s
   for borrowed clients, borrowed panel or daemon), ask him: what it is, why it
   is necessary, what writing our own would take. Parts already in (Smithay,
   libinput/seatd/xkbcommon, Xwayland, ab_glyph, resvg, Adwaita cursors;
-  table in whitepaper §8) stay until he decides on each. OS interfaces (DRM/KMS,
+  table in whitepaper §8) stay until he decides on each. The list of code we
+  did not write, for later review and possible rewrite: docs/borrowed-review.md
+  (Dave, 2026-11-11); add to it when anything borrowed comes in. OS interfaces (DRM/KMS,
   evdev, GBM, EGL, Vulkan) are not borrowing.
 - **Three platforms, one code base** (Dave, 2026-11-09; replaces "FreeBSD
   first" of 2026-11-06). The primary development platform is **Linux without
