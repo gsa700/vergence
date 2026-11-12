@@ -48,6 +48,15 @@ if [ -z "$LIBSEAT_BACKEND" ] && [ ! -d /run/systemd/system ]; then
     export LIBSEAT_BACKEND=seatd
 fi
 export XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=Vergence
+# The system's locale when nothing set one (started over ssh, or by a launcher
+# that skipped the login shell): without it programs see POSIX and some
+# refuse to run (btop: "No UTF-8 locale detected", 2026-11-11). Linux keeps
+# it in /etc/locale.conf; FreeBSD's login.conf class sets it at login.
+if [ -z "${LANG:-}" ] && [ -r /etc/locale.conf ]; then
+    while IFS='=' read -r key value; do
+        case $key in LANG|LC_[A-Z]*) export "$key=$(printf %s "$value" | tr -d '"')" ;; esac
+    done < /etc/locale.conf
+fi
 # GTK programs (Firefox among them) read the desktop's settings from the
 # settings portal only when told to; the server's D-Bus edge is that portal,
 # and so they get our window buttons' layout, theme and fonts. What else

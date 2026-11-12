@@ -438,31 +438,40 @@ fuzz test feeds the decoder random frames and descriptors.
     fit one frame and still encoded) and a small tree whole; meaning's
     parent links and stable ids. 325 green on Hubble, kepler and Techbench.
 
-## Acceptance, where it stands (2026-11-11, after step 6)
+## Acceptance, where it stands (2026-11-11, 22:30)
 
-1. Native on Hubble: **met** (terminal and settings app, `vctl windows`).
-   On kepler and Techbench: installed and tested there, not yet run in a
-   session there.
-2. Stress test: **rates met** (step 5's table). Clicks: the tool picked
-   the wrong window with two terminals open; fixed 2026-11-11 (`vctl
-   windows` now names each window's pid, from the bus socket's peer
-   credentials or the Wayland client's, and `clicks.sh` takes the stress
-   test's own). Rerun on Hubble: every tab change drawn within one frame on
-   both roads, 41 of 50 natively, 33 over Wayland, because the first job
-   (btop) exits at once on Void and takes its tab with it (five tabs, so
-   clicks on the sixth change nothing). To finish: btop on Void, or the
-   tool counting the tabs that are there.
-3. Clipboard: native and Wayland both ways **met** with the terminal on
-   Hubble (step 4); **Firefox not yet tried**.
+1. Native on Hubble and kepler: **met** (terminal and settings app,
+   `vctl windows`). Techbench: installed and tested, **not yet run in a
+   session there** (needs Dave at GDM).
+2. Stress test: **met on Hubble and kepler.** Clicks, 50 of 50 within two
+   frames on both roads and both machines, once Hubble's session had a
+   locale: btop had exited at once ("No UTF-8 locale detected") because a
+   session started over ssh never read /etc/locale.conf; tools/vergence-session
+   now does when LANG is unset. From the press reaching the terminal to its
+   frame being built: natively 13.9 ms on average on Hubble (30 Hz) and
+   8.1 ms on kepler (60 Hz), over Wayland under 0.4 ms: the native road
+   draws on the server's next frame offer, the Wayland road at once; both
+   well within the two frames. Rates on kepler: one minute a road,
+   alternated; the first run of a series is slow on the floods whichever
+   road it is (warm-up), the others within 2% of each other (seq about
+   1.0 s, color 7.8k, cursor 6.7k, Unicode 230k a second).
+3. Clipboard with Firefox: **met** on Hubble and kepler, both ways, between
+   `vnative` (the native protocol, the toolkit's road's requests) and a
+   Firefox text box (throwaway profile): Firefox pasted "copied from
+   vnative, a native window", vnative pasted "pasted from firefox". `vctl
+   key` learned chords for it (`ctrl+v`, `ctrl+shift+c`). The terminal
+   both ways with the Wayland road: step 4.
 4. Placement by request and memory: **met**.
 5. `vctl tree`: **met** (secret by the toolkit's test).
-6. Wayland applications as before: the terminal's Wayland road runs;
-   **Firefox, AlbumWall and foot not yet tried** in this build. Step 2's
-   soak was clean.
-7. Fuzz (a million frames, step 1) and refusals (the lying client, step
-   3): **met**.
+6. Wayland applications: **met on Hubble**: Firefox, AlbumWall and foot
+   (foot installed from Void's packages for it) draw and take input as
+   before; Firefox on kepler too. X11 applications (off by default) not
+   rerun. Step 2's soak was clean.
+7. Fuzz and refusals: **met**; the fuzz test rerun at a million
+   iterations on Hubble, 2026-11-11 (5.5 s).
 8. Outside a Vergence session: Wayland by the code (no `VERGENCE_BUS`);
-   **not yet run** under GNOME or Xfce.
+   **not yet run** (GNOME on Techbench; Xfce on Hubble is X11 only, where
+   vergence-ui has no road).
 
-To close the milestone: the runs on kepler and Techbench, Firefox (3, 6),
-the click tool, and one run outside a Vergence session.
+To close the milestone: a Techbench session (1, 2, 3, 6) and GNOME on
+Techbench (8), both from Dave's GDM.

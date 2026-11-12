@@ -196,8 +196,28 @@ impl Server {
             // Keys by name and text by letter, as a US keyboard has them (the kernel's
             // key numbers; what they type is the session's layout's to say).
             "key" | "type" => {
+                // Chords: "ctrl+v", "ctrl+shift+c", "alt+Tab": the modifiers
+                // held (Control_L, Shift_L, Alt_L, Super_L) while the last key
+                // is pressed.
+                let mut held: Vec<u32> = Vec::new();
+                let mut name = args.first().copied().unwrap_or("");
+                if cmd == "key" && name.contains('+') && name.len() > 1 {
+                    let parts: Vec<&str> = name.split('+').collect();
+                    for m in &parts[..parts.len() - 1] {
+                        held.push(match m.to_ascii_lowercase().as_str() {
+                            "ctrl" | "control" => 29,
+                            "shift" => 42,
+                            "alt" => 56,
+                            "super" => 125,
+                            other => return format!("key: no modifier {other} (ctrl, shift, alt, super)"),
+                        });
+                    }
+                    name = parts[parts.len() - 1];
+                }
+                const ROWS: [(&str, u32); 4] = [("1234567890-=", 2), ("qwertyuiop", 16), ("asdfghjkl", 30), ("zxcvbnm,.", 44)];
+                let letter = |c: char| if c == ' ' { Some(57) } else { ROWS.iter().find_map(|(row, first)| row.find(c).map(|i| first + i as u32)) };
                 let codes: Vec<u32> = if cmd == "key" {
-                    match args.first().copied().unwrap_or("") {
+                    match name {
                         "Escape" => vec![1],
                         "Return" => vec![28],
                         "BackSpace" => vec![14],
@@ -212,28 +232,36 @@ impl Server {
                         "Mute" => vec![113],
                         "VolumeDown" => vec![114],
                         "VolumeUp" => vec![115],
-                        other => return format!("key: no key {other} (Escape, Return, BackSpace, Tab, space, Up, Down, Left, Right, Super, Mute, VolumeDown, VolumeUp)"),
+                        other => match other.chars().collect::<Vec<_>>().as_slice() {
+                            // One letter or digit, for chords ("ctrl+v").
+                            [c] if letter(*c).is_some() => vec![letter(*c).unwrap()],
+                            _ => return format!("key: no key {other} (Escape, Return, BackSpace, Tab, space, Up, Down, Left, Right, Super, Mute, VolumeDown, VolumeUp, a letter; chords like ctrl+v)"),
+                        },
                     }
                 } else {
-                    const ROWS: [(&str, u32); 4] = [("1234567890-=", 2), ("qwertyuiop", 16), ("asdfghjkl", 30), ("zxcvbnm,.", 44)];
                     let text = args.join(" ");
                     let mut codes = Vec::new();
                     for c in text.chars() {
-                        let code = if c == ' ' { Some(57) } else { ROWS.iter().find_map(|(row, first)| row.find(c).map(|i| first + i as u32)) };
-                        match code {
+                        match letter(c) {
                             Some(code) => codes.push(code),
                             None => return format!("type: no key for {c:?} (small letters, digits, space, - = , .)"),
                         }
                     }
                     codes
                 };
+                use smithay::backend::input::{InputTime, KeyState};
+                for m in &held {
+                    self.handle_key((m + 8).into(), KeyState::Pressed, InputTime::now());
+                }
                 for code in &codes {
-                    for state in [smithay::backend::input::KeyState::Pressed, smithay::backend::input::KeyState::Released] {
-                        let time = smithay::backend::input::InputTime::now();
-                        self.handle_key((code + 8).into(), state, time);
+                    for state in [KeyState::Pressed, KeyState::Released] {
+                        self.handle_key((code + 8).into(), state, InputTime::now());
                     }
                 }
-                format!("{} keys", codes.len())
+                for m in held.iter().rev() {
+                    self.handle_key((m + 8).into(), KeyState::Released, InputTime::now());
+                }
+                format!("{} keys", codes.len() + held.len())
             }
             "dbus" => self.dbus_report(),
             "notes" => self.notify_report(),
@@ -302,7 +330,7 @@ impl Server {
                 self.loop_signal.stop();
                 "quitting".into()
             }
-            _ => "commands: shot, windows, shelf, session, apps, key <name>, type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
+            _ => "commands: shot, windows, shelf, session, apps, key <name> (chords: ctrl+v), type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
         }
     }
 
