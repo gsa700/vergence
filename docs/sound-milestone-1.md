@@ -130,3 +130,31 @@ service, ALSA's `alsactl`) still restores levels at boot.
    until later. Proposed: (c) now, (a) later; Fedora is not the target.
 3. **Volume keys' step**: 5% a press, proposed; or the system's own
    steps (ALSA cards often have 64 or so).
+
+## Progress
+
+- **Step 1 (2026-11-11): `vergence-sound` with the OSS back end, and
+  `vsound`.** The `Sound` interface (outputs, volume, mute, default, a
+  test tone); OSS: the devices that play from `dev.pcm.N`, named from the
+  codec pins they drive (`dev.pcm.N.%location`, `dev.hdaaM.nidK_config`:
+  "Internal speaker", "Front headphones", "HDMI or DisplayPort", a USB
+  device by its own name), volume and mute through `/dev/mixerN`
+  (`SOUND_MIXER_VOLUME`, FreeBSD's `SOUND_MIXER_MUTE` mask), the default
+  through `hw.snd.default_unit` (root). The test tone: 440 Hz for 1.5 s at
+  a tenth of full scale, ramped, in N channels on chosen ones; when the
+  device's virtual channels mix in fewer, it says which sysctl reaches the
+  higher outputs. Tests: pin names, locations, levels, the tone.
+  - On kepler: the speaker, the (silent) front headphone jack, HDMI and a
+    Focusrite Scarlett 4i4 (USB, plugged in by Dave) listed by name;
+    volume set; the Scarlett made the default and back. The Scarlett played
+    the tone on 1-2, on all four outputs (with 4-channel mixing) and on 1
+    and 2 alone, the driver taking every frame without an underrun, and
+    nothing came out of its outputs 1-2: it is not in Focusrite's MSD mode
+    (no mass-storage interface), so its stored routing (its vendor
+    interface, Focusrite Control's) is the likely reason; to check on
+    another computer.
+  - **Learned**: `mixer -d pcmN ...` sets `hw.snd.default_unit` on FreeBSD
+    14 and later; never use it to read a device (it moved kepler's
+    default to the silent jack more than once tonight). vergence-sound
+    reads each mixer by its own file and never touches the default.
+  - 330 tests green on Hubble, kepler and Techbench.

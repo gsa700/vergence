@@ -1,0 +1,11 @@
+[package]
+name = "vergence-sound"
+description = "Vergence's sound: outputs by name, which one is the default, volume and mute (OSS on FreeBSD, ALSA on Linux)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Our own code only (whitepaper §8): the systems' own interfaces (OSS and
+# ALSA ioctls, sysctl), no library between.
+[dependencies]

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/vergence-edid", "crates/vergence-profile", "crates/vergence-xsettings", "crates/vergence-harness", "crates/vergence-server", "crates/vergence-settings", "crates/vergence-protocol", "crates/vergence-dbus", "crates/vergence-term", "crates/vergence-scene", "crates/vergence-text", "crates/vergence-render", "crates/vergence-wl", "crates/vergence-ui", "crates/vergence-look", "crates/vergence-shell", "crates/vergence-widgets"]
+members = ["crates/vergence-edid", "crates/vergence-profile", "crates/vergence-xsettings", "crates/vergence-harness", "crates/vergence-server", "crates/vergence-settings", "crates/vergence-protocol", "crates/vergence-dbus", "crates/vergence-term", "crates/vergence-scene", "crates/vergence-text", "crates/vergence-render", "crates/vergence-wl", "crates/vergence-ui", "crates/vergence-look", "crates/vergence-shell", "crates/vergence-widgets", "crates/vergence-sound"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +13,7 @@ vergence-edid = { path = "crates/vergence-edid" }
 vergence-profile = { path = "crates/vergence-profile" }
 vergence-xsettings = { path = "crates/vergence-xsettings" }
 vergence-protocol = { path = "crates/vergence-protocol" }
+vergence-sound = { path = "crates/vergence-sound" }
 vergence-dbus = { path = "crates/vergence-dbus" }
 vergence-scene = { path = "crates/vergence-scene" }
 vergence-text = { path = "crates/vergence-text" }
