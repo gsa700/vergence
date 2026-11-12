@@ -67,6 +67,8 @@ pub struct Server {
     pub decor: std::collections::HashMap<Win, crate::decor::Decor>,
     /// Windows on the native protocol, by (bus client, window id) (native.rs).
     pub natives: std::collections::HashMap<(u32, u32), Win>,
+    /// Native windows' pointer focus and keymaps sent (native.rs).
+    pub native_input: crate::native::NativeInput,
     /// Where maximized windows go back to.
     pub restore: std::collections::HashMap<Win, smithay::utils::Rectangle<i32, Logical>>,
     /// The last press on a title bar, for double-click to maximize.
@@ -222,6 +224,7 @@ impl Server {
             xdg_decoration_state,
             decor: Default::default(),
             natives: Default::default(),
+            native_input: Default::default(),
             restore: Default::default(),
             last_title_press: None,
             shot_pending: Vec::new(),
@@ -305,6 +308,8 @@ impl Server {
         match self.hit(pos) {
             Hit::Surface(_, s, p) => return Some((s, p)),
             Hit::Edge(_, e) => self.pointer_image.status = CursorImageStatus::Named(edge_icon(e)),
+            // A native window's own shape, as it asked (native.rs).
+            Hit::Native(w) => self.pointer_image.status = CursorImageStatus::Named(w.native().map(|n| n.cursor()).unwrap_or(CursorIcon::Default)),
             _ => self.pointer_image.status = CursorImageStatus::Named(CursorIcon::Default),
         }
         None

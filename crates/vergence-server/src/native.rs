@@ -13,7 +13,18 @@
 // pixels go into a MemoryRenderBuffer, drawn by decor.rs's scene like a
 // title bar's text. A window asks for its next frame by attaching; the
 // server says `Frame` after drawing a monitor it is on, at the monitor's
-// pace. Input, the clipboard and GPU pictures are step 4.
+// pace.
+//
+// Input (step 4): the keyboard through Smithay's seat, as a third kind of
+// keyboard focus (focus.rs: the keymap once per client as a descriptor, the
+// repeat settings, keys as evdev codes, modifiers serialized as xkb's). The
+// pointer beside Smithay's, whose focus type is a Wayland surface: over a
+// native window Smithay's focus is none and this file sends enter, leave,
+// motion (in the window's reference units), buttons and the wheel, keeping
+// the window while a button is held (an implicit grab, as Wayland's). The
+// window's cursor shape is drawn while the pointer is over it. Move, resize
+// and minimize on request, when a button is held. The clipboard, touch and
+// GPU pictures follow.
 
 use std::{
     os::{fd::AsFd, unix::fs::FileExt},
@@ -78,6 +89,27 @@ struct State {
     picture: Option<Picture>,
     /// It attached a picture and waits to hear when to draw the next.
     frame_wanted: bool,
+    /// The pointer's shape over it, as it asked (step 4).
+    cursor: smithay::input::pointer::CursorIcon,
+}
+
+/// Native windows' share of the pointer and the keyboard (step 4).
+#[derive(Default)]
+pub struct NativeInput {
+    /// The native window the pointer is over (or held by a pressed button).
+    pointer: Option<Win>,
+    /// Buttons pressed while the pointer was on it: it keeps the pointer until
+    /// the last is let go.
+    held: Vec<u32>,
+    /// Bus clients that have been sent the keymap.
+    keymap_sent: std::collections::HashSet<u32>,
+    /// The seat's keymap as xkb text, read before the first native window
+    /// takes the keyboard (native_prepare_keymap). It cannot be read in the
+    /// focus callback: Smithay calls KeyboardTarget::enter holding the
+    /// keyboard's lock, and with_xkb_state takes the same lock (2026-11-11:
+    /// the first click on a native window froze the server on Hubble). The
+    /// server never changes its keymap while it runs.
+    keymap_text: Option<String>,
 }
 
 /// A native window's pixels, as the scene draws them.
@@ -115,6 +147,10 @@ impl NativeWindow {
 
     pub fn user_data(&self) -> &UserDataMap {
         &self.user_data
+    }
+
+    pub fn cursor(&self) -> smithay::input::pointer::CursorIcon {
+        self.state.lock().unwrap().cursor
     }
 
     fn kill(&self) {
@@ -202,6 +238,7 @@ impl Server {
                         shown: false,
                         picture: None,
                         frame_wanted: false,
+                        cursor: smithay::input::pointer::CursorIcon::Default,
                     }),
                     user_data: UserDataMap::new(),
                 });
@@ -285,9 +322,39 @@ impl Server {
                     self.toggle_maximize(&w);
                 }
             }
-            WinRequest::Paste { serial, .. } => self.native_refuse(client, serial, ErrorCode::NotYet, "the clipboard: step 4".into()),
-            // Input, moving and resizing from the client, minimizing, placement
-            // requests, meaning and the clipboard: steps 4 to 6.
+            WinRequest::Cursor { window, shape } => {
+                if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
+                    n.state.lock().unwrap().cursor = cursor_icon(shape);
+                    // Shown at once if the pointer is on it.
+                    if self.native_input.pointer.as_ref().is_some_and(|w| w.native().is_some_and(|m| std::ptr::eq(m, &*n))) {
+                        self.pointer_image.status = smithay::input::pointer::CursorImageStatus::Named(cursor_icon(shape));
+                    }
+                }
+            }
+            // Moving and resizing from the window's own bar or edges: only with a
+            // button held on it (the press of `input_serial`), as Wayland's.
+            WinRequest::Move { window, .. } | WinRequest::Resize { window, .. } if !self.native_holds(client, window) => {
+                tracing::debug!("native: client {client}: move or resize without a button held on window {window}");
+            }
+            WinRequest::Move { window, .. } => {
+                let Some(w) = self.natives.get(&(client, window)).cloned() else { return };
+                self.native_grab(w, None);
+            }
+            WinRequest::Resize { window, edges, .. } => {
+                let Some(w) = self.natives.get(&(client, window)).cloned() else { return };
+                // The protocol's edge bits are the server's own (top 1, bottom 2, left 4, right 8).
+                let e = crate::grabs::resize_grab::ResizeEdge::from_bits_truncate(edges as u32);
+                if !e.is_empty() {
+                    self.native_grab(w, Some(e));
+                }
+            }
+            WinRequest::Minimize { window } => {
+                if let Some(w) = self.natives.get(&(client, window)).cloned() {
+                    self.minimize(&w);
+                }
+            }
+            WinRequest::Paste { serial, .. } => self.native_refuse(client, serial, ErrorCode::NotYet, "the clipboard: not yet".into()),
+            // Placement requests, meaning and the clipboard: later in the milestone.
             other => tracing::debug!("native: client {client}: {other:?} (not yet)"),
         }
     }
@@ -342,12 +409,17 @@ impl Server {
         }
         self.space.unmap_elem(w);
         self.restore.remove(w);
+        if self.native_input.pointer.as_ref() == Some(w) {
+            self.native_input.pointer = None;
+            self.native_input.held.clear();
+        }
         n.kill();
         tracing::info!("native: {:?} window {} closed", n.app_id, n.id);
     }
 
     /// Bus client `client` has gone: its windows go with it.
     pub fn native_forget(&mut self, client: u32) {
+        self.native_input.keymap_sent.remove(&client);
         let mine: Vec<(u32, u32)> = self.natives.keys().filter(|(c, _)| *c == client).copied().collect();
         for k in mine {
             if let Some(w) = self.natives.remove(&k) {
@@ -430,6 +502,206 @@ impl Server {
                 tracing::info!("native: {:?} window {} now at scale {scale:.4}", n.app_id, n.id);
                 self.native_send_configure(n);
             }
+        }
+    }
+}
+
+/// The cursor-shape protocol's numbers (wp_cursor_shape_device_v1), which
+/// the native protocol uses too, as the server draws them.
+pub fn cursor_icon(shape: u16) -> smithay::input::pointer::CursorIcon {
+    use smithay::input::pointer::CursorIcon as C;
+    match shape {
+        2 => C::ContextMenu,
+        3 => C::Help,
+        4 => C::Pointer,
+        5 => C::Progress,
+        6 => C::Wait,
+        7 => C::Cell,
+        8 => C::Crosshair,
+        9 => C::Text,
+        10 => C::VerticalText,
+        11 => C::Alias,
+        12 => C::Copy,
+        13 => C::Move,
+        14 => C::NoDrop,
+        15 => C::NotAllowed,
+        16 => C::Grab,
+        17 => C::Grabbing,
+        18 => C::EResize,
+        19 => C::NResize,
+        20 => C::NeResize,
+        21 => C::NwResize,
+        22 => C::SResize,
+        23 => C::SeResize,
+        24 => C::SwResize,
+        25 => C::WResize,
+        26 => C::EwResize,
+        27 => C::NsResize,
+        28 => C::NeswResize,
+        29 => C::NwseResize,
+        30 => C::ColResize,
+        31 => C::RowResize,
+        32 => C::AllScroll,
+        33 => C::ZoomIn,
+        34 => C::ZoomOut,
+        _ => C::Default,
+    }
+}
+
+impl Server {
+    /// The pointer is at `pos`: the native window under it (or holding it)
+    /// hears enter, leave and motion. Called after Smithay's own motion, whose
+    /// focus over a native window is none.
+    pub fn native_pointer_motion(&mut self, pos: Point<f64, Logical>, time_ms: u32, grabbed: bool) {
+        let under = if !self.native_input.held.is_empty() {
+            self.native_input.pointer.clone()
+        } else if grabbed {
+            None
+        } else {
+            match self.hit(pos) {
+                crate::decor::Hit::Native(w) => Some(w),
+                _ => None,
+            }
+        };
+        if under != self.native_input.pointer {
+            if let Some(Win::Native(old)) = self.native_input.pointer.take() {
+                self.bus_send(old.client, ServerMsg::Window(WinEvent::PointerLeave { window: old.id }));
+            }
+            if let Some(Win::Native(n)) = &under {
+                let (x, y) = self.native_local(n, pos);
+                let serial = smithay::utils::SERIAL_COUNTER.next_serial().into();
+                self.bus_send(n.client, ServerMsg::Window(WinEvent::PointerEnter { window: n.id, serial, x, y }));
+            }
+            self.native_input.pointer = under;
+            return;
+        }
+        if let Some(Win::Native(n)) = &under {
+            let (x, y) = self.native_local(n, pos);
+            self.bus_send(n.client, ServerMsg::Window(WinEvent::PointerMotion { window: n.id, time_ms, x, y }));
+        }
+    }
+
+    /// A point of the desktop in a native window's reference units.
+    fn native_local(&self, n: &Arc<NativeWindow>, pos: Point<f64, Logical>) -> (f64, f64) {
+        let loc = self.space.element_location(&Win::Native(n.clone())).unwrap_or_default();
+        (pos.x - loc.x as f64, pos.y - loc.y as f64)
+    }
+
+    /// A button, if the pointer is on a native window: true when it went there.
+    pub fn native_pointer_button(&mut self, button: u32, pressed: bool, serial: u32, time_ms: u32) -> bool {
+        let Some(Win::Native(n)) = self.native_input.pointer.clone() else { return false };
+        if pressed {
+            if !self.native_input.held.contains(&button) {
+                self.native_input.held.push(button);
+            }
+        } else {
+            self.native_input.held.retain(|b| *b != button);
+        }
+        self.bus_send(n.client, ServerMsg::Window(WinEvent::PointerButton { window: n.id, serial, time_ms, button, pressed }));
+        if !pressed && self.native_input.held.is_empty() {
+            // The implicit grab ends: the pointer may be somewhere else by now.
+            let at = self.seat.get_pointer().map(|p| p.current_location()).unwrap_or_default();
+            self.native_pointer_motion(at, time_ms, false);
+        }
+        true
+    }
+
+    /// The wheel or a touchpad's scroll, if the pointer is on a native window.
+    pub fn native_pointer_axis(&mut self, time_ms: u32, source: u8, dx: f64, dy: f64, v120x: i32, v120y: i32) -> bool {
+        let Some(Win::Native(n)) = self.native_input.pointer.clone() else { return false };
+        self.bus_send(n.client, ServerMsg::Window(WinEvent::PointerAxis { window: n.id, time_ms, source, dx, dy, v120x, v120y }));
+        true
+    }
+
+    /// Does a button held on this window let it move or resize itself?
+    fn native_holds(&self, client: u32, window: u32) -> bool {
+        !self.native_input.held.is_empty() && self.native_input.pointer.as_ref().and_then(|w| w.native()).is_some_and(|n| n.client == client && n.id == window)
+    }
+
+    /// Move (edges None) or resize with the held button, as a title bar press does.
+    fn native_grab(&mut self, w: Win, edges: Option<crate::grabs::resize_grab::ResizeEdge>) {
+        let Some(pointer) = self.seat.get_pointer() else { return };
+        let Some(&button) = self.native_input.held.first() else { return };
+        // The grab has the pointer now: the window hears no more of it.
+        if let Some(Win::Native(n)) = self.native_input.pointer.take() {
+            self.bus_send(n.client, ServerMsg::Window(WinEvent::PointerLeave { window: n.id }));
+        }
+        self.native_input.held.clear();
+        let start = smithay::input::pointer::GrabStartData { focus: None, button, location: pointer.current_location() };
+        match edges {
+            Some(e) => self.start_resize(w, e, Some(start)),
+            None => self.start_move(w, Some(start)),
+        }
+    }
+
+    /// The key repeat a native window is told (settings.rs keeps it).
+    fn native_repeat(&self) -> (i32, i32) {
+        self.key_repeat()
+    }
+
+    /// Keyboard focus came to a native window (focus.rs): the keymap first, if
+    /// this client hasn't had it, and the repeat, then enter.
+    pub fn native_keyboard_enter(&mut self, n: &NativeWindow, serial: u32) {
+        if self.native_input.keymap_sent.insert(n.client) {
+            match self.native_keymap() {
+                Ok((fd, size)) => self.bus_send(n.client, ServerMsg::Window(WinEvent::Keymap { fd, size })),
+                Err(e) => tracing::warn!("native: keymap: {e}"),
+            }
+            let (rate, delay) = self.native_repeat();
+            self.bus_send(n.client, ServerMsg::Window(WinEvent::Repeat { rate, delay }));
+        }
+        self.bus_send(n.client, ServerMsg::Window(WinEvent::KeyboardEnter { window: n.id, serial }));
+    }
+
+    pub fn native_keyboard_leave(&mut self, n: &NativeWindow) {
+        self.bus_send(n.client, ServerMsg::Window(WinEvent::KeyboardLeave { window: n.id }));
+    }
+
+    /// A key: the evdev code (xkb's minus 8), as Wayland sends it.
+    pub fn native_key(&mut self, n: &NativeWindow, xkb_code: u32, pressed: bool, serial: u32, time_ms: u32) {
+        let key = xkb_code.saturating_sub(8);
+        self.bus_send(n.client, ServerMsg::Window(WinEvent::Key { window: n.id, serial, time_ms, key, pressed }));
+    }
+
+    pub fn native_modifiers(&mut self, n: &NativeWindow, m: &smithay::input::keyboard::ModifiersState) {
+        let s = m.serialized;
+        self.bus_send(n.client, ServerMsg::Window(WinEvent::Modifiers { depressed: s.depressed, latched: s.latched, locked: s.locked, group: s.layout_effective }));
+    }
+
+    /// Read the seat's keymap, once, outside any keyboard callback (see
+    /// `NativeInput::keymap_text`). Called before a native window is given
+    /// the keyboard.
+    pub fn native_prepare_keymap(&mut self) {
+        if self.native_input.keymap_text.is_some() {
+            return;
+        }
+        let Some(keyboard) = self.seat.get_keyboard() else { return };
+        let text = keyboard.with_xkb_state(self, |ctx| ctx.xkb().lock().unwrap().keymap_as_string());
+        self.native_input.keymap_text = Some(text);
+    }
+
+    /// The keymap read by native_prepare_keymap (NUL-terminated, as Wayland's),
+    /// in an anonymous file the client maps read-only (vergence_protocol::shm).
+    /// Never touches the keyboard: this runs inside its focus callback.
+    fn native_keymap(&mut self) -> std::io::Result<(vergence_protocol::window::Fd, u32)> {
+        let text = self.native_input.keymap_text.clone().ok_or_else(|| std::io::Error::other("keymap not read yet"))?;
+        let mut bytes = text.into_bytes();
+        bytes.push(0);
+        let mut shm = vergence_protocol::shm::ShmFile::new(bytes.len())?;
+        shm.bytes().copy_from_slice(&bytes);
+        // A descriptor of our own for the message: the file stays when the
+        // mapping goes with `shm`.
+        // SAFETY: shm.fd() is open for as long as `shm`, which outlives this borrow.
+        let fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(shm.fd()) }.try_clone_to_owned()?;
+        Ok((vergence_protocol::window::Fd(Arc::new(fd)), bytes.len() as u32))
+    }
+
+    /// The key repeat changed (settings.rs): every client with native windows hears it.
+    pub fn native_repeat_changed(&mut self) {
+        let (rate, delay) = self.native_repeat();
+        let clients: Vec<u32> = self.native_input.keymap_sent.iter().copied().collect();
+        for c in clients {
+            self.bus_send(c, ServerMsg::Window(WinEvent::Repeat { rate, delay }));
         }
     }
 }

@@ -9,6 +9,12 @@
 //! hears; it quits when the window is closed or after N frames, printing how
 //! many frames came and how far apart. `--short-file` claims one row more
 //! than its file holds, to check that the server refuses it and stays up.
+//!
+//! Input (step 4): a square follows the pointer, which takes the crosshair
+//! shape over the window; keys are printed as evdev codes (Esc quits);
+//! with `--own-frame`, a press on the top 24 points moves the window and a
+//! press within 16 points of the bottom-right corner resizes it. Everything
+//! else it hears (keymap, repeat, focus, modifiers, the wheel) is printed.
 
 use std::time::Instant;
 
@@ -21,6 +27,13 @@ use vergence_protocol::{
 
 const WINDOW: u32 = 1;
 const BAR: i32 = 24;
+/// The pointer's square, and the own frame's strip and corner, in reference units.
+const DOT: f64 = 8.0;
+const STRIP: f64 = 24.0;
+const CORNER: f64 = 16.0;
+/// wp_cursor_shape's crosshair.
+const CROSSHAIR: u16 = 8;
+const KEY_ESC: u32 = 1;
 
 struct Picture {
     shm: ShmFile,
@@ -57,6 +70,19 @@ impl Picture {
                 self.put(x, y, c);
             }
         }
+    }
+
+    /// The pointer's square at (x, y) reference units; returns it in pixels.
+    fn dot(&mut self, x: f64, y: f64) -> Damage {
+        let side = (DOT * self.scale).round() as i32;
+        let (px, py) = ((x * self.scale) as i32 - side / 2, (y * self.scale) as i32 - side / 2);
+        let r = Damage { x: px.max(0), y: py.max(0), w: (px + side).min(self.w) - px.max(0), h: (py + side).min(self.h) - py.max(0) };
+        for yy in r.y..r.y + r.h {
+            for xx in r.x..r.x + r.w {
+                self.put(xx, yy, (20, 20, 20));
+            }
+        }
+        r
     }
 
     /// The bar at step `n`, in pixels from the left; returns its strip.
@@ -121,6 +147,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut picture: Option<Picture> = None;
+    // Where the pointer is (None: not on the window), and the square last drawn.
+    let mut pointer: Option<(f64, f64)> = None;
+    let mut last_dot: Option<Damage> = None;
+    let mut size = (width, height);
     let mut step = 0u32;
     let mut last_bar: Option<(i32, i32)> = None;
     let (mut frames, started) = (0u32, Instant::now());
@@ -130,6 +160,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let ServerMsg::Window(ev) = c.next_event()? else { continue };
         match ev {
             WinEvent::Configure { serial, width, height, scale, maximized, activated, .. } => {
+                size = (width, height);
+                last_dot = None;
                 println!("configure {serial}: {width}x{height} at scale {scale:.4}{}{}", if maximized { ", maximized" } else { "" }, if activated { ", active" } else { "" });
                 let mut p = Picture::new(width, height, scale)?;
                 last_bar = Some(p.bar(step));
@@ -157,11 +189,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let (x, w) = p.bar(step);
                 damage.push(Damage { x, y: p.h / 3, w, h: p.h * 2 / 3 - p.h / 3 });
                 last_bar = Some((x, w));
+                // The pointer's square: the old one painted over, the new one drawn.
+                if let Some(d) = last_dot.take() {
+                    p.background(d.x, d.y, d.x + d.w, d.y + d.h);
+                    damage.push(d);
+                }
+                if let Some((x, y)) = pointer {
+                    let d = p.dot(x, y);
+                    if d.w > 0 && d.h > 0 {
+                        damage.push(d);
+                        last_dot = Some(d);
+                    }
+                }
                 attach(&mut c, p, damage, false)?;
             }
             WinEvent::Close { .. } => {
                 println!("asked to close");
                 break;
+            }
+            WinEvent::PointerEnter { x, y, .. } => {
+                println!("pointer in at {x:.1},{y:.1}");
+                pointer = Some((x, y));
+                c.send(&ClientMsg::Window(WinRequest::Cursor { window: WINDOW, shape: CROSSHAIR }))?;
+            }
+            WinEvent::PointerLeave { .. } => {
+                println!("pointer out");
+                pointer = None;
+            }
+            WinEvent::PointerMotion { x, y, .. } => pointer = Some((x, y)),
+            WinEvent::PointerButton { serial, button, pressed, .. } => {
+                println!("button {button:#x} {}", if pressed { "pressed" } else { "released" });
+                if pressed && own_frame && let Some((x, y)) = pointer {
+                    if y < STRIP {
+                        c.send(&ClientMsg::Window(WinRequest::Move { window: WINDOW, input_serial: serial }))?;
+                    } else if x > size.0 - CORNER && y > size.1 - CORNER {
+                        c.send(&ClientMsg::Window(WinRequest::Resize { window: WINDOW, input_serial: serial, edges: 2 | 8 }))?;
+                    }
+                }
+            }
+            WinEvent::PointerAxis { source, dx, dy, v120x, v120y, .. } => println!("scroll {dx:.1},{dy:.1} (v120 {v120x},{v120y}, source {source})"),
+            WinEvent::Keymap { size, .. } => println!("keymap: {size} bytes"),
+            WinEvent::Repeat { rate, delay } => println!("key repeat: {rate} a second after {delay} ms"),
+            WinEvent::KeyboardEnter { .. } => println!("keyboard in"),
+            WinEvent::KeyboardLeave { .. } => println!("keyboard out"),
+            WinEvent::Modifiers { depressed, locked, .. } => println!("modifiers {depressed:#x} (locked {locked:#x})"),
+            WinEvent::Key { key, pressed, .. } => {
+                println!("key {key} {}", if pressed { "down" } else { "up" });
+                if key == KEY_ESC && pressed {
+                    break;
+                }
             }
             other => println!("{other:?}"),
         }

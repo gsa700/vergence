@@ -2,7 +2,8 @@
 // milestone 1, Xwayland). An X window needs more than wl_keyboard.enter on its
 // surface: X input focus or WM_TAKE_FOCUS, as its ICCCM input model says, which
 // Smithay's X11Surface does. Pointer focus stays a WlSurface: X11Surface only
-// forwards pointer events to its surface.
+// forwards pointer events to its surface. A native window (native.rs) is the
+// third kind (native milestone 1, step 4): its keys go over the bus.
 
 use std::borrow::Cow;
 
@@ -24,6 +25,8 @@ use crate::Server;
 pub enum KeyboardFocus {
     Wayland(WlSurface),
     X11(X11Surface),
+    /// Always a `Win::Native`.
+    Native(crate::win::Win),
 }
 
 impl From<WlSurface> for KeyboardFocus {
@@ -37,6 +40,7 @@ impl IsAlive for KeyboardFocus {
         match self {
             KeyboardFocus::Wayland(s) => s.is_alive(),
             KeyboardFocus::X11(x) => x.alive(),
+            KeyboardFocus::Native(w) => w.alive(),
         }
     }
 }
@@ -46,6 +50,7 @@ impl WaylandFocus for KeyboardFocus {
         match self {
             KeyboardFocus::Wayland(s) => Some(Cow::Borrowed(s)),
             KeyboardFocus::X11(x) => x.wl_surface().map(Cow::Owned),
+            KeyboardFocus::Native(_) => None,
         }
     }
 
@@ -53,6 +58,7 @@ impl WaylandFocus for KeyboardFocus {
         match self {
             KeyboardFocus::Wayland(s) => s.same_client_as(object_id),
             KeyboardFocus::X11(x) => x.same_client_as(object_id),
+            KeyboardFocus::Native(_) => false,
         }
     }
 }
@@ -62,6 +68,11 @@ impl KeyboardTarget<Server> for KeyboardFocus {
         match self {
             KeyboardFocus::Wayland(s) => KeyboardTarget::enter(s, seat, data, keys, serial),
             KeyboardFocus::X11(x) => KeyboardTarget::enter(x, seat, data, keys, serial),
+            KeyboardFocus::Native(w) => {
+                if let Some(n) = w.native() {
+                    data.native_keyboard_enter(n, serial.into());
+                }
+            }
         }
     }
 
@@ -69,6 +80,11 @@ impl KeyboardTarget<Server> for KeyboardFocus {
         match self {
             KeyboardFocus::Wayland(s) => KeyboardTarget::leave(s, seat, data, serial),
             KeyboardFocus::X11(x) => KeyboardTarget::leave(x, seat, data, serial),
+            KeyboardFocus::Native(w) => {
+                if let Some(n) = w.native() {
+                    data.native_keyboard_leave(n);
+                }
+            }
         }
     }
 
@@ -84,6 +100,11 @@ impl KeyboardTarget<Server> for KeyboardFocus {
         match self {
             KeyboardFocus::Wayland(s) => KeyboardTarget::key(s, seat, data, key, state, serial, time),
             KeyboardFocus::X11(x) => KeyboardTarget::key(x, seat, data, key, state, serial, time),
+            KeyboardFocus::Native(w) => {
+                if let Some(n) = w.native() {
+                    data.native_key(n, key.raw_code().raw(), state == KeyState::Pressed, serial.into(), time.millis());
+                }
+            }
         }
     }
 
@@ -91,6 +112,11 @@ impl KeyboardTarget<Server> for KeyboardFocus {
         match self {
             KeyboardFocus::Wayland(s) => KeyboardTarget::modifiers(s, seat, data, modifiers, serial),
             KeyboardFocus::X11(x) => KeyboardTarget::modifiers(x, seat, data, modifiers, serial),
+            KeyboardFocus::Native(w) => {
+                if let Some(n) = w.native() {
+                    data.native_modifiers(n, &modifiers);
+                }
+            }
         }
     }
 }

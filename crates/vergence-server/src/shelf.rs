@@ -449,6 +449,7 @@ impl Server {
             let active = focused.as_ref().is_some_and(|k| match k {
                 crate::focus::KeyboardFocus::X11(x) => w.x11_surface() == Some(x),
                 crate::focus::KeyboardFocus::Wayland(s) => w.toplevel().is_some_and(|t| t.wl_surface() == s),
+                crate::focus::KeyboardFocus::Native(n) => &w == n,
             });
             classes.push((if id.class.is_empty() { id.instance } else { id.class }, active));
             windows.push(w);

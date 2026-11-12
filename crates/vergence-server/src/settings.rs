@@ -229,17 +229,26 @@ impl Server {
     }
 
     /// Key repeat from the settings, to the keyboard and every client that has it.
-    pub fn apply_key_repeat(&mut self) {
+    /// The key repeat the settings ask for: (repeats a second, delay in ms);
+    /// a rate of 0 turns repeat off (wl_keyboard.repeat_info, and the native
+    /// protocol's Repeat).
+    pub fn key_repeat(&self) -> (i32, i32) {
         let get = |k: &str| self.settings.current.get(&(KEYBOARD.to_string(), k.to_string()));
         let on = !matches!(get("repeat"), Some(SettingValue::Bool(false)));
         let delay = match get("delay") { Some(SettingValue::U32(v)) => *v, _ => REPEAT_DELAY };
         let interval = match get("repeat-interval") { Some(SettingValue::U32(v)) if *v > 0 => *v, _ => 1000 / REPEAT_RATE };
-        // A rate of 0 turns repeat off (wl_keyboard.repeat_info).
         let rate = if on { (1000 / interval).max(1) } else { 0 };
+        (rate as i32, delay as i32)
+    }
+
+    pub fn apply_key_repeat(&mut self) {
+        let (rate, delay) = self.key_repeat();
         if let Some(k) = self.seat.get_keyboard() {
-            k.change_repeat_info(rate as i32, delay as i32);
-            tracing::info!("key repeat: {} a second after {delay} ms", rate);
+            k.change_repeat_info(rate, delay);
+            tracing::info!("key repeat: {rate} a second after {delay} ms");
         }
+        // Native windows' clients too (native.rs).
+        self.native_repeat_changed();
     }
 
     /// Load the settings and re-read them whenever a source file changes.

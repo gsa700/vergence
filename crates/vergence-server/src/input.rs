@@ -151,22 +151,9 @@ impl Server {
                     })
                     .unwrap_or(px);
 
-                let serial = SERIAL_COUNTER.next_serial();
-
-                let pointer = self.seat.get_pointer().unwrap();
-
-                let under = self.surface_under(pos);
-
-                pointer.motion(
-                    self,
-                    under,
-                    &MotionEvent {
-                        location: pos,
-                        serial,
-                        time: event.time(),
-                    },
-                );
-                pointer.frame(self);
+                // The same path as the mouse on real monitors: hover effects and
+                // native windows too (native.rs).
+                self.pointer_to(pos, Event::time(&event));
             }
             InputEvent::PointerButton { event, .. } => {
                 self.touch_mouse_back();
@@ -214,6 +201,17 @@ impl Server {
                     }
                 }
 
+                // On a native window, the same amounts go to it (native.rs).
+                let wire_source = match source {
+                    AxisSource::Wheel => 0,
+                    AxisSource::Finger => 1,
+                    AxisSource::Continuous => 2,
+                    AxisSource::WheelTilt => 3,
+                };
+                let (v120x, v120y) = (horizontal_amount_discrete.unwrap_or(0.0) as i32, vertical_amount_discrete.unwrap_or(0.0) as i32);
+                if self.native_pointer_axis(event.time().millis(), wire_source, horizontal_amount, vertical_amount, v120x, v120y) {
+                    return;
+                }
                 let pointer = self.seat.get_pointer().unwrap();
                 pointer.axis(self, frame);
                 pointer.frame(self);
@@ -227,9 +225,12 @@ impl Server {
     /// Raise a window and give it the keyboard (X11 windows: X focus and stacking too).
     pub fn focus_window(&mut self, window: &crate::win::Win, serial: smithay::utils::Serial) {
         self.space.raise_element(window, true);
-        // A native window (native.rs) has no Wayland or X11 surface to give the
-        // keyboard: it is raised and activated, and the keyboard leaves the others
-        // (its own keyboard input comes in step 4).
+        // A native window (native.rs) takes the keyboard as a focus of its own
+        // kind (focus.rs): its keys go over the bus. Its keymap is read now,
+        // before set_focus, whose callback must not touch the keyboard.
+        if window.native().is_some() {
+            self.native_prepare_keymap();
+        }
         let focus = match (window.x11_surface(), window.toplevel()) {
             (Some(x), _) => {
                 if let Some(wm) = self.xwm.as_mut() {
@@ -238,7 +239,7 @@ impl Server {
                 Some(KeyboardFocus::X11(x.clone()))
             }
             (None, Some(t)) => Some(KeyboardFocus::Wayland(t.wl_surface().clone())),
-            (None, None) => None,
+            (None, None) => window.native().map(|_| KeyboardFocus::Native(window.clone())),
         };
         for w in self.space.elements() {
             w.set_activated(w == window);
@@ -283,6 +284,9 @@ impl Server {
         let under = self.surface_under(pos);
         pointer.motion(self, under, &MotionEvent { location: pos, serial, time });
         pointer.frame(self);
+        // A native window under the pointer (Smithay's focus is none there).
+        let grabbed = pointer.is_grabbed();
+        self.native_pointer_motion(pos, time.millis(), grabbed);
     }
 
     /// A button pressed or released: title bars, Alt+drag, focus, then the app.
@@ -423,6 +427,10 @@ impl Server {
             return;
         }
 
+        // On a native window, the button is its (native.rs); Smithay's focus is none there.
+        if !pointer.is_grabbed() && self.native_pointer_button(button, button_state == ButtonState::Pressed, serial.into(), time.millis()) {
+            return;
+        }
         pointer.button(
             self,
             &ButtonEvent {

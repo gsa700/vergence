@@ -291,6 +291,7 @@ impl Server {
                 let active = focused.as_ref().is_some_and(|k| match k {
                     crate::focus::KeyboardFocus::X11(x) => w.x11_surface() == Some(x),
                     crate::focus::KeyboardFocus::Wayland(s) => w.toplevel().is_some_and(|t| t.wl_surface() == s),
+                crate::focus::KeyboardFocus::Native(n) => &w == n,
                 });
                 let d = self.decor.entry(w.clone()).or_insert_with(Decor::new);
                 if d.active != active {

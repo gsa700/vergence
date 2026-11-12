@@ -51,10 +51,24 @@ struct Conn {
     app_id: Option<String>,
     uid: u32,
     topics: HashSet<Topic>,
-    outbox: Vec<u8>,
+    /// What is waiting to be written: each message's bytes with the
+    /// descriptors it carries (a native window's keymap, the clipboard's
+    /// pipes), which go out with the write of its first byte (SCM_RIGHTS), so
+    /// the client's reader has them when it reads the message.
+    outbox: std::collections::VecDeque<Outgoing>,
+    /// Bytes waiting in the outbox, for OUTBOX_MAX.
+    outbox_len: usize,
     write_source: Option<RegistrationToken>,
     /// Shut down after a protocol error or overflow; its read source removes it.
     closing: bool,
+}
+
+struct Outgoing {
+    bytes: Vec<u8>,
+    /// Bytes of it already written.
+    sent: usize,
+    /// Sent with the first write of it; empty after that.
+    fds: Vec<std::os::fd::OwnedFd>,
 }
 
 /// Is something answering on this socket path (a live server)?
@@ -122,7 +136,8 @@ impl Server {
                 app_id: None,
                 uid,
                 topics: HashSet::new(),
-                outbox: Vec::new(),
+                outbox: Default::default(),
+                outbox_len: 0,
                 write_source: None,
                 closing: false,
             },
@@ -270,19 +285,27 @@ impl Server {
 
     /// Queue a message for a client and write what the socket takes now.
     pub(crate) fn bus_send(&mut self, id: u32, m: ServerMsg) {
-        let bytes = match m.encode() {
+        let (bytes, raw) = match m.encode_with_fds() {
             Ok(b) => b,
             Err(e) => return tracing::warn!("bus: can't encode {m:?}: {e}"),
+        };
+        // Our own copies of the message's descriptors, kept until written:
+        // the message (and the files it names) may be dropped before then.
+        // SAFETY: each raw descriptor belongs to `m`, alive for this statement.
+        let fds = match raw.iter().map(|fd| unsafe { std::os::fd::BorrowedFd::borrow_raw(*fd) }.try_clone_to_owned()).collect::<std::io::Result<Vec<_>>>() {
+            Ok(f) => f,
+            Err(e) => return tracing::warn!("bus: can't keep the descriptors of {m:?}: {e}"),
         };
         let Some(c) = self.bus.clients.get_mut(&id) else { return };
         if c.closing {
             return;
         }
-        if c.outbox.len() + bytes.len() > OUTBOX_MAX {
+        if c.outbox_len + bytes.len() > OUTBOX_MAX {
             tracing::warn!("bus: client {id} ({:?}) isn't reading; disconnecting", c.app_id);
             return self.bus_close(id);
         }
-        c.outbox.extend_from_slice(&bytes);
+        c.outbox_len += bytes.len();
+        c.outbox.push_back(Outgoing { bytes, sent: 0, fds });
         if !self.bus_flush(id) {
             self.bus_watch_writable(id);
         }
@@ -291,17 +314,32 @@ impl Server {
     /// Write as much of the outbox as the socket takes; true when it is empty.
     fn bus_flush(&mut self, id: u32) -> bool {
         let Some(c) = self.bus.clients.get_mut(&id) else { return true };
-        while !c.outbox.is_empty() {
-            match (&c.stream).write(&c.outbox) {
+        while let Some(o) = c.outbox.front_mut() {
+            let rest = &o.bytes[o.sent..];
+            let res = if o.fds.is_empty() {
+                (&c.stream).write(rest)
+            } else {
+                use std::os::fd::AsRawFd;
+                let raw: Vec<std::os::fd::RawFd> = o.fds.iter().map(|f| f.as_raw_fd()).collect();
+                vergence_protocol::sock::send_with_fds(&c.stream, rest, &raw)
+            };
+            match res {
                 Ok(0) => break,
                 Ok(n) => {
-                    c.outbox.drain(..n);
+                    // The descriptors went with these bytes; the kernel holds its own copies.
+                    o.fds.clear();
+                    o.sent += n;
+                    c.outbox_len -= n;
+                    if o.sent == o.bytes.len() {
+                        c.outbox.pop_front();
+                    }
                 }
                 Err(e) if e.kind() == ErrorKind::Interrupted => continue,
                 Err(e) if e.kind() == ErrorKind::WouldBlock => break,
                 Err(_) => {
                     // The client is gone; its read source sees EOF and cleans up.
                     c.outbox.clear();
+                    c.outbox_len = 0;
                     c.closing = true;
                     break;
                 }
