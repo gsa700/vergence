@@ -388,11 +388,14 @@ const NEWS_DRAW: u8 = 1;
 const NEWS_STATE: u8 = 2;
 
 impl Session {
-    /// Starts the user's shell on a new terminal of cols x rows. Its output
-    /// is read and parsed on a thread of its own, which wakes the window.
-    fn start(cols: usize, rows: usize, waker: Waker) -> std::io::Result<Session> {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-        let pty = pty::Pty::spawn(&shell, cols as u16, rows as u16)?;
+    /// Starts the user's shell, or `command` (`-e`), on a new terminal of
+    /// cols x rows. Its output is read and parsed on a thread of its own,
+    /// which wakes the window.
+    fn start(cols: usize, rows: usize, waker: Waker, command: Option<Vec<String>>) -> std::io::Result<Session> {
+        let pty = match command.as_deref() {
+            Some([program, args @ ..]) => pty::Pty::spawn(program, args, cols as u16, rows as u16)?,
+            _ => pty::Pty::spawn(&std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()), &[], cols as u16, rows as u16)?,
+        };
         let reader = pty.reader()?;
         let mut replies = reader.try_clone()?;
         let screen = Arc::new(Mutex::new(Screen { grid: Grid::new(cols, rows), parser: vt::Parser::new(), scroll: 0, exited: false, copied: None, selection: None }));
@@ -564,6 +567,10 @@ struct Terminal {
     open_panes: usize,
     /// `--maximized`: the window is to fill its screen as soon as it is open.
     open_maximized: bool,
+    /// `-e PROGRAM ARGS...`: what the first terminal runs instead of the
+    /// shell (as xterm's); the tab closes when it ends, like a shell's. The
+    /// shelf starts desktop entries that want a terminal (htop) this way.
+    run: Option<Vec<String>>,
     /// How many commands the last frame's scene held.
     last_commands: usize,
     /// VTERM_FRAMES is set: frames and tab changes are written to the error output.
@@ -657,6 +664,7 @@ impl Terminal {
             open_with: 1,
             open_panes: 1,
             open_maximized: false,
+            run: None,
             last_commands: 0,
             measuring: std::env::var_os("VTERM_FRAMES").is_some(),
             frame_now: 0,
@@ -717,13 +725,14 @@ impl Terminal {
     /// Starts a terminal and gives it a number.
     fn start(&mut self, cols: usize, rows: usize) -> Option<(u64, Session)> {
         let waker = self.waker.clone()?;
-        match Session::start(cols, rows, waker) {
+        // `-e`'s program runs in the first terminal only; the others get the shell.
+        match Session::start(cols, rows, waker, self.run.take()) {
             Ok(session) => {
                 self.next_id += 1;
                 Some((self.next_id - 1, session))
             }
             Err(e) => {
-                eprintln!("vergence-term: could not start the shell: {e}");
+                eprintln!("vergence-term: could not start the program: {e}");
                 None
             }
         }
@@ -1729,7 +1738,16 @@ fn main() {
         return;
     }
     let mut terminal = Terminal::new();
-    let args: Vec<String> = std::env::args().collect();
+    let mut args: Vec<String> = std::env::args().collect();
+    // Everything after -e is the program and its arguments, ours or not.
+    if let Some(i) = args.iter().position(|a| a == "-e") {
+        let run: Vec<String> = args.split_off(i).into_iter().skip(1).collect();
+        if run.is_empty() {
+            eprintln!("vergence-term: -e wants a program to run");
+            std::process::exit(2);
+        }
+        terminal.run = Some(run);
+    }
     if let Some(n) = args.iter().position(|a| a == "--tabs").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<usize>().ok()) {
         terminal.open_with = n.clamp(1, 64);
     }

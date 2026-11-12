@@ -57,9 +57,9 @@ pub struct Pty {
 }
 
 impl Pty {
-    /// Start `shell` (a login-style interactive shell) on a new terminal of
-    /// cols x rows.
-    pub fn spawn(shell: &str, cols: u16, rows: u16) -> std::io::Result<Pty> {
+    /// Start `program` with `args` (the user's shell, or what `-e` named) on
+    /// a new terminal of cols x rows.
+    pub fn spawn(program: &str, args: &[String], cols: u16, rows: u16) -> std::io::Result<Pty> {
         let fd = unsafe { posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC) };
         if fd < 0 {
             return Err(std::io::Error::last_os_error());
@@ -87,8 +87,8 @@ impl Pty {
         // controlling terminal, and the shell's TIOCSCTTY would then fail (EPERM).
         let slave = std::fs::OpenOptions::new().read(true).write(true).custom_flags(O_NOCTTY).open(&name)?;
         set_size(fd, cols, rows);
-        let mut cmd = Command::new(shell);
-        cmd.stdin(Stdio::from(slave.try_clone()?))
+        let mut cmd = Command::new(program);
+        cmd.args(args).stdin(Stdio::from(slave.try_clone()?))
             .stdout(Stdio::from(slave.try_clone()?))
             .stderr(Stdio::from(slave))
             .env("TERM", "xterm-256color")
@@ -167,8 +167,8 @@ mod tests {
     /// others: not its terminal's master, and not an earlier terminal's.
     #[test]
     fn a_shell_inherits_no_terminal_masters() {
-        let _earlier = super::Pty::spawn("/bin/sh", 80, 24).unwrap();
-        let mut p = super::Pty::spawn("/bin/sh", 80, 24).unwrap();
+        let _earlier = super::Pty::spawn("/bin/sh", &[], 80, 24).unwrap();
+        let mut p = super::Pty::spawn("/bin/sh", &[], 80, 24).unwrap();
         let r = p.reader().unwrap();
         // Each descriptor from 3 to 12 that can be written to is reported.
         p.write(b"for fd in 3 4 5 6 7 8 9 10 11 12; do if (: >&$fd) 2>/dev/null; then echo held-$fd; fi; done; echo checked-$((40+2)); exit\n");
@@ -185,7 +185,7 @@ mod tests {
 
     #[test]
     fn a_shell_echoes_through_the_terminal() {
-        let mut p = super::Pty::spawn("/bin/sh", 80, 24).unwrap();
+        let mut p = super::Pty::spawn("/bin/sh", &[], 80, 24).unwrap();
         let r = p.reader().unwrap();
         p.write(b"echo vergence-$((40+2)); exit\n");
         let mut all = Vec::new();
@@ -195,6 +195,20 @@ mod tests {
         });
         let text = String::from_utf8_lossy(&all);
         assert!(text.contains("vergence-42"), "{text}");
+    }
+
+    /// `-e`: a program with its arguments, no shell between, on the terminal.
+    #[test]
+    fn a_program_runs_with_its_arguments() {
+        let p = super::Pty::spawn("/bin/sh", &["-c".into(), "echo ran-$((40+2)) \"$0\"".into(), "two words".into()], 80, 24).unwrap();
+        let r = p.reader().unwrap();
+        let mut all = Vec::new();
+        super::read_loop(r, |b| {
+            all.extend(b);
+            true
+        });
+        let text = String::from_utf8_lossy(&all);
+        assert!(text.contains("ran-42 two words"), "{text}");
     }
 
     /// When the terminal goes (its end of the pty is closed, as when the
@@ -213,7 +227,7 @@ mod tests {
         const SIGHUP: i32 = 1;
         // SAFETY: the disposition of one signal, put back below; 1 is SIG_IGN.
         let before = unsafe { super::signal(SIGHUP, 1) };
-        let p = super::Pty::spawn(script.to_str().unwrap(), 80, 24);
+        let p = super::Pty::spawn(script.to_str().unwrap(), &[], 80, 24);
         // SAFETY: as above.
         unsafe { super::signal(SIGHUP, before) };
         let p = p.unwrap();

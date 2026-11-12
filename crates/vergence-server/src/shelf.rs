@@ -1040,14 +1040,21 @@ impl Server {
             }
             Act::Start(key) => {
                 let Some(entry) = self.shelf.apps.iter().find(|e| e.id == key).cloned() else { return };
-                let Some((program, args)) = entry.exec.split_first() else { return };
-                if entry.terminal {
-                    // Our terminal cannot yet be told what to run.
-                    tracing::warn!("shelf: {} wants a terminal to run in: not started", entry.name);
+                if entry.exec.is_empty() {
                     return;
                 }
-                // The entry's own arguments, with no shell between.
-                match crate::spawn(std::process::Command::new(program).args(args)) {
+                // The entry's own arguments, with no shell between; one that
+                // wants a terminal runs in ours (`vergence-term -e`).
+                let mut command = if entry.terminal {
+                    let mut c = std::process::Command::new("vergence-term");
+                    c.arg("-e").args(&entry.exec);
+                    c
+                } else {
+                    let mut c = std::process::Command::new(&entry.exec[0]);
+                    c.args(&entry.exec[1..]);
+                    c
+                };
+                match crate::spawn(&mut command) {
                     Ok(pid) => {
                         tracing::info!("shelf: started {} (pid {pid})", entry.name);
                         let had = self.shelf_items().iter().find(|(i, _)| i.key == key).map_or(0, |(_, w)| w.len());

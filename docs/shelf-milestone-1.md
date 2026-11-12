@@ -550,6 +550,26 @@ one.
     primary (`shelf_screen`: the named screen if connected, else the
     primary).
 
+- **Step 6, the rest (2026-11-11): terminal applications.** A desktop
+  entry with `Terminal=true` (htop, btop) was refused ("wants a terminal
+  to run in: not started"); the terminal now takes `-e PROGRAM ARGS...`
+  (as xterm's: the first tab runs it, no shell between, and closes when
+  it ends), and the shelf and the apps popup start such entries with
+  `vergence-term -e`. On Hubble: Super, "htop", Enter opened htop in a
+  terminal; `q` closed the window. Test: a program with its arguments on
+  the pty. 333 green on Hubble, kepler and Techbench. Docks on several
+  screens stay parked (Dave, 2026-11-10), so step 6 is done.
+
+### Acceptance, where it stands (2026-11-11)
+
+2. **Met on Hubble**: `vshell apps` lists Firefox, htop, Terminal and
+   Settings, each with an icon file (canary is dropped; kepler stands for
+   FreeBSD).
+5. **Met on Hubble** for the popup: Super opens it, typing filters, Enter
+   starts the entry (htop, not Firefox, to keep Dave's profile out of it).
+1, 3, 6 need Hubble's two monitors (the second is on Techbench now); 4 and
+the Techbench parts of 2 and 5 are still to run.
+
 ## Acceptance
 
 Every step: `cargo test --workspace` green on Hubble, canary and Techbench,
