@@ -17,6 +17,7 @@ xcursor = "0.3"
 vergence-profile.workspace = true
 vergence-look.workspace = true
 vergence-shell.workspace = true
+vergence-seat.workspace = true
 vergence-scene.workspace = true
 vergence-text.workspace = true
 vergence-render.workspace = true

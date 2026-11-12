@@ -197,6 +197,7 @@ impl Server {
             Hit::Shelf => {
                 // The press the dock was holding is not a click any more.
                 self.shelf.held = None;
+                self.input.seat.abandon(BTN_LEFT);
                 self.shelf_menu(at);
             }
             Hit::Nothing => {

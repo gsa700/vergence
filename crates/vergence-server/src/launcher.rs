@@ -72,6 +72,11 @@ impl Server {
         self.launcher.open.is_some()
     }
 
+    /// Is `at` on the open popup (dispatch.rs: a press elsewhere closes it)?
+    pub fn launcher_contains(&self, at: Point<f64, Logical>) -> bool {
+        self.launcher.open.as_ref().is_some_and(|o| o.at.to_f64().contains(at))
+    }
+
     pub fn launcher_toggle(&mut self) {
         if self.launcher.open.is_some() {
             return self.launcher_close();

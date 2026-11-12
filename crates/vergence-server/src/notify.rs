@@ -110,8 +110,6 @@ pub struct Notifications {
     timer_running: bool,
     /// The pointer is over a card: countdowns are paused.
     paused: bool,
-    /// A press on a card: its button's release is swallowed.
-    pub swallow: Option<u32>,
 }
 
 struct Palette {

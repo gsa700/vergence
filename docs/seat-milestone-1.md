@@ -115,6 +115,26 @@ Smithay's own; nothing of ours runs in its callbacks.
    and the whitepaper's §8 table updated; CLAUDE.md's keyboard-lock rule
    becomes history.
 
+## Where it stands
+
+- **Step 1 done** (2026-11-12, 6d52716): crates/vergence-seat, 30 tests and
+  the fuzz test (a million events, every rule reached).
+- **Step 2 done** (2026-11-12): the pointer goes through the seat
+  (crates/vergence-server/src/dispatch.rs): what is under a point as a
+  target, Smithay's pointer called only for surfaces, native windows by
+  their own calls, the server's parts acting on the seat's presses; the
+  if-chain, the swallow flags and the native pointer path are gone; move
+  and resize are ours (`grabs/`, smallvil's, deleted); a program's move or
+  resize request is granted by the seat only with a button held on it;
+  grabs and held buttons end when the screens go off. On Techbench
+  (Fedora, by `vctl`): clicks 50 of 50 within one frame on both roads;
+  title bar drag, double-click maximize and restore, a border resize, the
+  terminal moved by its own bar, the desktop menu and a click outside it,
+  the dock minimizing and restoring Settings. Hubble and kepler: tests
+  green; their sessions not yet run (both went off the network that
+  evening). By hand still: Alt+drag, Firefox, an X11 program, a drag and
+  drop, the touchscreen.
+
 ## Acceptance
 
 1. All tests green on Hubble, kepler and Techbench, the seat's own and

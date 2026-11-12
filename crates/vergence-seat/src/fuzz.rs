@@ -153,6 +153,18 @@ fn fuzz_the_seat() {
                 let press = if rng.below(4) == 0 { rng.below(40) as u64 } else { timer };
                 seat.touch_long_press(press)
             }
+            18 if rng.below(3) == 0 => {
+                let w = 1 + rng.below(3) as WinId;
+                let out = seat.grab_from_press(w, [None, Some(Edges::LEFT)][rng.below(2)]);
+                // The held press became the grab's: no release will come for it.
+                if !out.is_empty() {
+                    watch.check(&out, step);
+                    watch.pressed.clear();
+                    Vec::new()
+                } else {
+                    out
+                }
+            }
             18 => {
                 let _ = seat.touch_move_request(rng.below(3) as Slot, 1 + rng.below(3) as WinId, 0.0, 0.0);
                 if rng.below(30) == 0 { seat.touch_cancel(target(&mut rng), now) } else { Vec::new() }

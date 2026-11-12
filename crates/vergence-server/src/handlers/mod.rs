@@ -118,6 +118,8 @@ impl WaylandDndGrabHandler for Server {
                 // create a dnd grab to start the operation
                 let grab = DnDGrab::new_pointer(&self.display_handle, start_data, source, seat);
                 ptr.set_grab(self, grab, serial, Focus::Keep);
+                // The seat's Edge grab: the pointer is Smithay's until the drop (dispatch.rs).
+                self.drag_began();
             }
             GrabType::Touch => {
                 // smallvil lacks touch handling

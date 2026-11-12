@@ -1,7 +1,7 @@
 // X11 apps through rootless Xwayland (server milestone 1). Adapted from Smithay's
 // anvil (MIT; see LICENSE-smithay.txt), cut down: X windows live in the same Space
 // as Wayland windows, are placed centered on the monitor under the pointer, and
-// move/resize with the server's own grabs. Scale: one client scale for all of
+// move/resize through the seat (dispatch.rs). Scale: one client scale for all of
 // Xwayland (VERGENCE_XWAYLAND_SCALE, default 1) until per-monitor X scaling lands.
 
 use crate::win::Win;
@@ -9,8 +9,7 @@ use std::os::unix::io::OwnedFd;
 
 use smithay::{
     desktop::Window,
-    input::pointer::{Focus, GrabStartData},
-    utils::{Logical, Rectangle, SERIAL_COUNTER},
+    utils::{Logical, Rectangle},
     wayland::{
         selection::{
             SelectionTarget,
@@ -30,7 +29,7 @@ use smithay::{
 use crate::{
     Server,
     focus::KeyboardFocus,
-    grabs::{MoveSurfaceGrab, ResizeSurfaceGrab, resize_grab::ResizeEdge},
+    dispatch::ResizeEdge,
 };
 
 impl XWaylandShellHandler for Server {
@@ -170,7 +169,7 @@ impl XwmHandler for Server {
         if let Some(w) = self.window_for_x11(&window) {
             self.space.map_element(w.clone(), geometry.loc, false);
             // Its place now, unless a drag is still going (recorded when it ends).
-            if !self.seat.get_pointer().is_some_and(|p| p.is_grabbed()) && !window.is_override_redirect() {
+            if self.input.seat.grab().is_none() && !window.is_override_redirect() {
                 self.remember(&w);
             }
         }
@@ -230,13 +229,13 @@ impl XwmHandler for Server {
             X11ResizeEdge::BottomLeft => ResizeEdge::BOTTOM_LEFT,
             X11ResizeEdge::BottomRight => ResizeEdge::BOTTOM_RIGHT,
         };
-        self.start_resize(w, edges, None);
+        self.grab_request(&w, Some(edges));
     }
 
     fn move_request(&mut self, _xwm: XwmId, window: X11Surface, button: u32) {
         tracing::info!("X11 move request {:?}: button {button}", window.title());
         if let Some(w) = self.window_for_x11(&window) {
-            self.start_move(w, None);
+            self.grab_request(&w, None);
         }
     }
 
@@ -283,28 +282,5 @@ impl XwmHandler for Server {
     fn disconnected(&mut self, _xwm: XwmId) {
         tracing::warn!("Xwayland's window manager connection closed");
         self.xwm = None;
-    }
-}
-
-impl Server {
-    /// Move a window with the pointer (an app's request, or Alt+left drag).
-    /// `start`: the grab's start (Alt+drag), else the click the app was given.
-    pub fn start_move(&mut self, window: Win, start: Option<GrabStartData<Server>>) {
-        let Some(pointer) = self.seat.get_pointer() else { return };
-        let Some(start_data) = start.or_else(|| pointer.grab_start_data()) else { return };
-        let Some(initial_window_location) = self.space.element_location(&window) else { return };
-        let unmaximize_on_drag = self.restore.contains_key(&window);
-        let grab = MoveSurfaceGrab { start_data, window, initial_window_location, unmaximize_on_drag };
-        pointer.set_grab(self, grab, SERIAL_COUNTER.next_serial(), Focus::Clear);
-    }
-
-    /// Resize a window with the pointer (an app's request, or Alt+right drag).
-    pub fn start_resize(&mut self, window: Win, edges: ResizeEdge, start: Option<GrabStartData<Server>>) {
-        let Some(pointer) = self.seat.get_pointer() else { return };
-        let Some(start_data) = start.or_else(|| pointer.grab_start_data()) else { return };
-        let Some(loc) = self.space.element_location(&window) else { return };
-        let size = window.geometry().size;
-        let grab = ResizeSurfaceGrab::start(start_data, window, edges, Rectangle::new(loc, size));
-        pointer.set_grab(self, grab, SERIAL_COUNTER.next_serial(), Focus::Clear);
     }
 }

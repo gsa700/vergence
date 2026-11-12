@@ -44,7 +44,7 @@ use smithay::{
 };
 use smithay::backend::allocator::Fourcc;
 
-use crate::{Server, grabs::resize_grab::ResizeEdge};
+use crate::{Server, dispatch::ResizeEdge};
 
 // The sizes and colors are the desktop's one look (vergence-look), which the
 // toolkit's own bars are drawn with too: neither keeps a copy.

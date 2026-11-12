@@ -212,6 +212,11 @@ impl Seat {
         self.pointer.focus
     }
 
+    /// Whether a button is held (the implicit grab).
+    pub fn buttons_held(&self) -> bool {
+        !self.pointer.held.is_empty()
+    }
+
     /// The window that has the keyboard, if any.
     pub fn keyboard_focus(&self) -> Option<WinId> {
         self.keyboard.focus

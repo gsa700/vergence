@@ -3,7 +3,7 @@
 
 mod handlers;
 
-mod grabs;
+mod dispatch;
 mod input;
 mod state;
 mod winit;

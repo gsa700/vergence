@@ -132,6 +132,7 @@ impl Server {
             tracing::info!("energy: no input for {}; screens off", minutes(idle));
             self.energy.screens_off = true;
             crate::drm::screens_off(self);
+            self.input_screens_off();
         }
         if !c.sleep.is_zero() && !self.energy.slept && idle >= c.sleep {
             self.energy.slept = true;
@@ -140,6 +141,7 @@ impl Server {
             if !self.energy.screens_off {
                 self.energy.screens_off = true;
                 crate::drm::screens_off(self);
+            self.input_screens_off();
             }
             // The command may block until the machine wakes (zzz does); its
             // result is only logged, the wake comes through input like any other.

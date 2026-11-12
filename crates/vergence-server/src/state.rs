@@ -10,10 +10,9 @@ use smithay::{
         wayland_server::{
             Display, DisplayHandle,
             backend::{ClientData, ClientId, DisconnectReason},
-            protocol::wl_surface::WlSurface,
         },
     },
-    utils::{Logical, Point},
+    utils::Logical,
     wayland::{
         compositor::{CompositorClientState, CompositorState},
         output::OutputManagerState,
@@ -69,12 +68,13 @@ pub struct Server {
     pub natives: std::collections::HashMap<(u32, u32), Win>,
     /// Native windows' pointer focus and keymaps sent (native.rs).
     pub native_input: crate::native::NativeInput,
+    /// The seat and what carries out its decisions (dispatch.rs).
+    pub input: crate::dispatch::Dispatch,
     /// The volume keys' level display, as a notification of the server's own (sound.rs).
     pub volume_note: u32,
     /// Where maximized windows go back to.
     pub restore: std::collections::HashMap<Win, smithay::utils::Rectangle<i32, Logical>>,
     /// The last press on a title bar, for double-click to maximize.
-    pub last_title_press: Option<(Win, std::time::Instant)>,
     /// Monitors (connector names) still to capture for the control socket's `shot`.
     pub shot_pending: Vec<String>,
     /// The desktop font for title text (None: titles without text).
@@ -89,10 +89,8 @@ pub struct Server {
     pub memory: crate::memory::Memory,
     /// The wallpaper and its desktop.toml watch (wallpaper.rs).
     pub wallpaper: Option<crate::wallpaper::Wallpaper>,
-    /// The desktop menu while it is open (menu.rs), and the button whose release
-    /// it swallows.
+    /// The desktop menu while it is open (menu.rs).
     pub menu: Option<crate::menu::OpenMenu>,
-    pub menu_swallow: Option<u32>,
     pub dmabuf: Option<(smithay::wayland::dmabuf::DmabufState, smithay::wayland::dmabuf::DmabufGlobal)>,
     /// The process exit status (control.rs: 75 = restart me).
     pub exit_code: i32,
@@ -227,9 +225,9 @@ impl Server {
             decor: Default::default(),
             natives: Default::default(),
             native_input: Default::default(),
+            input: Default::default(),
             volume_note: 0,
             restore: Default::default(),
-            last_title_press: None,
             shot_pending: Vec::new(),
             title_font: crate::text::TextFont::load(),
             placed: Default::default(),
@@ -238,7 +236,6 @@ impl Server {
             memory: crate::memory::Memory::load(),
             wallpaper: None,
             menu: None,
-            menu_swallow: None,
             exit_code: 0,
             control_owned: false,
             bus: Default::default(),
@@ -303,20 +300,6 @@ impl Server {
         socket_name
     }
 
-    /// The app surface under the pointer, if any (title bars and resize bands cover
-    /// what is behind them); off a surface, the pointer shape for what it is over.
-    pub fn surface_under(&mut self, pos: Point<f64, Logical>) -> Option<(WlSurface, Point<f64, Logical>)> {
-        use crate::decor::{Hit, edge_icon};
-        use smithay::input::pointer::{CursorImageStatus, CursorIcon};
-        match self.hit(pos) {
-            Hit::Surface(_, s, p) => return Some((s, p)),
-            Hit::Edge(_, e) => self.pointer_image.status = CursorImageStatus::Named(edge_icon(e)),
-            // A native window's own shape, as it asked (native.rs).
-            Hit::Native(w) => self.pointer_image.status = CursorImageStatus::Named(w.native().map(|n| n.cursor()).unwrap_or(CursorIcon::Default)),
-            _ => self.pointer_image.status = CursorImageStatus::Named(CursorIcon::Default),
-        }
-        None
-    }
 }
 
 /// desktop.toml's `[x11] enabled`: whether X11 applications are to run (through

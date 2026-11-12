@@ -236,6 +236,36 @@ impl Seat {
         self.grab = Some(grab);
     }
 
+    /// A program asked to be moved (`resize` None) or resized with the press
+    /// it was given (a Wayland or X11 window's own title bar, our toolkit's
+    /// bar and edges). Granted only while a button is held on that window:
+    /// the held button becomes the grab's. Empty when refused.
+    pub fn grab_from_press(&mut self, window: WinId, resize: Option<crate::Edges>) -> Vec<Out> {
+        let mut out = Vec::new();
+        if self.grab.is_some() || self.pointer.focus.and_then(|t| t.window()) != Some(window) {
+            return out;
+        }
+        let Some(&button) = self.pointer.held.first() else { return out };
+        // The other held buttons' releases go nowhere now.
+        for b in std::mem::take(&mut self.pointer.held).into_iter().skip(1) {
+            self.pointer.swallow(b);
+        }
+        self.begin(
+            match resize {
+                None => Grab::Move { window, button },
+                Some(e) => Grab::Resize { window, edges: Some(e), button },
+            },
+            &mut out,
+        );
+        out
+    }
+
+    /// Forget a held button without a release (a long press on the dock is
+    /// its menu, not a click; touch.rs in the server until step 4).
+    pub fn abandon(&mut self, button: u32) {
+        self.pointer.held.retain(|b| *b != button);
+    }
+
     /// A wheel turned (or a finger scrolled): who scrolls.
     pub fn axis(&mut self, under: Option<Target>) -> Vec<Out> {
         let mut out = Vec::new();
@@ -398,6 +428,22 @@ mod tests {
         assert_eq!(seat.axis(Some(s1())), vec![Out::Axis(s1())]);
         seat.menu_opened(Menu::Popup);
         assert_eq!(seat.axis(Some(s1())), vec![Out::Axis(Target::Server(Part::Popup))]);
+    }
+
+    #[test]
+    fn a_program_may_move_itself_only_with_a_press_held_on_it() {
+        let mut seat = Seat::new();
+        let bar = Target::Native(W1);
+        // Nothing held: refused.
+        seat.motion(Some(bar));
+        assert!(seat.grab_from_press(W1, None).is_empty());
+        seat.button(BTN_LEFT, true, Some(bar), Default::default(), 0);
+        // Another window's request: refused.
+        assert!(seat.grab_from_press(W2, None).is_empty());
+        assert_eq!(seat.grab_from_press(W1, Some(Edges::BOTTOM)), vec![Out::Leave(bar), Out::ResizeBegin(W1, Some(Edges::BOTTOM))]);
+        assert_eq!(seat.motion(Some(s2())), vec![Out::GrabMotion]);
+        // The press's release ends it; the window never hears it.
+        assert_eq!(seat.button(BTN_LEFT, false, Some(s2()), Default::default(), 1), vec![Out::GrabEnd(W1), Out::Enter(s2())]);
     }
 
     #[test]

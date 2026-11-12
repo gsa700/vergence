@@ -4,7 +4,6 @@ use smithay::{
     desktop::{PopupKind, PopupManager, Space, Window, find_popup_root_surface, get_popup_toplevel_coords},
     input::{
         Seat,
-        pointer::{Focus, GrabStartData as PointerGrabStartData},
     },
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
@@ -13,7 +12,7 @@ use smithay::{
             protocol::{wl_seat, wl_surface::WlSurface},
         },
     },
-    utils::{Rectangle, Serial},
+    utils::Serial,
     wayland::{
         compositor::with_states,
         shell::xdg::{
@@ -27,7 +26,7 @@ use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_to
 
 use crate::{
     Server,
-    grabs::{MoveSurfaceGrab, ResizeSurfaceGrab},
+    dispatch::ResizeEdge,
 };
 
 impl XdgShellHandler for Server {
@@ -104,73 +103,28 @@ impl XdgShellHandler for Server {
 
     fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {
         let seat = Seat::from_resource(&seat).unwrap();
-
         let wl_surface = surface.wl_surface();
-
-        if let Some(start_data) = check_grab(&seat, wl_surface, serial) {
-            let pointer = seat.get_pointer().unwrap();
-
-            let window = self
-                .space
-                .elements()
-                .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == wl_surface))
-                .unwrap()
-                .clone();
-            let initial_window_location = self.space.element_location(&window).unwrap();
-
-            // A maximized window leaves maximized once it is really dragged (move_grab.rs).
-            let unmaximize_on_drag = self.restore.contains_key(&window);
-            let grab = MoveSurfaceGrab {
-                start_data,
-                window,
-                initial_window_location,
-                unmaximize_on_drag,
-            };
-
-            pointer.set_grab(self, grab, serial, Focus::Clear);
+        let window = self.space.elements().find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == wl_surface)).cloned();
+        // The seat grants it only while a button is held on the window (dispatch.rs);
+        // the serial must be that press's, as Smithay's pointer saw it.
+        if pressed_with(&seat, wl_surface, serial)
+            && let Some(w) = window
+        {
+            self.grab_request(&w, None);
         } else {
             // Not a pointer's press: a finger's, perhaps (touch.rs).
             self.touch_move_request(wl_surface, serial);
         }
     }
 
-    fn resize_request(
-        &mut self,
-        surface: ToplevelSurface,
-        seat: wl_seat::WlSeat,
-        serial: Serial,
-        edges: xdg_toplevel::ResizeEdge,
-    ) {
+    fn resize_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial, edges: xdg_toplevel::ResizeEdge) {
         let seat = Seat::from_resource(&seat).unwrap();
-
         let wl_surface = surface.wl_surface();
-
-        if let Some(start_data) = check_grab(&seat, wl_surface, serial) {
-            let pointer = seat.get_pointer().unwrap();
-
-            let window = self
-                .space
-                .elements()
-                .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == wl_surface))
-                .unwrap()
-                .clone();
-            let initial_window_location = self.space.element_location(&window).unwrap();
-            let initial_window_size = window.geometry().size;
-
-            surface.with_pending_state(|state| {
-                state.states.set(xdg_toplevel::State::Resizing);
-            });
-
-            surface.send_pending_configure();
-
-            let grab = ResizeSurfaceGrab::start(
-                start_data,
-                window,
-                edges.into(),
-                Rectangle::new(initial_window_location, initial_window_size),
-            );
-
-            pointer.set_grab(self, grab, serial, Focus::Clear);
+        let window = self.space.elements().find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == wl_surface)).cloned();
+        if pressed_with(&seat, wl_surface, serial)
+            && let Some(w) = window
+        {
+            self.grab_request(&w, Some(ResizeEdge::from(edges)));
         }
     }
 
@@ -179,27 +133,13 @@ impl XdgShellHandler for Server {
     }
 }
 
-fn check_grab(
-    seat: &Seat<Server>,
-    surface: &WlSurface,
-    serial: Serial,
-) -> Option<PointerGrabStartData<Server>> {
-    let pointer = seat.get_pointer()?;
-
-    // Check that this surface has a click grab.
+/// Was `serial` a pointer press on this client's surface, still held?
+fn pressed_with(seat: &Seat<Server>, surface: &WlSurface, serial: Serial) -> bool {
+    let Some(pointer) = seat.get_pointer() else { return false };
     if !pointer.has_grab(serial) {
-        return None;
+        return false;
     }
-
-    let start_data = pointer.grab_start_data()?;
-
-    let (focus, _) = start_data.focus.as_ref()?;
-    // If the focus was for a different surface, ignore the request.
-    if !focus.id().same_client_as(&surface.id()) {
-        return None;
-    }
-
-    Some(start_data)
+    pointer.grab_start_data().and_then(|d| d.focus).is_some_and(|(focus, _)| focus.id().same_client_as(&surface.id()))
 }
 
 /// Should be called on `WlSurface::commit`

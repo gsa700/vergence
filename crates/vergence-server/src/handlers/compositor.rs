@@ -1,5 +1,5 @@
 // Based on Smithay's smallvil example (MIT; see LICENSE-smithay.txt), adapted for Vergence.
-use crate::{Server, grabs::resize_grab, state::ClientState};
+use crate::{Server, state::ClientState};
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     reexports::wayland_server::{
@@ -49,7 +49,7 @@ impl CompositorHandler for Server {
         };
 
         xdg_shell::handle_commit(&mut self.popups, &self.space, surface);
-        resize_grab::handle_commit(&mut self.space, surface);
+        self.resize_commit(surface);
     }
 }
 

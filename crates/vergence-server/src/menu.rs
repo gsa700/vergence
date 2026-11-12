@@ -160,6 +160,11 @@ impl Server {
         self.menu.is_some()
     }
 
+    /// Is `pos` on the open menu (dispatch.rs: a press elsewhere closes it)?
+    pub fn menu_contains(&self, pos: Point<f64, Logical>) -> bool {
+        self.menu.as_ref().is_some_and(|m| m.rect().to_f64().contains(pos))
+    }
+
     /// Open the desktop menu at the pointer, kept on its monitor.
     pub fn open_menu(&mut self, pos: Point<f64, Logical>) {
         let mut entries: Vec<Entry> = apps().into_iter().map(Entry::App).collect();

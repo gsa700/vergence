@@ -1,20 +1,21 @@
-// Based on Smithay's smallvil example (MIT; see LICENSE-smithay.txt), adapted for Vergence.
+// Input from the devices: the idle clock, keys (the key filter, until the seat
+// has it in step 3), touch (touch.rs) and the pointer, which goes to the seat
+// (dispatch.rs). Begun from Smithay's smallvil example (MIT; see
+// LICENSE-smithay.txt); the pointer part is ours since seat milestone 1.
 use smithay::{
     backend::input::{
-        AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
+        AbsolutePositionEvent, Axis, AxisSource, Event, InputBackend, InputEvent,
         KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
     },
     input::{
         keyboard::FilterResult,
-        pointer::{AxisFrame, ButtonEvent, MotionEvent},
+        pointer::AxisFrame,
     },
     utils::SERIAL_COUNTER,
 };
 
-use crate::{focus::KeyboardFocus, grabs::resize_grab::ResizeEdge, state::Server};
+use crate::{focus::KeyboardFocus, state::Server};
 
-const BTN_LEFT: u32 = 0x110;
-const BTN_RIGHT: u32 = 0x111;
 
 /// What a key does before any app sees it.
 enum KeyAction {
@@ -180,11 +181,6 @@ impl Server {
                 let vertical_amount = k * event
                     .amount(Axis::Vertical)
                     .unwrap_or_else(|| event.amount_v120(Axis::Vertical).unwrap_or(0.0) * 15.0 / 120.);
-                // The wheel scrolls the applications popup while it is open.
-                if self.launcher_is_open() {
-                    self.launcher_scroll(vertical_amount);
-                    return;
-                }
                 let horizontal_amount_discrete = event.amount_v120(Axis::Horizontal).map(|v| v * k);
                 let vertical_amount_discrete = event.amount_v120(Axis::Vertical).map(|v| v * k);
 
@@ -211,7 +207,8 @@ impl Server {
                     }
                 }
 
-                // On a native window, the same amounts go to it (native.rs).
+                // Who scrolls is the seat's: a window (Wayland through the frame,
+                // native with the same amounts over the bus) or the open popup (dispatch.rs).
                 let wire_source = match source {
                     AxisSource::Wheel => 0,
                     AxisSource::Finger => 1,
@@ -219,12 +216,7 @@ impl Server {
                     AxisSource::WheelTilt => 3,
                 };
                 let (v120x, v120y) = (horizontal_amount_discrete.unwrap_or(0.0) as i32, vertical_amount_discrete.unwrap_or(0.0) as i32);
-                if self.native_pointer_axis(event.time().millis(), wire_source, horizontal_amount, vertical_amount, v120x, v120y) {
-                    return;
-                }
-                let pointer = self.seat.get_pointer().unwrap();
-                pointer.axis(self, frame);
-                pointer.frame(self);
+                self.pointer_axis(frame, wire_source, horizontal_amount, vertical_amount, v120x, v120y, Event::time(&event));
             }
             _ => {}
         }
@@ -260,196 +252,5 @@ impl Server {
         if let Some(k) = self.seat.get_keyboard() {
             k.set_focus(self, focus, serial);
         }
-    }
-
-    /// The edges to resize from: the window's nearest third in each direction.
-    fn nearest_edges(&self, window: &crate::win::Win, at: smithay::utils::Point<f64, smithay::utils::Logical>) -> ResizeEdge {
-        let Some(g) = self.space.element_geometry(window) else { return ResizeEdge::BOTTOM_RIGHT };
-        let (fx, fy) = ((at.x - g.loc.x as f64) / g.size.w.max(1) as f64, (at.y - g.loc.y as f64) / g.size.h.max(1) as f64);
-        let mut e = ResizeEdge::empty();
-        if fx < 1.0 / 3.0 {
-            e |= ResizeEdge::LEFT;
-        } else if fx > 2.0 / 3.0 {
-            e |= ResizeEdge::RIGHT;
-        }
-        if fy < 1.0 / 3.0 {
-            e |= ResizeEdge::TOP;
-        } else if fy > 2.0 / 3.0 {
-            e |= ResizeEdge::BOTTOM;
-        }
-        if e.is_empty() { ResizeEdge::BOTTOM_RIGHT } else { e }
-    }
-}
-
-impl Server {
-    /// The pointer at `pos` (logical): focus, shape, and motion to the app or grab.
-    /// The mouse and the control socket's `pointer` both come here.
-    pub fn pointer_to(&mut self, pos: smithay::utils::Point<f64, smithay::utils::Logical>, time: smithay::backend::input::InputTime) {
-        let pointer = self.seat.get_pointer().unwrap();
-        let serial = SERIAL_COUNTER.next_serial();
-        self.menu_hover(pos);
-        self.notify_hover(pos);
-        self.shelf_hover(pos);
-        self.launcher_hover(pos);
-        let under = self.surface_under(pos);
-        pointer.motion(self, under, &MotionEvent { location: pos, serial, time });
-        pointer.frame(self);
-        // A native window under the pointer (Smithay's focus is none there).
-        let grabbed = pointer.is_grabbed();
-        self.native_pointer_motion(pos, time.millis(), grabbed);
-    }
-
-    /// A button pressed or released: title bars, Alt+drag, focus, then the app.
-    /// The mouse and the control socket's `press`/`release` both come here.
-    pub fn handle_button(&mut self, button: u32, button_state: ButtonState, time: smithay::backend::input::InputTime) {
-        let pointer = self.seat.get_pointer().unwrap();
-        let keyboard = self.seat.get_keyboard().unwrap();
-
-        let serial = SERIAL_COUNTER.next_serial();
-
-        // The desktop menu takes the clicks while it is open (and the release of the
-        // click that opened or used it).
-        if button_state == ButtonState::Released && self.menu_swallow == Some(button) {
-            self.menu_swallow = None;
-            return;
-        }
-        if button_state == ButtonState::Pressed && self.menu_is_open() {
-            let at = pointer.current_location();
-            self.menu_press(at);
-            self.menu_swallow = Some(button);
-            return;
-        }
-        // A press on the dock ends here: a click on what it was on, or the end of a drag.
-        if button_state == ButtonState::Released && self.shelf.held.is_some_and(|(b, _)| b == button) {
-            let at = pointer.current_location();
-            self.shelf_release(at);
-            return;
-        }
-        // A button with Super held is not a tap of Super.
-        self.launcher.super_alone = false;
-        // The applications popup takes the clicks while it is open: on an
-        // application, or elsewhere to close it.
-        if button_state == ButtonState::Pressed && self.launcher_is_open() {
-            let at = pointer.current_location();
-            self.launcher_press(at);
-            self.menu_swallow = Some(button);
-            return;
-        }
-        // Notifications take clicks on themselves (notify.rs).
-        if button_state == ButtonState::Released && self.notes.swallow == Some(button) {
-            self.notes.swallow = None;
-            return;
-        }
-        if button_state == ButtonState::Pressed && self.notify_at(pointer.current_location()) {
-            let at = pointer.current_location();
-            self.notify_press(at);
-            self.notes.swallow = Some(button);
-            return;
-        }
-
-        // (window, Some(edges) = resize / None = move)
-        let mut grab_with: Option<(crate::win::Win, Option<ResizeEdge>)> = None;
-        if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
-            use crate::decor::Hit;
-            let at = pointer.current_location();
-            let hit = self.hit(at);
-            let left = button == BTN_LEFT;
-            match &hit {
-                Hit::Surface(w, ..) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Minimize(w) | Hit::Edge(w, _) | Hit::Native(w) => {
-                    self.focus_window(&w.clone(), serial)
-                }
-                Hit::Shelf | Hit::Nothing => {}
-            }
-            match hit {
-                // Alt+left drag moves, Alt+right drag resizes any window.
-                Hit::Surface(w, ..) if keyboard.modifier_state().alt && (left || button == BTN_RIGHT) => {
-                    let edges = (!left).then(|| self.nearest_edges(&w, at));
-                    grab_with = Some((w, edges));
-                }
-                Hit::Surface(..) => {}
-                // Alt+drag works on native windows too; other presses wait for step 4.
-                Hit::Native(w) if keyboard.modifier_state().alt && (left || button == BTN_RIGHT) => {
-                    let edges = (!left).then(|| self.nearest_edges(&w, at));
-                    grab_with = Some((w, edges));
-                }
-                Hit::Native(_) => {}
-                Hit::Title(w) if left => {
-                    let now = std::time::Instant::now();
-                    let double = self
-                        .last_title_press
-                        .as_ref()
-                        .is_some_and(|(lw, t)| *lw == w && now.duration_since(*t).as_millis() < 400);
-                    if double {
-                        self.last_title_press = None;
-                        self.toggle_maximize(&w);
-                    } else {
-                        self.last_title_press = Some((w.clone(), now));
-                        grab_with = Some((w, None));
-                    }
-                }
-                Hit::Close(w) if left => self.close_window(&w),
-                Hit::Maximize(w) if left => self.toggle_maximize(&w),
-                Hit::Minimize(w) if left => self.minimize(&w),
-                Hit::Edge(w, e) if left => grab_with = Some((w, Some(e))),
-                Hit::Title(_) | Hit::Close(_) | Hit::Maximize(_) | Hit::Minimize(_) | Hit::Edge(..) => {}
-                // The dock (shelf.rs): let go where it was pressed, an application's icon
-                // brings its window forward or opens the list of its windows; moved
-                // first, the dock is dragged. What is behind the dock is never pressed.
-                Hit::Shelf if left => {
-                    self.shelf_press(at, button);
-                    return;
-                }
-                // Right-click on an application's icon: its menu.
-                Hit::Shelf if button == BTN_RIGHT => {
-                    self.shelf_menu(at);
-                    self.menu_swallow = Some(button);
-                    return;
-                }
-                Hit::Shelf => {}
-                // Right-click on the bare desktop: the desktop menu.
-                Hit::Nothing if button == BTN_RIGHT => {
-                    self.open_menu(at);
-                    self.menu_swallow = Some(button);
-                    return;
-                }
-                Hit::Nothing => {
-                self.space.elements().for_each(|window| {
-                    window.set_activated(false);
-                    if let Some(t) = window.toplevel() {
-                        t.send_pending_configure();
-                    }
-                });
-                keyboard.set_focus(self, Option::<KeyboardFocus>::None, serial);
-                }
-            }
-        };
-
-        if let Some((window, resize)) = grab_with {
-            // The press goes to the grab, not the app. Dragging a maximized window
-            // takes it out of maximized (back to its size, under the pointer) once
-            // the pointer has moved (move_grab.rs): a press alone does not, or a
-            // double-click on its title bar would restore and maximize it again.
-            let start = smithay::input::pointer::GrabStartData { focus: None, button, location: pointer.current_location() };
-            match resize {
-                Some(edges) => self.start_resize(window, edges, Some(start)),
-                None => self.start_move(window, Some(start)),
-            }
-            return;
-        }
-
-        // On a native window, the button is its (native.rs); Smithay's focus is none there.
-        if !pointer.is_grabbed() && self.native_pointer_button(button, button_state == ButtonState::Pressed, serial.into(), time.millis()) {
-            return;
-        }
-        pointer.button(
-            self,
-            &ButtonEvent {
-                button,
-                state: button_state,
-                serial,
-                time: time,
-            },
-        );
-        pointer.frame(self);
     }
 }

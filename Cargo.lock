@@ -2224,6 +2224,7 @@ dependencies = [
  "vergence-protocol",
  "vergence-render",
  "vergence-scene",
+ "vergence-seat",
  "vergence-shell",
  "vergence-sound",
  "vergence-text",
