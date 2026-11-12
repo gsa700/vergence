@@ -1334,8 +1334,9 @@ impl App {
         match change(s.as_mut()) {
             Ok(()) => self.status.clear(),
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                // FreeBSD's default output (hw.snd.default_unit) is root's.
-                self.status = "Choosing the output needs root on this system; the sound helper that does it for you comes next (for now: sudo vsound default <id>).".into();
+                // FreeBSD's default output (hw.snd.default_unit) is root's;
+                // the helper says why it could not do it.
+                self.status = format!("Choosing the output: {e}");
             }
             Err(e) => self.status = format!("Sound: {e}"),
         }

@@ -4,7 +4,8 @@
 //!     vsound                      list the outputs
 //!     vsound volume <id> <0-100>  set an output's volume
 //!     vsound mute <id> on|off
-//!     vsound default <id>         send sound there from now on (root on FreeBSD)
+//!     vsound default <id>         send sound there from now on (FreeBSD: through
+//!                                 the root helper, libexec/vergence/sound-default)
 //!     vsound tone <id> [CHANNELS] [ON]
 //!                                 a test tone, 440 Hz for 1.5 s, quiet: in a
 //!                                 stream of CHANNELS channels (2), heard on those

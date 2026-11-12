@@ -1,7 +1,9 @@
 //! FreeBSD's OSS (sound(4), snd_hda): a `pcm` device per output group the
 //! codec reports, each with a mixer, `/dev/mixerN` (mode 0666: volume and
 //! mute need no privilege). The default device is the sysctl
-//! `hw.snd.default_unit`, which only root may set.
+//! `hw.snd.default_unit`, which only root may set: [`Oss::set_default`]
+//! asks the root helper ([`helper_main`], `libexec/vergence/sound-default`)
+//! when the system refuses us.
 //!
 //! What each device is: `dev.pcm.N.%desc` (the driver's words),
 //! `dev.pcm.N.%location` (the codec pins it drives, "nid=33,26") and
@@ -10,7 +12,13 @@
 //! `dev.pcm.N.mode`: 1 mixer, 2 play, 4 record; only devices that play are
 //! outputs.
 
-use std::{ffi::CString, fs::OpenOptions, io, os::fd::AsRawFd};
+use std::{
+    ffi::{CString, OsString},
+    fs::OpenOptions,
+    io,
+    os::fd::AsRawFd,
+    path::PathBuf,
+};
 
 use crate::{Output, Sound, level_of, level_percent, location_pins, pin_name};
 
@@ -77,6 +85,61 @@ fn set_sysctl_int(name: &str, value: i32) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// The root helper's name, in `PREFIX/libexec/vergence` (tools/install.sh
+/// installs it setuid root, runnable by the `video` group only).
+pub const HELPER: &str = "sound-default";
+
+/// The helper: in the prefix our program runs from (`PREFIX/bin/..`), else
+/// /usr/local's (a development build run from target/).
+fn helper_path() -> Option<PathBuf> {
+    let beside = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.parent()?.join("libexec/vergence").join(HELPER)));
+    beside.into_iter().chain([PathBuf::from("/usr/local/libexec/vergence").join(HELPER)]).find(|p| p.is_file())
+}
+
+/// Ask the helper to make `unit` the default output.
+fn run_helper(unit: u32) -> io::Result<()> {
+    let refused = |why: &str| io::Error::new(io::ErrorKind::PermissionDenied, why.to_string());
+    let Some(path) = helper_path() else {
+        return Err(refused("the sound helper (libexec/vergence/sound-default) is not installed; sudo tools/install.sh puts it there"));
+    };
+    let out = match std::process::Command::new(&path).arg(unit.to_string()).env_clear().output() {
+        Ok(o) => o,
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return Err(refused("only members of the video group may choose the output (sudo pw groupmod video -m $USER, then log in again)")),
+        Err(e) => return Err(e),
+    };
+    if out.status.success() {
+        return Ok(());
+    }
+    let said = String::from_utf8_lossy(&out.stderr);
+    Err(io::Error::other(said.trim().trim_start_matches("sound-default: ").to_string()))
+}
+
+/// The root helper's whole job (sound milestone 1, Decided 1): make the
+/// output numbered in its one argument the default, and nothing else. It
+/// runs setuid root, so it trusts nothing it is given: exactly one argument,
+/// one or two decimal digits, naming a device that exists and plays; no
+/// file is opened, no environment read, nothing else written. Returns the
+/// exit status.
+pub fn helper_main(args: Vec<OsString>) -> i32 {
+    let fail = |why: String| {
+        eprintln!("sound-default: {why}");
+        1
+    };
+    let [arg] = args.as_slice() else {
+        return fail("usage: sound-default UNIT (the N of pcmN)".into());
+    };
+    let Some(unit) = arg.to_str().filter(|a| (1..=2).contains(&a.len()) && a.bytes().all(|b| b.is_ascii_digit())).and_then(|a| a.parse::<u32>().ok()) else {
+        return fail("the unit is a number, the N of pcmN".into());
+    };
+    if !Oss::units().contains(&unit) {
+        return fail(format!("no output pcm{unit}"));
+    }
+    match set_sysctl_int("hw.snd.default_unit", unit as i32) {
+        Ok(()) => 0,
+        Err(e) => fail(format!("setting hw.snd.default_unit: {e}")),
+    }
 }
 
 pub struct Oss;
@@ -153,7 +216,15 @@ impl Sound for Oss {
     }
 
     fn set_default(&mut self, id: &str) -> io::Result<()> {
-        set_sysctl_int("hw.snd.default_unit", Self::unit(id)? as i32)
+        let unit = Self::unit(id)?;
+        if !Self::units().contains(&unit) {
+            return Err(io::Error::new(io::ErrorKind::NotFound, format!("no output {id}")));
+        }
+        match set_sysctl_int("hw.snd.default_unit", unit as i32) {
+            // Not root (the usual case): the helper does it.
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => run_helper(unit),
+            r => r,
+        }
     }
 
     fn tone(&mut self, id: &str, channels: u32, on: &[u32]) -> io::Result<String> {

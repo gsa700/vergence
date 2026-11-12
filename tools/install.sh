@@ -17,6 +17,9 @@
 #   share/applications/vergence-*.desktop    the terminal and the settings app, for the shelf and any launcher
 #   share/icons/hicolor/scalable/apps/       their icons (data/icons, drawn by the project)
 #   share/doc/vergence/                      LICENSE-APACHE, LICENSE-GPL, THIRD-PARTY-NOTICES.md
+#   libexec/vergence/sound-default           FreeBSD only: the root helper that sets the default
+#                                            sound output (hw.snd.default_unit) and nothing else;
+#                                            setuid root, group video, mode 4750
 # User files stay in the user's home: ~/.config/vergence (settings), ~/.local/state/vergence (logs).
 #
 # System setup, unless --destdir: where there is no logind, seatd is enabled and
@@ -49,12 +52,15 @@ docs=$destdir$prefix/share/doc/vergence       # license and notices (the setting
 docfiles="LICENSE-APACHE LICENSE-GPL THIRD-PARTY-NOTICES.md"
 programs="vergence-server vergence-term vergence-settings vbus vnative vsound vshell"
 tools="vergence-term vergence-settings"
+libexec=$destdir$prefix/libexec/vergence
 
 if [ -n "$uninstall" ]; then
     for p in $programs vctl vergence-session vergence; do rm -f "$bin/$p"; done
     rm -f "$sessions/vergence.desktop"
     for t in $tools; do rm -f "$applications/$t.desktop" "$icons/$t.svg"; done
     for d in $docfiles; do rm -f "$docs/$d"; done
+    rm -f "$libexec/sound-default"
+    rmdir "$libexec" 2>/dev/null || true
     rmdir "$docs" 2>/dev/null || true
     echo "removed Vergence from $destdir$prefix (user settings and logs kept)"
     exit 0
@@ -77,6 +83,18 @@ for t in $tools; do
 done
 for p in $programs; do install -m 755 "$release/$p" "$bin/$p"; done
 install -m 755 "$here/vctl" "$bin/vctl"
+if [ "$(uname -s)" = FreeBSD ]; then
+    # The sound helper: setuid root, run only by the video group (the seat's,
+    # below). Staged (--destdir) without the bits; the package sets them.
+    [ -x "$release/sound-default" ] || { echo "install.sh: $release/sound-default is missing; run cargo build --release first" >&2; exit 1; }
+    mkdir -p "$libexec"
+    if [ -z "$destdir" ]; then
+        install -o root -g video -m 4750 "$release/sound-default" "$libexec/sound-default"
+    else
+        install -m 755 "$release/sound-default" "$libexec/sound-default"
+        echo "note: $prefix/libexec/vergence/sound-default needs owner root, group video, mode 4750 in the package"
+    fi
+fi
 install -m 755 "$here/vergence-session" "$bin/vergence-session"
 ln -sf vergence-session "$bin/vergence"
 tmp=$(mktemp)

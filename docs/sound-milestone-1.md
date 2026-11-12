@@ -214,3 +214,17 @@ service, ALSA's `alsactl`) still restores levels at boot.
     (It was at 83% before the test, not the 69% left after step 3: not yet
     explained.)
   - A test of the step; 332 tests green on Hubble, kepler and Techbench.
+
+- **Step 5 (2026-11-11): FreeBSD's root helper.** `sound-default N`
+  (crates/vergence-sound/src/bin/sound-default.rs, the checks in
+  `oss::helper_main`) sets `hw.snd.default_unit` to N and nothing else:
+  exactly one argument of one or two digits, a device that exists and
+  plays; no file opened, no environment read. tools/install.sh puts it in
+  `PREFIX/libexec/vergence`, root:video, mode 4750 (setuid root, the seat
+  group only; `--destdir` stages it plain and says what the package must
+  set). `Oss::set_default` tries the sysctl itself and, refused, runs the
+  helper (beside our prefix, else /usr/local's) with an empty environment;
+  the settings app's status line carries its words (not installed; not in
+  video). On kepler as derickson: pcm0 and back to pcm3 by `vsound default`;
+  `pcm9`, `1;x` and two arguments refused; `nobody` cannot execute it.
+  332 tests green on Hubble, kepler and Techbench.

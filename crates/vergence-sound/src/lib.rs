@@ -6,7 +6,7 @@
 //! OSS on FreeBSD ([`oss`], step 1); ALSA on Linux without a sound server
 //! (step 2). PipeWire waits for a client of our own (Dave, 2026-11-11).
 //! Volume and mute need no privilege on either; FreeBSD's default output
-//! needs root (a helper of its own, step 5).
+//! needs root: the helper `sound-default` (step 5, [`oss::helper_main`]).
 
 use std::io;
 
