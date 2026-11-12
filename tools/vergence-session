@@ -24,6 +24,10 @@ elif [ -x "$here/vergence-server" ]; then
     installed=1
 elif [ -x "$here/../target/release/vergence-server" ]; then
     BIN=$here/../target/release/vergence-server     # a checkout
+    # Its programs first on PATH, so the shelf's desktop entries
+    # (Exec=vergence-term) and `vergence-term -e` find this build's.
+    PATH=$(cd "$here/../target/release" && pwd):$PATH
+    export PATH
 else
     BIN=vergence-server                              # whatever PATH finds
     installed=1
