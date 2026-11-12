@@ -443,9 +443,15 @@ fuzz test feeds the decoder random frames and descriptors.
 1. Native on Hubble: **met** (terminal and settings app, `vctl windows`).
    On kepler and Techbench: installed and tested there, not yet run in a
    session there.
-2. Stress test: **rates met** (step 5's table). Clicks: 33 of 50 on both
-   roads, from the click tool picking the wrong window; fix the tool,
-   then run again.
+2. Stress test: **rates met** (step 5's table). Clicks: the tool picked
+   the wrong window with two terminals open; fixed 2026-11-11 (`vctl
+   windows` now names each window's pid, from the bus socket's peer
+   credentials or the Wayland client's, and `clicks.sh` takes the stress
+   test's own). Rerun on Hubble: every tab change drawn within one frame on
+   both roads, 41 of 50 natively, 33 over Wayland, because the first job
+   (btop) exits at once on Void and takes its tab with it (five tabs, so
+   clicks on the sixth change nothing). To finish: btop on Void, or the
+   tool counting the tabs that are there.
 3. Clipboard: native and Wayland both ways **met** with the terminal on
    Hubble (step 4); **Firefox not yet tried**.
 4. Placement by request and memory: **met**.

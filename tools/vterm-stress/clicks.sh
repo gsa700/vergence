@@ -18,8 +18,13 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 clicks=${1:-50}
 dir=$(ls -dt "${TMPDIR:-/tmp}"/vterm-stress.*/ | head -1)
 log=${dir}vterm.log
-# The terminal's window: the last one listed with its program's name.
-set -- $("$here/vctl" windows | grep '"vergence-term"' | tail -1 | sed 's/.*x: \([0-9-]*\), y: \([0-9-]*\), width: \([0-9]*\).*/\1 \2 \3/')
+# The terminal's window: the stress test's own, by the pid run.sh recorded
+# (vctl windows names each window's process since 2026-11-11; "the last one
+# listed" picked another terminal when two were open and clicked the wrong
+# places, 33 of 50 on both roads).
+pid=$(cat "${dir}pid")
+set -- $("$here/vctl" windows | grep '"vergence-term"' | grep " pid $pid\$" | tail -1 | sed 's/.*x: \([0-9-]*\), y: \([0-9-]*\), width: \([0-9]*\).*/\1 \2 \3/')
+[ $# -ge 3 ] || { echo "clicks.sh: no window of pid $pid in vctl windows" >&2; exit 1; }
 wx=$1 wy=$2 ww=$3
 before=$(wc -l < "$log" | tr -d ' ')
 n=0

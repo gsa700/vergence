@@ -114,7 +114,6 @@ unsafe extern "C" {
     fn libc_getuid() -> u32;
     #[cfg(not(target_os = "linux"))]
     fn getpeereid(fd: i32, euid: *mut u32, egid: *mut u32) -> i32;
-    #[cfg(target_os = "linux")]
     fn getsockopt(fd: i32, level: i32, name: i32, val: *mut u8, len: *mut u32) -> i32;
 }
 
@@ -139,6 +138,24 @@ pub fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
         let ok = unsafe { getsockopt(stream.as_raw_fd(), 1, 17, buf.as_mut_ptr(), &mut len) } == 0;
         (ok && len == 12).then(|| u32::from_ne_bytes(buf[4..8].try_into().unwrap()))
     }
+}
+
+/// The connecting process's id, for `vctl windows` (2026-11-11: the stress
+/// test's click tool finds its own terminal by it). Linux: SO_PEERCRED's
+/// struct ucred { pid, uid, gid }. FreeBSD: LOCAL_PEERCRED's struct xucred
+/// { u_int version; uid_t uid; short ngroups; gid_t groups[16]; union {
+/// void *; pid_t pid; } }, the pid at byte 80 (after 76 bytes, aligned to 8).
+pub fn peer_pid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    #[cfg(target_os = "linux")]
+    let (level, name, size, at) = (1, 17, 12usize, 0usize);
+    #[cfg(not(target_os = "linux"))]
+    let (level, name, size, at) = (0, 1, 88usize, 80usize); // SOL_LOCAL, LOCAL_PEERCRED
+    let mut buf = [0u8; 88];
+    let mut len = size as u32;
+    // SAFETY: `buf` has room for `len` bytes, and getsockopt writes at most that.
+    let ok = unsafe { getsockopt(stream.as_raw_fd(), level, name, buf.as_mut_ptr(), &mut len) } == 0;
+    (ok && len as usize >= at + 4).then(|| u32::from_ne_bytes(buf[at..at + 4].try_into().unwrap())).filter(|p| *p != 0)
 }
 
 impl Server {
@@ -313,7 +330,13 @@ impl Server {
                     None => ("?", String::new(), String::new()),
                 },
             };
-            out.push(format!("{i} {kind} {title:?} {class:?} {geo:?} on {on:?} title-bar={}", self.has_title(w)));
+            // The window's process (Wayland: the client's credentials; native: its bus connection's).
+            let pid = match w.native() {
+                Some(n) => self.bus_pid(n.client),
+                None => w.toplevel().and_then(|t| smithay::reexports::wayland_server::Resource::client(t.wl_surface())).and_then(|c| c.get_credentials(&self.display_handle).ok()).map(|c| c.pid as u32),
+            };
+            let pid = pid.map(|p| format!(" pid {p}")).unwrap_or_default();
+            out.push(format!("{i} {kind} {title:?} {class:?} {geo:?} on {on:?} title-bar={}{pid}", self.has_title(w)));
         }
         out.join("\n")
     }
@@ -350,4 +373,14 @@ pub fn save_png(name: String, w: u32, h: u32, rgba: Vec<u8>) {
             Err(e) => tracing::warn!("shot {}: {e}", path.display()),
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_socket_s_peer_is_this_process() {
+        let (a, _b) = std::os::unix::net::UnixStream::pair().unwrap();
+        assert_eq!(super::peer_pid(&a), Some(std::process::id()));
+        assert_eq!(super::peer_uid(&a), Some(super::our_uid()));
+    }
 }

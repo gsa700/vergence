@@ -50,6 +50,8 @@ struct Conn {
     /// Set by Hello: the app id the client gave (recorded, not trusted, §7.4).
     app_id: Option<String>,
     uid: u32,
+    /// The client's process id, from the socket's peer credentials.
+    pid: Option<u32>,
     topics: HashSet<Topic>,
     /// What is waiting to be written: each message's bytes with the
     /// descriptors it carries (a native window's keymap, the clipboard's
@@ -127,6 +129,7 @@ impl Server {
         if let Err(e) = res {
             return tracing::warn!("bus: {e}");
         }
+        let pid = crate::control::peer_pid(&write_half);
         self.bus.clients.insert(
             id,
             Conn {
@@ -135,6 +138,7 @@ impl Server {
                 fds: Default::default(),
                 app_id: None,
                 uid,
+                pid,
                 topics: HashSet::new(),
                 outbox: Default::default(),
                 outbox_len: 0,
@@ -371,6 +375,11 @@ impl Server {
                 self.bus_close(id);
             }
         }
+    }
+
+    /// A client's process id, from its socket (for `vctl windows`).
+    pub(crate) fn bus_pid(&self, id: u32) -> Option<u32> {
+        self.bus.clients.get(&id).and_then(|c| c.pid)
     }
 
     /// The application id a client gave in its Hello (recorded, not trusted, §7.4).
