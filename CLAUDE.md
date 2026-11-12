@@ -72,8 +72,10 @@ The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md: s
   picked for hosting the X11 daemon. Techbench is Dave's workstation, not a
   project machine: Rust and -devel packages only (dnf needs his sudo), build
   in ~/src/vergence (`tools/sync-hubble.sh techbench`). Start it from GDM:
-  "Vergence" in the gear menu (tools/install-session.sh put
-  /usr/share/wayland-sessions/vergence.desktop there, 2026-11-08); log out of
+  "Vergence (dev)" in the gear menu runs this checkout (tools/install-session.sh,
+  /usr/share/wayland-sessions/vergence-dev.desktop; renamed 2026-11-12), plain
+  "Vergence" the installed build (tools/install.sh, run there 2026-11-12: no
+  control socket, so no `vctl`); log out of
   GNOME first, GDM won't start a second session for the same user. NOT from a
   text console: Fedora 45's consoles are kmscon, which holds the GPU (the
   server fails "Device or resource busy"); the kernel console is a dummy.
