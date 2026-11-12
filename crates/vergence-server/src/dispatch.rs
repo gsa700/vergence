@@ -208,6 +208,11 @@ impl Server {
         })
     }
 
+    /// The surface a seat number names, with its origin when last hit.
+    pub(crate) fn surface_of(&self, sid: u64) -> Option<(WlSurface, Point<f64, Logical>)> {
+        self.input.surfaces.get(&sid).cloned()
+    }
+
     /// The pointer's picture for what it is on: a window edge's arrows, a
     /// native window's own shape; a Wayland surface sets its own.
     fn pointer_picture(&mut self, under: Option<Target>) {
@@ -224,12 +229,23 @@ impl Server {
     /// what has it. The mouse, a pointing finger and `vctl pointer` come here.
     pub fn pointer_to(&mut self, pos: Point<f64, Logical>, time: InputTime) {
         self.dispatch_sync();
-        // Hover: each of the server's parts looks for itself.
+        self.pointer_hover(pos);
+        let under = self.target_at(pos);
+        self.pointer_follow(pos, time, under);
+        let out = self.input.seat.motion(under);
+        self.apply(out, pos, time, &Came::Motion);
+    }
+
+    /// Hover: each of the server's parts looks for itself.
+    pub(crate) fn pointer_hover(&mut self, pos: Point<f64, Logical>) {
         self.menu_hover(pos);
         self.notify_hover(pos);
         self.shelf_hover(pos);
         self.launcher_hover(pos);
-        let under = self.target_at(pos);
+    }
+
+    /// The pointer's picture, and Smithay's pointer where the pointer is.
+    pub(crate) fn pointer_follow(&mut self, pos: Point<f64, Logical>, time: InputTime, under: Option<Target>) {
         let (grab, held, focus) = (self.input.seat.grab(), self.input.seat.buttons_held(), self.input.seat.pointer_focus());
         if grab.is_none() && !held {
             self.pointer_picture(under);
@@ -247,8 +263,6 @@ impl Server {
             p.motion(self, None, &MotionEvent { location: pos, serial: SERIAL_COUNTER.next_serial(), time });
             p.frame(self);
         }
-        let out = self.input.seat.motion(under);
-        self.apply(out, pos, time, &Came::Motion);
     }
 
     /// A button pressed or released. The mouse, a pointing finger and `vctl
@@ -301,7 +315,7 @@ impl Server {
     }
 
     /// Carry out what the seat decided, in order.
-    fn apply(&mut self, out: Vec<Out>, pos: Point<f64, Logical>, time: InputTime, came: &Came) {
+    pub(crate) fn apply(&mut self, out: Vec<Out>, pos: Point<f64, Logical>, time: InputTime, came: &Came) {
         let Some(pointer) = self.seat.get_pointer() else { return };
         for o in out {
             match o {
@@ -393,7 +407,7 @@ impl Server {
                     self.launcher_close();
                 }
                 Out::ToEdge => self.to_edge(pos, time, came),
-                // Touch is touch.rs's until step 4.
+                // Touch's own (touch.rs) are carried out there.
                 _ => {}
             }
         }

@@ -30,60 +30,55 @@
 // The pointer's picture goes away at a finger's touch and comes back when
 // a mouse moves.
 //
+// Which finger goes where is the seat's (crates/vergence-seat, touch.rs there;
+// seat milestone 1, step 4): this file says which screen a panel is on, where
+// a finger meant, when half a second has passed, and carries out what the
+// seat decided for the fingers (Wayland touch through Smithay, a native
+// window's over the bus, a window going with its finger).
+//
 // Not yet: a way to make the tie by touching the screen (settings app).
 
-use crate::win::Win;
 use std::collections::{HashMap, HashSet};
 
 use smithay::{
-    backend::input::{ButtonState, InputTime, TouchSlot},
-    reexports::{calloop::timer::{TimeoutAction, Timer}, wayland_server::{Resource, protocol::wl_surface::WlSurface}},
-    utils::Serial,
+    backend::input::{InputTime, TouchSlot},
     input::touch::{DownEvent, MotionEvent, UpEvent},
-    utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
+    reexports::{
+        calloop::timer::{TimeoutAction, Timer},
+        wayland_server::{Resource, protocol::wl_surface::WlSurface},
+    },
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial},
 };
+use vergence_seat::{Out, Slot, Target, WinId};
 
-use crate::{Server, decor::Hit};
+use crate::{Server, decor::Hit, dispatch::Came};
 
-const BTN_LEFT: u32 = 0x110;
 /// How far off its mark a finger may come down and still have meant it, in points.
 const REACH: f64 = 10.0;
-/// How long a finger rests for a long press, and how far it may wander meanwhile.
+/// How long a finger rests for a long press (how far it may wander is the seat's).
 const LONG: std::time::Duration = std::time::Duration::from_millis(500);
-const STILL: f64 = 10.0;
-
-/// A window going with the finger that asked to move it.
-struct Moving {
-    slot: TouchSlot,
-    window: Win,
-    /// Where the window was and where the finger came down.
-    from: Point<i32, Logical>,
-    down: Point<f64, Logical>,
-}
 
 #[derive(Default)]
 pub struct Touch {
     /// Panels tied to screens: the panel's name, the screen's id.
     ties: Vec<(String, String)>,
-    /// The finger that is acting as the pointer.
-    pointing: Option<TouchSlot>,
-    /// Where the pointing finger came down, while it has not moved away:
-    /// a long press, if it stays. And which press this is, for its timer.
-    resting: Option<Point<f64, Logical>>,
-    presses: u64,
-    /// The fingers that are on windows: each one's press (its serial, the
-    /// surface, where).
-    on_windows: HashMap<TouchSlot, (Serial, WlSurface, Point<f64, Logical>)>,
-    /// The fingers on native windows (native.rs): each one's window and
-    /// where it was last, told to the window over the bus.
-    on_native: HashMap<TouchSlot, (crate::win::Win, Point<f64, Logical>)>,
-    moving: Option<Moving>,
+    /// Each finger down: its slot as the panel named it, the serial of its
+    /// down on a Wayland surface (a window's move request names it), and
+    /// where it was last.
+    fingers: HashMap<Slot, (TouchSlot, Option<(Serial, WlSurface)>, Point<f64, Logical>)>,
+    /// Where the finger acting as the pointer came down (a long press's menu opens there).
+    pointing_at: Option<Point<f64, Logical>>,
+    /// A window going with a finger: where the window was.
+    moving_from: Option<(WinId, Point<i32, Logical>)>,
     /// A finger was the last thing to point: the pointer's picture is not
     /// drawn until a mouse moves again (an arrow, or a window edge's shape,
     /// left where a finger lifted, points at nothing).
     pub fingers_last: bool,
     /// Panels already named in the log.
     said: HashSet<String>,
+    /// Smithay's touch was told something since the last frame (a frame with
+    /// nothing in it is a client bug in Smithay's eyes).
+    unframed: bool,
 }
 
 /// The ties desktop.toml records.
@@ -96,6 +91,10 @@ pub fn load() -> Vec<(String, String)> {
         .filter_map(|p| Some((p.get("name")?.as_str()?.to_string(), p.get("screen")?.as_str()?.to_string())))
         .take(16)
         .collect()
+}
+
+fn slot_number(slot: TouchSlot) -> Slot {
+    i32::from(slot) as Slot
 }
 
 impl Server {
@@ -128,46 +127,25 @@ impl Server {
     /// A finger came down at `at`. The touch panel, and the control socket's
     /// `touch`, both come here.
     pub fn touch_down(&mut self, slot: TouchSlot, at: Point<f64, Logical>, time: InputTime) {
-        // Anything but Super between its press and release: not a tap of it.
-        self.input.seat.interrupt_super();
         if !self.touch.fingers_last {
             self.touch.fingers_last = true;
             self.redraw_all();
         }
-        // On a window, unless something of the server's own is open over it.
+        self.dispatch_sync();
+        // Over something of the server's own that is open, a finger is the
+        // pointer where it is; elsewhere, where it meant.
         let ours = self.menu_is_open() || self.launcher_is_open() || self.notify_at(at);
-        let hit = if ours { Hit::Nothing } else { self.hit(at) };
-        if let Hit::Native(window) = &hit {
-            let serial = SERIAL_COUNTER.next_serial();
-            self.focus_window(window, serial);
-            self.touch.on_native.insert(slot, (window.clone(), at));
-            self.native_touch(window, slot.into(), 0, at, time.millis());
-            return;
+        let at = if ours { at } else { self.touch_meant(at) };
+        let n = slot_number(slot);
+        self.touch.fingers.insert(n, (slot, None, at));
+        self.pointer_hover(at);
+        let under = self.target_at(at);
+        let now = self.start_time.elapsed().as_millis() as u64;
+        let out = self.input.seat.touch_down(n, at.x, at.y, under, now);
+        if out.iter().any(|o| matches!(o, Out::PointerTo { .. })) {
+            self.touch.pointing_at = Some(at);
         }
-        if let Hit::Surface(window, surface, origin) = hit {
-            let serial = SERIAL_COUNTER.next_serial();
-            self.focus_window(&window, serial);
-            self.touch.on_windows.insert(slot, (serial, surface.clone(), at));
-            if let Some(touch) = self.seat.get_touch() {
-                touch.down(self, Some((surface, origin)), &DownEvent { slot, location: at, serial, time });
-            }
-            return;
-        }
-        // Elsewhere: the first finger is the pointer; others there do nothing.
-        if self.touch.pointing.is_none() && self.touch.on_windows.is_empty() {
-            let at = if ours { at } else { self.touch_meant(at) };
-            self.touch.pointing = Some(slot);
-            self.pointer_to(at, time);
-            self.handle_button(BTN_LEFT, ButtonState::Pressed, time);
-            // If it stays where it is, it is a long press.
-            self.touch.presses += 1;
-            self.touch.resting = (!ours).then_some(at);
-            let press = self.touch.presses;
-            let _ = self.loop_handle.insert_source(Timer::from_duration(LONG), move |_, _, state| {
-                state.touch_long_press(press);
-                TimeoutAction::Drop
-            });
-        }
+        self.touch_apply(out, at, time, under);
     }
 
     /// Where a finger that came down at `at` meant: there, if something is
@@ -185,97 +163,52 @@ impl Server {
         around.iter().map(|(dx, dy)| Point::from((at.x + dx, at.y + dy))).find(|p| wanted(&self.hit(*p))).unwrap_or(at)
     }
 
-    /// Half a second after press number `press`: if that finger is still
-    /// down where it came down, on a dock icon or the bare desktop, it was
-    /// the right button there.
-    fn touch_long_press(&mut self, press: u64) {
-        if press != self.touch.presses || self.touch.pointing.is_none() {
-            return;
-        }
-        let Some(at) = self.touch.resting.take() else { return };
-        let time = InputTime::now();
-        match self.hit(at) {
-            Hit::Shelf => {
-                // The press the dock was holding is not a click any more.
-                self.shelf.held = None;
-                self.input.seat.abandon(BTN_LEFT);
-                self.shelf_menu(at);
-            }
-            Hit::Nothing => {
-                self.handle_button(BTN_LEFT, ButtonState::Released, time);
-                self.open_menu(at);
-            }
-            _ => return,
-        }
-        // The finger has said what it had to: its lifting does nothing more.
-        self.touch.pointing = None;
-        self.redraw_all();
-    }
-
     /// A window asks to be moved, giving the serial of the press that began
     /// it: if that press was a finger's on that window, the window goes
-    /// with the finger from now on. (A pointer's press is the move grab's.)
+    /// with the finger from now on (the seat decides). A maximized window stays.
     pub fn touch_move_request(&mut self, surface: &WlSurface, serial: Serial) {
-        let Some((slot, down)) = self.touch.on_windows.iter().find(|(_, (s, on, _))| *s == serial && on.id().same_client_as(&surface.id())).map(|(slot, (_, _, at))| (*slot, *at)) else { return };
+        // The press must be this program's own (§7.3: no moving by another's serial).
+        let Some((n, down)) = self.touch.fingers.iter().find(|(_, (_, s, _))| s.as_ref().is_some_and(|(sr, on)| *sr == serial && on.id().same_client_as(&surface.id()))).map(|(n, (_, _, at))| (*n, *at)) else { return };
         let Some(window) = self.space.elements().find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface)).cloned() else { return };
-        // A maximized window stays where it is.
         if self.restore.contains_key(&window) {
-            tracing::info!("touch: a maximized window is not moved by a finger");
-            return;
+            return tracing::info!("touch: a maximized window is not moved by a finger");
         }
         let Some(from) = self.space.element_location(&window) else { return };
-        tracing::info!("touch: a finger moves {:?}", self.window_title(&window));
-        self.touch.moving = Some(Moving { slot, window, from, down });
+        let id = self.win_id(&window);
+        if self.input.seat.touch_move_request(n, id, down.x, down.y) {
+            tracing::info!("touch: a finger moves {:?}", self.window_title(&window));
+            self.touch.moving_from = Some((id, from));
+        }
     }
 
     pub fn touch_motion(&mut self, slot: TouchSlot, at: Point<f64, Logical>, time: InputTime) {
-        if self.touch.pointing == Some(slot) {
-            if self.touch.resting.is_some_and(|r| (at.x - r.x).abs() > STILL || (at.y - r.y).abs() > STILL) {
-                self.touch.resting = None;
-            }
-            self.pointer_to(at, time);
-        } else if let Some(m) = self.touch.moving.as_ref().filter(|m| m.slot == slot) {
-            // The window goes with the finger; its application hears no more of it.
-            let to = (m.from.to_f64() + (at - m.down)).to_i32_round();
-            let window = m.window.clone();
-            self.space.map_element(window, to, true);
-        } else if let Some((window, last)) = self.touch.on_native.get_mut(&slot) {
-            // The window keeps its finger wherever it goes, as Wayland's touch does.
-            *last = at;
-            let window = window.clone();
-            self.native_touch(&window, slot.into(), 1, at, time.millis());
-        } else if self.touch.on_windows.contains_key(&slot) {
-            let focus = match self.hit(at) {
-                Hit::Surface(_, surface, origin) => Some((surface, origin)),
-                _ => None,
-            };
-            if let Some(touch) = self.seat.get_touch() {
-                touch.motion(self, focus, &MotionEvent { slot, location: at, time });
-            }
+        let n = slot_number(slot);
+        if let Some(f) = self.touch.fingers.get_mut(&n) {
+            f.2 = at;
         }
+        self.dispatch_sync();
+        self.pointer_hover(at);
+        let under = self.target_at(at);
+        let out = self.input.seat.touch_motion(n, at.x, at.y, under);
+        self.touch_apply(out, at, time, under);
     }
 
     pub fn touch_up(&mut self, slot: TouchSlot, time: InputTime) {
-        if let Some(m) = self.touch.moving.take_if(|m| m.slot == slot) {
-            self.remember(&m.window);
-        }
-        if self.touch.pointing == Some(slot) {
-            self.touch.pointing = None;
-            self.touch.resting = None;
-            self.handle_button(BTN_LEFT, ButtonState::Released, time);
-            // No finger rests where it tapped: no name appears beside a dock icon.
-            self.shelf_unhover();
-        } else if let Some((window, last)) = self.touch.on_native.remove(&slot) {
-            self.native_touch(&window, slot.into(), 2, last, time.millis());
-        } else if self.touch.on_windows.remove(&slot).is_some()
-            && let Some(touch) = self.seat.get_touch()
-        {
-            touch.up(self, &UpEvent { slot, serial: SERIAL_COUNTER.next_serial(), time });
-        }
+        let n = slot_number(slot);
+        let at = self.touch.fingers.get(&n).map(|f| f.2).unwrap_or_else(|| self.pointer_location());
+        self.dispatch_sync();
+        let under = self.target_at(at);
+        let now = self.start_time.elapsed().as_millis() as u64;
+        let out = self.input.seat.touch_up(n, under, now);
+        self.touch_apply(out, at, time, under);
+        self.touch.fingers.remove(&n);
     }
 
     /// The fingers of one moment have all been told.
     pub fn touch_frame(&mut self) {
+        if !std::mem::take(&mut self.touch.unframed) {
+            return;
+        }
         if let Some(touch) = self.seat.get_touch() {
             touch.frame(self);
         }
@@ -283,30 +216,118 @@ impl Server {
 
     /// The panel took its touches back (a palm, a gesture of the system's).
     pub fn touch_cancel(&mut self, time: InputTime) {
-        if self.touch.pointing.take().is_some() {
-            self.handle_button(BTN_LEFT, ButtonState::Released, time);
-            self.shelf_unhover();
-        }
-        self.touch.resting = None;
-        self.touch.moving = None;
-        self.touch.on_windows.clear();
-        for (slot, (window, last)) in std::mem::take(&mut self.touch.on_native) {
-            self.native_touch(&window, slot.into(), 3, last, time.millis());
-        }
+        let at = self.pointer_location();
+        let under = self.target_at(at);
+        let now = self.start_time.elapsed().as_millis() as u64;
+        let out = self.input.seat.touch_cancel(under, now);
+        self.touch_apply(out, at, time, under);
         if let Some(touch) = self.seat.get_touch() {
             touch.cancel(self);
         }
+        self.touch.fingers.clear();
+        self.touch.moving_from = None;
+    }
+
+    /// Carry out what the seat decided for a finger at `at`.
+    fn touch_apply(&mut self, out: Vec<Out>, at: Point<f64, Logical>, time: InputTime, under: Option<Target>) {
+        for o in out {
+            match o {
+                Out::PointerTo { .. } => self.pointer_follow(at, time, under),
+                Out::TouchDown(t, n) | Out::TouchMotion(t, n) | Out::TouchUp(t, n) | Out::TouchCancel(t, n) => self.touch_deliver(o, t, n, at, time),
+                Out::LongPressTimer(press) => {
+                    let _ = self.loop_handle.insert_source(Timer::from_duration(LONG), move |_, _, st| {
+                        st.touch_long_press(press);
+                        TimeoutAction::Drop
+                    });
+                }
+                Out::DockMenu => {
+                    // The press the dock was holding is not a click any more.
+                    self.shelf.held = None;
+                    self.shelf_menu(at);
+                    self.redraw_all();
+                }
+                Out::DesktopMenu => {
+                    self.open_menu(at);
+                    self.redraw_all();
+                }
+                Out::FingerMove { window, dx, dy } => {
+                    if let (Some((id, from)), Some(w)) = (self.touch.moving_from, self.input.window(window))
+                        && id == window
+                    {
+                        let to = (from.to_f64() + Point::from((dx, dy))).to_i32_round();
+                        self.space.map_element(w, to, true);
+                    }
+                }
+                Out::FingerMoveEnd(window) => {
+                    self.touch.moving_from = None;
+                    if let Some(w) = self.input.window(window) {
+                        self.remember(&w);
+                    }
+                }
+                // No finger rests where it tapped: no name appears beside a dock icon.
+                Out::Unhover => self.shelf_unhover(),
+                other => self.apply(vec![other], at, time, &Came::Nothing),
+            }
+        }
+    }
+
+    /// A finger on a window's content: Wayland touch through Smithay, or a
+    /// native window's over the bus (phase 0 down, 1 moved, 2 up, 3 canceled).
+    fn touch_deliver(&mut self, o: Out, t: Target, n: Slot, at: Point<f64, Logical>, time: InputTime) {
+        let Some(&(slot, _, _)) = self.touch.fingers.get(&n) else { return };
+        match t {
+            Target::Surface(_, sid) => {
+                let Some(touch) = self.seat.get_touch() else { return };
+                self.touch.unframed = true;
+                match o {
+                    Out::TouchDown(..) => {
+                        let serial = SERIAL_COUNTER.next_serial();
+                        let focus = self.surface_of(sid);
+                        if let (Some(f), Some((on, _))) = (self.touch.fingers.get_mut(&n), focus.as_ref()) {
+                            f.1 = Some((serial, on.clone()));
+                        }
+                        touch.down(self, focus, &DownEvent { slot, location: at, serial, time });
+                    }
+                    Out::TouchMotion(..) => {
+                        let focus = self.surface_of(sid);
+                        touch.motion(self, focus, &MotionEvent { slot, location: at, time });
+                    }
+                    Out::TouchUp(..) => touch.up(self, &UpEvent { slot, serial: SERIAL_COUNTER.next_serial(), time }),
+                    _ => {}
+                }
+            }
+            Target::Native(id) => {
+                let Some(w) = self.input.window(id) else { return };
+                let phase = match o {
+                    Out::TouchDown(..) => 0,
+                    Out::TouchMotion(..) => 1,
+                    Out::TouchUp(..) => 2,
+                    _ => 3,
+                };
+                self.native_touch(&w, slot.into(), phase, at, time.millis());
+            }
+            Target::Server(_) => {}
+        }
+    }
+
+    /// Half a second after press number `press` (the seat knows whether that
+    /// finger is still resting on a dock icon or the bare desktop).
+    fn touch_long_press(&mut self, press: u64) {
+        let at = self.touch.pointing_at.unwrap_or_else(|| self.pointer_location());
+        let out = self.input.seat.touch_long_press(press);
+        self.touch_apply(out, at, InputTime::now(), None);
     }
 
     /// For `vctl touch`.
     pub fn touch_report(&self) -> String {
         let ties: Vec<String> = self.touch.ties.iter().map(|(name, screen)| format!("{name:?} -> {screen}")).collect();
+        let (pointing, on_windows) = self.input.seat.touch_counts();
         format!(
             "ties: {}\npanels seen: {}\nfingers: {} as the pointer, {} on windows",
             if ties.is_empty() { "none".to_string() } else { ties.join("; ") },
             if self.touch.said.is_empty() { "none".to_string() } else { self.touch.said.iter().cloned().collect::<Vec<_>>().join("; ") },
-            self.touch.pointing.iter().count(),
-            self.touch.on_windows.len()
+            pointing,
+            on_windows
         )
     }
 }

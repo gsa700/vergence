@@ -148,6 +148,18 @@ Smithay's own; nothing of ours runs in its callbacks.
   native terminal and over Wayland, Super's popup taking the keys and
   Escape closing it with nothing leaking. The volume keys reach the sound
   code, which declines on Techbench (PipeWire): to check on Hubble.
+- **Step 4 done** (2026-11-12): touch through the seat. touch.rs keeps
+  what is the hardware's and the screen's (which screen a panel is on, a
+  finger's reach, the half-second timer) and carries out the seat's
+  decisions: Wayland touch through Smithay, a native window's over the
+  bus, the pointing finger through the pointer's path, a long press's
+  menus, a window going with the finger that asked (only by that program's
+  own press serial). Its own finger bookkeeping is gone. Smithay's touch is
+  framed only after something was sent to it. On Techbench by `vctl
+  touch`: a finger dragging a title bar, a long press opening the desktop
+  menu and a tap outside closing it, a tap on the settings app's sidebar
+  (native touch), taps on a dock icon. Hubble's touchscreen (now on
+  kepler's hardware) by hand still.
 
 ## Acceptance
 
