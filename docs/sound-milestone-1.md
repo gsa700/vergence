@@ -158,3 +158,26 @@ service, ALSA's `alsactl`) still restores levels at boot.
     default to the silent jack more than once tonight). vergence-sound
     reads each mixer by its own file and never touches the default.
   - 330 tests green on Hubble, kepler and Techbench.
+
+- **Step 2 (2026-11-11): the ALSA back end.** ALSA's kernel interface
+  spoken directly, no alsa-lib: every struct size, offset and ioctl number
+  measured from Hubble's `<sound/asound.h>` with a throwaway C program
+  (control list 80 bytes, element info 272, element value 1224, PCM
+  hardware parameters 608). Outputs are a card's playback devices: the
+  analog one named from its controls ("Speakers and headphones", the card
+  switching between them itself), one per HDMI or DisplayPort connector
+  ("HDMI or DisplayPort 1-3"). Volume and mute are the card's Master
+  controls; an HDMI output has no volume (said plainly when asked), only
+  its IEC958 switch. The default is `~/.asoundrc`, written only when it is
+  absent or ours (our first line), never over the user's own. The tone
+  goes straight to the PCM device: hardware parameters (16-bit,
+  interleaved, the channels and 48 kHz, the rest the kernel's choice),
+  prepare, write, drain. On a machine where PipeWire or PulseAudio has the
+  sound (its socket in the runtime directory) the crate declines and
+  `vsound` says why (Fedora on Techbench).
+  - On Hubble, each checked against `amixer`: the analog output at 69%
+    (60 of 87), set to 50% (44, which reads back as 51%: 87 steps), muted
+    and unmuted, back to 69%; an HDMI volume refused; the default moved to
+    HDMI 1 in a new `~/.asoundrc` and back, the file then removed; the
+    tone played. Tests: ALSA's card lines, `.asoundrc` defaults, and the
+    range conversions. 331 green on Hubble, kepler and Techbench.

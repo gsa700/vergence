@@ -13,6 +13,11 @@
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(mut sound) = vergence_sound::open() else {
+        #[cfg(target_os = "linux")]
+        if vergence_sound::pipewire_running() {
+            eprintln!("vsound: PipeWire (or PulseAudio) manages sound here; vergence-sound does not speak to it yet (a later milestone)");
+            std::process::exit(1);
+        }
         eprintln!("vsound: no sound system we know here");
         std::process::exit(1);
     };

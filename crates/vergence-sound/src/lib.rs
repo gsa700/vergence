@@ -12,6 +12,8 @@ use std::io;
 
 #[cfg(target_os = "freebsd")]
 pub mod oss;
+#[cfg(target_os = "linux")]
+pub mod alsa;
 
 /// One output, as the page shows it.
 #[derive(Debug, Clone, PartialEq)]
@@ -74,10 +76,26 @@ pub fn open() -> Option<Box<dyn Sound>> {
     {
         oss::Oss::open().map(|o| Box::new(o) as Box<dyn Sound>)
     }
-    #[cfg(not(target_os = "freebsd"))]
+    #[cfg(target_os = "linux")]
+    {
+        // A sound server owns the devices when one runs: PipeWire waits for a
+        // client of our own (Dave, 2026-11-11), PulseAudio likewise.
+        if pipewire_running() {
+            return None;
+        }
+        alsa::Alsa::open().map(|a| Box::new(a) as Box<dyn Sound>)
+    }
+    #[cfg(not(any(target_os = "freebsd", target_os = "linux")))]
     {
         None
     }
+}
+
+/// Whether PipeWire (or PulseAudio) has the user's sound: its socket is in
+/// the runtime directory.
+#[cfg(target_os = "linux")]
+pub fn pipewire_running() -> bool {
+    std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).is_some_and(|d| d.join("pipewire-0").exists() || d.join("pulse/native").exists())
 }
 
 /// An output's name from a codec pin's configuration, as FreeBSD's driver
@@ -110,6 +128,34 @@ pub fn pin_name(config: &str) -> Option<String> {
     let name = if place.is_empty() { what.to_string() } else { format!("{place} {what}") };
     let mut c = name.chars();
     Some(c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default())
+}
+
+/// An ALSA card from a line of /proc/asound/cards
+/// (" 0 [PCH            ]: HDA-Intel - HDA Intel PCH"): its number and name.
+pub fn alsa_card_line(line: &str) -> Option<(u32, String)> {
+    let (num, rest) = line.trim_start().split_once(' ')?;
+    let num = num.parse().ok()?;
+    let name = rest.split_once(" - ").map(|(_, n)| n.trim()).unwrap_or(rest.trim());
+    Some((num, name.to_string()))
+}
+
+/// The default card and device from an ~/.asoundrc (0, 0 if it names none).
+pub fn asoundrc_default(text: &str) -> (u32, u32) {
+    let get = |key: &str| text.lines().find_map(|l| l.trim().strip_prefix(key).and_then(|v| v.trim().parse().ok())).unwrap_or(0);
+    (get("defaults.pcm.card"), get("defaults.pcm.device"))
+}
+
+/// An ALSA volume control's value as 0 to 100, from its range.
+pub fn range_percent(min: i64, max: i64, v: i64) -> u8 {
+    if max <= min {
+        return 100;
+    }
+    (((v - min) * 100 + (max - min) / 2) / (max - min)).clamp(0, 100) as u8
+}
+
+/// 0 to 100 as a value in an ALSA control's range.
+pub fn percent_range(min: i64, max: i64, percent: u8) -> i64 {
+    min + ((max - min) * percent.min(100) as i64 + 50) / 100
 }
 
 /// The pins a device drives, from its location ("nid=33,26").
@@ -163,6 +209,18 @@ mod tests {
         assert!(peak > 3000 && peak <= (i16::MAX as u16) / 10 + 1, "peak {peak}");
         // It starts and ends at silence (the ramps).
         assert_eq!((s[2], s[s.len() - 2]), (0, 0));
+    }
+
+    #[test]
+    fn alsa_s_words_are_read() {
+        assert_eq!(alsa_card_line(" 0 [PCH            ]: HDA-Intel - HDA Intel PCH"), Some((0, "HDA Intel PCH".into())));
+        assert_eq!(alsa_card_line("                      HDA Intel PCH at 0xb1230000 irq 142"), None);
+        assert_eq!(asoundrc_default("# ours\ndefaults.pcm.card 1\ndefaults.pcm.device 3\ndefaults.ctl.card 1\n"), (1, 3));
+        assert_eq!(asoundrc_default(""), (0, 0));
+        // Hubble's Master: 0 to 87.
+        assert_eq!((range_percent(0, 87, 87), range_percent(0, 87, 0), range_percent(0, 87, 44)), (100, 0, 51));
+        assert_eq!((percent_range(0, 87, 100), percent_range(0, 87, 0), percent_range(0, 87, 50)), (87, 0, 44));
+        assert_eq!(range_percent(0, 87, percent_range(0, 87, 37)), 37);
     }
 
     #[test]
