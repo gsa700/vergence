@@ -9,7 +9,10 @@ The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md: s
   main git copy, pushed to GitHub; Control has no Rust). Build and test on the
   dev boxes: `tools/sync-hubble.sh [host]` (rsync; keeps the host's build output;
   default hubble, also kepler and techbench), then `cargo test --workspace`
-  there: Hubble, kepler and Techbench for every change. Fake monitors for tests: docs/milestone-1.md, "Found on Hubble".
+  there: Hubble, kepler and Techbench for every change. After adding a
+  crate, a dependency or a version, copy Cargo.lock back from the build box
+  (`scp hubble:src/vergence/Cargo.lock .`) and commit it: Cargo updates it
+  there, never here (it was stale for three changes, 2026-11-11). Fake monitors for tests: docs/milestone-1.md, "Found on Hubble".
 - **vergd, phase 1's X11 daemon, is retired** (Dave, 2026-11-10): removed
   from the workspace with tools/install-autostart.sh; git keeps it (last as
   `crates/vergd` in 4a2f00f). Its files' formats live on in vergence-profile
