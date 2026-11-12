@@ -74,6 +74,9 @@ pub struct Touch {
     /// The fingers that are on windows: each one's press (its serial, the
     /// surface, where).
     on_windows: HashMap<TouchSlot, (Serial, WlSurface, Point<f64, Logical>)>,
+    /// The fingers on native windows (native.rs): each one's window and
+    /// where it was last, told to the window over the bus.
+    on_native: HashMap<TouchSlot, (crate::win::Win, Point<f64, Logical>)>,
     moving: Option<Moving>,
     /// A finger was the last thing to point: the pointer's picture is not
     /// drawn until a mouse moves again (an arrow, or a window edge's shape,
@@ -133,6 +136,13 @@ impl Server {
         // On a window, unless something of the server's own is open over it.
         let ours = self.menu_is_open() || self.launcher_is_open() || self.notify_at(at);
         let hit = if ours { Hit::Nothing } else { self.hit(at) };
+        if let Hit::Native(window) = &hit {
+            let serial = SERIAL_COUNTER.next_serial();
+            self.focus_window(window, serial);
+            self.touch.on_native.insert(slot, (window.clone(), at));
+            self.native_touch(window, slot.into(), 0, at, time.millis());
+            return;
+        }
         if let Hit::Surface(window, surface, origin) = hit {
             let serial = SERIAL_COUNTER.next_serial();
             self.focus_window(&window, serial);
@@ -227,6 +237,11 @@ impl Server {
             let to = (m.from.to_f64() + (at - m.down)).to_i32_round();
             let window = m.window.clone();
             self.space.map_element(window, to, true);
+        } else if let Some((window, last)) = self.touch.on_native.get_mut(&slot) {
+            // The window keeps its finger wherever it goes, as Wayland's touch does.
+            *last = at;
+            let window = window.clone();
+            self.native_touch(&window, slot.into(), 1, at, time.millis());
         } else if self.touch.on_windows.contains_key(&slot) {
             let focus = match self.hit(at) {
                 Hit::Surface(_, surface, origin) => Some((surface, origin)),
@@ -248,6 +263,8 @@ impl Server {
             self.handle_button(BTN_LEFT, ButtonState::Released, time);
             // No finger rests where it tapped: no name appears beside a dock icon.
             self.shelf_unhover();
+        } else if let Some((window, last)) = self.touch.on_native.remove(&slot) {
+            self.native_touch(&window, slot.into(), 2, last, time.millis());
         } else if self.touch.on_windows.remove(&slot).is_some()
             && let Some(touch) = self.seat.get_touch()
         {
@@ -271,6 +288,9 @@ impl Server {
         self.touch.resting = None;
         self.touch.moving = None;
         self.touch.on_windows.clear();
+        for (slot, (window, last)) in std::mem::take(&mut self.touch.on_native) {
+            self.native_touch(&window, slot.into(), 3, last, time.millis());
+        }
         if let Some(touch) = self.seat.get_touch() {
             touch.cancel(self);
         }

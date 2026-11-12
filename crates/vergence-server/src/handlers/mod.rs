@@ -55,7 +55,43 @@ impl smithay::input::tablet::TabletSeatHandler for Server {
 //
 
 impl SelectionHandler for Server {
-    type SelectionUserData = ();
+    /// Who a server-side selection is really from (native.rs).
+    type SelectionUserData = crate::native::ClipOwner;
+
+    /// A Wayland client put something on the clipboard (or cleared it):
+    /// native windows and X11 hear of it.
+    fn new_selection(&mut self, ty: smithay::wayland::selection::SelectionTarget, source: Option<smithay::wayland::selection::SelectionSource>, _seat: Seat<Self>) {
+        use smithay::wayland::selection::SelectionTarget;
+        if ty != SelectionTarget::Clipboard {
+            return;
+        }
+        let kinds = source.map(|s| s.mime_types());
+        self.native_clipboard_offer(kinds.clone().unwrap_or_default());
+        if let Some(xwm) = self.xwm.as_mut()
+            && let Err(e) = xwm.new_selection(SelectionTarget::Clipboard, kinds)
+        {
+            tracing::warn!("clipboard to X11: {e:?}");
+        }
+    }
+
+    /// A Wayland client pastes what the server holds for someone: X11's or a
+    /// native client's clipboard (before 2026-11-11, X11's never reached it).
+    fn send_selection(&mut self, ty: smithay::wayland::selection::SelectionTarget, mime_type: String, fd: std::os::fd::OwnedFd, _seat: Seat<Self>, owner: &crate::native::ClipOwner) {
+        use smithay::wayland::selection::SelectionTarget;
+        if ty != SelectionTarget::Clipboard {
+            return;
+        }
+        match owner {
+            crate::native::ClipOwner::Native(client) => self.native_clipboard_send(*client, mime_type, fd),
+            crate::native::ClipOwner::X11 => {
+                if let Some(xwm) = self.xwm.as_mut()
+                    && let Err(e) = xwm.send_selection(SelectionTarget::Clipboard, mime_type, fd)
+                {
+                    tracing::warn!("clipboard from X11: {e:?}");
+                }
+            }
+        }
+    }
 }
 
 impl DataDeviceHandler for Server {

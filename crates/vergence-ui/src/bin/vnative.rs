@@ -1,7 +1,7 @@
 //! vnative: a window drawn over the native protocol (native milestone 1,
 //! step 3), to try the server's side before the toolkit has a native road.
 //!
-//!     vnative [--title T] [--size WxH] [--own-frame] [--frames N] [--short-file]
+//!     vnative [--title T] [--size WxH] [--own-frame] [--frames N] [--short-file] [--gpu]
 //!
 //! It asks for a window, draws a gradient with a border at the scale it is
 //! told, and then moves a bar one step for every frame the server offers,
@@ -14,7 +14,17 @@
 //! shape over the window; keys are printed as evdev codes (Esc quits);
 //! with `--own-frame`, a press on the top 24 points moves the window and a
 //! press within 16 points of the bottom-right corner resizes it. Everything
-//! else it hears (keymap, repeat, focus, modifiers, the wheel) is printed.
+//! else it hears (keymap, repeat, focus, modifiers, the wheel, fingers) is
+//! printed; a finger moves the square as the pointer does.
+//!
+//! The clipboard: `c` copies a line of text, `v` pastes and prints what
+//! came; offers and requests are printed.
+//!
+//! `--gpu` draws with the toolkit's GPU renderer into GPU buffers (dmabuf)
+//! instead of shared memory: two of them, taken in turn. A buffer is free
+//! to draw into again once a later one has been attached and a frame has
+//! followed (the server swaps pictures at attach). Moved here from
+//! vergence-protocol on 2026-11-11 for the renderer.
 
 use std::time::Instant;
 
@@ -22,8 +32,57 @@ use vergence_protocol::{
     Client,
     bus::{ClientMsg, ServerMsg},
     shm::ShmFile,
-    window::{Buffer, Damage, Fd, Place, SHM_ARGB8888, WinEvent, WinRequest},
+    window::{Buffer, Damage, Fd, Place, Plane, SHM_ARGB8888, WinEvent, WinRequest},
 };
+use vergence_render::{Gpu, GpuBuffer};
+use vergence_scene::{Color, Rect, Scene};
+use vergence_text::Fonts;
+
+/// The same picture drawn by the GPU renderer: two buffers, taken in turn.
+struct GpuDraw {
+    gpu: Gpu,
+    fonts: Fonts,
+    buffers: Vec<GpuBuffer>,
+    next: usize,
+    size: (f64, f64),
+    scale: f64,
+}
+
+impl GpuDraw {
+    fn configure(&mut self, width: f64, height: f64, scale: f64) -> Result<(), Box<dyn std::error::Error>> {
+        // The server keeps what it imported until our next picture replaces it.
+        for b in self.buffers.drain(..) {
+            self.gpu.release(b);
+        }
+        let (w, h) = ((width * scale).round().max(1.0) as u32, (height * scale).round().max(1.0) as u32);
+        for _ in 0..2 {
+            self.buffers.push(self.gpu.buffer(w, h).map_err(|e| format!("GPU buffer: {e:?}"))?);
+        }
+        (self.size, self.scale, self.next) = ((width, height), scale, 0);
+        Ok(())
+    }
+
+    /// Draws the picture (step `n`, the pointer's square) into the next
+    /// buffer and attaches it.
+    fn draw(&mut self, c: &mut Client, n: u32, pointer: Option<(f64, f64)>) -> Result<(), Box<dyn std::error::Error>> {
+        let (w, h) = (self.size.0 as f32, self.size.1 as f32);
+        let mut scene = Scene::new(w, h);
+        scene.fill(Rect::new(0.0, 0.0, w, h), Color::rgb(40, 90, 160));
+        scene.fill(Rect::new(2.0, 2.0, w - 4.0, h - 4.0), Color::rgb(215, 235, 240));
+        let travel = (w - BAR as f32).max(1.0);
+        scene.fill(Rect::new((n as f32 * 2.0) % travel, h / 3.0, BAR as f32, h / 3.0), Color::rgb(60, 160, 90));
+        if let Some((x, y)) = pointer {
+            scene.fill(Rect::new(x as f32 - DOT as f32 / 2.0, y as f32 - DOT as f32 / 2.0, DOT as f32, DOT as f32), Color::rgb(20, 20, 20));
+        }
+        let b = &self.buffers[self.next];
+        self.gpu.draw_into(b, &scene, &mut self.fonts, self.scale as f32, Color::rgb(0, 0, 0)).map_err(|e| format!("GPU draw: {e:?}"))?;
+        let plane = Plane { fd: Fd(std::sync::Arc::new(b.fd.try_clone()?)), offset: b.offset, stride: b.stride };
+        let buffer = Buffer::Dmabuf { planes: vec![plane], width: b.width, height: b.height, format: b.format, modifier: b.modifier };
+        c.send(&ClientMsg::Window(WinRequest::Attach { window: WINDOW, buffer, damage: Vec::new() }))?;
+        self.next = (self.next + 1) % self.buffers.len();
+        Ok(())
+    }
+}
 
 const WINDOW: u32 = 1;
 const BAR: i32 = 24;
@@ -34,6 +93,10 @@ const CORNER: f64 = 16.0;
 /// wp_cursor_shape's crosshair.
 const CROSSHAIR: u16 = 8;
 const KEY_ESC: u32 = 1;
+const KEY_C: u32 = 46;
+const KEY_V: u32 = 47;
+const COPIED: &str = "copied from vnative, a native window";
+const TEXT: &str = "text/plain;charset=utf-8";
 
 struct Picture {
     shm: ShmFile,
@@ -126,6 +189,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let own_frame = args.iter().any(|a| a == "--own-frame");
     let frames_max: Option<u32> = arg("--frames").and_then(|n| n.parse().ok());
     let lie = args.iter().any(|a| a == "--short-file");
+    let mut gpu = if args.iter().any(|a| a == "--gpu") {
+        let g = Gpu::new().map_err(|e| format!("no GPU renderer: {e:?}"))?;
+        println!("drawing on the GPU: {}", g.description());
+        Some(GpuDraw { gpu: g, fonts: Fonts::system(), buffers: Vec::new(), next: 0, size: (width, height), scale: 1.0 })
+    } else {
+        None
+    };
 
     let mut c = Client::connect("vnative")?;
     let reply = c.request(|serial| {
@@ -157,12 +227,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut gaps: Vec<u32> = Vec::new();
     let mut last_time: Option<u32> = None;
     loop {
-        let ServerMsg::Window(ev) = c.next_event()? else { continue };
+        let ev = match c.next_event()? {
+            ServerMsg::Window(ev) => ev,
+            ServerMsg::Error { code, message, .. } => {
+                println!("refused ({code:?}): {message}");
+                continue;
+            }
+            _ => continue,
+        };
         match ev {
             WinEvent::Configure { serial, width, height, scale, maximized, activated, .. } => {
                 size = (width, height);
                 last_dot = None;
                 println!("configure {serial}: {width}x{height} at scale {scale:.4}{}{}", if maximized { ", maximized" } else { "" }, if activated { ", active" } else { "" });
+                if let Some(g) = gpu.as_mut() {
+                    g.configure(width, height, scale)?;
+                    c.send(&ClientMsg::Window(WinRequest::AckConfigure { window: WINDOW, serial }))?;
+                    g.draw(&mut c, step, pointer)?;
+                    continue;
+                }
                 let mut p = Picture::new(width, height, scale)?;
                 last_bar = Some(p.bar(step));
                 c.send(&ClientMsg::Window(WinRequest::AckConfigure { window: WINDOW, serial }))?;
@@ -177,6 +260,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 last_time = Some(time_ms);
                 if frames_max.is_some_and(|n| frames >= n) {
                     break;
+                }
+                if let Some(g) = gpu.as_mut() {
+                    step += 1;
+                    g.draw(&mut c, step, pointer)?;
+                    continue;
                 }
                 let Some(p) = picture.as_mut() else { continue };
                 step += 1;
@@ -228,16 +316,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             WinEvent::PointerAxis { source, dx, dy, v120x, v120y, .. } => println!("scroll {dx:.1},{dy:.1} (v120 {v120x},{v120y}, source {source})"),
+            WinEvent::Touch { id, phase, x, y, .. } => {
+                let what = ["down", "moved", "up", "canceled"].get(phase as usize).copied().unwrap_or("?");
+                if phase != 1 {
+                    println!("finger {id} {what} at {x:.1},{y:.1}");
+                }
+                // The square follows a finger too.
+                pointer = if phase < 2 { Some((x, y)) } else { None };
+            }
             WinEvent::Keymap { size, .. } => println!("keymap: {size} bytes"),
             WinEvent::Repeat { rate, delay } => println!("key repeat: {rate} a second after {delay} ms"),
             WinEvent::KeyboardEnter { .. } => println!("keyboard in"),
             WinEvent::KeyboardLeave { .. } => println!("keyboard out"),
             WinEvent::Modifiers { depressed, locked, .. } => println!("modifiers {depressed:#x} (locked {locked:#x})"),
-            WinEvent::Key { key, pressed, .. } => {
+            WinEvent::Key { serial, key, pressed, .. } => {
                 println!("key {key} {}", if pressed { "down" } else { "up" });
                 if key == KEY_ESC && pressed {
                     break;
                 }
+                if key == KEY_C && pressed {
+                    c.send(&ClientMsg::Window(WinRequest::Copy { input_serial: serial, kinds: vec![TEXT.into(), "text/plain".into()] }))?;
+                }
+                if key == KEY_V && pressed {
+                    let s = c.next_serial();
+                    c.send(&ClientMsg::Window(WinRequest::Paste { serial: s, kind: TEXT.into() }))?;
+                }
+            }
+            WinEvent::ClipboardOffer { kinds } => println!("clipboard offers {kinds:?}"),
+            WinEvent::ClipboardSend { kind, fd } => {
+                // Someone pastes what we copied: written, then the pipe closed.
+                use std::io::Write;
+                let mut f = std::fs::File::from(std::sync::Arc::try_unwrap(fd.0).unwrap_or_else(|a| a.try_clone().expect("dup")));
+                let _ = f.write_all(COPIED.as_bytes());
+                println!("clipboard asked for {kind}: sent {} bytes", COPIED.len());
+            }
+            WinEvent::ClipboardData { fd, .. } => {
+                use std::io::Read;
+                let mut f = std::fs::File::from(std::sync::Arc::try_unwrap(fd.0).unwrap_or_else(|a| a.try_clone().expect("dup")));
+                let mut text = String::new();
+                let _ = f.read_to_string(&mut text);
+                println!("pasted: {text:?}");
             }
             other => println!("{other:?}"),
         }

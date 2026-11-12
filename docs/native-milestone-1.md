@@ -306,3 +306,54 @@ fuzz test feeds the decoder random frames and descriptors.
     live run on kepler (built and tested there; its session is Dave's).
     Until step 4 a native window gets no input of its own, so its title
     bar draws as unfocused even when it is in front.
+
+- **Step 4 (2026-11-11): input, GPU pictures, the clipboard.**
+  - **Keyboard**: a native window is a third kind of keyboard focus
+    (`focus.rs`, `KeyboardFocus::Native`), so Smithay's seat delivers its
+    keys. The keymap goes once per client as a descriptor, then the repeat
+    settings (again when they change), keys as evdev codes, modifiers as
+    xkb serializes them.
+  - **Pointer** beside Smithay's, whose focus type is a Wayland surface: over
+    a native window Smithay's focus is none and `native.rs` sends enter,
+    leave, motion in the window's reference units, buttons and the wheel,
+    keeping the window while a button is held (an implicit grab). The
+    window's cursor shape (the cursor-shape protocol's numbers) is drawn
+    while the pointer is on it. **Fingers** the same way (`touch.rs`).
+  - **Requests**: move and resize with a button held on the window (its own
+    bar and edges), minimize, maximize.
+  - **GPU pictures**: a dmabuf attach is kept and imported into the
+    renderer when the scene is next built, drawn as a texture. The rule a
+    client follows, now in the protocol's documentation: a GPU buffer is
+    free again once a later picture has been attached and a `Frame` has
+    followed (the server swaps pictures at attach), so a client takes two
+    or more in turn. No release event needed.
+  - **The clipboard**, through Smithay's server-side selection, whose user
+    data now says who owns it (`ClipOwner`: X11 or a native client): a
+    native copy becomes the clipboard for Wayland clients and Xwayland; a
+    native paste gets the read end of a pipe whose write end goes to the
+    owner (a Wayland client, X11, or a native client, which hears
+    `ClipboardSend`); native clients hear `ClipboardOffer` when it changes.
+    Only a client whose window has the keyboard may copy (§7.3). The same
+    change closed an older gap: a Wayland paste of X11's clipboard never
+    reached X11 (`send_selection` was not implemented).
+  - **Found on Hubble and fixed**: the server froze on the first click into a
+    native window, because Smithay calls `KeyboardTarget::enter` holding the
+    keyboard's lock and the keymap was read there (`with_xkb_state` takes
+    the same lock); it is now read before the focus changes. And the bus had
+    never sent descriptors to a client: its outbox now keeps each message's
+    descriptors and sends them with the write of its first byte.
+  - `vnative` moved to vergence-ui (for the renderer): a square follows the
+    pointer or a finger, keys printed (Esc quits), `--own-frame` moves and
+    resizes by its own strip and corner, `c` copies and `v` pastes, `--gpu`
+    draws with the GPU renderer into two dmabufs taken in turn.
+  - **On Hubble**: the keymap (35,758 bytes), repeat, "ab" Return as keys
+    30, 48, 28; moved by its own strip and resized by its corner (one
+    configure per acknowledgement); the crosshair drawn; `--gpu` on the UHD
+    630, 240 frames at the monitor's 30 Hz, green bar, no warnings; copy in
+    vnative and Paste in the terminal's menu gave "copied from vnative, a
+    native window"; the terminal's Copy of its date line and `v` in vnative
+    gave "Wed Nov 11 20:36:08 CST 2026"; vnative to itself (native to
+    native) too. Tests: 322 green on Hubble, kepler and Techbench.
+  - **Not yet seen**: the wheel (vctl has no scroll command), a finger (no
+    touch panel on Hubble now; the code path is the pointer's), X11's half
+    of the clipboard (X11 is off by default), a live run on kepler.

@@ -6,12 +6,15 @@
 // (window memory first, then the monitor under the pointer), answers
 // `Created` and a `Configure` with the size in reference units and the exact
 // scale of its monitor (Contract 1), and shows it with its first picture.
-// Pictures are shared memory here (GPU buffers come in step 4): the server
+// Pictures are shared memory or GPU buffers. For shared memory the server
 // reads the damaged rows with pread, never mapping the client's file, so a
 // client that shrinks its file under us gets a short read and loses its
 // connection, where a mapping would take the server down with SIGBUS. The
 // pixels go into a MemoryRenderBuffer, drawn by decor.rs's scene like a
-// title bar's text. A window asks for its next frame by attaching; the
+// title bar's text. A GPU buffer (dmabuf, step 4) is imported into the
+// renderer when the scene is next built, and drawn as a texture; the
+// client may draw into it again once it has attached a later picture and
+// a frame has followed (the server swaps pictures at attach). A window asks for its next frame by attaching; the
 // server says `Frame` after drawing a monitor it is on, at the monitor's
 // pace.
 //
@@ -23,8 +26,15 @@
 // motion (in the window's reference units), buttons and the wheel, keeping
 // the window while a button is held (an implicit grab, as Wayland's). The
 // window's cursor shape is drawn while the pointer is over it. Move, resize
-// and minimize on request, when a button is held. The clipboard, touch and
-// GPU pictures follow.
+// and minimize on request, when a button is held. Fingers as the pointer is
+// (touch.rs).
+//
+// The clipboard: a native client's copy becomes a server-side selection in
+// Smithay's data device, owned by that client (ClipOwner::Native), so
+// Wayland clients paste from it as from any other, and Xwayland is told; a
+// paste is given the read end of a pipe whose write end goes to whoever has
+// the clipboard (a Wayland client, X11, or another native client, which
+// hears ClipboardSend). Native clients hear ClipboardOffer when it changes.
 
 use std::{
     os::{fd::AsFd, unix::fs::FileExt},
@@ -110,16 +120,42 @@ pub struct NativeInput {
     /// the first click on a native window froze the server on Hubble). The
     /// server never changes its keymap while it runs.
     keymap_text: Option<String>,
+    /// The kinds of data on the clipboard as last offered, for clients that
+    /// come later.
+    clip_kinds: Option<Vec<String>>,
+}
+
+/// Who owns a selection the server holds for someone (Smithay's server-side
+/// selection user data): Xwayland, or a native client by its bus id.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClipOwner {
+    X11,
+    Native(u32),
 }
 
 /// A native window's pixels, as the scene draws them.
 #[derive(Clone)]
 pub struct Picture {
-    pub buffer: MemoryRenderBuffer,
+    pub content: Content,
     /// Its size in pixels, and in reference units at the scale it was drawn for.
     pub px: Size<i32, BufferCoords>,
     pub logical: Size<i32, Logical>,
     format: u32,
+}
+
+#[derive(Clone)]
+pub enum Content {
+    /// Shared memory, copied in.
+    Memory(MemoryRenderBuffer),
+    /// A GPU buffer, imported when the scene is built (decor.rs).
+    Gpu(Arc<Mutex<GpuPicture>>),
+}
+
+pub struct GpuPicture {
+    pub dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
+    pub texture: Option<smithay::backend::renderer::element::texture::TextureBuffer<smithay::backend::renderer::gles::GlesTexture>>,
+    /// The renderer refused it: not tried again (the window keeps its last picture).
+    pub failed: bool,
 }
 
 impl NativeWindow {
@@ -267,6 +303,10 @@ impl Server {
                 tracing::info!("native: {app_id:?} window {window} ({role:?}) asked {}x{}, given {}x{} at scale {scale:.4}", asked.w, asked.h, rect.size.w, rect.size.h);
                 self.bus_send(client, ServerMsg::Window(WinEvent::Created { serial, window, token }));
                 self.native_send_configure(&n);
+                // What is on the clipboard now, for a client that came after it was put there.
+                if let Some(kinds) = self.native_input.clip_kinds.clone() {
+                    self.bus_send(client, ServerMsg::Window(WinEvent::ClipboardOffer { kinds }));
+                }
             }
             WinRequest::Destroy { window } => {
                 if let Some(w) = self.natives.remove(&(client, window)) {
@@ -353,8 +393,9 @@ impl Server {
                     self.minimize(&w);
                 }
             }
-            WinRequest::Paste { serial, .. } => self.native_refuse(client, serial, ErrorCode::NotYet, "the clipboard: not yet".into()),
-            // Placement requests, meaning and the clipboard: later in the milestone.
+            WinRequest::Copy { kinds, .. } => self.native_copy(client, kinds),
+            WinRequest::Paste { serial, kind } => self.native_paste(client, serial, kind),
+            // Placement requests and meaning: later in the milestone.
             other => tracing::debug!("native: client {client}: {other:?} (not yet)"),
         }
     }
@@ -365,8 +406,9 @@ impl Server {
 
     /// Read a picture into the window's buffer.
     fn native_attach(&mut self, n: &NativeWindow, buffer: Buffer, damage: &[Damage]) -> Result<(), String> {
-        let Buffer::Shm { fd, width, height, stride, format } = buffer else {
-            return Err("GPU pictures come in step 4".into());
+        let (fd, width, height, stride, format) = match buffer {
+            Buffer::Shm { fd, width, height, stride, format } => (fd, width, height, stride, format),
+            Buffer::Dmabuf { planes, width, height, format, modifier } => return self.native_attach_gpu(n, planes, width, height, format, modifier),
         };
         let fourcc = match format {
             SHM_ARGB8888 => Fourcc::Argb8888,
@@ -383,21 +425,41 @@ impl Server {
         let (w, h) = (width as i32, height as i32);
         let px: Size<i32, BufferCoords> = (w, h).into();
         let mut s = n.state.lock().unwrap();
-        let reuse = s.picture.as_ref().is_some_and(|p| p.px == px && p.format == format);
+        let reuse = s.picture.as_ref().is_some_and(|p| p.px == px && p.format == format && matches!(p.content, Content::Memory(_)));
         if !reuse {
             let opaque = (fourcc == Fourcc::Xrgb8888).then(|| vec![Rectangle::from_size(px)]);
             let buffer = MemoryRenderBuffer::new(fourcc, px, 1, Transform::Normal, opaque);
-            s.picture = Some(Picture { buffer, px, logical: Size::default(), format });
+            s.picture = Some(Picture { content: Content::Memory(buffer), px, logical: Size::default(), format });
         }
         let scale = s.scale;
         let p = s.picture.as_mut().unwrap();
+        let Content::Memory(buffer) = &mut p.content else { unreachable!("a memory picture was just made") };
         // A new buffer starts empty: all of the picture is copied.
         let damage = if reuse { damage } else { &[] };
-        p.buffer
+        buffer
             .render()
             .draw(|mem| copy_damage(&file, mem, w, h, stride, damage))
             .map_err(|e| format!("reading the picture: {e}"))?;
         p.logical = ((w as f64 / scale).round() as i32, (h as f64 / scale).round() as i32).into();
+        Ok(())
+    }
+
+    /// A GPU buffer: checked and kept, to be imported when the scene is built.
+    fn native_attach_gpu(&mut self, n: &NativeWindow, planes: Vec<vergence_protocol::window::Plane>, width: u32, height: u32, format: u32, modifier: u64) -> Result<(), String> {
+        use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
+        let fourcc = Fourcc::try_from(format).map_err(|_| format!("GPU picture format {format:#x} is unknown"))?;
+        let mut b = Dmabuf::builder((width as i32, height as i32), fourcc, smithay::backend::allocator::Modifier::from(modifier), DmabufFlags::empty());
+        for p in planes {
+            if !b.add_plane(p.fd.0.clone(), p.offset, p.stride) {
+                return Err("too many planes".into());
+            }
+        }
+        let dmabuf = b.build().ok_or("a GPU picture with no planes")?;
+        let px: Size<i32, BufferCoords> = (width as i32, height as i32).into();
+        let mut s = n.state.lock().unwrap();
+        let logical = ((width as f64 / s.scale).round() as i32, (height as f64 / s.scale).round() as i32).into();
+        let gpu = GpuPicture { dmabuf, texture: None, failed: false };
+        s.picture = Some(Picture { content: Content::Gpu(Arc::new(Mutex::new(gpu))), px, logical, format });
         Ok(())
     }
 
@@ -420,6 +482,13 @@ impl Server {
     /// Bus client `client` has gone: its windows go with it.
     pub fn native_forget(&mut self, client: u32) {
         self.native_input.keymap_sent.remove(&client);
+        // What it had put on the clipboard goes with it.
+        use smithay::wayland::selection::data_device::{clear_data_device_selection, current_data_device_selection_userdata};
+        let owned = current_data_device_selection_userdata(&self.seat).is_some_and(|o| *o == ClipOwner::Native(client));
+        if owned {
+            clear_data_device_selection(&self.display_handle, &self.seat);
+            self.native_clipboard_offer(Vec::new());
+        }
         let mine: Vec<(u32, u32)> = self.natives.keys().filter(|(c, _)| *c == client).copied().collect();
         for k in mine {
             if let Some(w) = self.natives.remove(&k) {
@@ -696,6 +765,76 @@ impl Server {
         Ok((vergence_protocol::window::Fd(Arc::new(fd)), bytes.len() as u32))
     }
 
+    /// A finger on a native window (touch.rs): `phase` 0 down, 1 moved, 2 up,
+    /// 3 canceled, at a point of the desktop given in the window's units.
+    pub fn native_touch(&mut self, w: &Win, id: i32, phase: u8, at: Point<f64, Logical>, time_ms: u32) {
+        let Win::Native(n) = w else { return };
+        let (x, y) = self.native_local(n, at);
+        self.bus_send(n.client, ServerMsg::Window(WinEvent::Touch { window: n.id, time_ms, id, phase, x, y }));
+    }
+
+    /// A native client copies: what it offers becomes the clipboard, for
+    /// Wayland clients (Smithay's server-side selection) and X11 alike. Only
+    /// a client whose window has the keyboard may (§7.3: no clipboard writes
+    /// from the background).
+    fn native_copy(&mut self, client: u32, kinds: Vec<String>) {
+        use smithay::wayland::selection::{SelectionTarget, data_device::set_data_device_selection};
+        let focused = matches!(self.seat.get_keyboard().and_then(|k| k.current_focus()), Some(crate::focus::KeyboardFocus::Native(w)) if w.native().is_some_and(|n| n.client == client));
+        if !focused {
+            return tracing::debug!("native: client {client} copied without the keyboard; ignored");
+        }
+        tracing::info!("native: client {client} copied {kinds:?}");
+        set_data_device_selection(&self.display_handle, &self.seat, kinds.clone(), ClipOwner::Native(client));
+        if let Some(xwm) = self.xwm.as_mut() {
+            let _ = xwm.new_selection(SelectionTarget::Clipboard, Some(kinds.clone()));
+        }
+        self.native_clipboard_offer(kinds);
+    }
+
+    /// A native client pastes: it gets the read end of a pipe whose write end
+    /// goes to whoever has the clipboard.
+    fn native_paste(&mut self, client: u32, serial: u32, kind: String) {
+        use smithay::wayland::selection::{SelectionTarget, data_device::{current_data_device_selection_userdata, request_data_device_client_selection}};
+        let (read, write) = match vergence_protocol::sock::pipe() {
+            Ok(p) => p,
+            Err(e) => return self.native_refuse(client, serial, ErrorCode::BadMessage, format!("no pipe: {e}")),
+        };
+        let owner = current_data_device_selection_userdata(&self.seat).map(|o| o.clone());
+        let sent = match owner {
+            Some(ClipOwner::Native(from)) => {
+                self.native_clipboard_send(from, kind.clone(), write);
+                Ok(())
+            }
+            Some(ClipOwner::X11) => match self.xwm.as_mut() {
+                Some(xwm) => xwm.send_selection(SelectionTarget::Clipboard, kind.clone(), write).map_err(|e| format!("{e:?}")),
+                None => Err("X11 is gone".into()),
+            },
+            // A Wayland client's selection, or none.
+            None => request_data_device_client_selection(&self.seat, kind.clone(), write).map_err(|e| format!("{e:?}")),
+        };
+        match sent {
+            Ok(()) => self.bus_send(client, ServerMsg::Window(WinEvent::ClipboardData { serial, fd: vergence_protocol::window::Fd(Arc::new(read)) })),
+            Err(e) => self.native_refuse(client, serial, ErrorCode::BadMessage, format!("nothing to paste as {kind}: {e}")),
+        }
+    }
+
+    /// Ask native client `client` to write its clipboard as `kind` into `fd`.
+    pub fn native_clipboard_send(&mut self, client: u32, kind: String, fd: std::os::fd::OwnedFd) {
+        self.bus_send(client, ServerMsg::Window(WinEvent::ClipboardSend { kind, fd: vergence_protocol::window::Fd(Arc::new(fd)) }));
+    }
+
+    /// The clipboard changed: every native client hears what kinds it holds
+    /// (empty: nothing).
+    pub fn native_clipboard_offer(&mut self, kinds: Vec<String>) {
+        self.native_input.clip_kinds = (!kinds.is_empty()).then(|| kinds.clone());
+        let mut clients: Vec<u32> = self.natives.keys().map(|(c, _)| *c).collect();
+        clients.sort_unstable();
+        clients.dedup();
+        for c in clients {
+            self.bus_send(c, ServerMsg::Window(WinEvent::ClipboardOffer { kinds: kinds.clone() }));
+        }
+    }
+
     /// The key repeat changed (settings.rs): every client with native windows hears it.
     pub fn native_repeat_changed(&mut self) {
         let (rate, delay) = self.native_repeat();
@@ -747,6 +886,20 @@ mod tests {
         assert_eq!(mem, src);
         let got = copy_damage(&f, &mut mem, 2, 2, 8, &[Damage { x: 1, y: 1, w: 50, h: 50 }, Damage { x: 9, y: 9, w: 1, h: 1 }]).unwrap();
         assert_eq!(got, vec![Rectangle::new((1, 1).into(), (1, 1).into())]);
+    }
+
+    #[test]
+    fn cursor_shapes_follow_the_cursor_shape_protocol() {
+        use smithay::input::pointer::CursorIcon as C;
+        // wp_cursor_shape_device_v1's numbers: 1 default ... 9 text, 13 move, 34 zoom-out.
+        assert_eq!(cursor_icon(1), C::Default);
+        assert_eq!(cursor_icon(4), C::Pointer);
+        assert_eq!(cursor_icon(9), C::Text);
+        assert_eq!(cursor_icon(13), C::Move);
+        assert_eq!(cursor_icon(29), C::NwseResize);
+        assert_eq!(cursor_icon(34), C::ZoomOut);
+        assert_eq!(cursor_icon(0), C::Default, "not a shape");
+        assert_eq!(cursor_icon(35), C::Default, "past the protocol's last");
     }
 
     #[test]

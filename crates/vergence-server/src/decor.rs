@@ -72,6 +72,8 @@ smithay::backend::renderer::element::render_elements! {
     Solid = SolidColorRenderElement,
     Memory = MemoryRenderBufferRenderElement<GlesRenderer>,
     Moving = crate::shelf::Moving,
+    /// A native window's GPU picture (native.rs).
+    Texture = smithay::backend::renderer::element::texture::TextureRenderElement<smithay::backend::renderer::gles::GlesTexture>,
 }
 
 /// What is under a point of the desktop.
@@ -368,9 +370,33 @@ impl Server {
                 if let Some(p) = n.picture() {
                     let at = (loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
                     let whole = Rectangle::<f64, Logical>::from_size((p.px.w as f64, p.px.h as f64).into());
-                    match MemoryRenderBufferRenderElement::from_buffer(renderer, at.to_f64(), &p.buffer, None, Some(whole), Some(p.logical), Kind::Unspecified) {
-                        Ok(e) => elements.push(SceneElement::Memory(e)),
-                        Err(e) => tracing::warn!("native window picture: {e:?}"),
+                    match &p.content {
+                        crate::native::Content::Memory(buffer) => {
+                            match MemoryRenderBufferRenderElement::from_buffer(renderer, at.to_f64(), buffer, None, Some(whole), Some(p.logical), Kind::Unspecified) {
+                                Ok(e) => elements.push(SceneElement::Memory(e)),
+                                Err(e) => tracing::warn!("native window picture: {e:?}"),
+                            }
+                        }
+                        crate::native::Content::Gpu(g) => {
+                            // Imported the first time it is drawn, on whichever monitor that is.
+                            let mut g = g.lock().unwrap();
+                            if g.texture.is_none() && !g.failed {
+                                use smithay::backend::renderer::ImportDma;
+                                match renderer.import_dmabuf(&g.dmabuf, None) {
+                                    Ok(t) => {
+                                        g.texture = Some(smithay::backend::renderer::element::texture::TextureBuffer::from_texture(renderer, t, 1, Transform::Normal, None));
+                                    }
+                                    Err(e) => {
+                                        g.failed = true;
+                                        tracing::warn!("native window GPU picture: {e:?}");
+                                    }
+                                }
+                            }
+                            if let Some(t) = &g.texture {
+                                let e = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at.to_f64(), t, None, Some(whole), Some(p.logical), Kind::Unspecified);
+                                elements.push(SceneElement::Texture(e));
+                            }
+                        }
                     }
                 }
                 continue;

@@ -11,4 +11,6 @@ vergence-scene.workspace = true
 vergence-text.workspace = true
 vergence-render.workspace = true
 vergence-wl.workspace = true
+# The native protocol (native milestone 1): vnative, and the native road of step 5.
+vergence-protocol.workspace = true
 vergence-look.workspace = true

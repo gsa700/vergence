@@ -249,22 +249,34 @@ impl XwmHandler for Server {
     }
 
     fn send_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_type: String, fd: OwnedFd) {
-        if selection == SelectionTarget::Clipboard
-            && let Err(e) = request_data_device_client_selection(&self.seat, mime_type, fd)
-        {
+        if selection != SelectionTarget::Clipboard {
+            return;
+        }
+        // A native client's clipboard (native.rs), else a Wayland client's.
+        let native = match current_data_device_selection_userdata(&self.seat).as_deref() {
+            Some(crate::native::ClipOwner::Native(c)) => Some(*c),
+            _ => None,
+        };
+        if let Some(c) = native {
+            self.native_clipboard_send(c, mime_type, fd);
+        } else if let Err(e) = request_data_device_client_selection(&self.seat, mime_type, fd) {
             tracing::warn!("X11 clipboard request: {e:?}");
         }
     }
 
     fn new_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
         if selection == SelectionTarget::Clipboard {
-            set_data_device_selection(&self.display_handle, &self.seat, mime_types, ());
+            set_data_device_selection(&self.display_handle, &self.seat, mime_types.clone(), crate::native::ClipOwner::X11);
+            self.native_clipboard_offer(mime_types);
         }
     }
 
     fn cleared_selection(&mut self, _xwm: XwmId, selection: SelectionTarget) {
-        if selection == SelectionTarget::Clipboard && current_data_device_selection_userdata(&self.seat).is_some() {
+        // Only X11's own: a native client's clipboard stays when X11 lets go of its copy.
+        let x11 = current_data_device_selection_userdata(&self.seat).is_some_and(|o| *o == crate::native::ClipOwner::X11);
+        if selection == SelectionTarget::Clipboard && x11 {
             clear_data_device_selection(&self.display_handle, &self.seat);
+            self.native_clipboard_offer(Vec::new());
         }
     }
 

@@ -149,6 +149,11 @@ pub enum WinRequest {
     /// The configure with this serial is drawn for.
     AckConfigure { window: u32, serial: u32 },
     /// A new picture, and what changed since the last one (empty: all of it).
+    /// Shared memory is copied when the server reads this message: the client
+    /// may draw into it again at once. A GPU buffer is read while the server
+    /// draws: it is free again once a later picture has been attached and a
+    /// `Frame` has followed (the server swaps pictures at attach), so a client
+    /// takes two or more in turn.
     Attach { window: u32, buffer: Buffer, damage: Vec<Damage> },
     /// The pointer's shape over this window (the cursor-shape protocol's numbers).
     Cursor { window: u32, shape: u16 },
