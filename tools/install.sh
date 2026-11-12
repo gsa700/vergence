@@ -16,6 +16,7 @@
 #   share/wayland-sessions/vergence.desktop  "Vergence" at a display manager's login screen
 #   share/applications/vergence-*.desktop    the terminal and the settings app, for the shelf and any launcher
 #   share/icons/hicolor/scalable/apps/       their icons (data/icons, drawn by the project)
+#   share/doc/vergence/                      LICENSE-APACHE, LICENSE-GPL, THIRD-PARTY-NOTICES.md
 # User files stay in the user's home: ~/.config/vergence (settings), ~/.local/state/vergence (logs).
 #
 # System setup, unless --destdir: where there is no logind, seatd is enabled and
@@ -44,6 +45,8 @@ bin=$destdir$prefix/bin
 sessions=$destdir$prefix/share/wayland-sessions
 applications=$destdir$prefix/share/applications
 icons=$destdir$prefix/share/icons/hicolor/scalable/apps
+docs=$destdir$prefix/share/doc/vergence       # license and notices (the settings app's About page names it)
+docfiles="LICENSE-APACHE LICENSE-GPL THIRD-PARTY-NOTICES.md"
 programs="vergence-server vergence-term vergence-settings vbus vshell"
 tools="vergence-term vergence-settings"
 
@@ -51,6 +54,8 @@ if [ -n "$uninstall" ]; then
     for p in $programs vctl vergence-session vergence; do rm -f "$bin/$p"; done
     rm -f "$sessions/vergence.desktop"
     for t in $tools; do rm -f "$applications/$t.desktop" "$icons/$t.svg"; done
+    for d in $docfiles; do rm -f "$docs/$d"; done
+    rmdir "$docs" 2>/dev/null || true
     echo "removed Vergence from $destdir$prefix (user settings and logs kept)"
     exit 0
 fi
@@ -64,7 +69,8 @@ if [ -z "$destdir" ] && [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-install -d -m 755 "$bin" "$sessions" "$applications" "$icons"
+install -d -m 755 "$bin" "$sessions" "$applications" "$icons" "$docs"
+for d in $docfiles; do install -m 644 "$root/$d" "$docs/$d"; done
 for t in $tools; do
     install -m 644 "$root/data/applications/$t.desktop" "$applications/$t.desktop"
     install -m 644 "$root/data/icons/$t.svg" "$icons/$t.svg"
