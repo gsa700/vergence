@@ -1,6 +1,8 @@
 //! Laying a tree of elements out: each gets its rectangle, in reference
 //! units, in a flat list in drawing order (a parent before its children).
 
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
 use vergence_scene::{Color, Image, Rect};
@@ -74,6 +76,21 @@ pub(crate) struct Layout<'a> {
     pub measure: &'a mut dyn Measure,
     /// The size of text that does not name one.
     pub text_size: f32,
+    /// A label's lines, remembered for this layout pass: containers measure
+    /// their children more than once, and nested ones multiply that, so
+    /// without it a long wrapped text was broken into lines dozens of times
+    /// (the settings app's License page took 6 s to lay out, 2026-11-11).
+    pub lines_seen: HashMap<LinesKey, (Vec<Line>, f32)>,
+}
+
+/// What a label's line breaks depend on: its text, size, weight and the width.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct LinesKey {
+    text: u64,
+    size: u32,
+    weight: Weight,
+    width: Option<u32>,
+    wrap: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -93,31 +110,57 @@ impl Layout<'_> {
 
     fn lines(&mut self, l: &Label, width: Option<f32>) -> (Vec<Line>, f32) {
         let size = l.size.unwrap_or(self.text_size);
+        let key = LinesKey {
+            text: {
+                let mut h = DefaultHasher::new();
+                l.text.hash(&mut h);
+                h.finish()
+            },
+            size: size.to_bits(),
+            weight: l.weight,
+            width: width.filter(|_| l.wrap).map(f32::to_bits),
+            wrap: l.wrap,
+        };
+        if let Some(seen) = self.lines_seen.get(&key) {
+            return seen.clone();
+        }
         let (ascent, step) = self.measure.line(size, l.weight);
         let mut lines: Vec<(String, f32)> = Vec::new();
         for para in l.text.split('\n') {
             match width.filter(|_| l.wrap) {
                 None => lines.push((para.to_string(), self.measure.width(size, l.weight, para))),
                 Some(max) => {
+                    // Each word is measured once and the widths added (word, space,
+                    // word...): measuring the whole line again for every word was
+                    // quadratic in a paragraph's length. A finished line is measured
+                    // once whole, so its width (for centering) includes kerning.
+                    let space = self.measure.width(size, l.weight, " ");
                     let mut cur = String::new();
                     let mut cur_w = 0.0;
                     for word in para.split(' ').filter(|w| !w.is_empty()) {
-                        let trial = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
-                        let trial_w = self.measure.width(size, l.weight, &trial);
+                        let word_w = self.measure.width(size, l.weight, word);
+                        let trial_w = if cur.is_empty() { word_w } else { cur_w + space + word_w };
                         if trial_w > max && !cur.is_empty() {
-                            lines.push((std::mem::take(&mut cur), cur_w));
-                            cur_w = self.measure.width(size, l.weight, word);
-                            cur = word.to_string();
+                            let done = std::mem::take(&mut cur);
+                            let done_w = self.measure.width(size, l.weight, &done);
+                            lines.push((done, done_w));
+                            (cur, cur_w) = (word.to_string(), word_w);
                         } else {
-                            (cur, cur_w) = (trial, trial_w);
+                            if !cur.is_empty() {
+                                cur.push(' ');
+                            }
+                            cur.push_str(word);
+                            cur_w = trial_w;
                         }
                     }
-                    lines.push((cur, cur_w));
+                    let last_w = if cur.is_empty() { 0.0 } else { self.measure.width(size, l.weight, &cur) };
+                    lines.push((cur, last_w));
                 }
             }
         }
         let out = lines.into_iter().enumerate().map(|(i, (text, w))| Line { text, x: 0.0, baseline: (ascent + i as f32 * step).round(), width: w }).collect::<Vec<_>>();
         let height = (out.len() as f32 * step).ceil();
+        self.lines_seen.insert(key, (out.clone(), height));
         (out, height)
     }
 

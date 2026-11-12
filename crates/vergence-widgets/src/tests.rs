@@ -102,6 +102,39 @@ fn text_wraps_at_its_width() {
     assert_eq!(m.name, "one two three four");
 }
 
+/// Counts how much text a layout measures (the License page regression).
+struct Counting(usize);
+
+impl Measure for Counting {
+    fn width(&mut self, size: f32, _: Weight, text: &str) -> f32 {
+        self.0 += text.chars().count();
+        text.chars().count() as f32 * size * 0.5
+    }
+
+    fn line(&mut self, size: f32, _: Weight) -> (f32, f32) {
+        (size * 0.8, size * 1.25)
+    }
+}
+
+#[test]
+fn a_long_wrapped_text_is_measured_about_once() {
+    // 2,000 words in a label, three containers deep, as on a settings page. Line
+    // breaking used to re-measure the line so far for every word, again for every
+    // time a container measured it: 2026-11-11, the License page took 6 s.
+    let text = vec!["word"; 2000].join(" ");
+    let page: Element<Msg> = column(vec![panel(column(vec![panel(label(text.clone()).wrap().width(Length::FILL)).width(Length::FILL)]).width(Length::FILL)).width(Length::FILL)]).width(Length::FILL);
+    let mut counting = Counting(0);
+    let mut ui = Ui::new();
+    ui.layout(page, 300.0, 300.0, &mut counting, 10.0);
+    // Linear: the natural width once whole, then, for each width the containers
+    // try (two here), each word once and each finished line once (2026-11-11:
+    // about 3.6x the text). Quadratic line breaking would be millions here.
+    assert!(counting.0 < 5 * text.len(), "measured {} characters for a text of {}", counting.0, text.len());
+    // And the lines are what they were: 300 / 5 per char = 60 chars, so 12 words ("word " x 12 = 59).
+    let m = &ui.meaning()[0];
+    assert_eq!(m.bounds.h, ((2000.0f32 / 12.0).ceil() * 12.5).ceil(), "{}", ui.meaning_text());
+}
+
 fn two_buttons() -> Element<Msg> {
     row(vec![button(label("A")).on_press(Msg::A), button(label("B")).on_press(Msg::B), button(label("off"))]).spacing(10.0)
 }

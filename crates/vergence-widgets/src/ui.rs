@@ -257,7 +257,7 @@ impl<M: Clone> Ui<M> {
     /// stays with the widgets whose ids are still there.
     pub fn layout(&mut self, root: Element<M>, width: f32, height: f32, measure: &mut dyn Measure, text_size: f32) {
         let mut nodes = Vec::new();
-        Layout { measure, text_size }.run(root, Rect::new(0.0, 0.0, width, height), &mut nodes);
+        Layout { measure, text_size, lines_seen: Default::default() }.run(root, Rect::new(0.0, 0.0, width, height), &mut nodes);
         self.nodes = nodes;
         self.size = (width, height);
         let alive = |id: Option<Id>, nodes: &[Node<M>]| id.filter(|id| nodes.iter().any(|n| n.id == *id && n.active()));
