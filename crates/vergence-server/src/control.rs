@@ -163,6 +163,11 @@ impl Server {
         let mut words = line.split_whitespace();
         let cmd = words.next().unwrap_or("");
         let args: Vec<&str> = words.collect();
+        // Input made by vctl counts as input: it wakes screens that went off
+        // while idle (a test on an idle machine clicked into nothing).
+        if matches!(cmd, "pointer" | "press" | "release" | "key" | "type" | "touch") {
+            self.energy_activity();
+        }
         match cmd {
             "shot" => {
                 if self.backend.is_none() {

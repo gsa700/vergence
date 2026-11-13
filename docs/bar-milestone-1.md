@@ -473,6 +473,25 @@ one process.
 
 ## Later
 
+- **Found by Dave on Techbench, 2026-11-12 22:25, for the next session**
+  (Vergence (dev) session, real mouse; scripted drags by vctl could not
+  reproduce either on Hubble or Techbench):
+  1. A window's only tab, dragged onto another terminal's bar, did not
+     join (a torn-off window moved three times by its tab, then closed by
+     hand; the log has the moves and no TabJoin). The server logs nothing
+     when a drop does not join, so the cause is unknown.
+  2. A bar stuck with a tab that has no label. Cause found: during a drag
+     the server draws the row as it would be if let go now, with the
+     titles of the preview (the dragged tab left out once it is outside
+     the row) but the layout of the window's real tabs (decor.rs passes
+     `f.layout`), so the last slot is drawn with no title. That is meant
+     to last only while dragging; on Techbench the window stayed so, so
+     the server's `tab_hold` was not cleared: the drag's end was missed.
+  To do: log every tab drop (where, what was under the pointer, why it
+  joined or not) and a hold whose release never came; end a hold when no
+  button is held any more; draw the preview with a layout of the
+  preview's own count. Then Dave repeats the drags with a real mouse.
+
 - **Tab dragging under other desktops** (Dave, 2026-11-12: "make a note
   for now"). In a Vergence session the server drags tabs; under GNOME the
   terminal draws its own bar, whose tabs are chosen, closed and added but
