@@ -23,6 +23,8 @@ use vergence_text::{FaceId, Fonts};
 pub const BAR_H: f32 = vergence_look::BAR_H;
 pub const TAB_H: f32 = vergence_look::BAR_ITEM_H;
 pub const TAB_W: f32 = 200.0;
+/// The size of the bar's text (tab titles, a window's title), in points.
+pub const FONT_SIZE: f32 = 13.0;
 /// The least a tab shrinks to, a button's box, the + tab's width.
 const TAB_MIN: f32 = 28.0;
 const BUTTON_W: f32 = 32.0;

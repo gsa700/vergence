@@ -2227,6 +2227,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "vergence-bar",
  "vergence-dbus",
  "vergence-edid",
  "vergence-look",

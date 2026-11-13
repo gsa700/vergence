@@ -106,6 +106,14 @@ window straddling two monitors has a sharp bar on both.
   until step 3. 372 tests on Hubble and Techbench; on kepler one terminal
   pty test failed once under the full parallel run and passed five times
   alone (a race on FreeBSD to look at, unrelated to the bar).
+- **Step 3, first half done** (2026-11-12): every title bar the server
+  draws is vergence-bar's plain bar, laid out with the desktop's button
+  layout (the WM `button-layout` setting, from Gtk/DecorationLayout) and
+  hit-tested by the same layout, drawn into a picture per scale with the
+  dock's CPU path and redrawn when the title, width, focus, hover or layout
+  changes. The bar is 36 points tall now, the toolkit's (the server's was
+  24). On Hubble (layout "close,minimize,maximize:") the settings app's
+  buttons are on the left like the terminal's. 372 tests on all three.
 
 ## Steps
 

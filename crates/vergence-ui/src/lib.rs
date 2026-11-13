@@ -556,7 +556,7 @@ fn decoration_manager_offered(offered: &[(Interface, u32, u32)]) -> bool {
 }
 
 /// Our bar's title size (the settings app's interface text).
-const BAR_FONT_SIZE: f32 = 13.0;
+const BAR_FONT_SIZE: f32 = bar::FONT_SIZE;
 
 /// Opens the window and runs until it is closed. `size` is the size asked
 /// for, in reference units; the server may give another.

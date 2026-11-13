@@ -242,10 +242,10 @@ mod tests {
     fn too_tall_window_fits_below_the_title_bar() {
         // AlbumWall's 1131 x 710 on the 14" (1170 x 658 points), with a title bar.
         let area = content_area(r(0, 0, 1170, 658), true);
-        assert_eq!(area, r(0, 24, 1170, 634));
+        assert_eq!(area, r(0, TITLE_H, 1170, 658 - TITLE_H));
         let size = fit((1131, 710).into(), area.size, None);
-        assert_eq!(size, (1131, 634).into());
-        assert_eq!(center(area, size), (19, 24).into());
+        assert_eq!(size, (1131, 658 - TITLE_H).into());
+        assert_eq!(center(area, size), (19, TITLE_H).into());
     }
 
     #[test]

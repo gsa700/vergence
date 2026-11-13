@@ -1,13 +1,18 @@
-// Title bars drawn by the server (server milestone 1, 2026-11-07).
+// Title bars drawn by the server (server milestone 1, 2026-11-07; the bar
+// itself from vergence-bar since bar milestone 1, 2026-11-12).
 //
-// X11 windows that do not decorate themselves, and Wayland windows that ask for
-// server-side decorations (xdg-decoration), get a title bar TITLE_H points tall
-// above their content, with maximize and close buttons at the right, and an
-// invisible band BORDER points wide around the whole frame for resizing. Sizes are
-// in points like everything else, so the bar is the same physical height on every
-// monitor; it is drawn with solid colors, which are sharp at any scale. Edges are
-// rounded from logical to physical the same way as the window's own position, so
-// bar and content meet without a seam.
+// X11 windows that do not decorate themselves, Wayland windows that ask for
+// server-side decorations (xdg-decoration) and native windows that leave their
+// frame to the server get a title bar TITLE_H points tall above their content,
+// and an invisible band BORDER points wide around the whole frame for resizing.
+// The bar is vergence-bar's, the one the toolkit draws: its buttons where the
+// desktop's layout puts them (Gtk/DecorationLayout, the settings app's Windows
+// page, followed live), drawn into a picture at each monitor's scale and laid
+// out and hit-tested by the same code, so what is drawn and what is pressed
+// cannot disagree. Sizes are in points like everything else, so the bar is the
+// same physical height on every monitor. Edges are rounded from logical to
+// physical the same way as the window's own position, so bar and content meet
+// without a seam.
 //
 // Every window that draws no frame of its own, ours (the terminal and the settings
 // app draw their own title bars) or a server-decorated one, also gets an EDGE-point
@@ -40,7 +45,7 @@ use smithay::{
         },
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    utils::{IsAlive, Logical, Physical, Point, Rectangle, Size, Transform},
+    utils::{IsAlive, Logical, Physical, Point, Rectangle, Transform},
 };
 use smithay::backend::allocator::Fourcc;
 
@@ -48,8 +53,9 @@ use crate::{Server, dispatch::ResizeEdge};
 
 // The sizes and colors are the desktop's one look (vergence-look), which the
 // toolkit's own bars are drawn with too: neither keeps a copy.
-/// The title bar's height, in points.
-pub const TITLE_H: i32 = vergence_look::TITLE_H as i32;
+/// The title bar's height, in points: the one bar's (vergence-bar), the
+/// toolkit's too (it was 24 for the server's own until 2026-11-12).
+pub const TITLE_H: i32 = vergence_bar::BAR_H as i32;
 /// The resize band around a decorated window, in points.
 pub const BORDER: i32 = vergence_look::RESIZE_BAND as i32;
 /// The border line around a window, in points.
@@ -57,14 +63,6 @@ pub const EDGE: i32 = vergence_look::EDGE as i32;
 const EDGE_ACTIVE: [f32; 4] = vergence_look::EDGE_FOCUSED.floats();
 const EDGE_INACTIVE: [f32; 4] = vergence_look::EDGE_UNFOCUSED.floats();
 
-const BAR_ACTIVE: [f32; 4] = vergence_look::BAR_FOCUSED.floats();
-const BAR_INACTIVE: [f32; 4] = vergence_look::BAR_UNFOCUSED.floats();
-const CLOSE: [f32; 4] = vergence_look::CLOSE.floats();
-const BUTTON: [f32; 4] = vergence_look::BUTTON.floats();
-const TEXT_ACTIVE: [f32; 3] = vergence_look::INK_FOCUSED.floats3();
-const TEXT_INACTIVE: [f32; 3] = vergence_look::INK_UNFOCUSED.floats3();
-/// Space before the title text and between it and the buttons, in points.
-const TEXT_PAD: i32 = 8;
 
 smithay::backend::renderer::element::render_elements! {
     pub SceneElement<=GlesRenderer>;
@@ -96,13 +94,13 @@ pub struct Decor {
     ids: [Id; 11],
     commit: CommitCounter,
     active: bool,
-    /// One title raster per output scale (key: the scale's bits).
-    titles: std::collections::HashMap<u64, TitleRaster>,
+    /// One bar picture per output scale (key: the scale's bits).
+    bars: std::collections::HashMap<u64, BarPicture>,
 }
 
-/// A title drawn for one scale: what it shows, and the pixels.
-struct TitleRaster {
-    key: (String, Size<i32, Logical>, bool),
+/// A bar drawn for one scale: what it shows, and the pixels.
+struct BarPicture {
+    key: (String, i32, bool, Option<vergence_bar::Part>, String),
     buffer: MemoryRenderBuffer,
 }
 
@@ -112,40 +110,38 @@ impl Decor {
             ids: std::array::from_fn(|_| Id::new()),
             commit: CommitCounter::default(),
             active: false,
-            titles: Default::default(),
+            bars: Default::default(),
         }
     }
 }
 
-/// A decorated window's parts, in logical space.
+/// A decorated window's parts, in logical space: its content and its bar,
+/// laid out by vergence-bar.
 struct Frame {
     content: Rectangle<i32, Logical>,
     title: Rectangle<i32, Logical>,
-    close: Rectangle<i32, Logical>,
-    maximize: Rectangle<i32, Logical>,
-    /// Left of maximize; drawn and pressed only when the settings name the button.
-    minimize: Rectangle<i32, Logical>,
+    layout: vergence_bar::Layout,
 }
 
 impl Frame {
-    fn of(content: Rectangle<i32, Logical>) -> Frame {
+    fn of(content: Rectangle<i32, Logical>, buttons: &(Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>)) -> Frame {
         let title = Rectangle::new((content.loc.x, content.loc.y - TITLE_H).into(), (content.size.w, TITLE_H).into());
-        let close = Rectangle::new((title.loc.x + title.size.w - TITLE_H, title.loc.y).into(), (TITLE_H, TITLE_H).into());
-        let maximize = Rectangle::new((close.loc.x - TITLE_H, title.loc.y).into(), (TITLE_H, TITLE_H).into());
-        let minimize = Rectangle::new((maximize.loc.x - TITLE_H, title.loc.y).into(), (TITLE_H, TITLE_H).into());
-        Frame { content, title, close, maximize, minimize }
+        let layout = vergence_bar::Layout::plain(content.size.w as f32, &buttons.0, &buttons.1);
+        Frame { content, title, layout }
+    }
+
+    /// What of the bar is at `pos`, if anything.
+    fn part_at(&self, pos: Point<f64, Logical>) -> Option<vergence_bar::Part> {
+        if !self.title.to_f64().contains(pos) {
+            return None;
+        }
+        self.layout.at((pos.x - self.title.loc.x as f64) as f32, (pos.y - self.title.loc.y as f64) as f32)
     }
 
     /// Title bar and content.
     fn whole(&self) -> Rectangle<i32, Logical> {
         Rectangle::new(self.title.loc, (self.content.size.w, self.content.size.h + TITLE_H).into())
     }
-}
-
-/// Smaller by `by` points on every side.
-fn inset(r: Rectangle<i32, Logical>, by: f64) -> Rectangle<f64, Logical> {
-    let r = r.to_f64();
-    Rectangle::new((r.loc.x + by, r.loc.y + by).into(), ((r.size.w - 2.0 * by).max(0.0), (r.size.h - 2.0 * by).max(0.0)).into())
 }
 
 /// A logical rectangle on an output, in its physical pixels, corners rounded like
@@ -175,7 +171,21 @@ impl Server {
     }
 
     fn frame_of(&self, w: &Win) -> Option<Frame> {
-        self.has_title(w).then(|| self.space.element_geometry(w).map(Frame::of)).flatten()
+        let buttons = self.button_layout();
+        self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons))).flatten()
+    }
+
+    /// The window buttons, left and right, as the settings say
+    /// (Gtk/DecorationLayout; minimize, maximize, close on the right if unset).
+    pub fn button_layout(&self) -> (Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>) {
+        vergence_bar::decoration_layout(&self.button_layout_text())
+    }
+
+    fn button_layout_text(&self) -> String {
+        match self.settings.current.get(&(crate::settings::WM.to_string(), "button-layout".to_string())) {
+            Some(vergence_protocol::bus::SettingValue::Str(layout)) => layout.clone(),
+            _ => ":minimize,maximize,close".to_string(),
+        }
     }
 
     /// The rectangle the server outlines and surrounds with a resize band: the
@@ -199,14 +209,6 @@ impl Server {
     }
 
     /// The top-most thing under `pos`: a title bar part, a resize band, or a surface.
-    /// True if the settings' window buttons include minimize (they do unless a
-    /// layout without it has been chosen): the server's title bars then have it.
-    pub fn minimize_button(&self) -> bool {
-        match self.settings.current.get(&(crate::settings::WM.to_string(), "button-layout".to_string())) {
-            Some(vergence_protocol::bus::SettingValue::Str(layout)) => layout.contains("minimize"),
-            _ => true,
-        }
-    }
 
     pub fn hit(&self, pos: Point<f64, Logical>) -> Hit {
         if self.shelf_at(pos) {
@@ -214,17 +216,13 @@ impl Server {
         }
         for w in self.space.elements().rev() {
             if let Some(f) = self.frame_of(w) {
-                if f.close.to_f64().contains(pos) {
-                    return Hit::Close(w.clone());
-                }
-                if f.maximize.to_f64().contains(pos) {
-                    return Hit::Maximize(w.clone());
-                }
-                if self.minimize_button() && f.minimize.to_f64().contains(pos) {
-                    return Hit::Minimize(w.clone());
-                }
-                if f.title.to_f64().contains(pos) {
-                    return Hit::Title(w.clone());
+                use vergence_bar::{Part, WinButton};
+                match f.part_at(pos) {
+                    Some(Part::Button(WinButton::Close)) => return Hit::Close(w.clone()),
+                    Some(Part::Button(WinButton::Maximize)) => return Hit::Maximize(w.clone()),
+                    Some(Part::Button(WinButton::Minimize)) => return Hit::Minimize(w.clone()),
+                    Some(_) => return Hit::Title(w.clone()),
+                    None => {}
                 }
             }
             if let Some(b) = self.border_of(w) {
@@ -266,7 +264,18 @@ impl Server {
     pub fn scene(&mut self, renderer: &mut GlesRenderer, output: &Output, scale: f64) -> Vec<SceneElement> {
         let Some(out) = self.space.output_geometry(output) else { return Vec::new() };
         let focused = self.keyboard_window();
-        let minimize_button = self.minimize_button();
+        // What of a bar the pointer is over, for its hover look (the scene is
+        // built again whenever the pointer moves).
+        let hovered: Option<(Win, vergence_bar::Part)> = {
+            use vergence_bar::{Part, WinButton};
+            match self.hit(self.pointer_location()) {
+                Hit::Close(w) => Some((w, Part::Button(WinButton::Close))),
+                Hit::Maximize(w) => Some((w, Part::Button(WinButton::Maximize))),
+                Hit::Minimize(w) => Some((w, Part::Button(WinButton::Minimize))),
+                _ => None,
+            }
+        };
+        let layout_text = self.button_layout_text();
         self.decor.retain(|w, _| w.alive());
         // A window on its way back from the dock is put in its place when it arrives.
         self.shelf_motions_end();
@@ -309,54 +318,43 @@ impl Server {
                     elements.push(solid(9, Rectangle::new((r.loc.x + r.size.w, r.loc.y).into(), (e, r.size.h).into()), c));
                 }
                 if let Some(f) = frame {
-                // Front to back: title text, button marks, then the bar.
-                let text_x = f.title.loc.x + TEXT_PAD;
-                let buttons_from = if minimize_button { f.minimize.loc.x } else { f.maximize.loc.x };
-                let logical: Size<i32, Logical> = (buttons_from - TEXT_PAD / 2 - text_x, TITLE_H).into();
-                if let Some(font) = self.title_font.as_ref()
-                    && logical.w > 0
-                    && !title.is_empty()
-                {
-                    // Pixels exactly as Smithay places `logical` at this scale: drawn 1:1.
-                    let (pw, ph) = ((logical.w as f64 * scale).round() as i32, (logical.h as f64 * scale).round() as i32);
-                    let key = (title.clone(), logical, active);
-                    let raster = d.titles.entry(scale.to_bits()).or_insert_with(|| TitleRaster {
-                        key: (String::new(), Size::default(), false),
+                    // The bar, vergence-bar's, drawn once per scale and again when what it shows changes.
+                    let hover = hovered.as_ref().filter(|(hw, _)| *hw == w).map(|(_, p)| *p);
+                    let width = f.title.size.w;
+                    let key = (title.clone(), width, active, hover, layout_text.clone());
+                    let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
+                    let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
+                        key: (String::new(), -1, false, None, String::new()),
                         buffer: MemoryRenderBuffer::new(Fourcc::Abgr8888, (1, 1), 1, Transform::Normal, None),
                     });
-                    if raster.key != key {
-                        let rgba = font.render(&title, pw as usize, ph as usize, scale, if active { TEXT_ACTIVE } else { TEXT_INACTIVE });
-                        raster.buffer = MemoryRenderBuffer::from_slice(&rgba, Fourcc::Abgr8888, (pw, ph), 1, Transform::Normal, None);
-                        raster.key = key;
+                    if picture.key != key && width > 0 {
+                        let face = fonts.face("sans-serif", 400, false);
+                        let mut scene = vergence_scene::Scene::new(width as f32, TITLE_H as f32);
+                        let look = vergence_bar::Look {
+                            focused: active,
+                            pane: vergence_scene::Color::rgb(0, 0, 0),
+                            pane_ink: vergence_scene::Color::rgb(255, 255, 255),
+                            font: face,
+                            font_size: vergence_bar::FONT_SIZE,
+                            titles: &[],
+                            title: &title,
+                            shown: 0,
+                            hover,
+                        };
+                        vergence_bar::draw(&mut scene, fonts, &f.layout, &look);
+                        match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)) {
+                            Ok(p) => {
+                                picture.buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+                                picture.key = key;
+                            }
+                            Err(e) => tracing::warn!("title bar: {e}"),
+                        }
                     }
-                    let at = (Point::<i32, Logical>::from((text_x, f.title.loc.y)) - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-                    let whole = Rectangle::<f64, Logical>::from_size((pw as f64, ph as f64).into());
-                    match MemoryRenderBufferRenderElement::from_buffer(
-                        renderer,
-                        at.to_f64(),
-                        &raster.buffer,
-                        None,
-                        Some(whole),
-                        Some(logical),
-                        Kind::Unspecified,
-                    ) {
+                    let at = (f.title.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+                    match MemoryRenderBufferRenderElement::from_buffer(renderer, at.to_f64(), &picture.buffer, None, None, Some(f.title.size), Kind::Unspecified) {
                         Ok(e) => elements.push(SceneElement::Memory(e)),
-                        Err(e) => tracing::warn!("title text: {e:?}"),
+                        Err(e) => tracing::warn!("title bar: {e:?}"),
                     }
-                }
-                let m = inset(f.maximize, 7.0);
-                let t = 1.5;
-                elements.push(solid(0, inset(f.close, 7.0), CLOSE));
-                elements.push(solid(1, Rectangle::new(m.loc, (m.size.w, t).into()), BUTTON));
-                elements.push(solid(2, Rectangle::new((m.loc.x, m.loc.y + m.size.h - t).into(), (m.size.w, t).into()), BUTTON));
-                elements.push(solid(3, Rectangle::new(m.loc, (t, m.size.h).into()), BUTTON));
-                elements.push(solid(4, Rectangle::new((m.loc.x + m.size.w - t, m.loc.y).into(), (t, m.size.h).into()), BUTTON));
-                if minimize_button {
-                    // A line along the foot of its square, as the terminal's bar draws it.
-                    let n = inset(f.minimize, 7.0);
-                    elements.push(solid(10, Rectangle::new((n.loc.x, n.loc.y + n.size.h - t).into(), (n.size.w, t).into()), BUTTON));
-                }
-                elements.push(solid(5, f.title.to_f64(), if active { BAR_ACTIVE } else { BAR_INACTIVE }));
                 }
             }
             let Some(loc) = self.space.element_location(&w) else { continue };
