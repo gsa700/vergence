@@ -749,7 +749,8 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
     let layout_changed = Arc::new(AtomicBool::new(false));
     if !app.own_frame() {
         let (changed, waker) = (layout_changed.clone(), Waker { pipe: wake_pipe, pending: wake_pending.clone() });
-        let stamp = || bar::settings_path().and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok());
+        // Vergence's settings file's time, and GNOME's layout when running there.
+        let stamp = || (bar::settings_path().and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok()), bar::host_layout());
         std::thread::Builder::new().name("settings".into()).spawn(move || {
             let mut seen = stamp();
             loop {

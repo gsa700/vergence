@@ -63,13 +63,40 @@ pub enum WinButton {
 /// on the left (Dave, 2026-11-12; it was on the right until then).
 pub const DEFAULT_LAYOUT: &str = "close,minimize,maximize:";
 
-/// The desktop's button layout from Vergence's settings file
-/// (`~/.config/vergence/settings.toml`, `"Gtk/DecorationLayout" = "..."`,
-/// the settings app's Windows page), else [`DEFAULT_LAYOUT`]: what the
-/// terminal's bar follows, and the toolkit's own bar where the server draws none.
+/// The desktop's button layout: under GNOME, GNOME's own ([`host_layout`]:
+/// a program of ours there looks like its neighbors, Dave 2026-11-12); else
+/// Vergence's settings file (`~/.config/vergence/settings.toml`,
+/// `"Gtk/DecorationLayout" = "..."`, the settings app's Windows page); else
+/// [`DEFAULT_LAYOUT`]. What the terminal's bar follows, and the toolkit's own
+/// bar where the server draws none.
 pub fn desktop_layout() -> (Vec<WinButton>, Vec<WinButton>) {
     let text = settings_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
-    decoration_layout(&layout_setting(&text).unwrap_or_else(|| DEFAULT_LAYOUT.into()))
+    decoration_layout(&host_layout().or_else(|| layout_setting(&text)).unwrap_or_else(|| DEFAULT_LAYOUT.into()))
+}
+
+/// GNOME's button layout ("icon:minimize,close"), when the program runs
+/// under GNOME and not in a Vergence session; None elsewhere. Read with
+/// GNOME's own gsettings tool (part of every GNOME install; no library of
+/// GNOME's is linked), so it is asked each time: callers that follow it
+/// live ask again about once a second.
+pub fn host_layout() -> Option<String> {
+    // The Vergence session's bus (vergence_protocol::BUS_ENV): in a Vergence
+    // session our own setting holds, whatever the desktop variable says.
+    if std::env::var_os("VERGENCE_BUS").is_some() {
+        return None;
+    }
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    if !desktop.split(':').any(|d| d.eq_ignore_ascii_case("GNOME")) {
+        return None;
+    }
+    let out = std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.wm.preferences", "button-layout"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let value = String::from_utf8_lossy(&out.stdout).trim().trim_matches('\'').to_string();
+    (!value.is_empty() && value.len() < 256).then_some(value)
 }
 
 /// Vergence's settings file, which holds the button layout.

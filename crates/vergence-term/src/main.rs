@@ -126,7 +126,8 @@ fn config(name: &str) -> String {
 /// toolkit speaks it).
 fn watch_settings(changed: Arc<AtomicBool>, waker: Waker) {
     let stamp = |name: &str| config_path(name).and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok());
-    let stamps = move || [stamp("desktop.toml"), stamp("settings.toml")];
+    // The files' times, and GNOME's button layout when running there (bar::host_layout).
+    let stamps = move || ([stamp("desktop.toml"), stamp("settings.toml")], bar::host_layout());
     std::thread::spawn(move || {
         let mut seen = stamps();
         loop {
@@ -142,6 +143,16 @@ fn watch_settings(changed: Arc<AtomicBool>, waker: Waker) {
 }
 
 impl Settings {
+    /// Vergence's settings file; the button layout GNOME's when running under
+    /// GNOME (Dave, 2026-11-12).
+    fn load() -> Settings {
+        let mut s = Settings::from_text(&config("settings.toml"));
+        if let Some(layout) = bar::host_layout() {
+            (s.left, s.right) = bar::decoration_layout(&layout);
+        }
+        s
+    }
+
     fn from_text(text: &str) -> Settings {
         // Lines of the form "Gtk/FontName" = "Adwaita Sans 10".
         let value = |key: &str| {
@@ -696,7 +707,7 @@ impl Terminal {
             waker: None,
             palette: palette(),
             opacity: vergence_ui::opacity_setting(&config("desktop.toml"), "[terminal]"),
-            settings: Settings::from_text(&config("settings.toml")),
+            settings: Settings::load(),
             metrics: None,
             focused: false,
             width: 820.0,
@@ -1653,7 +1664,7 @@ impl App for Terminal {
             // worked out again at the next frame, and the grids follow it.
             self.palette = palette();
             self.opacity = vergence_ui::opacity_setting(&config("desktop.toml"), "[terminal]");
-            self.settings = Settings::from_text(&config("settings.toml"));
+            self.settings = Settings::load();
             self.metrics = None;
             window.redraw();
         }
