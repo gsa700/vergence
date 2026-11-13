@@ -277,6 +277,12 @@ one process.
   were with their 41 shells, none of the three back. The store: 8,383
   bytes for thirty windows, 7,795 after the three went. Scripts in the
   session's scratchpad (nested.sh, scale.sh).
+- **A tab's or section's new window is as large as the one it left**
+  (Dave, 2026-11-12): the toolkit's `App::opening_size` gives the size a
+  window opened by another asks for, and the opener is its parent, so the
+  section menu's Move to a new window asks for a place a bar's height down
+  and right of it (`Place::Parent`). On Hubble: a source resized to 650 x
+  410, the section's window and a torn-off tab's both 650 x 410.
 
 ## Steps
 

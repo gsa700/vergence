@@ -538,6 +538,8 @@ struct Terminal {
     /// off, a section moved to a window of its own), and where it asks to be.
     moved: Vec<Tab>,
     ask: Option<vergence_ui::BarPlace>,
+    /// The size a window opened for a tab or section asks for: the one it left's.
+    ask_size: Option<(u32, u32)>,
     /// Tabs on their way between windows of this process (a tab joined to
     /// another window): the window's key, the tab, its place there. Shared.
     moves: Rc<RefCell<Vec<(u64, Tab, usize)>>>,
@@ -682,6 +684,7 @@ impl Terminal {
             wid: 0,
             moved: Vec::new(),
             ask: None,
+            ask_size: None,
             moves: Rc::new(RefCell::new(Vec::new())),
             wids: Rc::new(RefCell::new(Vec::new())),
             tabs: Vec::new(),
@@ -774,6 +777,8 @@ impl Terminal {
         let mut t = self.window_for(String::new(), Vec::new(), None, None);
         t.moved = vec![tab];
         t.ask = place;
+        // As large as the window it came from (Dave, 2026-11-12).
+        t.ask_size = (self.width > 0.0 && self.height > 0.0).then(|| (self.width.round() as u32, self.height.round() as u32));
         window.open_window(Box::new(t));
     }
 
@@ -1097,7 +1102,9 @@ impl Terminal {
                             None => self.tabs.get(self.shown).map(|t| t.id).and_then(|id| self.take_tab(id, window)),
                         };
                         if let Some(t) = moved {
-                            self.tab_to_window(t, None, window);
+                            // A bar's height down and right of this window, as large.
+                            let step = vergence_ui::bar::BAR_H as f64;
+                            self.tab_to_window(t, Some(vergence_ui::BarPlace::Parent { x: step, y: step }), window);
                         }
                     }
                     None => {}
@@ -1467,6 +1474,10 @@ impl App for Terminal {
 
     fn place(&self) -> vergence_ui::BarPlace {
         self.ask.clone().unwrap_or(vergence_ui::BarPlace::Anywhere)
+    }
+
+    fn opening_size(&self) -> Option<(u32, u32)> {
+        self.ask_size
     }
 
     fn bar(&mut self) -> Option<vergence_ui::Bar> {

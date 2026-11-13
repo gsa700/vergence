@@ -377,23 +377,29 @@ impl<'a> Native<'a> {
                 Command::Paste => self.start_paste(id)?,
                 Command::Timer(timer, at) => set_timer(&mut self.windows[i].timers, timer, at),
                 Command::Place(place) => self.send(WinRequest::Place { window: id, place })?,
-                Command::Open(app) => self.open(app)?,
+                Command::Open(app) => self.open(app, id)?,
             }
         }
         Ok(())
     }
 
-    /// Another window of the program: asked of the server now, run when it is created.
-    fn open(&mut self, mut app: Box<dyn App>) -> io::Result<()> {
+    /// Another window of the program, opened by window `opener` (its parent,
+    /// for a place it asks relative to it): asked of the server now, run when
+    /// it is created.
+    fn open(&mut self, mut app: Box<dyn App>, opener: u32) -> io::Result<()> {
         let id = self.next_window;
         self.next_window += 1;
         let serial = self.client.next_serial();
-        let (bar_by_server, request) = create_request(app.as_ref(), id, serial, OPENED_SIZE);
+        let size = app.opening_size().map_or(OPENED_SIZE, |(w, h)| (w.clamp(64, 16_384), h.clamp(48, 16_384)));
+        let (bar_by_server, mut request) = create_request(app.as_ref(), id, serial, size);
+        if let WinRequest::Create { parent, .. } = &mut request {
+            *parent = opener;
+        }
         app.opened(id);
         app.waker(self.waker.clone());
         self.send(request)?;
         self.creating.push((serial, id));
-        self.windows.push(Win::new(id, Run::Owned(app), OPENED_SIZE, bar_by_server));
+        self.windows.push(Win::new(id, Run::Owned(app), size, bar_by_server));
         Ok(())
     }
 

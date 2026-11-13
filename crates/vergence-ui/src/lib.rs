@@ -457,6 +457,13 @@ pub trait App {
         Place::Anywhere
     }
 
+    /// The content size, in reference units, a window opened with
+    /// [`Window::open_window`] asks for (a torn-off tab's window: the size of
+    /// the one it left). None: the toolkit's own. Window memory still wins.
+    fn opening_size(&self) -> Option<(u32, u32)> {
+        None
+    }
+
     /// True if the window's bar has tabs the server may draw (bar milestone
     /// 1): on the native road the window then leaves its frame to the server,
     /// describes its tabs with [`App::bar`], hears what was done with them in
