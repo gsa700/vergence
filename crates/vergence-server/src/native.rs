@@ -191,7 +191,6 @@ impl NativeWindow {
     }
 
     /// What its bar shows, as last sent (none: its title).
-    #[allow(dead_code)] // drawn from in bar milestone 1, step 3
     pub fn bar(&self) -> Option<vergence_protocol::window::Bar> {
         self.state.lock().unwrap().bar.clone()
     }

@@ -82,6 +82,11 @@ pub enum Hit {
     Maximize(Win),
     Minimize(Win),
     Edge(Win, ResizeEdge),
+    /// A tab of a native window's bar the server draws (its place in the
+    /// row), a tab's close button, the + (bar milestone 1).
+    Tab(Win, usize),
+    CloseTab(Win, usize),
+    Plus(Win),
     /// The body of a native window (native.rs): its input comes in step 4.
     Native(Win),
     /// The shelf's strip (shelf.rs): in front of every window.
@@ -100,8 +105,17 @@ pub struct Decor {
 
 /// A bar drawn for one scale: what it shows, and the pixels.
 struct BarPicture {
-    key: (String, i32, bool, Option<vergence_bar::Part>, String),
+    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>),
     buffer: MemoryRenderBuffer,
+}
+
+/// A native window's tabs as the server draws them: titles, the one in
+/// front, its accent, and each tab's id (what the program calls it).
+struct Tabs {
+    titles: Vec<String>,
+    shown: usize,
+    accent: Option<u32>,
+    ids: Vec<u32>,
 }
 
 impl Decor {
@@ -121,13 +135,18 @@ struct Frame {
     content: Rectangle<i32, Logical>,
     title: Rectangle<i32, Logical>,
     layout: vergence_bar::Layout,
+    /// A native window's tabs, if it described any (else a plain bar).
+    tabs: Option<Tabs>,
 }
 
 impl Frame {
-    fn of(content: Rectangle<i32, Logical>, buttons: &(Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>)) -> Frame {
+    fn of(content: Rectangle<i32, Logical>, buttons: &(Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>), tabs: Option<Tabs>) -> Frame {
         let title = Rectangle::new((content.loc.x, content.loc.y - TITLE_H).into(), (content.size.w, TITLE_H).into());
-        let layout = vergence_bar::Layout::plain(content.size.w as f32, &buttons.0, &buttons.1);
-        Frame { content, title, layout }
+        let layout = match &tabs {
+            Some(t) => vergence_bar::Layout::new(content.size.w as f32, t.titles.len(), t.shown, &buttons.0, &buttons.1),
+            None => vergence_bar::Layout::plain(content.size.w as f32, &buttons.0, &buttons.1),
+        };
+        Frame { content, title, layout, tabs }
     }
 
     /// What of the bar is at `pos`, if anything.
@@ -172,7 +191,12 @@ impl Server {
 
     fn frame_of(&self, w: &Win) -> Option<Frame> {
         let buttons = self.button_layout();
-        self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons))).flatten()
+        self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, tabs_of(w)))).flatten()
+    }
+
+    /// The id a native window gave the tab at `index` of its bar.
+    pub fn tab_id(&self, w: &Win, index: usize) -> Option<u32> {
+        tabs_of(w).and_then(|t| t.ids.get(index).copied())
     }
 
     /// The window buttons, left and right, as the settings say
@@ -221,6 +245,9 @@ impl Server {
                     Some(Part::Button(WinButton::Close)) => return Hit::Close(w.clone()),
                     Some(Part::Button(WinButton::Maximize)) => return Hit::Maximize(w.clone()),
                     Some(Part::Button(WinButton::Minimize)) => return Hit::Minimize(w.clone()),
+                    Some(Part::Tab(i)) => return Hit::Tab(w.clone(), i),
+                    Some(Part::CloseTab(i)) => return Hit::CloseTab(w.clone(), i),
+                    Some(Part::Plus) => return Hit::Plus(w.clone()),
                     Some(_) => return Hit::Title(w.clone()),
                     None => {}
                 }
@@ -272,6 +299,9 @@ impl Server {
                 Hit::Close(w) => Some((w, Part::Button(WinButton::Close))),
                 Hit::Maximize(w) => Some((w, Part::Button(WinButton::Maximize))),
                 Hit::Minimize(w) => Some((w, Part::Button(WinButton::Minimize))),
+                Hit::Tab(w, i) => Some((w, Part::Tab(i))),
+                Hit::CloseTab(w, i) => Some((w, Part::CloseTab(i))),
+                Hit::Plus(w) => Some((w, Part::Plus)),
                 _ => None,
             }
         };
@@ -321,24 +351,34 @@ impl Server {
                     // The bar, vergence-bar's, drawn once per scale and again when what it shows changes.
                     let hover = hovered.as_ref().filter(|(hw, _)| *hw == w).map(|(_, p)| *p);
                     let width = f.title.size.w;
-                    let key = (title.clone(), width, active, hover, layout_text.clone());
+                    let (titles, shown, accent) = f.tabs.as_ref().map(|t| (t.titles.clone(), t.shown, t.accent)).unwrap_or_default();
+                    let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent);
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
-                        key: (String::new(), -1, false, None, String::new()),
+                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None),
                         buffer: MemoryRenderBuffer::new(Fourcc::Abgr8888, (1, 1), 1, Transform::Normal, None),
                     });
                     if picture.key != key && width > 0 {
                         let face = fonts.face("sans-serif", 400, false);
                         let mut scene = vergence_scene::Scene::new(width as f32, TITLE_H as f32);
+                        // The tab in front: the desktop's color, or the program's accent (bar milestone 1).
+                        let front = match accent {
+                            Some(c) => vergence_scene::Color::rgb((c >> 16) as u8, (c >> 8) as u8, c as u8),
+                            None => {
+                                let c = if active { vergence_look::TAB_FRONT_FOCUSED } else { vergence_look::TAB_FRONT_UNFOCUSED };
+                                vergence_scene::Color::rgb(c.0, c.1, c.2)
+                            }
+                        };
+                        let ink = if active { vergence_look::INK_FOCUSED } else { vergence_look::INK_UNFOCUSED };
                         let look = vergence_bar::Look {
                             focused: active,
-                            pane: vergence_scene::Color::rgb(0, 0, 0),
-                            pane_ink: vergence_scene::Color::rgb(255, 255, 255),
+                            pane: front,
+                            pane_ink: vergence_scene::Color::rgb(ink.0, ink.1, ink.2),
                             font: face,
                             font_size: vergence_bar::FONT_SIZE,
-                            titles: &[],
+                            titles: &titles,
                             title: &title,
-                            shown: 0,
+                            shown,
                             hover,
                         };
                         vergence_bar::draw(&mut scene, fonts, &f.layout, &look);
@@ -499,5 +539,18 @@ pub fn edge_icon(e: ResizeEdge) -> smithay::input::pointer::CursorIcon {
         ResizeEdge::BOTTOM => C::SResize,
         ResizeEdge::LEFT => C::WResize,
         _ => C::EResize,
+    }
+}
+
+/// A native window's tabs, if it described them (bar milestone 1).
+fn tabs_of(w: &Win) -> Option<Tabs> {
+    match w.native()?.bar()? {
+        vergence_protocol::window::Bar::Tabs { tabs, front, accent, .. } => Some(Tabs {
+            shown: tabs.iter().position(|t| t.id == front).unwrap_or(0),
+            titles: tabs.iter().map(|t| t.title.clone()).collect(),
+            ids: tabs.iter().map(|t| t.id).collect(),
+            accent,
+        }),
+        vergence_protocol::window::Bar::Plain => None,
     }
 }

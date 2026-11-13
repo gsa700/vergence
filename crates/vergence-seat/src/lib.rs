@@ -66,6 +66,12 @@ pub enum Part {
     Close(WinId),
     Maximize(WinId),
     Minimize(WinId),
+    /// A tab of a window's bar (by its place in the row), a tab's close
+    /// button, and the + (bar milestone 1): the server draws them, the
+    /// program hears what was done.
+    Tab(WinId, u32),
+    CloseTab(WinId, u32),
+    Plus(WinId),
     /// The dock (the shelf).
     Dock,
     /// The applications popup.
@@ -94,7 +100,7 @@ impl Target {
     pub fn window(&self) -> Option<WinId> {
         match *self {
             Target::Surface(w, _) | Target::Native(w) => Some(w),
-            Target::Server(Part::Title(w) | Part::Edge(w, _) | Part::Close(w) | Part::Maximize(w) | Part::Minimize(w)) => Some(w),
+            Target::Server(Part::Title(w) | Part::Edge(w, _) | Part::Close(w) | Part::Maximize(w) | Part::Minimize(w) | Part::Tab(w, _) | Part::CloseTab(w, _) | Part::Plus(w)) => Some(w),
             Target::Server(_) => None,
         }
     }

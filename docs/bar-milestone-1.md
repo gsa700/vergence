@@ -114,6 +114,23 @@ window straddling two monitors has a sharp bar on both.
   changes. The bar is 36 points tall now, the toolkit's (the server's was
   24). On Hubble (layout "close,minimize,maximize:") the settings app's
   buttons are on the left like the terminal's. 372 tests on all three.
+- **Step 3 done** (2026-11-12): the second half. A native window whose
+  tabs the server may draw (`App::tabs_by_server` in vergence-ui) leaves
+  its frame to the server on the native road, sends its bar description
+  after each frame in which it changed (`App::bar`), hears the tab events
+  in `App::tab`, and leaves its own bar out of its picture
+  (`Frame::bar_by_server`); over Wayland and under other desktops it draws
+  its own bar as before. The server lays a described window's bar out with
+  `Layout::new`, draws its tabs (the tab in front in the desktop's new
+  TAB_FRONT colors, or the program's accent) and hit-tests them: a tab,
+  its close button and + are seat parts (vergence-seat `Part::Tab`,
+  `CloseTab`, `Plus`); a left press on a tab chooses it, a middle press or
+  its close button closes it, + opens one. The terminal is the first user
+  (tab ids, a bar height of 0 when the server draws it). On Hubble by
+  `vctl`: + opens a tab and the bar shows it within 0.3 s, a tab is chosen,
+  a tab's close button closes it, the last one closes the window. 372 tests
+  on all three. The left controls are the default since the same evening
+  (cbe95ae).
 
 ## Steps
 

@@ -120,6 +120,32 @@ pub struct Frame {
     pub number: u64,
     /// What drew the frame before this one: "GPU", "CPU", or "" for the first.
     pub drawn_by: &'static str,
+    /// The server draws this window's tabbed bar ([`App::tabs_by_server`],
+    /// on the native road): the scene leaves it out and starts at the top.
+    pub bar_by_server: bool,
+}
+
+/// What the bar's description is made of ([`App::bar`]): the native
+/// protocol's own types.
+pub use vergence_protocol::window::{Bar, MenuEntry as BarMenuEntry, Place as BarPlace, Tab as BarTab};
+
+/// What the user did with the tabs the server drew ([`App::tab`]); each
+/// tab named by the id the program gave it in [`App::bar`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum TabEvent {
+    Chosen(u32),
+    Close(u32),
+    CloseOthers(u32),
+    /// The + was pressed.
+    New,
+    /// Dragged to another place in the row (counted with it taken out first).
+    Moved { tab: u32, to: u32 },
+    /// Dragged out of the window, or "Move to a new window": a window for it, there.
+    Out { tab: u32, place: BarPlace },
+    /// Dropped on another window of this program, at `to`.
+    Join { tab: u32, into: u32, to: u32 },
+    /// One of the program's own tab-menu entries.
+    Menu { tab: u32, entry: u32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -395,6 +421,24 @@ pub trait App {
     fn place(&self) -> Place {
         Place::Anywhere
     }
+
+    /// True if the window's bar has tabs the server may draw (bar milestone
+    /// 1): on the native road the window then leaves its frame to the server,
+    /// describes its tabs with [`App::bar`], hears what was done with them in
+    /// [`App::tab`], and draws no bar of its own ([`Frame::bar_by_server`]).
+    /// Elsewhere it draws its own bar as before.
+    fn tabs_by_server(&self) -> bool {
+        false
+    }
+
+    /// The bar's description, when it has changed since it was last asked:
+    /// asked after each frame when the server draws the bar. None: as before.
+    fn bar(&mut self) -> Option<Bar> {
+        None
+    }
+
+    /// Something was done with a tab the server drew.
+    fn tab(&mut self, _event: TabEvent, _window: &mut Window) {}
 
     /// The window's meaning (Contract 3), when it has changed since it was
     /// last asked: asked after each frame on the native road. None: as before.
@@ -1373,7 +1417,7 @@ impl Runner {
     fn draw(&mut self, app: &mut dyn App) -> io::Result<()> {
         let t = Instant::now();
         let bar_h = self.bar_h();
-        let frame = Frame { width: self.width as f32, height: (self.height as f32 - bar_h).max(1.0), scale: self.scale120 as f32 / 120.0, time: self.started.elapsed().as_secs_f64(), number: self.frames, drawn_by: self.drawn_by };
+        let frame = Frame { width: self.width as f32, height: (self.height as f32 - bar_h).max(1.0), scale: self.scale120 as f32 / 120.0, time: self.started.elapsed().as_secs_f64(), number: self.frames, drawn_by: self.drawn_by , bar_by_server: false };
         let mut scene = app.scene(&frame, &mut self.fonts);
         if self.frame {
             self.add_bar(&mut scene, &app.title());

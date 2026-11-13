@@ -38,7 +38,7 @@ fn target(rng: &mut Rng) -> Option<Target> {
         4..=5 => Target::Native(w),
         6 => Target::Server(Part::Title(w)),
         7 => Target::Server(Part::Edge(w, Edges::RIGHT)),
-        8 => Target::Server([Part::Close(w), Part::Maximize(w), Part::Minimize(w)][rng.below(3)]),
+        8 => Target::Server([Part::Close(w), Part::Maximize(w), Part::Minimize(w), Part::Tab(w, 1), Part::CloseTab(w, 0), Part::Plus(w)][rng.below(6)]),
         9 => Target::Server(Part::Dock),
         10 => Target::Server(Part::Menu),
         11 => Target::Server(Part::Popup),

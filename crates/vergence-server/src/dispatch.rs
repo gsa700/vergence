@@ -32,6 +32,7 @@ use smithay::{
     utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER, Size},
     wayland::{compositor, shell::xdg::SurfaceCachedState},
 };
+use vergence_protocol::window::WinEvent;
 use vergence_seat::{Edges, Out, Part, Target, WinId};
 
 use crate::{decor::Hit, state::Server, win::Win};
@@ -203,6 +204,9 @@ impl Server {
             Hit::Maximize(w) => Target::Server(Part::Maximize(self.win_id(&w))),
             Hit::Minimize(w) => Target::Server(Part::Minimize(self.win_id(&w))),
             Hit::Edge(w, e) => Target::Server(Part::Edge(self.win_id(&w), e.into())),
+            Hit::Tab(w, i) => Target::Server(Part::Tab(self.win_id(&w), i as u32)),
+            Hit::CloseTab(w, i) => Target::Server(Part::CloseTab(self.win_id(&w), i as u32)),
+            Hit::Plus(w) => Target::Server(Part::Plus(self.win_id(&w))),
             Hit::Shelf => Target::Server(Part::Dock),
             Hit::Nothing => Target::Server(Part::Desktop),
         })
@@ -442,8 +446,24 @@ impl Server {
             Target::Server(Part::Dock) if pressed && button == vergence_seat::BTN_RIGHT => self.shelf_menu(pos),
             Target::Server(Part::Dock) if !pressed && self.shelf.held.is_some_and(|(b, _)| b == button) => self.shelf_release(pos),
             Target::Server(Part::Desktop) if pressed && button == vergence_seat::BTN_RIGHT => self.open_menu(pos),
+            // A native window's tabs (bar milestone 1): the program hears what was done.
+            Target::Server(Part::Tab(id, i)) if pressed && button == vergence_seat::BTN_LEFT => self.tab_event(id, i, |window, tab| WinEvent::TabChosen { window, tab }),
+            Target::Server(Part::Tab(id, i)) if pressed && button == vergence_seat::BTN_MIDDLE => self.tab_event(id, i, |window, tab| WinEvent::TabClose { window, tab }),
+            Target::Server(Part::CloseTab(id, i)) if pressed && button == vergence_seat::BTN_LEFT => self.tab_event(id, i, |window, tab| WinEvent::TabClose { window, tab }),
+            Target::Server(Part::Plus(id)) if pressed && button == vergence_seat::BTN_LEFT => {
+                if let Some(Win::Native(n)) = self.input.wins.get(&id).cloned() {
+                    self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(WinEvent::TabNew { window: n.id }));
+                }
+            }
             Target::Server(_) => {}
         }
+    }
+
+    /// Tell a native window what was done with its tab at `index`.
+    fn tab_event(&mut self, id: WinId, index: u32, event: impl FnOnce(u32, u32) -> WinEvent) {
+        let Some(w) = self.input.wins.get(&id).cloned() else { return };
+        let (Win::Native(n), Some(tab)) = (&w, self.tab_id(&w, index as usize)) else { return };
+        self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(event(n.id, tab)));
     }
 
     /// The drag and drop's event, to Smithay as it came; when its grab has

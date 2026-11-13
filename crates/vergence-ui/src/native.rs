@@ -40,6 +40,7 @@ use vergence_scene::{Color, Scene};
 use vergence_text::Fonts;
 
 use crate::{
+    TabEvent,
     App, Button, Command, Cursor, Frame, GPU_BUFFERS, Input, MAX_KEYMAP, MeaningTree, MAX_PASTE, Modifiers, PASTE_TIMEOUT, Paste, Repeat, TEXT_KINDS, Waker, Window, keyboard, other, set_timer,
     touch,
 };
@@ -100,6 +101,8 @@ struct Native {
     wake: std::fs::File,
     wake_pending: Arc<AtomicBool>,
     timers: Vec<(u64, Instant)>,
+    /// The server draws this window's tabbed bar (App::tabs_by_server).
+    bar_by_server: bool,
 }
 
 fn client_error(e: ClientError) -> io::Error {
@@ -117,7 +120,9 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
         return Ok(None);
     }
     let Ok(mut client) = Client::connect(&app.app_id()) else { return Ok(None) };
-    let (title, own_frame, place) = (app.title(), app.own_frame(), app.place());
+    // A window whose tabs the server may draw leaves its frame to the server here.
+    let bar_by_server = app.own_frame() && app.tabs_by_server();
+    let (title, own_frame, place) = (app.title(), app.own_frame() && !bar_by_server, app.place());
     let created = client.request(|serial| {
         ClientMsg::Window(WinRequest::Create {
             serial,
@@ -178,6 +183,7 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
         wake: wake_read.into(),
         wake_pending,
         timers: Vec::new(),
+        bar_by_server,
     };
     let result = n.run(app);
     let _ = n.client.send(&ClientMsg::Window(WinRequest::Destroy { window: WINDOW }));
@@ -460,16 +466,15 @@ impl Native {
                 }
             }
             WinEvent::Created { .. } => {}
-            // The bar's events (bar milestone 1): the toolkit draws its own bar
-            // until the server draws it (step 3), so none come yet.
-            WinEvent::TabChosen { .. }
-            | WinEvent::TabClose { .. }
-            | WinEvent::TabCloseOthers { .. }
-            | WinEvent::TabNew { .. }
-            | WinEvent::TabMoved { .. }
-            | WinEvent::TabOut { .. }
-            | WinEvent::TabJoin { .. }
-            | WinEvent::TabMenu { .. } => {}
+            // The bar's events (bar milestone 1): what was done with the tabs the server drew.
+            WinEvent::TabChosen { tab, .. } => self.with_window(app, |app, w| app.tab(TabEvent::Chosen(tab), w))?,
+            WinEvent::TabClose { tab, .. } => self.with_window(app, |app, w| app.tab(TabEvent::Close(tab), w))?,
+            WinEvent::TabCloseOthers { tab, .. } => self.with_window(app, |app, w| app.tab(TabEvent::CloseOthers(tab), w))?,
+            WinEvent::TabNew { .. } => self.with_window(app, |app, w| app.tab(TabEvent::New, w))?,
+            WinEvent::TabMoved { tab, to, .. } => self.with_window(app, |app, w| app.tab(TabEvent::Moved { tab, to }, w))?,
+            WinEvent::TabOut { tab, place, .. } => self.with_window(app, |app, w| app.tab(TabEvent::Out { tab, place }, w))?,
+            WinEvent::TabJoin { tab, into, to, .. } => self.with_window(app, |app, w| app.tab(TabEvent::Join { tab, into, to }, w))?,
+            WinEvent::TabMenu { tab, entry, .. } => self.with_window(app, |app, w| app.tab(TabEvent::Menu { tab, entry }, w))?,
         }
         Ok(())
     }
@@ -583,7 +588,7 @@ impl Native {
 
     fn draw(&mut self, app: &mut dyn App) -> io::Result<()> {
         let t = Instant::now();
-        let frame = Frame { width: self.width as f32, height: self.height as f32, scale: self.scale as f32, time: self.started.elapsed().as_secs_f64(), number: self.frames, drawn_by: self.drawn_by };
+        let frame = Frame { width: self.width as f32, height: self.height as f32, scale: self.scale as f32, time: self.started.elapsed().as_secs_f64(), number: self.frames, drawn_by: self.drawn_by, bar_by_server: self.bar_by_server };
         let scene = app.scene(&frame, &mut self.fonts);
         let background = app.background();
         let (pw, ph) = pixel_size(&scene, frame.scale).map_err(other)?;
@@ -611,6 +616,12 @@ impl Native {
         self.frames += 1;
         if !app.shown(&frame, t.elapsed().as_secs_f64() * 1e3) {
             self.closing = true;
+        }
+        // The bar, when the server draws it and it has changed (bar milestone 1).
+        if self.bar_by_server
+            && let Some(bar) = app.bar()
+        {
+            self.send(WinRequest::Bar { window: WINDOW, bar })?;
         }
         // The window's meaning, when it has changed (Contract 3).
         if let Some(tree) = app.meaning() {

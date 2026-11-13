@@ -48,6 +48,11 @@ pub const BAR_FOCUSED: Rgb = Rgb(51, 61, 82);
 pub const BAR_UNFOCUSED: Rgb = Rgb(56, 56, 56);
 pub const INK_FOCUSED: Rgb = Rgb(235, 235, 235);
 pub const INK_UNFOCUSED: Rgb = Rgb(158, 158, 158);
+/// The tab in front on a bar the server draws (bar milestone 1: the desktop's
+/// colors for every window; a program's accent may take its place), for the
+/// window that has the keyboard and for the others. The ink on it is INK_*.
+pub const TAB_FRONT_FOCUSED: Rgb = Rgb(76, 90, 120);
+pub const TAB_FRONT_UNFOCUSED: Rgb = Rgb(82, 82, 82);
 /// The border line around the window that has the keyboard, and the others.
 pub const EDGE_FOCUSED: Rgb = Rgb(107, 122, 158);
 pub const EDGE_UNFOCUSED: Rgb = Rgb(87, 87, 87);

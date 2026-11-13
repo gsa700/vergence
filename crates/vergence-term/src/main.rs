@@ -473,6 +473,8 @@ impl Session {
 
 /// A tab: its room divided among one or more terminals.
 struct Tab {
+    /// Its name to the server, which draws the bar on the native road (bar milestone 1).
+    id: u32,
     tree: Node,
     /// The terminals, by the numbers the tree knows them by.
     panes: Vec<(u64, Session)>,
@@ -511,6 +513,13 @@ struct Terminal {
     tabs: Vec<Tab>,
     /// The tab in front.
     shown: usize,
+    /// The id the next tab gets.
+    next_tab: u32,
+    /// The bar's height in the window: BAR_H when it draws its own, 0 when
+    /// the server draws it (native road, bar milestone 1).
+    bar_h: f32,
+    /// The bar as last described to the server: each tab's id and title, the front one.
+    bar_told: Option<(Vec<(u32, String)>, u32)>,
     /// The number the next terminal gets.
     next_id: u64,
     waker: Option<Waker>,
@@ -587,7 +596,7 @@ impl Terminal {
     /// through it; a full-screen program, which has none, gets arrow keys, as
     /// it does from the wheel.
     fn finger_scroll(&mut self, x: f32, y: f32, lines: isize, window: &mut Window) {
-        let Some((id, area)) = self.pane_at(x, y).filter(|_| y >= BAR_H) else { return };
+        let Some((id, area)) = self.pane_at(x, y).filter(|_| y >= self.bar_h) else { return };
         // A program that asked for the mouse gets the wheel, a notch for every
         // WHEEL_LINES lines the finger has gone.
         let mouse = self.session_mut(id).is_some_and(|session| {
@@ -631,6 +640,9 @@ impl Terminal {
         Terminal {
             tabs: Vec::new(),
             shown: 0,
+            next_tab: 1,
+            bar_h: BAR_H,
+            bar_told: None,
             next_id: 1,
             waker: None,
             palette: palette(),
@@ -676,9 +688,14 @@ impl Terminal {
         Layout::new(self.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right)
     }
 
+    /// What of our own bar is at a point; nothing when the server draws the bar.
+    fn bar_at(&self, x: f32, y: f32) -> Option<Part> {
+        if self.bar_h == 0.0 { None } else { self.layout().at(x, y) }
+    }
+
     /// The room under the bar, which the front tab's panes share.
     fn room(&self) -> Rect {
-        Rect::new(0.0, BAR_H, self.width, (self.height - BAR_H).max(0.0))
+        Rect::new(0.0, self.bar_h, self.width, (self.height - self.bar_h).max(0.0))
     }
 
     /// Where the front tab's panes and the lines between them are.
@@ -740,7 +757,11 @@ impl Terminal {
 
     fn new_tab(&mut self, window: &mut Window) {
         if let Some((id, session)) = self.start(self.fits.0, self.fits.1) {
-            self.tabs.push(Tab { tree: Node::Leaf(id), panes: vec![(id, session)], active: id });
+            {
+                let tab_id = self.next_tab;
+                self.next_tab += 1;
+                self.tabs.push(Tab { id: tab_id, tree: Node::Leaf(id), panes: vec![(id, session)], active: id });
+            }
             self.shown = self.tabs.len() - 1;
             self.retitle(window);
         }
@@ -992,8 +1013,8 @@ impl Terminal {
     /// The pointer moved with nothing held: what it is over, the shape it
     /// takes, and word of it to a program that asked to hear.
     fn hover(&mut self, x: f32, y: f32, window: &mut Window) {
-        let part = self.layout().at(x, y);
-        let pane = if part.is_none() && y >= BAR_H { self.pane_at(x, y) } else { None };
+        let part = self.bar_at(x, y);
+        let pane = if part.is_none() && y >= self.bar_h { self.pane_at(x, y) } else { None };
         self.over = pane.map(|(id, _)| id);
         let divider = if part.is_none() { self.areas().1.into_iter().find(|d| d.holds(x, y)) } else { None };
         let cursor = if let Some(d) = divider {
@@ -1248,6 +1269,63 @@ impl App for Terminal {
         true
     }
 
+    // Bar milestone 1: in a Vergence session the server draws the tabs.
+    fn tabs_by_server(&self) -> bool {
+        true
+    }
+
+    fn bar(&mut self) -> Option<vergence_ui::Bar> {
+        let tabs: Vec<(u32, String)> = self.tabs.iter().map(|t| (t.id, t.label())).collect();
+        let front = self.tabs.get(self.shown).map_or(0, |t| t.id);
+        if self.bar_told.as_ref().is_some_and(|(told, f)| *told == tabs && *f == front) {
+            return None;
+        }
+        let bar = vergence_ui::Bar::Tabs {
+            tabs: tabs.iter().map(|(id, title)| vergence_ui::BarTab { id: *id, title: title.chars().take(200).collect(), closable: true }).collect(),
+            front,
+            plus: true,
+            accent: None,
+            menu: Vec::new(),
+        };
+        self.bar_told = Some((tabs, front));
+        Some(bar)
+    }
+
+    fn tab(&mut self, event: vergence_ui::TabEvent, window: &mut Window) {
+        use vergence_ui::TabEvent;
+        let index = |id: u32| self.tabs.iter().position(|t| t.id == id);
+        match event {
+            TabEvent::Chosen(id) => {
+                if let Some(i) = index(id) {
+                    self.show_tab(i, window);
+                }
+            }
+            TabEvent::Close(id) => {
+                if let Some(i) = index(id) {
+                    self.close_tab(i, window);
+                }
+            }
+            TabEvent::CloseOthers(id) => {
+                while let Some(i) = self.tabs.iter().position(|t| t.id != id) {
+                    self.close_tab(i, window);
+                }
+            }
+            TabEvent::New => self.new_tab(window),
+            TabEvent::Moved { tab, to } => {
+                if let Some(from) = index(tab) {
+                    let front = self.tabs.get(self.shown).map(|t| t.id);
+                    bar::reorder(&mut self.tabs, from, to as usize);
+                    if let Some(f) = front.and_then(|f| self.tabs.iter().position(|t| t.id == f)) {
+                        self.shown = f;
+                    }
+                    window.redraw();
+                }
+            }
+            // A tab's own window and joining another terminal come with step 4.
+            TabEvent::Out { .. } | TabEvent::Join { .. } | TabEvent::Menu { .. } => {}
+        }
+    }
+
     fn background(&self) -> Color {
         let bg = self.palette.bg;
         Color::rgba(bg.r, bg.g, bg.b, (self.opacity * 255.0).round() as u8)
@@ -1263,7 +1341,11 @@ impl App for Terminal {
         watch_settings(self.settings_changed.clone(), waker);
         for _ in 0..self.open_with {
             match self.start(self.fits.0, self.fits.1) {
-                Some((id, session)) => self.tabs.push(Tab { tree: Node::Leaf(id), panes: vec![(id, session)], active: id }),
+                Some((id, session)) => {
+                    let tab_id = self.next_tab;
+                    self.next_tab += 1;
+                    self.tabs.push(Tab { id: tab_id, tree: Node::Leaf(id), panes: vec![(id, session)], active: id });
+                }
                 None => std::process::exit(1),
             }
         }
@@ -1279,7 +1361,7 @@ impl App for Terminal {
             // A finger held still on the text is the right button there: the menu.
             TIMER_LONG_PRESS => {
                 if let Some(vergence_ui::touch::Gesture::LongPress { x, y }) = self.fingers.long_press(now)
-                    && y >= BAR_H
+                    && y >= self.bar_h
                 {
                     let modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false };
                     self.input(&Input::PointerMoved { x, y }, window);
@@ -1397,7 +1479,7 @@ impl App for Terminal {
                 }
                 // A drag that began on the bar is the pointer's with its button
                 // held: the window is moved by its bar, a tab along the row.
-                Some(Gesture::Drag { x, y, from, .. }) if from.1 < BAR_H => {
+                Some(Gesture::Drag { x, y, from, .. }) if from.1 < self.bar_h => {
                     if self.finger_pointer.is_none() {
                         let modifiers = Modifiers { shift: false, ctrl: false, alt: false, logo: false };
                         self.input(&Input::PointerMoved { x: from.0, y: from.1 }, window);
@@ -1493,8 +1575,8 @@ impl App for Terminal {
             },
             // One thing is held at a time: other buttons wait for its release.
             Input::Button { pressed: true, .. } if self.held.is_some() => {}
-            Input::Button { button, pressed: true, x, y, modifiers } => match (button, self.layout().at(*x, *y)) {
-                (_, None) if *y >= BAR_H => self.press(*button, *x, *y, *modifiers, window),
+            Input::Button { button, pressed: true, x, y, modifiers } => match (button, self.bar_at(*x, *y)) {
+                (_, None) if *y >= self.bar_h => self.press(*button, *x, *y, *modifiers, window),
                 (Button::Left, Some(Part::Button(WinButton::Close))) => window.close(),
                 (Button::Left, Some(Part::Button(WinButton::Minimize))) => window.minimize(),
                 (Button::Left, Some(Part::Button(WinButton::Maximize))) => {
@@ -1599,7 +1681,7 @@ impl App for Terminal {
             }
             Input::Scroll { x, y, dy, .. } => {
                 // The wheel is the pane's under the pointer, whichever has the keys.
-                let Some((id, area)) = self.pane_at(*x, *y).filter(|_| *y >= BAR_H) else { return };
+                let Some((id, area)) = self.pane_at(*x, *y).filter(|_| *y >= self.bar_h) else { return };
                 let notches = (dy / 15.0).round() as isize;
                 // A program with the mouse gets the wheel, a report for each notch.
                 if !self.shift && notches != 0 {
@@ -1676,7 +1758,9 @@ impl App for Terminal {
         let (cw, ch) = (mt.cell_w, mt.cell_h);
         // The grid that fits a room: the whole of it for a new tab, a pane's for its terminal.
         let fit = |w: f32, h: f32| ((((w - 2.0 * PAD) / cw).floor().max(2.0) as usize).min(2000), (((h - 2.0 * PAD) / ch).floor().max(1.0) as usize).min(1000));
-        self.fits = fit(frame.width, frame.height - BAR_H);
+        // The server draws the bar on the native road; the room starts at the top then.
+        self.bar_h = if frame.bar_by_server { 0.0 } else { BAR_H };
+        self.fits = fit(frame.width, frame.height - self.bar_h);
         // The tabs behind are fitted as well, whenever the window's or the cells'
         // size changes: a program in a tab nobody is looking at is told its real
         // size all the same (it was left at the size it started with until shown).
@@ -1694,9 +1778,11 @@ impl App for Terminal {
             }
         }
 
-        let titles: Vec<String> = self.tabs.iter().map(Tab::label).collect();
-        let layout = Layout::new(frame.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right);
-        bar::draw(&mut scene, fonts, &layout, &bar::Look { focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, title: "", shown: self.shown, hover: self.hover });
+        if !frame.bar_by_server {
+            let titles: Vec<String> = self.tabs.iter().map(Tab::label).collect();
+            let layout = Layout::new(frame.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right);
+            bar::draw(&mut scene, fonts, &layout, &bar::Look { focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, title: "", shown: self.shown, hover: self.hover });
+        }
 
         let Some(tab) = self.tabs.get(self.shown) else { return scene };
         // Scene font numbers for the faces used in this frame.
