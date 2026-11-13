@@ -249,6 +249,20 @@ one process.
   the drop point, a one-tab window joined into another, the tab menu's
   Move to a new window, both section-menu moves; one process and every
   shell kept throughout. 378 tests on all three.
+- **Step 8 done** (2026-11-12): clean-up. The server draws every native
+  window's bar: `WinRequest::Create` lost `own_frame`, and the window's own
+  `Move` and `Resize` requests are gone (ops 106 and 107 left unused), so
+  the bus protocol is version 2. On the native road an app that draws its
+  own bar elsewhere (`App::own_frame`) is told the server draws it
+  (`Frame::bar_by_server`); the toolkit's Wayland road keeps the flag for
+  other desktops. Gone with them: the server's finger-moves-a-native-window
+  path (touch.rs, seat `finger_on`) and vnative's `--own-frame`. Docs:
+  whitepaper §6.4 (tokens kept by the application, the server's bar and
+  tabs), native-milestone-1.md's protocol note. Besides (Dave, 2026-11-12):
+  the settings app runs in a Vergence session only (it refuses to start
+  without `VERGENCE_BUS`; its desktop entry has `OnlyShowIn=Vergence;`), and
+  the shelf honors OnlyShowIn and NotShowIn, so another desktop's own
+  entries (GNOME's Settings) leave Vergence's popup. 377 tests on all three.
 
 ## Steps
 

@@ -120,8 +120,9 @@ pub struct Frame {
     pub number: u64,
     /// What drew the frame before this one: "GPU", "CPU", or "" for the first.
     pub drawn_by: &'static str,
-    /// The server draws this window's tabbed bar ([`App::tabs_by_server`],
-    /// on the native road): the scene leaves it out and starts at the top.
+    /// The server draws the bar this window would draw ([`App::own_frame`],
+    /// on the native road, with its tabs if [`App::tabs_by_server`]): the
+    /// scene leaves it out and starts at the top.
     pub bar_by_server: bool,
 }
 
@@ -391,6 +392,8 @@ pub trait App {
     fn app_id(&self) -> String;
 
     /// True if the window draws its own bar; false asks the server for one.
+    /// On the native road the server draws every bar: the window is told so
+    /// by [`Frame::bar_by_server`] and leaves its own out.
     fn own_frame(&self) -> bool {
         false
     }

@@ -178,7 +178,7 @@ pub enum WinRequest {
     /// window of a program that keeps tokens; empty if the program keeps none
     /// (its windows are then told apart by the order they open in).
     /// Reply: [`WinEvent::Created`], then a [`WinEvent::Configure`].
-    Create { serial: u32, window: u32, role: String, token: String, title: String, width: f64, height: f64, own_frame: bool, parent: u32, place: Place },
+    Create { serial: u32, window: u32, role: String, token: String, title: String, width: f64, height: f64, parent: u32, place: Place },
     Destroy { window: u32 },
     Title { window: u32, title: String },
     /// The configure with this serial is drawn for.
@@ -192,10 +192,6 @@ pub enum WinRequest {
     Attach { window: u32, buffer: Buffer, damage: Vec<Damage> },
     /// The pointer's shape over this window (the cursor-shape protocol's numbers).
     Cursor { window: u32, shape: u16 },
-    /// Move or resize the window with the press of `input_serial`; `edges`
-    /// top 1, bottom 2, left 4, right 8.
-    Move { window: u32, input_serial: u32 },
-    Resize { window: u32, input_serial: u32, edges: u8 },
     Maximize { window: u32, on: bool },
     Minimize { window: u32 },
     /// Ask again where to be (Contract 2).
@@ -208,8 +204,8 @@ pub enum WinRequest {
     Copy { input_serial: u32, kinds: Vec<String> },
     /// The clipboard's data in this kind, please. Reply: [`WinEvent::ClipboardData`].
     Paste { serial: u32, kind: String },
-    /// What the window's bar shows now; the server draws it (a window
-    /// created with `own_frame` false). Sent again whenever it changes.
+    /// What the window's bar shows now; the server draws it (it draws every
+    /// native window's bar). Sent again whenever it changes.
     Bar { window: u32, bar: Bar },
 }
 
@@ -277,8 +273,8 @@ pub(crate) mod op {
     pub const ACK_CONFIGURE: u16 = 103;
     pub const ATTACH: u16 = 104;
     pub const CURSOR: u16 = 105;
-    pub const MOVE: u16 = 106;
-    pub const RESIZE: u16 = 107;
+    // 106 and 107 were Move and Resize, for windows that drew their own bar
+    // (gone with bar milestone 1, step 8: the server draws every bar).
     pub const MAXIMIZE: u16 = 108;
     pub const MINIMIZE: u16 = 109;
     pub const PLACE: u16 = 110;
@@ -449,9 +445,9 @@ impl WinRequest {
     pub fn encode(&self) -> Result<(Vec<u8>, Vec<RawFd>), WireError> {
         let mut fds = Vec::new();
         let e = match self {
-            WinRequest::Create { serial, window, role, token, title, width, height, own_frame, parent, place } => {
+            WinRequest::Create { serial, window, role, token, title, width, height, parent, place } => {
                 let mut e = Encoder::frame(op::CREATE);
-                e.u32(*serial).u32(*window).str(role).str(token).str(title).f64(*width).f64(*height).bool(*own_frame).u32(*parent);
+                e.u32(*serial).u32(*window).str(role).str(token).str(title).f64(*width).f64(*height).u32(*parent);
                 put_place(&mut e, place);
                 e
             }
@@ -494,16 +490,6 @@ impl WinRequest {
             WinRequest::Cursor { window, shape } => {
                 let mut e = Encoder::frame(op::CURSOR);
                 e.u32(*window).u16(*shape);
-                e
-            }
-            WinRequest::Move { window, input_serial } => {
-                let mut e = Encoder::frame(op::MOVE);
-                e.u32(*window).u32(*input_serial);
-                e
-            }
-            WinRequest::Resize { window, input_serial, edges } => {
-                let mut e = Encoder::frame(op::RESIZE);
-                e.u32(*window).u32(*input_serial).u8(*edges);
                 e
             }
             WinRequest::Maximize { window, on } => {
@@ -578,7 +564,6 @@ impl WinRequest {
                 title: d.str()?,
                 width: finite(d.f64()?, "width")?,
                 height: finite(d.f64()?, "height")?,
-                own_frame: d.bool()?,
                 parent: d.u32()?,
                 place: get_place(&mut d)?,
             },
@@ -619,8 +604,6 @@ impl WinRequest {
                 WinRequest::Attach { window, buffer, damage }
             }
             op::CURSOR => WinRequest::Cursor { window: d.u32()?, shape: d.u16()? },
-            op::MOVE => WinRequest::Move { window: d.u32()?, input_serial: d.u32()? },
-            op::RESIZE => WinRequest::Resize { window: d.u32()?, input_serial: d.u32()?, edges: d.u8()? },
             op::MAXIMIZE => WinRequest::Maximize { window: d.u32()?, on: d.bool()? },
             op::MINIMIZE => WinRequest::Minimize { window: d.u32()? },
             op::PLACE => WinRequest::Place { window: d.u32()?, place: get_place(&mut d)? },
@@ -931,15 +914,13 @@ mod tests {
         let a = shm();
         let planes = vec![Plane { fd: shm(), offset: 0, stride: 1024 }, Plane { fd: shm(), offset: 4096, stride: 512 }];
         let all = vec![
-            WinRequest::Create { serial: 7, window: 1, role: "main".into(), token: "".into(), title: "Terminal".into(), width: 880.0, height: 640.0, own_frame: true, parent: 0, place: Place::Monitor { id: "abc".into(), x: 10.0, y: 20.5 } },
+            WinRequest::Create { serial: 7, window: 1, role: "main".into(), token: "".into(), title: "Terminal".into(), width: 880.0, height: 640.0, parent: 0, place: Place::Monitor { id: "abc".into(), x: 10.0, y: 20.5 } },
             WinRequest::Destroy { window: 1 },
             WinRequest::Title { window: 1, title: "x".into() },
             WinRequest::AckConfigure { window: 1, serial: 9 },
             WinRequest::Attach { window: 1, buffer: Buffer::Shm { fd: a.clone(), width: 100, height: 50, stride: 400, format: 0 }, damage: vec![Damage { x: 0, y: 0, w: 10, h: 10 }] },
             WinRequest::Attach { window: 1, buffer: Buffer::Dmabuf { planes, width: 256, height: 128, format: 0x3432_5258, modifier: 1 << 56 }, damage: vec![] },
             WinRequest::Cursor { window: 1, shape: 2 },
-            WinRequest::Move { window: 1, input_serial: 4 },
-            WinRequest::Resize { window: 1, input_serial: 4, edges: 9 },
             WinRequest::Maximize { window: 1, on: true },
             WinRequest::Minimize { window: 1 },
             WinRequest::Place { window: 1, place: Place::Parent { x: 5.0, y: 6.0 } },

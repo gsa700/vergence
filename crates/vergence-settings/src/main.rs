@@ -2152,6 +2152,13 @@ fn main() -> std::io::Result<()> {
         println!("vergence-settings {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
+    // Vergence's settings are for a Vergence session only (Dave, 2026-11-12):
+    // other desktops have settings of their own. The server gives every
+    // program it starts its bus, nested or not.
+    if std::env::var_os(vergence_protocol::BUS_ENV).is_none() {
+        eprintln!("vergence-settings: runs in a Vergence session only ({} is not set)", vergence_protocol::BUS_ENV);
+        std::process::exit(1);
+    }
     vergence_widgets::run(App::new(), (880, 640))
 }
 

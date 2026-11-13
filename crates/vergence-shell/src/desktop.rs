@@ -8,7 +8,8 @@
 //! understood is left out, never guessed at.
 //!
 //! Read from an entry: Type, Name, Exec, Icon, TryExec, Terminal,
-//! NoDisplay, Hidden, StartupWMClass, Keywords. Translated names
+//! NoDisplay, Hidden, OnlyShowIn, NotShowIn, StartupWMClass, Keywords.
+//! Translated names
 //! (`Name[de]`) are not used yet.
 
 /// The most of a file that is read, and the longest line and argument list
@@ -16,6 +17,10 @@
 pub const MAX_FILE: usize = 256 * 1024;
 const MAX_VALUE: usize = 4096;
 const MAX_ARGS: usize = 256;
+
+/// This desktop's name, as OnlyShowIn and NotShowIn name desktops (and as
+/// the session's XDG_CURRENT_DESKTOP says it).
+pub const DESKTOP: &str = "Vergence";
 
 /// One application, as its desktop entry describes it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -143,6 +148,8 @@ pub fn parse(id: &str, text: &str) -> Option<Entry> {
     let text = if text.len() > MAX_FILE { text.get(..MAX_FILE).or_else(|| text.get(..text.floor_char_boundary(MAX_FILE)))? } else { text };
     let mut entry = Entry { id: id.to_string(), ..Entry::default() };
     let (mut in_group, mut seen_group, mut application, mut exec) = (false, false, false, None);
+    let names = |v: &str| v.split(';').any(|d| d.trim() == DESKTOP);
+    let (mut only_elsewhere, mut not_here) = (false, false);
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -172,11 +179,15 @@ pub fn parse(id: &str, text: &str) -> Option<Entry> {
             "Terminal" => entry.terminal = flag,
             "NoDisplay" => entry.no_display = flag,
             "Hidden" => entry.hidden = flag,
+            "OnlyShowIn" => only_elsewhere = !names(value),
+            "NotShowIn" => not_here = names(value),
             "StartupWMClass" => entry.startup_wm_class = unescape(value),
             "Keywords" => entry.keywords = unescape(value).split(';').map(str::trim).filter(|k| !k.is_empty()).map(str::to_string).collect(),
             _ => {}
         }
     }
+    // An entry for other desktops only is kept but not listed: it may still own windows.
+    entry.no_display |= only_elsewhere || not_here;
     // A hidden entry is kept (it hides the system's of its id) whatever else it lacks.
     if entry.hidden {
         return seen_group.then_some(entry);
@@ -271,6 +282,12 @@ Exec=firefox --new-window %u
         assert_eq!(parse("x", "[Desktop Entry]\nType=Application\nName=X\nExec=\"open\n"), None);
         // Keys of another group are not the entry's.
         assert_eq!(parse("x", "[Other]\nType=Application\nName=X\nExec=x\n"), None);
+        // Another desktop's entries are kept but not listed; ours and everyone's are.
+        let app = "[Desktop Entry]\nType=Application\nName=A\nExec=a\n";
+        assert!(parse("g", &format!("{app}OnlyShowIn=GNOME;Unity;\n")).unwrap().no_display);
+        assert!(!parse("v", &format!("{app}OnlyShowIn=GNOME;Vergence;\n")).unwrap().no_display);
+        assert!(parse("n", &format!("{app}NotShowIn=KDE;Vergence;\n")).unwrap().no_display);
+        assert!(!parse("k", &format!("{app}NotShowIn=KDE;\n")).unwrap().no_display);
         // Hidden is kept, to hide the system's entry of the same id, with or without the rest.
         let h = parse("x", "[Desktop Entry]\nHidden=true\n").unwrap();
         assert!(h.hidden && h.exec.is_empty());

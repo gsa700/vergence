@@ -176,8 +176,9 @@ fn physical(r: Rectangle<f64, Logical>, output_loc: Point<i32, Logical>, scale: 
 impl Server {
     /// Does the server draw this window's title bar?
     pub fn has_title(&self, w: &Win) -> bool {
-        if let Some(n) = w.native() {
-            return !n.own_frame;
+        // Every native window's bar is the server's (bar milestone 1, step 8).
+        if w.native().is_some() {
+            return true;
         }
         if let Some(x) = w.x11_surface() {
             return !x.is_override_redirect() && !x.is_decorated() && !x.is_fullscreen();

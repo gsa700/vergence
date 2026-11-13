@@ -99,8 +99,6 @@ struct Win<'a> {
     frames: u64,
     closing: bool,
     pointer_at: Option<(f32, f32)>,
-    /// The serial of the last button press (to move or resize).
-    press_serial: u32,
     cursor: Cursor,
     fingers: Vec<(i32, f32, f32)>,
     timers: Vec<(u64, Instant)>,
@@ -215,10 +213,11 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
 }
 
 /// The Create request for a window run by `app` (its serial filled in by the
-/// sender), and whether the server draws its tabbed bar.
+/// sender), and whether the server draws a bar the app would otherwise draw.
 fn create_request(app: &dyn App, window: u32, serial: u32, size: (u32, u32)) -> (bool, WinRequest) {
-    // A window whose tabs the server may draw leaves its frame to the server here.
-    let bar_by_server = app.own_frame() && app.tabs_by_server();
+    // The server draws every native window's bar (bar milestone 1, step 8):
+    // an app that draws its own elsewhere leaves it out here.
+    let bar_by_server = app.own_frame();
     let request = WinRequest::Create {
         serial,
         window,
@@ -227,7 +226,6 @@ fn create_request(app: &dyn App, window: u32, serial: u32, size: (u32, u32)) -> 
         title: app.title(),
         width: size.0.max(1) as f64,
         height: size.1.max(1) as f64,
-        own_frame: app.own_frame() && !bar_by_server,
         parent: 0,
         place: app.place(),
     };
@@ -254,7 +252,6 @@ impl<'a> Win<'a> {
             frames: 0,
             closing: false,
             pointer_at: None,
-            press_serial: 0,
             cursor: Cursor::Default,
             fingers: Vec::new(),
             timers: Vec::new(),
@@ -358,14 +355,8 @@ impl<'a> Native<'a> {
             match command {
                 Command::Redraw => self.windows[i].dirty = true,
                 Command::Close => self.windows[i].closing = true,
-                Command::Move => {
-                    let input_serial = self.windows[i].press_serial;
-                    self.send(WinRequest::Move { window: id, input_serial })?
-                }
-                Command::Resize(edges) => {
-                    let input_serial = self.windows[i].press_serial;
-                    self.send(WinRequest::Resize { window: id, input_serial, edges: edges.wire() as u8 })?
-                }
+                // The server's bar and edges move and resize a native window.
+                Command::Move | Command::Resize(_) => {}
                 Command::Cursor(cursor) => {
                     let w = &mut self.windows[i];
                     if cursor != w.cursor {
@@ -532,7 +523,6 @@ impl<'a> Native<'a> {
             WinEvent::PointerButton { window, serial, button, pressed, .. } => {
                 let Some(i) = self.index(window) else { return Ok(()) };
                 if pressed {
-                    self.windows[i].press_serial = serial;
                     self.input_serial = serial;
                 }
                 let button = match button {
@@ -808,6 +798,7 @@ impl<'a> Native<'a> {
         }
         // The bar, when the server draws it and it has changed (bar milestone 1).
         if w.bar_by_server
+            && w.app.get().tabs_by_server()
             && let Some(bar) = w.app.get().bar()
         {
             self.send(WinRequest::Bar { window: id, bar })?;

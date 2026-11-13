@@ -8,3 +8,4 @@ Terminal=false
 Categories=Settings;
 Keywords=preferences;appearance;screens;wallpaper;theme;fonts;
 StartupWMClass=vergence-settings
+OnlyShowIn=Vergence;

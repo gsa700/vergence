@@ -10,12 +10,14 @@
 //! Version 1 has the bus itself and two topics: the monitors
 //! ([`Topic::Outputs`]) and the desktop settings ([`Topic::Settings`]); and
 //! notifications ([`ClientMsg::Notify`]), whose events go only to the client
-//! that made them.
+//! that made them. Version 2 (2026-11-12, bar milestone 1): the server
+//! draws every native window's bar; `Create` lost `own_frame`, and the
+//! window's own Move and Resize requests are gone.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

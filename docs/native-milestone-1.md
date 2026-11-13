@@ -53,7 +53,11 @@ connection.
 **A window.** A client asks for a window with its **identity** (Contract
 2: application id, a role such as "main" or "preferences", and a
 persistence token it may keep from a previous run), a title, a size asked
-for, and whether it draws its own bar. The server answers with the size
+for, and whether it draws its own bar (since bar milestone 1, step 8,
+2026-11-12, protocol version 2: it never does; the server draws every
+native window's bar, tabs included, and moves and resizes the window from
+it, so the flag and the window's own Move and Resize requests are gone;
+docs/bar-milestone-1.md). The server answers with the size
 to draw at, **in reference units**, and the exact scale of the monitor it
 is on (Contract 1); it says again when either changes. The window is
 shown when the client first sends a picture.

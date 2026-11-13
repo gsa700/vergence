@@ -248,7 +248,7 @@ fn window_messages_with_descriptors() {
     let pipe = || Fd::new(vergence_protocol::sock::pipe().unwrap().0);
     // Good messages to mutate from.
     let seeds: Vec<WinRequest> = vec![
-        WinRequest::Create { serial: 1, window: 1, role: "main".into(), token: String::new(), title: "t".into(), width: 640.0, height: 480.0, own_frame: false, parent: 0, place: Place::Anywhere },
+        WinRequest::Create { serial: 1, window: 1, role: "main".into(), token: String::new(), title: "t".into(), width: 640.0, height: 480.0, parent: 0, place: Place::Anywhere },
         WinRequest::Attach { window: 1, buffer: Buffer::Shm { fd: pipe(), width: 64, height: 32, stride: 256, format: 0 }, damage: vec![Damage { x: 0, y: 0, w: 8, h: 8 }] },
         WinRequest::Meaning { window: 1, focus: 2, caret: None, nodes: vec![Node { id: 2, parent: 0, role: "button".into(), name: "OK".into(), value: None, states: vec![], x: 0.0, y: 0.0, w: 10.0, h: 10.0 }] },
         WinRequest::Copy { input_serial: 3, kinds: vec!["text/plain".into()] },

@@ -261,6 +261,8 @@ A single display server owns all outputs and all input, like NeXT's Window Serve
 
 - Every window has a **stable identity**: application ID, window role and a persistence token.
 - Applications **may request** a position, relative to a monitor or a parent window. The **server decides and remembers**, per monitor set.
+- **The token is the application's to keep.** The server issues it when the window first opens; an application that wants its windows back hands each one's token in again on the next run, and the window returns exactly where it was, on the monitor it was on. A window the user closes on purpose is forgotten; a session's end forgets nothing. Places unseen for 90 days are pruned.
+- **The server draws every window's bar** on the native protocol, with the window controls on the side the user chose and an application's **tabs** described by the application and drawn, hit-tested and dragged by the server. A tab dragged out becomes a window where it was dropped; dropped on another window of the same application, it joins it. One bar for every application, so they look and behave alike and the application's name on it cannot be faked (§7.3).
 - **User rules override both** (for example, "the logbook always opens on the left monitor, top half").
 - Unplugging, sleeping and waking never pile windows onto one screen.
 

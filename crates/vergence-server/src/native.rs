@@ -25,8 +25,9 @@
 // native window Smithay's focus is none and this file sends enter, leave,
 // motion (in the window's reference units), buttons and the wheel, keeping
 // the window while a button is held (an implicit grab, as Wayland's). The
-// window's cursor shape is drawn while the pointer is over it. Move, resize
-// and minimize on request, when a button is held. Fingers as the pointer is
+// window's cursor shape is drawn while the pointer is over it. The server
+// draws every native window's bar and moves and resizes it from there;
+// minimize and maximize on request. Fingers as the pointer is
 // (touch.rs).
 //
 // The clipboard: a native client's copy becomes a server-side selection in
@@ -86,8 +87,6 @@ pub struct NativeWindow {
     /// then goes by the token; otherwise by numbering, as for programs that
     /// keep none, so they leave no token behind in the store.
     pub keeps_token: bool,
-    /// Whether the client draws its own bar (otherwise the server does).
-    pub own_frame: bool,
     alive: AtomicBool,
     state: Mutex<State>,
     user_data: UserDataMap,
@@ -255,7 +254,7 @@ impl Server {
     /// A window message from bus client `client` (bus.rs).
     pub fn native_request(&mut self, client: u32, req: WinRequest) {
         match req {
-            WinRequest::Create { serial, window, role, token, title, width, height, own_frame, parent, place } => {
+            WinRequest::Create { serial, window, role, token, title, width, height, parent, place } => {
                 if window == 0 || self.natives.contains_key(&(client, window)) {
                     return self.native_refuse(client, serial, ErrorCode::BadMessage, format!("window id {window} is 0 or in use"));
                 }
@@ -285,7 +284,6 @@ impl Server {
                     role: role.clone(),
                     token: token.clone(),
                     keeps_token,
-                    own_frame,
                     alive: AtomicBool::new(true),
                     state: Mutex::new(State {
                         title,
@@ -416,23 +414,6 @@ impl Server {
                     if self.input.seat.pointer_focus() == Some(vergence_seat::Target::Native(id)) {
                         self.pointer_image.status = smithay::input::pointer::CursorImageStatus::Named(cursor_icon(shape));
                     }
-                }
-            }
-            // Moving and resizing from the window's own bar or edges: only with a
-            // button held on it (the press of `input_serial`), as Wayland's; the
-            // seat decides (dispatch.rs).
-            WinRequest::Move { window, .. } => {
-                let Some(w) = self.natives.get(&(client, window)).cloned() else { return };
-                if !self.grab_request(&w, None) && !self.touch_move_native(&w) {
-                    tracing::debug!("native: client {client}: move without a button or finger held on window {window}");
-                }
-            }
-            WinRequest::Resize { window, edges, .. } => {
-                let Some(w) = self.natives.get(&(client, window)).cloned() else { return };
-                // The protocol's edge bits are the server's own (top 1, bottom 2, left 4, right 8).
-                let e = crate::dispatch::ResizeEdge::from_bits_truncate(edges as u32);
-                if !e.is_empty() && !self.grab_request(&w, Some(e)) {
-                    tracing::debug!("native: client {client}: resize without a button held on window {window}");
                 }
             }
             WinRequest::Minimize { window } => {

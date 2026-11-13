@@ -1,7 +1,7 @@
 //! vnative: a window drawn over the native protocol (native milestone 1,
 //! step 3), to try the server's side before the toolkit has a native road.
 //!
-//!     vnative [--title T] [--size WxH] [--own-frame] [--frames N] [--short-file] [--gpu]
+//!     vnative [--title T] [--size WxH] [--frames N] [--short-file] [--gpu]
 //!             [--role R] [--place MONITOR_ID:X,Y]
 //!
 //! It asks for a window, draws a gradient with a border at the scale it is
@@ -13,9 +13,7 @@
 //!
 //! Input (step 4): a square follows the pointer, which takes the crosshair
 //! shape over the window; keys are printed as evdev codes (Esc quits);
-//! with `--own-frame`, a press on the top 24 points moves the window and a
-//! press within 16 points of the bottom-right corner resizes it. Everything
-//! else it hears (keymap, repeat, focus, modifiers, the wheel, fingers) is
+//! everything else it hears (keymap, repeat, focus, modifiers, the wheel, fingers) is
 //! printed; a finger moves the square as the pointer does.
 //!
 //! The clipboard: `c` copies a line of text, `v` pastes and prints what
@@ -92,10 +90,8 @@ impl GpuDraw {
 
 const WINDOW: u32 = 1;
 const BAR: i32 = 24;
-/// The pointer's square, and the own frame's strip and corner, in reference units.
+/// The pointer's square, in reference units.
 const DOT: f64 = 8.0;
-const STRIP: f64 = 24.0;
-const CORNER: f64 = 16.0;
 /// wp_cursor_shape's crosshair.
 const CROSSHAIR: u16 = 8;
 const KEY_ESC: u32 = 1;
@@ -193,7 +189,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (width, height) = arg("--size")
         .and_then(|s| s.split_once('x').and_then(|(w, h)| Some((w.parse::<f64>().ok()?, h.parse::<f64>().ok()?))))
         .unwrap_or((480.0, 320.0));
-    let own_frame = args.iter().any(|a| a == "--own-frame");
     let frames_max: Option<u32> = arg("--frames").and_then(|n| n.parse().ok());
     let lie = args.iter().any(|a| a == "--short-file");
     let mut gpu = if args.iter().any(|a| a == "--gpu") {
@@ -227,7 +222,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             title: title.clone(),
             width,
             height,
-            own_frame,
             parent: 0,
             place: place.clone(),
         })
@@ -240,7 +234,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Where the pointer is (None: not on the window), and the square last drawn.
     let mut pointer: Option<(f64, f64)> = None;
     let mut last_dot: Option<Damage> = None;
-    let mut size = (width, height);
     let mut step = 0u32;
     let mut last_bar: Option<(i32, i32)> = None;
     let (mut frames, started) = (0u32, Instant::now());
@@ -257,7 +250,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         match ev {
             WinEvent::Configure { serial, width, height, scale, maximized, activated, .. } => {
-                size = (width, height);
                 last_dot = None;
                 println!("configure {serial}: {width}x{height} at scale {scale:.4}{}{}", if maximized { ", maximized" } else { "" }, if activated { ", active" } else { "" });
                 if let Some(g) = gpu.as_mut() {
@@ -325,15 +317,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 pointer = None;
             }
             WinEvent::PointerMotion { x, y, .. } => pointer = Some((x, y)),
-            WinEvent::PointerButton { serial, button, pressed, .. } => {
+            WinEvent::PointerButton { button, pressed, .. } => {
                 println!("button {button:#x} {}", if pressed { "pressed" } else { "released" });
-                if pressed && own_frame && let Some((x, y)) = pointer {
-                    if y < STRIP {
-                        c.send(&ClientMsg::Window(WinRequest::Move { window: WINDOW, input_serial: serial }))?;
-                    } else if x > size.0 - CORNER && y > size.1 - CORNER {
-                        c.send(&ClientMsg::Window(WinRequest::Resize { window: WINDOW, input_serial: serial, edges: 2 | 8 }))?;
-                    }
-                }
             }
             WinEvent::PointerAxis { source, dx, dy, v120x, v120y, .. } => println!("scroll {dx:.1},{dy:.1} (v120 {v120x},{v120y}, source {source})"),
             WinEvent::Touch { id, phase, x, y, .. } => {

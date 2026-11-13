@@ -115,7 +115,6 @@ fn run(socket: Option<std::path::PathBuf>, args: &[String]) -> Result<(), Box<dy
                     title: title.clone(),
                     width: 400.0,
                     height: 300.0,
-                    own_frame: false,
                     parent: 0,
                     place: vergence_protocol::window::Place::Anywhere,
                 })
