@@ -10,6 +10,10 @@ generally favor minimalism and consistency over tons of options". So: a
 few well-chosen color options, applied by the server to every bar alike;
 no per-program styling, no large theming system.
 
+**Closed 2026-11-12:** all steps (1 to 8 and 4b) in and all eight
+acceptance checks met on Hubble, kepler and Techbench (notes below).
+Carried forward: tab dragging under other desktops (below, "Later").
+
 ## Where things stand (2026-11-12)
 
 - **Two bars for one look.** The server draws title bars for Wayland and
@@ -466,3 +470,15 @@ one process.
    (b) after. Proposed: **(a)**: it is smaller, it removes the move
    request paths that caused trouble this week, and it uses the drawing
    code the renderer work will build on.
+
+## Later
+
+- **Tab dragging under other desktops** (Dave, 2026-11-12: "make a note
+  for now"). In a Vergence session the server drags tabs; under GNOME the
+  terminal draws its own bar, whose tabs are chosen, closed and added but
+  not dragged (as before the milestone). Two parts when it is taken up:
+  reorder and drag out to a new window in the terminal's own bar, with
+  vergence-bar's drag model (the desktop places the new window, not the
+  drop point); and dropping a tab on another terminal window, which needs
+  Wayland drag and drop (a program sees no pointer outside its own window
+  there), as browsers do it.
