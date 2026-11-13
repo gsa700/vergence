@@ -289,6 +289,16 @@ one process.
   let go over another window's bar of the same program, the tab joins it
   there and its own window closes (`join_target`, which looks through the
   window being moved but not through a tab's window that stays put).
+- **Run on kepler and Techbench** (2026-11-12, 7eb1a42): the same live
+  scripts as on Hubble (tabtest, sectest, sizetest, onetab) pass on kepler
+  (FreeBSD, the 14" 4K at scale 2) and Techbench (Fedora 45, the dev
+  session from GDM, scale 1): reorder, tear-off at the drop point, a
+  one-tab window joined into another, the tab menu's and the section
+  menu's moves, new windows the size of their source, a window moved by
+  its only tab and joined by letting go on another bar; one process and
+  every shell kept. kepler's bar at scale 2 is drawn 1:1 and sharp (it
+  shows close and minimize only: its settings.toml has
+  `Gtk/DecorationLayout = "close,minimize:"`).
 
 ## Steps
 
