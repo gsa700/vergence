@@ -26,6 +26,13 @@ included, with tabs that can be dragged; the wiring is Claude's to choose.
   bar that imitates another window's (§7.3).
 - **The terminal's tabs** can be clicked, closed (their button, or a middle
   click) and added with +; they cannot be dragged yet.
+- **The server's title bar ignores the button layout.** decor.rs reads the
+  layout setting only to decide whether there is a minimize button and
+  always puts the buttons on the right, while the toolkit's bar follows
+  `Gtk/DecorationLayout` (on Hubble "close,minimize,maximize:", the left).
+  So in a Vergence session the settings app's buttons are on the right and
+  the terminal's on the left (Dave noticed; under GNOME, where the settings
+  app draws its own bar, they agree).
 
 ## Design
 
@@ -61,9 +68,12 @@ nothing until the drop. Touch works the same way (a finger on a tab), and
 there is no "please move me" request any more: the server moves a window
 by its bar itself, for every kind of press.
 
-**Wayland and X11 windows** are unchanged: Firefox and other programs that
-draw their own bars keep doing so (client-side decorations), and windows
-that ask the server for a frame keep today's title bar. **Under GNOME and
+**Every bar the server draws comes from vergence-bar**, the plain ones
+too: the frame around a Wayland or X11 window that asks for one is a
+`Plain` bar with its title, so all of them follow the button layout, live.
+decor.rs keeps the frame's border, shadow and hit test around the window
+and stops drawing a bar of its own. Firefox and other programs that draw
+their own bars keep doing so (client-side decorations). **Under GNOME and
 other desktops** our toolkit keeps drawing its own bar (from vergence-bar,
 so it is the same one); the native road is where the server draws it.
 
@@ -79,10 +89,11 @@ window straddling two monitors has a sharp bar on both.
 2. **The protocol**: the bar description and the bar's events in
    vergence-protocol, length-limited (tab count, title length), with the
    fuzz test extended.
-3. **The server draws native bars** from their descriptions, in place of
-   decor.rs's title bar for those windows; the bar's parts are seat
-   targets; clicks, closes and + reach the program. The terminal's native
-   road stops drawing its own bar.
+3. **The server draws every bar with vergence-bar**: first its plain title
+   bars (so they follow the button layout, which fixes the left/right
+   mismatch on its own), then native bars from their descriptions; the
+   bar's parts are seat targets; clicks, closes and + reach the program.
+   The terminal's native road stops drawing its own bar.
 4. **Tab dragging**: reorder in the bar, drop outside for a new window,
    drop on another window of the same program to join it. The terminal
    implements all three (a tab's session moves with it).
@@ -96,8 +107,8 @@ window straddling two monitors has a sharp bar on both.
 1. Tests green on Hubble, kepler and Techbench, the bar's own and the
    protocol fuzz test with the bar messages among them.
 2. In a Vergence session on all three: the terminal's bar is the server's
-   (one bar look for every native window, buttons on the side the settings
-   say, changed live); tabs chosen, closed and added by mouse and finger;
+   (one bar look for every window the server frames, Wayland and X11 ones
+   included, buttons on the side the settings say, changed live); tabs chosen, closed and added by mouse and finger;
    the window moved and resized by its bar with mouse and finger; a
    double-click on the bar maximizes.
 3. Tab dragging: reorder by mouse and finger, a tab dragged out becomes a
