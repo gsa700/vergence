@@ -337,8 +337,14 @@ one process.
   six tabs at 144 Hz: native road 50 of 50 drawn, at most one frame after
   the press, 49 within 13.9 ms (one at 14.5 ms); Wayland road 50 of 50,
   all within (6). A torn-off tab's window and a section's window come back
-  exactly after a logout-like kill and a start (8). Left: 5 (under GNOME,
-  on Techbench with Dave logged in there).
+  exactly after a logout-like kill and a start (8).
+- **Acceptance 5 met** (2026-11-12, Techbench, Dave in GNOME 49): today's
+  terminal on the Wayland road draws the same bar itself: buttons on the
+  left as Vergence's settings say (the toolkit follows Vergence's
+  settings.toml, not GNOME's button-layout, which there is
+  "icon:minimize,close"), tabs chosen, added and closed, the window moved,
+  resized and maximized by its bar; Dave's screenshot and checks. All
+  eight acceptance checks are met; step 4b is left.
 
 ## Steps
 
