@@ -18,7 +18,8 @@
 //   all in points: they mean the same physical size on every monitor.
 // - Recorded when a move or resize ends, on maximize/restore, and when the
 //   window closes. A remembered place decides before the defaults and before the
-//   app's own restore, when its monitor is there and the window fits it.
+//   app's own restore, when its monitor is there and the window's title bar is
+//   wholly on it (Dave, 2026-11-12; the whole window had to fit until then).
 // - ~/.config/vergence/server-windows.toml, 0600 (whitepaper §7.3), the shared
 //   WindowStore format; `skip = ["app"]` leaves an app alone. vergd's
 //   windows.toml is separate: its units are X pixels.
@@ -209,7 +210,7 @@ impl Server {
         // Where the shelf's strip now stands, the window is moved clear of it (shelf.rs).
         let r = self.clear_of_shelf(r);
         let maximized = s.max_horz && s.max_vert;
-        if !maximized && !self.fits_a_monitor(r, self.has_title(w)) {
+        if !maximized && !self.bar_on_a_monitor(r, self.has_title(w)) {
             return None;
         }
         Some((r, maximized))
@@ -228,11 +229,19 @@ impl Server {
         if geo.size.w < MIN_W || geo.size.h < MIN_H {
             return;
         }
+        // The monitor its center is on; for a window hanging off the edge with
+        // its center off every monitor, the one its title bar is on (it is
+        // restored there while the bar is wholly on it, place.rs).
         let center = (geo.loc.x + geo.size.w / 2, geo.loc.y + geo.size.h / 2);
-        let Some((mon, og)) = self.space.outputs().find_map(|o| {
-            let g = self.space.output_geometry(o)?;
-            g.contains(center).then(|| (monitor_id_of(o), g))
-        }) else {
+        let h = crate::decor::TITLE_H;
+        let bar = (geo.loc.x + geo.size.w / 2, if self.has_title(w) { geo.loc.y - h / 2 } else { geo.loc.y + h / 2 });
+        let on = |p: (i32, i32)| {
+            self.space.outputs().find_map(|o| {
+                let g = self.space.output_geometry(o)?;
+                g.contains(p).then(|| (monitor_id_of(o), g))
+            })
+        };
+        let Some((mon, og)) = on(center).or_else(|| on(bar)) else {
             return;
         };
         let Some(mon) = mon else { return };

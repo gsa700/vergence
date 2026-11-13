@@ -40,6 +40,17 @@ impl Server {
         self.content_areas(titled).iter().any(|a| a.contains_rect(rect))
     }
 
+    /// Is a window with content `rect` grabbable where it is: its title bar
+    /// (for a window without one, its top strip of the same height) wholly on
+    /// one monitor? A remembered place is restored then, even with the rest of
+    /// the window hanging off the edge (Dave, 2026-11-12: windows go back
+    /// exactly where they were put, as long as they can always be grabbed).
+    pub fn bar_on_a_monitor(&self, rect: Rectangle<i32, Logical>, titled: bool) -> bool {
+        let h = crate::decor::TITLE_H;
+        let bar = if titled { Rectangle::new((rect.loc.x, rect.loc.y - h).into(), (rect.size.w, h).into()) } else { Rectangle::new(rect.loc, (rect.size.w, h.min(rect.size.h)).into()) };
+        self.space.outputs().filter_map(|o| self.space.output_geometry(o)).any(|g| g.contains_rect(bar))
+    }
+
     /// Place a new X11 window: returns its content rectangle.
     pub fn place_x11(&self, x: &X11Surface) -> Rectangle<i32, Logical> {
         let titled = !x.is_override_redirect() && !x.is_decorated();
