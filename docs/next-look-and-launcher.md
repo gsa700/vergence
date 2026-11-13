@@ -43,3 +43,12 @@ One thing, not two: the dock's apps popup becomes a launcher.
   smoky dark one in dark (what is under it shows through darkened, light
   text and controls on it); the tabs, the launcher and the red tab each
   in both, contrast checked in both.
+- **Rounded window corners** (waiting until the server draws the frames,
+  which it now does for every native window): the server rounds them, at
+  the one radius used everywhere (5 pt, decided 2026-11-10: "consistency
+  throughout"); square when maximized; the border and the frosted bar
+  follow the curve; the resize band keeps its corner cursors.
+- **The bar's proportions, reviewed with the corners** (Dave, 2026-11-12):
+  the bar's height (36 pt now), the window buttons' size (32 x 30) and the
+  tabs' size and spacing (the 6 pt margin rule), looked at together with
+  mocks before anything is changed.
