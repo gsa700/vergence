@@ -161,9 +161,8 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
     }
     // Which window buttons, and on which side ("close,minimize:" or
     // ":minimize,maximize,close"): the server's own title bars follow it too.
-    if let Some(v) = xstr("Gtk/DecorationLayout") {
-        put(WM, "button-layout", SettingValue::Str(v));
-    }
+    // Unset, the default (on the left) is published, so apps follow it as well.
+    put(WM, "button-layout", SettingValue::Str(xstr("Gtk/DecorationLayout").unwrap_or_else(|| vergence_bar::DEFAULT_LAYOUT.to_string())));
     // Cursor size in points (the same on every monitor): the server's, not
     // XSETTINGS' pixel value, which is scaled for X apps.
     put(INTERFACE, "cursor-size", SettingValue::I32(cursor_points as i32));

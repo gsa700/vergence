@@ -147,7 +147,7 @@ impl Settings {
                 (k.trim().trim_matches('"') == key).then(|| v.trim().trim_matches('"').to_string())
             })
         };
-        let (left, right) = bar::decoration_layout(&value("Gtk/DecorationLayout").unwrap_or_else(|| ":minimize,maximize,close".into()));
+        let (left, right) = bar::decoration_layout(&value("Gtk/DecorationLayout").unwrap_or_else(|| bar::DEFAULT_LAYOUT.into()));
         let (ui_family, ui_size) = font_name(&value("Gtk/FontName").unwrap_or_default(), "sans-serif", 10.0);
         let (mono_family, mono_size) = font_name(&value("Gtk/MonospaceFontName").unwrap_or_default(), "monospace", 10.0);
         Settings { left, right, ui_family, ui_size, mono_family, mono_size }
@@ -1857,7 +1857,8 @@ mod tests {
         assert!((s.ui_size - 13.333).abs() < 0.01 && (s.mono_size - 14.667).abs() < 0.01);
         // Nothing set: buttons on the right, the machine's own fonts at 10 points.
         let s = Settings::from_text("");
-        assert_eq!((s.left.len(), s.right.as_slice()), (0, &[WinButton::Minimize, WinButton::Maximize, WinButton::Close][..]));
+        // No layout chosen: vergence-bar's default, on the left (2026-11-12).
+        assert_eq!((s.left.as_slice(), s.right.len()), (&[WinButton::Close, WinButton::Minimize, WinButton::Maximize][..], 0));
         assert_eq!((s.ui_family.as_str(), s.mono_family.as_str()), ("sans-serif", "monospace"));
         assert_eq!(font_name("Cantarell", "sans-serif", 10.0).0, "Cantarell");
         assert_eq!(font_name("Noto Sans 400", "sans-serif", 10.0), ("Noto Sans 400".to_string(), 10.0 * 96.0 / 72.0), "a size that is not one is part of the name");

@@ -59,14 +59,17 @@ pub enum WinButton {
     Maximize,
 }
 
+/// The button layout when none has been chosen: close, minimize, maximize
+/// on the left (Dave, 2026-11-12; it was on the right until then).
+pub const DEFAULT_LAYOUT: &str = "close,minimize,maximize:";
+
 /// The desktop's button layout from Vergence's settings file
 /// (`~/.config/vergence/settings.toml`, `"Gtk/DecorationLayout" = "..."`,
-/// the settings app's Windows page), else minimize, maximize, close on the
-/// right: what the terminal's bar follows, and the toolkit's own bar where
-/// the server draws none.
+/// the settings app's Windows page), else [`DEFAULT_LAYOUT`]: what the
+/// terminal's bar follows, and the toolkit's own bar where the server draws none.
 pub fn desktop_layout() -> (Vec<WinButton>, Vec<WinButton>) {
     let text = settings_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
-    decoration_layout(&layout_setting(&text).unwrap_or_else(|| ":minimize,maximize,close".into()))
+    decoration_layout(&layout_setting(&text).unwrap_or_else(|| DEFAULT_LAYOUT.into()))
 }
 
 /// Vergence's settings file, which holds the button layout.

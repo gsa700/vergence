@@ -176,7 +176,7 @@ impl Server {
     }
 
     /// The window buttons, left and right, as the settings say
-    /// (Gtk/DecorationLayout; minimize, maximize, close on the right if unset).
+    /// (Gtk/DecorationLayout; vergence-bar's default, on the left, if unset).
     pub fn button_layout(&self) -> (Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>) {
         vergence_bar::decoration_layout(&self.button_layout_text())
     }
@@ -184,7 +184,7 @@ impl Server {
     fn button_layout_text(&self) -> String {
         match self.settings.current.get(&(crate::settings::WM.to_string(), "button-layout".to_string())) {
             Some(vergence_protocol::bus::SettingValue::Str(layout)) => layout.clone(),
-            _ => ":minimize,maximize,close".to_string(),
+            _ => vergence_bar::DEFAULT_LAYOUT.to_string(),
         }
     }
 

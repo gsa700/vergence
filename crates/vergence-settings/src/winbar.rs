@@ -14,8 +14,9 @@ pub struct Layout {
 }
 
 impl Default for Layout {
+    /// On the left, with every button (Dave, 2026-11-12; vergence-bar's DEFAULT_LAYOUT).
     fn default() -> Self {
-        Layout { left: false, minimize: true, maximize: true }
+        Layout { left: true, minimize: true, maximize: true }
     }
 }
 
@@ -70,6 +71,6 @@ mod tests {
         for l in [Layout { left: true, minimize: false, maximize: true }, Layout { left: false, minimize: true, maximize: false }] {
             assert_eq!(parse(&format(l)), l);
         }
-        assert_eq!(format(Layout::default()), ":minimize,maximize,close");
+        assert_eq!(format(Layout::default()), "close,minimize,maximize:");
     }
 }
