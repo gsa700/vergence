@@ -439,6 +439,11 @@ pub trait App {
     /// program that wants the window back in its place on the next run.
     fn token_given(&mut self, _token: &str) {}
 
+    /// The window has closed (the user closed it, or the program did) while
+    /// the program runs on. Not called when the program is ended from outside
+    /// (a logout): what it keeps of its windows then stays for next time.
+    fn closed(&mut self) {}
+
     /// Where the window asks to be when it opens (Contract 2).
     fn place(&self) -> Place {
         Place::Anywhere

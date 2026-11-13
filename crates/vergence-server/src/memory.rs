@@ -28,7 +28,7 @@ use std::{collections::HashMap, os::unix::fs::PermissionsExt, path::PathBuf};
 
 use smithay::{
     output::Output,
-    utils::{Logical, Rectangle},
+    utils::{Logical, Point, Rectangle},
 };
 use vergence_profile::windows::{WindowId, WindowSetting, WindowStore};
 
@@ -172,10 +172,10 @@ impl Server {
         // A window with a token and no memory yet starts where the last window
         // of its program the user closed was (a new terminal window, a torn-off
         // tab's own window asks for its drop point and has no memory: that wins).
-        let s = match profile.get(&id) {
-            Some(s) => s.clone(),
-            None if !id.token.is_empty() => profile.get(&id.untokened()).or_else(|| profile.get(&WindowId { role: String::new(), ..id.untokened() }))?.clone(),
-            None if !id.role.is_empty() => profile.get(&WindowId { role: String::new(), ..id.clone() })?.clone(),
+        let (s, fallback) = match profile.get(&id) {
+            Some(s) => (s.clone(), false),
+            None if !id.token.is_empty() => (profile.get(&id.untokened()).or_else(|| profile.get(&WindowId { role: String::new(), ..id.untokened() }))?.clone(), true),
+            None if !id.role.is_empty() => (profile.get(&WindowId { role: String::new(), ..id.clone() })?.clone(), false),
             None => return None,
         };
         if (s.width as i32) < MIN_W || (s.height as i32) < MIN_H {
@@ -183,7 +183,29 @@ impl Server {
         }
         let out = self.space.outputs().find(|o| monitor_id_of(o).as_deref() == Some(s.monitor.as_str()))?.clone();
         let og = self.space.output_geometry(&out)?;
-        let r = Rectangle::new((og.loc.x + s.x, og.loc.y + s.y).into(), (s.width as i32, s.height as i32).into());
+        let mut r = Rectangle::new((og.loc.x + s.x, og.loc.y + s.y).into(), (s.width as i32, s.height as i32).into());
+        // A new window starting from its program's last-closed place does not
+        // land exactly on another of its windows: it steps down and right by a
+        // bar's height until the corner is free (three new terminals stacked
+        // exactly on one another, 2026-11-12).
+        if fallback {
+            let taken: Vec<Point<i32, Logical>> = self
+                .space
+                .elements()
+                .filter(|o| *o != w && o.native().is_some_and(|n| w.native().is_some_and(|m| n.app_id == m.app_id)))
+                .filter_map(|o| self.space.element_location(o))
+                .collect();
+            let step = crate::decor::TITLE_H;
+            for _ in 0..32 {
+                if !taken.contains(&r.loc) {
+                    break;
+                }
+                r.loc += Point::from((step, step));
+            }
+            if r.loc.x + r.size.w > og.loc.x + og.size.w || r.loc.y + r.size.h > og.loc.y + og.size.h {
+                r.loc = Point::from((og.loc.x + s.x, og.loc.y + s.y));
+            }
+        }
         // Where the shelf's strip now stands, the window is moved clear of it (shelf.rs).
         let r = self.clear_of_shelf(r);
         let maximized = s.max_horz && s.max_vert;

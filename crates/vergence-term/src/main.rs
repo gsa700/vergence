@@ -56,6 +56,7 @@ mod menu;
 mod mouse;
 mod panes;
 #[allow(dead_code)]
+mod program;
 mod pty;
 mod scrollbar;
 mod select;
@@ -63,7 +64,9 @@ mod select;
 mod vt;
 
 use std::{
+    cell::RefCell,
     collections::HashMap,
+    rc::Rc,
     io::Write,
     sync::{
         Arc, Mutex, MutexGuard,
@@ -391,10 +394,10 @@ impl Session {
     /// Starts the user's shell, or `command` (`-e`), on a new terminal of
     /// cols x rows. Its output is read and parsed on a thread of its own,
     /// which wakes the window.
-    fn start(cols: usize, rows: usize, waker: Waker, command: Option<Vec<String>>) -> std::io::Result<Session> {
+    fn start(cols: usize, rows: usize, waker: Waker, command: Option<Vec<String>>, cwd: Option<&str>) -> std::io::Result<Session> {
         let pty = match command.as_deref() {
-            Some([program, args @ ..]) => pty::Pty::spawn(program, args, cols as u16, rows as u16)?,
-            _ => pty::Pty::spawn(&std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()), &[], cols as u16, rows as u16)?,
+            Some([program, args @ ..]) => pty::Pty::spawn(program, args, cols as u16, rows as u16, cwd)?,
+            _ => pty::Pty::spawn(&std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()), &[], cols as u16, rows as u16, cwd)?,
         };
         let reader = pty.reader()?;
         let mut replies = reader.try_clone()?;
@@ -510,18 +513,33 @@ enum Held {
 }
 
 struct Terminal {
+    /// The program's windows and what it keeps of them (program.rs), shared
+    /// by every window of this process; this window's key there.
+    program: Rc<RefCell<program::Program>>,
+    key: u64,
+    /// The token to present when the window is created (one kept from an
+    /// earlier run), and the one the server gave.
+    present: String,
+    token: String,
+    /// Requests from later starts of vergence-term (program.rs), for whichever window hears of them first.
+    inbox: Arc<Mutex<Vec<program::OpenRequest>>>,
+    /// The first window of the process: it listens for later starts.
+    primary: bool,
+    /// The window is on the native road (it was given a token).
+    native: bool,
+    /// Where the first tabs' programs start (restored tabs), and where the
+    /// rest do (a window opened from a request); none: where we stand.
+    start_dirs: Vec<String>,
+    start_cwd: Option<String>,
     tabs: Vec<Tab>,
     /// The tab in front.
     shown: usize,
-    /// The id the next tab gets.
-    next_tab: u32,
+
     /// The bar's height in the window: BAR_H when it draws its own, 0 when
     /// the server draws it (native road, bar milestone 1).
     bar_h: f32,
     /// The bar as last described to the server: each tab's id and title, the front one.
     bar_told: Option<(Vec<(u32, String)>, u32)>,
-    /// The number the next terminal gets.
-    next_id: u64,
     waker: Option<Waker>,
     palette: Palette,
     /// How opaque the ground is (vergence_ui::opacity_setting): less than 1,
@@ -637,13 +655,24 @@ impl Terminal {
     }
 
     fn new() -> Terminal {
+        let program = Rc::new(RefCell::new(program::Program::default()));
+        let key = program.borrow_mut().add();
         Terminal {
+            program,
+            key,
+            present: String::new(),
+            token: String::new(),
+            inbox: Arc::new(Mutex::new(Vec::new())),
+            primary: false,
+            native: false,
+            start_dirs: Vec::new(),
+            start_cwd: None,
             tabs: Vec::new(),
             shown: 0,
-            next_tab: 1,
+
             bar_h: BAR_H,
             bar_told: None,
-            next_id: 1,
+
             waker: None,
             palette: palette(),
             opacity: vergence_ui::opacity_setting(&config("desktop.toml"), "[terminal]"),
@@ -681,6 +710,43 @@ impl Terminal {
             measuring: std::env::var_os("VTERM_FRAMES").is_some(),
             frame_now: 0,
             asked: None,
+        }
+    }
+
+    /// Tell the program what this window keeps (its token, its tabs' working
+    /// directories), for the state file (program.rs).
+    fn keep(&mut self) {
+        let tabs = self.tabs.iter().filter_map(|t| t.session(t.active)).filter_map(|s| program::cwd_of(s.pty.pid())).collect();
+        self.program.borrow_mut().update(self.key, program::WindowState { token: self.token.clone(), tabs });
+    }
+
+    /// Another window of this process: sharing its program, opened for a
+    /// later start's request or to restore one kept from the last run.
+    fn window_for(&self, present: String, start_dirs: Vec<String>, start_cwd: Option<String>, run: Option<Vec<String>>) -> Terminal {
+        let mut t = Terminal::new();
+        t.program = self.program.clone();
+        t.key = t.program.borrow_mut().add();
+        t.inbox = self.inbox.clone();
+        t.open_with = start_dirs.len().max(1);
+        t.present = present;
+        t.start_dirs = start_dirs;
+        t.start_cwd = start_cwd;
+        t.run = run;
+        t
+    }
+
+    /// Windows asked for by later starts, and windows from the last run still
+    /// to open: whichever window hears first opens them.
+    fn open_asked(&mut self, window: &mut Window) {
+        let asked: Vec<program::OpenRequest> = std::mem::take(&mut *self.inbox.lock().unwrap_or_else(|e| e.into_inner()));
+        for r in asked {
+            let run = (!r.run.is_empty()).then_some(r.run);
+            let cwd = (!r.cwd.is_empty()).then_some(r.cwd);
+            window.open_window(Box::new(self.window_for(String::new(), Vec::new(), cwd, run)));
+        }
+        let restore = std::mem::take(&mut self.program.borrow_mut().restore);
+        for w in restore {
+            window.open_window(Box::new(self.window_for(w.token, w.tabs, None, None)));
         }
     }
 
@@ -742,11 +808,12 @@ impl Terminal {
     /// Starts a terminal and gives it a number.
     fn start(&mut self, cols: usize, rows: usize) -> Option<(u64, Session)> {
         let waker = self.waker.clone()?;
+        // A restored tab starts where its shell stood; then where the request said.
+        let cwd = if self.start_dirs.is_empty() { self.start_cwd.clone() } else { Some(self.start_dirs.remove(0)) };
         // `-e`'s program runs in the first terminal only; the others get the shell.
-        match Session::start(cols, rows, waker, self.run.take()) {
+        match Session::start(cols, rows, waker, self.run.take(), cwd.as_deref()) {
             Ok(session) => {
-                self.next_id += 1;
-                Some((self.next_id - 1, session))
+                Some((NEXT_PANE.fetch_add(1, Ordering::SeqCst), session))
             }
             Err(e) => {
                 eprintln!("vergence-term: could not start the program: {e}");
@@ -757,14 +824,11 @@ impl Terminal {
 
     fn new_tab(&mut self, window: &mut Window) {
         if let Some((id, session)) = self.start(self.fits.0, self.fits.1) {
-            {
-                let tab_id = self.next_tab;
-                self.next_tab += 1;
-                self.tabs.push(Tab { id: tab_id, tree: Node::Leaf(id), panes: vec![(id, session)], active: id });
-            }
+            self.tabs.push(Tab { id: NEXT_TAB.fetch_add(1, Ordering::SeqCst), tree: Node::Leaf(id), panes: vec![(id, session)], active: id });
             self.shown = self.tabs.len() - 1;
             self.retitle(window);
         }
+        self.keep();
         window.redraw();
     }
 
@@ -798,6 +862,9 @@ impl Terminal {
         }
         self.tabs.remove(index);
         self.held = None;
+        if !self.tabs.is_empty() {
+            self.keep();
+        }
         if self.tabs.is_empty() {
             window.close();
             return;
@@ -1274,6 +1341,21 @@ impl App for Terminal {
         true
     }
 
+    // Step 6: the terminal keeps its windows' tokens (program.rs).
+    fn token(&self) -> String {
+        if self.present.is_empty() { "new".into() } else { self.present.clone() }
+    }
+
+    fn token_given(&mut self, token: &str) {
+        self.token = token.to_string();
+        self.native = true;
+        self.keep();
+    }
+
+    fn closed(&mut self) {
+        self.program.borrow_mut().remove(self.key);
+    }
+
     fn bar(&mut self) -> Option<vergence_ui::Bar> {
         let tabs: Vec<(u32, String)> = self.tabs.iter().map(|t| (t.id, t.label())).collect();
         let front = self.tabs.get(self.shown).map_or(0, |t| t.id);
@@ -1315,6 +1397,7 @@ impl App for Terminal {
                 if let Some(from) = index(tab) {
                     let front = self.tabs.get(self.shown).map(|t| t.id);
                     bar::reorder(&mut self.tabs, from, to as usize);
+                    self.keep();
                     if let Some(f) = front.and_then(|f| self.tabs.iter().position(|t| t.id == f)) {
                         self.shown = f;
                     }
@@ -1338,20 +1421,31 @@ impl App for Terminal {
 
     fn waker(&mut self, waker: Waker) {
         self.waker = Some(waker.clone());
+        // The first window, on the native road: later starts hand over to it
+        // (program.rs), and windows kept from the last run are opened.
+        if self.primary && self.native {
+            let w = waker.clone();
+            if !program::listen(self.inbox.clone(), move || w.wake()) {
+                eprintln!("vergence-term: no socket for later starts; they open windows of their own");
+            }
+            if !self.program.borrow().restore.is_empty() {
+                waker.wake();
+            }
+        }
         watch_settings(self.settings_changed.clone(), waker);
         for _ in 0..self.open_with {
             match self.start(self.fits.0, self.fits.1) {
-                Some((id, session)) => {
-                    let tab_id = self.next_tab;
-                    self.next_tab += 1;
-                    self.tabs.push(Tab { id: tab_id, tree: Node::Leaf(id), panes: vec![(id, session)], active: id });
-                }
+                Some((id, session)) => self.tabs.push(Tab { id: NEXT_TAB.fetch_add(1, Ordering::SeqCst), tree: Node::Leaf(id), panes: vec![(id, session)], active: id }),
                 None => std::process::exit(1),
             }
         }
         // The first tab divided: side by side, then each new pane the other way.
         for n in 1..self.open_panes {
             self.split_active(if n % 2 == 1 { Axis::Side } else { Axis::Stack });
+        }
+        // Its tabs are there now (the first window's token came before them).
+        if !self.token.is_empty() {
+            self.keep();
         }
     }
 
@@ -1387,6 +1481,7 @@ impl App for Terminal {
     }
 
     fn woken(&mut self, window: &mut Window) {
+        self.open_asked(window);
         // Asked once the window has shown a frame: a request made before the
         // server has placed the window is lost to the place it remembers.
         if self.open_maximized && self.last_commands > 0 {
@@ -1818,6 +1913,11 @@ impl App for Terminal {
     }
 }
 
+/// Numbers for terminals (panes) and tabs, unique in the process, so a tab
+/// can move from one window to another (bar milestone 1, step 7).
+static NEXT_PANE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+static NEXT_TAB: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
 fn main() {
     if std::env::args().any(|a| a == "--version" || a == "-V") {
         println!("vergence-term {}", env!("CARGO_PKG_VERSION"));
@@ -1841,6 +1941,29 @@ fn main() {
         terminal.open_panes = n.clamp(1, 16);
     }
     terminal.open_maximized = args.iter().any(|a| a == "--maximized");
+    // One process for all the terminal's windows, in a Vergence session (program.rs):
+    // a later start asks the running one for a window and is done. A terminal
+    // started to be measured keeps a process of its own.
+    let measured = args.iter().any(|a| a == "--tabs" || a == "--panes") || std::env::var_os("VTERM_FRAMES").is_some();
+    let native = std::env::var_os("VERGENCE_BUS").is_some() && std::env::var("VERGENCE_UI_WAYLAND").as_deref() != Ok("1");
+    if native && !measured {
+        let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
+        if program::hand_over(&program::OpenRequest { cwd, run: terminal.run.clone().unwrap_or_default() }) {
+            return;
+        }
+        terminal.primary = true;
+        // The windows of the last run, unless this start runs a program of its own.
+        if terminal.run.is_none() {
+            let mut kept = program::load();
+            if !kept.is_empty() {
+                let first = kept.remove(0);
+                terminal.open_with = first.tabs.len().max(1);
+                terminal.present = first.token;
+                terminal.start_dirs = first.tabs;
+                terminal.program.borrow_mut().restore = kept;
+            }
+        }
+    }
     if let Err(e) = vergence_ui::run(&mut terminal, (820, 520)) {
         eprintln!("vergence-term: {e}");
         std::process::exit(1);

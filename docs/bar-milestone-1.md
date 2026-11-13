@@ -204,6 +204,28 @@ one process.
   token forgotten on every setup; a program that goes away or a session
   that ends forgets nothing; tokens unseen for 90 days are pruned at save.
   375 tests on all three. The terminal keeping its tokens is step 6.
+- **Step 6 done** (2026-11-12): the terminal is one process for all its
+  windows (crates/vergence-term/src/program.rs). In a Vergence session the
+  first `vergence-term` listens on an owner-only socket in the runtime
+  directory; a later start hands its request (working directory, `-e`
+  program) over and exits; a terminal started to be measured (--tabs,
+  --panes, VTERM_FRAMES) keeps its own process. Each window is its own
+  `Terminal` sharing the program; panes and tabs are numbered across the
+  process. The terminal presents its saved token or "new", keeps each
+  window's token and its tabs' working directories (Linux /proc, FreeBSD
+  procstat) in ~/.local/state/vergence/terminal-windows (0600, its own
+  small line format), written on every change, and at start opens them
+  again with their tokens and tabs. The toolkit's new `App::closed` tells a
+  window it closed while the program runs on (not at a logout), so a window
+  the user closes leaves the state file. New windows starting from their
+  program's last-closed place cascade down and right by a bar's height
+  instead of landing on one another. On Hubble (tools in the session's
+  scratchpad, memtest.sh): three windows in one process, two moved, the
+  process killed as a logout would: all three back exactly; one closed for
+  good: forgotten by the terminal and the server, the other two back
+  exactly after another start. A remembered place partly off its monitor
+  is not restored (the existing rule: the whole window must fit). 378 tests
+  on all three.
 
 ## Steps
 

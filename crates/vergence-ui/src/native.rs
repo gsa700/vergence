@@ -329,8 +329,9 @@ impl<'a> Native<'a> {
         }
     }
 
-    /// A window is gone: its GPU buffers are let go and the server told.
-    fn release_window(&mut self, w: Win<'a>) -> io::Result<()> {
+    /// A window is gone: its program told, its GPU buffers let go and the server told.
+    fn release_window(&mut self, mut w: Win<'a>) -> io::Result<()> {
+        w.app.get().closed();
         if let Some(gpu) = self.gpu.as_mut() {
             for s in w.slots {
                 gpu.release(s.buffer);

@@ -59,7 +59,7 @@ pub struct Pty {
 impl Pty {
     /// Start `program` with `args` (the user's shell, or what `-e` named) on
     /// a new terminal of cols x rows.
-    pub fn spawn(program: &str, args: &[String], cols: u16, rows: u16) -> std::io::Result<Pty> {
+    pub fn spawn(program: &str, args: &[String], cols: u16, rows: u16, cwd: Option<&str>) -> std::io::Result<Pty> {
         let fd = unsafe { posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC) };
         if fd < 0 {
             return Err(std::io::Error::last_os_error());
@@ -88,6 +88,10 @@ impl Pty {
         let slave = std::fs::OpenOptions::new().read(true).write(true).custom_flags(O_NOCTTY).open(&name)?;
         set_size(fd, cols, rows);
         let mut cmd = Command::new(program);
+        // Where it starts: a restored tab's directory, if it is still there.
+        if let Some(dir) = cwd.filter(|d| std::path::Path::new(d).is_dir()) {
+            cmd.current_dir(dir);
+        }
         cmd.args(args).stdin(Stdio::from(slave.try_clone()?))
             .stdout(Stdio::from(slave.try_clone()?))
             .stderr(Stdio::from(slave))
@@ -118,6 +122,11 @@ impl Pty {
         }
         let child = cmd.spawn()?;
         Ok(Pty { master, child })
+    }
+
+    /// The program's process id (its working directory is read by it, program.rs).
+    pub fn pid(&self) -> u32 {
+        self.child.id()
     }
 
     /// A handle for reading the shell's output on another thread.
@@ -167,8 +176,8 @@ mod tests {
     /// others: not its terminal's master, and not an earlier terminal's.
     #[test]
     fn a_shell_inherits_no_terminal_masters() {
-        let _earlier = super::Pty::spawn("/bin/sh", &[], 80, 24).unwrap();
-        let mut p = super::Pty::spawn("/bin/sh", &[], 80, 24).unwrap();
+        let _earlier = super::Pty::spawn("/bin/sh", &[], 80, 24, None).unwrap();
+        let mut p = super::Pty::spawn("/bin/sh", &[], 80, 24, None).unwrap();
         let r = p.reader().unwrap();
         // Each descriptor from 3 to 12 that can be written to is reported.
         p.write(b"for fd in 3 4 5 6 7 8 9 10 11 12; do if (: >&$fd) 2>/dev/null; then echo held-$fd; fi; done; echo checked-$((40+2)); exit\n");
@@ -185,7 +194,7 @@ mod tests {
 
     #[test]
     fn a_shell_echoes_through_the_terminal() {
-        let mut p = super::Pty::spawn("/bin/sh", &[], 80, 24).unwrap();
+        let mut p = super::Pty::spawn("/bin/sh", &[], 80, 24, None).unwrap();
         let r = p.reader().unwrap();
         p.write(b"echo vergence-$((40+2)); exit\n");
         let mut all = Vec::new();
@@ -209,7 +218,7 @@ mod tests {
         // on kepler (2026-11-12). Shells and real programs live longer than
         // their first output; a one-line `-e` command's window closes as it
         // exits anyway.
-        let p = super::Pty::spawn("/bin/sh", &["-c".into(), "echo ran-$((40+2)) \"$0\"; sleep 0.5".into(), "two words".into()], 80, 24).unwrap();
+        let p = super::Pty::spawn("/bin/sh", &["-c".into(), "echo ran-$((40+2)) \"$0\"; sleep 0.5".into(), "two words".into()], 80, 24, None).unwrap();
         let r = p.reader().unwrap();
         let mut all = Vec::new();
         super::read_loop(r, |b| {
@@ -236,7 +245,7 @@ mod tests {
         const SIGHUP: i32 = 1;
         // SAFETY: the disposition of one signal, put back below; 1 is SIG_IGN.
         let before = unsafe { super::signal(SIGHUP, 1) };
-        let p = super::Pty::spawn(script.to_str().unwrap(), &[], 80, 24);
+        let p = super::Pty::spawn(script.to_str().unwrap(), &[], 80, 24, None);
         // SAFETY: as above.
         unsafe { super::signal(SIGHUP, before) };
         let p = p.unwrap();
