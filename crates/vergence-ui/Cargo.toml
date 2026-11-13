@@ -14,3 +14,5 @@ vergence-wl.workspace = true
 # The native protocol (native milestone 1): vnative, and the native road of step 5.
 vergence-protocol.workspace = true
 vergence-look.workspace = true
+# The bar (bar milestone 1): the same one the server draws.
+vergence-bar.workspace = true

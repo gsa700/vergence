@@ -1,9 +1,11 @@
-//! The bar a toolkit window draws for itself: the window's buttons where
-//! the desktop's layout puts them, and either tabs with a + (the terminal:
-//! [`Layout::new`]) or the window's title ([`Layout::plain`]). It was the
-//! terminal's own until 2026-11-10 and is the toolkit's so that every tool
-//! has the same one; its sizes and colors are the desktop's one look
-//! (vergence-look), which the server's title bars are drawn with too.
+//! The window bar: the window's buttons where the desktop's layout puts
+//! them, and either tabs with a + (the terminal: [`Layout::new`]) or the
+//! window's title ([`Layout::plain`]). It was the terminal's own until
+//! 2026-11-10, then the toolkit's, and since bar milestone 1
+//! (docs/bar-milestone-1.md) a crate of its own: the server draws every bar
+//! from it (its title bars, native windows' tabs) and vergence-ui draws the
+//! same bar where the server draws none. Its sizes and colors are the
+//! desktop's one look (vergence-look).
 //!
 //! Where everything sits is worked out in one place ([`Layout::new`]) and
 //! used both to draw the bar and to say what is under the pointer, so the
@@ -314,6 +316,75 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
     }
 }
 
+/// How far a press on a tab moves before it is a drag, in points.
+pub const DRAG_START: f32 = 6.0;
+/// How far beyond the bar (above, below, or past the window's sides) a
+/// dragged tab goes before it would leave the window, in points.
+pub const DETACH: f32 = 30.0;
+
+/// A tab being dragged: which one, and where along it the pointer took hold.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TabDrag {
+    pub tab: usize,
+    grab: f32,
+}
+
+/// Where a dragged tab would go if let go now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Landing {
+    /// To this place in the row (counted with the dragged tab taken out
+    /// first, so its own place means no change).
+    At(usize),
+    /// Out of the window: a window of its own, or another window's bar.
+    Outside,
+}
+
+impl TabDrag {
+    /// A drag of `tab` taken hold of at `x` (the window's points).
+    pub fn new(layout: &Layout, tab: usize, x: f32) -> TabDrag {
+        let left = layout.tabs.get(tab).map_or(x, |r| r.x);
+        TabDrag { tab, grab: x - left }
+    }
+
+    /// Where the dragged tab's left edge is drawn with the pointer at `x`:
+    /// with the pointer, kept within the row of tabs.
+    pub fn drawn_x(&self, layout: &Layout, x: f32) -> f32 {
+        let (Some(first), Some(last)) = (layout.tabs.first(), layout.tabs.last()) else { return x - self.grab };
+        (x - self.grab).clamp(first.x, last.x)
+    }
+
+    /// Where it would land if let go at (`x`, `y`) of a window `width` wide.
+    pub fn landing(&self, layout: &Layout, width: f32, x: f32, y: f32) -> Landing {
+        if y < -DETACH || y > BAR_H + DETACH || x < -DETACH || x > width + DETACH {
+            return Landing::Outside;
+        }
+        let Some(me) = layout.tabs.get(self.tab) else { return Landing::At(0) };
+        let center = self.drawn_x(layout, x) + me.w / 2.0;
+        // A tab that was before the dragged one stays before it until the
+        // dragged one's middle is past its middle; one that was after comes
+        // before it as soon as the middles meet (at the ends of the row they do).
+        let before = layout
+            .tabs
+            .iter()
+            .enumerate()
+            .filter(|(i, r)| {
+                let mid = r.x + r.w / 2.0;
+                (*i < self.tab && mid < center) || (*i > self.tab && mid <= center)
+            })
+            .count();
+        Landing::At(before)
+    }
+}
+
+/// Move one item of a list to another place (a tab's new place, as
+/// [`Landing::At`] counts it).
+pub fn reorder<T>(items: &mut Vec<T>, from: usize, to: usize) {
+    if from < items.len() {
+        let item = items.remove(from);
+        items.insert(to.min(items.len()), item);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,5 +463,54 @@ mod tests {
         // Buttons on the left: the title starts after them.
         let l = Layout::plain(640.0, &LEFT, &[]);
         assert!(l.title.unwrap().x > 2.0 * BUTTON_W);
+    }
+
+    fn five() -> Layout {
+        Layout::new(1000.0, 5, 0, &[], &[WinButton::Close])
+    }
+
+    #[test]
+    fn a_tab_dragged_past_its_neighbour_takes_its_place() {
+        let l = five();
+        let d = TabDrag::new(&l, 0, l.tabs[0].x + 10.0);
+        // A small move: still first.
+        assert_eq!(d.landing(&l, 1000.0, l.tabs[0].x + 30.0, 20.0), Landing::At(0));
+        // Past the second tab's middle: second.
+        let past = l.tabs[1].x + l.tabs[1].w / 2.0 + 15.0;
+        assert_eq!(d.landing(&l, 1000.0, past, 20.0), Landing::At(1));
+        // Far right, still in the bar: last.
+        assert_eq!(d.landing(&l, 1000.0, 990.0, 20.0), Landing::At(4));
+    }
+
+    #[test]
+    fn a_tab_dragged_left_goes_first_and_is_drawn_within_the_row() {
+        let l = five();
+        let d = TabDrag::new(&l, 3, l.tabs[3].x + 5.0);
+        assert_eq!(d.landing(&l, 1000.0, 0.0, 20.0), Landing::At(0));
+        assert_eq!(d.drawn_x(&l, -500.0), l.tabs[0].x);
+        assert_eq!(d.drawn_x(&l, 5000.0), l.tabs[4].x);
+    }
+
+    #[test]
+    fn a_tab_dragged_well_away_from_the_bar_leaves_the_window() {
+        let l = five();
+        let d = TabDrag::new(&l, 2, l.tabs[2].x + 5.0);
+        assert_eq!(d.landing(&l, 1000.0, l.tabs[2].x, BAR_H + DETACH - 1.0), Landing::At(2));
+        assert_eq!(d.landing(&l, 1000.0, l.tabs[2].x, BAR_H + DETACH + 1.0), Landing::Outside);
+        assert_eq!(d.landing(&l, 1000.0, l.tabs[2].x, -DETACH - 1.0), Landing::Outside);
+        assert_eq!(d.landing(&l, 1000.0, 1000.0 + DETACH + 1.0, 20.0), Landing::Outside);
+    }
+
+    #[test]
+    fn reorder_moves_one_item() {
+        let mut v = vec!['a', 'b', 'c', 'd'];
+        reorder(&mut v, 0, 2);
+        assert_eq!(v, ['b', 'c', 'a', 'd']);
+        reorder(&mut v, 3, 0);
+        assert_eq!(v, ['d', 'b', 'c', 'a']);
+        reorder(&mut v, 1, 99);
+        assert_eq!(v, ['d', 'c', 'a', 'b']);
+        reorder(&mut v, 9, 0);
+        assert_eq!(v, ['d', 'c', 'a', 'b']);
     }
 }

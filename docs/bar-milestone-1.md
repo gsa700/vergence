@@ -86,6 +86,15 @@ so it is the same one); the native road is where the server draws it.
 rest of the frame, drawn at each monitor's scale by the server, so a
 window straddling two monitors has a sharp bar on both.
 
+## Where it stands
+
+- **Step 1 done** (2026-11-12): crates/vergence-bar (bar.rs moved out of
+  vergence-ui with its history; vergence-ui keeps `bar` as an alias, so the
+  terminal and the settings app are unchanged), plus the tab drag model
+  (`TabDrag`: when a press is a drag, where the tab is drawn, where it would
+  land, in the row or out of the window; `reorder`), with tests. 371 tests
+  on Hubble, kepler and Techbench.
+
 ## Steps
 
 1. **`vergence-bar`**: bar.rs moved out of vergence-ui (no change in what

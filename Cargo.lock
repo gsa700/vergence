@@ -2152,6 +2152,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
+name = "vergence-bar"
+version = "0.1.0"
+dependencies = [
+ "vergence-look",
+ "vergence-render",
+ "vergence-scene",
+ "vergence-text",
+]
+
+[[package]]
 name = "vergence-dbus"
 version = "0.1.0"
 
@@ -2288,6 +2298,7 @@ dependencies = [
 name = "vergence-ui"
 version = "0.1.0"
 dependencies = [
+ "vergence-bar",
  "vergence-look",
  "vergence-protocol",
  "vergence-render",

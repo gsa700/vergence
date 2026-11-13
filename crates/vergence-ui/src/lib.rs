@@ -36,7 +36,8 @@
 //! the server will not, over Wayland (the rest of this file). A program
 //! cannot tell which: the same calls and the same input either way.
 
-pub mod bar;
+/// The bar, in its own crate since bar milestone 1 so the server draws the same one.
+pub use vergence_bar as bar;
 pub mod keyboard;
 mod native;
 pub mod touch;

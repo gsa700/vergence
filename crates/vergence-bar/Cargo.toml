@@ -1,0 +1,16 @@
+[package]
+name = "vergence-bar"
+description = "The window bar every Vergence window has: buttons where the desktop's layout puts them, a title or tabs with a +; laid out, hit-tested and drawn in one place for the server and the toolkit alike (docs/bar-milestone-1.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Our own code only. The server draws every bar from this (its title bars,
+# native windows' tabs); vergence-ui draws the same bar itself where the
+# server draws none (other desktops).
+[dependencies]
+vergence-scene.workspace = true
+vergence-text.workspace = true
+vergence-render.workspace = true
+vergence-look.workspace = true
