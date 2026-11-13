@@ -200,7 +200,16 @@ mod tests {
     /// `-e`: a program with its arguments, no shell between, on the terminal.
     #[test]
     fn a_program_runs_with_its_arguments() {
-        let p = super::Pty::spawn("/bin/sh", &["-c".into(), "echo ran-$((40+2)) \"$0\"".into(), "two words".into()], 80, 24).unwrap();
+        // The program waits a moment after writing. On FreeBSD, when the
+        // session leader that has the pty as its controlling terminal exits,
+        // the terminal is revoked and output its master has not read yet is
+        // thrown away, even if another descriptor of the slave is open (Linux
+        // keeps it). A program quicker than the reading thread (here, under a
+        // loaded test run) lost all its output: the test failed now and then
+        // on kepler (2026-11-12). Shells and real programs live longer than
+        // their first output; a one-line `-e` command's window closes as it
+        // exits anyway.
+        let p = super::Pty::spawn("/bin/sh", &["-c".into(), "echo ran-$((40+2)) \"$0\"; sleep 0.5".into(), "two words".into()], 80, 24).unwrap();
         let r = p.reader().unwrap();
         let mut all = Vec::new();
         super::read_loop(r, |b| {
