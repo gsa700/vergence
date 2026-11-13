@@ -111,6 +111,9 @@ struct State {
     cursor: smithay::input::pointer::CursorIcon,
     /// Its meaning as last sent (Contract 3): the focused widget, the caret, the tree.
     meaning: Option<(u64, Option<(f64, f64, f64, f64)>, Vec<vergence_protocol::window::Node>)>,
+    /// What its bar shows, as last sent (bar milestone 1); none: a plain bar
+    /// with its title, as before. The server draws it from step 3.
+    bar: Option<vergence_protocol::window::Bar>,
 }
 
 /// Native windows' share of the pointer and the keyboard (step 4).
@@ -185,6 +188,12 @@ impl NativeWindow {
 
     pub fn cursor(&self) -> smithay::input::pointer::CursorIcon {
         self.state.lock().unwrap().cursor
+    }
+
+    /// What its bar shows, as last sent (none: its title).
+    #[allow(dead_code)] // drawn from in bar milestone 1, step 3
+    pub fn bar(&self) -> Option<vergence_protocol::window::Bar> {
+        self.state.lock().unwrap().bar.clone()
     }
 
     fn kill(&self) {
@@ -274,6 +283,7 @@ impl Server {
                         frame_wanted: false,
                         cursor: smithay::input::pointer::CursorIcon::Default,
                         meaning: None,
+                        bar: None,
                     }),
                     user_data: UserDataMap::new(),
                 });
@@ -361,6 +371,13 @@ impl Server {
                 let Some(w) = self.natives.get(&(client, window)).cloned() else { return };
                 if on != self.restore.contains_key(&w) {
                     self.toggle_maximize(&w);
+                }
+            }
+            // What the bar shows (bar milestone 1): kept, and drawn from step 3.
+            WinRequest::Bar { window, bar } => {
+                if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
+                    n.state.lock().unwrap().bar = Some(bar);
+                    self.redraw_all();
                 }
             }
             WinRequest::Cursor { window, shape } => {

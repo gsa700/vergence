@@ -76,6 +76,39 @@ pub const MAX_NODES: usize = 4096;
 pub const MAX_STATES: usize = 16;
 /// A picture's longest side, in pixels.
 pub const MAX_SIDE: u32 = 16_384;
+/// A bar's tabs, a tab title's bytes, and the program's own tab-menu entries.
+pub const MAX_TABS: usize = 256;
+pub const MAX_TAB_TITLE: usize = 1024;
+pub const MAX_MENU: usize = 16;
+
+/// What a window's bar shows, for the server to draw (bar milestone 1): the
+/// window's title, or tabs. The window's buttons are the desktop's.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Bar {
+    /// The window's title (its `Title`).
+    Plain,
+    /// Tabs, in order, `front` being the id of the one in front; `plus`
+    /// a + that asks for a new tab; `accent` a color (0xRRGGBB) the tab in
+    /// front may wear; `menu` the program's own entries for a tab's menu,
+    /// after the server's (Close, Close the others, Move to a new window).
+    Tabs { tabs: Vec<Tab>, front: u32, plus: bool, accent: Option<u32>, menu: Vec<MenuEntry> },
+}
+
+/// One tab: an id the program chose (unique in the window, not 0), its
+/// title, and whether it has a close button.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tab {
+    pub id: u32,
+    pub title: String,
+    pub closable: bool,
+}
+
+/// An entry of a tab's menu that the program adds: an id it chose and a label.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuEntry {
+    pub id: u32,
+    pub label: String,
+}
 
 /// Shared-memory picture formats, as DRM fourcc codes (the same numbering as
 /// a GPU buffer's): four bytes a pixel, blue, green, red, then alpha (or
@@ -173,6 +206,9 @@ pub enum WinRequest {
     Copy { input_serial: u32, kinds: Vec<String> },
     /// The clipboard's data in this kind, please. Reply: [`WinEvent::ClipboardData`].
     Paste { serial: u32, kind: String },
+    /// What the window's bar shows now; the server draws it (a window
+    /// created with `own_frame` false). Sent again whenever it changes.
+    Bar { window: u32, bar: Bar },
 }
 
 /// What the server tells a client about its windows.
@@ -209,6 +245,26 @@ pub enum WinEvent {
     ClipboardSend { kind: String, fd: Fd },
     /// What was asked for with Paste, to be read from `fd`.
     ClipboardData { serial: u32, fd: Fd },
+    // The bar's events (bar milestone 1): what the user did with the tabs
+    // the server drew. The program decides what each means.
+    /// A tab was chosen.
+    TabChosen { window: u32, tab: u32 },
+    /// A tab's close button, its middle click or its menu's Close.
+    TabClose { window: u32, tab: u32 },
+    /// "Close the others" from a tab's menu.
+    TabCloseOthers { window: u32, tab: u32 },
+    /// The + was pressed.
+    TabNew { window: u32 },
+    /// A tab was dragged to another place in the row (`to` counted with the
+    /// tab taken out first).
+    TabMoved { window: u32, tab: u32, to: u32 },
+    /// A tab was dragged out of the window, or "Move to a new window" was
+    /// chosen: open a window for it there (`place` for its Create).
+    TabOut { window: u32, tab: u32, place: Place },
+    /// A tab was dropped on another window of this program's bar, at `to`.
+    TabJoin { window: u32, tab: u32, into: u32, to: u32 },
+    /// One of the program's own tab-menu entries was chosen.
+    TabMenu { window: u32, tab: u32, entry: u32 },
 }
 
 pub(crate) mod op {
@@ -227,6 +283,7 @@ pub(crate) mod op {
     pub const MEANING: u16 = 111;
     pub const COPY: u16 = 112;
     pub const PASTE: u16 = 113;
+    pub const BAR: u16 = 114;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -247,6 +304,14 @@ pub(crate) mod op {
     pub const CLIPBOARD_OFFER: u16 = 116;
     pub const CLIPBOARD_SEND: u16 = 117;
     pub const CLIPBOARD_DATA: u16 = 118;
+    pub const TAB_CHOSEN: u16 = 119;
+    pub const TAB_CLOSE: u16 = 120;
+    pub const TAB_CLOSE_OTHERS: u16 = 121;
+    pub const TAB_NEW: u16 = 122;
+    pub const TAB_MOVED: u16 = 123;
+    pub const TAB_OUT: u16 = 124;
+    pub const TAB_JOIN: u16 = 125;
+    pub const TAB_MENU: u16 = 126;
 
     /// Whether an opcode is a window message's (either way).
     pub fn is_window(opcode: u16) -> bool {
@@ -302,6 +367,74 @@ fn put_kinds(e: &mut Encoder, kinds: &[String]) {
     for k in kinds {
         e.str(k);
     }
+}
+
+fn put_bar(e: &mut Encoder, bar: &Bar) {
+    match bar {
+        Bar::Plain => {
+            e.u8(0);
+        }
+        Bar::Tabs { tabs, front, plus, accent, menu } => {
+            e.u8(1).count(tabs.len());
+            for t in tabs {
+                e.u32(t.id).str(&t.title).bool(t.closable);
+            }
+            e.u32(*front).bool(*plus);
+            match accent {
+                Some(c) => e.bool(true).u32(*c),
+                None => e.bool(false),
+            };
+            e.count(menu.len());
+            for m in menu {
+                e.u32(m.id).str(&m.label);
+            }
+        }
+    }
+}
+
+/// A bar description, checked: the limits, ids unique and not 0, the tab in
+/// front one of the tabs (or 0 with none).
+fn get_bar(d: &mut Decoder) -> Result<Bar, WireError> {
+    let title = |d: &mut Decoder| -> Result<String, WireError> {
+        let t = d.str()?;
+        if t.len() > MAX_TAB_TITLE { Err(WireError::TooLong(t.len())) } else { Ok(t) }
+    };
+    Ok(match d.u8()? {
+        0 => Bar::Plain,
+        1 => {
+            let n = d.count(9)?;
+            if n > MAX_TABS {
+                return Err(WireError::TooLong(n));
+            }
+            let mut tabs: Vec<Tab> = Vec::with_capacity(n);
+            for _ in 0..n {
+                let (id, t, closable) = (d.u32()?, title(d)?, d.bool()?);
+                if id == 0 || tabs.iter().any(|x| x.id == id) {
+                    return Err(WireError::BadValue("tab id"));
+                }
+                tabs.push(Tab { id, title: t, closable });
+            }
+            let (front, plus) = (d.u32()?, d.bool()?);
+            if (tabs.is_empty() && front != 0) || (!tabs.is_empty() && !tabs.iter().any(|t| t.id == front)) {
+                return Err(WireError::BadValue("tab in front"));
+            }
+            let accent = if d.bool()? { Some(d.u32()? & 0xff_ffff) } else { None };
+            let m = d.count(8)?;
+            if m > MAX_MENU {
+                return Err(WireError::TooLong(m));
+            }
+            let mut menu: Vec<MenuEntry> = Vec::with_capacity(m);
+            for _ in 0..m {
+                let (id, label) = (d.u32()?, title(d)?);
+                if menu.iter().any(|x| x.id == id) {
+                    return Err(WireError::BadValue("menu entry id"));
+                }
+                menu.push(MenuEntry { id, label });
+            }
+            Bar::Tabs { tabs, front, plus, accent, menu }
+        }
+        _ => return Err(WireError::BadValue("bar")),
+    })
 }
 
 fn size(w: u32, h: u32) -> Result<(), WireError> {
@@ -420,6 +553,12 @@ impl WinRequest {
                 e.u32(*serial).str(kind);
                 e
             }
+            WinRequest::Bar { window, bar } => {
+                let mut e = Encoder::frame(op::BAR);
+                e.u32(*window);
+                put_bar(&mut e, bar);
+                e
+            }
         };
         Ok((e.finish()?, fds))
     }
@@ -507,6 +646,7 @@ impl WinRequest {
             }
             op::COPY => WinRequest::Copy { input_serial: d.u32()?, kinds: get_kinds(&mut d)? },
             op::PASTE => WinRequest::Paste { serial: d.u32()?, kind: d.str()? },
+            op::BAR => WinRequest::Bar { window: d.u32()?, bar: get_bar(&mut d)? },
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -622,6 +762,47 @@ impl WinEvent {
                 e.u8(1).u32(*serial);
                 e
             }
+            WinEvent::TabChosen { window, tab } => {
+                let mut e = Encoder::frame(op::TAB_CHOSEN);
+                e.u32(*window).u32(*tab);
+                e
+            }
+            WinEvent::TabClose { window, tab } => {
+                let mut e = Encoder::frame(op::TAB_CLOSE);
+                e.u32(*window).u32(*tab);
+                e
+            }
+            WinEvent::TabCloseOthers { window, tab } => {
+                let mut e = Encoder::frame(op::TAB_CLOSE_OTHERS);
+                e.u32(*window).u32(*tab);
+                e
+            }
+            WinEvent::TabNew { window } => {
+                let mut e = Encoder::frame(op::TAB_NEW);
+                e.u32(*window);
+                e
+            }
+            WinEvent::TabMoved { window, tab, to } => {
+                let mut e = Encoder::frame(op::TAB_MOVED);
+                e.u32(*window).u32(*tab).u32(*to);
+                e
+            }
+            WinEvent::TabOut { window, tab, place } => {
+                let mut e = Encoder::frame(op::TAB_OUT);
+                e.u32(*window).u32(*tab);
+                put_place(&mut e, place);
+                e
+            }
+            WinEvent::TabJoin { window, tab, into, to } => {
+                let mut e = Encoder::frame(op::TAB_JOIN);
+                e.u32(*window).u32(*tab).u32(*into).u32(*to);
+                e
+            }
+            WinEvent::TabMenu { window, tab, entry } => {
+                let mut e = Encoder::frame(op::TAB_MENU);
+                e.u32(*window).u32(*tab).u32(*entry);
+                e
+            }
         };
         Ok((e.finish()?, fds))
     }
@@ -672,6 +853,14 @@ impl WinEvent {
                 let fd = one(fds, &mut d)?;
                 WinEvent::ClipboardData { serial: d.u32()?, fd }
             }
+            op::TAB_CHOSEN => WinEvent::TabChosen { window: d.u32()?, tab: d.u32()? },
+            op::TAB_CLOSE => WinEvent::TabClose { window: d.u32()?, tab: d.u32()? },
+            op::TAB_CLOSE_OTHERS => WinEvent::TabCloseOthers { window: d.u32()?, tab: d.u32()? },
+            op::TAB_NEW => WinEvent::TabNew { window: d.u32()? },
+            op::TAB_MOVED => WinEvent::TabMoved { window: d.u32()?, tab: d.u32()?, to: d.u32()? },
+            op::TAB_OUT => WinEvent::TabOut { window: d.u32()?, tab: d.u32()?, place: get_place(&mut d)? },
+            op::TAB_JOIN => WinEvent::TabJoin { window: d.u32()?, tab: d.u32()?, into: d.u32()?, to: d.u32()? },
+            op::TAB_MENU => WinEvent::TabMenu { window: d.u32()?, tab: d.u32()?, entry: d.u32()? },
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -714,6 +903,28 @@ mod tests {
     }
 
     #[test]
+    fn a_bad_bar_is_refused() {
+        let tabs = |ids: &[u32], front: u32| WinRequest::Bar {
+            window: 1,
+            bar: Bar::Tabs { tabs: ids.iter().map(|&id| Tab { id, title: "t".into(), closable: true }).collect(), front, plus: true, accent: None, menu: vec![] },
+        };
+        let decode = |m: WinRequest| {
+            let (bytes, _) = m.encode().unwrap();
+            WinRequest::decode(op::BAR, &bytes[6..], &mut NoFds)
+        };
+        assert!(decode(tabs(&[1, 2], 2)).is_ok());
+        assert!(decode(tabs(&[], 0)).is_ok());
+        assert!(decode(tabs(&[1, 1], 1)).is_err(), "the same id twice");
+        assert!(decode(tabs(&[0, 2], 2)).is_err(), "id 0");
+        assert!(decode(tabs(&[1, 2], 3)).is_err(), "front is not a tab");
+        assert!(decode(tabs(&[], 5)).is_err(), "front with no tabs");
+        let many: Vec<u32> = (1..=MAX_TABS as u32 + 1).collect();
+        assert!(decode(tabs(&many, 1)).is_err(), "too many tabs");
+        let long = WinRequest::Bar { window: 1, bar: Bar::Tabs { tabs: vec![Tab { id: 1, title: "x".repeat(MAX_TAB_TITLE + 1), closable: true }], front: 1, plus: false, accent: None, menu: vec![] } };
+        assert!(decode(long).is_err(), "title too long");
+    }
+
+    #[test]
     fn every_request_survives_the_wire() {
         let a = shm();
         let planes = vec![Plane { fd: shm(), offset: 0, stride: 1024 }, Plane { fd: shm(), offset: 4096, stride: 512 }];
@@ -738,6 +949,17 @@ mod tests {
             },
             WinRequest::Copy { input_serial: 5, kinds: vec!["text/plain;charset=utf-8".into()] },
             WinRequest::Paste { serial: 8, kind: "text/plain".into() },
+            WinRequest::Bar { window: 1, bar: Bar::Plain },
+            WinRequest::Bar {
+                window: 1,
+                bar: Bar::Tabs {
+                    tabs: vec![Tab { id: 4, title: "~/src".into(), closable: true }, Tab { id: 9, title: "htop".into(), closable: false }],
+                    front: 9,
+                    plus: true,
+                    accent: Some(0x3b82f6),
+                    menu: vec![MenuEntry { id: 1, label: "Rename".into() }],
+                },
+            },
         ];
         for m in all {
             let (bytes, fds) = m.encode().unwrap();
@@ -785,6 +1007,14 @@ mod tests {
             WinEvent::ClipboardOffer { kinds: vec!["text/plain".into()] },
             WinEvent::ClipboardSend { kind: "text/plain".into(), fd: shm() },
             WinEvent::ClipboardData { serial: 13, fd: shm() },
+            WinEvent::TabChosen { window: 1, tab: 4 },
+            WinEvent::TabClose { window: 1, tab: 4 },
+            WinEvent::TabCloseOthers { window: 1, tab: 4 },
+            WinEvent::TabNew { window: 1 },
+            WinEvent::TabMoved { window: 1, tab: 4, to: 2 },
+            WinEvent::TabOut { window: 1, tab: 4, place: Place::Monitor { id: "8ec9".into(), x: 300.0, y: 200.0 } },
+            WinEvent::TabJoin { window: 1, tab: 4, into: 2, to: 0 },
+            WinEvent::TabMenu { window: 1, tab: 4, entry: 1 },
         ];
         for m in all {
             let (bytes, fds) = m.encode().unwrap();

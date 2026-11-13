@@ -243,7 +243,7 @@ fn random_frames_never_panic() {
 fn window_messages_with_descriptors() {
     use std::collections::VecDeque;
     use std::os::fd::OwnedFd;
-    use vergence_protocol::window::{Buffer, Damage, Fd, Node, Place, WinEvent, WinRequest};
+    use vergence_protocol::window::{Bar, Buffer, Damage, Fd, MenuEntry, Node, Place, Tab, WinEvent, WinRequest};
     let mut rng = Rng::new(0x5eed_0f_f1e5);
     let pipe = || Fd::new(vergence_protocol::sock::pipe().unwrap().0);
     // Good messages to mutate from.
@@ -252,15 +252,24 @@ fn window_messages_with_descriptors() {
         WinRequest::Attach { window: 1, buffer: Buffer::Shm { fd: pipe(), width: 64, height: 32, stride: 256, format: 0 }, damage: vec![Damage { x: 0, y: 0, w: 8, h: 8 }] },
         WinRequest::Meaning { window: 1, focus: 2, caret: None, nodes: vec![Node { id: 2, parent: 0, role: "button".into(), name: "OK".into(), value: None, states: vec![], x: 0.0, y: 0.0, w: 10.0, h: 10.0 }] },
         WinRequest::Copy { input_serial: 3, kinds: vec!["text/plain".into()] },
+        WinRequest::Bar {
+            window: 1,
+            bar: Bar::Tabs { tabs: vec![Tab { id: 1, title: "a".into(), closable: true }, Tab { id: 2, title: "b".into(), closable: false }], front: 2, plus: true, accent: Some(0xff0000), menu: vec![MenuEntry { id: 7, label: "m".into() }] },
+        },
     ];
     let encoded: Vec<Vec<u8>> = seeds.iter().map(|m| m.encode().unwrap().0).collect();
-    let events = [WinEvent::Keymap { fd: pipe(), size: 10 }.encode().unwrap().0, WinEvent::ClipboardData { serial: 1, fd: pipe() }.encode().unwrap().0];
+    let events = [
+        WinEvent::Keymap { fd: pipe(), size: 10 }.encode().unwrap().0,
+        WinEvent::ClipboardData { serial: 1, fd: pipe() }.encode().unwrap().0,
+        WinEvent::TabOut { window: 1, tab: 2, place: Place::Monitor { id: "m".into(), x: 1.0, y: 2.0 } }.encode().unwrap().0,
+        WinEvent::TabJoin { window: 1, tab: 2, into: 3, to: 0 }.encode().unwrap().0,
+    ];
     for round in 0..iters() {
         let mut data = if rng.below(3) == 0 { events[rng.below(events.len())].clone() } else { encoded[rng.below(encoded.len())].clone() };
         for _ in 0..rng.below(4) {
             mutate(&mut rng, &mut data);
         }
-        let opcode = 100 + rng.below(20) as u16;
+        let opcode = 100 + rng.below(30) as u16;
         let payload = if data.len() > 6 { &data[6..] } else { &[][..] };
         let waiting = rng.below(4);
         let mut fds: VecDeque<OwnedFd> = (0..waiting).map(|_| vergence_protocol::sock::pipe().unwrap().0).collect();

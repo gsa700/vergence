@@ -94,6 +94,18 @@ window straddling two monitors has a sharp bar on both.
   (`TabDrag`: when a press is a drag, where the tab is drawn, where it would
   land, in the row or out of the window; `reorder`), with tests. 371 tests
   on Hubble, kepler and Techbench.
+- **Step 2 done** (2026-11-12): the protocol. `WinRequest::Bar { window,
+  bar }` with `Bar::Plain` or `Bar::Tabs { tabs, front, plus, accent,
+  menu }`; events `TabChosen`, `TabClose`, `TabCloseOthers`, `TabNew`,
+  `TabMoved`, `TabOut` (with the place for the new window's Create),
+  `TabJoin` and `TabMenu`. Checked on decoding: at most 256 tabs, titles
+  and labels up to 1 KB, 16 menu entries, tab ids unique and not 0, the tab
+  in front one of the tabs. Round-trip tests, a refusal test, the fuzz test
+  seeded with bar messages (200,000 rounds clean). The server keeps each
+  native window's bar description; the toolkit ignores the tab events
+  until step 3. 372 tests on Hubble and Techbench; on kepler one terminal
+  pty test failed once under the full parallel run and passed five times
+  alone (a race on FreeBSD to look at, unrelated to the bar).
 
 ## Steps
 

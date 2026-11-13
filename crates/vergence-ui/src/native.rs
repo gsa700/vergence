@@ -460,6 +460,16 @@ impl Native {
                 }
             }
             WinEvent::Created { .. } => {}
+            // The bar's events (bar milestone 1): the toolkit draws its own bar
+            // until the server draws it (step 3), so none come yet.
+            WinEvent::TabChosen { .. }
+            | WinEvent::TabClose { .. }
+            | WinEvent::TabCloseOthers { .. }
+            | WinEvent::TabNew { .. }
+            | WinEvent::TabMoved { .. }
+            | WinEvent::TabOut { .. }
+            | WinEvent::TabJoin { .. }
+            | WinEvent::TabMenu { .. } => {}
         }
         Ok(())
     }
