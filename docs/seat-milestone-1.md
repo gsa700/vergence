@@ -170,15 +170,17 @@ Smithay's own; nothing of ours runs in its callbacks.
 
 ### Acceptance, where it stands (2026-11-12, evening)
 
-1. Tests: **met on Techbench** (366, the seat's fuzz test with a million
-   events among them). Hubble and kepler green through step 2; after steps
-   3 to 5 still to run (both machines were being moved and kepler
-   reinstalled that evening).
-2. **Partly met on Techbench** by `vctl`: clicks 50 of 50 on both roads,
-   typing and Ctrl chords in the terminal on both roads. Still to do:
+1. Tests: **met on Techbench and kepler** (366, the seat's fuzz test with
+   a million events among them; kepler reinstalled that evening on Hubble's
+   former Tiny, i5-8500T, UHD 630). Hubble (now in Mobilenode) still to run.
+2. **Partly met on Techbench and kepler** by `vctl`: clicks 50 of 50 on
+   both roads (kepler, FreeBSD, 4K at 30 Hz and scale 3: every change within
+   one frame), typing and Ctrl chords in the terminal. clicks.sh learned
+   RIGHT_BUTTONS (a fresh setup's buttons are on the right; the old guess
+   missed every sixth tab there). Still to do:
    repeat and the volume keys (Hubble's ALSA), Firefox, foot, an X11
    program, the clipboard both ways, a drag and drop; Hubble and kepler.
-3. **Partly met on Techbench**: title bars (drag, double-click, buttons,
+3. **Partly met on Techbench, and on kepler the same by `vctl`**: title bars (drag, double-click, buttons,
    resize), the dock (click, menu), the apps popup and its keys, the desktop
    menu, by mouse and by finger (`vctl touch`). Still to do: Alt+drag (by
    hand), dragging the dock, notification cards, hiding docks, a real

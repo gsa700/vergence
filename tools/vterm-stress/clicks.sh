@@ -12,7 +12,9 @@
 # the monitor's frame times (REFRESH=hertz, 30 if not given: Hubble's 4K), from
 # the press reaching the terminal to its frame being built. It assumes the window buttons the
 # terminal draws are on the left, two of them (close, minimize), as on Hubble;
-# LEFT_BUTTONS=n says otherwise.
+# LEFT_BUTTONS=n says otherwise, and RIGHT_BUTTONS=n how many are on the right
+# (a fresh setup has three there and none on the left: LEFT_BUTTONS=0
+# RIGHT_BUTTONS=3; kepler, 2026-11-12, where the old guess missed every sixth tab).
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
 clicks=${1:-50}
@@ -34,7 +36,7 @@ while [ "$n" -lt "$clicks" ]; do
     tab=$(( (n * 5) % 6 ))
     # bar.rs: six units of margin, each button 32 and 2 apart, the tabs after them
     # sharing what is left before + (34) and the margin.
-    at=$(awk -v w="$ww" -v i="$tab" -v b="${LEFT_BUTTONS:-2}" 'BEGIN { start = 6 + b * 34 + (b > 0 ? 2 : 0); tw = (w - 6 - start - 36 - 12) / 6; if (tw > 200) tw = 200; printf "%.0f", start + i * (tw + 2) + tw / 2 }')
+    at=$(awk -v w="$ww" -v i="$tab" -v b="${LEFT_BUTTONS:-2}" -v r="${RIGHT_BUTTONS:-0}" 'BEGIN { start = 6 + b * 34 + (b > 0 ? 2 : 0); tw = (w - 6 - start - 36 - 12 - r * 34 - (r > 0 ? 2 : 0)) / 6; if (tw > 200) tw = 200; printf "%.0f", start + i * (tw + 2) + tw / 2 }')
     "$here/vctl" pointer $((wx + at)) $((wy + 21)) >/dev/null
     "$here/vctl" press left >/dev/null
     "$here/vctl" release left >/dev/null
