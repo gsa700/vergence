@@ -190,6 +190,20 @@ one process.
   the server-drawn tabs (clicks.sh now finds the bar above a window the
   server frames). The Wayland road (other desktops) keeps one window for
   now: step 4b, after the terminal's own steps.
+- **Step 5, the server and the store done** (2026-11-12): native windows
+  get a persistence token at Create: the one they present if it is 32
+  lowercase hex digits and not another open window's of the same program,
+  else a new 128-bit one (/dev/urandom). A program that keeps tokens
+  presents its saved one, or "new" for a new window (no memory then, so the
+  place it asks for wins: a torn-off tab's drop point); memory goes by the
+  token for it. A program that presents nothing keeps the numbering, so it
+  leaves no token entries behind (otherwise every run would have added
+  one). The store (vergence-profile) carries `token` and `seen` (a day
+  number); a window closed for good (the program's Destroy) has its place
+  kept as its program's last-closed one, where a new window starts, and its
+  token forgotten on every setup; a program that goes away or a session
+  that ends forgets nothing; tokens unseen for 90 days are pruned at save.
+  375 tests on all three. The terminal keeping its tokens is step 6.
 
 ## Steps
 

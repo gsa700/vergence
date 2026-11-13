@@ -173,8 +173,10 @@ pub struct Node {
 #[derive(Debug, Clone, PartialEq)]
 pub enum WinRequest {
     /// A new window, `window` an id the client chose (not 0). Its identity
-    /// (Contract 2): the connection's application id, `role`, and `token`
-    /// (empty, or one the server gave the same window on an earlier run).
+    /// (Contract 2): the connection's application id, `role`, and `token`:
+    /// one the server gave the same window on an earlier run; "new" for a new
+    /// window of a program that keeps tokens; empty if the program keeps none
+    /// (its windows are then told apart by the order they open in).
     /// Reply: [`WinEvent::Created`], then a [`WinEvent::Configure`].
     Create { serial: u32, window: u32, role: String, token: String, title: String, width: f64, height: f64, own_frame: bool, parent: u32, place: Place },
     Destroy { window: u32 },

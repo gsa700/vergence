@@ -80,6 +80,12 @@ pub struct NativeWindow {
     /// Its identity (Contract 2).
     pub app_id: String,
     pub role: String,
+    /// Its persistence token (memory.rs): the one it presented if valid, else new.
+    pub token: String,
+    /// Whether its program keeps tokens (it presented one, or "new"): memory
+    /// then goes by the token; otherwise by numbering, as for programs that
+    /// keep none, so they leave no token behind in the store.
+    pub keeps_token: bool,
     /// Whether the client draws its own bar (otherwise the server does).
     pub own_frame: bool,
     alive: AtomicBool,
@@ -249,7 +255,7 @@ impl Server {
     /// A window message from bus client `client` (bus.rs).
     pub fn native_request(&mut self, client: u32, req: WinRequest) {
         match req {
-            WinRequest::Create { serial, window, role, title, width, height, own_frame, parent, place, .. } => {
+            WinRequest::Create { serial, window, role, token, title, width, height, own_frame, parent, place } => {
                 if window == 0 || self.natives.contains_key(&(client, window)) {
                     return self.native_refuse(client, serial, ErrorCode::BadMessage, format!("window id {window} is 0 or in use"));
                 }
@@ -259,11 +265,23 @@ impl Server {
                 let side = |v: f64| if v.is_finite() { (v.round() as i32).clamp(MIN_SIDE, 16_384) } else { 640 };
                 let asked: Size<i32, Logical> = (side(width), side(height)).into();
                 let app_id = self.bus_app_id(client);
+                // The window's persistence token (bar milestone 1, step 5): the one it
+                // presents, if well formed and not already another open window's of
+                // this program, else a new one. "new" asks for a new one from a
+                // program that keeps tokens (a torn-off tab's window: no memory, so
+                // the place it asks for wins); nothing presented, the program keeps
+                // none and its windows go by numbering.
+                let keeps_token = !token.is_empty();
+                let presented = token.len() == 32 && token.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase());
+                let taken = self.natives.values().any(|w| w.native().is_some_and(|m| m.app_id == app_id && m.token == token));
+                let token = if presented && !taken { token } else { new_token() };
                 let n = Arc::new(NativeWindow {
                     client,
                     id: window,
                     app_id: app_id.clone(),
                     role: role.clone(),
+                    token: token.clone(),
+                    keeps_token,
                     own_frame,
                     alive: AtomicBool::new(true),
                     state: Mutex::new(State {
@@ -306,10 +324,7 @@ impl Server {
                     (s.size, s.scale, s.place, s.place_maximized) = (rect.size, scale, rect.loc, maximized);
                 }
                 self.natives.insert((client, window), w.clone());
-                let token = match self.window_identity(&w) {
-                    Some(id) => format!("{}/{}/{}", id.class, id.role, id.index),
-                    None => String::new(),
-                };
+                let _ = self.window_identity(&w);
                 tracing::info!("native: {app_id:?} window {window} ({role:?}) asked {}x{}, given {}x{} at scale {scale:.4}", asked.w, asked.h, rect.size.w, rect.size.h);
                 self.bus_send(client, ServerMsg::Window(WinEvent::Created { serial, window, token }));
                 self.native_send_configure(&n);
@@ -318,9 +333,13 @@ impl Server {
                     self.bus_send(client, ServerMsg::Window(WinEvent::ClipboardOffer { kinds }));
                 }
             }
+            // The program closed the window itself: the user closed it, for good.
+            // (A program that goes away, or a session that ends, sends no Destroy:
+            // its windows are remembered for next time.)
             WinRequest::Destroy { window } => {
                 if let Some(w) = self.natives.remove(&(client, window)) {
                     self.native_drop(&w);
+                    self.forget_window(&w);
                 }
             }
             WinRequest::Title { window, title } => {
@@ -954,4 +973,16 @@ mod tests {
         let mut mem = vec![0u8; 4 * 4 * 4];
         assert!(copy_damage(&f, &mut mem, 4, 4, 16, &[]).is_err());
     }
+}
+
+/// A new persistence token: 128 random bits, as 32 lowercase hex digits.
+fn new_token() -> String {
+    use std::io::Read;
+    let mut b = [0u8; 16];
+    if std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut b)).is_err() {
+        // No randomness to be had: unique enough for one machine's windows.
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        b = (t ^ (std::process::id() as u128) << 64).to_le_bytes();
+    }
+    b.iter().map(|x| format!("{x:02x}")).collect()
 }

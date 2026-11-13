@@ -8,6 +8,12 @@
 //   profile_key); a monitor is named by its EDID (monitor_id), not its port.
 // - A window is its app's class (X11 WM_CLASS instance/class, Wayland app_id)
 //   and its place among open windows of that class. No titles (Dave, 2026-11-06).
+//   A native window is its persistence token instead (bar milestone 1, step 5;
+//   docs/bar-milestone-1.md, "Windows that stay where they were"): issued by the
+//   server, presented again by the program, so each window keeps its own place
+//   whatever else opened or closed. A new window (no memory for its token) starts
+//   where the last window of its program the user closed was; closing one for
+//   good forgets its token everywhere; tokens unseen for 90 days are pruned.
 // - Positions are relative to the monitor's top-left, sizes are the content's,
 //   all in points: they mean the same physical size on every monitor.
 // - Recorded when a move or resize ends, on maximize/restore, and when the
@@ -73,7 +79,12 @@ impl Memory {
         Memory { store, setup: String::new(), ids: HashMap::new() }
     }
 
-    fn save(&self) {
+    fn save(&mut self) {
+        // Windows with a token that have not come back for 90 days are forgotten.
+        let pruned = self.store.prune_unseen(today().saturating_sub(90));
+        if pruned > 0 {
+            tracing::info!("memory: forgot {pruned} window places unseen for 90 days");
+        }
         let Some(p) = path() else { return };
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -98,7 +109,16 @@ impl Server {
         }
         let mut role = String::new();
         let (instance, class) = if let Some(n) = w.native() {
-            // A native window says who it is (Contract 2): its application id and role.
+            // A native window says who it is (Contract 2): its application id and
+            // role, and, if its program keeps tokens, its token (no numbering then).
+            if n.keeps_token {
+                let id = WindowId { instance: n.app_id.clone(), class: n.app_id.clone(), role: n.role.clone(), index: 0, token: n.token.clone() };
+                if id.instance.is_empty() || self.memory.store.skips(&id) {
+                    return None;
+                }
+                self.memory.ids.insert(w.clone(), id.clone());
+                return Some(id);
+            }
             role = n.role.clone();
             (n.app_id.clone(), n.app_id.clone())
         } else if let Some(x) = w.x11_surface() {
@@ -132,7 +152,7 @@ impl Server {
             .map(|i| i.index)
             .collect();
         let index = (0..).find(|i| !taken.contains(i)).unwrap_or(0);
-        let id = WindowId { instance, class, role, index };
+        let id = WindowId { instance, class, role, index, token: String::new() };
         if self.memory.store.skips(&id) {
             return None;
         }
@@ -149,8 +169,12 @@ impl Server {
         // A native window (a role) with no memory yet takes its program's
         // role-less one: where the same program's Wayland window was (our tools
         // before the native road, 2026-11-11), so moving roads forgets nothing.
+        // A window with a token and no memory yet starts where the last window
+        // of its program the user closed was (a new terminal window, a torn-off
+        // tab's own window asks for its drop point and has no memory: that wins).
         let s = match profile.get(&id) {
             Some(s) => s.clone(),
+            None if !id.token.is_empty() => profile.get(&id.untokened()).or_else(|| profile.get(&WindowId { role: String::new(), ..id.untokened() }))?.clone(),
             None if !id.role.is_empty() => profile.get(&WindowId { role: String::new(), ..id.clone() })?.clone(),
             None => return None,
         };
@@ -201,6 +225,7 @@ impl Server {
             max_vert: maximized.is_some(),
             fullscreen: false,
             desktop: None,
+            seen: if id.token.is_empty() { 0 } else { today() },
         };
         let setup = self.memory.setup.clone();
         let profile = self.memory.store.get_mut_or_new(&setup);
@@ -232,6 +257,34 @@ fn program_of(dh: &smithay::reexports::wayland_server::DisplayHandle, surface: &
     }
     let out = std::process::Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).output().ok()?;
     Some(String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// Today, in days since 1970-01-01 (for when a tokened window was last seen).
+pub fn today() -> u32 {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    (secs / 86_400) as u32
+}
+
+impl Server {
+    /// The user closed a window with a token for good: where it was becomes
+    /// its program's last-closed place (a new window starts there), and its
+    /// token is forgotten on every monitor setup.
+    pub fn forget_window(&mut self, w: &Win) {
+        let Some(id) = self.memory.ids.get(w).cloned() else { return };
+        if id.token.is_empty() {
+            return;
+        }
+        let setup = self.memory.setup.clone();
+        if let Some(mut last) = self.memory.store.get(&setup).and_then(|p| p.get(&id)).cloned() {
+            last.id = id.untokened();
+            last.seen = 0;
+            self.memory.store.get_mut_or_new(&setup).put(last);
+        }
+        let n = self.memory.store.forget_token(&id.token);
+        self.memory.ids.remove(w);
+        tracing::info!("memory: {} closed for good; {n} places forgotten", id.describe());
+        self.memory.save();
+    }
 }
 
 fn now() -> String {
