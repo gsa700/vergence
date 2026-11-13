@@ -107,6 +107,8 @@ pub struct Decor {
 struct BarPicture {
     key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>),
     buffer: MemoryRenderBuffer,
+    /// Its pixels' width and height (the scale's, not the bar's points).
+    px: (i32, i32),
 }
 
 /// A native window's tabs as the server draws them: titles, the one in
@@ -357,6 +359,7 @@ impl Server {
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
                         key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None),
                         buffer: MemoryRenderBuffer::new(Fourcc::Abgr8888, (1, 1), 1, Transform::Normal, None),
+                        px: (1, 1),
                     });
                     if picture.key != key && width > 0 {
                         let face = fonts.face("sans-serif", 400, false);
@@ -385,13 +388,18 @@ impl Server {
                         match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)) {
                             Ok(p) => {
                                 picture.buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+                                picture.px = (p.width as i32, p.height as i32);
                                 picture.key = key;
                             }
                             Err(e) => tracing::warn!("title bar: {e}"),
                         }
                     }
                     let at = (f.title.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-                    match MemoryRenderBufferRenderElement::from_buffer(renderer, at.to_f64(), &picture.buffer, None, None, Some(f.title.size), Kind::Unspecified) {
+                    // All of the picture's pixels (drawn for this scale) into the bar's points:
+                    // drawn 1:1 (left out, it was taken as points and shown magnified at
+                    // scale 2: kepler, 2026-11-12).
+                    let whole = Rectangle::<f64, Logical>::from_size((picture.px.0 as f64, picture.px.1 as f64).into());
+                    match MemoryRenderBufferRenderElement::from_buffer(renderer, at.to_f64(), &picture.buffer, None, Some(whole), Some(f.title.size), Kind::Unspecified) {
                         Ok(e) => elements.push(SceneElement::Memory(e)),
                         Err(e) => tracing::warn!("title bar: {e:?}"),
                     }
