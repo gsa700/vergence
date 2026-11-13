@@ -283,6 +283,12 @@ one process.
   section menu's Move to a new window asks for a place a bar's height down
   and right of it (`Place::Parent`). On Hubble: a source resized to 650 x
   410, the section's window and a torn-off tab's both 650 x 410.
+- **A window's only tab moves the window** (Dave, 2026-11-12), as a
+  browser's: past the drag distance the press becomes the seat's window
+  move (from the press point, so the window keeps up with the pointer);
+  let go over another window's bar of the same program, the tab joins it
+  there and its own window closes (`join_target`, which looks through the
+  window being moved but not through a tab's window that stays put).
 
 ## Steps
 

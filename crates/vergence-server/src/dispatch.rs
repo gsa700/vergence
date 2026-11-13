@@ -116,6 +116,9 @@ pub struct Dispatch {
     smithay_held: Vec<u32>,
     /// A left press on a tab of a native window's bar, and the drag it may become.
     tab_hold: Option<TabHold>,
+    /// A window being moved by its only tab (as a browser's): let go over
+    /// another window's bar of the same program, the tab joins it.
+    tab_move: Option<(Win, usize)>,
     /// A Wayland window resized from its top or left: kept anchored as its
     /// commits arrive, until the one after the resize ended.
     anchored: Option<(Win, ResizeEdge, Rectangle<i32, Logical>, bool)>,
@@ -495,6 +498,19 @@ impl Server {
         let Some((bar, layout)) = self.bar_of(&hold.window) else { return };
         let (lx, ly) = ((pos.x - bar.loc.x as f64) as f32, (pos.y - bar.loc.y as f64) as f32);
         let moved = (pos.x - hold.from.x).hypot(pos.y - hold.from.y) as f32;
+        // A window's only tab moves the window (Dave, 2026-11-12).
+        if hold.drag.is_none() && moved >= vergence_bar::DRAG_START && layout.tabs.len() == 1 {
+            let Some(hold) = self.input.tab_hold.take() else { return };
+            if self.grab_request(&hold.window, None) {
+                // From the press, not from here: the window keeps up with the pointer.
+                if let Some(Running::Move { from, .. }) = self.input.running.as_mut() {
+                    *from = hold.from;
+                }
+                self.input.tab_move = Some((hold.window, hold.index));
+                self.grab_motion(pos);
+            }
+            return;
+        }
         let hold = self.input.tab_hold.as_mut().unwrap();
         if hold.drag.is_none() && moved >= vergence_bar::DRAG_START {
             let start_x = (hold.from.x - bar.loc.x as f64) as f32;
@@ -533,19 +549,7 @@ impl Server {
             Some(vergence_bar::Landing::At(to)) if to != hold.index => WinEvent::TabMoved { window, tab, to: to as u32 },
             Some(vergence_bar::Landing::At(_)) | None => return,
             Some(vergence_bar::Landing::Outside) => {
-                // Over another window's bar, of the same program?
-                let over = match self.hit(pos) {
-                    Hit::Tab(w, _) | Hit::CloseTab(w, _) | Hit::Plus(w) | Hit::Title(w) => Some(w),
-                    _ => None,
-                };
-                let into = over.filter(|w| *w != hold.window).and_then(|w| match &w {
-                    Win::Native(m) if m.client == client => self.bar_of(&w).map(|(bar, layout)| {
-                        let x = (pos.x - bar.loc.x as f64) as f32;
-                        (m.id, layout.tabs.iter().filter(|r| r.x + r.w / 2.0 < x).count() as u32)
-                    }),
-                    _ => None,
-                });
-                match into {
+                match self.join_target(&hold.window, pos, false) {
                     Some((into, to)) => WinEvent::TabJoin { window, tab, into, to },
                     None => WinEvent::TabOut { window, tab, place: self.drop_place(pos, n.size()) },
                 }
@@ -553,6 +557,30 @@ impl Server {
         };
         tracing::info!("tab: {event:?}");
         self.bus_send(client, vergence_protocol::bus::ServerMsg::Window(event));
+    }
+
+    /// The window of the same program whose bar is under `pos`, and the place
+    /// in its row the pointer is at: where a tab dropped there joins. `from`,
+    /// the tab's window, is looked through when it is the one being moved
+    /// (`moving`); otherwise it hides what is below it like any other.
+    fn join_target(&self, from: &Win, pos: Point<f64, Logical>, moving: bool) -> Option<(u32, u32)> {
+        let Win::Native(n) = from else { return None };
+        let at = pos.to_i32_round::<i32>();
+        for w in self.space.elements().rev().filter(|w| !moving || *w != from) {
+            if let Win::Native(m) = w
+                && m.client == n.client
+                && w != from
+                && let Some((bar, layout)) = self.bar_of(w).filter(|(bar, _)| bar.contains(at))
+            {
+                let x = (pos.x - bar.loc.x as f64) as f32;
+                return Some((m.id, layout.tabs.iter().filter(|r| r.x + r.w / 2.0 < x).count() as u32));
+            }
+            // Any other window over the spot (its bar or its content) hides what is below.
+            if self.bar_of(w).is_some_and(|(bar, _)| bar.contains(at)) || self.space.element_geometry(w).is_some_and(|g| g.contains(at)) {
+                return None;
+            }
+        }
+        None
     }
 
     /// Where a window for a tab dropped at `pos` goes: its bar under the
@@ -711,8 +739,21 @@ impl Server {
     }
 
     fn grab_end(&mut self, time: InputTime) {
+        let tab_move = self.input.tab_move.take();
         match self.input.running.take() {
-            Some(Running::Move { window, .. }) => self.remember(&window),
+            Some(Running::Move { window, .. }) => {
+                self.remember(&window);
+                // Moved by its only tab and let go over another window's bar: it joins.
+                if let Some((w, index)) = tab_move.filter(|(w, _)| *w == window)
+                    && let Win::Native(n) = &w
+                    && let Some(tab) = self.tab_id(&w, index)
+                    && let Some((into, to)) = self.join_target(&w, self.pointer_location(), true)
+                {
+                    let event = WinEvent::TabJoin { window: n.id, tab, into, to };
+                    tracing::info!("tab: {event:?}");
+                    self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(event));
+                }
+            }
             Some(Running::Resize { window, size, .. }) => {
                 self.remember(&window);
                 if let Some(t) = window.toplevel() {
