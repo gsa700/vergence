@@ -345,6 +345,13 @@ one process.
   "icon:minimize,close"), tabs chosen, added and closed, the window moved,
   resized and maximized by its bar; Dave's screenshot and checks. All
   eight acceptance checks are met; step 4b is left.
+- **Under GNOME, GNOME's button layout** (Dave, 2026-11-12: "it should
+  probably follow gnome if running there"; c6ebbed): `vergence_bar::host_layout`
+  reads org.gnome.desktop.wm.preferences button-layout with gsettings when
+  running under GNOME outside a Vergence session, polled once a second
+  with the settings file. On Techbench ("icon:minimize,close"): minimize
+  and close on the right, no maximize, the tabs' close marks on their
+  right; Dave's screenshot.
 
 ## Steps
 
