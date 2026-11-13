@@ -175,6 +175,21 @@ one process.
   a tab's close button closes it, the last one closes the window. 372 tests
   on all three. The left controls are the default since the same evening
   (cbe95ae).
+- **Step 4, the native road done** (2026-11-12): vergence-ui runs several
+  windows per program on the native road. The connection keeps what the
+  windows share (the keyboard and its repeat, the clipboard and a paste in
+  progress, the GPU, fonts, the waker: a wake goes to every window); each
+  window keeps its program (`App`), picture buffers, size and scale,
+  frames, pointer, fingers, cursor and timers; events go by window id, keys
+  to the window with the keyboard. `Window::open_window(Box<dyn App>)`
+  opens another (created asynchronously; the first stays synchronous, since
+  it decides between the roads); the program ends with its last window.
+  `App::token` and `App::token_given` carry the persistence token for step
+  5. Single-window programs are unchanged: on Hubble the click test is 50 of
+  50 on both roads, natively 2.1 ms on average from press to frame through
+  the server-drawn tabs (clicks.sh now finds the bar above a window the
+  server frames). The Wayland road (other desktops) keeps one window for
+  now: step 4b, after the terminal's own steps.
 
 ## Steps
 

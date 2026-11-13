@@ -271,6 +271,8 @@ enum Command {
     Paste,
     Timer(u64, Option<Instant>),
     Place(Place),
+    /// Another window of the same program (bar milestone 1, step 4).
+    Open(Box<dyn App>),
 }
 
 /// What a program may ask of its window while it handles input.
@@ -349,6 +351,15 @@ impl Window {
     pub fn ask_place(&mut self, place: Place) {
         self.commands.push(Command::Place(place));
     }
+
+    /// Opens another window of this program, run by `app` (a tab torn off,
+    /// a second terminal window). The windows of a program share its
+    /// keyboard, clipboard and waker; the program ends when the last one
+    /// closes. Native road only for now: elsewhere the window is not opened
+    /// (the Wayland road follows in bar milestone 1, step 4b).
+    pub fn open_window(&mut self, app: Box<dyn App>) {
+        self.commands.push(Command::Open(app));
+    }
 }
 
 /// The most timers a window keeps at once; asking for more drops the
@@ -416,6 +427,17 @@ pub trait App {
     fn shown(&mut self, _frame: &Frame, _draw_ms: f64) -> bool {
         true
     }
+
+    /// The persistence token this window had on an earlier run, if the
+    /// program kept one (Contract 2): presented when the window is created,
+    /// so window memory puts it back where it was. Empty: a new window.
+    fn token(&self) -> String {
+        String::new()
+    }
+
+    /// The server's token for this window, once it exists: kept by a
+    /// program that wants the window back in its place on the next run.
+    fn token_given(&mut self, _token: &str) {}
 
     /// Where the window asks to be when it opens (Contract 2).
     fn place(&self) -> Place {
@@ -880,6 +902,8 @@ impl Runner {
                 Command::Timer(id, at) => set_timer(&mut self.timers, id, at),
                 // Wayland lets no client place its window.
                 Command::Place(_) => {}
+                // Several windows per program: native road only so far (step 4b).
+                Command::Open(_) => {}
             }
         }
         Ok(())

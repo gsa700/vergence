@@ -17,6 +17,14 @@
 //! reads the attach, so one buffer serves every frame; a GPU buffer is free
 //! again once a later picture has been attached and a frame has followed;
 //! cursor shapes and resize edges use the same numbers as Wayland's.
+//!
+//! A program may have several windows (bar milestone 1, step 4:
+//! [`Window::open_window`]). They share the connection, the keyboard and its
+//! repeat, the clipboard, the GPU and the fonts, and the waker (a wake goes
+//! to every window); each has its own picture, size and scale, frames,
+//! pointer, fingers, cursor and timers. The first window is created before
+//! anything else, since it decides between this road and Wayland; the others
+//! as the program asks. The program ends when its last window closes.
 
 use std::{
     io::{self, Read, Write},
@@ -45,24 +53,38 @@ use crate::{
     touch,
 };
 
-/// The one window a toolkit program has, by the id it gives it.
-const WINDOW: u32 = 1;
-
 /// A GPU buffer and whether the server may still be reading it.
 struct Slot {
     buffer: GpuBuffer,
     busy: bool,
 }
 
-struct Native {
-    client: Client,
-    gpu: Option<Gpu>,
+/// The program, borrowed for its first window, or a window it opened later.
+enum Run<'a> {
+    Borrowed(&'a mut dyn App),
+    Owned(Box<dyn App>),
+}
+
+impl Run<'_> {
+    fn get(&mut self) -> &mut dyn App {
+        match self {
+            Run::Borrowed(a) => &mut **a,
+            Run::Owned(a) => a.as_mut(),
+        }
+    }
+}
+
+/// One window: the program that runs it and what the road keeps for it.
+struct Win<'a> {
+    id: u32,
+    app: Run<'a>,
+    /// Created by the server (the first is before the loop; the others when
+    /// their `Created` comes).
+    created: bool,
     slots: Vec<Slot>,
     /// The slot attached last: the one the server shows until the next.
     showing: Option<usize>,
     drawn_by: &'static str,
-    cpu: Cpu,
-    fonts: Fonts,
     /// Shared memory for frames drawn in software: copied by the server at
     /// attach, so one serves every frame (its size, and whether it has alpha).
     shm: Option<(ShmFile, u32, u32, bool)>,
@@ -76,14 +98,30 @@ struct Native {
     frame_pending: bool,
     frames: u64,
     closing: bool,
-
     pointer_at: Option<(f32, f32)>,
-    /// The serial of the last button press (to move or resize) and of the
-    /// last key or button press (to copy).
+    /// The serial of the last button press (to move or resize).
     press_serial: u32,
-    input_serial: u32,
     cursor: Cursor,
     fingers: Vec<(i32, f32, f32)>,
+    timers: Vec<(u64, Instant)>,
+    /// The server draws this window's tabbed bar (App::tabs_by_server).
+    bar_by_server: bool,
+}
+
+/// The connection and what a program's windows share.
+struct Native<'a> {
+    client: Client,
+    gpu: Option<Gpu>,
+    cpu: Cpu,
+    fonts: Fonts,
+    windows: Vec<Win<'a>>,
+    next_window: u32,
+    /// Windows asked for and not yet answered: the request's serial, the window.
+    creating: Vec<(u32, u32)>,
+    /// The window with the keyboard.
+    focus: Option<u32>,
+    /// The serial of the last key or button press, any window's (to copy).
+    input_serial: u32,
     keyboard: Option<keyboard::Keyboard>,
     repeat_rate: i32,
     repeat_delay: i32,
@@ -94,15 +132,15 @@ struct Native {
     /// What we put there, and whether the offer echoing our copy is yet to come.
     copied: Option<Arc<str>>,
     own_offer_due: bool,
-    /// The paste asked for (its serial), and the text on its way in.
+    /// The paste asked for (its serial and the window that asked), and the text on its way in.
     paste_serial: Option<u32>,
+    paste_window: u32,
     paste: Option<Paste>,
-    inbox: Vec<Input>,
+    /// Input made here rather than read from the server, for a window next.
+    inbox: Vec<(u32, Input)>,
     wake: std::fs::File,
     wake_pending: Arc<AtomicBool>,
-    timers: Vec<(u64, Instant)>,
-    /// The server draws this window's tabbed bar (App::tabs_by_server).
-    bar_by_server: bool,
+    waker: Waker,
 }
 
 fn client_error(e: ClientError) -> io::Error {
@@ -112,64 +150,47 @@ fn client_error(e: ClientError) -> io::Error {
     }
 }
 
-/// Opens the window natively and runs until it is closed. Ok(None): not in
-/// a Vergence session, or the server would not open a window this way; the
-/// program has not been called, and the caller opens it over Wayland.
+/// Opens the window natively and runs until the program's last window is
+/// closed. Ok(None): not in a Vergence session, or the server would not open
+/// a window this way; the program has not been called, and the caller opens
+/// it over Wayland.
 pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>> {
     if std::env::var("VERGENCE_UI_WAYLAND").as_deref() == Ok("1") || std::env::var_os(vergence_protocol::BUS_ENV).is_none() {
         return Ok(None);
     }
     let Ok(mut client) = Client::connect(&app.app_id()) else { return Ok(None) };
-    // A window whose tabs the server may draw leaves its frame to the server here.
-    let bar_by_server = app.own_frame() && app.tabs_by_server();
-    let (title, own_frame, place) = (app.title(), app.own_frame() && !bar_by_server, app.place());
+    let (bar_by_server, request) = create_request(app, 1, 0, size);
     let created = client.request(|serial| {
-        ClientMsg::Window(WinRequest::Create {
-            serial,
-            window: WINDOW,
-            role: "main".into(),
-            token: String::new(),
-            title,
-            width: size.0.max(1) as f64,
-            height: size.1.max(1) as f64,
-            own_frame,
-            parent: 0,
-            place,
-        })
+        let mut r = request.clone();
+        if let WinRequest::Create { serial: s, .. } = &mut r {
+            *s = serial;
+        }
+        ClientMsg::Window(r)
     });
-    match created {
-        Ok(ServerMsg::Window(WinEvent::Created { .. })) => {}
+    let token = match created {
+        Ok(ServerMsg::Window(WinEvent::Created { token, .. })) => token,
         // A server without native windows says "not yet", or something else:
         // Wayland it is.
         _ => return Ok(None),
-    }
+    };
+    app.token_given(&token);
     let gpu = (std::env::var("VERGENCE_RENDER").as_deref() != Ok("cpu")).then(|| Gpu::new().ok()).flatten().filter(Gpu::shares_buffers);
     let (wake_read, wake_write) = sock::pipe()?;
     let wake_pending = Arc::new(AtomicBool::new(false));
-    app.waker(Waker { pipe: Arc::new(wake_write.into()), pending: wake_pending.clone() });
+    let waker = Waker { pipe: Arc::new(wake_write.into()), pending: wake_pending.clone() };
+    app.waker(waker.clone());
+    let mut first = Win::new(1, Run::Borrowed(app), size, bar_by_server);
+    first.created = true;
     let mut n = Native {
         client,
         gpu,
-        slots: Vec::new(),
-        showing: None,
-        drawn_by: "",
         cpu: Cpu::new(),
         fonts: Fonts::system(),
-        shm: None,
-        started: Instant::now(),
-        width: size.0.max(1),
-        height: size.1.max(1),
-        scale: 1.0,
-        configured: false,
-        dirty: false,
-        frame_pending: false,
-        frames: 0,
-        closing: false,
-        pointer_at: None,
-        press_serial: 0,
+        windows: vec![first],
+        next_window: 2,
+        creating: Vec::new(),
+        focus: None,
         input_serial: 0,
-        cursor: Cursor::Default,
-        fingers: Vec::new(),
         keyboard: None,
         repeat_rate: 0,
         repeat_delay: 0,
@@ -178,31 +199,102 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
         copied: None,
         own_offer_due: false,
         paste_serial: None,
+        paste_window: 0,
         paste: None,
         inbox: Vec::new(),
         wake: wake_read.into(),
         wake_pending,
-        timers: Vec::new(),
-        bar_by_server,
+        waker,
     };
-    let result = n.run(app);
-    let _ = n.client.send(&ClientMsg::Window(WinRequest::Destroy { window: WINDOW }));
+    let result = n.run();
+    for w in std::mem::take(&mut n.windows) {
+        let _ = n.client.send(&ClientMsg::Window(WinRequest::Destroy { window: w.id }));
+    }
     result.map(Some)
 }
 
-impl Native {
+/// The Create request for a window run by `app` (its serial filled in by the
+/// sender), and whether the server draws its tabbed bar.
+fn create_request(app: &dyn App, window: u32, serial: u32, size: (u32, u32)) -> (bool, WinRequest) {
+    // A window whose tabs the server may draw leaves its frame to the server here.
+    let bar_by_server = app.own_frame() && app.tabs_by_server();
+    let request = WinRequest::Create {
+        serial,
+        window,
+        role: "main".into(),
+        token: app.token(),
+        title: app.title(),
+        width: size.0.max(1) as f64,
+        height: size.1.max(1) as f64,
+        own_frame: app.own_frame() && !bar_by_server,
+        parent: 0,
+        place: app.place(),
+    };
+    (bar_by_server, request)
+}
+
+impl<'a> Win<'a> {
+    fn new(id: u32, app: Run<'a>, size: (u32, u32), bar_by_server: bool) -> Win<'a> {
+        Win {
+            id,
+            app,
+            created: false,
+            slots: Vec::new(),
+            showing: None,
+            drawn_by: "",
+            shm: None,
+            started: Instant::now(),
+            width: size.0.max(1),
+            height: size.1.max(1),
+            scale: 1.0,
+            configured: false,
+            dirty: false,
+            frame_pending: false,
+            frames: 0,
+            closing: false,
+            pointer_at: None,
+            press_serial: 0,
+            cursor: Cursor::Default,
+            fingers: Vec::new(),
+            timers: Vec::new(),
+            bar_by_server,
+        }
+    }
+}
+
+/// A new window's size before the server says (the first window's is the program's).
+const OPENED_SIZE: (u32, u32) = (820, 520);
+
+impl<'a> Native<'a> {
     fn send(&mut self, r: WinRequest) -> io::Result<()> {
         self.client.send(&ClientMsg::Window(r)).map_err(client_error)
     }
 
-    fn run(&mut self, app: &mut dyn App) -> io::Result<()> {
-        while !self.closing {
+    fn index(&self, id: u32) -> Option<usize> {
+        self.windows.iter().position(|w| w.id == id)
+    }
+
+    fn run(&mut self) -> io::Result<()> {
+        loop {
+            // Closed windows go; the program ends with its last.
+            let mut i = 0;
+            while i < self.windows.len() {
+                if self.windows[i].closing {
+                    let w = self.windows.remove(i);
+                    self.release_window(w)?;
+                } else {
+                    i += 1;
+                }
+            }
+            if self.windows.is_empty() {
+                return Ok(());
+            }
             // Wait for the server, but no longer than the next key repeat, the
             // paste's limit or the next timer.
             let now = Instant::now();
             let repeat = self.repeat.as_ref().map(|r| r.next.saturating_duration_since(now));
             let paste = self.paste.as_ref().map(|p| (p.started + PASTE_TIMEOUT).saturating_duration_since(now));
-            let timer = self.timers.iter().map(|t| t.1).min().map(|t| t.saturating_duration_since(now));
+            let timer = self.windows.iter().flat_map(|w| w.timers.iter().map(|t| t.1)).min().map(|t| t.saturating_duration_since(now));
             let wait = if self.client.has_buffered() { Some(Duration::ZERO) } else { [repeat, paste, timer].into_iter().flatten().min() };
             let pipe = self.paste.as_ref().map(|p| p.pipe.as_raw_fd());
             let ready = sock::poll_readable(&[Some(self.client.raw_fd()), pipe, Some(self.wake.as_raw_fd())], wait)?;
@@ -210,7 +302,7 @@ impl Native {
                 return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "the display server closed the connection"));
             }
             while let Some(m) = self.client.try_event().map_err(client_error)? {
-                self.handle(m, app)?;
+                self.handle(m)?;
             }
             self.read_paste(ready[1]);
             if ready[2] {
@@ -218,74 +310,116 @@ impl Native {
                 let mut drain = [0u8; 64];
                 let _ = self.wake.read(&mut drain);
                 self.wake_pending.store(false, Ordering::SeqCst);
-                self.with_window(app, |app, window| app.woken(window))?;
+                for id in self.windows.iter().map(|w| w.id).collect::<Vec<_>>() {
+                    self.with_window(id, |app, window| app.woken(window))?;
+                }
             }
-            for input in std::mem::take(&mut self.inbox) {
-                self.tell(app, input)?;
+            for (id, input) in std::mem::take(&mut self.inbox) {
+                self.tell(id, input)?;
             }
-            self.repeat_due(app)?;
-            self.timers_due(app)?;
-            if self.configured && self.dirty && !self.frame_pending && !self.closing {
-                self.dirty = false;
-                self.draw(app)?;
+            self.repeat_due()?;
+            self.timers_due()?;
+            for i in 0..self.windows.len() {
+                let w = &self.windows[i];
+                if w.created && w.configured && w.dirty && !w.frame_pending && !w.closing {
+                    self.windows[i].dirty = false;
+                    self.draw(i)?;
+                }
             }
         }
-        Ok(())
     }
 
-    fn tell(&mut self, app: &mut dyn App, input: Input) -> io::Result<()> {
-        self.with_window(app, |app, window| app.input(&input, window))
+    /// A window is gone: its GPU buffers are let go and the server told.
+    fn release_window(&mut self, w: Win<'a>) -> io::Result<()> {
+        if let Some(gpu) = self.gpu.as_mut() {
+            for s in w.slots {
+                gpu.release(s.buffer);
+            }
+        }
+        if self.focus == Some(w.id) {
+            self.focus = None;
+            self.repeat = None;
+        }
+        self.send(WinRequest::Destroy { window: w.id })
     }
 
-    fn with_window(&mut self, app: &mut dyn App, call: impl FnOnce(&mut dyn App, &mut Window)) -> io::Result<()> {
+    fn tell(&mut self, id: u32, input: Input) -> io::Result<()> {
+        self.with_window(id, |app, window| app.input(&input, window))
+    }
+
+    fn with_window(&mut self, id: u32, call: impl FnOnce(&mut dyn App, &mut Window)) -> io::Result<()> {
+        let Some(i) = self.index(id) else { return Ok(()) };
         let mut window = Window::default();
-        call(app, &mut window);
+        call(self.windows[i].app.get(), &mut window);
         for command in window.commands {
+            let Some(i) = self.index(id) else { break };
             match command {
-                Command::Redraw => self.dirty = true,
-                Command::Close => self.closing = true,
-                Command::Move => self.send(WinRequest::Move { window: WINDOW, input_serial: self.press_serial })?,
-                Command::Resize(edges) => self.send(WinRequest::Resize { window: WINDOW, input_serial: self.press_serial, edges: edges.wire() as u8 })?,
+                Command::Redraw => self.windows[i].dirty = true,
+                Command::Close => self.windows[i].closing = true,
+                Command::Move => {
+                    let input_serial = self.windows[i].press_serial;
+                    self.send(WinRequest::Move { window: id, input_serial })?
+                }
+                Command::Resize(edges) => {
+                    let input_serial = self.windows[i].press_serial;
+                    self.send(WinRequest::Resize { window: id, input_serial, edges: edges.wire() as u8 })?
+                }
                 Command::Cursor(cursor) => {
-                    if cursor != self.cursor {
-                        self.cursor = cursor;
-                        if self.pointer_at.is_some() {
-                            self.send(WinRequest::Cursor { window: WINDOW, shape: cursor.wire() as u16 })?;
+                    let w = &mut self.windows[i];
+                    if cursor != w.cursor {
+                        w.cursor = cursor;
+                        if w.pointer_at.is_some() {
+                            self.send(WinRequest::Cursor { window: id, shape: cursor.wire() as u16 })?;
                         }
                     }
                 }
-                Command::Title(title) => self.send(WinRequest::Title { window: WINDOW, title })?,
-                Command::Maximize(on) => self.send(WinRequest::Maximize { window: WINDOW, on })?,
-                Command::Minimize => self.send(WinRequest::Minimize { window: WINDOW })?,
+                Command::Title(title) => self.send(WinRequest::Title { window: id, title })?,
+                Command::Maximize(on) => self.send(WinRequest::Maximize { window: id, on })?,
+                Command::Minimize => self.send(WinRequest::Minimize { window: id })?,
                 Command::Copy(text) => {
                     self.send(WinRequest::Copy { input_serial: self.input_serial, kinds: TEXT_KINDS.iter().map(|k| k.to_string()).collect() })?;
                     self.copied = Some(text.into());
                     self.own_offer_due = true;
                 }
-                Command::Paste => self.start_paste()?,
-                Command::Timer(id, at) => set_timer(&mut self.timers, id, at),
-                Command::Place(place) => self.send(WinRequest::Place { window: WINDOW, place })?,
+                Command::Paste => self.start_paste(id)?,
+                Command::Timer(timer, at) => set_timer(&mut self.windows[i].timers, timer, at),
+                Command::Place(place) => self.send(WinRequest::Place { window: id, place })?,
+                Command::Open(app) => self.open(app)?,
             }
         }
         Ok(())
     }
 
-    /// Asks whoever owns the clipboard for its text.
-    fn start_paste(&mut self) -> io::Result<()> {
+    /// Another window of the program: asked of the server now, run when it is created.
+    fn open(&mut self, mut app: Box<dyn App>) -> io::Result<()> {
+        let id = self.next_window;
+        self.next_window += 1;
+        let serial = self.client.next_serial();
+        let (bar_by_server, request) = create_request(app.as_ref(), id, serial, OPENED_SIZE);
+        app.waker(self.waker.clone());
+        self.send(request)?;
+        self.creating.push((serial, id));
+        self.windows.push(Win::new(id, Run::Owned(app), OPENED_SIZE, bar_by_server));
+        Ok(())
+    }
+
+    /// Asks whoever owns the clipboard for its text, for window `id`.
+    fn start_paste(&mut self, id: u32) -> io::Result<()> {
         // Our own copy needs no trip through the server.
         if let Some(text) = &self.copied {
-            self.inbox.push(Input::Paste(text.to_string()));
+            self.inbox.push((id, Input::Paste(text.to_string())));
             return Ok(());
         }
         let Some(kind) = TEXT_KINDS.iter().find(|k| self.clip_kinds.iter().any(|have| have == *k)) else { return Ok(()) };
         let serial = self.client.next_serial();
         self.send(WinRequest::Paste { serial, kind: kind.to_string() })?;
         self.paste_serial = Some(serial);
+        self.paste_window = id;
         Ok(())
     }
 
     /// As lib.rs: what has arrived of a paste; all of it (or too much, or too
-    /// late) goes to the program.
+    /// late) goes to the window that asked.
     fn read_paste(&mut self, ready: bool) {
         let Some(paste) = &mut self.paste else { return };
         let mut done = paste.started.elapsed() >= PASTE_TIMEOUT;
@@ -302,7 +436,7 @@ impl Native {
         if done && let Some(mut paste) = self.paste.take() {
             paste.data.truncate(MAX_PASTE);
             if !paste.data.is_empty() {
-                self.inbox.push(Input::Paste(String::from_utf8_lossy(&paste.data).into_owned()));
+                self.inbox.push((self.paste_window, Input::Paste(String::from_utf8_lossy(&paste.data).into_owned())));
             }
         }
     }
@@ -311,7 +445,7 @@ impl Native {
         self.keyboard.as_ref().map(keyboard::Keyboard::modifiers).unwrap_or_default()
     }
 
-    fn handle(&mut self, m: ServerMsg, app: &mut dyn App) -> io::Result<()> {
+    fn handle(&mut self, m: ServerMsg) -> io::Result<()> {
         let ev = match m {
             ServerMsg::Window(ev) => ev,
             // A paste the server could not serve: nothing comes.
@@ -319,50 +453,83 @@ impl Native {
                 self.paste_serial = None;
                 return Ok(());
             }
+            // A window the server would not open: it goes, unseen.
+            ServerMsg::Error { serial, .. } if self.creating.iter().any(|c| c.0 == serial) => {
+                let pos = self.creating.iter().position(|c| c.0 == serial).unwrap();
+                let (_, id) = self.creating.remove(pos);
+                if let Some(i) = self.index(id) {
+                    self.windows.remove(i);
+                }
+                return Ok(());
+            }
             _ => return Ok(()),
         };
         match ev {
-            WinEvent::Configure { serial, width, height, scale, .. } => {
-                self.send(WinRequest::AckConfigure { window: WINDOW, serial })?;
+            WinEvent::Created { serial, window, token } => {
+                if let Some(pos) = self.creating.iter().position(|c| c.0 == serial && c.1 == window) {
+                    self.creating.remove(pos);
+                    if let Some(i) = self.index(window) {
+                        self.windows[i].created = true;
+                        self.windows[i].app.get().token_given(&token);
+                    }
+                }
+            }
+            WinEvent::Configure { window, serial, width, height, scale, .. } => {
+                self.send(WinRequest::AckConfigure { window, serial })?;
+                let Some(i) = self.index(window) else { return Ok(()) };
+                let w = &mut self.windows[i];
                 if width.is_finite() && height.is_finite() && width >= 1.0 && height >= 1.0 {
-                    (self.width, self.height) = (width.round() as u32, height.round() as u32);
+                    (w.width, w.height) = (width.round() as u32, height.round() as u32);
                 }
                 if scale.is_finite() && scale > 0.0 {
-                    self.scale = scale;
+                    w.scale = scale;
                 }
-                self.configured = true;
-                self.dirty = true;
+                w.configured = true;
+                w.dirty = true;
             }
-            WinEvent::Close { .. } => self.closing = true,
-            WinEvent::Frame { .. } => {
-                self.frame_pending = false;
+            WinEvent::Close { window } => {
+                if let Some(i) = self.index(window) {
+                    self.windows[i].closing = true;
+                }
+            }
+            WinEvent::Frame { window, .. } => {
+                let Some(i) = self.index(window) else { return Ok(()) };
+                let w = &mut self.windows[i];
+                w.frame_pending = false;
                 // Every GPU buffer but the one now showing is free again.
-                for (i, s) in self.slots.iter_mut().enumerate() {
-                    if Some(i) != self.showing {
+                for (j, s) in w.slots.iter_mut().enumerate() {
+                    if Some(j) != w.showing {
                         s.busy = false;
                     }
                 }
-                if app.animating() {
-                    self.dirty = true;
+                if w.app.get().animating() {
+                    w.dirty = true;
                 }
             }
-            WinEvent::PointerEnter { x, y, .. } => {
-                self.pointer_at = Some((x as f32, y as f32));
+            WinEvent::PointerEnter { window, x, y, .. } => {
+                let Some(i) = self.index(window) else { return Ok(()) };
+                self.windows[i].pointer_at = Some((x as f32, y as f32));
                 // A pointer that enters has no shape until it is given one.
-                self.send(WinRequest::Cursor { window: WINDOW, shape: self.cursor.wire() as u16 })?;
-                self.tell(app, Input::PointerMoved { x: x as f32, y: y as f32 })?;
+                let shape = self.windows[i].cursor.wire() as u16;
+                self.send(WinRequest::Cursor { window, shape })?;
+                self.tell(window, Input::PointerMoved { x: x as f32, y: y as f32 })?;
             }
-            WinEvent::PointerLeave { .. } => {
-                self.pointer_at = None;
-                self.tell(app, Input::PointerLeft)?;
+            WinEvent::PointerLeave { window } => {
+                if let Some(i) = self.index(window) {
+                    self.windows[i].pointer_at = None;
+                }
+                self.tell(window, Input::PointerLeft)?;
             }
-            WinEvent::PointerMotion { x, y, .. } => {
-                self.pointer_at = Some((x as f32, y as f32));
-                self.tell(app, Input::PointerMoved { x: x as f32, y: y as f32 })?;
+            WinEvent::PointerMotion { window, x, y, .. } => {
+                if let Some(i) = self.index(window) {
+                    self.windows[i].pointer_at = Some((x as f32, y as f32));
+                }
+                self.tell(window, Input::PointerMoved { x: x as f32, y: y as f32 })?;
             }
-            WinEvent::PointerButton { serial, button, pressed, .. } => {
+            WinEvent::PointerButton { window, serial, button, pressed, .. } => {
+                let Some(i) = self.index(window) else { return Ok(()) };
                 if pressed {
-                    self.press_serial = serial;
+                    self.windows[i].press_serial = serial;
                     self.input_serial = serial;
                 }
                 let button = match button {
@@ -371,40 +538,43 @@ impl Native {
                     0x112 => Button::Middle,
                     other => Button::Other(other),
                 };
-                let (x, y) = self.pointer_at.unwrap_or_default();
+                let (x, y) = self.windows[i].pointer_at.unwrap_or_default();
                 let modifiers = self.modifiers();
-                self.tell(app, Input::Button { button, pressed, x, y, modifiers })?;
+                self.tell(window, Input::Button { button, pressed, x, y, modifiers })?;
             }
-            WinEvent::PointerAxis { dx, dy, .. } => {
-                let (x, y) = self.pointer_at.unwrap_or_default();
-                self.tell(app, Input::Scroll { x, y, dx: dx as f32, dy: dy as f32 })?;
+            WinEvent::PointerAxis { window, dx, dy, .. } => {
+                let Some(i) = self.index(window) else { return Ok(()) };
+                let (x, y) = self.windows[i].pointer_at.unwrap_or_default();
+                self.tell(window, Input::Scroll { x, y, dx: dx as f32, dy: dy as f32 })?;
             }
-            WinEvent::Touch { id, phase, x, y, .. } => {
+            WinEvent::Touch { window, id, phase, x, y, .. } => {
+                let Some(i) = self.index(window) else { return Ok(()) };
                 let (x, y) = (x as f32, y as f32);
                 match phase {
                     0 => {
                         // A finger's press is as good as a button's (the clipboard, moving).
-                        self.fingers.retain(|f| f.0 != id);
-                        if self.fingers.len() < 16 {
-                            self.fingers.push((id, x, y));
+                        let fingers = &mut self.windows[i].fingers;
+                        fingers.retain(|f| f.0 != id);
+                        if fingers.len() < 16 {
+                            fingers.push((id, x, y));
                         }
-                        self.tell(app, Input::Touch { id, phase: touch::Phase::Down, x, y })?;
+                        self.tell(window, Input::Touch { id, phase: touch::Phase::Down, x, y })?;
                     }
                     1 => {
-                        if let Some(f) = self.fingers.iter_mut().find(|f| f.0 == id) {
+                        if let Some(f) = self.windows[i].fingers.iter_mut().find(|f| f.0 == id) {
                             (f.1, f.2) = (x, y);
-                            self.tell(app, Input::Touch { id, phase: touch::Phase::Moved, x, y })?;
+                            self.tell(window, Input::Touch { id, phase: touch::Phase::Moved, x, y })?;
                         }
                     }
                     2 => {
-                        if let Some(i) = self.fingers.iter().position(|f| f.0 == id) {
-                            let (_, x, y) = self.fingers.remove(i);
-                            self.tell(app, Input::Touch { id, phase: touch::Phase::Up, x, y })?;
+                        if let Some(j) = self.windows[i].fingers.iter().position(|f| f.0 == id) {
+                            let (_, x, y) = self.windows[i].fingers.remove(j);
+                            self.tell(window, Input::Touch { id, phase: touch::Phase::Up, x, y })?;
                         }
                     }
                     _ => {
-                        for (id, x, y) in std::mem::take(&mut self.fingers) {
-                            self.tell(app, Input::Touch { id, phase: touch::Phase::Cancelled, x, y })?;
+                        for (id, x, y) in std::mem::take(&mut self.windows[i].fingers) {
+                            self.tell(window, Input::Touch { id, phase: touch::Phase::Cancelled, x, y })?;
                         }
                     }
                 }
@@ -415,20 +585,26 @@ impl Native {
                 }
             }
             WinEvent::Repeat { rate, delay } => (self.repeat_rate, self.repeat_delay) = (rate, delay),
-            WinEvent::KeyboardEnter { .. } => self.tell(app, Input::Focus(true))?,
-            WinEvent::KeyboardLeave { .. } => {
+            WinEvent::KeyboardEnter { window, .. } => {
+                self.focus = Some(window);
+                self.tell(window, Input::Focus(true))?;
+            }
+            WinEvent::KeyboardLeave { window } => {
+                if self.focus == Some(window) {
+                    self.focus = None;
+                }
                 self.repeat = None;
                 if let Some(k) = &mut self.keyboard {
                     k.reset_compose();
                 }
-                self.tell(app, Input::Focus(false))?;
+                self.tell(window, Input::Focus(false))?;
             }
             WinEvent::Modifiers { depressed, latched, locked, group } => {
                 if let Some(k) = &mut self.keyboard {
                     k.update(depressed, latched, locked, group);
                 }
             }
-            WinEvent::Key { serial, key, pressed, .. } => {
+            WinEvent::Key { window, serial, key, pressed, .. } => {
                 if pressed {
                     self.input_serial = serial;
                     let repeats = self.repeat_rate > 0 && self.keyboard.as_ref().is_some_and(|k| k.repeats(key));
@@ -436,7 +612,7 @@ impl Native {
                 } else if self.repeat.as_ref().is_some_and(|r| r.key == key) {
                     self.repeat = None;
                 }
-                self.key(app, key, pressed, false)?;
+                self.key(window, key, pressed, false)?;
             }
             WinEvent::ClipboardOffer { kinds } => {
                 // The offer that follows our own copy keeps it; any other means
@@ -465,21 +641,20 @@ impl Native {
                     self.paste = Some(Paste { pipe: pipe.into(), data: Vec::new(), started: Instant::now() });
                 }
             }
-            WinEvent::Created { .. } => {}
             // The bar's events (bar milestone 1): what was done with the tabs the server drew.
-            WinEvent::TabChosen { tab, .. } => self.with_window(app, |app, w| app.tab(TabEvent::Chosen(tab), w))?,
-            WinEvent::TabClose { tab, .. } => self.with_window(app, |app, w| app.tab(TabEvent::Close(tab), w))?,
-            WinEvent::TabCloseOthers { tab, .. } => self.with_window(app, |app, w| app.tab(TabEvent::CloseOthers(tab), w))?,
-            WinEvent::TabNew { .. } => self.with_window(app, |app, w| app.tab(TabEvent::New, w))?,
-            WinEvent::TabMoved { tab, to, .. } => self.with_window(app, |app, w| app.tab(TabEvent::Moved { tab, to }, w))?,
-            WinEvent::TabOut { tab, place, .. } => self.with_window(app, |app, w| app.tab(TabEvent::Out { tab, place }, w))?,
-            WinEvent::TabJoin { tab, into, to, .. } => self.with_window(app, |app, w| app.tab(TabEvent::Join { tab, into, to }, w))?,
-            WinEvent::TabMenu { tab, entry, .. } => self.with_window(app, |app, w| app.tab(TabEvent::Menu { tab, entry }, w))?,
+            WinEvent::TabChosen { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::Chosen(tab), w))?,
+            WinEvent::TabClose { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::Close(tab), w))?,
+            WinEvent::TabCloseOthers { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::CloseOthers(tab), w))?,
+            WinEvent::TabNew { window } => self.with_window(window, |app, w| app.tab(TabEvent::New, w))?,
+            WinEvent::TabMoved { window, tab, to } => self.with_window(window, |app, w| app.tab(TabEvent::Moved { tab, to }, w))?,
+            WinEvent::TabOut { window, tab, place } => self.with_window(window, |app, w| app.tab(TabEvent::Out { tab, place }, w))?,
+            WinEvent::TabJoin { window, tab, into, to } => self.with_window(window, |app, w| app.tab(TabEvent::Join { tab, into, to }, w))?,
+            WinEvent::TabMenu { window, tab, entry } => self.with_window(window, |app, w| app.tab(TabEvent::Menu { tab, entry }, w))?,
         }
         Ok(())
     }
 
-    fn key(&mut self, app: &mut dyn App, key: u32, pressed: bool, repeat: bool) -> io::Result<()> {
+    fn key(&mut self, window: u32, key: u32, pressed: bool, repeat: bool) -> io::Result<()> {
         let Some(keyboard) = &mut self.keyboard else { return Ok(()) };
         let modifiers = keyboard.modifiers();
         let (sym, text, composing) = if pressed {
@@ -488,78 +663,84 @@ impl Native {
         } else {
             (keyboard.key(key).0, None, false)
         };
-        self.tell(app, Input::Key { sym, text, pressed, repeat, composing, modifiers })
+        self.tell(window, Input::Key { sym, text, pressed, repeat, composing, modifiers })
     }
 
-    fn timers_due(&mut self, app: &mut dyn App) -> io::Result<()> {
+    fn timers_due(&mut self) -> io::Result<()> {
         let now = Instant::now();
-        let mut due: Vec<(u64, Instant)> = Vec::new();
-        self.timers.retain(|t| {
-            let keep = t.1 > now;
-            if !keep {
-                due.push(*t);
-            }
-            keep
-        });
-        due.sort_by_key(|t| t.1);
-        for (id, _) in due {
-            self.with_window(app, |app, window| app.timer(id, window))?;
+        let mut due: Vec<(u32, u64, Instant)> = Vec::new();
+        for w in &mut self.windows {
+            w.timers.retain(|t| {
+                let keep = t.1 > now;
+                if !keep {
+                    due.push((w.id, t.0, t.1));
+                }
+                keep
+            });
+        }
+        due.sort_by_key(|t| t.2);
+        for (window, id, _) in due {
+            self.with_window(window, |app, w| app.timer(id, w))?;
         }
         Ok(())
     }
 
-    fn repeat_due(&mut self, app: &mut dyn App) -> io::Result<()> {
+    fn repeat_due(&mut self) -> io::Result<()> {
+        let Some(window) = self.focus else { return Ok(()) };
         let step = Duration::from_secs_f64(1.0 / self.repeat_rate.max(1) as f64);
         for _ in 0..4 {
             let now = Instant::now();
             let Some(r) = self.repeat.as_mut().filter(|r| r.next <= now) else { break };
             r.next = (r.next + step).max(now);
             let key = r.key;
-            self.key(app, key, true, true)?;
+            self.key(window, key, true, true)?;
         }
         Ok(())
     }
 
-    /// Lets go of the GPU renderer and its buffers, for good: software from here on.
+    /// Lets go of the GPU renderer and every window's buffers, for good: software from here on.
     fn give_up_gpu(&mut self) {
         if let Some(mut gpu) = self.gpu.take() {
-            for s in self.slots.drain(..) {
-                gpu.release(s.buffer);
+            for w in &mut self.windows {
+                for s in w.slots.drain(..) {
+                    gpu.release(s.buffer);
+                }
+                w.showing = None;
+                w.dirty = true;
             }
         }
-        self.showing = None;
-        self.dirty = true;
     }
 
-    /// Draws the scene into a free GPU buffer of this size and attaches it.
-    /// Ok(false): not this time (draw in software).
-    fn draw_on_gpu(&mut self, scene: &Scene, scale: f32, background: Color, pw: u32, ph: u32) -> io::Result<bool> {
+    /// Draws the scene into a free GPU buffer of this size and attaches it,
+    /// for window `i`. Ok(false): not this time (draw in software).
+    fn draw_on_gpu(&mut self, i: usize, scene: &Scene, scale: f32, background: Color, pw: u32, ph: u32) -> io::Result<bool> {
         let Some(gpu) = self.gpu.as_mut() else { return Ok(false) };
+        let w = &mut self.windows[i];
         // Buffers of another size the server is done with are let go.
-        let mut i = 0;
-        while i < self.slots.len() {
-            let s = &self.slots[i];
+        let mut j = 0;
+        while j < w.slots.len() {
+            let s = &w.slots[j];
             if !s.busy && (s.buffer.width, s.buffer.height) != (pw, ph) {
-                let old = self.slots.remove(i);
+                let old = w.slots.remove(j);
                 gpu.release(old.buffer);
-                if let Some(sh) = self.showing.as_mut() {
-                    if *sh == i {
-                        self.showing = None;
-                    } else if *sh > i {
+                if let Some(sh) = w.showing.as_mut() {
+                    if *sh == j {
+                        w.showing = None;
+                    } else if *sh > j {
                         *sh -= 1;
                     }
                 }
             } else {
-                i += 1;
+                j += 1;
             }
         }
         let fits = |s: &Slot| (s.buffer.width, s.buffer.height) == (pw, ph);
-        let index = match self.slots.iter().position(|s| !s.busy && fits(s)) {
-            Some(i) => i,
-            None if self.slots.iter().filter(|s| fits(s)).count() < GPU_BUFFERS => match gpu.buffer(pw, ph) {
+        let index = match w.slots.iter().position(|s| !s.busy && fits(s)) {
+            Some(k) => k,
+            None if w.slots.iter().filter(|s| fits(s)).count() < GPU_BUFFERS => match gpu.buffer(pw, ph) {
                 Ok(buffer) => {
-                    self.slots.push(Slot { buffer, busy: false });
-                    self.slots.len() - 1
+                    w.slots.push(Slot { buffer, busy: false });
+                    w.slots.len() - 1
                 }
                 Err(_) => {
                     self.give_up_gpu();
@@ -569,7 +750,7 @@ impl Native {
             // All busy: this frame in software.
             None => return Ok(false),
         };
-        match gpu.draw_into(&self.slots[index].buffer, scene, &mut self.fonts, scale, background) {
+        match gpu.draw_into(&w.slots[index].buffer, scene, &mut self.fonts, scale, background) {
             Ok(()) => {}
             Err(GpuError::Unsupported(_)) => return Ok(false),
             Err(_) => {
@@ -577,55 +758,60 @@ impl Native {
                 return Ok(false);
             }
         }
-        let b = &self.slots[index].buffer;
+        let b = &w.slots[index].buffer;
         let plane = Plane { fd: Fd(Arc::new(b.fd.try_clone()?)), offset: b.offset, stride: b.stride };
         let buffer = Buffer::Dmabuf { planes: vec![plane], width: b.width, height: b.height, format: b.format, modifier: b.modifier };
-        self.send(WinRequest::Attach { window: WINDOW, buffer, damage: Vec::new() })?;
-        self.slots[index].busy = true;
-        self.showing = Some(index);
+        let id = w.id;
+        w.slots[index].busy = true;
+        w.showing = Some(index);
+        self.send(WinRequest::Attach { window: id, buffer, damage: Vec::new() })?;
         Ok(true)
     }
 
-    fn draw(&mut self, app: &mut dyn App) -> io::Result<()> {
+    fn draw(&mut self, i: usize) -> io::Result<()> {
         let t = Instant::now();
-        let frame = Frame { width: self.width as f32, height: self.height as f32, scale: self.scale as f32, time: self.started.elapsed().as_secs_f64(), number: self.frames, drawn_by: self.drawn_by, bar_by_server: self.bar_by_server };
-        let scene = app.scene(&frame, &mut self.fonts);
-        let background = app.background();
+        let w = &mut self.windows[i];
+        let frame = Frame { width: w.width as f32, height: w.height as f32, scale: w.scale as f32, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: w.bar_by_server };
+        let id = w.id;
+        let scene = w.app.get().scene(&frame, &mut self.fonts);
+        let background = self.windows[i].app.get().background();
         let (pw, ph) = pixel_size(&scene, frame.scale).map_err(other)?;
-        if self.draw_on_gpu(&scene, frame.scale, background, pw, ph)? {
-            self.drawn_by = "GPU";
+        if self.draw_on_gpu(i, &scene, frame.scale, background, pw, ph)? {
+            self.windows[i].drawn_by = "GPU";
         } else {
-            self.drawn_by = "CPU";
+            let w = &mut self.windows[i];
+            w.drawn_by = "CPU";
             let alpha = background.a != 255;
             let stride = pw as usize * 4;
-            if !self.shm.as_ref().is_some_and(|(_, w, h, a)| (*w, *h, *a) == (pw, ph, alpha)) {
-                self.shm = Some((ShmFile::new(stride * ph as usize)?, pw, ph, alpha));
+            if !w.shm.as_ref().is_some_and(|(_, sw, sh, a)| (*sw, *sh, *a) == (pw, ph, alpha)) {
+                w.shm = Some((ShmFile::new(stride * ph as usize)?, pw, ph, alpha));
             }
-            let (file, ..) = self.shm.as_mut().unwrap();
+            let (file, ..) = w.shm.as_mut().unwrap();
             // Drawn in place in the server's byte order; the server copies it at attach.
             let target = Target { data: file.bytes(), width: pw, height: ph, order: Order::Bgra };
             self.cpu.render_target(&scene, &mut self.fonts, frame.scale, background, target, 0..ph).map_err(other)?;
-            // SAFETY: the ShmFile's descriptor is open while `self.shm` holds it, which outlives this borrow.
+            // SAFETY: the ShmFile's descriptor is open while the window's shm holds it, which outlives this borrow.
             let fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(file.fd()) }.try_clone_to_owned()?;
             let format = if alpha { SHM_ARGB8888 } else { SHM_XRGB8888 };
             let buffer = Buffer::Shm { fd: Fd(Arc::new(fd)), width: pw, height: ph, stride: stride as u32, format };
-            self.send(WinRequest::Attach { window: WINDOW, buffer, damage: Vec::new() })?;
-            self.showing = None;
+            w.showing = None;
+            self.send(WinRequest::Attach { window: id, buffer, damage: Vec::new() })?;
         }
-        self.frame_pending = true;
-        self.frames += 1;
-        if !app.shown(&frame, t.elapsed().as_secs_f64() * 1e3) {
-            self.closing = true;
+        let w = &mut self.windows[i];
+        w.frame_pending = true;
+        w.frames += 1;
+        if !w.app.get().shown(&frame, t.elapsed().as_secs_f64() * 1e3) {
+            w.closing = true;
         }
         // The bar, when the server draws it and it has changed (bar milestone 1).
-        if self.bar_by_server
-            && let Some(bar) = app.bar()
+        if w.bar_by_server
+            && let Some(bar) = w.app.get().bar()
         {
-            self.send(WinRequest::Bar { window: WINDOW, bar })?;
+            self.send(WinRequest::Bar { window: id, bar })?;
         }
         // The window's meaning, when it has changed (Contract 3).
-        if let Some(tree) = app.meaning() {
-            self.send(meaning_request(&tree))?;
+        if let Some(tree) = self.windows[i].app.get().meaning() {
+            self.send(meaning_request(id, &tree))?;
         }
         Ok(())
     }
@@ -639,7 +825,7 @@ const MEANING_BUDGET: usize = 60 * 1024;
 const MEANING_TEXT: usize = 512;
 
 /// The tree as the protocol's Meaning request, within its limits.
-fn meaning_request(tree: &MeaningTree) -> WinRequest {
+fn meaning_request(window: u32, tree: &MeaningTree) -> WinRequest {
     let cut = |s: &str| -> String { s.chars().take(MEANING_TEXT).collect() };
     let mut nodes = Vec::new();
     let mut used = 64;
@@ -665,7 +851,7 @@ fn meaning_request(tree: &MeaningTree) -> WinRequest {
         nodes.push(node);
     }
     let caret = tree.caret.map(|(x, y, w, h)| (x as f64, y as f64, w as f64, h as f64));
-    WinRequest::Meaning { window: WINDOW, focus: tree.focus, caret, nodes }
+    WinRequest::Meaning { window, focus: tree.focus, caret, nodes }
 }
 
 #[cfg(test)]
@@ -680,7 +866,7 @@ mod tests {
     fn a_tree_too_big_for_one_message_is_cut_to_fit_and_still_encodes() {
         // 5,000 widgets with 2,000-character names: far past the 64 KB frame.
         let tree = MeaningTree { focus: 1, caret: None, nodes: (0..5000).map(|i| node(i, 2000)).collect() };
-        let req = meaning_request(&tree);
+        let req = meaning_request(1, &tree);
         let WinRequest::Meaning { nodes, .. } = &req else { panic!("not a Meaning") };
         assert!(!nodes.is_empty() && nodes.len() < 5000, "{} nodes kept", nodes.len());
         assert!(nodes.iter().all(|n| n.name.chars().count() <= MEANING_TEXT && n.states.len() <= MAX_STATES));
@@ -691,7 +877,7 @@ mod tests {
     #[test]
     fn a_small_tree_goes_whole() {
         let tree = MeaningTree { focus: 2, caret: Some((1.0, 2.0, 1.0, 14.0)), nodes: (0..40).map(|i| node(i, 12)).collect() };
-        let WinRequest::Meaning { focus, caret, nodes, .. } = meaning_request(&tree) else { panic!() };
+        let WinRequest::Meaning { focus, caret, nodes, .. } = meaning_request(1, &tree) else { panic!() };
         assert_eq!((focus, nodes.len(), caret), (2, 40, Some((1.0, 2.0, 1.0, 14.0))));
     }
 }

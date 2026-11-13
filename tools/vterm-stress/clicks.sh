@@ -25,9 +25,14 @@ log=${dir}vterm.log
 # listed" picked another terminal when two were open and clicked the wrong
 # places, 33 of 50 on both roads).
 pid=$(cat "${dir}pid")
-set -- $("$here/vctl" windows | grep '"vergence-term"' | grep " pid $pid\$" | tail -1 | sed 's/.*x: \([0-9-]*\), y: \([0-9-]*\), width: \([0-9]*\).*/\1 \2 \3/')
+line=$("$here/vctl" windows | grep '"vergence-term"' | grep " pid $pid\$" | tail -1)
+set -- $(echo "$line" | sed 's/.*x: \([0-9-]*\), y: \([0-9-]*\), width: \([0-9]*\).*/\1 \2 \3/')
 [ $# -ge 3 ] || { echo "clicks.sh: no window of pid $pid in vctl windows" >&2; exit 1; }
 wx=$1 wy=$2 ww=$3
+# The server draws the bar above the window's content on the native road
+# since bar milestone 1 (vctl windows says title-bar=true): the bar's 36
+# points are above wy then, not its first 36 points.
+case "$line" in *title-bar=true*) wy=$((wy - 36)) ;; esac
 before=$(wc -l < "$log" | tr -d ' ')
 n=0
 while [ "$n" -lt "$clicks" ]; do
