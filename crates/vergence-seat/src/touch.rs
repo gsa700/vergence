@@ -162,6 +162,12 @@ impl Seat {
         }
     }
 
+    /// The finger on `window` that came down last, if any (a native window's
+    /// move request carries no finger: it may go with one that is on it).
+    pub fn finger_on(&self, window: WinId) -> Option<Slot> {
+        self.touch.on_windows.iter().rev().find(|(_, t)| t.window() == Some(window)).map(|(s, _)| *s)
+    }
+
     /// The panel took its touches back (a palm, a gesture of the system's).
     pub fn touch_cancel(&mut self, under: Option<Target>, now_ms: u64) -> Vec<Out> {
         let mut out = Vec::new();
@@ -259,6 +265,18 @@ mod tests {
         assert!(seat.touch_move_request(0, W1, 100.0, 20.0));
         assert_eq!(seat.touch_motion(0, 150.0, 60.0, None), vec![Out::FingerMove { window: W1, dx: 50.0, dy: 40.0 }]);
         assert_eq!(seat.touch_up(0, None, 1), vec![Out::FingerMoveEnd(W1), Out::TouchUp(Target::Native(W1), 0)]);
+    }
+
+    #[test]
+    fn a_native_window_may_go_with_a_finger_on_it() {
+        let mut seat = Seat::new();
+        assert_eq!(seat.finger_on(W1), None);
+        seat.touch_down(4, 100.0, 20.0, Some(Target::Native(W1)), 0);
+        seat.touch_down(5, 300.0, 20.0, Some(Target::Native(W2)), 0);
+        assert_eq!(seat.finger_on(W1), Some(4));
+        assert_eq!(seat.finger_on(W2), Some(5));
+        seat.touch_up(4, None, 1);
+        assert_eq!(seat.finger_on(W1), None);
     }
 
     #[test]

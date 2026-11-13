@@ -181,6 +181,27 @@ impl Server {
         }
     }
 
+    /// A native window asks to be moved with no button held on it: it goes
+    /// with a finger that is on it now, if one is (native touch carries no
+    /// serial to match; a program still moves only itself, and only while
+    /// it is being touched). A maximized window stays.
+    pub fn touch_move_native(&mut self, window: &crate::win::Win) -> bool {
+        let id = self.win_id(window);
+        let Some(n) = self.input.seat.finger_on(id) else { return false };
+        let Some(at) = self.touch.fingers.get(&n).map(|f| f.2) else { return false };
+        if self.restore.contains_key(window) {
+            tracing::info!("touch: a maximized window is not moved by a finger");
+            return false;
+        }
+        let Some(from) = self.space.element_location(window) else { return false };
+        if self.input.seat.touch_move_request(n, id, at.x, at.y) {
+            tracing::info!("touch: a finger moves {:?}", self.window_title(window));
+            self.touch.moving_from = Some((id, from));
+            return true;
+        }
+        false
+    }
+
     pub fn touch_motion(&mut self, slot: TouchSlot, at: Point<f64, Logical>, time: InputTime) {
         let n = slot_number(slot);
         if let Some(f) = self.touch.fingers.get_mut(&n) {

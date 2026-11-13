@@ -378,8 +378,8 @@ impl Server {
             // seat decides (dispatch.rs).
             WinRequest::Move { window, .. } => {
                 let Some(w) = self.natives.get(&(client, window)).cloned() else { return };
-                if !self.grab_request(&w, None) {
-                    tracing::debug!("native: client {client}: move without a button held on window {window}");
+                if !self.grab_request(&w, None) && !self.touch_move_native(&w) {
+                    tracing::debug!("native: client {client}: move without a button or finger held on window {window}");
                 }
             }
             WinRequest::Resize { window, edges, .. } => {
