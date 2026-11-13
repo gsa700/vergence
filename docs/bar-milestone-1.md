@@ -327,6 +327,18 @@ one process.
   restart. The scale test still passes (30 windows exact, then 27).
   `vctl` takes `VCTL_SOCKET` for one socket and no fallback: the nested
   test's stop, with its server not running, quit Hubble's session.
+- **Acceptance 2, 3, 4, 6 and 8** (2026-11-12, Hubble, by vctl; scratchpad
+  acc.sh, acc2.sh, clicks-both.sh): by a finger, + adds a tab, the bar
+  moves the window, a quick double-tap maximizes and restores, tabs
+  reorder, tear off and join (a one-tab window's tab too); a torn-off tab
+  keeps its output and scrollback. A terminal stopped with `kill -STOP` is
+  still moved by its bar, and its close press waits: the window closes as
+  soon as the program runs again (4). Tab clicks with the stress test's
+  six tabs at 144 Hz: native road 50 of 50 drawn, at most one frame after
+  the press, 49 within 13.9 ms (one at 14.5 ms); Wayland road 50 of 50,
+  all within (6). A torn-off tab's window and a section's window come back
+  exactly after a logout-like kill and a start (8). Left: 5 (under GNOME,
+  on Techbench with Dave logged in there).
 
 ## Steps
 
