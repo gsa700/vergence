@@ -288,6 +288,8 @@ impl Server {
                 if let Some(xs) = w.x11_surface() {
                     let _ = xs.configure(smithay::utils::Rectangle::new((x, y).into(), xs.geometry().size));
                 }
+                // Remembered as a move by hand is when it ends (tests of window memory).
+                self.remember(&w);
                 format!("moved {i} to {x},{y}")
             }
             "focus" => {

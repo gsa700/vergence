@@ -1,6 +1,6 @@
 #!/bin/sh
 # Talk to a running vergence-server's control socket (src/control.rs):
-#   vctl shot | windows | tree | spawn <command> | move <i> <x> <y> | focus <i> | restart | quit
+#   vctl shot | windows | tree | spawn <command> | move <i> <x> <y> (remembered, as a move by hand) | focus <i> | restart | quit
 # Same user only (the socket is 0600 and checks the peer's uid), and only when
 # the server was started with VERGENCE_CONTROL=1 (the launchers in tools/ do).
 # The server's runtime directory: this shell's, logind's (Linux), lightdm's

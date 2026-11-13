@@ -263,6 +263,20 @@ one process.
   without `VERGENCE_BUS`; its desktop entry has `OnlyShowIn=Vergence;`), and
   the shelf honors OnlyShowIn and NotShowIn, so another desktop's own
   entries (GNOME's Settings) leave Vergence's popup. 377 tests on all three.
+- **Acceptance 7 met** (2026-11-12, Hubble): a nested server with seven
+  virtual monitors (`VERGENCE_OUTPUTS`, 244 x 928 points each) in Hubble's
+  session, with a throwaway HOME and runtime directory; thirty terminal
+  windows in one process, four or five to a monitor (some reaching past its
+  bottom, the bar on it), fifteen with extra tabs (45 shells), placed with
+  `vctl move` (which now remembers the place, as a move by hand does when
+  it ends). The terminal killed as a logout would and the server ended and
+  started again: all thirty back exactly, 45 shells, in 0.17 s from the
+  start (one window alone: 0.06 to 0.12 s). Three in the middle closed
+  with their close buttons: forgotten ("closed for good" three times), and
+  after another logout and login the other twenty-seven exactly where they
+  were with their 41 shells, none of the three back. The store: 8,383
+  bytes for thirty windows, 7,795 after the three went. Scripts in the
+  session's scratchpad (nested.sh, scale.sh).
 
 ## Steps
 
