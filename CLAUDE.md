@@ -56,9 +56,14 @@ The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md: s
   systemd: Void (glibc) on Hubble**, reinstalled from FreeBSD on 2026-11-09
   because the work ahead (GPUs, several cards, explicit sync, suspend soak) is
   where FreeBSD's drm-kmod lagged and its tools are thin. **FreeBSD** stays a
-  real-hardware platform on **kepler**, the second Lenovo Tiny (ThinkCentre
-  M910q, i5-6500T, Intel HD 530, 16 GB; FreeBSD 15.1 on ZFS, installed
-  2026-11-10; drm-kmod with `kld_list="i915kms"`, seatd, Rust by rustup so
+  real-hardware platform on **kepler**: since 2026-11-12 the Lenovo Tiny that
+  was Hubble's (i5-8500T, Intel UHD 630, the 14" 4K touch monitor; 10.0.1.31;
+  FreeBSD 15.1 on ZFS reinstalled that day; the M910q with the HD 530 it ran on
+  from 2026-11-10 is a spare). Its touch panel comes up in HID mouse mode on
+  FreeBSD (touches as one absolute mouse): a devd rule,
+  /usr/local/etc/devd/touchscreen-sw4101c.conf with
+  /usr/local/libexec/touchscreen-mode, sets `dev.hconf.N.input_mode=2` each
+  time it attaches. drm-kmod with `kld_list="i915kms"`, seatd, Rust by rustup so
   `. ~/.cargo/env` over ssh; `tools/sync-hubble.sh kepler`; passwordless
   sudo; Vergence installed under /usr/local, `vergence` from its text
   console starts the session, and ~/.config/vergence/control-socket is
