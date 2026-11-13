@@ -540,36 +540,27 @@ struct Repeat {
     next: Instant,
 }
 
-struct Runner {
-    client: Client,
-    shm: u32,
-    wm_base: u32,
+use native::Run;
+
+/// One window on the Wayland road (bar milestone 1, step 4b: a program may
+/// have several): the program that runs it, its objects and what the road
+/// keeps for it. What the windows share (the seat, the keyboard, the
+/// clipboard, the GPU, the fonts) is the [`Runner`]'s.
+struct WlWin<'a> {
+    /// The toolkit's number for it ([`App::opened`]).
+    id: u32,
+    app: Run<'a>,
     surface: u32,
     xdg_surface: u32,
     toplevel: u32,
     viewport: Option<u32>,
-    exact_scale: bool,
-    seat: Option<u32>,
-    cursor_shape_manager: Option<u32>,
-    pointer: Option<u32>,
-    touch: Option<u32>,
-    /// The fingers that are down, and where each last was.
-    fingers: Vec<(i32, f32, f32)>,
-    keyboard_object: Option<u32>,
-    cursor_device: Option<u32>,
-    data_manager: Option<u32>,
-    data_device: Option<u32>,
-    dmabuf: Option<u32>,
-
-    /// The GPU renderer, while it and the server's taking of its buffers work.
-    gpu: Option<Gpu>,
+    /// The fractional-scale object (its PreferredScale events name it).
+    scale_object: Option<u32>,
+    decoration: Option<u32>,
     /// GPU buffers the server has taken, and those it has been asked to take.
     shared: Vec<Shared>,
     asked: Vec<(u32, GpuBuffer)>,
     drawn_by: &'static str,
-
-    cpu: Cpu,
-    fonts: Fonts,
     started: Instant,
     width: u32,
     height: u32,
@@ -581,14 +572,99 @@ struct Runner {
     frames: u64,
     buffers: Vec<Buffer>,
     closing: bool,
-
-    /// Where the pointer is, if it is over the window.
+    /// Where the pointer is, if it is over this window.
     pointer_at: Option<(f32, f32)>,
+    cursor: Cursor,
+    /// The fingers that are down on it, and where each last was.
+    fingers: Vec<(i32, f32, f32)>,
+    /// The bar is ours to draw: the program leaves its frame to the server
+    /// ([`App::own_frame`] false) and the server draws none (no decoration
+    /// protocol, as GNOME's; or it answered "client side"). The program's
+    /// scene and input are then below [`bar::BAR_H`].
+    frame: bool,
+    own_frame: bool,
+    /// The server draws no border either: ours, and the band inside it
+    /// that resizes the window ([`vergence_look::EDGE`], [`vergence_look::RESIZE_BAND`]).
+    edges: bool,
+    /// The edges the pointer is on, in that band.
+    on_edge: Option<Edges>,
+    /// What the pointer is over in our bar, and the button pressed there.
+    bar_hover: Option<bar::Part>,
+    bar_pressed: Option<bar::Part>,
+    /// The pointer is on our bar (the program was told it left).
+    in_bar: bool,
+    /// The server's word: the window is active, maximized (our bar's look and its button).
+    active: bool,
+    maximized: bool,
+    /// The program's timers: its id for each, and when it is due.
+    timers: Vec<(u64, Instant)>,
+}
+
+impl WlWin<'_> {
+    /// Our bar's height, when we draw one.
+    fn bar_h(&self) -> f32 {
+        if self.frame { bar::BAR_H } else { 0.0 }
+    }
+
+    /// A point of the window as the program knows it (below our bar), or
+    /// None if it is on our bar.
+    fn to_app(&self, x: f32, y: f32) -> Option<(f32, f32)> {
+        let h = self.bar_h();
+        (y >= h).then_some((x, y - h))
+    }
+
+    /// The edges of the window (x, y) is within the resizing band of, when
+    /// we draw the border; none while maximized.
+    fn edge_at(&self, x: f32, y: f32) -> Option<Edges> {
+        if !self.edges || self.maximized {
+            return None;
+        }
+        let band = vergence_look::RESIZE_BAND;
+        let (w, h) = (self.width as f32, self.height as f32);
+        let e = Edges { top: y < band, bottom: y >= h - band, left: x < band, right: x >= w - band };
+        (e.top || e.bottom || e.left || e.right).then_some(e)
+    }
+}
+
+/// The connection and what a program's windows share.
+struct Runner<'a> {
+    client: Client,
+    shm: u32,
+    wm_base: u32,
+    compositor: u32,
+    viewporter: Option<u32>,
+    scale_manager: Option<u32>,
+    decoration_manager: Option<u32>,
+    /// The server offered no decoration protocol: a window leaving its
+    /// frame to the server gets none, so we draw it.
+    undecorated: bool,
+    seat: Option<u32>,
+    cursor_shape_manager: Option<u32>,
+    pointer: Option<u32>,
+    touch: Option<u32>,
+    keyboard_object: Option<u32>,
+    cursor_device: Option<u32>,
+    data_manager: Option<u32>,
+    data_device: Option<u32>,
+    dmabuf: Option<u32>,
+
+    /// The GPU renderer, while it and the server's taking of its buffers work.
+    gpu: Option<Gpu>,
+    cpu: Cpu,
+    fonts: Fonts,
+
+    windows: Vec<WlWin<'a>>,
+    next_window: u32,
+    /// The window the pointer is over, the one with the keyboard, and the
+    /// window each finger came down on.
+    pointer_window: Option<u32>,
+    keyboard_window: Option<u32>,
+    finger_windows: Vec<(i32, u32)>,
+
     /// The serial of the pointer's entry (to set its shape) and of the last
     /// button press (to start a move or a resize).
     enter_serial: u32,
     press_serial: u32,
-    cursor: Cursor,
     keyboard: Option<keyboard::Keyboard>,
     /// Repeats a second, and milliseconds before the first.
     repeat_rate: i32,
@@ -603,36 +679,19 @@ struct Runner {
     selection: Option<u32>,
     copied: Option<(u32, Arc<str>)>,
     paste: Option<Paste>,
-    /// Input made here rather than read from the server, to give the program next.
-    inbox: Vec<Input>,
-    /// The bar is ours to draw: the program leaves its frame to the server
-    /// ([`App::own_frame`] false) and the server draws none (no decoration
-    /// protocol, as GNOME's; or it answered "client side"). The program's
-    /// scene and input are then below [`bar::BAR_H`].
-    frame: bool,
-    own_frame: bool,
-    /// The server draws no border either: ours, and the band inside it
-    /// that resizes the window ([`vergence_look::EDGE`], [`vergence_look::RESIZE_BAND`]).
-    edges: bool,
-    /// The edges the pointer is on, in that band.
-    on_edge: Option<Edges>,
+    /// The window that asked for the paste on its way in.
+    paste_window: u32,
+    /// Input made here rather than read from the server, for a window, to give it next.
+    inbox: Vec<(u32, Input)>,
     /// Our bar's buttons, left and right ([`bar::desktop_layout`]), and
-    /// the flag the settings file's watcher raises when it is written.
+    /// the flag the settings watcher raises when the layout may have changed.
     buttons: (Vec<bar::WinButton>, Vec<bar::WinButton>),
     layout_changed: Arc<AtomicBool>,
-    /// What the pointer is over in our bar, and the button pressed there.
-    bar_hover: Option<bar::Part>,
-    bar_pressed: Option<bar::Part>,
-    /// The pointer is on our bar (the program was told it left).
-    in_bar: bool,
-    /// The server's word: the window is active, maximized (our bar's look and its button).
-    active: bool,
-    maximized: bool,
-    /// The pipe other threads wake the window through, and its flag.
+    /// The pipe other threads wake the program through, its flag, and a
+    /// waker to hand each window the program opens.
     wake: std::fs::File,
     wake_pending: Arc<AtomicBool>,
-    /// The program's timers: its id for each, and when it is due.
-    timers: Vec<(u64, Instant)>,
+    waker: Waker,
 }
 
 /// Whether the server offered no decoration protocol, so that a window
@@ -644,8 +703,10 @@ fn decoration_manager_offered(offered: &[(Interface, u32, u32)]) -> bool {
 /// Our bar's title size (the settings app's interface text).
 const BAR_FONT_SIZE: f32 = bar::FONT_SIZE;
 
-/// Opens the window and runs until it is closed. `size` is the size asked
-/// for, in reference units; the server may give another.
+/// Opens the window and runs until the program's last window is closed.
+/// `size` is the size asked for, in reference units; the server may give
+/// another. Windows the program opens later ([`Window::open_window`]) run
+/// on the same connection.
 pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
     // The native road first, in a Vergence session; it returns before
     // telling the program anything if the window is to be opened over Wayland.
@@ -692,10 +753,7 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
             None => Ok(None),
         }
     };
-    // Our bar when the server will draw none (it may still say so later),
-    // and our border for any window then.
     let undecorated = decoration_manager_offered(&offered);
-    let frame = !app.own_frame() && undecorated;
     let need = |id: Option<u32>, what: &str| id.ok_or_else(|| other(format!("the display server has no {what}")));
     let compositor = need(bind(&mut client, Interface::Compositor)?, "wl_compositor")?;
     let shm = need(bind(&mut client, Interface::Shm)?, "wl_shm")?;
@@ -718,31 +776,11 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         _ => None,
     };
 
-    let surface = client.create_surface(compositor)?;
-    let xdg_surface = client.get_xdg_surface(wm_base, surface)?;
-    let toplevel = client.get_toplevel(xdg_surface)?;
-    client.set_title(toplevel, &app.title())?;
-    client.set_app_id(toplevel, &app.app_id())?;
-    if let Some(manager) = decoration_manager {
-        let decoration = client.get_decoration(manager, toplevel)?;
-        client.set_decoration_mode(decoration, if app.own_frame() { wl::DECORATION_CLIENT } else { wl::DECORATION_SERVER })?;
-    }
-    // The exact scale needs both: the server says the scale, and the viewport
-    // says the buffer of that many pixels is still the window's size in units.
-    let (viewport, exact_scale) = match (viewporter, scale_manager) {
-        (Some(v), Some(m)) => {
-            client.get_fractional_scale(m, surface)?;
-            (Some(client.get_viewport(v, surface)?), true)
-        }
-        _ => (None, false),
-    };
-    // The first commit has no buffer: it asks the server to configure the window.
-    client.commit(surface)?;
-
     let (wake_read, wake_write) = vergence_wl::conn::pipe()?;
     let wake_pending = Arc::new(AtomicBool::new(false));
     let wake_pipe: Arc<std::fs::File> = Arc::new(wake_write.into());
-    app.waker(Waker { pipe: wake_pipe.clone(), pending: wake_pending.clone() });
+    let waker = Waker { pipe: wake_pipe.clone(), pending: wake_pending.clone() };
+    app.waker(waker.clone());
     // The settings file, looked at once a second as the terminal does: a
     // bar of ours follows the button layout the moment it is changed (the
     // settings app's own window included, which stays in front meanwhile).
@@ -769,42 +807,30 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         client,
         shm,
         wm_base,
-        surface,
-        xdg_surface,
-        toplevel,
-        viewport,
-        exact_scale,
+        compositor,
+        viewporter,
+        scale_manager,
+        decoration_manager,
+        undecorated,
         seat,
         cursor_shape_manager,
         pointer: None,
         touch: None,
-        fingers: Vec::new(),
         keyboard_object: None,
         cursor_device: None,
         data_manager,
         data_device,
         dmabuf,
         gpu,
-        shared: Vec::new(),
-        asked: Vec::new(),
-        drawn_by: "",
         cpu: Cpu::new(),
         fonts: Fonts::system(),
-        started: Instant::now(),
-        width: size.0.max(1),
-        height: size.1.max(1) + if frame { bar::BAR_H as u32 } else { 0 },
-        suggested: None,
-        scale120: 120,
-        configured: false,
-        dirty: false,
-        frame_callback: None,
-        frames: 0,
-        buffers: Vec::new(),
-        closing: false,
-        pointer_at: None,
+        windows: Vec::new(),
+        next_window: 2,
+        pointer_window: None,
+        keyboard_window: None,
+        finger_windows: Vec::new(),
         enter_serial: 0,
         press_serial: 0,
-        cursor: Cursor::Default,
         keyboard: None,
         repeat_rate: 0,
         repeat_delay: 0,
@@ -814,38 +840,179 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         selection: None,
         copied: None,
         paste: None,
+        paste_window: 1,
         inbox: Vec::new(),
-        frame,
-        own_frame: app.own_frame(),
-        edges: undecorated,
-        on_edge: None,
         buttons: bar::desktop_layout(),
         layout_changed,
-        bar_hover: None,
-        bar_pressed: None,
-        in_bar: false,
-        active: true,
-        maximized: false,
         wake: wake_read.into(),
         wake_pending,
-        timers: Vec::new(),
+        waker,
     };
-    runner.run(app)
+    app.opened(1);
+    runner.add_window(1, Run::Borrowed(app), size)?;
+    runner.run()
 }
 
-impl Runner {
-    fn run(&mut self, app: &mut dyn App) -> io::Result<()> {
-        while !self.closing {
-            // Wait for the server, but no longer than the next key repeat is due.
+impl<'a> Runner<'a> {
+    fn index(&self, id: u32) -> Option<usize> {
+        self.windows.iter().position(|w| w.id == id)
+    }
+
+    /// The window whose object this is (its surface, xdg_surface, toplevel,
+    /// decoration or fractional-scale object).
+    fn by_object(&self, object: u32) -> Option<usize> {
+        self.windows.iter().position(|w| {
+            w.surface == object || w.xdg_surface == object || w.toplevel == object || w.decoration == Some(object) || w.scale_object == Some(object)
+        })
+    }
+
+    fn id_of_surface(&self, surface: u32) -> Option<u32> {
+        self.windows.iter().find(|w| w.surface == surface).map(|w| w.id)
+    }
+
+    /// Asks the server for a window run by `app`: its surface, role, title,
+    /// decoration and scale objects; the first commit has no buffer, it asks
+    /// the server to configure the window.
+    fn add_window(&mut self, id: u32, mut app: Run<'a>, size: (u32, u32)) -> io::Result<()> {
+        let a = app.get();
+        let own_frame = a.own_frame();
+        // Our bar when the server will draw none (it may still say so later),
+        // and our border for any window then.
+        let frame = !own_frame && self.undecorated;
+        let surface = self.client.create_surface(self.compositor)?;
+        let xdg_surface = self.client.get_xdg_surface(self.wm_base, surface)?;
+        let toplevel = self.client.get_toplevel(xdg_surface)?;
+        self.client.set_title(toplevel, &a.title())?;
+        self.client.set_app_id(toplevel, &a.app_id())?;
+        let decoration = match self.decoration_manager {
+            Some(manager) => {
+                let d = self.client.get_decoration(manager, toplevel)?;
+                self.client.set_decoration_mode(d, if own_frame { wl::DECORATION_CLIENT } else { wl::DECORATION_SERVER })?;
+                Some(d)
+            }
+            None => None,
+        };
+        // The exact scale needs both: the server says the scale, and the viewport
+        // says the buffer of that many pixels is still the window's size in units.
+        let (viewport, scale_object) = match (self.viewporter, self.scale_manager) {
+            (Some(v), Some(m)) => {
+                let s = self.client.get_fractional_scale(m, surface)?;
+                (Some(self.client.get_viewport(v, surface)?), Some(s))
+            }
+            _ => (None, None),
+        };
+        self.client.commit(surface)?;
+        self.windows.push(WlWin {
+            id,
+            app,
+            surface,
+            xdg_surface,
+            toplevel,
+            viewport,
+            scale_object,
+            decoration,
+            shared: Vec::new(),
+            asked: Vec::new(),
+            drawn_by: "",
+            started: Instant::now(),
+            width: size.0.max(1),
+            height: size.1.max(1) + if frame { bar::BAR_H as u32 } else { 0 },
+            suggested: None,
+            scale120: 120,
+            configured: false,
+            dirty: false,
+            frame_callback: None,
+            frames: 0,
+            buffers: Vec::new(),
+            closing: false,
+            pointer_at: None,
+            cursor: Cursor::Default,
+            fingers: Vec::new(),
+            frame,
+            own_frame,
+            edges: self.undecorated,
+            on_edge: None,
+            bar_hover: None,
+            bar_pressed: None,
+            in_bar: false,
+            active: true,
+            maximized: false,
+            timers: Vec::new(),
+        });
+        Ok(())
+    }
+
+    /// Another window of the program, opened by one of its windows.
+    fn open(&mut self, mut app: Box<dyn App>) -> io::Result<()> {
+        let id = self.next_window;
+        self.next_window += 1;
+        let size = app.opening_size().map_or(native::OPENED_SIZE, |(w, h)| (w.clamp(64, 16_384), h.clamp(48, 16_384)));
+        app.opened(id);
+        app.waker(self.waker.clone());
+        self.add_window(id, Run::Owned(app), size)
+    }
+
+    /// A window is gone: its program told, its buffers let go, its objects destroyed.
+    fn release(&mut self, mut w: WlWin<'a>) -> io::Result<()> {
+        w.app.get().closed();
+        for b in &w.buffers {
+            self.client.destroy_buffer(b.id)?;
+        }
+        if let Some(gpu) = self.gpu.as_mut() {
+            for s in w.shared {
+                self.client.destroy_buffer(s.id)?;
+                gpu.release(s.buffer);
+            }
+            for (_, b) in w.asked {
+                gpu.release(b);
+            }
+        }
+        if let Some(d) = w.decoration {
+            self.client.destroy_object(d)?;
+        }
+        self.client.destroy_object(w.toplevel)?;
+        self.client.destroy_object(w.xdg_surface)?;
+        for o in [w.viewport, w.scale_object].into_iter().flatten() {
+            self.client.destroy_object(o)?;
+        }
+        self.client.destroy_object(w.surface)?;
+        if self.pointer_window == Some(w.id) {
+            self.pointer_window = None;
+        }
+        if self.keyboard_window == Some(w.id) {
+            self.keyboard_window = None;
+            self.repeat = None;
+        }
+        self.finger_windows.retain(|f| f.1 != w.id);
+        self.client.flush()
+    }
+
+    fn run(&mut self) -> io::Result<()> {
+        loop {
+            // Closed windows go; the program ends with its last.
+            let mut i = 0;
+            while i < self.windows.len() {
+                if self.windows[i].closing {
+                    let w = self.windows.remove(i);
+                    self.release(w)?;
+                } else {
+                    i += 1;
+                }
+            }
+            if self.windows.is_empty() {
+                return Ok(());
+            }
+            // Wait for the server, but no longer than the next key repeat, the
+            // paste's limit or the next timer.
             let now = Instant::now();
             let repeat = self.repeat.as_ref().map(|r| r.next.saturating_duration_since(now));
             let paste = self.paste.as_ref().map(|p| (p.started + PASTE_TIMEOUT).saturating_duration_since(now));
-            let timer = self.timers.iter().map(|t| t.1).min().map(|t| t.saturating_duration_since(now));
+            let timer = self.windows.iter().flat_map(|w| w.timers.iter().map(|t| t.1)).min().map(|t| t.saturating_duration_since(now));
             let wait = [repeat, paste, timer].into_iter().flatten().min();
             let pipe = self.paste.as_ref().map(|p| p.pipe.as_raw_fd());
             let (events, [pipe_ready, woken]) = self.client.dispatch_or([pipe, Some(self.wake.as_raw_fd())], wait)?;
             for event in events {
-                self.handle(event, app)?;
+                self.handle(event)?;
             }
             self.read_paste(pipe_ready);
             if woken {
@@ -857,58 +1024,68 @@ impl Runner {
                     let buttons = bar::desktop_layout();
                     if buttons != self.buttons {
                         self.buttons = buttons;
-                        self.dirty |= self.frame;
+                        for w in &mut self.windows {
+                            w.dirty |= w.frame;
+                        }
                     }
                 }
-                self.with_window(app, |app, window| app.woken(window))?;
+                for id in self.windows.iter().map(|w| w.id).collect::<Vec<_>>() {
+                    self.with_window(id, |app, window| app.woken(window))?;
+                }
             }
-            for input in std::mem::take(&mut self.inbox) {
-                self.tell(app, input)?;
+            for (id, input) in std::mem::take(&mut self.inbox) {
+                self.tell(id, input)?;
             }
-            self.repeat_due(app)?;
-            self.timers_due(app)?;
-            if self.configured && self.dirty && self.frame_callback.is_none() && !self.closing {
-                self.dirty = false;
-                self.draw(app)?;
+            self.repeat_due()?;
+            self.timers_due()?;
+            for i in 0..self.windows.len() {
+                let w = &self.windows[i];
+                if w.configured && w.dirty && w.frame_callback.is_none() && !w.closing {
+                    self.windows[i].dirty = false;
+                    self.draw(i)?;
+                }
             }
         }
-        Ok(())
     }
 
-    /// Gives the program one input and does what it asks in return.
-    fn tell(&mut self, app: &mut dyn App, input: Input) -> io::Result<()> {
-        self.with_window(app, |app, window| app.input(&input, window))
+    /// Gives window `id`'s program one input and does what it asks in return.
+    fn tell(&mut self, id: u32, input: Input) -> io::Result<()> {
+        self.with_window(id, |app, window| app.input(&input, window))
     }
 
-    /// Calls the program with a handle on its window, then does what it asked.
-    fn with_window(&mut self, app: &mut dyn App, call: impl FnOnce(&mut dyn App, &mut Window)) -> io::Result<()> {
+    /// Calls window `id`'s program with a handle on its window, then does what it asked.
+    fn with_window(&mut self, id: u32, call: impl FnOnce(&mut dyn App, &mut Window)) -> io::Result<()> {
+        let Some(i) = self.index(id) else { return Ok(()) };
         let mut window = Window::default();
-        call(app, &mut window);
+        call(self.windows[i].app.get(), &mut window);
         for command in window.commands {
+            let Some(i) = self.index(id) else { break };
+            let toplevel = self.windows[i].toplevel;
             match command {
-                Command::Redraw => self.dirty = true,
-                Command::Close => self.closing = true,
+                Command::Redraw => self.windows[i].dirty = true,
+                Command::Close => self.windows[i].closing = true,
                 Command::Move => {
                     if let Some(seat) = self.seat {
-                        self.client.start_move(self.toplevel, seat, self.press_serial)?;
+                        self.client.start_move(toplevel, seat, self.press_serial)?;
                     }
                 }
                 Command::Resize(edges) => {
                     if let Some(seat) = self.seat {
-                        self.client.start_resize(self.toplevel, seat, self.press_serial, edges.wire())?;
+                        self.client.start_resize(toplevel, seat, self.press_serial, edges.wire())?;
                     }
                 }
                 Command::Cursor(cursor) => {
-                    if cursor != self.cursor {
-                        self.cursor = cursor;
-                        if let (Some(device), Some(_), false) = (self.cursor_device, self.pointer_at, self.in_bar) {
+                    let w = &mut self.windows[i];
+                    if cursor != w.cursor {
+                        w.cursor = cursor;
+                        if let (Some(device), Some(_), false) = (self.cursor_device, w.pointer_at, w.in_bar) {
                             self.client.set_cursor_shape(device, self.enter_serial, cursor.wire())?;
                         }
                     }
                 }
-                Command::Title(title) => self.client.set_title(self.toplevel, &title)?,
-                Command::Maximize(on) => self.client.set_maximized(self.toplevel, on)?,
-                Command::Minimize => self.client.set_minimized(self.toplevel)?,
+                Command::Title(title) => self.client.set_title(toplevel, &title)?,
+                Command::Maximize(on) => self.client.set_maximized(toplevel, on)?,
+                Command::Minimize => self.client.set_minimized(toplevel)?,
                 Command::Copy(text) => {
                     if let (Some(manager), Some(device)) = (self.data_manager, self.data_device) {
                         if let Some((old, _)) = self.copied.take() {
@@ -919,23 +1096,22 @@ impl Runner {
                         self.copied = Some((source, text.into()));
                     }
                 }
-                Command::Paste => self.start_paste()?,
-                Command::Timer(id, at) => set_timer(&mut self.timers, id, at),
+                Command::Paste => self.start_paste(id)?,
+                Command::Timer(timer, at) => set_timer(&mut self.windows[i].timers, timer, at),
                 // Wayland lets no client place its window.
                 Command::Place(_) => {}
-                // Several windows per program: native road only so far (step 4b).
-                Command::Open(_) => {}
+                Command::Open(app) => self.open(app)?,
             }
         }
         Ok(())
     }
 
-    /// Asks whoever owns the clipboard for its text.
-    fn start_paste(&mut self) -> io::Result<()> {
+    /// Asks whoever owns the clipboard for its text, for window `id`.
+    fn start_paste(&mut self, id: u32) -> io::Result<()> {
         // Our own copy needs no trip through the server (and a program
         // cannot wait on itself).
         if let Some((_, text)) = &self.copied {
-            self.inbox.push(Input::Paste(text.to_string()));
+            self.inbox.push((id, Input::Paste(text.to_string())));
             return Ok(());
         }
         let Some(offer) = self.selection else { return Ok(()) };
@@ -947,11 +1123,12 @@ impl Runner {
         self.client.flush()?;
         drop(write_end);
         self.paste = Some(Paste { pipe: read_end.into(), data: Vec::new(), started: Instant::now() });
+        self.paste_window = id;
         Ok(())
     }
 
     /// Takes what has arrived of a paste; when it is all here (or too much,
-    /// or too late), gives it to the program.
+    /// or too late), gives it to the window that asked.
     fn read_paste(&mut self, ready: bool) {
         let Some(paste) = &mut self.paste else { return };
         let mut done = paste.started.elapsed() >= PASTE_TIMEOUT;
@@ -969,7 +1146,7 @@ impl Runner {
         if done && let Some(mut paste) = self.paste.take() {
             paste.data.truncate(MAX_PASTE);
             if !paste.data.is_empty() {
-                self.inbox.push(Input::Paste(String::from_utf8_lossy(&paste.data).into_owned()));
+                self.inbox.push((self.paste_window, Input::Paste(String::from_utf8_lossy(&paste.data).into_owned())));
             }
         }
     }
@@ -978,61 +1155,74 @@ impl Runner {
         self.keyboard.as_ref().map(keyboard::Keyboard::modifiers).unwrap_or_default()
     }
 
-    fn handle(&mut self, event: Event, app: &mut dyn App) -> io::Result<()> {
+    fn handle(&mut self, event: Event) -> io::Result<()> {
         match event {
             Event::Ping { serial } => self.client.pong(self.wm_base, serial)?,
-            Event::ToplevelConfigure { width, height, states, .. } => {
+            Event::ToplevelConfigure { toplevel, width, height, states } => {
+                let Some(i) = self.by_object(toplevel) else { return Ok(()) };
+                let w = &mut self.windows[i];
                 if width > 0 && height > 0 {
-                    self.suggested = Some((width as u32, height as u32));
+                    w.suggested = Some((width as u32, height as u32));
                 }
                 let (active, maximized) = (states.contains(&wl::STATE_ACTIVATED), states.contains(&wl::STATE_MAXIMIZED));
-                if (self.frame || self.edges) && (active, maximized) != (self.active, self.maximized) {
-                    self.dirty = true;
+                if (w.frame || w.edges) && (active, maximized) != (w.active, w.maximized) {
+                    w.dirty = true;
                 }
-                (self.active, self.maximized) = (active, maximized);
+                (w.active, w.maximized) = (active, maximized);
             }
-            Event::DecorationMode { mode, .. } => {
+            Event::DecorationMode { decoration, mode } => {
+                let Some(i) = self.by_object(decoration) else { return Ok(()) };
+                let w = &mut self.windows[i];
                 // The server's answer to our request: it may draw no bar after all.
-                let frame = !self.own_frame && mode == wl::DECORATION_CLIENT;
-                if frame != self.frame {
+                let frame = !w.own_frame && mode == wl::DECORATION_CLIENT;
+                if frame != w.frame {
                     let bar_h = bar::BAR_H as u32;
-                    self.height = if frame { self.height + bar_h } else { self.height.saturating_sub(bar_h).max(1) };
-                    self.frame = frame;
-                    self.edges = frame;
-                    self.dirty = true;
+                    w.height = if frame { w.height + bar_h } else { w.height.saturating_sub(bar_h).max(1) };
+                    w.frame = frame;
+                    w.edges = frame;
+                    w.dirty = true;
                 }
             }
-            Event::Configure { serial, .. } => {
-                self.client.ack_configure(self.xdg_surface, serial)?;
-                if let Some(size) = self.suggested.take() {
-                    (self.width, self.height) = size;
+            Event::Configure { xdg_surface, serial } => {
+                let Some(i) = self.by_object(xdg_surface) else { return Ok(()) };
+                self.client.ack_configure(xdg_surface, serial)?;
+                let w = &mut self.windows[i];
+                if let Some(size) = w.suggested.take() {
+                    (w.width, w.height) = size;
                 }
-                self.configured = true;
-                self.dirty = true;
+                w.configured = true;
+                w.dirty = true;
             }
-            Event::PreferredScale { scale120, .. } => {
-                if self.exact_scale && scale120 > 0 && scale120 != self.scale120 {
-                    self.scale120 = scale120;
-                    self.dirty = true;
+            Event::PreferredScale { object, scale120 } => {
+                let Some(i) = self.by_object(object) else { return Ok(()) };
+                let w = &mut self.windows[i];
+                if w.viewport.is_some() && scale120 > 0 && scale120 != w.scale120 {
+                    w.scale120 = scale120;
+                    w.dirty = true;
                 }
             }
             Event::BufferRelease { buffer } => {
-                if let Some(b) = self.buffers.iter_mut().find(|b| b.id == buffer) {
-                    b.busy = false;
-                }
-                if let Some(b) = self.shared.iter_mut().find(|b| b.id == buffer) {
-                    b.busy = false;
+                for w in &mut self.windows {
+                    if let Some(b) = w.buffers.iter_mut().find(|b| b.id == buffer) {
+                        b.busy = false;
+                    }
+                    if let Some(b) = w.shared.iter_mut().find(|b| b.id == buffer) {
+                        b.busy = false;
+                    }
                 }
             }
             Event::DmabufCreated { params, buffer } => {
                 self.client.destroy_dmabuf_params(params)?;
-                if let Some(i) = self.asked.iter().position(|(p, _)| *p == params) {
-                    let (_, made) = self.asked.swap_remove(i);
-                    self.shared.push(Shared { buffer: made, id: buffer, busy: false });
-                    // A frame drawn in software meanwhile is drawn again on the GPU.
-                    self.dirty = true;
-                } else {
-                    self.client.destroy_buffer(buffer)?;
+                match self.windows.iter().position(|w| w.asked.iter().any(|(p, _)| *p == params)) {
+                    Some(i) => {
+                        let w = &mut self.windows[i];
+                        let at = w.asked.iter().position(|(p, _)| *p == params).unwrap_or(0);
+                        let (_, made) = w.asked.swap_remove(at);
+                        w.shared.push(Shared { buffer: made, id: buffer, busy: false });
+                        // A frame drawn in software meanwhile is drawn again on the GPU.
+                        w.dirty = true;
+                    }
+                    None => self.client.destroy_buffer(buffer)?,
                 }
             }
             Event::DmabufFailed { params } => {
@@ -1040,13 +1230,19 @@ impl Runner {
                 self.client.destroy_dmabuf_params(params)?;
                 self.give_up_gpu()?;
             }
-            Event::Done { callback, .. } if Some(callback) == self.frame_callback => {
-                self.frame_callback = None;
-                if app.animating() {
-                    self.dirty = true;
+            Event::Done { callback, .. } => {
+                if let Some(i) = self.windows.iter().position(|w| w.frame_callback == Some(callback)) {
+                    self.windows[i].frame_callback = None;
+                    if self.windows[i].app.get().animating() {
+                        self.windows[i].dirty = true;
+                    }
                 }
             }
-            Event::Close { .. } => self.closing = true,
+            Event::Close { toplevel } => {
+                if let Some(i) = self.by_object(toplevel) {
+                    self.windows[i].closing = true;
+                }
+            }
             Event::Error { object, code, message } => return Err(other(format!("the display server refused: {message} (object {object}, code {code})"))),
 
             Event::SeatCapabilities { seat, capabilities } => {
@@ -1064,95 +1260,128 @@ impl Runner {
                     self.keyboard_object = Some(self.client.get_keyboard(seat)?);
                 }
             }
-            Event::PointerEnter { serial, x, y, .. } => {
+            Event::PointerEnter { serial, surface, x, y } => {
+                let Some(id) = self.id_of_surface(surface) else { return Ok(()) };
+                let Some(i) = self.index(id) else { return Ok(()) };
+                self.pointer_window = Some(id);
                 self.enter_serial = serial;
-                self.pointer_at = Some((x as f32, y as f32));
+                self.windows[i].pointer_at = Some((x as f32, y as f32));
                 // A pointer that enters has no shape until it is given one.
                 if let Some(device) = self.cursor_device {
-                    self.client.set_cursor_shape(device, serial, self.cursor.wire())?;
+                    self.client.set_cursor_shape(device, serial, self.windows[i].cursor.wire())?;
                 }
-                self.in_bar = false;
-                self.pointer_moved(app, x as f32, y as f32)?;
+                self.windows[i].in_bar = false;
+                self.pointer_moved(id, x as f32, y as f32)?;
             }
-            Event::PointerLeave { .. } => {
-                self.pointer_at = None;
-                if self.bar_hover.take().is_some() {
-                    self.dirty = true;
+            Event::PointerLeave { surface, .. } => {
+                let Some(id) = self.id_of_surface(surface).or(self.pointer_window) else { return Ok(()) };
+                if self.pointer_window == Some(id) {
+                    self.pointer_window = None;
                 }
-                self.bar_pressed = None;
-                self.on_edge = None;
-                if !std::mem::take(&mut self.in_bar) {
-                    self.tell(app, Input::PointerLeft)?;
+                let Some(i) = self.index(id) else { return Ok(()) };
+                let w = &mut self.windows[i];
+                w.pointer_at = None;
+                if w.bar_hover.take().is_some() {
+                    w.dirty = true;
+                }
+                w.bar_pressed = None;
+                w.on_edge = None;
+                if !std::mem::take(&mut w.in_bar) {
+                    self.tell(id, Input::PointerLeft)?;
                 }
             }
-            Event::PointerMotion { x, y, .. } => self.pointer_moved(app, x as f32, y as f32)?,
+            Event::PointerMotion { x, y, .. } => {
+                if let Some(id) = self.pointer_window {
+                    self.pointer_moved(id, x as f32, y as f32)?;
+                }
+            }
             Event::PointerButton { serial, button, pressed, .. } => {
                 if pressed {
                     self.press_serial = serial;
                     self.input_serial = serial;
                 }
+                let Some(id) = self.pointer_window else { return Ok(()) };
+                let Some(i) = self.index(id) else { return Ok(()) };
                 let button = match button {
                     0x110 => Button::Left,
                     0x111 => Button::Right,
                     0x112 => Button::Middle,
                     other => Button::Other(other),
                 };
-                let (x, y) = self.pointer_at.unwrap_or_default();
-                if let Some(edges) = self.on_edge {
+                let (x, y) = self.windows[i].pointer_at.unwrap_or_default();
+                if let Some(edges) = self.windows[i].on_edge {
                     if pressed && button == Button::Left && let Some(seat) = self.seat {
-                        self.client.start_resize(self.toplevel, seat, serial, edges.wire())?;
+                        self.client.start_resize(self.windows[i].toplevel, seat, serial, edges.wire())?;
                     }
                     return Ok(());
                 }
-                match self.to_app(x, y) {
+                match self.windows[i].to_app(x, y) {
                     Some((x, y)) => {
                         let modifiers = self.modifiers();
-                        self.tell(app, Input::Button { button, pressed, x, y, modifiers })?;
+                        self.tell(id, Input::Button { button, pressed, x, y, modifiers })?;
                     }
-                    None if button == Button::Left => self.bar_button(x, y, pressed)?,
+                    None if button == Button::Left => self.bar_button(id, x, y, pressed)?,
                     None => {}
                 }
             }
-            Event::TouchDown { serial, id, x, y, .. } => {
+            Event::TouchDown { serial, surface, id: finger, x, y, .. } => {
                 // A finger's press is as good as a button's for what needs one
                 // (the clipboard, moving the window).
                 self.press_serial = serial;
                 self.input_serial = serial;
-                let Some((x, y)) = self.to_app(x as f32, y as f32) else {
+                let Some(id) = self.id_of_surface(surface) else { return Ok(()) };
+                let Some(i) = self.index(id) else { return Ok(()) };
+                let Some((x, y)) = self.windows[i].to_app(x as f32, y as f32) else {
                     // A finger on our bar: a button at once, else the window moves.
-                    self.bar_button(x as f32, y as f32, true)?;
-                    return self.bar_button(x as f32, y as f32, false);
+                    self.bar_button(id, x as f32, y as f32, true)?;
+                    return self.bar_button(id, x as f32, y as f32, false);
                 };
-                self.fingers.retain(|f| f.0 != id);
-                if self.fingers.len() < 16 {
-                    self.fingers.push((id, x, y));
+                self.finger_windows.retain(|f| f.0 != finger);
+                self.finger_windows.push((finger, id));
+                let w = &mut self.windows[i];
+                w.fingers.retain(|f| f.0 != finger);
+                if w.fingers.len() < 16 {
+                    w.fingers.push((finger, x, y));
                 }
-                self.tell(app, Input::Touch { id, phase: touch::Phase::Down, x, y })?;
+                self.tell(id, Input::Touch { id: finger, phase: touch::Phase::Down, x, y })?;
             }
-            Event::TouchMotion { id, x, y, .. } => {
-                let (x, y) = (x as f32, y as f32 - self.bar_h());
-                if let Some(finger) = self.fingers.iter_mut().find(|f| f.0 == id) {
-                    (finger.1, finger.2) = (x, y);
-                    self.tell(app, Input::Touch { id, phase: touch::Phase::Moved, x, y })?;
+            Event::TouchMotion { id: finger, x, y, .. } => {
+                let Some(id) = self.finger_windows.iter().find(|f| f.0 == finger).map(|f| f.1) else { return Ok(()) };
+                let Some(i) = self.index(id) else { return Ok(()) };
+                let w = &mut self.windows[i];
+                let (x, y) = (x as f32, y as f32 - w.bar_h());
+                if let Some(f) = w.fingers.iter_mut().find(|f| f.0 == finger) {
+                    (f.1, f.2) = (x, y);
+                    self.tell(id, Input::Touch { id: finger, phase: touch::Phase::Moved, x, y })?;
                 }
             }
-            Event::TouchUp { id, .. } => {
-                if let Some(index) = self.fingers.iter().position(|f| f.0 == id) {
-                    let (_, x, y) = self.fingers.remove(index);
-                    self.tell(app, Input::Touch { id, phase: touch::Phase::Up, x, y })?;
+            Event::TouchUp { id: finger, .. } => {
+                let Some(pos) = self.finger_windows.iter().position(|f| f.0 == finger) else { return Ok(()) };
+                let (_, id) = self.finger_windows.remove(pos);
+                let Some(i) = self.index(id) else { return Ok(()) };
+                let w = &mut self.windows[i];
+                if let Some(index) = w.fingers.iter().position(|f| f.0 == finger) {
+                    let (_, x, y) = w.fingers.remove(index);
+                    self.tell(id, Input::Touch { id: finger, phase: touch::Phase::Up, x, y })?;
                 }
             }
             Event::TouchCancel => {
-                for (id, x, y) in std::mem::take(&mut self.fingers) {
-                    self.tell(app, Input::Touch { id, phase: touch::Phase::Cancelled, x, y })?;
+                self.finger_windows.clear();
+                for i in 0..self.windows.len() {
+                    let id = self.windows[i].id;
+                    for (finger, x, y) in std::mem::take(&mut self.windows[i].fingers) {
+                        self.tell(id, Input::Touch { id: finger, phase: touch::Phase::Cancelled, x, y })?;
+                    }
                 }
             }
             Event::TouchFrame => {}
             Event::PointerAxis { axis, value, .. } => {
-                let (x, y) = self.pointer_at.unwrap_or_default();
-                let Some((x, y)) = self.to_app(x, y) else { return Ok(()) };
+                let Some(id) = self.pointer_window else { return Ok(()) };
+                let Some(i) = self.index(id) else { return Ok(()) };
+                let (x, y) = self.windows[i].pointer_at.unwrap_or_default();
+                let Some((x, y)) = self.windows[i].to_app(x, y) else { return Ok(()) };
                 let (dx, dy) = if axis == 0 { (0.0, value as f32) } else { (value as f32, 0.0) };
-                self.tell(app, Input::Scroll { x, y, dx, dy })?;
+                self.tell(id, Input::Scroll { x, y, dx, dy })?;
             }
             Event::Keymap { format, size } => {
                 // The file comes with the event whatever its format: take it either way.
@@ -1165,13 +1394,21 @@ impl Runner {
                 }
             }
             Event::RepeatInfo { rate, delay } => (self.repeat_rate, self.repeat_delay) = (rate, delay),
-            Event::KeyboardEnter { .. } => self.tell(app, Input::Focus(true))?,
-            Event::KeyboardLeave { .. } => {
+            Event::KeyboardEnter { surface, .. } => {
+                let Some(id) = self.id_of_surface(surface) else { return Ok(()) };
+                self.keyboard_window = Some(id);
+                self.tell(id, Input::Focus(true))?;
+            }
+            Event::KeyboardLeave { surface, .. } => {
                 self.repeat = None;
                 if let Some(k) = &mut self.keyboard {
                     k.reset_compose();
                 }
-                self.tell(app, Input::Focus(false))?;
+                let Some(id) = self.id_of_surface(surface).or(self.keyboard_window) else { return Ok(()) };
+                if self.keyboard_window == Some(id) {
+                    self.keyboard_window = None;
+                }
+                self.tell(id, Input::Focus(false))?;
             }
             Event::Modifiers { depressed, latched, locked, group } => {
                 if let Some(k) = &mut self.keyboard {
@@ -1186,7 +1423,7 @@ impl Runner {
                 } else if self.repeat.as_ref().is_some_and(|r| r.key == key) {
                     self.repeat = None;
                 }
-                self.key(app, key, pressed, false)?;
+                self.key(key, pressed, false)?;
             }
             Event::DataOffer { offer } => {
                 self.offers.insert(offer, Vec::new());
@@ -1233,125 +1470,108 @@ impl Runner {
         Ok(())
     }
 
-    /// Our bar's height, when we draw one.
-    fn bar_h(&self) -> f32 {
-        if self.frame { bar::BAR_H } else { 0.0 }
+    fn bar_layout(&self, i: usize) -> bar::Layout {
+        bar::Layout::plain(self.windows[i].width as f32, &self.buttons.0, &self.buttons.1)
     }
 
-    /// A point of the window as the program knows it (below our bar), or
-    /// None if it is on our bar.
-    fn to_app(&self, x: f32, y: f32) -> Option<(f32, f32)> {
-        let h = self.bar_h();
-        (y >= h).then_some((x, y - h))
-    }
-
-    fn bar_layout(&self) -> bar::Layout {
-        bar::Layout::plain(self.width as f32, &self.buttons.0, &self.buttons.1)
-    }
-
-    /// The pointer moved to (x, y) of the window: our bar's hover, or the
+    /// The pointer moved to (x, y) of window `id`: our bar's hover, or the
     /// program's input (it is told the pointer left when it goes onto the bar).
-    fn pointer_moved(&mut self, app: &mut dyn App, x: f32, y: f32) -> io::Result<()> {
-        self.pointer_at = Some((x, y));
+    fn pointer_moved(&mut self, id: u32, x: f32, y: f32) -> io::Result<()> {
+        let Some(i) = self.index(id) else { return Ok(()) };
+        self.windows[i].pointer_at = Some((x, y));
         // Our border's band: it resizes, before the bar or the program sees the pointer.
-        let edge = self.edge_at(x, y);
-        if edge != self.on_edge {
-            self.on_edge = edge;
+        let edge = self.windows[i].edge_at(x, y);
+        if edge != self.windows[i].on_edge {
+            self.windows[i].on_edge = edge;
             if let Some(device) = self.cursor_device {
                 let shape = match edge {
                     Some(e) => Cursor::Resize(e).wire(),
-                    None if self.to_app(x, y).is_none() => Cursor::Default.wire(),
-                    None => self.cursor.wire(),
+                    None if self.windows[i].to_app(x, y).is_none() => Cursor::Default.wire(),
+                    None => self.windows[i].cursor.wire(),
                 };
                 self.client.set_cursor_shape(device, self.enter_serial, shape)?;
             }
         }
         if edge.is_some() {
-            if self.bar_hover.take().is_some() {
-                self.dirty = true;
+            let w = &mut self.windows[i];
+            if w.bar_hover.take().is_some() {
+                w.dirty = true;
             }
-            if !self.in_bar {
-                self.in_bar = true;
-                self.tell(app, Input::PointerLeft)?;
+            if !w.in_bar {
+                w.in_bar = true;
+                self.tell(id, Input::PointerLeft)?;
             }
             return Ok(());
         }
-        let hover = if self.frame { self.bar_layout().at(x, y) } else { None };
-        if hover != self.bar_hover {
-            self.bar_hover = hover;
-            self.dirty = true;
+        let hover = if self.windows[i].frame { self.bar_layout(i).at(x, y) } else { None };
+        if hover != self.windows[i].bar_hover {
+            self.windows[i].bar_hover = hover;
+            self.windows[i].dirty = true;
         }
-        match self.to_app(x, y) {
+        match self.windows[i].to_app(x, y) {
             Some((x, y)) => {
-                if std::mem::take(&mut self.in_bar)
+                if std::mem::take(&mut self.windows[i].in_bar)
                     && let Some(device) = self.cursor_device
                 {
-                    self.client.set_cursor_shape(device, self.enter_serial, self.cursor.wire())?;
+                    self.client.set_cursor_shape(device, self.enter_serial, self.windows[i].cursor.wire())?;
                 }
-                self.tell(app, Input::PointerMoved { x, y })
+                self.tell(id, Input::PointerMoved { x, y })
             }
             None => {
-                if !self.in_bar {
-                    self.in_bar = true;
+                if !self.windows[i].in_bar {
+                    self.windows[i].in_bar = true;
                     if let Some(device) = self.cursor_device {
                         self.client.set_cursor_shape(device, self.enter_serial, Cursor::Default.wire())?;
                     }
-                    self.tell(app, Input::PointerLeft)?;
+                    self.tell(id, Input::PointerLeft)?;
                 }
                 Ok(())
             }
         }
     }
 
-    /// The edges of the window (x, y) is within the resizing band of, when
-    /// we draw the border; none while maximized.
-    fn edge_at(&self, x: f32, y: f32) -> Option<Edges> {
-        if !self.edges || self.maximized {
-            return None;
-        }
-        let band = vergence_look::RESIZE_BAND;
-        let (w, h) = (self.width as f32, self.height as f32);
-        let e = Edges { top: y < band, bottom: y >= h - band, left: x < band, right: x >= w - band };
-        (e.top || e.bottom || e.left || e.right).then_some(e)
-    }
-
-    /// A press or release on our bar: a button does its work when released
-    /// over it; a press anywhere else moves the window.
-    fn bar_button(&mut self, x: f32, y: f32, pressed: bool) -> io::Result<()> {
-        let part = self.bar_layout().at(x, y);
+    /// A press or release on window `id`'s bar: a button does its work when
+    /// released over it; a press anywhere else moves the window.
+    fn bar_button(&mut self, id: u32, x: f32, y: f32, pressed: bool) -> io::Result<()> {
+        let Some(i) = self.index(id) else { return Ok(()) };
+        let part = self.bar_layout(i).at(x, y);
+        let toplevel = self.windows[i].toplevel;
         if pressed {
             match part {
-                Some(bar::Part::Button(_)) => self.bar_pressed = part,
+                Some(bar::Part::Button(_)) => self.windows[i].bar_pressed = part,
                 _ => {
                     if let Some(seat) = self.seat {
-                        self.client.start_move(self.toplevel, seat, self.press_serial)?;
+                        self.client.start_move(toplevel, seat, self.press_serial)?;
                     }
                 }
             }
             return Ok(());
         }
-        if self.bar_pressed.take().is_some_and(|p| Some(p) == part) {
+        if self.windows[i].bar_pressed.take().is_some_and(|p| Some(p) == part) {
             match part {
-                Some(bar::Part::Button(bar::WinButton::Close)) => self.closing = true,
-                Some(bar::Part::Button(bar::WinButton::Minimize)) => self.client.set_minimized(self.toplevel)?,
-                Some(bar::Part::Button(bar::WinButton::Maximize)) => self.client.set_maximized(self.toplevel, !self.maximized)?,
+                Some(bar::Part::Button(bar::WinButton::Close)) => self.windows[i].closing = true,
+                Some(bar::Part::Button(bar::WinButton::Minimize)) => self.client.set_minimized(toplevel)?,
+                Some(bar::Part::Button(bar::WinButton::Maximize)) => self.client.set_maximized(toplevel, !self.windows[i].maximized)?,
                 _ => {}
             }
         }
         Ok(())
     }
 
-    /// Our bar over the program's scene, which is moved down below it.
-    fn add_bar(&mut self, scene: &mut Scene, title: &str) {
+    /// Our bar over window `i`'s scene, which is moved down below it.
+    fn add_bar(&mut self, i: usize, scene: &mut Scene, title: &str) {
         scene.translate(0.0, bar::BAR_H);
         scene.height += bar::BAR_H;
-        let layout = self.bar_layout();
+        let layout = self.bar_layout(i);
         let font = self.fonts.face("sans-serif", 400, false);
-        let look = bar::Look { focused: self.active, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font, font_size: BAR_FONT_SIZE, titles: &[], title, shown: 0, hover: self.bar_hover };
+        let w = &self.windows[i];
+        let look = bar::Look { focused: w.active, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font, font_size: BAR_FONT_SIZE, titles: &[], title, shown: 0, hover: w.bar_hover };
         bar::draw(scene, &mut self.fonts, &layout, &look);
     }
 
-    fn key(&mut self, app: &mut dyn App, key: u32, pressed: bool, repeat: bool) -> io::Result<()> {
+    /// A key, to the window with the keyboard.
+    fn key(&mut self, key: u32, pressed: bool, repeat: bool) -> io::Result<()> {
+        let Some(id) = self.keyboard_window else { return Ok(()) };
         let Some(keyboard) = &mut self.keyboard else { return Ok(()) };
         let modifiers = keyboard.modifiers();
         // A key going up types nothing, and is no part of a sequence.
@@ -1361,94 +1581,104 @@ impl Runner {
         } else {
             (keyboard.key(key).0, None, false)
         };
-        self.tell(app, Input::Key { sym, text, pressed, repeat, composing, modifiers })
+        self.tell(id, Input::Key { sym, text, pressed, repeat, composing, modifiers })
+    }
+
+    /// Tells each window's program of every timer of its that is due, the
+    /// earliest first. A timer set again while this runs waits for the next turn.
+    fn timers_due(&mut self) -> io::Result<()> {
+        let now = Instant::now();
+        let mut due: Vec<(u64, Instant, u32)> = Vec::new();
+        for w in &mut self.windows {
+            let id = w.id;
+            w.timers.retain(|t| {
+                let keep = t.1 > now;
+                if !keep {
+                    due.push((t.0, t.1, id));
+                }
+                keep
+            });
+        }
+        due.sort_by_key(|t| t.1);
+        for (timer, _, id) in due {
+            self.with_window(id, |app, window| app.timer(timer, window))?;
+        }
+        Ok(())
     }
 
     /// Repeats the held key as often as is due. A program that falls behind
     /// gets the repeats it missed at once, at most a few: it catches up, it
     /// does not run on after the key is released.
-    /// Tells the program of every timer that is due, the earliest first.
-    /// A timer set again while this runs waits for the next turn.
-    fn timers_due(&mut self, app: &mut dyn App) -> io::Result<()> {
-        let now = Instant::now();
-        let mut due: Vec<(u64, Instant)> = Vec::new();
-        self.timers.retain(|t| {
-            let keep = t.1 > now;
-            if !keep {
-                due.push(*t);
-            }
-            keep
-        });
-        due.sort_by_key(|t| t.1);
-        for (id, _) in due {
-            self.with_window(app, |app, window| app.timer(id, window))?;
-        }
-        Ok(())
-    }
-
-    fn repeat_due(&mut self, app: &mut dyn App) -> io::Result<()> {
+    fn repeat_due(&mut self) -> io::Result<()> {
         let step = Duration::from_secs_f64(1.0 / self.repeat_rate.max(1) as f64);
         for _ in 0..4 {
             let now = Instant::now();
             let Some(r) = self.repeat.as_mut().filter(|r| r.next <= now) else { break };
             r.next = (r.next + step).max(now);
             let key = r.key;
-            self.key(app, key, true, true)?;
+            self.key(key, true, true)?;
         }
         Ok(())
     }
 
-    /// Lets go of the GPU renderer and its buffers, for good.
+    /// Lets go of the GPU renderer and every window's buffers of it, for good.
     fn give_up_gpu(&mut self) -> io::Result<()> {
         let Some(mut gpu) = self.gpu.take() else { return Ok(()) };
-        for (_, buffer) in self.asked.drain(..) {
-            gpu.release(buffer);
+        for w in &mut self.windows {
+            for (_, buffer) in w.asked.drain(..) {
+                gpu.release(buffer);
+            }
+            for shared in w.shared.drain(..) {
+                self.client.destroy_buffer(shared.id)?;
+                gpu.release(shared.buffer);
+            }
+            w.dirty = true;
         }
-        for shared in self.shared.drain(..) {
-            self.client.destroy_buffer(shared.id)?;
-            gpu.release(shared.buffer);
-        }
-        self.dirty = true;
         Ok(())
     }
 
-    /// Draws the scene on the GPU into a buffer the server has taken, if
-    /// there is one free. Ok(None): not this time (draw in software).
-    fn draw_on_gpu(&mut self, scene: &Scene, scale: f32, background: Color, pw: u32, ph: u32) -> io::Result<Option<u32>> {
+    /// Draws window `i`'s scene on the GPU into a buffer the server has
+    /// taken, if there is one free. Ok(None): not this time (draw in software).
+    fn draw_on_gpu(&mut self, i: usize, scene: &Scene, scale: f32, background: Color, pw: u32, ph: u32) -> io::Result<Option<u32>> {
         let (Some(gpu), Some(dmabuf)) = (self.gpu.as_mut(), self.dmabuf) else { return Ok(None) };
+        let w = &mut self.windows[i];
         // Buffers of another size that the server is done with are let go.
-        let mut i = 0;
-        while i < self.shared.len() {
-            if !self.shared[i].busy && (self.shared[i].buffer.width, self.shared[i].buffer.height) != (pw, ph) {
-                let old = self.shared.swap_remove(i);
+        let mut k = 0;
+        while k < w.shared.len() {
+            if !w.shared[k].busy && (w.shared[k].buffer.width, w.shared[k].buffer.height) != (pw, ph) {
+                let old = w.shared.swap_remove(k);
                 self.client.destroy_buffer(old.id)?;
                 gpu.release(old.buffer);
             } else {
-                i += 1;
+                k += 1;
             }
         }
         let fits = |b: &GpuBuffer| (b.width, b.height) == (pw, ph);
-        let Some(index) = self.shared.iter().position(|s| !s.busy && fits(&s.buffer)) else {
+        let Some(index) = w.shared.iter().position(|s| !s.busy && fits(&s.buffer)) else {
             // None free: ask the server to take more, up to the few a window needs.
-            let have = self.shared.iter().filter(|s| fits(&s.buffer)).count() + self.asked.iter().filter(|(_, b)| fits(b)).count();
+            let have = w.shared.iter().filter(|s| fits(&s.buffer)).count() + w.asked.iter().filter(|(_, b)| fits(b)).count();
+            let mut failed = false;
             for _ in have..GPU_BUFFERS.min(have + 2) {
                 match gpu.buffer(pw, ph) {
                     Ok(b) => {
                         let params = self.client.create_dmabuf(dmabuf, std::os::fd::AsRawFd::as_raw_fd(&b.fd), pw as i32, ph as i32, b.format, b.modifier, b.offset, b.stride)?;
-                        self.asked.push((params, b));
+                        w.asked.push((params, b));
                     }
                     Err(_) => {
-                        self.give_up_gpu()?;
+                        failed = true;
                         break;
                     }
                 }
             }
+            if failed {
+                self.give_up_gpu()?;
+            }
             return Ok(None);
         };
-        match gpu.draw_into(&self.shared[index].buffer, scene, &mut self.fonts, scale, background) {
+        match gpu.draw_into(&w.shared[index].buffer, scene, &mut self.fonts, scale, background) {
             Ok(()) => {
-                self.shared[index].busy = true;
-                Ok(Some(self.shared[index].id))
+                w.shared[index].busy = true;
+                Ok(Some(w.shared[index].id))
             }
             // Something this renderer does not draw yet: this frame in software.
             Err(GpuError::Unsupported(_)) => Ok(None),
@@ -1459,29 +1689,32 @@ impl Runner {
         }
     }
 
-    fn draw(&mut self, app: &mut dyn App) -> io::Result<()> {
+    fn draw(&mut self, i: usize) -> io::Result<()> {
         let t = Instant::now();
-        let bar_h = self.bar_h();
-        let frame = Frame { width: self.width as f32, height: (self.height as f32 - bar_h).max(1.0), scale: self.scale120 as f32 / 120.0, time: self.started.elapsed().as_secs_f64(), number: self.frames, drawn_by: self.drawn_by , bar_by_server: false };
-        let mut scene = app.scene(&frame, &mut self.fonts);
-        if self.frame {
-            self.add_bar(&mut scene, &app.title());
+        let w = &self.windows[i];
+        let bar_h = w.bar_h();
+        let frame = Frame { width: w.width as f32, height: (w.height as f32 - bar_h).max(1.0), scale: w.scale120 as f32 / 120.0, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: false };
+        let mut scene = self.windows[i].app.get().scene(&frame, &mut self.fonts);
+        if self.windows[i].frame {
+            let title = self.windows[i].app.get().title();
+            self.add_bar(i, &mut scene, &title);
         }
-        if self.edges && !self.maximized {
+        let w = &self.windows[i];
+        if w.edges && !w.maximized {
             // The line the server draws round a window, in the same colors.
-            let c = if self.active { vergence_look::EDGE_FOCUSED } else { vergence_look::EDGE_UNFOCUSED };
+            let c = if w.active { vergence_look::EDGE_FOCUSED } else { vergence_look::EDGE_UNFOCUSED };
             scene.stroke(vergence_scene::Rect::new(0.0, 0.0, scene.width, scene.height), 0.0, vergence_look::EDGE, Color::rgb(c.0, c.1, c.2));
         }
-        let background = app.background();
+        let background = self.windows[i].app.get().background();
         let (pw, ph) = pixel_size(&scene, frame.scale).map_err(other)?;
-        if let Some(id) = self.draw_on_gpu(&scene, frame.scale, background, pw, ph)? {
-            self.drawn_by = "GPU";
-            return self.show(app, &frame, id, pw, ph, t);
+        if let Some(id) = self.draw_on_gpu(i, &scene, frame.scale, background, pw, ph)? {
+            self.windows[i].drawn_by = "GPU";
+            return self.show(i, &frame, id, pw, ph, t);
         }
-        self.drawn_by = "CPU";
+        self.windows[i].drawn_by = "CPU";
         // A buffer of this size that the server is not using; others of another size are let go.
         let mut stale = Vec::new();
-        self.buffers.retain(|b| {
+        self.windows[i].buffers.retain(|b| {
             let keep = b.busy || (b.width, b.height) == (pw, ph);
             if !keep {
                 stale.push(b.id);
@@ -1493,40 +1726,46 @@ impl Runner {
         }
         let stride = pw as usize * 4;
         let alpha = background.a != 255;
-        let index = match self.buffers.iter().position(|b| !b.busy && (b.width, b.height, b.alpha) == (pw, ph, alpha)) {
-            Some(i) => i,
+        let index = match self.windows[i].buffers.iter().position(|b| !b.busy && (b.width, b.height, b.alpha) == (pw, ph, alpha)) {
+            Some(k) => k,
             None => {
                 let file = ShmFile::new(stride * ph as usize)?;
                 let pool = self.client.create_pool(self.shm, file.fd(), file.len() as i32)?;
                 let format = if alpha { wl::FORMAT_ARGB8888 } else { wl::FORMAT_XRGB8888 };
                 let id = self.client.create_buffer(pool, 0, pw as i32, ph as i32, stride as i32, format)?;
                 self.client.destroy_pool(pool)?;
-                self.buffers.push(Buffer { file, id, width: pw, height: ph, alpha, busy: false });
-                self.buffers.len() - 1
+                self.windows[i].buffers.push(Buffer { file, id, width: pw, height: ph, alpha, busy: false });
+                self.windows[i].buffers.len() - 1
             }
         };
-        let buffer = &mut self.buffers[index];
+        let buffer = &mut self.windows[i].buffers[index];
         // Drawn in place, in the server's byte order: no picture of our own, no copy.
         let target = Target { data: buffer.file.bytes(), width: pw, height: ph, order: Order::Bgra };
         self.cpu.render_target(&scene, &mut self.fonts, frame.scale, background, target, 0..ph).map_err(other)?;
         buffer.busy = true;
         let id = buffer.id;
-        self.show(app, &frame, id, pw, ph, t)
+        self.show(i, &frame, id, pw, ph, t)
     }
 
-    /// Hands the server a drawn buffer as the window's next frame.
-    fn show(&mut self, app: &mut dyn App, frame: &Frame, id: u32, pw: u32, ph: u32, t: Instant) -> io::Result<()> {
-        self.client.attach(self.surface, id)?;
-        self.client.damage_buffer(self.surface, 0, 0, pw as i32, ph as i32)?;
-        if let Some(v) = self.viewport {
-            self.client.set_destination(v, self.width as i32, self.height as i32)?;
+    /// Hands the server a drawn buffer as window `i`'s next frame.
+    fn show(&mut self, i: usize, frame: &Frame, id: u32, pw: u32, ph: u32, t: Instant) -> io::Result<()> {
+        let (surface, viewport, width, height) = {
+            let w = &self.windows[i];
+            (w.surface, w.viewport, w.width, w.height)
+        };
+        self.client.attach(surface, id)?;
+        self.client.damage_buffer(surface, 0, 0, pw as i32, ph as i32)?;
+        if let Some(v) = viewport {
+            self.client.set_destination(v, width as i32, height as i32)?;
         }
-        self.frame_callback = Some(self.client.frame(self.surface)?);
-        self.client.commit(self.surface)?;
+        let callback = self.client.frame(surface)?;
+        self.client.commit(surface)?;
         self.client.flush()?;
-        self.frames += 1;
-        if !app.shown(frame, t.elapsed().as_secs_f64() * 1e3) {
-            self.closing = true;
+        let w = &mut self.windows[i];
+        w.frame_callback = Some(callback);
+        w.frames += 1;
+        if !w.app.get().shown(frame, t.elapsed().as_secs_f64() * 1e3) {
+            w.closing = true;
         }
         Ok(())
     }

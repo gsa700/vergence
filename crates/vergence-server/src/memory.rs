@@ -172,10 +172,14 @@ impl Server {
     /// the corner is free; where that runs off monitor `og` (a window in the
     /// bottom-right corner), up and left; else `r` itself.
     pub fn clear_of_siblings(&self, w: &Win, mut r: Rectangle<i32, Logical>, og: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
+        // Its program: a native window's application id, else the class memory
+        // knows it by (Wayland app_id, X11 WM_CLASS).
+        let class = |x: &Win| x.native().map(|n| n.app_id.clone()).or_else(|| self.memory.ids.get(x).map(|i| i.class.clone()));
+        let mine = class(w);
         let taken: Vec<Point<i32, Logical>> = self
             .space
             .elements()
-            .filter(|o| *o != w && o.native().is_some_and(|n| w.native().is_some_and(|m| n.app_id == m.app_id)))
+            .filter(|o| *o != w && mine.is_some() && class(o) == mine)
             .filter_map(|o| self.space.element_location(o))
             .collect();
         let start = r.loc;

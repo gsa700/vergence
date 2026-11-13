@@ -450,6 +450,15 @@ impl Client {
         self.send(Writer::new(buffer, 0))
     }
 
+    /// Destroys an object whose destructor is its request 0: a wl_surface,
+    /// xdg_surface, xdg_toplevel, wp_viewport, wp_fractional_scale_v1 or
+    /// zxdg_toplevel_decoration_v1 (a window of several closing; the order is
+    /// the caller's: decoration, toplevel, xdg_surface, then the surface's
+    /// own objects and the surface).
+    pub fn destroy_object(&mut self, object: u32) -> io::Result<()> {
+        self.send(Writer::new(object, 0))
+    }
+
     // xdg_wm_base, xdg_surface, xdg_toplevel
 
     pub fn pong(&mut self, wm_base: u32, serial: u32) -> io::Result<()> {

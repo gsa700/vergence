@@ -5,10 +5,11 @@
 //   on a socket of its own (owner-only, in the runtime directory); starting
 //   it again asks that one for a new window and exits. Joining a tab to
 //   another window, tearing one off, moving a section into its own window:
-//   all inside the one process. Only on the native road (the Wayland road
-//   has one window per program until step 4b), and not for a terminal
-//   started to be measured (--tabs, --panes, VTERM_FRAMES), which wants a
-//   process of its own.
+//   all inside the one process, on either road (the Wayland road too since
+//   bar milestone 1, step 4b). Not for a terminal started to be measured
+//   (--tabs, --panes, VTERM_FRAMES), which wants a process of its own.
+//   Windows are kept and restored on the native road only: by their
+//   tokens, which another desktop does not give.
 // - **What it keeps.** Each window's persistence token (the server's, so
 //   window memory puts the window back where it was) and its tabs' working
 //   directories, in ~/.local/state/vergence/terminal-windows (0600), written

@@ -1585,9 +1585,9 @@ impl App for Terminal {
 
     fn waker(&mut self, waker: Waker) {
         self.waker = Some(waker.clone());
-        // The first window, on the native road: later starts hand over to it
-        // (program.rs), and windows kept from the last run are opened.
-        if self.primary && self.native {
+        // The first window: later starts hand over to it (program.rs), and on
+        // the native road windows kept from the last run are opened.
+        if self.primary {
             let w = waker.clone();
             if !program::listen(self.inbox.clone(), move || w.wake()) {
                 eprintln!("vergence-term: no socket for later starts; they open windows of their own");
@@ -2111,19 +2111,22 @@ fn main() {
         terminal.open_panes = n.clamp(1, 16);
     }
     terminal.open_maximized = args.iter().any(|a| a == "--maximized");
-    // One process for all the terminal's windows, in a Vergence session (program.rs):
-    // a later start asks the running one for a window and is done. A terminal
-    // started to be measured keeps a process of its own.
+    // One process for all the terminal's windows (program.rs), on either road
+    // since bar milestone 1, step 4b: a later start asks the running one for a
+    // window and is done. A terminal started to be measured keeps a process of
+    // its own.
     let measured = args.iter().any(|a| a == "--tabs" || a == "--panes") || std::env::var_os("VTERM_FRAMES").is_some();
     let native = std::env::var_os("VERGENCE_BUS").is_some() && std::env::var("VERGENCE_UI_WAYLAND").as_deref() != Ok("1");
-    if native && !measured {
+    if !measured {
         let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
         if program::hand_over(&program::OpenRequest { cwd, run: terminal.run.clone().unwrap_or_default() }) {
             return;
         }
         terminal.primary = true;
-        // The windows of the last run, unless this start runs a program of its own.
-        if terminal.run.is_none() {
+        // The windows of the last run, unless this start runs a program of its
+        // own; native road only: they come back by their tokens, which another
+        // desktop has no use for (and its windows, having none, write nothing).
+        if native && terminal.run.is_none() {
             let mut kept = program::load();
             if !kept.is_empty() {
                 let first = kept.remove(0);

@@ -352,6 +352,25 @@ one process.
   with the settings file. On Techbench ("icon:minimize,close"): minimize
   and close on the right, no maximize, the tabs' close marks on their
   right; Dave's screenshot.
+- **Step 4b done** (2026-11-12): several windows per program on the
+  toolkit's Wayland road too (other desktops, `VERGENCE_UI_WAYLAND=1`).
+  vergence-ui's Wayland runner keeps a list of windows as the native road
+  does (`WlWin`: each its surface, toplevel, decoration, viewport and
+  fractional-scale objects, buffers, bar, timers; the seat, keyboard,
+  clipboard, GPU and fonts shared); events go to the window their object
+  names (pointer and keyboard by the surface entered, fingers by the
+  surface they came down on); `Window::open_window` works there, and a
+  window closed while others run is destroyed (vergence-wl
+  `destroy_object`) and its program told (`App::closed`). The terminal is
+  one process on either road; it keeps and restores windows only on the
+  native road (by their tokens), so another desktop neither opens nor
+  rewrites what a Vergence session kept. The server's default place for a
+  new window (no memory, centered) now steps aside from its program's
+  other windows, Wayland and X11 ones included (`clear_of_siblings` knows
+  a window's program by memory's class). On Hubble with the Wayland road
+  forced: two starts, one process, two windows (550,280 and 586,316); a
+  section moved to a third; one window's shell exiting closes only it;
+  the state file untouched. 378 tests on all three.
 
 ## Steps
 

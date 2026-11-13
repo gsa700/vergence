@@ -60,13 +60,13 @@ struct Slot {
 }
 
 /// The program, borrowed for its first window, or a window it opened later.
-enum Run<'a> {
+pub(crate) enum Run<'a> {
     Borrowed(&'a mut dyn App),
     Owned(Box<dyn App>),
 }
 
 impl Run<'_> {
-    fn get(&mut self) -> &mut dyn App {
+    pub(crate) fn get(&mut self) -> &mut dyn App {
         match self {
             Run::Borrowed(a) => &mut **a,
             Run::Owned(a) => a.as_mut(),
@@ -261,7 +261,7 @@ impl<'a> Win<'a> {
 }
 
 /// A new window's size before the server says (the first window's is the program's).
-const OPENED_SIZE: (u32, u32) = (820, 520);
+pub(crate) const OPENED_SIZE: (u32, u32) = (820, 520);
 
 impl<'a> Native<'a> {
     fn send(&mut self, r: WinRequest) -> io::Result<()> {

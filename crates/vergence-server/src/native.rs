@@ -323,7 +323,8 @@ impl Server {
                         let out = self.output_at_pointer().unwrap_or_default();
                         let area = crate::place::content_area(self.work_area(out), self.has_title(&w));
                         let size = crate::place::fit(asked, area.size, Some((MIN_SIDE, MIN_SIDE).into()));
-                        (Rectangle::new(crate::place::center(area, size), size), false)
+                        // Not exactly on another window of its program.
+                        (self.clear_of_siblings(&w, Rectangle::new(crate::place::center(area, size), size), out), false)
                     }
                 };
                 let scale = self.scale_at(rect);

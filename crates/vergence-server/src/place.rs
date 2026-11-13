@@ -111,7 +111,10 @@ impl Server {
             t.with_pending_state(|s| s.size = Some(fitted));
             t.send_pending_configure();
         }
-        self.space.map_element(w.clone(), center(area, fitted), false);
+        // Not exactly on another window of its program (three of the toolkit's
+        // Wayland windows opened at once stacked in the middle, 2026-11-12).
+        let r = self.clear_of_siblings(w, Rectangle::new(center(area, fitted), fitted), out);
+        self.space.map_element(w.clone(), r.loc, false);
     }
 }
 
