@@ -197,10 +197,12 @@ Smithay's own; nothing of ours runs in its callbacks.
 5. **Met**: smallvil's grabs gone, input.rs rewritten (borrowed-review.md
    §1 has the counts).
 
-Found on the way, not part of the seat: absolute pointer devices (a touch
-panel in mouse mode, a drawing tablet, a VM's mouse) are placed through the
-nested-window mapping, which is wrong on real monitors (input.rs,
-PointerMotionAbsolute): to fix.
+Found on the way and fixed (2026-11-12): absolute pointer devices (a touch
+panel in mouse mode, a drawing tablet, a VM's mouse) went through the
+nested-window mapping and landed nowhere useful on real monitors; they now
+cover the screen their panel is tied to, else the primary, as touch does
+(input.rs). Checked by Dave on kepler with the panel put in mouse mode:
+taps land where touched.
 
 ## Acceptance
 

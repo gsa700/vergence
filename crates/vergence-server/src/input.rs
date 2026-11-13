@@ -128,8 +128,21 @@ impl Server {
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
                 self.touch_mouse_back();
-                // The position in the host window, mapped through the output it is over
-                // (1c): its left edge in logical space plus the offset at its scale.
+                // On the real monitors, an absolute device (a drawing tablet, a touch
+                // panel left in mouse mode, a VM's mouse) covers one screen: the one
+                // desktop.toml ties it to, else the primary, as a touch panel does
+                // (touch.rs). It went through the nested mapping below until
+                // 2026-11-12 and landed nowhere useful (kepler's panel in mouse mode).
+                if self.backend.is_some() {
+                    use smithay::backend::input::Device;
+                    if let Some(screen) = self.touch_screen(&event.device().name()) {
+                        let pos = event.position_transformed(screen.size) + screen.loc.to_f64();
+                        self.pointer_to(pos, Event::time(&event));
+                    }
+                    return;
+                }
+                // Nested: the position in the host window, mapped through the output it is
+                // over (1c): its left edge in logical space plus the offset at its scale.
                 let w = self.window_px;
                 let px = event.position_transformed((w.w, w.h).into());
                 let pos = self
