@@ -3,8 +3,8 @@
 Drafted 2026-11-13 from docs/next-look-and-launcher.md (agreed with Dave
 2026-11-12, "yes to all", from his macOS screenshots of the Apps launcher
 and Mail's translucent toolbar; "an inverse model for the dark lovers";
-corners and the bar's proportions added the same evening). **Not yet
-accepted**: the questions at the end are Dave's. Shelf milestone 2 (the
+corners and the bar's proportions added the same evening). **Accepted
+2026-11-13: Dave answered (a) to all four questions at the end.** Shelf milestone 2 (the
 Apps launcher, docs/shelf-milestone-2.md) uses this milestone's blur, so
 this one goes first.
 
@@ -208,7 +208,7 @@ tests and the window placement steps follow `BAR_H`.
 - Smithay's replacement step 2 (the window space and the renderer); this
   milestone's shaders move into it when it comes.
 
-## Questions for Dave
+## Questions for Dave (answered 2026-11-13: (a) to all four)
 
 1. **Where the blur is built.** (a) Now, in today's compositor, with the
    shaders behind our own small interface so they move into

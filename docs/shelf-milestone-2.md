@@ -2,7 +2,8 @@
 
 Drafted 2026-11-13 from docs/next-look-and-launcher.md (agreed with Dave
 2026-11-12, "yes to all", from his screenshot of macOS's Apps launcher).
-**Not yet accepted**: the questions at the end are Dave's. It comes after
+**Accepted 2026-11-13: Dave answered (a) to all four questions at the
+end.** It comes after
 look milestone 1's blur and backdrop (docs/look-milestone-1.md, steps 3 and
 5), since the panel is frosted. (Shelf milestone 1 named live tiles as its
 second milestone; they move to a later one.)
@@ -105,7 +106,7 @@ shows changes), the frost under it by the server.
 - Live tiles (shelf milestone 1's "milestone 2"): later.
 - The most used applications first: see Question 2.
 
-## Questions for Dave
+## Questions for Dave (answered 2026-11-13: (a) to all four)
 
 1. **Which tabs.** (a) "All" and a short fixed list (Internet, Office,
    Graphics, Sound & Video, Development, Games, Education, Utilities,
