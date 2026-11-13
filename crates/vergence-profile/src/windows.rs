@@ -51,7 +51,7 @@ impl WindowId {
 }
 
 /// Where one window was.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowSetting {
     #[serde(flatten)]
     pub id: WindowId,
@@ -122,6 +122,50 @@ pub struct WindowProfile {
     pub windows: Vec<WindowSetting>,
 }
 
+/// A setup's key for one size of its monitors: the monitors' key (their
+/// EDIDs, [`crate::profile_key`]) and each monitor's size in points, so the
+/// same monitors at another resolution or scale keep places of their own
+/// (Dave, 2026-11-12). `sizes`: (monitor id, width, height), in any order.
+pub fn sized_key(base: &str, sizes: &[(String, u32, u32)]) -> String {
+    let mut v: Vec<String> = sizes.iter().map(|(id, w, h)| format!("{id}={w}x{h}")).collect();
+    v.sort();
+    format!("{base}|{}", v.join(","))
+}
+
+/// A key's monitors' key and its monitors' sizes (none for a key from before
+/// sizes were kept, or one that cannot be read).
+pub fn key_sizes(key: &str) -> (&str, Vec<(String, u32, u32)>) {
+    let Some((base, rest)) = key.split_once('|') else { return (key, Vec::new()) };
+    let sizes = rest
+        .split(',')
+        .filter_map(|m| {
+            let (id, wh) = m.split_once('=')?;
+            let (w, h) = wh.split_once('x')?;
+            Some((id.to_string(), w.parse().ok()?, h.parse().ok()?))
+        })
+        .collect();
+    (base, sizes)
+}
+
+impl WindowSetting {
+    /// This place on its monitor at size `from`, in proportion on the same
+    /// monitor at size `to` (points): a window a third of the way across
+    /// stays a third of the way across, and as large a part of the monitor.
+    pub fn scaled(&self, from: (u32, u32), to: (u32, u32)) -> WindowSetting {
+        if from == to || from.0 == 0 || from.1 == 0 {
+            return self.clone();
+        }
+        let (fx, fy) = (to.0 as f64 / from.0 as f64, to.1 as f64 / from.1 as f64);
+        WindowSetting {
+            x: (self.x as f64 * fx).round() as i32,
+            y: (self.y as f64 * fy).round() as i32,
+            width: ((self.width as f64 * fx).round() as u32).max(1),
+            height: ((self.height as f64 * fy).round() as u32).max(1),
+            ..self.clone()
+        }
+    }
+}
+
 impl WindowProfile {
     pub fn get(&self, id: &WindowId) -> Option<&WindowSetting> {
         self.windows.iter().find(|w| &w.id == id)
@@ -175,6 +219,15 @@ impl WindowStore {
         self.profiles.last_mut().expect("just pushed")
     }
 
+    /// The other sizes of the setup whose monitors' key is `base` (and a
+    /// profile from before sizes were kept, keyed by `base` alone), the most
+    /// recently changed first; `except` is left out.
+    pub fn variants(&self, base: &str, except: &str) -> Vec<&WindowProfile> {
+        let mut v: Vec<&WindowProfile> = self.profiles.iter().filter(|p| p.key != except && key_sizes(&p.key).0 == base).collect();
+        v.sort_by(|a, b| b.updated.cmp(&a.updated));
+        v
+    }
+
     pub fn skips(&self, id: &WindowId) -> bool {
         self.skip.iter().any(|s| s.eq_ignore_ascii_case(&id.class) || s.eq_ignore_ascii_case(&id.instance))
     }
@@ -220,6 +273,27 @@ impl WindowStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sized_keys_round_trip_and_places_scale_in_proportion() {
+        let k = sized_key("abc", &[("m2".into(), 1280, 720), ("m1".into(), 1920, 1080)]);
+        assert_eq!(k, "abc|m1=1920x1080,m2=1280x720", "sorted, so the order monitors come in does not matter");
+        let (base, sizes) = key_sizes(&k);
+        assert_eq!((base, sizes.len()), ("abc", 2));
+        assert!(sizes.contains(&("m2".into(), 1280, 720)));
+        assert_eq!(key_sizes("abc"), ("abc", vec![]), "a key from before sizes: no sizes");
+        let w = WindowSetting { id: WindowId::default(), monitor: "m1".into(), x: 640, y: 360, width: 960, height: 540, ..WindowSetting::default() };
+        let s = w.scaled((1920, 1080), (1280, 720));
+        assert_eq!((s.x, s.y, s.width, s.height), (427, 240, 640, 360));
+        assert_eq!(w.scaled((1920, 1080), (1920, 1080)), w);
+        let mut store = WindowStore::default();
+        store.get_mut_or_new("abc").updated = "2026-11-01 10:00:00".into();
+        store.get_mut_or_new("abc|m1=1280x720").updated = "2026-11-12 10:00:00".into();
+        store.get_mut_or_new("abc|m1=1920x1080").updated = "2026-11-10 10:00:00".into();
+        store.get_mut_or_new("other|m1=1920x1080");
+        let keys: Vec<&str> = store.variants("abc", "abc|m1=1920x1080").iter().map(|p| p.key.as_str()).collect();
+        assert_eq!(keys, ["abc|m1=1280x720", "abc"], "newest first, the current one and other setups left out");
+    }
 
     fn w(class: &str, index: u32, x: i32) -> WindowSetting {
         WindowSetting {

@@ -5,8 +5,15 @@
 # the server was started with VERGENCE_CONTROL=1 (the launchers in tools/ do).
 # The server's runtime directory: this shell's, logind's (Linux), lightdm's
 # (pam_xdg), or the console launcher's.
+# VCTL_SOCKET names one socket and nothing else is tried: a script driving a
+# nested server must never fall through to the session it runs in (a test
+# quit Hubble's session that way, 2026-11-12).
 sock=
-for d in "$XDG_RUNTIME_DIR" "/run/user/$(id -u)" "/var/run/xdg/$(id -un)" "/tmp/xdg-$(id -u)"; do
+if [ -n "$VCTL_SOCKET" ]; then
+    [ -S "$VCTL_SOCKET" ] || { echo "no vergence-server control socket at $VCTL_SOCKET" >&2; exit 1; }
+    sock=$VCTL_SOCKET
+fi
+[ -n "$sock" ] || for d in "$XDG_RUNTIME_DIR" "/run/user/$(id -u)" "/var/run/xdg/$(id -un)" "/tmp/xdg-$(id -u)"; do
     [ -n "$d" ] && [ -S "$d/vergence-control" ] && { sock=$d/vergence-control; break; }
 done
 [ -n "$sock" ] || { echo "no vergence-server control socket found" >&2; exit 1; }

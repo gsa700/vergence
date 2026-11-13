@@ -6,6 +6,12 @@
 //
 // - A setup is the set of connected monitors' EDIDs (vergence_profile's
 //   profile_key); a monitor is named by its EDID (monitor_id), not its port.
+//   Places are kept per size of the setup: its key and each monitor's size in
+//   points (windows::sized_key), so the same monitors at another resolution
+//   or scale keep places of their own, and going back finds the old ones
+//   (Dave, 2026-11-12). A size seen for the first time starts from the most
+//   recent other size of the same monitors, each place scaled in proportion
+//   to its monitor; a move there is kept for that size only.
 // - A window is its app's class (X11 WM_CLASS instance/class, Wayland app_id)
 //   and its place among open windows of that class. No titles (Dave, 2026-11-06).
 //   A native window is its persistence token instead (bar milestone 1, step 5;
@@ -193,18 +199,36 @@ impl Server {
     /// size no real window has (see MIN_W).
     pub fn remembered_place(&mut self, w: &Win) -> Option<(Rectangle<i32, Logical>, bool)> {
         let id = self.window_identity(w)?;
-        let profile = self.memory.store.get(&self.memory.setup)?;
         // A native window (a role) with no memory yet takes its program's
         // role-less one: where the same program's Wayland window was (our tools
         // before the native road, 2026-11-11), so moving roads forgets nothing.
         // A window with a token and no memory yet starts where the last window
         // of its program the user closed was (a new terminal window, a torn-off
         // tab's own window asks for its drop point and has no memory: that wins).
-        let (s, fallback) = match profile.get(&id) {
-            Some(s) => (s.clone(), false),
-            None if !id.token.is_empty() => (profile.get(&id.untokened()).or_else(|| profile.get(&WindowId { role: String::new(), ..id.untokened() }))?.clone(), true),
-            None if !id.role.is_empty() => (profile.get(&WindowId { role: String::new(), ..id.clone() })?.clone(), false),
-            None => return None,
+        let find = |profile: &vergence_profile::windows::WindowProfile| match profile.get(&id) {
+            Some(s) => Some((s.clone(), false)),
+            None if !id.token.is_empty() => profile.get(&id.untokened()).or_else(|| profile.get(&WindowId { role: String::new(), ..id.untokened() })).map(|s| (s.clone(), true)),
+            None if !id.role.is_empty() => profile.get(&WindowId { role: String::new(), ..id.clone() }).map(|s| (s.clone(), false)),
+            None => None,
+        };
+        // This size of the setup first; else the most recent other size of the
+        // same monitors, scaled to this one (a key from before sizes: as it is).
+        let key = self.sized_setup();
+        let (s, fallback) = match self.memory.store.get(&key).and_then(|p| find(p)) {
+            Some(found) => found,
+            None => {
+                let now = vergence_profile::windows::key_sizes(&key).1;
+                let size_in = |sizes: &[(String, u32, u32)], m: &str| sizes.iter().find(|(id, ..)| id == m).map(|(_, w, h)| (*w, *h));
+                self.memory.store.variants(&self.memory.setup, &key).into_iter().find_map(|p| {
+                    let (s, fallback) = find(p)?;
+                    let then = vergence_profile::windows::key_sizes(&p.key).1;
+                    let s = match (size_in(&then, &s.monitor), size_in(&now, &s.monitor)) {
+                        (Some(from), Some(to)) => s.scaled(from, to),
+                        _ => s,
+                    };
+                    Some((s, fallback))
+                })?
+            }
         };
         if (s.width as i32) < MIN_W || (s.height as i32) < MIN_H {
             return None;
@@ -269,13 +293,28 @@ impl Server {
             desktop: None,
             seen: if id.token.is_empty() { 0 } else { today() },
         };
-        let setup = self.memory.setup.clone();
+        let setup = self.sized_setup();
         let profile = self.memory.store.get_mut_or_new(&setup);
         if profile.put(setting.clone()) {
             profile.updated = now();
             tracing::info!("memory: {} {}", id.describe(), setting.describe_place());
             self.memory.save();
         }
+    }
+
+    /// The key places are kept under now: the setup's, with each monitor's
+    /// size in points (empty until the setup is known).
+    pub fn sized_setup(&self) -> String {
+        if self.memory.setup.is_empty() {
+            return String::new();
+        }
+        let sizes: Vec<(String, u32, u32)> = self
+            .space
+            .outputs()
+            .filter_map(|o| Some((monitor_id_of(o)?, self.space.output_geometry(o)?.size)))
+            .map(|(id, s)| (id, s.w.max(0) as u32, s.h.max(0) as u32))
+            .collect();
+        vergence_profile::windows::sized_key(&self.memory.setup, &sizes)
     }
 
     /// The setup changed (or became known): its key from the monitors' EDIDs.
@@ -316,7 +355,7 @@ impl Server {
         if id.token.is_empty() {
             return;
         }
-        let setup = self.memory.setup.clone();
+        let setup = self.sized_setup();
         if let Some(mut last) = self.memory.store.get(&setup).and_then(|p| p.get(&id)).cloned() {
             last.id = id.untokened();
             last.seen = 0;

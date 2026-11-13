@@ -309,6 +309,24 @@ one process.
   window at 1.5 slid exactly onto the screen (630,310 for 650 x 410 on
   1280 x 720). Found on the way: window memory keys a setup by its
   monitors alone, not their scale or resolution (see the next note).
+- **Window memory per size of the setup** (Dave, 2026-11-12: "yes, build
+  it that way"): places are kept under the setup's key and each monitor's
+  size in points (`windows::sized_key`, "<key>|<monitor>=<w>x<h>,..."), so
+  a change of resolution or scale on the same monitors has places of its
+  own and going back finds the old ones untouched. A size seen for the
+  first time starts from the most recent other size of the same monitors
+  (`WindowStore::variants`), each place and size scaled in proportion to
+  its monitor (`WindowSetting::scaled`); a profile from before sizes were
+  kept counts as such a size, unscaled. When the size changes with windows
+  open, they go to their places for the new size at once; the server's own
+  placing after a monitor change (place.rs `set_rect`, which now resizes
+  native windows too) is no longer remembered as if the user had moved
+  them. On Hubble (scratchpad sizemem.sh): a terminal at 960,540 820 x 520
+  at scale 1; at 1.5 first time 640,360 547 x 347; moved there to 100,100;
+  back at 1: 960,540 820 x 520; at 1.5: 100,100; the same live, without a
+  restart. The scale test still passes (30 windows exact, then 27).
+  `vctl` takes `VCTL_SOCKET` for one socket and no fallback: the nested
+  test's stop, with its server not running, quit Hubble's session.
 
 ## Steps
 

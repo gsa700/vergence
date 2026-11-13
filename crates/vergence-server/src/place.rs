@@ -206,7 +206,10 @@ impl Server {
         }
     }
 
-    /// Put a window's content at `r` (X11: configured; Wayland: asked to take the size).
+    /// Put a window's content at `r` (X11: configured; Wayland and native:
+    /// asked to take the size). Not remembered: the server placed it after a
+    /// monitor change, the user did not (a place derived for a new size of
+    /// the setup is derived again until the user moves the window there).
     pub fn set_rect(&mut self, w: &Win, r: Rectangle<i32, Logical>) {
         if let Some(x) = w.x11_surface() {
             let _ = x.configure(r);
@@ -215,9 +218,12 @@ impl Server {
                 t.with_pending_state(|s| s.size = Some(r.size));
                 t.send_pending_configure();
             }
+        } else if let Some(n) = w.native()
+            && w.geometry().size != r.size
+        {
+            self.native_configure(n, r.size, false);
         }
         self.space.map_element(w.clone(), r.loc, false);
-        self.remember(w);
     }
 }
 
