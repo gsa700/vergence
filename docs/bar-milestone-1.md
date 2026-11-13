@@ -491,6 +491,13 @@ one process.
   joined or not) and a hold whose release never came; end a hold when no
   button is held any more; draw the preview with a layout of the
   preview's own count. Then Dave repeats the drags with a real mouse.
+- **Where a dragged tab will go** (Dave, 2026-11-12: "ghost tab and
+  insertion line, note those for tomorrow too"). A ghost of the tab under
+  the pointer for the whole drag; an insertion line in the accent color
+  between tabs where it would land, in its own row and in another
+  terminal's row while the pointer is over it (so a join is seen before
+  the drop). Not chosen for now: an outline of the window a tear-off
+  would open, and the moving window going see-through over another bar.
 
 - **Tab dragging under other desktops** (Dave, 2026-11-12: "make a note
   for now"). In a Vergence session the server drags tabs; under GNOME the
