@@ -74,6 +74,18 @@ Mail's toolbar. A program that does not opt in (the settings app, for now)
 gets the bar frosting nothing, so a plain tint, which looks like today's bar
 in the new colors.
 
+**The terminal's rows never start under the bar** (Dave, 2026-11-13: "how
+will we make sure the prompt doesn't start under there?"). Its grid is
+laid out below the inset: the size it reports to the program (rows for the
+pty) counts only the rows below the bar, so the shell, vim and htop cannot
+write there. The strip under the bar shows only the scrollback lines just
+above row 1, frosted; on the alternate screen (vim, htop, less), which has
+no scrollback, it is empty frost. After `clear` the prompt is on row 1
+below the bar. Scrolled back, the strip shows the line above the top
+visible one. Only the top panes of a split reach under the bar. Text under
+the bar cannot be selected (presses there are the bar's). A change of the
+inset is a resize: new rows, the program told.
+
 Input over the bar stays the server's. **Window memory and placement keep
 the content rectangle below the bar**, so no remembered place moves when a
 program starts drawing under its bar; only the picture grows by the inset.
