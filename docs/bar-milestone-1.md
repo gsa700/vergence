@@ -226,6 +226,29 @@ one process.
   exactly after another start. A remembered place partly off its monitor
   is not restored (the existing rule: the whole window must fit). 378 tests
   on all three.
+- **Step 7 done** (2026-11-12): tab dragging and the menus. The server
+  holds a pressed tab (dispatch.rs `TabHold`): past the drag distance it
+  draws the tab following the pointer and where it would land
+  (vergence-bar's model); let go in the row it sends `TabMoved`, over
+  another window's bar of the same program `TabJoin` (the place in that
+  row by the pointer), anywhere else `TabOut` with the drop point: the
+  new window's bar under the pointer, slid onto the monitor's work area as
+  far as the window's size needs (a place partly off the monitor is
+  refused, which centered the window). A window with a fresh token that
+  asks for a place gets it ahead of its program's last-closed place (the
+  rule step 5 meant; memory came first in the code), and neither lands
+  with its corner exactly on another window of its program: it steps
+  down and right by a bar's height, up and left where that runs off the
+  monitor (memory.rs `clear_of_siblings`). Right-click on a tab: the
+  server's tab menu (Close, Close the others, Move to a new window, the
+  program's entries). The terminal takes a tab out (`take_tab`; a window's
+  only tab may join another window, which then closes), hands it to
+  another window of the process or opens one for it at the asked place;
+  its section menu has Move to a new tab and Move to a new window. On
+  Hubble by vctl (scratchpad tabtest.sh, sectest.sh): reorder, tear-off at
+  the drop point, a one-tab window joined into another, the tab menu's
+  Move to a new window, both section-menu moves; one process and every
+  shell kept throughout. 378 tests on all three.
 
 ## Steps
 

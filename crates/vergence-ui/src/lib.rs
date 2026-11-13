@@ -439,6 +439,11 @@ pub trait App {
     /// program that wants the window back in its place on the next run.
     fn token_given(&mut self, _token: &str) {}
 
+    /// The toolkit's number for this window, as the server's tab events name
+    /// another window of the program ([`TabEvent::Join`]'s `into`). Native
+    /// road only: called before the window's first frame.
+    fn opened(&mut self, _id: u32) {}
+
     /// The window has closed (the user closed it, or the program did) while
     /// the program runs on. Not called when the program is ended from outside
     /// (a logout): what it keeps of its windows then stays for next time.

@@ -161,6 +161,33 @@ impl Server {
         Some(id)
     }
 
+    /// `r` for a new window `w`, moved off any other window of its program
+    /// whose corner is exactly there: down and right by a bar's height until
+    /// the corner is free; where that runs off monitor `og` (a window in the
+    /// bottom-right corner), up and left; else `r` itself.
+    pub fn clear_of_siblings(&self, w: &Win, mut r: Rectangle<i32, Logical>, og: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
+        let taken: Vec<Point<i32, Logical>> = self
+            .space
+            .elements()
+            .filter(|o| *o != w && o.native().is_some_and(|n| w.native().is_some_and(|m| n.app_id == m.app_id)))
+            .filter_map(|o| self.space.element_location(o))
+            .collect();
+        let start = r.loc;
+        let on = |p: Point<i32, Logical>| p.x >= og.loc.x && p.y >= og.loc.y && p.x + r.size.w <= og.loc.x + og.size.w && p.y + r.size.h <= og.loc.y + og.size.h;
+        let free = |dir: i32| {
+            let mut p = start;
+            for _ in 0..32 {
+                if !taken.contains(&p) {
+                    return on(p).then_some(p);
+                }
+                p += Point::from((dir * crate::decor::TITLE_H, dir * crate::decor::TITLE_H));
+            }
+            None
+        };
+        r.loc = free(1).or_else(|| free(-1)).unwrap_or(start);
+        r
+    }
+
     /// Where memory puts this window on the current setup: its content rectangle
     /// and whether it was maximized. None: no place, monitor absent, no fit, or a
     /// size no real window has (see MIN_W).
@@ -186,26 +213,10 @@ impl Server {
         let og = self.space.output_geometry(&out)?;
         let mut r = Rectangle::new((og.loc.x + s.x, og.loc.y + s.y).into(), (s.width as i32, s.height as i32).into());
         // A new window starting from its program's last-closed place does not
-        // land exactly on another of its windows: it steps down and right by a
-        // bar's height until the corner is free (three new terminals stacked
+        // land exactly on another of its windows (three new terminals stacked
         // exactly on one another, 2026-11-12).
         if fallback {
-            let taken: Vec<Point<i32, Logical>> = self
-                .space
-                .elements()
-                .filter(|o| *o != w && o.native().is_some_and(|n| w.native().is_some_and(|m| n.app_id == m.app_id)))
-                .filter_map(|o| self.space.element_location(o))
-                .collect();
-            let step = crate::decor::TITLE_H;
-            for _ in 0..32 {
-                if !taken.contains(&r.loc) {
-                    break;
-                }
-                r.loc += Point::from((step, step));
-            }
-            if r.loc.x + r.size.w > og.loc.x + og.size.w || r.loc.y + r.size.h > og.loc.y + og.size.h {
-                r.loc = Point::from((og.loc.x + s.x, og.loc.y + s.y));
-            }
+            r = self.clear_of_siblings(w, r, og);
         }
         // Where the shelf's strip now stands, the window is moved clear of it (shelf.rs).
         let r = self.clear_of_shelf(r);

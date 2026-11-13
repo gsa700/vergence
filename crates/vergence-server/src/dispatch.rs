@@ -82,6 +82,17 @@ enum Running {
     Resize { window: Win, edges: ResizeEdge, from: Point<f64, Logical>, initial: Rectangle<i32, Logical>, size: Size<i32, Logical> },
 }
 
+/// A press on a tab (bar milestone 1, step 7): the window, the tab's place in
+/// the row, where the press was; past vergence-bar's DRAG_START it is a drag,
+/// and where the tab would land if let go now.
+struct TabHold {
+    window: Win,
+    index: usize,
+    from: Point<f64, Logical>,
+    drag: Option<vergence_bar::TabDrag>,
+    landing: Option<vergence_bar::Landing>,
+}
+
 /// What came in, for the outputs that pass it on as it came.
 pub enum Came {
     Motion,
@@ -103,6 +114,8 @@ pub struct Dispatch {
     running: Option<Running>,
     /// Buttons Smithay's pointer has seen go down and not up.
     smithay_held: Vec<u32>,
+    /// A left press on a tab of a native window's bar, and the drag it may become.
+    tab_hold: Option<TabHold>,
     /// A Wayland window resized from its top or left: kept anchored as its
     /// commits arrive, until the one after the resize ended.
     anchored: Option<(Win, ResizeEdge, Rectangle<i32, Logical>, bool)>,
@@ -323,6 +336,7 @@ impl Server {
         let Some(pointer) = self.seat.get_pointer() else { return };
         for o in out {
             match o {
+                Out::Motion(Target::Server(Part::Tab(..))) if self.input.tab_hold.is_some() => self.tab_motion(pos),
                 Out::Enter(t) | Out::Motion(t) => match t {
                     Target::Surface(_, sid) => {
                         let focus = self.input.surfaces.get(&sid).cloned();
@@ -447,7 +461,22 @@ impl Server {
             Target::Server(Part::Dock) if !pressed && self.shelf.held.is_some_and(|(b, _)| b == button) => self.shelf_release(pos),
             Target::Server(Part::Desktop) if pressed && button == vergence_seat::BTN_RIGHT => self.open_menu(pos),
             // A native window's tabs (bar milestone 1): the program hears what was done.
-            Target::Server(Part::Tab(id, i)) if pressed && button == vergence_seat::BTN_LEFT => self.tab_event(id, i, |window, tab| WinEvent::TabChosen { window, tab }),
+            Target::Server(Part::Tab(id, i)) if pressed && button == vergence_seat::BTN_LEFT => {
+                self.tab_event(id, i, |window, tab| WinEvent::TabChosen { window, tab });
+                if let Some(w) = self.input.wins.get(&id).cloned() {
+                    self.input.tab_hold = Some(TabHold { window: w, index: i as usize, from: pos, drag: None, landing: None });
+                }
+            }
+            Target::Server(Part::Tab(_, _)) if !pressed && button == vergence_seat::BTN_LEFT => self.tab_release(pos),
+            Target::Server(Part::Tab(id, i)) if pressed && button == vergence_seat::BTN_RIGHT => {
+                if let Some(w) = self.input.wins.get(&id).cloned()
+                    && let (Some((bar, layout)), Some(tab)) = (self.bar_of(&w), self.tab_id(&w, i as usize))
+                    && let Some(r) = layout.tabs.get(i as usize)
+                {
+                    let slot = Rectangle::new((bar.loc.x + r.x as i32, bar.loc.y + r.y as i32).into(), (r.w as i32, r.h as i32).into());
+                    self.open_tab_menu(&w, tab, slot);
+                }
+            }
             Target::Server(Part::Tab(id, i)) if pressed && button == vergence_seat::BTN_MIDDLE => self.tab_event(id, i, |window, tab| WinEvent::TabClose { window, tab }),
             Target::Server(Part::CloseTab(id, i)) if pressed && button == vergence_seat::BTN_LEFT => self.tab_event(id, i, |window, tab| WinEvent::TabClose { window, tab }),
             Target::Server(Part::Plus(id)) if pressed && button == vergence_seat::BTN_LEFT => {
@@ -457,6 +486,110 @@ impl Server {
             }
             Target::Server(_) => {}
         }
+    }
+
+    /// The pointer moved with a tab held: past DRAG_START it is a drag, and
+    /// the bar shows where the tab would land (decor.rs, tab_preview).
+    fn tab_motion(&mut self, pos: Point<f64, Logical>) {
+        let Some(hold) = self.input.tab_hold.as_ref() else { return };
+        let Some((bar, layout)) = self.bar_of(&hold.window) else { return };
+        let (lx, ly) = ((pos.x - bar.loc.x as f64) as f32, (pos.y - bar.loc.y as f64) as f32);
+        let moved = (pos.x - hold.from.x).hypot(pos.y - hold.from.y) as f32;
+        let hold = self.input.tab_hold.as_mut().unwrap();
+        if hold.drag.is_none() && moved >= vergence_bar::DRAG_START {
+            let start_x = (hold.from.x - bar.loc.x as f64) as f32;
+            hold.drag = Some(vergence_bar::TabDrag::new(&layout, hold.index, start_x));
+            self.pointer_image.status = CursorImageStatus::Named(CursorIcon::Grabbing);
+        }
+        if let Some(drag) = hold.drag {
+            let landing = drag.landing(&layout, bar.size.w as f32, lx, ly);
+            if hold.landing != Some(landing) {
+                hold.landing = Some(landing);
+                self.redraw_all();
+            }
+        }
+    }
+
+    /// Where a tab being dragged in window `w` would go: its place, and its
+    /// new place in the row (None: out of the window).
+    pub fn tab_preview(&self, w: &Win) -> Option<(usize, Option<usize>)> {
+        let hold = self.input.tab_hold.as_ref().filter(|h| h.window == *w && h.drag.is_some())?;
+        match hold.landing? {
+            vergence_bar::Landing::At(to) => Some((hold.index, Some(to))),
+            vergence_bar::Landing::Outside => Some((hold.index, None)),
+        }
+    }
+
+    /// The tab is let go: to its new place in the row; onto another window
+    /// of the same program's bar, joining it; anywhere else, a window of its
+    /// own, where it was dropped.
+    fn tab_release(&mut self, pos: Point<f64, Logical>) {
+        let Some(hold) = self.input.tab_hold.take() else { return };
+        self.redraw_all();
+        let (Some(_), Win::Native(n)) = (hold.drag, &hold.window) else { return };
+        let Some(tab) = self.tab_id(&hold.window, hold.index) else { return };
+        let (client, window) = (n.client, n.id);
+        let event = match hold.landing {
+            Some(vergence_bar::Landing::At(to)) if to != hold.index => WinEvent::TabMoved { window, tab, to: to as u32 },
+            Some(vergence_bar::Landing::At(_)) | None => return,
+            Some(vergence_bar::Landing::Outside) => {
+                // Over another window's bar, of the same program?
+                let over = match self.hit(pos) {
+                    Hit::Tab(w, _) | Hit::CloseTab(w, _) | Hit::Plus(w) | Hit::Title(w) => Some(w),
+                    _ => None,
+                };
+                let into = over.filter(|w| *w != hold.window).and_then(|w| match &w {
+                    Win::Native(m) if m.client == client => self.bar_of(&w).map(|(bar, layout)| {
+                        let x = (pos.x - bar.loc.x as f64) as f32;
+                        (m.id, layout.tabs.iter().filter(|r| r.x + r.w / 2.0 < x).count() as u32)
+                    }),
+                    _ => None,
+                });
+                match into {
+                    Some((into, to)) => WinEvent::TabJoin { window, tab, into, to },
+                    None => WinEvent::TabOut { window, tab, place: self.drop_place(pos, n.size()) },
+                }
+            }
+        };
+        tracing::info!("tab: {event:?}");
+        self.bus_send(client, vergence_protocol::bus::ServerMsg::Window(event));
+    }
+
+    /// Where a window for a tab dropped at `pos` goes: its bar under the
+    /// pointer, slid onto the monitor's work area as far as `size` (the
+    /// content's, taken from the window the tab left) needs, since a place
+    /// partly off the monitor would be refused and the window centered.
+    fn drop_place(&self, pos: Point<f64, Logical>, size: Size<i32, Logical>) -> vergence_protocol::window::Place {
+        let at = pos.to_i32_round::<i32>();
+        let Some(out) = self.space.outputs().find(|o| self.space.output_geometry(o).is_some_and(|g| g.contains(at))) else {
+            return vergence_protocol::window::Place::Anywhere;
+        };
+        let (Some(id), Some(g)) = (crate::memory::monitor_id_of(out), self.space.output_geometry(out)) else {
+            return vergence_protocol::window::Place::Anywhere;
+        };
+        let area = crate::place::content_area(self.work_area(g), true);
+        let slide = |want: f64, lo: i32, room: i32, side: i32| want.min((lo + room - side) as f64).max(lo as f64);
+        let x = slide(pos.x - 120.0, area.loc.x, area.size.w, size.w) - g.loc.x as f64;
+        let y = slide(pos.y + crate::decor::TITLE_H as f64 / 2.0, area.loc.y, area.size.h, size.h) - g.loc.y as f64;
+        vergence_protocol::window::Place::Monitor { id, x, y }
+    }
+
+    /// A tab menu's entry was chosen (menu.rs).
+    pub fn tab_act(&mut self, w: &Win, tab: u32, act: crate::menu::TabAct) {
+        use crate::menu::TabAct;
+        let Win::Native(n) = w else { return };
+        let window = n.id;
+        let event = match act {
+            TabAct::Close => WinEvent::TabClose { window, tab },
+            TabAct::CloseOthers => WinEvent::TabCloseOthers { window, tab },
+            TabAct::NewWindow => {
+                // A little down and right of the window, on its monitor.
+                let at = self.space.element_location(w).map(|p| p.to_f64() + Point::from((60.0, 60.0))).unwrap_or_default();
+                WinEvent::TabOut { window, tab, place: self.drop_place(at + Point::from((120.0, -(crate::decor::TITLE_H as f64) / 2.0)), n.size()) }
+            }
+            TabAct::Program(entry) => WinEvent::TabMenu { window, tab, entry },
+        };
+        self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(event));
     }
 
     /// Tell a native window what was done with its tab at `index`.

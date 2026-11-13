@@ -196,6 +196,12 @@ impl Server {
         self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, tabs_of(w)))).flatten()
     }
 
+    /// A window's bar: where it is on the desktop, and how it is laid out
+    /// (tab drags and the tab menu, dispatch.rs).
+    pub fn bar_of(&self, w: &Win) -> Option<(Rectangle<i32, Logical>, vergence_bar::Layout)> {
+        self.frame_of(w).map(|f| (f.title, f.layout))
+    }
+
     /// The id a native window gave the tab at `index` of its bar.
     pub fn tab_id(&self, w: &Win, index: usize) -> Option<u32> {
         tabs_of(w).and_then(|t| t.ids.get(index).copied())
@@ -332,6 +338,7 @@ impl Server {
             if frame.is_some() || border.is_some() {
                 let title = self.window_title(&w);
                 let active = focused.as_ref() == Some(&w);
+                let preview = self.tab_preview(&w);
                 let d = self.decor.entry(w.clone()).or_insert_with(Decor::new);
                 if d.active != active {
                     d.active = active;
@@ -353,7 +360,23 @@ impl Server {
                     // The bar, vergence-bar's, drawn once per scale and again when what it shows changes.
                     let hover = hovered.as_ref().filter(|(hw, _)| *hw == w).map(|(_, p)| *p);
                     let width = f.title.size.w;
-                    let (titles, shown, accent) = f.tabs.as_ref().map(|t| (t.titles.clone(), t.shown, t.accent)).unwrap_or_default();
+                    let (mut titles, mut shown, accent) = f.tabs.as_ref().map(|t| (t.titles.clone(), t.shown, t.accent)).unwrap_or_default();
+                    // A tab being dragged (dispatch.rs): the row as it would be if let
+                    // go now; out of the window, without it.
+                    if let Some((from, to)) = preview
+                        && from < titles.len()
+                    {
+                        let front = shown;
+                        let mut order: Vec<usize> = (0..titles.len()).collect();
+                        match to {
+                            Some(to) => vergence_bar::reorder(&mut order, from, to),
+                            None => {
+                                order.remove(from);
+                            }
+                        }
+                        titles = order.iter().map(|&i| titles[i].clone()).collect();
+                        shown = order.iter().position(|&i| i == front).unwrap_or(0);
+                    }
                     let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent);
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {

@@ -174,6 +174,7 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
         _ => return Ok(None),
     };
     app.token_given(&token);
+    app.opened(1);
     let gpu = (std::env::var("VERGENCE_RENDER").as_deref() != Ok("cpu")).then(|| Gpu::new().ok()).flatten().filter(Gpu::shares_buffers);
     let (wake_read, wake_write) = sock::pipe()?;
     let wake_pending = Arc::new(AtomicBool::new(false));
@@ -397,6 +398,7 @@ impl<'a> Native<'a> {
         self.next_window += 1;
         let serial = self.client.next_serial();
         let (bar_by_server, request) = create_request(app.as_ref(), id, serial, OPENED_SIZE);
+        app.opened(id);
         app.waker(self.waker.clone());
         self.send(request)?;
         self.creating.push((serial, id));

@@ -57,8 +57,20 @@ enum Entry {
     Window(crate::win::Win, String),
     /// Something to do with an application on the dock, and what the menu calls it.
     Shelf(crate::shelf::Act, String),
+    /// Something to do with a tab of a native window's bar (bar milestone 1):
+    /// the window, the tab's id, what, and what the menu calls it.
+    Tab(crate::win::Win, u32, TabAct, String),
     Separator,
     Exit,
+}
+
+/// What a tab's menu does (bar milestone 1): the server's entries, then the program's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabAct {
+    Close,
+    CloseOthers,
+    NewWindow,
+    Program(u32),
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -197,6 +209,22 @@ impl Server {
 
     /// The menu of a right-click on an application's icon, placed as its list
     /// of windows is.
+    /// A tab's menu (bar milestone 1), below the tab: Close, Close the others
+    /// and Move to a new window (with more than one tab), then the program's own.
+    pub fn open_tab_menu(&mut self, w: &crate::win::Win, tab: u32, slot: Rectangle<i32, Logical>) {
+        let Some(vergence_protocol::window::Bar::Tabs { tabs, menu, .. }) = w.native().and_then(|n| n.bar()) else { return };
+        let mut entries = vec![Entry::Tab(w.clone(), tab, TabAct::Close, "Close".into())];
+        if tabs.len() > 1 {
+            entries.push(Entry::Tab(w.clone(), tab, TabAct::CloseOthers, "Close the others".into()));
+            entries.push(Entry::Tab(w.clone(), tab, TabAct::NewWindow, "Move to a new window".into()));
+        }
+        if !menu.is_empty() {
+            entries.push(Entry::Separator);
+            entries.extend(menu.iter().map(|m| Entry::Tab(w.clone(), tab, TabAct::Program(m.id), m.label.chars().take(60).collect())));
+        }
+        self.open_beside(slot, vergence_shell::Edge::Bottom, entries);
+    }
+
     pub fn open_shelf_menu(&mut self, slot: Rectangle<i32, Logical>, towards: vergence_shell::Edge, acts: Vec<(crate::shelf::Act, String)>) {
         self.open_beside(slot, towards, acts.into_iter().map(|(act, label)| Entry::Shelf(act, label)).collect());
     }
@@ -262,6 +290,11 @@ impl Server {
                 tracing::info!("shelf: {label}");
                 self.shelf_act(act.clone());
             }
+            Entry::Tab(w, tab, act, label) => {
+                tracing::info!("tab menu: {label}");
+                let (w, tab, act) = (w.clone(), *tab, *act);
+                self.tab_act(&w, tab, act);
+            }
             Entry::Exit => {
                 tracing::info!("menu: exit");
                 self.loop_signal.stop();
@@ -290,6 +323,7 @@ impl Server {
                 Entry::App(item) => item.name.clone(),
                 Entry::Window(_, title) => title.clone(),
                 Entry::Shelf(_, label) => label.clone(),
+                Entry::Tab(_, _, _, label) => label.clone(),
                 Entry::Exit => "Exit Vergence".into(),
                 Entry::Separator => continue,
             };

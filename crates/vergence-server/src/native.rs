@@ -274,6 +274,9 @@ impl Server {
                 let keeps_token = !token.is_empty();
                 let presented = token.len() == 32 && token.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase());
                 let taken = self.natives.values().any(|w| w.native().is_some_and(|m| m.app_id == app_id && m.token == token));
+                // A fresh token has no memory of its own: a place it asks for (a
+                // torn-off tab's drop point) wins over its program's last-closed one.
+                let fresh = !(presented && !taken);
                 let token = if presented && !taken { token } else { new_token() };
                 let n = Arc::new(NativeWindow {
                     client,
@@ -309,7 +312,14 @@ impl Server {
                 // asked to be if that is allowed, else fitted and centered on the
                 // monitor under the pointer (place.rs).
                 let asked_place = self.native_place_rect(client, parent, &place, asked, &w);
-                let (rect, maximized) = match self.remembered_place(&w).or(asked_place.map(|r| (r, false))) {
+                let remembered = if fresh && asked_place.is_some() { None } else { self.remembered_place(&w) };
+                // Nor on top of another of its program's windows (a tab dropped
+                // where the window it left is).
+                let asked_place = asked_place.map(|r| match self.space.outputs().find_map(|o| self.space.output_geometry(o).filter(|g| g.contains(r.loc))) {
+                    Some(og) if fresh => self.clear_of_siblings(&w, r, og),
+                    _ => r,
+                });
+                let (rect, maximized) = match remembered.or(asked_place.map(|r| (r, false))) {
                     Some(r) => r,
                     None => {
                         let out = self.output_at_pointer().unwrap_or_default();

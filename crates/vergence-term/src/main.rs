@@ -531,6 +531,18 @@ struct Terminal {
     /// rest do (a window opened from a request); none: where we stand.
     start_dirs: Vec<String>,
     start_cwd: Option<String>,
+    /// The toolkit's number for this window (App::opened): the server's tab
+    /// events name other windows by it.
+    wid: u32,
+    /// Tabs this window opens with, brought from another window (a tab torn
+    /// off, a section moved to a window of its own), and where it asks to be.
+    moved: Vec<Tab>,
+    ask: Option<vergence_ui::BarPlace>,
+    /// Tabs on their way between windows of this process (a tab joined to
+    /// another window): the window's key, the tab, its place there. Shared.
+    moves: Rc<RefCell<Vec<(u64, Tab, usize)>>>,
+    /// Each window's toolkit number and key, shared.
+    wids: Rc<RefCell<Vec<(u32, u64)>>>,
     tabs: Vec<Tab>,
     /// The tab in front.
     shown: usize,
@@ -667,6 +679,11 @@ impl Terminal {
             native: false,
             start_dirs: Vec::new(),
             start_cwd: None,
+            wid: 0,
+            moved: Vec::new(),
+            ask: None,
+            moves: Rc::new(RefCell::new(Vec::new())),
+            wids: Rc::new(RefCell::new(Vec::new())),
             tabs: Vec::new(),
             shown: 0,
 
@@ -727,6 +744,8 @@ impl Terminal {
         t.program = self.program.clone();
         t.key = t.program.borrow_mut().add();
         t.inbox = self.inbox.clone();
+        t.moves = self.moves.clone();
+        t.wids = self.wids.clone();
         t.open_with = start_dirs.len().max(1);
         t.present = present;
         t.start_dirs = start_dirs;
@@ -747,6 +766,71 @@ impl Terminal {
         let restore = std::mem::take(&mut self.program.borrow_mut().restore);
         for w in restore {
             window.open_window(Box::new(self.window_for(w.token, w.tabs, None, None)));
+        }
+    }
+
+    /// A window of its own for `tab` (taken from this one), asking to be at `place`.
+    fn tab_to_window(&mut self, tab: Tab, place: Option<vergence_ui::BarPlace>, window: &mut Window) {
+        let mut t = self.window_for(String::new(), Vec::new(), None, None);
+        t.moved = vec![tab];
+        t.ask = place;
+        window.open_window(Box::new(t));
+    }
+
+    /// Takes the tab with this id out of the window (the last one stays: a
+    /// window keeps a tab).
+    fn take_tab(&mut self, id: u32, window: &mut Window) -> Option<Tab> {
+        if self.tabs.len() < 2 {
+            return None;
+        }
+        let i = self.tabs.iter().position(|t| t.id == id)?;
+        let front = self.tabs.get(self.shown).map(|t| t.id);
+        let tab = self.tabs.remove(i);
+        self.shown = front.and_then(|f| self.tabs.iter().position(|t| t.id == f)).unwrap_or_else(|| i.min(self.tabs.len() - 1));
+        self.held = None;
+        self.retitle(window);
+        self.keep();
+        window.redraw();
+        Some(tab)
+    }
+
+    /// The active section (pane) of the front tab, out of its tab: its
+    /// terminal keeps running. None if it is the tab's only one.
+    fn take_pane(&mut self, window: &mut Window) -> Option<Tab> {
+        let tab = self.tabs.get_mut(self.shown)?;
+        if tab.panes.len() < 2 {
+            return None;
+        }
+        let id = tab.active;
+        let leaves = tab.tree.leaves();
+        if !tab.tree.remove(id) {
+            return None;
+        }
+        let i = tab.panes.iter().position(|(own, _)| *own == id)?;
+        let (_, session) = tab.panes.remove(i);
+        let at = leaves.iter().position(|l| *l == id).unwrap_or(0);
+        tab.active = leaves[if at > 0 { at - 1 } else { 1 }];
+        self.held = None;
+        window.redraw();
+        Some(Tab { id: NEXT_TAB.fetch_add(1, Ordering::SeqCst), tree: Node::Leaf(id), panes: vec![(id, session)], active: id })
+    }
+
+    /// Tabs other windows of the process sent here (a tab joined to this window).
+    fn take_moves(&mut self, window: &mut Window) {
+        let mine: Vec<(u64, Tab, usize)> = {
+            let mut moves = self.moves.borrow_mut();
+            let (mine, rest): (Vec<_>, Vec<_>) = moves.drain(..).partition(|(k, _, _)| *k == self.key);
+            *moves = rest;
+            mine
+        };
+        for (_, tab, to) in mine {
+            let to = to.min(self.tabs.len());
+            self.tabs.insert(to, tab);
+            self.shown = to;
+            self.fitted = (0.0, 0.0, 0.0, 0.0);
+            self.retitle(window);
+            self.keep();
+            window.redraw();
         }
     }
 
@@ -997,6 +1081,25 @@ impl Terminal {
                     Some(Item::SplitStack) => self.split(Axis::Stack, window),
                     Some(Item::NewTab) => self.new_tab(window),
                     Some(Item::ClosePane) => self.close_active(window),
+                    Some(Item::PaneToTab) => {
+                        if let Some(t) = self.take_pane(window) {
+                            self.tabs.push(t);
+                            self.shown = self.tabs.len() - 1;
+                            self.fitted = (0.0, 0.0, 0.0, 0.0);
+                            self.retitle(window);
+                            self.keep();
+                        }
+                    }
+                    Some(Item::PaneToWindow) => {
+                        // A section of a tab with others; a tab of its own otherwise.
+                        let moved = match self.take_pane(window) {
+                            Some(t) => Some(t),
+                            None => self.tabs.get(self.shown).map(|t| t.id).and_then(|id| self.take_tab(id, window)),
+                        };
+                        if let Some(t) = moved {
+                            self.tab_to_window(t, None, window);
+                        }
+                    }
                     None => {}
                 }
                 true
@@ -1354,6 +1457,16 @@ impl App for Terminal {
 
     fn closed(&mut self) {
         self.program.borrow_mut().remove(self.key);
+        self.wids.borrow_mut().retain(|(_, k)| *k != self.key);
+    }
+
+    fn opened(&mut self, id: u32) {
+        self.wid = id;
+        self.wids.borrow_mut().push((id, self.key));
+    }
+
+    fn place(&self) -> vergence_ui::BarPlace {
+        self.ask.clone().unwrap_or(vergence_ui::BarPlace::Anywhere)
     }
 
     fn bar(&mut self) -> Option<vergence_ui::Bar> {
@@ -1404,8 +1517,37 @@ impl App for Terminal {
                     window.redraw();
                 }
             }
-            // A tab's own window and joining another terminal come with step 4.
-            TabEvent::Out { .. } | TabEvent::Join { .. } | TabEvent::Menu { .. } => {}
+            // Dragged out (or "Move to a new window"): a window of its own, where it was dropped.
+            TabEvent::Out { tab, place } => {
+                if let Some(t) = self.take_tab(tab, window) {
+                    self.tab_to_window(t, Some(place), window);
+                }
+            }
+            // Dropped on another window of this process: it goes there.
+            TabEvent::Join { tab, into, to } => {
+                let target = self.wids.borrow().iter().find(|(w, _)| *w == into).map(|(_, k)| *k);
+                // A window's only tab may go too: the window closes behind it.
+                let last = || self.tabs.len() == 1 && self.tabs[0].id == tab;
+                let take = if target.is_some() && last() {
+                    self.held = None;
+                    window.close();
+                    self.tabs.pop()
+                } else if target.is_some() {
+                    self.take_tab(tab, window)
+                } else {
+                    None
+                };
+                if let Some(key) = target
+                    && let Some(t) = take
+                {
+                    self.moves.borrow_mut().push((key, t, to as usize));
+                    if let Some(w) = &self.waker {
+                        w.wake();
+                    }
+                }
+            }
+            // The terminal adds no entries of its own to a tab's menu yet.
+            TabEvent::Menu { .. } => {}
         }
     }
 
@@ -1433,6 +1575,11 @@ impl App for Terminal {
             }
         }
         watch_settings(self.settings_changed.clone(), waker);
+        // A window opened for tabs from another window starts with them, no new shell.
+        if !self.moved.is_empty() {
+            self.tabs = std::mem::take(&mut self.moved);
+            self.open_with = 0;
+        }
         for _ in 0..self.open_with {
             match self.start(self.fits.0, self.fits.1) {
                 Some((id, session)) => self.tabs.push(Tab { id: NEXT_TAB.fetch_add(1, Ordering::SeqCst), tree: Node::Leaf(id), panes: vec![(id, session)], active: id }),
@@ -1482,6 +1629,7 @@ impl App for Terminal {
 
     fn woken(&mut self, window: &mut Window) {
         self.open_asked(window);
+        self.take_moves(window);
         // Asked once the window has shown a frame: a request made before the
         // server has placed the window is lost to the place it remembers.
         if self.open_maximized && self.last_commands > 0 {

@@ -28,6 +28,9 @@ pub enum Item {
     SplitStack,
     NewTab,
     ClosePane,
+    /// The section (pane) into a tab of its own, or a window of its own (bar milestone 1, step 7).
+    PaneToTab,
+    PaneToWindow,
 }
 
 impl Item {
@@ -40,12 +43,26 @@ impl Item {
             Item::SplitStack => ("Split top and bottom", "Ctrl+Shift+D"),
             Item::NewTab => ("New tab", "Ctrl+Shift+T"),
             Item::ClosePane => ("Close pane", "Ctrl+Shift+W"),
+            Item::PaneToTab => ("Move to a new tab", ""),
+            Item::PaneToWindow => ("Move to a new window", ""),
         }
     }
 }
 
 /// The menu's lines from the top; None is a dividing line.
-const LINES: [Option<Item>; 8] = [Some(Item::Copy), Some(Item::Paste), None, Some(Item::SplitSide), Some(Item::SplitStack), None, Some(Item::NewTab), Some(Item::ClosePane)];
+const LINES: [Option<Item>; 11] = [
+    Some(Item::Copy),
+    Some(Item::Paste),
+    None,
+    Some(Item::SplitSide),
+    Some(Item::SplitStack),
+    None,
+    Some(Item::NewTab),
+    Some(Item::ClosePane),
+    None,
+    Some(Item::PaneToTab),
+    Some(Item::PaneToWindow),
+];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Menu {
@@ -129,7 +146,7 @@ mod tests {
     #[test]
     fn the_menu_stays_in_the_window() {
         let m = Menu::new(100.0, 80.0, (800.0, 600.0), true);
-        assert_eq!((m.area.x, m.area.y, m.area.w, m.area.h), (100.0, 80.0, 236.0, 194.0), "at the pointer where there is room");
+        assert_eq!((m.area.x, m.area.y, m.area.w, m.area.h), (100.0, 80.0, 236.0, 259.0), "at the pointer where there is room");
         let m = Menu::new(790.0, 590.0, (800.0, 600.0), true);
         assert_eq!((m.area.x + m.area.w, m.area.y + m.area.h), (800.0, 600.0), "moved in from the corner");
         let m = Menu::new(50.0, 20.0, (120.0, 100.0), true);
@@ -147,8 +164,11 @@ mod tests {
         assert_eq!(m.at(120.0, 84.0 + 121.0 + 4.0), None, "the second dividing line");
         assert_eq!(m.at(120.0, 84.0 + 130.0 + 5.0), Some(Item::NewTab));
         assert_eq!(m.at(120.0, 84.0 + 158.0 + 27.0), Some(Item::ClosePane));
+        assert_eq!(m.at(120.0, 84.0 + 186.0 + 4.0), None, "the third dividing line");
+        assert_eq!(m.at(120.0, 84.0 + 195.0 + 5.0), Some(Item::PaneToTab));
+        assert_eq!(m.at(120.0, 84.0 + 223.0 + 5.0), Some(Item::PaneToWindow));
         assert_eq!((m.at(101.0, 90.0), m.at(400.0, 90.0)), (None, None), "the edge and beyond");
-        assert!(m.contains(101.0, 81.0) && !m.contains(99.0, 90.0) && !m.contains(120.0, 274.5));
+        assert!(m.contains(101.0, 81.0) && !m.contains(99.0, 90.0) && !m.contains(120.0, 339.5));
         // Nothing selected: Copy cannot be chosen, the rest can.
         let m = Menu::new(100.0, 80.0, (800.0, 600.0), false);
         assert_eq!((m.at(120.0, 90.0), m.at(120.0, 84.0 + 28.0 + 5.0)), (None, Some(Item::Paste)));
