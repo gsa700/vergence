@@ -3,7 +3,12 @@
 Drafted 2026-11-12 from Dave's decision the same evening: "the server
 should draw all the native apps where feasible", the tabbed title bar
 included, with tabs that can be dragged; the wiring is Claude's to choose.
-**A draft: four questions for Dave at the end.**
+**Accepted 2026-11-12: Dave answered (a) to all four questions at the
+end.** His reason for the server drawing every bar: "we will want some
+different color options and maybe theming to some extent although i
+generally favor minimalism and consistency over tons of options". So: a
+few well-chosen color options, applied by the server to every bar alike;
+no per-program styling, no large theming system.
 
 ## Where things stand (2026-11-12)
 
@@ -136,7 +141,7 @@ window straddling two monitors has a sharp bar on both.
 - Showing that a program is not answering, and offering to stop it: noted
   for later (it needs a ping on the native protocol).
 
-## Questions for Dave
+## Questions for Dave (answered 2026-11-12: (a) to all four)
 
 1. **The bar's colors.** (a) The desktop's bar colors for every window,
    so every bar looks the same; (b) a program may tint its bar (the
