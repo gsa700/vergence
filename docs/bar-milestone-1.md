@@ -298,7 +298,17 @@ one process.
   its only tab and joined by letting go on another bar; one process and
   every shell kept. kepler's bar at scale 2 is drawn 1:1 and sharp (it
   shows close and minimize only: its settings.toml has
-  `Gtk/DecorationLayout = "close,minimize:"`).
+  `Gtk/DecorationLayout = "close,minimize:"`; put back to
+  "close,minimize,maximize:" at Dave's word, live).
+- **Fractional scales** (2026-11-12, Hubble's panel by desktop.toml at
+  1.25, 1.5 and 1.75: 1536 x 864, 1280 x 720 and 1098 x 618 points): the
+  four live scripts pass at each (clicks land on what is drawn: reorder,
+  tear-off, join, menus, sizes, the only tab moving its window); the
+  server's bars, tabs and buttons and the settings app are sharp at each
+  (pictures drawn at the screen's pixels, shown 1:1). A torn-off tab's
+  window at 1.5 slid exactly onto the screen (630,310 for 650 x 410 on
+  1280 x 720). Found on the way: window memory keys a setup by its
+  monitors alone, not their scale or resolution (see the next note).
 
 ## Steps
 
