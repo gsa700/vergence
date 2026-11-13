@@ -168,27 +168,39 @@ Smithay's own; nothing of ours runs in its callbacks.
   xkbcommon also used directly); CLAUDE.md's keyboard-lock rule is
   history.
 
-### Acceptance, where it stands (2026-11-12, evening)
+### Acceptance, where it stands (2026-11-12, 19:15)
 
-1. Tests: **met on Techbench and kepler** (366, the seat's fuzz test with
-   a million events among them; kepler reinstalled that evening on Hubble's
-   former Tiny, i5-8500T, UHD 630). Hubble (now in Mobilenode) still to run.
-2. **Partly met on Techbench and kepler** by `vctl`: clicks 50 of 50 on
-   both roads (kepler, FreeBSD, 4K at 30 Hz and scale 3: every change within
-   one frame), typing and Ctrl chords in the terminal. clicks.sh learned
-   RIGHT_BUTTONS (a fresh setup's buttons are on the right; the old guess
-   missed every sixth tab there). Still to do:
-   repeat and the volume keys (Hubble's ALSA), Firefox, foot, an X11
-   program, the clipboard both ways, a drag and drop; Hubble and kepler.
-3. **Partly met on Techbench, and on kepler the same by `vctl`**: title bars (drag, double-click, buttons,
-   resize), the dock (click, menu), the apps popup and its keys, the desktop
-   menu, by mouse and by finger (`vctl touch`). Still to do: Alt+drag (by
-   hand), dragging the dock, notification cards, hiding docks, a real
-   touchscreen.
+1. Tests: **met on all three** (366 on Techbench and kepler, 367 on Hubble
+   with the finger test added that evening; the seat's fuzz test with a
+   million events among them). kepler was reinstalled that evening on
+   Hubble's former Tiny (i5-8500T, UHD 630, the 14" 4K touch monitor);
+   Hubble's Void disk now runs in Mobilenode (ASUS TUF F15, i5-10300H, UHD
+   for the panel + GTX 1650, 1080p at 144 Hz).
+2. **Met on all three by `vctl`, except what needs a hand**: clicks 50 of
+   50 on both roads everywhere, every change within one frame (kepler:
+   FreeBSD, 4K at 30 Hz, scale 3; Hubble: 144 Hz, native 3.8 ms on average
+   from the press to its frame); typing, Ctrl chords and Super's popup in
+   the terminal on both roads; the volume keys on Hubble's ALSA (70 to 66
+   and back, with the card). clicks.sh learned RIGHT_BUTTONS (a fresh
+   setup's buttons are on the right). Still by hand: key repeat, Firefox,
+   foot, an X11 program, the clipboard both ways, a drag and drop.
+3. **Met on all three by `vctl`, and kepler's touchscreen by hand** (Dave,
+   2026-11-12: taps, a long press, and the terminal dragged by its own bar
+   with a finger once a native window could go with a finger, e662b8d; the
+   panel needed a devd rule to leave HID mouse mode on FreeBSD, see
+   CLAUDE.md): title bars (drag, double-click, buttons, resize), the dock
+   (click, menu), the apps popup and its keys, the desktop menu, by mouse
+   and by finger. Still by hand: Alt+drag, dragging the dock, notification
+   cards, hiding docks.
 4. **Met**: no `native_pointer_`, no swallow flag, no `PointerGrab` of
    ours, nothing of ours in a `KeyboardTarget` callback.
 5. **Met**: smallvil's grabs gone, input.rs rewritten (borrowed-review.md
    §1 has the counts).
+
+Found on the way, not part of the seat: absolute pointer devices (a touch
+panel in mouse mode, a drawing tablet, a VM's mouse) are placed through the
+nested-window mapping, which is wrong on real monitors (input.rs,
+PointerMotionAbsolute): to fix.
 
 ## Acceptance
 
