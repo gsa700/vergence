@@ -86,6 +86,50 @@ so it is the same one); the native road is where the server draws it.
 rest of the frame, drawn at each monitor's scale by the server, so a
 window straddling two monitors has a sharp bar on both.
 
+## Windows that stay where they were (added 2026-11-12, Dave's go)
+
+Dave, 2026-11-12: tear-offs and joins must not make window memory messy:
+"we really need to get this right because this is my big deal ... its what
+I hate about wayland etc. make it scale and stay fast." His test case:
+thirty terminals remembered on seven screens.
+
+**What was wrong with memory for this.** A window's identity was its
+program, its role and its place among that program's open windows (#1, #2,
+#3, in the order they opened). A torn-off tab would have taken the next
+free number and jumped to wherever that number last was, not where it was
+dropped; and with thirty windows, closing one in the middle shifts every
+later one into the place of the one before it at the next login.
+
+**Persistence tokens** (whitepaper §6, Contract 2; the protocol's Create
+already carries one). The server gives every native window a token when it
+is created, unique and meaningless (a random id, with the program's name
+and role beside it in the store); a program that kept it presents it again
+when it opens that window on a later run, and memory is keyed by it. So:
+
+- each window comes back to its own place, whatever else was opened or
+  closed meanwhile; numbering is left only for programs that keep no token
+  (Wayland and X11 programs today);
+- a window opened for a torn-off tab gets a new token and **the drop point
+  wins over memory** for it (a `Place` with the drop flag); it is remembered
+  where it then is;
+- a window **the user closes** (its close button, its last tab closed, the
+  dock's Close) has its memory dropped; windows still open when **the
+  session ends** keep theirs; tokens not seen for 90 days are pruned, so
+  the store cannot silt up;
+- lookups are by token (a hash map), the store is written once a move or
+  resize ends and at most once a second otherwise, and stays small (one
+  line per remembered window per monitor setup).
+
+**One terminal, many windows.** vergence-ui gains several windows per
+program; the terminal becomes one process for all its windows (starting
+`vergence-term` again asks the running one for a new window). It keeps its
+windows' tokens and their tabs in its own small state file and, at login,
+opens them again itself, each with its token, so each comes back where it
+was with its tabs (their working directories; a shell's scrollback does not
+survive a logout). Joining a tab to another window, tearing one off, and
+moving a section of a tab into its own tab or window all happen inside the
+one process.
+
 ## Where it stands
 
 - **Step 1 done** (2026-11-12): crates/vergence-bar (bar.rs moved out of
@@ -145,13 +189,26 @@ window straddling two monitors has a sharp bar on both.
    mismatch on its own), then native bars from their descriptions; the
    bar's parts are seat targets; clicks, closes and + reach the program.
    The terminal's native road stops drawing its own bar.
-4. **Tab dragging**: reorder in the bar, drop outside for a new window,
-   drop on another window of the same program to join it. The terminal
-   implements all three (a tab's session moves with it).
-5. **Clean-up**: the "draws its own bar" flag kept only for the
-   toolkit's road on other desktops; the native move and resize requests
-   go when nothing native sends them; docs (whitepaper §6.4, the native
-   milestone's protocol notes).
+4. **Several windows per program** in vergence-ui, on the native road and
+   the Wayland road: a window id per window, each window's own frame,
+   input, bar and meaning; the one-window API kept as the common case.
+5. **Persistence tokens and memory by token**: the server issues and honors
+   tokens, memory keyed by them (numbering kept for programs without one),
+   the drop point winning for a torn-off tab's window, memory dropped when
+   the user closes a window, pruning after 90 days unseen; tests for the
+   rules, and a test with thirty windows over seven fake monitors.
+6. **One terminal process**: a second start hands over to the running one;
+   the terminal keeps its windows' tokens, tabs and working directories and
+   opens them again at login (session restore starts it once).
+7. **Tab dragging and the menus**: reorder in the bar, a tab dragged out
+   becomes a window where it was dropped, dropped on another terminal
+   window it joins it; the server's tab menu (Close, Close the others, Move
+   to a new window, the program's own entries); the terminal's section menu
+   (Move to a new tab, Move to a new window).
+8. **Clean-up**: the "draws its own bar" flag kept only for the toolkit's
+   road on other desktops; the native move and resize requests go when
+   nothing native sends them; docs (whitepaper §6.4 and Contract 2, the
+   native milestone's protocol notes).
 
 ## Acceptance
 
@@ -169,6 +226,14 @@ window straddling two monitors has a sharp bar on both.
    and its close button asks the server to close it.
 5. Under GNOME the terminal draws the same bar itself, as now.
 6. Clicks 50 of 50 on tabs on both roads, as before.
+7. **Memory at scale** (Dave's case): thirty terminal windows spread over
+   seven (fake) monitors, logout and login: every window back on its
+   monitor and place with its tabs; close three in the middle, log out and
+   in: the other twenty-seven exactly where they were, the three forgotten.
+   Restoring them takes no more than a second beyond starting the programs;
+   the store stays under 64 KB.
+8. A tab torn off opens where it was dropped and, after a logout, comes back
+   there; a section moved to a new window likewise.
 
 ## Security (whitepaper §7.3)
 
