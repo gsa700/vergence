@@ -179,6 +179,31 @@ by the computer through usbmuxd before it hands out a connection (Question
   mice; kepler shows Touchscreen, not Touchpad, its page names the SW4101C
   on HDMI-A-1. 444 tests on all three; Hubble and kepler installed with v7,
   Techbench's installed session needs `sudo tools/install.sh`.
+- **Step 3 in: vergence-net** (2026-11-14), our own code with no
+  dependency. `wpa`: the control-socket client (sockets found in
+  /run/wpa_supplicant or /var/run/wpa_supplicant, not the global or
+  Wi-Fi Direct ones; a socket of its own in the runtime directory, removed
+  after); PING, STATUS, SIGNAL_POLL, SCAN (busy counts as started),
+  SCAN_RESULTS, LIST_NETWORKS, join (ADD_NETWORK, the name as hex, the
+  password checked and quoted or key_mgmt NONE, ENABLE and SELECT; a
+  refused step removes the half-made network), select, enable all, forget
+  (REMOVE and SAVE_CONFIG), save, disconnect, reconnect; `Events` on a
+  socket of its own after ATTACH (scan results, connected, disconnected,
+  wrong password, network not found, terminating). Untrusted text: names
+  decoded from wpa_supplicant's escapes, at most 32 bytes, control characters
+  dropped (the bytes kept to join with); passwords 8 to 63 printable ASCII
+  or 64 hex digits, so none can carry a second command. Bars from dBm,
+  band and channel from the frequency, one entry per network, strongest
+  first. `ifaces`: getifaddrs on both systems (the socket-address headers,
+  the hardware address from AF_PACKET or AF_LINK, the carrier from
+  IFF_LOWER_UP or if_data's link state), addresses with prefixes, a kind by
+  name (wl* Wi-Fi). Tests: parsing, what is sent, and a fake wpa_supplicant
+  socket (commands in order, an event slipped before a reply passed over,
+  events after ATTACH). The example `vnet [scan]`: on Hubble with
+  wpa_supplicant started by hand for the test (stopped after) it read the
+  state and scanned Dave's two networks with signal, security, band and
+  channel; on Hubble and kepler the interfaces, carriers and addresses are
+  right. 459 tests on all three.
 
 ## Steps
 

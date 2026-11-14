@@ -2183,6 +2183,10 @@ name = "vergence-look"
 version = "0.1.0"
 
 [[package]]
+name = "vergence-net"
+version = "0.1.0"
+
+[[package]]
 name = "vergence-profile"
 version = "0.1.0"
 dependencies = [

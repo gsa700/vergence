@@ -1,0 +1,12 @@
+[package]
+name = "vergence-net"
+description = "Vergence's networks: a client of wpa_supplicant's control socket, and the machine's interfaces and addresses (Linux and FreeBSD)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Our own code only (whitepaper §8; settings milestone 1, step 3): the
+# systems' own interfaces (getifaddrs, Unix datagram sockets) and
+# wpa_supplicant's documented text protocol, no library between.
+[dependencies]
