@@ -92,6 +92,12 @@ purpose (Dave, 2026-11-12): Smithay's drag and drop between Wayland
 programs (the seat's Edge grab), and its keyboard as the Wayland edge, fed
 every key beside our own xkb state.
 
+**The xdg-dialog protocol (window styles milestone 1, Dave 2026-11-14).**
+Smithay's `wayland::shell::xdg::dialog` (in the `wayland_frontend` feature,
+no new dependency) answers GTK's and Qt's modal hint at the Wayland edge;
+the server records the hint on the window and decides what modal does.
+Goes with the rest of the Wayland front end when that is replaced.
+
 ### libinput, libseat/seatd, xkbcommon (through Smithay)
 
 Input devices, seat and device access, keymaps. C libraries every Wayland

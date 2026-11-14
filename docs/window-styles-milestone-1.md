@@ -8,7 +8,8 @@ shape from his screenshot of macOS's System Settings
 good place for it"), and wallpaper tinting ("yes, add it to the window
 styles plan"). Comes after windows milestone 1 and before the settings
 milestone ("finish windows first"; window styles next, then settings).
-**Not accepted yet: questions at the end.**
+**Accepted 2026-11-14: Dave answered (a) to all four questions at the
+end** ("yes to all").
 
 ## Where things stand (read 2026-11-14, 0e34eb3)
 
@@ -90,8 +91,12 @@ his Mac in light mode). A switch in Settings > Appearance beside Frost
   palette, sidebar), `modal`, and the size limits; a `Limits` request changes
   them later (bus protocol v4).
 - **Wayland windows**: a parent makes a dialog; equal min and max a fixed
-  size; modal from the xdg-dialog protocol only if Dave agrees to speak it
-  (a protocol extension added for other people's programs: Question 1).
+  size; modal from the xdg-dialog protocol (Question 1, (a)): Smithay
+  65aa86f has it (`wayland::shell::xdg::dialog`, in the `wayland_frontend`
+  feature we build with, no new dependency); we register `XdgDialogState`
+  at the Wayland edge and record `dialog_hint_changed` on the window; what
+  modal does is the server's, the same for every road. Listed in
+  docs/borrowed-review.md with the rest of Smithay's front end.
 - **X11 windows**: `_NET_WM_WINDOW_TYPE` (DIALOG, UTILITY as palette,
   SPLASH, NORMAL), `WM_TRANSIENT_FOR` (the parent), `_NET_WM_STATE_MODAL`,
   `WM_NORMAL_HINTS` (the limits).
@@ -169,7 +174,7 @@ The settings app is the first sidebar window.
 - Tabbed dialogs, sheets sliding from the bar (macOS), and per-kind
   animations.
 
-## Questions for Dave
+## Questions for Dave (answered 2026-11-14: (a) to all four)
 
 1. **Wayland's modal hint.** GTK and Qt mark a modal dialog through the
    xdg-dialog protocol. (a) Speak it at the Wayland edge (a protocol
