@@ -119,7 +119,8 @@ struct Surface {
 struct Relay {
     bufs: Vec<RelayBuf>,
     next: usize,
-    /// Frames drawn so far (for damage by each buffer's age).
+    /// Calls to the damage tracker so far, drawn or not (its history has one
+    /// entry for each; a buffer's age is counted in them).
     frame: usize,
     /// The newest drawn buffer not copied yet.
     pending: Option<usize>,
@@ -897,8 +898,11 @@ fn relay_frame(primary: &mut GlesRenderer, copier: Option<&mut GlesRenderer>, s:
             let r = relay.damage.render_output(primary, &mut fb, age, elements, clear).map_err(|e| format!("draw: {e:?}"))?;
             r.damage.is_some().then(|| r.sync.clone())
         };
+        // The tracker keeps a history entry for every call, drawn or not, and a
+        // buffer's age counts those entries: counting only frames drawn left
+        // stale patches behind the pointer (Hubble's 14", 2026-11-14).
+        relay.frame += 1;
         if let Some(sync) = drawn {
-            relay.frame += 1;
             relay.bufs[i].drawn = relay.frame;
             relay.bufs[i].sync = Some(sync);
             relay.pending = Some(i);
