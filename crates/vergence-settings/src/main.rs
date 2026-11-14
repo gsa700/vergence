@@ -2230,8 +2230,8 @@ impl App {
         }
         panel(
             column(vec![
-                self.title_card(
-                    if b.folders { "Add a folder" } else { "Add pictures" },
+                self.intro(
+                    Some(if b.folders { "Add a folder" } else { "Add pictures" }),
                     if b.folders { "Open the folder you want, then add it. Every picture in it and its folders is offered." } else { "Click pictures to pick them, in as many folders as you like, then add them." },
                 ),
                 row(vec![button(label("\u{2191} Up").size(12.0)).padding(Padding::hv(4.0, 10.0)).on_press(Message::BrowseUp), label(b.dir.display().to_string()).size(12.0).dim()]).spacing(10.0).align(Align::Center),
@@ -2474,26 +2474,26 @@ impl Program for App {
 // ---- the look ----
 
 impl App {
-    fn title_card(&self, title: &str, description: &str) -> Element<Message> {
-        panel(
-            column(vec![label(title).size(20.0).weight(700), label(description).dim().wrap().align(Align::Center).width(Length::FILL)])
-                .spacing(6.0)
-                .align(Align::Center)
-                .width(Length::FILL),
-        )
-        .color(self.card_color())
-        .radius(10.0)
-        .padding(18.0)
-        .width(Length::FILL)
+    /// A line or two saying what a page is for, plain text over its groups:
+    /// no heading card (Dave, 2026-11-14: the sidebar already says which page
+    /// it is). A sub-page with no sidebar entry (adding pictures) keeps its
+    /// name in bold.
+    fn intro(&self, title: Option<&str>, description: &str) -> Element<Message> {
+        let text = label(description).size(12.0).dim().wrap().width(Length::FILL);
+        match title {
+            Some(t) => column(vec![label(t).size(15.0).weight(700), text]).spacing(4.0).width(Length::FILL),
+            None => text,
+        }
     }
 
-    /// A page: its heading card, then its groups, scrolling as one.
+    /// A page: what it is for, then its groups, scrolling as one; its name
+    /// (the sidebar's) names the scroll for Contract 3.
     fn page_layout(&self, title: &str, description: &str, items: Vec<Element<Message>>) -> Element<Message> {
-        let mut all = vec![self.title_card(title, description)];
+        let mut all = vec![self.intro(None, description)];
         all.extend(items);
         // The page scrolls up under the frosted bar (look milestone 1's content under the bar).
         let top = self.top.get();
-        scroll(panel(column(all).spacing(16.0).width(Length::FILL)).padding(Padding { top: 22.0 + top, bottom: 22.0, left: 22.0, right: 22.0 }).width(Length::FILL)).name("Page")
+        scroll(panel(column(all).spacing(16.0).width(Length::FILL)).padding(Padding { top: 22.0 + top, bottom: 22.0, left: 22.0, right: 22.0 }).width(Length::FILL)).name(title)
     }
 
     /// A group of settings in a rounded card, a hairline between rows.

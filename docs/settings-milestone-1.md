@@ -145,6 +145,11 @@ by the computer through usbmuxd before it hands out a connection (Question
   (shots): the page on its one screen; a nested server with two screens: the
   row, choosing "right", giving it the panda (its own entry in desktop.toml,
   the desktop and its tile changed). 442 tests on all three.
+- **No heading card on the pages** (Dave, 2026-11-14: "we clicked
+  wallpaper, we don't need a big banner at the top"): each page opens with
+  its one-line description in small dim text, then its groups; the page's
+  name stays as the scroll's name for Contract 3. Adding pictures, a
+  sub-page with no sidebar entry, keeps its name in bold over its line.
 
 ## Steps
 
