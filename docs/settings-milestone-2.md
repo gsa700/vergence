@@ -128,6 +128,18 @@ as now.
   the same distance. The switch on the Screens overview, and on a single
   screen's page (it decides for screens met later too). Hubble's panel: off
   100%, on 104% ("the same size as on every screen"), off again.
+- **Step 4 in: cables like Wi-Fi** (2026-11-14). vergence-net's `Iface`
+  has the link speed and duplex: Linux from /sys (`speed`, `duplex`),
+  FreeBSD from the interface's media word (SIOCGIFMEDIA, tested on the
+  subtype table); `vnet` prints them. The Network page's connected row
+  reads "Connected at 1 Gb/s, full duplex", and a Traffic row has in and
+  out with the Wi-Fi page's two-minute chart, sampled every 2 s while the
+  page is open. kepler's em0: 1000 Mb/s full, shown. Also (Dave's ask):
+  **no Wi-Fi where there is no Wi-Fi hardware**: the sidebar's Wi-Fi entry
+  and the Network page's Wi-Fi group are hidden (checked again on each
+  tick, so a USB card plugged in brings them back). kepler's sidebar has
+  Network only, Hubble's Wi-Fi and Network. This replaces settings
+  milestone 1's "kepler says no Wi-Fi device" page. 481 tests (kepler 477).
 
 ## Steps
 

@@ -31,6 +31,10 @@ pub struct Iface {
     /// Bytes received and sent since the interface came up, from the
     /// system's own counters (Linux: 32 bits, so they wrap; see [`delta`]).
     pub rx_bytes: Option<u64>,
+    /// A cable's link speed in Mb/s and whether it is full duplex, where the
+    /// system says (settings milestone 2: the Network page).
+    pub speed_mbps: Option<u32>,
+    pub full_duplex: Option<bool>,
     pub tx_bytes: Option<u64>,
 }
 
@@ -111,6 +115,79 @@ pub fn is_phone(name: &str) -> bool {
     // SAFETY: a NUL-terminated name and a buffer of `len` bytes.
     let r = unsafe { sysctlbyname(c"dev.ipheth.0.%driver".as_ptr(), buf.as_mut_ptr(), &mut len, std::ptr::null(), 0) };
     r == 0 && buf[..len.min(buf.len())].starts_with(b"ipheth")
+}
+
+/// A cable's link speed (Mb/s) and duplex. Where the systems differ: Linux
+/// keeps them in /sys/class/net/NAME/{speed,duplex}; FreeBSD answers the
+/// interface's media query (SIOCGIFMEDIA) with an Ethernet subtype.
+#[cfg(target_os = "linux")]
+pub fn link(name: &str) -> (Option<u32>, Option<bool>) {
+    if name.contains('/') || name.starts_with('.') {
+        return (None, None);
+    }
+    let read = |f: &str| std::fs::read_to_string(format!("/sys/class/net/{name}/{f}")).ok().map(|s| s.trim().to_string());
+    let speed = read("speed").and_then(|s| s.parse::<i64>().ok()).filter(|v| *v > 0 && *v < 10_000_000).map(|v| v as u32);
+    let duplex = read("duplex").and_then(|d| match d.as_str() {
+        "full" => Some(true),
+        "half" => Some(false),
+        _ => None,
+    });
+    (speed, duplex)
+}
+
+#[cfg(target_os = "freebsd")]
+pub fn link(name: &str) -> (Option<u32>, Option<bool>) {
+    // struct ifmediareq (net/if.h): name[16], current, mask, status, active, count, ulist*.
+    #[repr(C)]
+    struct IfMediaReq {
+        name: [u8; 16],
+        current: i32,
+        mask: i32,
+        status: i32,
+        active: i32,
+        count: i32,
+        ulist: *mut i32,
+    }
+    unsafe extern "C" {
+        fn socket(domain: i32, ty: i32, proto: i32) -> i32;
+        fn ioctl(fd: i32, request: std::ffi::c_ulong, arg: *mut IfMediaReq) -> i32;
+        fn close(fd: i32) -> i32;
+    }
+    // _IOWR('i', 56, struct ifmediareq): in|out, its size, group 'i', number 56.
+    const SIOCGIFMEDIA: std::ffi::c_ulong = 0xc000_0000 | ((std::mem::size_of::<IfMediaReq>() as std::ffi::c_ulong & 0x1fff) << 16) | ((b'i' as std::ffi::c_ulong) << 8) | 56;
+    const IFM_ETHER: i32 = 0x20;
+    const IFM_FDX: i32 = 0x0010_0000;
+    let mut req = IfMediaReq { name: [0; 16], current: 0, mask: 0, status: 0, active: 0, count: 0, ulist: std::ptr::null_mut() };
+    let bytes = name.as_bytes();
+    if bytes.len() >= 16 {
+        return (None, None);
+    }
+    req.name[..bytes.len()].copy_from_slice(bytes);
+    // SAFETY: a datagram socket for the ioctl, closed below; the request is ours.
+    let fd = unsafe { socket(2, 2, 0) };
+    if fd < 0 {
+        return (None, None);
+    }
+    let ok = unsafe { ioctl(fd, SIOCGIFMEDIA, &mut req) } == 0;
+    unsafe { close(fd) };
+    if !ok || req.active & 0xe0 != IFM_ETHER {
+        return (None, None);
+    }
+    (media_speed(req.active), Some(req.active & IFM_FDX != 0))
+}
+
+/// FreeBSD's Ethernet media subtypes (net/if_media.h, the low five bits and
+/// the extended bits), in Mb/s, for the common ones.
+#[cfg_attr(not(target_os = "freebsd"), allow(dead_code))]
+fn media_speed(active: i32) -> Option<u32> {
+    let sub = (active & 0x1f) | ((active >> 6) & 0x7e0);
+    Some(match sub {
+        3 | 4 | 5 => 10,
+        6 | 8 | 9 | 10 => 100,
+        11 | 14 | 15 | 16 => 1000,
+        18 | 19 | 20 | 21 | 22 => 10_000,
+        _ => return None,
+    })
 }
 
 #[repr(C)]
@@ -262,6 +339,9 @@ pub fn list() -> io::Result<Vec<Iface>> {
         if f.kind == Kind::Wired && is_phone(&f.name) {
             f.kind = Kind::Phone;
         }
+        if f.kind == Kind::Wired && f.carrier {
+            (f.speed_mbps, f.full_duplex) = link(&f.name);
+        }
     }
     Ok(out)
 }
@@ -304,6 +384,14 @@ mod tests {
     }
 
     #[test]
+    fn media_subtypes() {
+        // IFM_ETHER | IFM_1000_T | IFM_FDX, as kepler's em0 answers.
+        assert_eq!(media_speed(0x20 | 16 | 0x0010_0000), Some(1000));
+        assert_eq!(media_speed(0x20 | 6), Some(100));
+        assert_eq!(media_speed(0x20 | 0x1f), None);
+    }
+
+    #[test]
     fn prefixes() {
         assert_eq!(prefix_of(&[255, 255, 255, 0]), 24);
         assert_eq!(prefix_of(&[255, 255, 240, 0]), 20);
@@ -317,5 +405,6 @@ mod tests {
         assert!(lo.up);
         assert!(lo.addrs.iter().any(|(a, p)| *a == IpAddr::V4(Ipv4Addr::LOCALHOST) && *p == 8), "{lo:?}");
         assert!(lo.rx_bytes.is_some() && lo.tx_bytes.is_some(), "the loopback's counters: {lo:?}");
+        assert_eq!(lo.speed_mbps, None, "no link speed for a loopback");
     }
 }

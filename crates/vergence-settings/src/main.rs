@@ -1401,10 +1401,11 @@ impl App {
             }
         }
         let mut groups = vec![
-            ("Connections", vec![
-                ("Wi-Fi".into(), Page::WiFi, Icon::WiFi, "wifi wi-fi wireless network wlan password join hotspot internet"),
-                ("Network".into(), Page::Network, Icon::Network, "network ethernet cable wired iphone phone usb tethering hotspot address ip"),
-            ]),
+            ("Connections", self.has_wifi()
+                .then(|| ("Wi-Fi".into(), Page::WiFi, Icon::WiFi, "wifi wi-fi wireless network wlan password join hotspot internet"))
+                .into_iter()
+                .chain([("Network".into(), Page::Network, Icon::Network, "network ethernet cable wired iphone phone usb tethering hotspot address ip")])
+                .collect()),
             ("Look", vec![
                 ("Appearance".into(), Page::Appearance, Icon::Appearance, "style light dark accent color frost tab tint controls size"),
                 ("Theme and fonts".into(), Page::Theme, Icon::Fonts, "theme font fonts monospace interface icons cursor"),
@@ -3031,6 +3032,8 @@ fn main() -> std::io::Result<()> {
     let mut app = App::new();
     // Whether there is a battery, for the sidebar (the page reads it again when opened).
     app.battery.power = vergence_power::power();
+    // Whether there is Wi-Fi, for the sidebar.
+    app.read_interfaces();
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--page")
         && args.get(i + 1).map(String::as_str) == Some("wifi")

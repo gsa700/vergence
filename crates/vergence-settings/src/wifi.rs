@@ -53,6 +53,10 @@ pub struct Wifi {
     started: bool,
     /// Every interface, for the Network page.
     pub all: Vec<ifaces::Iface>,
+    /// The Network page's cables: each one's byte counters at the last sample
+    /// and its rates in and out since (bits a second), the last two minutes.
+    cables: std::collections::HashMap<String, Cable>,
+    cable_sampler: bool,
     /// The network in use's signal every two seconds while the page is open
     /// (dBm, oldest first; the last two minutes), and for which network.
     history: std::collections::VecDeque<i32>,
@@ -61,6 +65,14 @@ pub struct Wifi {
     /// in and out since then (bits a second).
     last_bytes: Option<(std::time::Instant, u64, u64)>,
     rates: Option<(f64, f64)>,
+}
+
+/// A cable's traffic for the Network page.
+#[derive(Default)]
+struct Cable {
+    last: Option<(std::time::Instant, u64, u64)>,
+    rx: std::collections::VecDeque<f64>,
+    tx: std::collections::VecDeque<f64>,
 }
 
 /// Samples kept for the signal chart: two minutes at one every two seconds.
@@ -76,6 +88,8 @@ pub enum WifiMsg {
     Event(wpa::Event),
     /// Time to sample the signal and the traffic.
     Sample,
+    /// Time to sample the cables' traffic (the Network page).
+    CableSample,
     Pick(usize),
     Password(String),
     ShowPassword(bool),
@@ -204,6 +218,31 @@ fn signal_chart<M: 'static>(samples: Vec<i32>) -> Element<M> {
     .height(Length::Fixed(30.0))
 }
 
+/// Traffic over the last two minutes: in (the accent) and out (fainter),
+/// from 0 to the larger of 1 Mb/s and the most seen, the newest at the right.
+fn traffic_chart<M: 'static>(rx: Vec<f64>, tx: Vec<f64>) -> Element<M> {
+    drawing(move |scene: &mut Scene, _: &mut Fonts, r: Rect, t: &Theme| {
+        let faint = Color::rgba(t.dim.r, t.dim.g, t.dim.b, 50);
+        scene.line(Point::new(r.x, r.y + r.h), Point::new(r.x + r.w, r.y + r.h), 1.0, faint);
+        let top = rx.iter().chain(tx.iter()).copied().fold(1e6f64, f64::max) * 1.1;
+        let step = r.w / (HISTORY - 1) as f32;
+        let y_of = |v: f64| r.y + r.h - (v / top).clamp(0.0, 1.0) as f32 * r.h;
+        let draw = |scene: &mut Scene, s: &[f64], c: Color| {
+            if s.len() < 2 {
+                return;
+            }
+            let x0 = r.x + r.w - step * (s.len() - 1) as f32;
+            for (i, p) in s.windows(2).enumerate() {
+                scene.line(Point::new(x0 + step * i as f32, y_of(p[0])), Point::new(x0 + step * (i + 1) as f32, y_of(p[1])), 1.6, c);
+            }
+        };
+        draw(scene, &tx, Color::rgba(t.accent.r, t.accent.g, t.accent.b, 110));
+        draw(scene, &rx, t.accent);
+    })
+    .width(Length::Fixed(180.0))
+    .height(Length::Fixed(30.0))
+}
+
 /// A rate in bits a second, in words: "2.4 Mb/s", "860 kb/s".
 fn rate_text(bits: f64) -> String {
     if bits >= 1e6 {
@@ -240,6 +279,18 @@ fn state_words(s: &str) -> &'static str {
 }
 
 impl App {
+    /// Whether the machine has a Wi-Fi device now (the sidebar shows the Wi-Fi
+    /// page then, as Touchpad and Touchscreen once the machine has had one;
+    /// Dave, 2026-11-14). A USB Wi-Fi adapter plugged in makes it appear.
+    pub fn has_wifi(&self) -> bool {
+        self.wifi.all.iter().any(|f| f.kind == ifaces::Kind::WiFi)
+    }
+
+    /// The interfaces read again (at start; the Wi-Fi thread's tick keeps them current).
+    pub fn read_interfaces(&mut self) {
+        self.wifi.all = ifaces::list().unwrap_or_default();
+    }
+
     fn wifi_setting(&self) -> usize {
         let w = self.desktop.get("network").and_then(|n| n.get("wifi")).and_then(|v| v.as_str()).unwrap_or("auto");
         WIFI_WORDS.iter().position(|x| *x == w.trim().to_ascii_lowercase()).unwrap_or(2)
@@ -256,6 +307,19 @@ impl App {
 
     /// Read everything again (the page opened, a scan finished, a tick).
     pub fn wifi_read(&mut self) {
+        // The Network page's cables are sampled whether or not there is Wi-Fi.
+        if self.page == Page::Network && !self.wifi.cable_sampler {
+            self.wifi.cable_sampler = true;
+            let mail = self.mail.clone();
+            let _ = std::thread::Builder::new().name("cables".into()).spawn(move || {
+                loop {
+                    std::thread::sleep(SAMPLE);
+                    if !mail.send(Message::Wifi(WifiMsg::CableSample)) {
+                        return;
+                    }
+                }
+            });
+        }
         if !self.wifi.started {
             self.wifi.started = true;
             let mail = self.mail.clone();
@@ -314,6 +378,9 @@ impl App {
                 self.wifi_read();
             }
             WifiMsg::Tick => {
+                if !matches!(self.page, Page::WiFi | Page::Network) {
+                    self.read_interfaces();
+                }
                 if self.page == Page::Network {
                     self.wifi_read();
                 }
@@ -324,6 +391,27 @@ impl App {
                         let _ = c.scan();
                     }
                     self.wifi_read();
+                }
+            }
+            WifiMsg::CableSample => {
+                if self.page != Page::Network {
+                    return;
+                }
+                self.wifi.all = ifaces::list().unwrap_or_default();
+                let now = std::time::Instant::now();
+                for f in self.wifi.all.iter().filter(|f| matches!(f.kind, ifaces::Kind::Wired | ifaces::Kind::Phone)) {
+                    let (Some(rx), Some(tx)) = (f.rx_bytes, f.tx_bytes) else { continue };
+                    let c = self.wifi.cables.entry(f.name.clone()).or_default();
+                    if let Some((then, rx0, tx0)) = c.last {
+                        let secs = now.duration_since(then).as_secs_f64().max(0.1);
+                        c.rx.push_back(ifaces::delta(rx0, rx) as f64 * 8.0 / secs);
+                        c.tx.push_back(ifaces::delta(tx0, tx) as f64 * 8.0 / secs);
+                        while c.rx.len() > HISTORY {
+                            c.rx.pop_front();
+                            c.tx.pop_front();
+                        }
+                    }
+                    c.last = Some((now, rx, tx));
                 }
             }
             WifiMsg::Sample => {
@@ -679,13 +767,42 @@ impl App {
                 "Ethernet".to_string()
             };
             let addrs = shown_addrs(f);
+            let speed = match (f.speed_mbps, f.full_duplex) {
+                (Some(sp), fd) => {
+                    let s = if sp >= 1000 && sp % 1000 == 0 { format!("{} Gb/s", sp / 1000) } else { format!("{sp} Mb/s") };
+                    match fd {
+                        Some(true) => format!("{s}, full duplex"),
+                        Some(false) => format!("{s}, half duplex"),
+                        None => s,
+                    }
+                }
+                _ => String::new(),
+            };
             let (state, detail) = match (f.carrier, phone) {
+                (true, _) if !addrs.is_empty() && !speed.is_empty() => (format!("Connected at {speed}"), addrs),
                 (true, _) if !addrs.is_empty() => ("Connected".to_string(), addrs),
                 (true, _) => ("Connected".to_string(), "Waiting for an address.".to_string()),
                 (false, false) => ("Cable not connected".to_string(), String::new()),
                 (false, true) => ("Not sharing its connection".to_string(), "On the iPhone: trust this computer, and turn on Personal Hotspot.".to_string()),
             };
-            items.push(self.group(Some(&title), vec![setting(&state, &detail, space())]));
+            let mut rows = vec![setting(&state, &detail, space())];
+            // Its traffic while connected: always shown then (a dash until two
+            // samples), so the page does not shift.
+            if f.carrier {
+                let c = w.cables.get(&f.name);
+                let rx: Vec<f64> = c.map(|c| c.rx.iter().copied().collect()).unwrap_or_default();
+                let tx: Vec<f64> = c.map(|c| c.tx.iter().copied().collect()).unwrap_or_default();
+                let now = match (rx.last(), tx.last()) {
+                    (Some(r), Some(t)) => format!("in {}, out {}", rate_text(*r), rate_text(*t)),
+                    _ => "Measuring\u{2026}".to_string(),
+                };
+                rows.push(setting(
+                    "Traffic",
+                    "The last two minutes: in, and out (fainter).",
+                    row(vec![traffic_chart(rx, tx), label(now).dim().width(Length::Fixed(170.0)).align(Align::End)]).spacing(12.0).align(Align::Center),
+                ));
+            }
+            items.push(self.group(Some(&title), rows));
         }
         if links.is_empty() {
             items.push(self.group(None, vec![setting("No network cable port", "", space())]));
@@ -700,10 +817,13 @@ impl App {
         } else {
             "Not connected.".to_string()
         };
-        items.push(self.group(
-            Some("Wi-Fi"),
-            vec![setting(&wifi_line, "", button(label("Wi-Fi").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Go(Page::WiFi)).name("Open Wi-Fi"))],
-        ));
+        // Only where there is Wi-Fi (Dave, 2026-11-14: hidden like the touchscreen's).
+        if self.has_wifi() {
+            items.push(self.group(
+                Some("Wi-Fi"),
+                vec![setting(&wifi_line, "", button(label("Wi-Fi").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Go(Page::WiFi)).name("Open Wi-Fi"))],
+            ));
+        }
         if !links.iter().any(|f| f.kind == ifaces::Kind::Phone) {
             items.push(label("An iPhone by cable shows here once it shares its connection: plug it in, trust this computer, and turn on Personal Hotspot.").size(11.0).dim().wrap().width(Length::FILL));
         }

@@ -11,8 +11,13 @@ fn main() {
         Ok(all) => {
             for f in all {
                 let addrs: Vec<String> = f.addrs.iter().map(|(a, p)| format!("{a}/{p}")).collect();
+                let link = match (f.speed_mbps, f.full_duplex) {
+                    (Some(sp), Some(fd)) => format!(" {sp} Mb/s {}", if fd { "full" } else { "half" }),
+                    (Some(sp), None) => format!(" {sp} Mb/s"),
+                    _ => String::new(),
+                };
                 println!(
-                    "{:<10} {:?}{}{} {} {}",
+                    "{:<10} {:?}{}{}{link} {} {}",
                     f.name,
                     f.kind,
                     if f.up { " up" } else { " down" },
