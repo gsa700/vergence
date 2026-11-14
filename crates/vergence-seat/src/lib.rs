@@ -82,6 +82,8 @@ pub enum Part {
     Menu,
     /// A notification card.
     Note,
+    /// Alt+Tab's list of windows (windows milestone 1, step 5).
+    Switcher,
     /// The bare desktop.
     Desktop,
 }

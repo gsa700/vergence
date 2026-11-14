@@ -180,6 +180,23 @@ impl Server {
             "windows" => self.describe_windows(),
             // The order of use, most recent first, and the focused window (Alt+Tab's order).
             "used" => self.order_of_use_report(),
+            // Alt+Tab's list: what it holds, which row is stepped to, whether it shows.
+            "switching" => self.switching_report(),
+            // A modifier held down or let go across commands (Alt held while Tab is
+            // pressed several times shows Alt+Tab's list): `hold alt`, `let-go alt`.
+            "hold" | "let-go" => {
+                let code: u32 = match args.first().map(|a| a.to_ascii_lowercase()).as_deref() {
+                    Some("alt") => 56,
+                    Some("ctrl") | Some("control") => 29,
+                    Some("shift") => 42,
+                    Some("super") => 125,
+                    _ => return "hold|let-go alt|ctrl|shift|super".into(),
+                };
+                use smithay::backend::input::{InputTime, KeyState};
+                let state = if cmd == "hold" { KeyState::Pressed } else { KeyState::Released };
+                self.handle_key((code + 8).into(), state, InputTime::now());
+                format!("{cmd} {}", args[0])
+            }
             // Snapping's choices, what a drag is aimed at, the snapped windows (snap.rs).
             "snap" => self.snap_report(),
             // Native windows' meaning (Contract 3, native.rs).

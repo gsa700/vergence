@@ -270,6 +270,19 @@ All the server's, ahead of any program, through the seat's filter:
   **Found**: vergence-render's GPU test hung once on kepler (2026-11-14
   09:04, 0% CPU for 16 minutes, the session running on the same card);
   killed, it then passed three times alone in 0.7 s. Intermittent; to watch.
+- **Step 5 in** (2026-11-14): Alt+Tab's list (switch.rs): once Alt has been
+  held 0.15 s after the first Tab, a frosted panel in the middle of the
+  focused window's screen (two fifths of its width within 360 to 640 points,
+  rows of 40, at most three fifths of its height, then it scrolls to keep the
+  one stepped to in view): the dock item's icon and the window's title (no
+  control characters, at most 200, cut with an ellipsis), minimized windows
+  faint and marked, the one stepped to shaded (its text full strength even
+  when minimized: faint ink on the shading did not read, seen in a shot); a
+  click on a row chooses it (the seat's `Part::Switcher`). vctl gained
+  `switching` and `hold`/`let-go` (a modifier held across commands). Live on
+  kepler: the list over two and three windows (shots), Escape left the focus
+  on foot, a click on minimized foot's row brought it back with the keyboard.
+  434 tests on Hubble, kepler and Techbench.
 
 ## Steps
 

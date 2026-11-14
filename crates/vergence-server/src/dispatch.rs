@@ -221,6 +221,9 @@ impl Server {
         if self.launcher_contains(pos) {
             return Some(Target::Server(Part::Popup));
         }
+        if self.switcher_contains(pos) {
+            return Some(Target::Server(Part::Switcher));
+        }
         if self.notify_at(pos) {
             return Some(Target::Server(Part::Note));
         }
@@ -492,6 +495,7 @@ impl Server {
             Target::Server(Part::Dock) if pressed && button == vergence_seat::BTN_RIGHT => self.shelf_menu(pos),
             Target::Server(Part::Dock) if !pressed && self.shelf.held.is_some_and(|(b, _)| b == button) => self.shelf_release(pos),
             Target::Server(Part::Desktop) if pressed && button == vergence_seat::BTN_RIGHT => self.open_menu(pos),
+            Target::Server(Part::Switcher) if pressed && button == vergence_seat::BTN_LEFT => self.switch_click(pos),
             // A native window's tabs (bar milestone 1): the program hears what was done.
             Target::Server(Part::Tab(id, i)) if pressed && button == vergence_seat::BTN_LEFT => {
                 self.tab_event(id, i, |window, tab| WinEvent::TabChosen { window, tab });

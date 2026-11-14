@@ -38,7 +38,7 @@ use smithay::{
     utils::{IsAlive, Logical, Point, Rectangle, Transform},
 };
 use vergence_seat::keyboard::WindowKey;
-use vergence_shell::snap::{Arrow, KeyAct, Standing, Zone, key_act, zone_at, zone_rect, zone_rect_gapped};
+use vergence_shell::snap::{Arrow, KeyAct, Standing, Zone, key_act, zone_at, zone_rect_gapped};
 
 use crate::{Server, decor::SceneElement, win::Win};
 
