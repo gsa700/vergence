@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "14 November 2026 — Draft 0.15"
+date: "14 November 2026 — Draft 0.16"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.15 · 14 November 2026
+David Erickson (AB0R), with Claude · Draft 0.16 · 14 November 2026
 
 ---
 
@@ -534,6 +534,8 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 4. **Display lists need Vulkan compute** (§6.6). Intel and AMD have it through Mesa on both systems, and NVIDIA's proprietary driver on Linux. On FreeBSD with NVIDIA it is to be checked (§10). Bitmap surfaces never need it.
 5. **The server survives a GPU reset.** When the kernel resets a hung GPU, every GL context on it may be lost. On Hubble a reset caused by a client left the server drawing black while every GL call still reported success. The server's renderer uses robust contexts, checks reset status every frame, and on a reset rebuilds its context and re-uploads its textures without a restart. A client that hangs the GPU is logged by name.
 
+**A screen on a second GPU, as built** (GPUs milestone 1, 14 November 2026). Hubble, an ASUS laptop without a MUX switch, has its panel wired to the Intel GPU and its HDMI and USB-C DisplayPort outputs to an NVIDIA GTX 1650 (nouveau, with NVIDIA's GSP firmware). Every GPU on the seat is probed at start (its driver, connectors, the formats it scans out, renders to and imports) and every GPU with connectors is opened; a screen is known by its GPU and its CRTC. The Intel GPU draws every screen. Drawing straight into the NVIDIA GPU's scan-out buffer fails (nouveau scans out of its own video memory, which the Intel GPU cannot draw into), so a screen there is drawn into a linear buffer in the Intel GPU's memory, and the NVIDIA GPU, with a renderer of its own, takes that buffer in as a texture and copies **only the changed rectangles** into its scan-out buffer, never blocking the server: the copy starts once the Intel GPU's fence has signaled, checked and not waited on, and finishes before the flip (nouveau's EGL gives the kernel no fence). Three findings shaped it. Mesa now runs nouveau's OpenGL through Zink, which needs Mesa's Vulkan driver NVK; without it the "GPU copy" ran on the CPU at 40 to 77 ms a 4K frame, so the server names each GPU's renderer at start and `install.sh` names the missing packages. Damage tracking by buffer age must count every frame the tracker sees, drawn or not. And windows are asked for a frame only when a frame went to the screen, so each screen's own refresh paces its windows (144 frames a second on the panel, 60 on the 14-inch monitor). An app may render on the NVIDIA GPU (`DRI_PRIME=1`) and be shown anywhere: a native 4K full-screen load drew at 124 to 171 frames a second on the 14-inch screen. With no screen on it, the NVIDIA GPU sleeps, and the laptop draws about 9.4 W idle instead of 15. Still to come: a copy by the CPU for GPUs that share no buffer format, NVIDIA's own driver with explicit sync, and a screen drawn by its own GPU for heavy loads.
+
 **Test hardware, planned.** A dual-boot FreeBSD and Linux machine (likely Fedora, as on the Linux test workstation) with an Intel UHD 630 and an NVIDIA RTX card covers integrated graphics, proprietary NVIDIA on both systems, nouveau/NVK on Linux, and the hybrid two-GPU case in one box. AMD comes later. A working NVIDIA compute machine is used only for reading driver facts, not for display tests.
 
 ---
@@ -563,14 +565,16 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
   - **Settings** (14 November): the settings app's sidebar in groups with an icon per page and a search field; Accessibility and Wallpaper pages; an Advanced part at a page's end; separate Keyboard, Mouse, Touchpad and Touchscreen pages, the last two shown once the machine has had one, which the server remembers and tells the app (bus protocol version 7, the input devices); Wi-Fi by the project's own client of wpa_supplicant, on only while no network cable is connected unless set otherwise, and a Network page (§6.9). A phone by USB cable is parked: it needs Apple's pairing.
   - **The look** (13 November): the frost (what is under a bar, the dock, a menu or the launcher blurred and tinted on the GPU, with a plain tint where Reduce transparency asks for it or there is no GPU), light and dark versions of everything with contrast checked in both, a native window's content running under its frosted bar, a terminal tab turning red while a program in it runs as root, rounded window corners at the one radius, and the size of controls settled together.
 
-  Still open within phase 2: checks by hand left in the seat, shelf and look milestones; docks on more than one screen; live tiles; the rest of Smithay's replacement (the window space and the renderer next, then the DRM/KMS and input back ends); explicit sync, more than one GPU and the NVIDIA card (§8.3); and packages for Void, FreeBSD and Fedora (today `tools/install.sh` installs under a prefix).
+  - **A second GPU** (14 November): screens on another GPU, drawn by the main one and copied over (§8.3, "A screen on a second GPU, as built"): Hubble's 14-inch 4K monitor on the NVIDIA card's HDMI, smooth, paced to its own refresh, its touch panel tied to it, the NVIDIA card asleep when unplugged; the Screens page says which GPU shows and draws each screen; bus protocol version 8. Carried over: the copy by the CPU for GPUs that share no format.
+
+  Still open within phase 2: checks by hand left in the seat, shelf and look milestones; docks on more than one screen; live tiles; the rest of Smithay's replacement (the window space and the renderer next, then the DRM/KMS and input back ends); explicit sync and NVIDIA's own driver (§8.3); and packages for Void, FreeBSD and Fedora (today `tools/install.sh` installs under a prefix).
 
 **The order of work in phase 2, from 9 November 2026,** with where each step stands:
 
 1. **The toolkit's drawing and text core, and the terminal on it** (§6.10). *Done 10 November.* It moved ahead of the shell when the borrowed toolkit's faults were measured under load: with six busy tabs in a window of 3792 × 2118 pixels its software renderer held one processor core and nothing else, and its GPU renderer was ten to fifteen times faster on the same load but lost the window's buttons.
 2. **The shell** (§6.9), built in the server on the same drawing code. *The dock, session restore and the Apps launcher are done (10 and 13 November), snapping and keyboard switching too (14 November); live tiles remain.*
 3. **Widgets, and the settings app on them**; the borrowed toolkit removed. *Done 10 November.*
-4. **Windows, placement and accessibility on the native protocol**, which the toolkit then uses instead of Wayland, and explicit sync and the rest of §8.3 alongside as hardware allows. *The protocol, placement and the first meaning tree are done (11 November), with the seat and the bar on them (12 November); explicit sync and several GPUs remain.*
+4. **Windows, placement and accessibility on the native protocol**, which the toolkit then uses instead of Wayland, and explicit sync and the rest of §8.3 alongside as hardware allows. *The protocol, placement and the first meaning tree are done (11 November), with the seat and the bar on them (12 November); a second GPU's screens (14 November); explicit sync remains.*
 
 The display-list renderer was phase 3 work. Step 1 brought its first version forward into phase 2, because the tools need it; what stays in phase 3 is the protocol side (applications submitting scenes to the server), the readers of the accessibility contract (magnifier, screen readers, the agent interface), and Avalonia.
 

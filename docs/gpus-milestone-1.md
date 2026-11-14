@@ -8,6 +8,9 @@ vendor, explicit sync later. **Accepted 2026-11-14: "yes to your
 proposals, go ahead with step 1"** (our own code for the second GPU; the
 Intel GPU draws external screens by default; nouveau now, NVIDIA's driver
 and explicit sync as the next GPU milestone).
+**Closed 2026-11-14** (Dave: "go ahead with the docs, carry the fallback
+over"). Carried over: way 2, the copy by the CPU for two GPUs that share no
+buffer format, with its test on a fake second GPU (step 4).
 
 ## Where things stand (read 2026-11-14 on Hubble)
 
@@ -276,3 +279,18 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
    driver (Void's `nvidia` package; needs `modeset=1`, then explicit sync).
    Proposed: **(a)** for this milestone; NVIDIA's driver and explicit sync
    as the next GPU milestone, since other people's machines will have it.
+
+## Where acceptance stands (closed 2026-11-14)
+
+1. Tests: 476 on Hubble and Techbench, 472 on kepler; the one-GPU machines
+   unchanged (kepler, Techbench). **Met.**
+2. The 14" on HDMI at its own scale beside the panel, windows moving between
+   them, its touch on it, the arrangement and window memory: **met** (Dave:
+   Firefox "scrolls clicks and zooms FB").
+3. Keeping up at 4K 60 Hz: **met** with NVK (no relay turn over 20 ms moving
+   a window; native 4K glmark2 124 to 171 FPS; es2gears 59.98 FPS); the
+   Battery page shows the NVIDIA GPU awake while plugged.
+4. Unplugged, the NVIDIA GPU asleep and the draw falling back: **met**
+   (13.3 W to 9.9 W in 30 s).
+5. Hotplug both ways while the session runs: **met**; with the screens off:
+   not tried by hand.
