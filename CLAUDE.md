@@ -40,10 +40,15 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   look; `vctl windows`, `vctl spawn`, `vctl move`, `vctl key`, `vctl restart`.
   Window indices are the stacking order (they change on focus).
 - **Hubble is a project machine** (Dave, 2026-11-06): breaking its session
-  for the project is fine; his accounts and data still need care. Fake
-  EDIDs: `vergence-harness fake` (in /tmp on Hubble: fake1, fake4k, fake24,
-  fake13). Avalonia on FreeBSD needs the natives in ~/vergence-native
-  (BsdProbe's libSkiaSharp 119, libc-epoll, HarfBuzz link).
+  for the project is fine; his accounts and data still need care (Dave
+  2026-11-12: Hubble, kepler and Techbench are all set up for this work).
+  Fake EDIDs are made when needed, none are kept: `vergence-harness fake
+  --name N --product 0xNNNN --serial N --mode 4k30|1080p60 --size-mm WxH
+  --out FILE` (the /tmp/fake* files on FreeBSD Hubble went with its
+  reinstall, 2026-11-09). Avalonia apps on FreeBSD: parked (Dave,
+  2026-11-11); BsdProbe's natives (~/vergence-native: libSkiaSharp 119,
+  libc-epoll, HarfBuzz link) are on neither Hubble nor kepler since their
+  reinstalls, and docs/milestone-4.md has what they were.
 - **Names:** the project and its crates are `vergence` / `vergence-*`; the
   phase 1 daemon was `vergd` (retired). "Verge" for short in conversation.
 - **Rust throughout** (whitepaper §8). EDID, profile and rules logic live in
