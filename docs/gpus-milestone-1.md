@@ -159,6 +159,17 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
   moves on the 14" (the full copies after start); a pointer move copies a
   few thousand pixels. Full-screen changes still cost a 40 ms copy: why
   nouveau's copy from system memory is that slow is open.
+- **The likely why** (glmark2 on Hubble, 2026-11-14): offscreen the Intel GPU
+  scores 4383 (thousands of frames a second; in a window it held 46 FPS, the
+  session's pacing, to look at); with `DRI_PRIME=1` Mesa 26 tried nouveau's
+  GL through Zink, which needs NVK and the Vulkan loader, not installed, and
+  fell back to **llvmpipe**. The server's copier on the NVIDIA card is very
+  likely the same software renderer, so the "GPU copy" was the CPU's. The
+  server now logs each GPU's GL renderer at start and warns when a showing
+  GPU's is software. Next on Hubble: install `mesa-vulkan-nouveau` and
+  `vulkan-loader` (Void), confirm the copier is Zink on NVK, time the copy
+  again. Hubble's battery was run flat by Dave meanwhile (the history kept
+  the drain to 0%).
 
 ## Steps
 

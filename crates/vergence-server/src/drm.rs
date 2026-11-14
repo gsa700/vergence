@@ -187,7 +187,9 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
 
     let display = unsafe { EGLDisplay::new(gbm.clone())? };
     let context = EGLContext::new(&display)?;
-    let renderer = unsafe { GlesRenderer::new(context)? };
+    let mut renderer = unsafe { GlesRenderer::new(context)? };
+    let name = gl_renderer(&mut renderer);
+    tracing::info!("gpu: {} draws with {name}", path.display());
     let render_formats: FormatSet = renderer.egl_context().dmabuf_render_formats().iter().copied().collect();
     // Every GPU on the seat, probed and logged (GPUs milestone 1, step 1).
     state.gpus = crate::gpus::probe(&mut session_handle, &seat, &path);
@@ -234,7 +236,18 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
             let node = DrmNode::from_path(p)?;
             let display = unsafe { EGLDisplay::new(gbm.clone())? };
             let context = EGLContext::new(&display)?;
-            let copier = unsafe { GlesRenderer::new(context)? };
+            let mut copier = unsafe { GlesRenderer::new(context)? };
+            // Which driver really draws there: Mesa falls back to software
+            // (llvmpipe) when the GPU's own GL driver is missing. On Hubble,
+            // Mesa 26 runs nouveau's GL through Zink, which needs NVK, and
+            // without it the "GPU copy" of the 14"'s frames was the CPU's
+            // (40 to 77 ms a 4K frame), 2026-11-14.
+            let name = gl_renderer(&mut copier);
+            if is_software(&name) {
+                tracing::warn!("gpu: {other}: its GL is {name}, software on the CPU: screens on it will be slow. Its own GL driver is missing (nouveau: Mesa's Vulkan driver NVK and the Vulkan loader, for Zink)");
+            } else {
+                tracing::info!("gpu: {other} copies with {name}");
+            }
             let formats: FormatSet = copier.egl_context().dmabuf_render_formats().iter().copied().collect();
             let manager = DrmOutputManager::new(
                 drm,
@@ -530,6 +543,13 @@ fn is_drm_hotplug(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn software_renderers_are_known() {
+        assert!(super::is_software("llvmpipe (LLVM 22.1.8, 256 bits)"));
+        assert!(!super::is_software("Mesa Intel(R) UHD Graphics (CML GT2)"));
+        assert!(!super::is_software("zink Vulkan 1.4(NVIDIA GeForce GTX 1650 (NVK TU117))"));
+    }
+
+    #[test]
     fn devd_drm_hotplug() {
         assert!(super::is_drm_hotplug("!system=DRM subsystem=CONNECTOR type=HOTPLUG cdev=dri/card0 connector=115"));
         assert!(!super::is_drm_hotplug("!system=USB subsystem=DEVICE type=ATTACH"));
@@ -665,6 +685,22 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
         tracing::info!("{name}: shown by {}, drawn by {} and copied there", b.devices[gpu].path, b.devices[0].path);
     }
     b.surfaces.insert((gpu, crtc), Surface { output, drm_output, connector: name, last: std::time::Instant::now(), scale, id, px: (w as u32, h as u32), mm, edid: identity, global, relay });
+}
+
+/// The GL renderer's name ("Mesa Intel(R) UHD Graphics (CML GT2)", "llvmpipe ...").
+fn gl_renderer(r: &mut GlesRenderer) -> String {
+    use smithay::backend::renderer::gles::ffi;
+    r.with_context(|gl| unsafe {
+        let p = gl.GetString(ffi::RENDERER);
+        if p.is_null() { String::from("an unknown renderer") } else { std::ffi::CStr::from_ptr(p as *const std::ffi::c_char).to_string_lossy().into_owned() }
+    })
+    .unwrap_or_else(|_| "an unknown renderer".into())
+}
+
+/// Whether a GL renderer is Mesa's software rendering on the CPU.
+fn is_software(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    ["llvmpipe", "softpipe", "swrast", "software"].iter().any(|s| n.contains(s))
 }
 
 /// A linear XRGB8888 buffer in the primary GPU's memory, the size of a screen
