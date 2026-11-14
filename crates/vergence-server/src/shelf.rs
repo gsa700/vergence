@@ -328,6 +328,9 @@ pub struct Shelf {
     /// The strip's picture for a height in points, a scale and what it shows,
     /// kept until one of them changes.
     picture: Option<((i32, u64, u64), MemoryRenderBuffer)>,
+    /// The frost behind the dock (look milestone 1, step 5): its element's
+    /// id, the texture its capture goes into (kept while its size holds).
+    backdrop: Option<(smithay::backend::renderer::element::Id, smithay::backend::renderer::gles::GlesTexture)>,
     /// The applications this machine has (vergence-shell), read again when a
     /// directory of desktop entries changes.
     pub apps: Vec<Entry>,
@@ -1160,8 +1163,11 @@ impl Server {
             (&item.key, &item.name, windows.len(), item.focused, icon.is_some(), away).hash(&mut hasher);
         }
         starting.hash(&mut hasher);
-        // Reduce transparency (look milestone 1): the dock is solid whatever its own setting says.
-        let glass = if self.reduce_transparency() { 255 } else { (self.shelf.config.opacity.filter(|o| o.is_finite()).unwrap_or(1.0).clamp(0.3, 1.0) * 255.0).round() as u8 };
+        // The frost behind the dock (look milestone 1, step 5): its ground is then
+        // the frost, drawn under the picture; Reduce transparency (or no frost
+        // on this renderer) leaves the dock as its own setting says, solid if that.
+        let frost = self.frost_program(renderer);
+        let glass = if frost.is_some() { 0 } else if self.reduce_transparency() { 255 } else { (self.shelf.config.opacity.filter(|o| o.is_finite()).unwrap_or(1.0).clamp(0.3, 1.0) * 255.0).round() as u8 };
         glass.hash(&mut hasher);
         light.hash(&mut hasher);
         (accent.r, accent.g, accent.b).hash(&mut hasher);
@@ -1299,6 +1305,39 @@ impl Server {
         let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
         if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(strip.size), Kind::Unspecified) {
             elements.push(SceneElement::Memory(el));
+        }
+        // Behind it, the frost of what is behind the dock.
+        if let Some(program) = frost {
+            use smithay::backend::renderer::{Offscreen, gles::GlesTexture};
+            let dst = Rectangle::<i32, smithay::utils::Physical>::new(a, (b.x - a.x, b.y - a.y).into());
+            let fresh = self.shelf.backdrop.as_ref().is_none_or(|(_, t)| {
+                use smithay::backend::renderer::Texture;
+                (t.width() as i32, t.height() as i32) != (dst.size.w, dst.size.h)
+            });
+            if fresh && dst.size.w > 0 && dst.size.h > 0 {
+                match Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, (dst.size.w, dst.size.h).into()) {
+                    Ok(t) => {
+                        let id = self.shelf.backdrop.take().map_or_else(smithay::backend::renderer::element::Id::new, |(id, _)| id);
+                        self.shelf.backdrop = Some((id, t));
+                    }
+                    Err(e) => tracing::warn!("dock frost: no texture: {e:?}"),
+                }
+            }
+            if let Some((id, texture)) = &self.shelf.backdrop {
+                let light = self.light_style();
+                let s = vergence_look::shelf_look(light);
+                let unit = |c: vergence_look::Rgb| [c.0 as f32 / 255.0, c.1 as f32 / 255.0, c.2 as f32 / 255.0];
+                let look = crate::backdrop::Look {
+                    tint: unit(s.dock),
+                    strength: vergence_look::frost_strength(self.look_setting("frost")),
+                    ink: unit(s.mark),
+                    need: 3.6,
+                    radius: vergence_look::FROST_RADIUS * scale as f32,
+                    corner: vergence_look::RADIUS * scale as f32,
+                    bottom: true,
+                };
+                elements.push(SceneElement::Backdrop(crate::backdrop::Backdrop::new(id.clone(), smithay::backend::renderer::utils::CommitCounter::default(), dst, texture.clone(), program, &look)));
+            }
         }
         elements
     }

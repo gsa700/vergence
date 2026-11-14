@@ -71,6 +71,7 @@ smithay::backend::renderer::element::render_elements! {
     /// A native window's GPU picture (native.rs).
     Texture = smithay::backend::renderer::element::texture::TextureRenderElement<smithay::backend::renderer::gles::GlesTexture>,
     Frost = smithay::backend::renderer::gles::element::TextureShaderElement,
+    Backdrop = crate::backdrop::Backdrop,
 }
 
 /// What is under a point of the desktop.
@@ -329,7 +330,7 @@ impl Server {
     /// shader that would not compile. Only windows that draw under their bar
     /// are frosted (their picture's top is what lies under it); the others
     /// keep a solid bar.
-    fn frost_program(&mut self, renderer: &mut GlesRenderer) -> Option<smithay::backend::renderer::gles::GlesTexProgram> {
+    pub fn frost_program(&mut self, renderer: &mut GlesRenderer) -> Option<smithay::backend::renderer::gles::GlesTexProgram> {
         if self.reduce_transparency() {
             return None;
         }
@@ -357,6 +358,7 @@ impl Server {
                     UniformName::new("ink", UniformType::_3f),
                     UniformName::new("need", UniformType::_1f),
                     UniformName::new("corner", UniformType::_1f),
+                    UniformName::new("bottom", UniformType::_1f),
                 ];
                 match renderer.compile_custom_texture_shader(vergence_render::blur::FROST_SHADER, &uniforms) {
                     Ok(p) => {
@@ -379,7 +381,7 @@ impl Server {
     }
 
     /// A number of the desktop's own look (org.vergence.look), or 0.
-    fn look_setting(&self, key: &str) -> u32 {
+    pub fn look_setting(&self, key: &str) -> u32 {
         match self.settings.current.get(&(crate::settings::LOOK.to_string(), key.to_string())) {
             Some(vergence_protocol::bus::SettingValue::U32(v)) => *v,
             // Standard Frost and Standard size when unset.

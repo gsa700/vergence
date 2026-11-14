@@ -357,6 +357,24 @@ Bar Proportions"):
   apart) and `ROUND_SHADER` to `round::cover` (alpha within two steps), in
   the dark and light styles. Run on the GPU on all three (Hubble; kepler's
   UHD 630 on FreeBSD; Techbench's UHD 770), not skipped. 395 tests.
+- **Step 5, the dock done** (2026-11-13): the frost over what is behind.
+  The server's `backdrop` module: `Backdrop`, a Smithay framebuffer effect
+  (`is_framebuffer_effect`; Smithay repaints the whole area behind it
+  whenever that changed and calls `capture_framebuffer` before `draw`),
+  copies that region of the framebuffer into a texture the scene builder
+  made and keeps per size (`glCopyTexSubImage2D`), then draws it through
+  the frost program (the frost shader's new `bottom` rounds all four
+  corners). Which way up the copy comes is read from the frame's
+  projection: the screen's rows run from the bottom, a screenshot's
+  texture's from the top (the frame's transformation says Normal for both;
+  the first try frosted the top of the screen into the dock, found by
+  pixel color). The dock's ground is the frost when the frost is on (its
+  own opacity setting only without it; Reduce transparency: solid). Seen in
+  screenshots on Hubble: the grey wallpaper behind the dock frosted, and a
+  window slid under its lower half darkening only that half. Not seen by
+  me: the screen's own path (the other branch of the same test). 395
+  tests on all three. **Left of step 5**: Wayland and X11 windows' bars,
+  the menus and the apps popup.
 
 ## Steps
 

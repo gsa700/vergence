@@ -30,7 +30,8 @@ const GOLDEN_ANGLE: f32 = 2.399_963_2;
 /// coordinates), `radius` (float, the spiral's reach in pixels), `tint`
 /// (vec4: the style's bar ground, sRGB, and the frost's own strength),
 /// `ink` (vec3, sRGB), `need` (float, the contrast to keep) and `corner`
-/// (float, the bar's top corners' radius in pixels; 0 for square).
+/// (float, the corners' radius in pixels; 0 for square) and `bottom`
+/// (float: 1 rounds the bottom corners too, a dock's or a menu's).
 pub const FROST_SHADER: &str = r#"#version 100
 
 //_DEFINES_
@@ -54,6 +55,7 @@ uniform vec4 tint;
 uniform vec3 ink;
 uniform float need;
 uniform float corner;
+uniform float bottom;
 
 float lin(float c) {
     return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
@@ -107,8 +109,12 @@ void main() {
     float cover = 1.0;
     if (corner > 0.0) {
         vec2 p = v_coords / texel;
+        float h = 1.0 / texel.y;
         if (p.y < corner) {
             vec2 c = vec2(clamp(p.x, corner, 1.0 / texel.x - corner), corner);
+            cover = clamp(corner - distance(p, c) + 0.5, 0.0, 1.0);
+        } else if (bottom > 0.5 && p.y > h - corner) {
+            vec2 c = vec2(clamp(p.x, corner, 1.0 / texel.x - corner), h - corner);
             cover = clamp(corner - distance(p, c) + 0.5, 0.0, 1.0);
         }
     }
