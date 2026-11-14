@@ -166,6 +166,9 @@ pub struct Backend {
     /// screens_on. Setting one up turns it on, and a monitor that drops off in
     /// standby (Techbench's ASUS, 2026-11-12) then woke and dropped again.
     waiting: Vec<(usize, connector::Handle, crtc::Handle)>,
+    /// Tells the main loop that a thread has woken another GPU and probed its
+    /// connectors (screens_on), so its scan is quick.
+    probed: smithay::reexports::calloop::channel::Sender<usize>,
 }
 
 pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(), Box<dyn std::error::Error>> {
@@ -268,7 +271,18 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
             Err(e) => tracing::warn!("gpu: {other}: cannot show screens on it: {e}"),
         }
     }
-    state.backend = Some(Backend { renderer, gbm: primary_gbm, devices, surfaces: HashMap::new(), waiting: Vec::new() });
+    // The other GPUs' connectors after a thread woke them (screens_on): scanned
+    // here, now quickly, as the card is awake.
+    let (probed, probed_rx) = smithay::reexports::calloop::channel::channel::<usize>();
+    event_loop.handle().insert_source(probed_rx, |event, _, state| {
+        if let smithay::reexports::calloop::channel::Event::Msg(gpu) = event {
+            let anchors = state.window_anchors();
+            if scan_gpu(state, gpu, false) {
+                setup_changed(state, anchors);
+            }
+        }
+    })?;
+    state.backend = Some(Backend { renderer, gbm: primary_gbm, devices, surfaces: HashMap::new(), waiting: Vec::new(), probed });
     state.session = Some(session.clone());
 
     // Input from every device on the seat.
@@ -1036,16 +1050,24 @@ pub fn screens_on(state: &mut Server) {
     // The other GPUs' connectors, probed again: with the screens off such a GPU
     // has nothing to do and sleeps, and a sleeping GPU sees no cable come or go
     // (Hubble's NVIDIA card kept the 14" "connected" after Dave unplugged it
-    // with the screens off, 2026-11-14). The scan's forced probe wakes it.
-    let others = state.backend.as_ref().map_or(0, |b| b.devices.len().saturating_sub(1));
-    if others > 0 {
-        let anchors = state.window_anchors();
-        let mut changed = false;
-        for gpu in 1..=others {
-            changed |= scan_gpu(state, gpu, false);
-        }
-        if changed {
-            setup_changed(state, anchors);
+    // with the screens off, 2026-11-14). A forced probe wakes it, which takes
+    // about half a second (the server stalled 0.45 s doing it here), so a thread
+    // probes and the main loop scans once the card is awake.
+    if let Some(b) = state.backend.as_ref() {
+        for gpu in 1..b.devices.len() {
+            let fd = b.devices[gpu].manager.device().device_fd().clone();
+            let tx = b.probed.clone();
+            let spawned = std::thread::Builder::new().name("gpu-probe".into()).spawn(move || {
+                if let Ok(res) = fd.resource_handles() {
+                    for c in res.connectors() {
+                        let _ = fd.get_connector(*c, true);
+                    }
+                }
+                let _ = tx.send(gpu);
+            });
+            if let Err(e) = spawned {
+                tracing::warn!("gpu: cannot probe {} on waking: {e}", b.devices[gpu].path);
+            }
         }
     }
     let waiting = state.backend.as_mut().map(|b| std::mem::take(&mut b.waiting)).unwrap_or_default();
