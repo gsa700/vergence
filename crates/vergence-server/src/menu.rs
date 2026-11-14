@@ -84,13 +84,16 @@ pub struct OpenMenu {
     at: Point<i32, Logical>,
     entries: Vec<Entry>,
     hover: Option<usize>,
-    /// Damage ids: background, edge, hover, separators...
+    /// Damage ids: background, edge, hover, separators..., then the edge's
+    /// other three sides.
     ids: Vec<Id>,
     commit: CommitCounter,
     /// Label rasters per (entry, scale bits, light).
     labels: HashMap<(usize, u64, bool), MemoryRenderBuffer>,
     /// The style it was last drawn in (its solid parts' damage follows it).
     light: bool,
+    /// The frost behind it (look milestone 1, step 5).
+    backdrop: crate::backdrop::Slot,
 }
 
 /// The apps for the menu: desktop.toml's, else the usual ones that are installed.
@@ -181,7 +184,7 @@ impl Server {
             entries.push(Entry::Separator);
         }
         entries.push(Entry::Exit);
-        let ids = (0..3 + entries.len()).map(|_| Id::new()).collect();
+        let ids = (0..6 + entries.len()).map(|_| Id::new()).collect();
         let mut m = OpenMenu {
             at: pos.to_i32_round(),
             entries,
@@ -190,6 +193,7 @@ impl Server {
             commit: CommitCounter::default(),
             labels: HashMap::new(),
             light: false,
+            backdrop: None,
         };
         if let Some(out) = self.output_at_pointer().map(|o| self.work_area(o)) {
             let (w, h) = (WIDTH, m.height());
@@ -232,8 +236,8 @@ impl Server {
         if entries.is_empty() {
             return;
         }
-        let ids = (0..3 + entries.len()).map(|_| Id::new()).collect();
-        let mut m = OpenMenu { at: slot.loc, entries, hover: None, ids, commit: CommitCounter::default(), labels: HashMap::new(), light: false };
+        let ids = (0..6 + entries.len()).map(|_| Id::new()).collect();
+        let mut m = OpenMenu { at: slot.loc, entries, hover: None, ids, commit: CommitCounter::default(), labels: HashMap::new(), light: false, backdrop: None };
         // Beside the icon, on the side `towards` names, a little off the dock.
         let off = vergence_look::SHELF_POPUP_GAP as i32;
         m.at = match towards {
@@ -306,6 +310,8 @@ impl Server {
         // Light or dark (look milestone 1): the dock's and menus' look.
         let light = self.light_style();
         let look = vergence_look::shelf_look(light);
+        let frost = self.frost_program(renderer);
+        let strength = vergence_look::frost_strength(self.look_setting("frost"));
         let Some(m) = self.menu.as_mut() else { return Vec::new() };
         if m.light != light {
             m.light = light;
@@ -360,8 +366,33 @@ impl Server {
         }
         let rect = m.rect();
         let inner = Rectangle::new((rect.loc.x + 1, rect.loc.y + 1).into(), (rect.size.w - 2, rect.size.h - 2).into());
-        els.push(SceneElement::Solid(SolidColorRenderElement::new(m.ids[0].clone(), phys(inner), m.commit, look.menu.floats(), Kind::Unspecified)));
-        els.push(SceneElement::Solid(SolidColorRenderElement::new(m.ids[1].clone(), phys(rect), m.commit, look.edge.floats(), Kind::Unspecified)));
+        // Its ground: the frost of what is behind it, or solid.
+        match frost {
+            Some(program) => {
+                let fl = crate::backdrop::Look {
+                    tint: crate::backdrop::unit(look.menu),
+                    strength,
+                    ink: crate::backdrop::unit(look.menu_ink),
+                    need: 5.0,
+                    radius: vergence_look::FROST_RADIUS * scale as f32,
+                    corner: 0.0,
+                    bottom: false,
+                };
+                if let Some(e) = crate::backdrop::element(renderer, &mut m.backdrop, phys(inner), program, &fl) {
+                    els.push(SceneElement::Backdrop(e));
+                }
+            }
+            None => els.push(SceneElement::Solid(SolidColorRenderElement::new(m.ids[0].clone(), phys(inner), m.commit, look.menu.floats(), Kind::Unspecified))),
+        }
+        // The edge: four lines round it, not a rectangle behind the ground (the
+        // frost would show that instead of what is behind the menu).
+        let (x, y, w, h) = (rect.loc.x, rect.loc.y, rect.size.w, rect.size.h);
+        let sides = [Rectangle::new((x, y).into(), (w, 1).into()), Rectangle::new((x, y + h - 1).into(), (w, 1).into()), Rectangle::new((x, y + 1).into(), (1, h - 2).into()), Rectangle::new((x + w - 1, y + 1).into(), (1, h - 2).into())];
+        let n = m.ids.len();
+        for (i, side) in sides.into_iter().enumerate() {
+            let id = if i == 0 { m.ids[1].clone() } else { m.ids[n - 4 + i].clone() };
+            els.push(SceneElement::Solid(SolidColorRenderElement::new(id, phys(side), m.commit, look.edge.floats(), Kind::Unspecified)));
+        }
         els
     }
 }

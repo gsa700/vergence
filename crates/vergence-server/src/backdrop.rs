@@ -154,3 +154,141 @@ impl RenderElement<GlesRenderer> for Backdrop {
 fn rows_from_top(frame: &GlesFrame<'_, '_>) -> bool {
     frame.projection()[4] > 0.0
 }
+
+/// A surface's frost texture, kept while its size holds: the element's id,
+/// the texture its capture goes into, and its commit, moved on whenever the
+/// texture is new. (Smithay captures what is behind a framebuffer effect when
+/// that changed, or when the element reports damage of its own; a menu that
+/// opens over a still desktop changes nothing behind it, so without the new
+/// commit its texture stayed empty: found on Hubble, a menu and a Wayland
+/// bar frosted only their tint.)
+pub type Slot = Option<(Id, GlesTexture, CommitCounter)>;
+
+/// The backdrop frost over `dst` for a surface whose texture is kept in
+/// `slot` (made or remade here when the size changed). None if the texture
+/// cannot be made.
+pub fn element(renderer: &mut GlesRenderer, slot: &mut Slot, dst: Rectangle<i32, Physical>, program: GlesTexProgram, look: &Look) -> Option<Backdrop> {
+    use smithay::backend::renderer::{Offscreen, Texture};
+    if dst.size.w <= 0 || dst.size.h <= 0 {
+        return None;
+    }
+    let fresh = slot.as_ref().is_none_or(|(_, t, _)| (t.width() as i32, t.height() as i32) != (dst.size.w, dst.size.h));
+    if fresh {
+        match Offscreen::<GlesTexture>::create_buffer(renderer, smithay::backend::allocator::Fourcc::Abgr8888, (dst.size.w, dst.size.h).into()) {
+            Ok(t) => {
+                let (id, mut commit) = slot.take().map_or_else(|| (Id::new(), CommitCounter::default()), |(id, _, c)| (id, c));
+                commit.increment();
+                *slot = Some((id, t, commit));
+            }
+            Err(e) => {
+                tracing::warn!("frost: no texture for {dst:?}: {e:?}");
+                return None;
+            }
+        }
+    }
+    let (id, texture, commit) = slot.as_ref()?;
+    Some(Backdrop::new(id.clone(), *commit, dst, texture.clone(), program, look))
+}
+
+/// sRGB 0-255 as 0-1, for a look.
+pub fn unit(c: vergence_look::Rgb) -> [f32; 3] {
+    [c.0 as f32 / 255.0, c.1 as f32 / 255.0, c.2 as f32 / 255.0]
+}
+
+/// A texture drawn through one of our shader programs (the frost of a
+/// window's own top strip, a picture with rounded corners), with an id that
+/// stays the window's and a commit that moves only when the picture, its
+/// place or the shader's numbers change. Smithay's own TextureShaderElement
+/// takes a new id each time it is made: every frame looked new, so the
+/// screen was drawn again at every refresh (25% of a core on Hubble, idle;
+/// found 2026-11-13).
+pub struct Shaded {
+    id: Id,
+    commit: CommitCounter,
+    dst: Rectangle<i32, Physical>,
+    src: Rectangle<f64, BufferCoords>,
+    texture: GlesTexture,
+    program: GlesTexProgram,
+    uniforms: Vec<Uniform<'static>>,
+}
+
+/// What a window keeps for one Shaded element: its id, its commit, and what
+/// it was last made of (to know when to move the commit).
+#[derive(Default)]
+pub struct ShadedSlot {
+    id: Option<Id>,
+    commit: CommitCounter,
+    last: u64,
+}
+
+impl Shaded {
+    /// `texture` drawn from `src` (its pixels) to `dst` (the output's).
+    pub fn new(slot: &mut ShadedSlot, dst: Rectangle<i32, Physical>, src: Rectangle<f64, BufferCoords>, texture: GlesTexture, program: GlesTexProgram, uniforms: Vec<Uniform<'static>>) -> Shaded {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (texture.tex_id(), dst.loc.x, dst.loc.y, dst.size.w, dst.size.h, src.loc.x.to_bits(), src.loc.y.to_bits(), src.size.w.to_bits(), src.size.h.to_bits()).hash(&mut h);
+        for u in &uniforms {
+            u.name.hash(&mut h);
+            format!("{:?}", u.value).hash(&mut h);
+        }
+        let made = h.finish();
+        if slot.last != made {
+            slot.last = made;
+            slot.commit.increment();
+        }
+        let id = slot.id.get_or_insert_with(Id::new).clone();
+        Shaded { id, commit: slot.commit, dst, src, texture, program, uniforms }
+    }
+}
+
+impl Element for Shaded {
+    fn id(&self) -> &Id {
+        &self.id
+    }
+
+    fn current_commit(&self) -> CommitCounter {
+        self.commit
+    }
+
+    fn geometry(&self, _scale: Scale<f64>) -> Rectangle<i32, Physical> {
+        self.dst
+    }
+
+    fn src(&self) -> Rectangle<f64, BufferCoords> {
+        self.src
+    }
+
+    fn transform(&self) -> Transform {
+        Transform::Normal
+    }
+
+    fn damage_since(&self, scale: Scale<f64>, commit: Option<CommitCounter>) -> DamageSet<i32, Physical> {
+        if commit == Some(self.commit) { DamageSet::default() } else { DamageSet::from_slice(&[Rectangle::from_size(self.geometry(scale).size)]) }
+    }
+
+    fn opaque_regions(&self, _scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
+        OpaqueRegions::default()
+    }
+
+    fn alpha(&self) -> f32 {
+        1.0
+    }
+
+    fn kind(&self) -> Kind {
+        Kind::Unspecified
+    }
+}
+
+impl RenderElement<GlesRenderer> for Shaded {
+    fn draw(
+        &self,
+        frame: &mut GlesFrame<'_, '_>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
+        _cache: Option<&UserDataMap>,
+    ) -> Result<(), GlesError> {
+        frame.render_texture_from_to(&self.texture, src, dst, damage, opaque_regions, Transform::Normal, 1.0, Some(&self.program), &self.uniforms)
+    }
+}

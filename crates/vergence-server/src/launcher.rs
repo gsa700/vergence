@@ -42,6 +42,8 @@ const ICON: i32 = 32;
 pub struct Launcher {
     open: Option<Open>,
     picture: Option<(u64, MemoryRenderBuffer)>,
+    /// The frost behind it (look milestone 1, step 5).
+    backdrop: crate::backdrop::Slot,
 }
 
 struct Open {
@@ -238,8 +240,10 @@ impl Server {
         // Light or dark (look milestone 1).
         let light = self.light_style();
         let s = vergence_look::shelf_look(light);
+        // With the frost on, the popup's ground is the frost, drawn under its picture.
+        let frost = self.frost_program(renderer);
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (&typed, selected, grid.scroll, scale.to_bits(), at.size.w, at.size.h, found.len(), light).hash(&mut hasher);
+        (&typed, selected, grid.scroll, scale.to_bits(), at.size.w, at.size.h, found.len(), light, frost.is_some()).hash(&mut hasher);
         for (index, _, name, icon) in &cells {
             (index, name, icon.is_some()).hash(&mut hasher);
         }
@@ -249,7 +253,9 @@ impl Server {
             // Everything below is in the popup's own points.
             let local = |r: Rect| SceneRect::new((r.x - at.loc.x) as f32, (r.y - at.loc.y) as f32, r.w as f32, r.h as f32);
             let mut scene = Scene::new(w, h);
-            scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, color(s.menu));
+            if frost.is_none() {
+                scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, color(s.menu));
+            }
             scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, color(s.edge));
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             let face = fonts.face("sans-serif", 400, false);
@@ -332,9 +338,27 @@ impl Server {
         let a = (at.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let b = (at.loc + at.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
-        match MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(at.size), Kind::Unspecified) {
-            Ok(el) => vec![SceneElement::Memory(el)],
-            Err(_) => Vec::new(),
+        let mut elements = Vec::new();
+        if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(at.size), Kind::Unspecified) {
+            elements.push(SceneElement::Memory(el));
         }
+        if let Some(program) = frost {
+            let look = crate::backdrop::Look {
+                tint: crate::backdrop::unit(s.menu),
+                strength: vergence_look::frost_strength(self.look_setting("frost")),
+                ink: crate::backdrop::unit(s.menu_ink),
+                need: 5.0,
+                radius: vergence_look::FROST_RADIUS * scale as f32,
+                corner: vergence_look::RADIUS * scale as f32,
+                bottom: true,
+            };
+            let dst = Rectangle::<i32, smithay::utils::Physical>::new(a, (b.x - a.x, b.y - a.y).into());
+            let mut slot = self.launcher.backdrop.take();
+            if let Some(e) = crate::backdrop::element(renderer, &mut slot, dst, program, &look) {
+                elements.push(SceneElement::Backdrop(e));
+            }
+            self.launcher.backdrop = slot;
+        }
+        elements
     }
 }

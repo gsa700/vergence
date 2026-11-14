@@ -70,7 +70,7 @@ smithay::backend::renderer::element::render_elements! {
     Moving = crate::shelf::Moving,
     /// A native window's GPU picture (native.rs).
     Texture = smithay::backend::renderer::element::texture::TextureRenderElement<smithay::backend::renderer::gles::GlesTexture>,
-    Frost = smithay::backend::renderer::gles::element::TextureShaderElement,
+    Shaded = crate::backdrop::Shaded,
     Backdrop = crate::backdrop::Backdrop,
 }
 
@@ -106,6 +106,11 @@ pub struct Decor {
     /// The border's four rounded corners per output scale, with the color
     /// they were drawn in (its own pictures: an element appears once a frame).
     corners: std::collections::HashMap<u64, ([u8; 3], [MemoryRenderBuffer; 4])>,
+    /// The frost behind a Wayland or X11 window's bar (look milestone 1, step 5).
+    backdrop: crate::backdrop::Slot,
+    /// The frost of its own top strip, and its picture with rounded corners.
+    frost: crate::backdrop::ShadedSlot,
+    round: crate::backdrop::ShadedSlot,
 }
 
 /// A bar drawn for one scale: what it shows, and the pixels.
@@ -138,6 +143,9 @@ impl Decor {
             light: false,
             bars: Default::default(),
             corners: Default::default(),
+            backdrop: None,
+            frost: Default::default(),
+            round: Default::default(),
         }
     }
 }
@@ -206,7 +214,7 @@ fn corner_pictures(fonts: &mut vergence_text::Fonts, scale: f64, rgb: [u8; 3]) -
 /// A native window's picture as a GPU texture, with its size in pixels and
 /// in points: imported the first time it is asked for, on whichever monitor
 /// that is. None for a picture in shared memory or one that failed to import.
-fn native_texture(renderer: &mut GlesRenderer, w: &Win) -> Option<(smithay::backend::renderer::element::texture::TextureBuffer<smithay::backend::renderer::gles::GlesTexture>, smithay::utils::Size<i32, smithay::utils::Buffer>, smithay::utils::Size<i32, Logical>)> {
+fn native_texture(renderer: &mut GlesRenderer, w: &Win) -> Option<(smithay::backend::renderer::element::texture::TextureBuffer<smithay::backend::renderer::gles::GlesTexture>, smithay::backend::renderer::gles::GlesTexture, smithay::utils::Size<i32, smithay::utils::Buffer>, smithay::utils::Size<i32, Logical>)> {
     let n = w.native()?;
     let p = n.picture()?;
     let crate::native::Content::Gpu(g) = &p.content else { return None };
@@ -214,14 +222,17 @@ fn native_texture(renderer: &mut GlesRenderer, w: &Win) -> Option<(smithay::back
     if g.texture.is_none() && !g.failed {
         use smithay::backend::renderer::ImportDma;
         match renderer.import_dmabuf(&g.dmabuf, None) {
-            Ok(t) => g.texture = Some(smithay::backend::renderer::element::texture::TextureBuffer::from_texture(renderer, t, 1, Transform::Normal, None)),
+            Ok(t) => {
+                g.gles = Some(t.clone());
+                g.texture = Some(smithay::backend::renderer::element::texture::TextureBuffer::from_texture(renderer, t, 1, Transform::Normal, None));
+            }
             Err(e) => {
                 g.failed = true;
                 tracing::warn!("native window GPU picture: {e:?}");
             }
         }
     }
-    Some((g.texture.clone()?, p.px, p.logical))
+    Some((g.texture.clone()?, g.gles.clone()?, p.px, p.logical))
 }
 
 impl Server {
@@ -591,8 +602,10 @@ impl Server {
                 // A native window that draws under its bar, with its picture on the
                 // GPU: the strip at the picture's top is frosted into the bar.
                 let under = frost.as_ref().filter(|_| w.native().is_some_and(|n| n.inset() > 0)).and_then(|_| native_texture(renderer, &w));
+                // A Wayland or X11 window's bar: frosted over what is behind it.
+                let behind = frost.is_some() && w.native().is_none();
                 if let Some(f) = frame {
-                    let frosted = under.is_some();
+                    let frosted = under.is_some() || behind;
                     // The bar, vergence-bar's, drawn once per scale and again when what it shows changes.
                     let hover = hovered.as_ref().filter(|(hw, _)| *hw == w).map(|(_, p)| *p);
                     let width = f.title.size.w;
@@ -685,12 +698,35 @@ impl Server {
                     // Behind it, the frost: the top of the window's own picture, blurred
                     // and tinted (vergence_render::blur), the tint raised where the
                     // bar's ink needs it.
-                    if let (Some(program), Some((texture, px, logical))) = (frost.as_ref(), under.as_ref()) {
-                        use smithay::backend::renderer::gles::{Uniform, UniformValue, element::TextureShaderElement};
+                    if behind && let Some(program) = frost.clone() {
+                        let front_alert = alerts.get(shown).copied().unwrap_or(false);
+                        let (ground, ink) = match (front_alert, active) {
+                            (true, true) => (style.alert_ground, style.ink),
+                            (true, false) => (style.alert_ground_off, style.ink_off),
+                            (false, true) => (style.ground, style.ink),
+                            (false, false) => (style.ground_off, style.ink_off),
+                        };
+                        let look = crate::backdrop::Look {
+                            tint: crate::backdrop::unit(ground),
+                            strength,
+                            ink: crate::backdrop::unit(ink),
+                            need: vergence_look::frost_need(light, active),
+                            radius: vergence_look::FROST_RADIUS * scale as f32,
+                            corner: 0.0,
+                            bottom: false,
+                        };
+                        let px = (f.title.size.to_f64().to_physical(scale)).to_i32_round::<i32>();
+                        let dst = Rectangle::<i32, Physical>::new(at, px);
+                        if let Some(e) = crate::backdrop::element(renderer, &mut d.backdrop, dst, program, &look) {
+                            elements.push(SceneElement::Backdrop(e));
+                        }
+                    }
+                    if let (Some(program), Some((_, texture, px, logical))) = (frost.as_ref(), under.as_ref()) {
+                        use smithay::backend::renderer::gles::{Uniform, UniformValue};
                         let per_point = px.w as f64 / logical.w.max(1) as f64;
                         let rows = (f.title.size.h as f64 * per_point).round().min(px.h as f64);
-                        let strip = Rectangle::<f64, Logical>::from_size((px.w as f64, rows).into());
-                        let inner = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at.to_f64(), texture, None, Some(strip), Some(f.title.size), Kind::Unspecified);
+                        let strip = Rectangle::<f64, smithay::utils::Buffer>::from_size((px.w as f64, rows).into());
+                        let dst = Rectangle::<i32, Physical>::new(at, f.title.size.to_f64().to_physical(scale).to_i32_round());
                         // The frost's tint: the bar's ground, the alarm's while a superuser's tab is in front.
                         let front_alert = alerts.get(shown).copied().unwrap_or(false);
                         let (ground, ink) = match (front_alert, active) {
@@ -710,7 +746,7 @@ impl Server {
                             Uniform::new("need", UniformValue::_1f(vergence_look::frost_need(light, active))),
                             Uniform::new("corner", UniformValue::_1f(if rounded { vergence_look::RADIUS * per_point as f32 } else { 0.0 })),
                         ];
-                        elements.push(SceneElement::Frost(TextureShaderElement::new(inner, program.clone(), uniforms)));
+                        elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(&mut d.frost, dst, strip, texture.clone(), program.clone(), uniforms)));
                     }
                 }
             }
@@ -731,20 +767,25 @@ impl Server {
                             }
                         }
                         crate::native::Content::Gpu(_) => {
-                            if let Some((t, _, _)) = native_texture(renderer, &w) {
-                                let e = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at.to_f64(), &t, None, Some(whole), Some(p.logical), Kind::Unspecified);
+                            if let Some((t, gles, _, _)) = native_texture(renderer, &w) {
                                 // Its bottom corners cut to the one radius, unless maximized.
                                 match round.as_ref().filter(|_| !self.restore.contains_key(&w) && self.frame_of(&w).is_some()) {
                                     Some(program) => {
-                                        use smithay::backend::renderer::gles::{Uniform, UniformValue, element::TextureShaderElement};
+                                        use smithay::backend::renderer::gles::{Uniform, UniformValue};
                                         let per_point = p.px.w as f32 / p.logical.w.max(1) as f32;
                                         let uniforms = vec![
                                             Uniform::new("size", UniformValue::_2f(p.px.w as f32, p.px.h as f32)),
                                             Uniform::new("radius", UniformValue::_1f(vergence_look::RADIUS * per_point)),
                                         ];
-                                        elements.push(SceneElement::Frost(TextureShaderElement::new(e, program.clone(), uniforms)));
+                                        let dst = Rectangle::<i32, Physical>::new(at, p.logical.to_f64().to_physical(scale).to_i32_round());
+                                        let src = Rectangle::<f64, smithay::utils::Buffer>::from_size((p.px.w as f64, p.px.h as f64).into());
+                                        let slot = &mut self.decor.entry(w.clone()).or_insert_with(Decor::new).round;
+                                        elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(slot, dst, src, gles, program.clone(), uniforms)));
                                     }
-                                    None => elements.push(SceneElement::Texture(e)),
+                                    None => {
+                                        let e = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at.to_f64(), &t, None, Some(whole), Some(p.logical), Kind::Unspecified);
+                                        elements.push(SceneElement::Texture(e));
+                                    }
                                 }
                             }
                         }

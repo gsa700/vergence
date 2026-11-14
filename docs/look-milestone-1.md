@@ -373,8 +373,28 @@ Bar Proportions"):
   screenshots on Hubble: the grey wallpaper behind the dock frosted, and a
   window slid under its lower half darkening only that half. Not seen by
   me: the screen's own path (the other branch of the same test). 395
-  tests on all three. **Left of step 5**: Wayland and X11 windows' bars,
-  the menus and the apps popup.
+  tests on all three.
+- **Step 5 done** (2026-11-13): the rest of it, and a bug found on the
+  way. `backdrop::element` makes or keeps a surface's texture (`Slot`, with
+  a commit moved on whenever the texture is new: Smithay captures when what
+  is behind changed or the element reports damage of its own, and a menu
+  opening over a still desktop changed nothing behind it, so its first
+  frost was only its tint). Frosted over what is behind them: the dock, the
+  apps popup (rounded at all four corners), the server's menus (their edge
+  now four lines: the solid rectangle it was, behind the ground, was what
+  the frost captured, found by logging the capture's average color) and
+  Wayland and X11 windows' bars (each window's texture in its Decor). **The
+  bug**: Smithay's TextureShaderElement takes a new id each time it is
+  made, so since step 3 every frame with a frosted or rounded native window
+  looked new and the screen was drawn at every refresh: the idle server used
+  25% of a core on Hubble. `backdrop::Shaded` (a stable id per window, a
+  commit that moves only when the picture, its place or the shader's numbers
+  change) replaces it: idle now about 5% (likely the existing look-again
+  timer that rebuilds the scene every 16 ms when nothing changed; not
+  measured apart). Seen in screenshots on Hubble: the menu with the
+  dashboard blurred through it, the apps popup over a white window (frost
+  nearly solid there, as the white labels need) and over the wallpaper.
+  395 tests on all three.
 
 ## Steps
 

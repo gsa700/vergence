@@ -330,7 +330,7 @@ pub struct Shelf {
     picture: Option<((i32, u64, u64), MemoryRenderBuffer)>,
     /// The frost behind the dock (look milestone 1, step 5): its element's
     /// id, the texture its capture goes into (kept while its size holds).
-    backdrop: Option<(smithay::backend::renderer::element::Id, smithay::backend::renderer::gles::GlesTexture)>,
+    backdrop: crate::backdrop::Slot,
     /// The applications this machine has (vergence-shell), read again when a
     /// directory of desktop entries changes.
     pub apps: Vec<Entry>,
@@ -1308,36 +1308,22 @@ impl Server {
         }
         // Behind it, the frost of what is behind the dock.
         if let Some(program) = frost {
-            use smithay::backend::renderer::{Offscreen, gles::GlesTexture};
             let dst = Rectangle::<i32, smithay::utils::Physical>::new(a, (b.x - a.x, b.y - a.y).into());
-            let fresh = self.shelf.backdrop.as_ref().is_none_or(|(_, t)| {
-                use smithay::backend::renderer::Texture;
-                (t.width() as i32, t.height() as i32) != (dst.size.w, dst.size.h)
-            });
-            if fresh && dst.size.w > 0 && dst.size.h > 0 {
-                match Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, (dst.size.w, dst.size.h).into()) {
-                    Ok(t) => {
-                        let id = self.shelf.backdrop.take().map_or_else(smithay::backend::renderer::element::Id::new, |(id, _)| id);
-                        self.shelf.backdrop = Some((id, t));
-                    }
-                    Err(e) => tracing::warn!("dock frost: no texture: {e:?}"),
-                }
+            let s = vergence_look::shelf_look(self.light_style());
+            let look = crate::backdrop::Look {
+                tint: crate::backdrop::unit(s.dock),
+                strength: vergence_look::frost_strength(self.look_setting("frost")),
+                ink: crate::backdrop::unit(s.mark),
+                need: 3.6,
+                radius: vergence_look::FROST_RADIUS * scale as f32,
+                corner: vergence_look::RADIUS * scale as f32,
+                bottom: true,
+            };
+            let mut slot = self.shelf.backdrop.take();
+            if let Some(e) = crate::backdrop::element(renderer, &mut slot, dst, program, &look) {
+                elements.push(SceneElement::Backdrop(e));
             }
-            if let Some((id, texture)) = &self.shelf.backdrop {
-                let light = self.light_style();
-                let s = vergence_look::shelf_look(light);
-                let unit = |c: vergence_look::Rgb| [c.0 as f32 / 255.0, c.1 as f32 / 255.0, c.2 as f32 / 255.0];
-                let look = crate::backdrop::Look {
-                    tint: unit(s.dock),
-                    strength: vergence_look::frost_strength(self.look_setting("frost")),
-                    ink: unit(s.mark),
-                    need: 3.6,
-                    radius: vergence_look::FROST_RADIUS * scale as f32,
-                    corner: vergence_look::RADIUS * scale as f32,
-                    bottom: true,
-                };
-                elements.push(SceneElement::Backdrop(crate::backdrop::Backdrop::new(id.clone(), smithay::backend::renderer::utils::CommitCounter::default(), dst, texture.clone(), program, &look)));
-            }
+            self.shelf.backdrop = slot;
         }
         elements
     }

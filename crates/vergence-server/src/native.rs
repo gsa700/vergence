@@ -165,6 +165,8 @@ pub enum Content {
 pub struct GpuPicture {
     pub dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
     pub texture: Option<smithay::backend::renderer::element::texture::TextureBuffer<smithay::backend::renderer::gles::GlesTexture>>,
+    /// The same texture as GL knows it, for our shaders (backdrop.rs Shaded).
+    pub gles: Option<smithay::backend::renderer::gles::GlesTexture>,
     /// The renderer refused it: not tried again (the window keeps its last picture).
     pub failed: bool,
 }
@@ -593,7 +595,7 @@ impl Server {
         let px: Size<i32, BufferCoords> = (width as i32, height as i32).into();
         let mut s = n.state.lock().unwrap();
         let logical = ((width as f64 / s.scale).round() as i32, (height as f64 / s.scale).round() as i32).into();
-        let gpu = GpuPicture { dmabuf, texture: None, failed: false };
+        let gpu = GpuPicture { dmabuf, texture: None, gles: None, failed: false };
         s.picture = Some(Picture { content: Content::Gpu(Arc::new(Mutex::new(gpu))), px, logical, format });
         Ok(())
     }
