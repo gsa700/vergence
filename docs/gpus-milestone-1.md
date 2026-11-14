@@ -10,7 +10,8 @@ Intel GPU draws external screens by default; nouveau now, NVIDIA's driver
 and explicit sync as the next GPU milestone).
 **Closed 2026-11-14** (Dave: "go ahead with the docs, carry the fallback
 over"). Carried over: way 2, the copy by the CPU for two GPUs that share no
-buffer format, with its test on a fake second GPU (step 4).
+buffer format, with its test on a fake second GPU (step 4); the second GPU's
+probe on waking moved off the server's thread (a 0.45 s hitch now).
 
 ## Where things stand (read 2026-11-14 on Hubble)
 
@@ -297,4 +298,8 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
    waking: the NVIDIA card had gone to sleep with its screen blanked, and a
    sleeping card sees no cable leave (the kernel still said "connected").
    Fixed: the other GPUs' connectors are probed again (a forced probe, which
-   wakes the card) whenever the screens come back on. **Met** once retried.
+   wakes the card) whenever the screens come back on. **Met** once retried
+   (Dave, 16:56: woke it, the 14" removed 2 s later, the windows back on the
+   panel, the NVIDIA card asleep again). Cost: the probe wakes the card while
+   the server waits, a 0.45 s hitch on waking; carried over: probe off the
+   main thread.
