@@ -41,16 +41,10 @@ const CLOSE_NEEDS: f32 = 72.0;
 const fn color(c: vergence_look::Rgb) -> Color {
     Color::rgb(c.0, c.1, c.2)
 }
-const fn shape(alpha: u8) -> Color {
-    Color::rgba(255, 255, 255, alpha)
+const fn shape(c: vergence_look::Rgb, alpha: u8) -> Color {
+    Color::rgba(c.0, c.1, c.2, alpha)
 }
-const BAR_FOCUSED: Color = color(vergence_look::BAR_FOCUSED);
-const BAR_UNFOCUSED: Color = color(vergence_look::BAR_UNFOCUSED);
-const INK_FOCUSED: Color = color(vergence_look::INK_FOCUSED);
-const INK_UNFOCUSED: Color = color(vergence_look::INK_UNFOCUSED);
 const CLOSE_HOVER: Color = color(vergence_look::CLOSE);
-const SHAPE_REST: Color = shape(vergence_look::SHAPE_REST);
-const SHAPE_HOVER: Color = shape(vergence_look::SHAPE_HOVER);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WinButton {
@@ -72,6 +66,61 @@ pub const DEFAULT_LAYOUT: &str = "close,minimize,maximize:";
 pub fn desktop_layout() -> (Vec<WinButton>, Vec<WinButton>) {
     let text = settings_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
     decoration_layout(&host_layout().or_else(|| layout_setting(&text)).unwrap_or_else(|| DEFAULT_LAYOUT.into()))
+}
+
+/// Whether the desktop is in its light style: under GNOME, GNOME's own
+/// ([`host_light`]: anything but "prefer-dark" is light there); else
+/// Vergence's desktop file (`~/.config/vergence/desktop.toml`, `[appearance]`
+/// `color-scheme = "light"`; "dark", "default" or nothing is dark, as the
+/// server reads it). What the toolkit's own bar and border follow; the
+/// server's bars follow the server's settings.
+pub fn desktop_light() -> bool {
+    host_light().unwrap_or_else(|| {
+        let text = desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        color_scheme_light(&text)
+    })
+}
+
+/// `color-scheme = "light"` under `[appearance]` in desktop.toml's text.
+pub fn color_scheme_light(text: &str) -> bool {
+    let mut section = "";
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            section = line;
+        } else if section == "[appearance]"
+            && let Some((k, v)) = line.split_once('=')
+            && k.trim() == "color-scheme"
+        {
+            return v.trim().trim_matches('"') == "light";
+        }
+    }
+    false
+}
+
+/// GNOME's light or dark (org.gnome.desktop.interface color-scheme), when
+/// running under GNOME outside a Vergence session; None elsewhere. Asked
+/// with gsettings, as [`host_layout`] is.
+pub fn host_light() -> Option<bool> {
+    if std::env::var_os("VERGENCE_BUS").is_some() {
+        return None;
+    }
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    if !desktop.split(':').any(|d| d.eq_ignore_ascii_case("GNOME")) {
+        return None;
+    }
+    let out = std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "color-scheme"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    Some(String::from_utf8_lossy(&out.stdout).trim().trim_matches('\'') != "prefer-dark")
+}
+
+/// Vergence's desktop file, which holds light or dark.
+pub fn desktop_path() -> Option<std::path::PathBuf> {
+    settings_path().map(|p| p.with_file_name("desktop.toml"))
 }
 
 /// GNOME's button layout ("icon:minimize,close"), when the program runs
@@ -267,6 +316,8 @@ fn icon(scene: &mut Scene, r: &Rect, what: Part, size: f32, ink: Color) {
 
 /// What the bar is drawn with.
 pub struct Look<'a> {
+    /// The style's colors (vergence_look::bar_look: light or dark).
+    pub bar: &'a vergence_look::BarLook,
     pub focused: bool,
     /// The terminal's own ground and text: the shown tab is drawn in them, joined to the pane.
     pub pane: Color,
@@ -283,19 +334,30 @@ pub struct Look<'a> {
 
 /// Draws the bar across the top of the scene.
 pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) {
-    let ink = if look.focused { INK_FOCUSED } else { INK_UNFOCUSED };
-    scene.fill(Rect::new(0.0, 0.0, scene.width, BAR_H), if look.focused { BAR_FOCUSED } else { BAR_UNFOCUSED });
+    let l = look.bar;
+    let ink = color(if look.focused { l.ink } else { l.ink_off });
+    let shape_rest = shape(l.shape, l.shape_rest);
+    let tab_rest = shape(l.shape, l.tab_rest);
+    let shape_hover = shape(l.shape, l.shape_hover);
+    scene.fill(Rect::new(0.0, 0.0, scene.width, BAR_H), color(if look.focused { l.ground } else { l.ground_off }));
     for (b, r) in &layout.buttons {
         let part = Part::Button(*b);
-        // A button has a shape at rest, the fill of a tab that is not shown, and
-        // is lighter under the pointer as such a tab is; the close button, red.
-        let fill = match (look.hover == Some(part), *b) {
-            (true, WinButton::Close) => CLOSE_HOVER,
-            (true, _) => SHAPE_HOVER,
-            (false, _) => SHAPE_REST,
+        // The buttons float on the tabs' line: drawn inset, pressed anywhere in
+        // their box. Shaded at rest only while the window has the keyboard;
+        // under the pointer lighter (darker in light), the close button red
+        // with a white mark.
+        let drawn = Rect::new(r.x + vergence_look::BUTTON_INSET_X, r.y + vergence_look::BUTTON_INSET_Y, r.w - 2.0 * vergence_look::BUTTON_INSET_X, r.h - 2.0 * vergence_look::BUTTON_INSET_Y);
+        let hovered = look.hover == Some(part);
+        let fill = match (hovered, *b) {
+            (true, WinButton::Close) => Some(CLOSE_HOVER),
+            (true, _) => Some(shape_hover),
+            (false, _) => look.focused.then_some(shape_rest),
         };
-        scene.fill_rounded(*r, RADIUS, fill);
-        icon(scene, r, part, 10.0, ink);
+        if let Some(fill) = fill {
+            scene.fill_rounded(drawn, RADIUS, fill);
+        }
+        let mark = if hovered && *b == WinButton::Close { Color::rgb(255, 255, 255) } else { ink };
+        icon(scene, r, part, 10.0, mark);
     }
     // A tab is round at the top and square where it meets the pane: drawn taller than the bar and cut off.
     let tab_shape = |scene: &mut Scene, r: &Rect, fill: Color| {
@@ -307,7 +369,7 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
         let shown = i == look.shown;
         let hovered = matches!(look.hover, Some(Part::Tab(t) | Part::CloseTab(t)) if t == i);
         let tab_ink = if shown { look.pane_ink } else { ink };
-        tab_shape(scene, tab, if shown { look.pane } else if hovered { SHAPE_HOVER } else { SHAPE_REST });
+        tab_shape(scene, tab, if shown { look.pane } else if hovered { shape_hover } else { tab_rest });
         let mut text_from = tab.x + 12.0;
         let mut text_to = tab.x + tab.w - 8.0;
         if let Some(close) = &layout.closes[i] {
@@ -333,7 +395,7 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
         }
     }
     if layout.plus.w > 0.0 {
-        tab_shape(scene, &layout.plus, if look.hover == Some(Part::Plus) { SHAPE_HOVER } else { SHAPE_REST });
+        tab_shape(scene, &layout.plus, if look.hover == Some(Part::Plus) { shape_hover } else { tab_rest });
         icon(scene, &layout.plus, Part::Plus, 12.0, ink);
     }
     if let (Some(room), Some(face)) = (&layout.title, look.font)
@@ -420,6 +482,15 @@ pub fn reorder<T>(items: &mut Vec<T>, from: usize, to: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn light_is_read_from_the_appearance_section() {
+        assert!(color_scheme_light("[wallpaper]\nmode = \"fill\"\n[appearance]\ncolor-scheme = \"light\"\n"));
+        assert!(!color_scheme_light("[appearance]\ncolor-scheme = \"dark\"\n"));
+        assert!(!color_scheme_light("[appearance]\ncolor-scheme = \"default\"\n"));
+        assert!(!color_scheme_light("[other]\ncolor-scheme = \"light\"\n"));
+        assert!(!color_scheme_light(""));
+    }
 
     const LEFT: [WinButton; 2] = [WinButton::Close, WinButton::Minimize];
 

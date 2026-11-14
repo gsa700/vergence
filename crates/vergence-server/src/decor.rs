@@ -60,8 +60,6 @@ pub const TITLE_H: i32 = vergence_bar::BAR_H as i32;
 pub const BORDER: i32 = vergence_look::RESIZE_BAND as i32;
 /// The border line around a window, in points.
 pub const EDGE: i32 = vergence_look::EDGE as i32;
-const EDGE_ACTIVE: [f32; 4] = vergence_look::EDGE_FOCUSED.floats();
-const EDGE_INACTIVE: [f32; 4] = vergence_look::EDGE_UNFOCUSED.floats();
 
 
 smithay::backend::renderer::element::render_elements! {
@@ -99,13 +97,15 @@ pub struct Decor {
     ids: [Id; 11],
     commit: CommitCounter,
     active: bool,
+    /// The style it was last drawn in (its border's color follows it).
+    light: bool,
     /// One bar picture per output scale (key: the scale's bits).
     bars: std::collections::HashMap<u64, BarPicture>,
 }
 
 /// A bar drawn for one scale: what it shows, and the pixels.
 struct BarPicture {
-    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>),
+    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, bool),
     buffer: MemoryRenderBuffer,
     /// Its pixels' width and height (the scale's, not the bar's points).
     px: (i32, i32),
@@ -126,6 +126,7 @@ impl Decor {
             ids: std::array::from_fn(|_| Id::new()),
             commit: CommitCounter::default(),
             active: false,
+            light: false,
             bars: Default::default(),
         }
     }
@@ -212,6 +213,13 @@ impl Server {
     /// (Gtk/DecorationLayout; vergence-bar's default, on the left, if unset).
     pub fn button_layout(&self) -> (Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>) {
         vergence_bar::decoration_layout(&self.button_layout_text())
+    }
+
+    /// Whether the desktop is in its light style (org.freedesktop.appearance
+    /// color-scheme 2, from desktop.toml's `color-scheme = "light"`), which
+    /// the bars, borders and notification cards follow.
+    pub fn light_style(&self) -> bool {
+        self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "color-scheme".to_string())) == Some(&vergence_protocol::bus::SettingValue::U32(2))
     }
 
     fn button_layout_text(&self) -> String {
@@ -315,6 +323,9 @@ impl Server {
             }
         };
         let layout_text = self.button_layout_text();
+        // Light or dark (Settings > Appearance > Style; look milestone 1).
+        let light = self.light_style();
+        let style = vergence_look::bar_look(light);
         self.decor.retain(|w, _| w.alive());
         // A window on its way back from the dock is put in its place when it arrives.
         self.shelf_motions_end();
@@ -341,8 +352,9 @@ impl Server {
                 let active = focused.as_ref() == Some(&w);
                 let preview = self.tab_preview(&w);
                 let d = self.decor.entry(w.clone()).or_insert_with(Decor::new);
-                if d.active != active {
+                if d.active != active || d.light != light {
                     d.active = active;
+                    d.light = light;
                     d.commit.increment();
                 }
                 let solid = |i: usize, r: Rectangle<f64, Logical>, c: [f32; 4]| {
@@ -351,7 +363,7 @@ impl Server {
                 // The border line, just outside the window (ids 6-9).
                 if let Some(b) = border {
                     let (r, e) = (b.to_f64(), EDGE as f64);
-                    let c = if active { EDGE_ACTIVE } else { EDGE_INACTIVE };
+                    let c = if active { style.edge.floats() } else { style.edge_off.floats() };
                     elements.push(solid(6, Rectangle::new((r.loc.x - e, r.loc.y - e).into(), (r.size.w + 2.0 * e, e).into()), c));
                     elements.push(solid(7, Rectangle::new((r.loc.x - e, r.loc.y + r.size.h).into(), (r.size.w + 2.0 * e, e).into()), c));
                     elements.push(solid(8, Rectangle::new((r.loc.x - e, r.loc.y).into(), (e, r.size.h).into()), c));
@@ -378,28 +390,31 @@ impl Server {
                         titles = order.iter().map(|&i| titles[i].clone()).collect();
                         shown = order.iter().position(|&i| i == front).unwrap_or(0);
                     }
-                    let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent);
+                    let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent, light);
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
-                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None),
+                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, false),
                         buffer: MemoryRenderBuffer::new(Fourcc::Abgr8888, (1, 1), 1, Transform::Normal, None),
                         px: (1, 1),
                     });
                     if picture.key != key && width > 0 {
                         let face = fonts.face("sans-serif", 400, false);
                         let mut scene = vergence_scene::Scene::new(width as f32, TITLE_H as f32);
-                        // The tab in front: the desktop's color, or the program's accent (bar milestone 1).
-                        let front = match accent {
-                            Some(c) => vergence_scene::Color::rgb((c >> 16) as u8, (c >> 8) as u8, c as u8),
-                            None => {
-                                let c = if active { vergence_look::TAB_FRONT_FOCUSED } else { vergence_look::TAB_FRONT_UNFOCUSED };
-                                vergence_scene::Color::rgb(c.0, c.1, c.2)
+                        // The tab in front: the program's page color (the terminal's
+                        // ground: look milestone 1, "front tab should be page color"),
+                        // with whichever ink reads on it; else the style's.
+                        let (front, ink) = match accent {
+                            Some(c) => {
+                                let page = vergence_look::Rgb((c >> 16) as u8, (c >> 8) as u8, c as u8);
+                                (page, vergence_look::ink_on(page))
                             }
+                            None if active => (style.front, style.ink),
+                            None => (style.front_off, style.ink_off),
                         };
-                        let ink = if active { vergence_look::INK_FOCUSED } else { vergence_look::INK_UNFOCUSED };
                         let look = vergence_bar::Look {
+                            bar: style,
                             focused: active,
-                            pane: front,
+                            pane: vergence_scene::Color::rgb(front.0, front.1, front.2),
                             pane_ink: vergence_scene::Color::rgb(ink.0, ink.1, ink.2),
                             font: face,
                             font_size: vergence_bar::FONT_SIZE,

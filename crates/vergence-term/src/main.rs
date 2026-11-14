@@ -95,6 +95,8 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 struct Settings {
     left: Vec<WinButton>,
     right: Vec<WinButton>,
+    /// Light or dark, for the bar we draw ourselves (bar::desktop_light).
+    light: bool,
     ui_family: String,
     ui_size: f32,
     mono_family: String,
@@ -126,8 +128,8 @@ fn config(name: &str) -> String {
 /// toolkit speaks it).
 fn watch_settings(changed: Arc<AtomicBool>, waker: Waker) {
     let stamp = |name: &str| config_path(name).and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok());
-    // The files' times, and GNOME's button layout when running there (bar::host_layout).
-    let stamps = move || ([stamp("desktop.toml"), stamp("settings.toml")], bar::host_layout());
+    // The files' times, and GNOME's button layout and light or dark when running there.
+    let stamps = move || ([stamp("desktop.toml"), stamp("settings.toml")], bar::host_layout(), bar::host_light());
     std::thread::spawn(move || {
         let mut seen = stamps();
         loop {
@@ -150,6 +152,7 @@ impl Settings {
         if let Some(layout) = bar::host_layout() {
             (s.left, s.right) = bar::decoration_layout(&layout);
         }
+        s.light = bar::desktop_light();
         s
     }
 
@@ -164,7 +167,7 @@ impl Settings {
         let (left, right) = bar::decoration_layout(&value("Gtk/DecorationLayout").unwrap_or_else(|| bar::DEFAULT_LAYOUT.into()));
         let (ui_family, ui_size) = font_name(&value("Gtk/FontName").unwrap_or_default(), "sans-serif", 10.0);
         let (mono_family, mono_size) = font_name(&value("Gtk/MonospaceFontName").unwrap_or_default(), "monospace", 10.0);
-        Settings { left, right, ui_family, ui_size, mono_family, mono_size }
+        Settings { left, right, light: false, ui_family, ui_size, mono_family, mono_size }
     }
 }
 /// While a selection is held past the top or bottom edge, the view moves a line this often.
@@ -564,7 +567,7 @@ struct Terminal {
     /// the server draws it (native road, bar milestone 1).
     bar_h: f32,
     /// The bar as last described to the server: each tab's id and title, the front one.
-    bar_told: Option<(Vec<(u32, String)>, u32)>,
+    bar_told: Option<(Vec<(u32, String)>, u32, u32)>,
     waker: Option<Waker>,
     palette: Palette,
     /// How opaque the ground is (vergence_ui::opacity_setting): less than 1,
@@ -1494,17 +1497,20 @@ impl App for Terminal {
     fn bar(&mut self) -> Option<vergence_ui::Bar> {
         let tabs: Vec<(u32, String)> = self.tabs.iter().map(|t| (t.id, t.label())).collect();
         let front = self.tabs.get(self.shown).map_or(0, |t| t.id);
-        if self.bar_told.as_ref().is_some_and(|(told, f)| *told == tabs && *f == front) {
+        // The tab in front is the page's color (look milestone 1): our ground.
+        let bg = self.palette.bg;
+        let page = (bg.r as u32) << 16 | (bg.g as u32) << 8 | bg.b as u32;
+        if self.bar_told.as_ref().is_some_and(|(told, f, a)| *told == tabs && *f == front && *a == page) {
             return None;
         }
         let bar = vergence_ui::Bar::Tabs {
             tabs: tabs.iter().map(|(id, title)| vergence_ui::BarTab { id: *id, title: title.chars().take(200).collect(), closable: true }).collect(),
             front,
             plus: true,
-            accent: None,
+            accent: Some(page),
             menu: Vec::new(),
         };
-        self.bar_told = Some((tabs, front));
+        self.bar_told = Some((tabs, front, page));
         Some(bar)
     }
 
@@ -2046,7 +2052,7 @@ impl App for Terminal {
         if !frame.bar_by_server {
             let titles: Vec<String> = self.tabs.iter().map(Tab::label).collect();
             let layout = Layout::new(frame.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right);
-            bar::draw(&mut scene, fonts, &layout, &bar::Look { focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, title: "", shown: self.shown, hover: self.hover });
+            bar::draw(&mut scene, fonts, &layout, &bar::Look { bar: vergence_look::bar_look(self.settings.light), focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, title: "", shown: self.shown, hover: self.hover });
         }
 
         let Some(tab) = self.tabs.get(self.shown) else { return scene };

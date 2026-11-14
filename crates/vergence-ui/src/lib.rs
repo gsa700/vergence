@@ -686,6 +686,8 @@ struct Runner<'a> {
     /// Our bar's buttons, left and right ([`bar::desktop_layout`]), and
     /// the flag the settings watcher raises when the layout may have changed.
     buttons: (Vec<bar::WinButton>, Vec<bar::WinButton>),
+    /// Light or dark for that bar and the border ([`bar::desktop_light`]).
+    light: bool,
     layout_changed: Arc<AtomicBool>,
     /// The pipe other threads wake the program through, its flag, and a
     /// waker to hand each window the program opens.
@@ -787,8 +789,10 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
     let layout_changed = Arc::new(AtomicBool::new(false));
     if !app.own_frame() {
         let (changed, waker) = (layout_changed.clone(), Waker { pipe: wake_pipe, pending: wake_pending.clone() });
-        // Vergence's settings file's time, and GNOME's layout when running there.
-        let stamp = || (bar::settings_path().and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok()), bar::host_layout());
+        // Vergence's settings and desktop files' times, and GNOME's layout and
+        // light or dark when running there.
+        let time = |p: Option<std::path::PathBuf>| p.and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok());
+        let stamp = move || (time(bar::settings_path()), time(bar::desktop_path()), bar::host_layout(), bar::host_light());
         std::thread::Builder::new().name("settings".into()).spawn(move || {
             let mut seen = stamp();
             loop {
@@ -843,6 +847,7 @@ pub fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<()> {
         paste_window: 1,
         inbox: Vec::new(),
         buttons: bar::desktop_layout(),
+        light: bar::desktop_light(),
         layout_changed,
         wake: wake_read.into(),
         wake_pending,
@@ -1021,9 +1026,10 @@ impl<'a> Runner<'a> {
                 let _ = self.wake.read(&mut drain);
                 self.wake_pending.store(false, Ordering::SeqCst);
                 if self.layout_changed.swap(false, Ordering::SeqCst) {
-                    let buttons = bar::desktop_layout();
-                    if buttons != self.buttons {
+                    let (buttons, light) = (bar::desktop_layout(), bar::desktop_light());
+                    if buttons != self.buttons || light != self.light {
                         self.buttons = buttons;
+                        self.light = light;
                         for w in &mut self.windows {
                             w.dirty |= w.frame;
                         }
@@ -1565,7 +1571,7 @@ impl<'a> Runner<'a> {
         let layout = self.bar_layout(i);
         let font = self.fonts.face("sans-serif", 400, false);
         let w = &self.windows[i];
-        let look = bar::Look { focused: w.active, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font, font_size: BAR_FONT_SIZE, titles: &[], title, shown: 0, hover: w.bar_hover };
+        let look = bar::Look { bar: vergence_look::bar_look(self.light), focused: w.active, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font, font_size: BAR_FONT_SIZE, titles: &[], title, shown: 0, hover: w.bar_hover };
         bar::draw(scene, &mut self.fonts, &layout, &look);
     }
 
@@ -1702,7 +1708,8 @@ impl<'a> Runner<'a> {
         let w = &self.windows[i];
         if w.edges && !w.maximized {
             // The line the server draws round a window, in the same colors.
-            let c = if w.active { vergence_look::EDGE_FOCUSED } else { vergence_look::EDGE_UNFOCUSED };
+            let style = vergence_look::bar_look(self.light);
+            let c = if w.active { style.edge } else { style.edge_off };
             scene.stroke(vergence_scene::Rect::new(0.0, 0.0, scene.width, scene.height), 0.0, vergence_look::EDGE, Color::rgb(c.0, c.1, c.2));
         }
         let background = self.windows[i].app.get().background();

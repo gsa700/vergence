@@ -199,6 +199,28 @@ Bar Proportions"):
   the bar's inset. The size is one value in vergence-look so the dock,
   menus and widgets can follow later; text size stays a separate setting.
 
+## Where it stands
+
+- **Step 1 done** (2026-11-13): the proportions and the decisions above,
+  from the mock-up; sizes unchanged (Standard 36).
+- **Step 2, the bars done** (2026-11-13): vergence-look's `BarLook` in a
+  dark and a light style (`BAR_DARK`, `BAR_LIGHT`, `bar_look`), with
+  `contrast`, `over` and `ink_on`, and the contrast test (titles 4.5:1
+  focused, 3:1 unfocused, on the ground, a tab behind, under the pointer and
+  the tab in front; the buttons' marks 3:1; white on the close red; the dark
+  style's unfocused ink went from 158 to 172 to pass). vergence-bar draws
+  from the style it is given: the window buttons float (drawn inset 2 x 3
+  pt, `BUTTON_INSET_X`/`_Y`, pressed in the whole box), shaded at rest only
+  while focused, the close mark white on the red; tabs behind and + in
+  `tab_rest`. The server's bars and borders follow Style live
+  (`Server::light_style`, the bar picture's key and the border's commit
+  include it); the tab in front is the program's page color with
+  `ink_on` (the terminal now sends its ground as its bar's accent). The
+  toolkit's own bar and border (other desktops) follow `desktop_light`:
+  Vergence's desktop.toml, or GNOME's color-scheme under GNOME. 381 tests
+  on Hubble, kepler and Techbench. Seen on Hubble in both styles, focused
+  and not (vctl shots). Left of step 2: the dock and the server's menus.
+
 ## Steps
 
 1. **The proportions**: mock-ups of bar height, buttons and tabs, light and

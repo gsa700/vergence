@@ -7,9 +7,10 @@
 //! here changes both. Lengths are in reference units (points at 96 to the
 //! inch, whitepaper Contract 1); colors are sRGB.
 //!
-//! These are the defaults of a dark desktop. What the user's settings
-//! change (the accent, light or dark, contrast) is applied over them by
-//! whoever draws; this crate knows nothing of settings.
+//! Bars and borders come in a dark and a light style ([`BarLook`]); the
+//! rest are the defaults of a dark desktop so far. What the user's settings
+//! choose (the accent, light or dark, contrast) is applied by whoever
+//! draws; this crate knows nothing of settings.
 
 /// A color, sRGB, opaque.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,29 +43,126 @@ pub const BAR_ITEM_H: f32 = 30.0;
 pub const EDGE: f32 = 1.0;
 pub const RESIZE_BAND: f32 = 6.0;
 
-/// A bar's ground, and what is written and drawn on it, for the window
-/// that has the keyboard and for the others.
-pub const BAR_FOCUSED: Rgb = Rgb(51, 61, 82);
-pub const BAR_UNFOCUSED: Rgb = Rgb(56, 56, 56);
-pub const INK_FOCUSED: Rgb = Rgb(235, 235, 235);
-pub const INK_UNFOCUSED: Rgb = Rgb(158, 158, 158);
-/// The tab in front on a bar the server draws (bar milestone 1: the desktop's
-/// colors for every window; a program's accent may take its place), for the
-/// window that has the keyboard and for the others. The ink on it is INK_*.
-pub const TAB_FRONT_FOCUSED: Rgb = Rgb(76, 90, 120);
-pub const TAB_FRONT_UNFOCUSED: Rgb = Rgb(82, 82, 82);
-/// The border line around the window that has the keyboard, and the others.
-pub const EDGE_FOCUSED: Rgb = Rgb(107, 122, 158);
-pub const EDGE_UNFOCUSED: Rgb = Rgb(87, 87, 87);
-/// The close button under the pointer, and the server's own close button.
+/// Everything a window's bar and border are drawn with, in one style: its
+/// ground, what is written and drawn on it, the tab in front when the
+/// program gives no page color of its own, the border line, and the shapes
+/// on it (a tab behind, a button, +), each for the window that has the
+/// keyboard and for the others. Look milestone 1, step 2 (2026-11-13): the
+/// server's bars follow Settings > Appearance > Style; until then they were
+/// dark only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BarLook {
+    pub ground: Rgb,
+    pub ground_off: Rgb,
+    pub ink: Rgb,
+    pub ink_off: Rgb,
+    pub front: Rgb,
+    pub front_off: Rgb,
+    pub edge: Rgb,
+    pub edge_off: Rgb,
+    /// The color shapes are laid in, and how much of it (of 255): a
+    /// window button at rest (only while its window has the keyboard: the
+    /// buttons of the others are their marks alone), a tab behind or +, and
+    /// anything under the pointer.
+    pub shape: Rgb,
+    pub shape_rest: u8,
+    pub tab_rest: u8,
+    pub shape_hover: u8,
+}
+
+/// The dark style (the desktop's first look), and the light one. Their
+/// contrast is a test (below): titles 4.5:1 on everything they stand on
+/// while the window has the keyboard, 3:1 when it has not (WCAG excuses
+/// inactive controls; these stay readable).
+pub const BAR_DARK: BarLook = BarLook {
+    ground: Rgb(51, 61, 82),
+    ground_off: Rgb(56, 56, 56),
+    ink: Rgb(235, 235, 235),
+    ink_off: Rgb(172, 172, 172),
+    front: Rgb(76, 90, 120),
+    front_off: Rgb(82, 82, 82),
+    edge: Rgb(107, 122, 158),
+    edge_off: Rgb(87, 87, 87),
+    shape: Rgb(255, 255, 255),
+    shape_rest: 20,
+    tab_rest: 26,
+    shape_hover: 41,
+};
+
+pub const BAR_LIGHT: BarLook = BarLook {
+    ground: Rgb(228, 230, 235),
+    ground_off: Rgb(240, 240, 241),
+    ink: Rgb(29, 29, 31),
+    ink_off: Rgb(112, 112, 116),
+    front: Rgb(250, 250, 251),
+    front_off: Rgb(232, 232, 233),
+    edge: Rgb(170, 174, 184),
+    edge_off: Rgb(205, 205, 208),
+    shape: Rgb(0, 0, 0),
+    shape_rest: 16,
+    tab_rest: 22,
+    shape_hover: 30,
+};
+
+/// The bar look for light or dark.
+pub const fn bar_look(light: bool) -> &'static BarLook {
+    if light { &BAR_LIGHT } else { &BAR_DARK }
+}
+
+/// `top` laid over `base` at `alpha` of 255, as a renderer blends it.
+pub const fn over(base: Rgb, top: Rgb, alpha: u8) -> Rgb {
+    const fn mix(b: u8, t: u8, a: u8) -> u8 {
+        ((b as u32 * (255 - a as u32) + t as u32 * a as u32 + 127) / 255) as u8
+    }
+    Rgb(mix(base.0, top.0, alpha), mix(base.1, top.1, alpha), mix(base.2, top.2, alpha))
+}
+
+/// A color's relative luminance (WCAG 2), 0 for black to 1 for white.
+pub fn luminance(c: Rgb) -> f32 {
+    let lin = |v: u8| {
+        let v = v as f32 / 255.0;
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * lin(c.0) + 0.7152 * lin(c.1) + 0.0722 * lin(c.2)
+}
+
+/// The contrast ratio of two colors (WCAG 2), from 1 to 21.
+pub fn contrast(a: Rgb, b: Rgb) -> f32 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// The ink for text on a ground the program chose (a terminal's page color
+/// on the tab in front): whichever of the two styles' inks reads better.
+pub fn ink_on(ground: Rgb) -> Rgb {
+    if contrast(BAR_DARK.ink, ground) >= contrast(BAR_LIGHT.ink, ground) { BAR_DARK.ink } else { BAR_LIGHT.ink }
+}
+
+/// The dark style's colors under their first names, for what draws in the
+/// dark style alone so far (the dock, the menus: look milestone 1 moves
+/// them onto both styles next).
+pub const BAR_FOCUSED: Rgb = BAR_DARK.ground;
+pub const BAR_UNFOCUSED: Rgb = BAR_DARK.ground_off;
+pub const INK_FOCUSED: Rgb = BAR_DARK.ink;
+pub const INK_UNFOCUSED: Rgb = BAR_DARK.ink_off;
+pub const TAB_FRONT_FOCUSED: Rgb = BAR_DARK.front;
+pub const TAB_FRONT_UNFOCUSED: Rgb = BAR_DARK.front_off;
+pub const EDGE_FOCUSED: Rgb = BAR_DARK.edge;
+pub const EDGE_UNFOCUSED: Rgb = BAR_DARK.edge_off;
+/// The close button under the pointer (its mark white on it), and the
+/// server's own close button.
 pub const CLOSE: Rgb = Rgb(199, 77, 71);
 /// The server's other title-bar buttons.
 pub const BUTTON: Rgb = Rgb(184, 184, 184);
+pub const SHAPE_REST: u8 = BAR_DARK.shape_rest;
+pub const SHAPE_HOVER: u8 = BAR_DARK.shape_hover;
 
-/// A shape on a bar that is not the one in front (a tab behind, a button,
-/// +): white at this much of 255, at rest and under the pointer.
-pub const SHAPE_REST: u8 = 20;
-pub const SHAPE_HOVER: u8 = 41;
+/// How far a window button's drawn shape stands in from its press area, at
+/// the sides and at the top and bottom (look milestone 1: the buttons float
+/// on the tabs' line, the tabs stay joined to the window below; the press
+/// area stays the whole box).
+pub const BUTTON_INSET_X: f32 = 2.0;
+pub const BUTTON_INSET_Y: f32 = 3.0;
 
 /// The shelf (whitepaper §6.9): the strip's width and its icons' size, its
 /// ground, and the line along the side that faces the windows.
@@ -133,6 +231,37 @@ pub const PALETTE_LIGHT: Palette = Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Look milestone 1's contrast rule for the bars, both styles: titles
+    /// 4.5:1 on all they stand on while the window has the keyboard, 3:1
+    /// when it has not; the buttons' marks 3:1 on their shapes; the close
+    /// button's white mark on its red.
+    #[test]
+    fn bar_text_is_readable_in_both_styles() {
+        for (name, l) in [("dark", &BAR_DARK), ("light", &BAR_LIGHT)] {
+            for focused in [true, false] {
+                let (ground, ink, front) = if focused { (l.ground, l.ink, l.front) } else { (l.ground_off, l.ink_off, l.front_off) };
+                let need = if focused { 4.5 } else { 3.0 };
+                let grounds = [("ground", ground), ("tab behind", over(ground, l.shape, l.tab_rest)), ("under the pointer", over(ground, l.shape, l.shape_hover)), ("tab in front", front)];
+                for (what, g) in grounds {
+                    let c = contrast(ink, g);
+                    assert!(c >= need, "{name}, focused {focused}: title on {what} {c:.2} < {need}");
+                }
+                let button = over(ground, l.shape, l.shape_rest);
+                assert!(contrast(ink, button) >= 3.0, "{name}: button mark {:.2}", contrast(ink, button));
+            }
+        }
+        assert!(contrast(Rgb(255, 255, 255), CLOSE) >= 4.5);
+    }
+
+    #[test]
+    fn ink_on_a_page_color_reads() {
+        for page in [Rgb(0x1e, 0x1e, 0x2e), Rgb(0xff, 0xff, 0xff), Rgb(0xef, 0xf1, 0xf5), Rgb(0x30, 0x0a, 0x24), Rgb(0x28, 0x2a, 0x36)] {
+            assert!(contrast(ink_on(page), page) >= 4.5, "{page:?}");
+        }
+        assert_eq!(over(Rgb(0, 0, 0), Rgb(255, 255, 255), 255), Rgb(255, 255, 255));
+        assert_eq!(over(Rgb(10, 20, 30), Rgb(255, 255, 255), 0), Rgb(10, 20, 30));
+    }
 
     #[test]
     fn colors_as_fractions() {

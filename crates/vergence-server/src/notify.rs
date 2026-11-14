@@ -401,8 +401,7 @@ impl Server {
         if self.notes.notes.is_empty() {
             return Vec::new();
         }
-        let light = self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "color-scheme".to_string()))
-            == Some(&vergence_protocol::bus::SettingValue::U32(2));
+        let light = self.light_style();
         let pal = if light { &LIGHT } else { &DARK };
         let phys = |r: Rectangle<i32, Logical>| {
             let a = (r.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
