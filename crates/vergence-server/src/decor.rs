@@ -606,6 +606,8 @@ impl Server {
         // And the line showing where it would land: over every window too, since
         // a window moved by its only tab covers the bar it is let go on.
         elements.extend(self.tab_mark_element(out, scale));
+        // Where a dragged window will go if let go now (snap.rs).
+        elements.extend(self.snap_preview_element(renderer, out, scale, light));
         for w in windows {
             let frame = self.frame_of(&w);
             let border = self.border_of(&w);
@@ -912,7 +914,12 @@ impl Server {
             self.remember(w);
             return;
         }
-        let Some(geo) = self.space.element_geometry(w) else { return };
+        let Some(mut geo) = self.space.element_geometry(w) else { return };
+        // A snapped window maximized goes back, later, to where it was before
+        // it was snapped (snap.rs).
+        if let Some(before) = self.unsnap(w) {
+            geo = before;
+        }
         let out = self
             .space
             .outputs()
@@ -934,7 +941,7 @@ impl Server {
         self.remember(w);
     }
 
-    fn set_window_rect(&mut self, w: &Win, rect: Rectangle<i32, Logical>, maximized: bool) {
+    pub(crate) fn set_window_rect(&mut self, w: &Win, rect: Rectangle<i32, Logical>, maximized: bool) {
         if let Win::Native(n) = w {
             self.native_configure(n, rect.size, maximized);
         } else if let Some(x) = w.x11_surface() {

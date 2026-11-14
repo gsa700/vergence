@@ -25,6 +25,8 @@ const LAUNCHED: std::time::Duration = std::time::Duration::from_secs(15);
 impl Server {
     /// A window has just been put on the screen for the first time.
     pub fn window_opened(&mut self, w: &Win) {
+        // Window memory had it snapped: into its part first (snap.rs).
+        self.snap_recalled(w);
         let typed_at = self.input.typed_at;
         let focused = self.keyboard_window();
         let same = match &focused {

@@ -252,6 +252,15 @@ impl Server {
         if !maximized && !self.bar_on_a_monitor(r, self.has_title(w)) {
             return None;
         }
+        // It was snapped: put in its part once it is shown (snap.rs, opened.rs).
+        match vergence_shell::snap::Zone::parse(&s.snap) {
+            Some(z) if !maximized => {
+                self.snap.recalled.insert(w.clone(), z);
+            }
+            _ => {
+                self.snap.recalled.remove(w);
+            }
+        }
         Some((r, maximized))
     }
 
@@ -262,7 +271,9 @@ impl Server {
         }
         let Some(id) = self.window_identity(w) else { return };
         let maximized = self.restore.get(w).copied();
-        let Some(geo) = maximized.or_else(|| self.space.element_geometry(w)) else { return };
+        // A snapped window (snap.rs) is kept by where it was before, and its part.
+        let snapped = self.snap.snapped.get(w).copied();
+        let Some(geo) = maximized.or(snapped.map(|s| s.before)).or_else(|| self.space.element_geometry(w)) else { return };
         // A window that hasn't got its size yet (1x1 before its first commit),
         // or was squeezed to it, is not a place to remember.
         if geo.size.w < MIN_W || geo.size.h < MIN_H {
@@ -296,6 +307,7 @@ impl Server {
             fullscreen: false,
             desktop: None,
             seen: if id.token.is_empty() { 0 } else { today() },
+            snap: snapped.map(|s| s.zone.as_str().to_string()).unwrap_or_default(),
         };
         let setup = self.sized_setup();
         let profile = self.memory.store.get_mut_or_new(&setup);

@@ -182,6 +182,30 @@ All the server's, ahead of any program, through the seat's filter:
   focused terminal stays behind and blinks (seen in shots); foot started
   from the launcher takes the keyboard; a second terminal window takes it.
   4 tests of the rule; 418 on Hubble, kepler and Techbench.
+- **Step 2 in** (2026-11-14): vergence-shell `snap` (the zones: halves,
+  quarters by 24 points along either edge, the top edge, the bottom edge
+  alone nothing; shared edges; rectangles in the work area, 7 tests); the
+  server's snap.rs (desktop.toml `[windows]` snap, top-edge, between-screens,
+  preview, read with the shelf's settings; the aim while a window is moved by
+  the pointer or by a finger on its bar; the preview after 0.15 s at an outer
+  edge, 0.5 s at a shared one; the snap on release; out again by dragging,
+  at the size it had where the drag took it from; double-click maximizes and
+  restores to that place; xdg-shell tiled states for Wayland windows, nothing
+  for native ones, whose frames are the server's, so no bus protocol change;
+  window memory's `snap` field, put back when the window is first shown and
+  refitted when the setup changes; `vctl snap`). Snapped windows are kept in
+  `Snap::snapped` with their place before, apart from `Server::restore`,
+  which several parts read as "maximized"; they keep round corners.
+  **Deviation**: the preview is a rounded accent tint drawn over the windows
+  (the dragged one too), not frosted under the dragged window: drawing between
+  windows needs the compositing order changed; noted for later. Live on
+  kepler by vctl: off by default (a drag to the edge only moves); with
+  `snap = true`, the left half (preview seen in a shot), out again at its own
+  size, the top-left quarter, the top edge maximizing and out again, the
+  bottom edge nothing, the right half; foot snapped right came back snapped
+  after a restart; with the dock set never to hide (keep-clear) the right half
+  stops at the dock (935 to 1870), with it hiding it reaches the edge. 426
+  tests on Hubble, kepler and Techbench.
 
 ## Steps
 

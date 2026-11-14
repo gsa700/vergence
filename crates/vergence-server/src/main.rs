@@ -36,6 +36,7 @@ mod native;
 mod sound;
 mod switch;
 mod opened;
+mod snap;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;

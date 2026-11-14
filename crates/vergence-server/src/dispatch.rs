@@ -141,6 +141,11 @@ impl Dispatch {
 }
 
 impl Server {
+    /// A window is being moved by the pointer (snap.rs shows its aim only then).
+    pub fn is_moving(&self) -> bool {
+        matches!(self.input.running, Some(Running::Move { .. }))
+    }
+
     /// The seat's number for a window.
     pub fn win_id(&mut self, w: &Win) -> WinId {
         if let Some(id) = self.input.ids.get(w) {
@@ -742,7 +747,7 @@ impl Server {
     fn begin_move(&mut self, window: Win, pos: Point<f64, Logical>, time: InputTime) {
         self.smithay_let_go(pos, time);
         let Some(loc) = self.space.element_location(&window) else { return };
-        let unmaximize_on_drag = self.restore.contains_key(&window);
+        let unmaximize_on_drag = self.restore.contains_key(&window) || self.snap.snapped.contains_key(&window);
         self.input.running = Some(Running::Move { window, from: pos, loc, unmaximize_on_drag });
     }
 
@@ -763,9 +768,16 @@ impl Server {
                 if unmaximize_on_drag {
                     if delta.x.hypot(delta.y) >= DRAG {
                         unmaximize_on_drag = false;
-                        if let Some(old) = self.restore.get(&window).copied() {
+                        let old = match self.restore.get(&window).copied() {
+                            Some(old) => {
+                                self.toggle_maximize(&window);
+                                Some(old)
+                            }
+                            // Out of its part of the screen (snap.rs), as out of maximized.
+                            None => self.unsnap(&window).inspect(|old| self.set_window_rect(&window, Rectangle::new(old.loc, old.size), false)),
+                        };
+                        if let Some(old) = old {
                             // Out of maximized, its old size, under the pointer by its title bar.
-                            self.toggle_maximize(&window);
                             let x = (pos.x - old.size.w as f64 / 2.0).round() as i32;
                             let y = pos.y.round() as i32 + crate::decor::TITLE_H / 2;
                             self.space.map_element(window.clone(), (x, y), true);
@@ -777,6 +789,7 @@ impl Server {
                         }
                     }
                 } else {
+                    self.snap_track(pos);
                     let to = (loc.to_f64() + delta).to_i32_round();
                     self.space.map_element(window.clone(), to, true);
                     if let Some(x) = window.x11_surface() {
@@ -820,8 +833,10 @@ impl Server {
     fn grab_end(&mut self, time: InputTime) {
         let tab_move = self.input.tab_move.take();
         match self.input.running.take() {
-            Some(Running::Move { window, .. }) => {
+            Some(Running::Move { window, loc, .. }) => {
                 self.remember(&window);
+                // Snapped, it goes back later to where this drag took it from.
+                self.snap_release(&window, loc);
                 // Moved by its only tab and let go over another window's bar: it joins.
                 if let Some((w, index)) = tab_move.filter(|(w, _)| *w == window)
                     && let Win::Native(n) = &w

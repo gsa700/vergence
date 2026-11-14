@@ -180,6 +180,8 @@ impl Server {
             "windows" => self.describe_windows(),
             // The order of use, most recent first, and the focused window (Alt+Tab's order).
             "used" => self.order_of_use_report(),
+            // Snapping's choices, what a drag is aimed at, the snapped windows (snap.rs).
+            "snap" => self.snap_report(),
             // Native windows' meaning (Contract 3, native.rs).
             "tree" => self.native_tree_report(),
             "shelf" => self.shelf_report(),

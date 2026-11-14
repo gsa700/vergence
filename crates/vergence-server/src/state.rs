@@ -74,6 +74,8 @@ pub struct Server {
     pub volume_note: u32,
     /// Where maximized windows go back to.
     pub restore: std::collections::HashMap<Win, smithay::utils::Rectangle<i32, Logical>>,
+    /// Snapping (snap.rs): the choices, the aim of a drag, the snapped windows.
+    pub snap: crate::snap::Snap,
     /// The last press on a title bar, for double-click to maximize.
     /// Monitors (connector names) still to capture for the control socket's `shot`.
     pub shot_pending: Vec<String>,
@@ -237,6 +239,7 @@ impl Server {
             input: Default::default(),
             volume_note: 0,
             restore: Default::default(),
+            snap: Default::default(),
             shot_pending: Vec::new(),
             title_font: crate::text::TextFont::load(),
             frost: None,

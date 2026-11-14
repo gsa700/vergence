@@ -155,10 +155,13 @@ impl Server {
                 if self.restore.contains_key(&w) {
                     self.toggle_maximize(&w);
                 }
+                self.unsnap(&w);
                 self.set_rect(&w, r);
                 if max {
                     self.toggle_maximize(&w);
                 }
+                // Snapped on this setup: into its part, fitted to this screen (snap.rs).
+                self.snap_recalled(&w);
                 tracing::info!("hotplug: window back to its place {:?}", r);
                 continue;
             }
@@ -193,6 +196,9 @@ impl Server {
             };
             if self.restore.contains_key(&w) {
                 self.toggle_maximize(&w);
+            }
+            if let Some(before) = self.unsnap(&w) {
+                self.set_rect(&w, before);
             }
             let size = self.space.element_geometry(&w).map(|g| g.size).unwrap_or(geo.size);
             let area = content_area(self.work_area(out), if self.has_title(&w) { self.bar_h_in(out) } else { 0 });

@@ -80,6 +80,11 @@ pub struct WindowSetting {
     /// 1970-01-01), so the store can forget windows that never come back.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub seen: u32,
+    /// The part of its monitor it was snapped to ("left", "top-right", ...;
+    /// windows milestone 1), empty if none: x, y, width and height are then
+    /// where it goes back to, as for a maximized window.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub snap: String,
 }
 
 fn is_zero(v: &u32) -> bool {
@@ -102,6 +107,9 @@ impl WindowSetting {
             s.push_str(" maximized across");
         } else if self.max_vert {
             s.push_str(" maximized up/down");
+        }
+        if !self.snap.is_empty() {
+            s.push_str(&format!(" snapped {}", self.snap));
         }
         match self.desktop {
             Some(ALL_DESKTOPS) => s.push_str(", all workspaces"),
@@ -308,6 +316,7 @@ mod tests {
             fullscreen: false,
             desktop: Some(0),
             seen: 0,
+            snap: String::new(),
         }
     }
 

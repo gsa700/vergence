@@ -310,6 +310,8 @@ impl Server {
                 state.energy_reload();
                 // The shelf's settings and the primary screen (shelf.rs).
                 state.shelf_reload();
+                // Snapping's choices (snap.rs).
+                state.snap_reload();
                 // X11 applications turned on (state.rs).
                 state.x11_follow();
                 let new = load();
