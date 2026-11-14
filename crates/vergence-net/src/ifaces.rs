@@ -37,6 +37,9 @@ pub enum Kind {
     WiFi,
     #[default]
     Wired,
+    /// A phone sharing its connection by USB cable (an iPhone's Personal
+    /// Hotspot: Linux's `ipheth`, FreeBSD's `ipheth(4)` as a `ue` interface).
+    Phone,
 }
 
 /// The kind an interface's name and flags make it. Linux names Wi-Fi
@@ -59,7 +62,39 @@ const VIRTUAL: [&str; 16] = ["docker", "br-", "virbr", "veth", "tun", "tap", "wg
 /// Ethernet port, a phone's USB tethering): the rule Wi-Fi's "When no cable
 /// is connected" goes by, in the server and the settings app alike.
 pub fn is_cable(f: &Iface) -> bool {
-    f.kind == Kind::Wired && f.up && f.carrier && f.mac.is_some() && !VIRTUAL.iter().any(|v| f.name.starts_with(v))
+    matches!(f.kind, Kind::Wired | Kind::Phone) && f.up && f.carrier && f.mac.is_some() && !is_virtual(&f.name)
+}
+
+/// Whether an interface is a virtual one (a bridge, a tunnel, a container's
+/// end) by its name: never a cable, and not shown as a connection.
+pub fn is_virtual(name: &str) -> bool {
+    VIRTUAL.iter().any(|v| name.starts_with(v))
+}
+
+/// Whether an interface is an iPhone's USB tethering. Where the systems
+/// differ: Linux names the interface's driver in /sys (`ipheth`); FreeBSD's
+/// ipheth(4) makes a `ue` interface and a `dev.ipheth` device.
+#[cfg(target_os = "linux")]
+pub fn is_phone(name: &str) -> bool {
+    if name.contains('/') || name.starts_with('.') {
+        return false;
+    }
+    std::fs::read_link(format!("/sys/class/net/{name}/device/driver")).is_ok_and(|p| p.file_name().is_some_and(|d| d == "ipheth"))
+}
+
+#[cfg(target_os = "freebsd")]
+pub fn is_phone(name: &str) -> bool {
+    unsafe extern "C" {
+        fn sysctlbyname(name: *const c_char, old: *mut u8, oldlen: *mut usize, new: *const u8, newlen: usize) -> i32;
+    }
+    if !name.starts_with("ue") {
+        return false;
+    }
+    let mut buf = [0u8; 32];
+    let mut len = buf.len();
+    // SAFETY: a NUL-terminated name and a buffer of `len` bytes.
+    let r = unsafe { sysctlbyname(c"dev.ipheth.0.%driver".as_ptr(), buf.as_mut_ptr(), &mut len, std::ptr::null(), 0) };
+    r == 0 && buf[..len.min(buf.len())].starts_with(b"ipheth")
 }
 
 #[repr(C)]
@@ -197,6 +232,11 @@ pub fn list() -> io::Result<Vec<Iface>> {
     }
     // SAFETY: the list getifaddrs gave, freed once.
     unsafe { freeifaddrs(head) };
+    for f in &mut out {
+        if f.kind == Kind::Wired && is_phone(&f.name) {
+            f.kind = Kind::Phone;
+        }
+    }
     Ok(out)
 }
 
@@ -218,6 +258,8 @@ mod tests {
         let iface = |name: &str, kind: Kind, carrier: bool| Iface { name: name.into(), kind, up: true, carrier, mac: Some("aa:bb:cc:dd:ee:ff".into()), addrs: vec![] };
         assert!(is_cable(&iface("enp5s0", Kind::Wired, true)));
         assert!(is_cable(&iface("em0", Kind::Wired, true)));
+        assert!(is_cable(&iface("eth1", Kind::Phone, true)), "a phone's USB tethering is a cable");
+        assert!(!is_phone("../etc"));
         assert!(!is_cable(&iface("enp5s0", Kind::Wired, false)), "no carrier");
         assert!(!is_cable(&iface("wlp4s0", Kind::WiFi, true)));
         assert!(!is_cable(&iface("docker0", Kind::Wired, true)));

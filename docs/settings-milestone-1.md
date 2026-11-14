@@ -238,6 +238,23 @@ by the computer through usbmuxd before it hands out a connection (Question
   by Dave: join with the real password, forget it, pull the cable (Wi-Fi on
   by itself, and the notification once), the phone's hotspot. 462 tests on
   all three.
+  Dave, same afternoon: joined dNET1, set back to When no cable is
+  connected, pulled the cable: Wi-Fi came on by itself and joined (Hubble
+  got 10.0.1.14, the reservation for Mobilenode's Wi-Fi), the note shown
+  once.
+- **Step 5 in, waiting on the phone: the Network page** (2026-11-14).
+  vergence-net knows an iPhone's USB tethering (`Kind::Phone`: Linux by the
+  interface's driver in /sys, `ipheth`; FreeBSD a `ue` interface with
+  `dev.ipheth`), and it counts as a cable, so Wi-Fi turns off while the
+  phone shares its connection. The page (Connections, three linked boxes):
+  each cable port ("Ethernet", or "Ethernet (name)" with several),
+  connected with its addresses or "Cable not connected"; "iPhone (USB)",
+  or how to make it show (trust, Personal Hotspot); Wi-Fi in a line with
+  its page a button away; Advanced with every interface as the system has
+  it. Read only. On Hubble (shots, on Wi-Fi, cable out): Ethernet "Cable
+  not connected", Wi-Fi "Connected to dNET1.". The phone by cable is Dave's
+  to plug in (usbmuxd not installed, to see whether it tethers without).
+  462 tests on all three.
 
 ## Steps
 

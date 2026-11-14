@@ -151,6 +151,7 @@ mod search_tests {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Icon {
     WiFi,
+    Network,
     Appearance,
     Fonts,
     Wallpaper,
@@ -171,7 +172,7 @@ impl Icon {
     /// Its square's color (one per kind of page, readable under a white mark).
     fn color(self) -> Color {
         match self {
-            Icon::WiFi => Color::rgb(0x1e, 0x88, 0xe5),
+            Icon::WiFi | Icon::Network => Color::rgb(0x1e, 0x88, 0xe5),
             Icon::Appearance | Icon::Fonts | Icon::Wallpaper => Color::rgb(0x2f, 0x6f, 0xd6),
             Icon::Windows | Icon::Dock => Color::rgb(0x5b, 0x5f, 0x6b),
             Icon::Screen => Color::rgb(0x1f, 0x8a, 0x8a),
@@ -203,6 +204,16 @@ fn icon_mark<M: 'static>(icon: Icon) -> Element<M> {
                 line(scene, (10.0, 9.6), (12.6, 11.4));
                 line(scene, (5.0, 9.0), (10.0, 5.8));
                 line(scene, (10.0, 5.8), (15.0, 9.0));
+            }
+            // Three linked boxes.
+            Icon::Network => {
+                scene.stroke(Rect::new(x + 7.5, y + 4.0, 5.0, 4.0), 1.0, 1.3, w);
+                scene.stroke(Rect::new(x + 3.5, y + 12.0, 5.0, 4.0), 1.0, 1.3, w);
+                scene.stroke(Rect::new(x + 11.5, y + 12.0, 5.0, 4.0), 1.0, 1.3, w);
+                line(scene, (10.0, 8.0), (10.0, 10.0));
+                line(scene, (6.0, 10.0), (14.0, 10.0));
+                line(scene, (6.0, 10.0), (6.0, 12.0));
+                line(scene, (14.0, 10.0), (14.0, 12.0));
             }
             // Half light, half dark.
             Icon::Appearance => {
@@ -318,6 +329,8 @@ fn chevron<M: 'static>(open: bool) -> Element<M> {
 enum Page {
     /// Wireless networks (settings milestone 1, step 4; wifi.rs).
     WiFi,
+    /// Cables and a phone by USB (step 5; wifi.rs).
+    Network,
     Appearance,
     Theme,
     Windows,
@@ -811,7 +824,7 @@ impl App {
         if p == Page::Sound {
             self.sound_read();
         }
-        if p == Page::WiFi {
+        if matches!(p, Page::WiFi | Page::Network) {
             self.wifi_read();
         }
         self.browser = None;
@@ -1349,7 +1362,10 @@ impl App {
             }
         }
         let mut groups = vec![
-            ("Connections", vec![("Wi-Fi".into(), Page::WiFi, Icon::WiFi, "wifi wi-fi wireless network wlan password join hotspot internet")]),
+            ("Connections", vec![
+                ("Wi-Fi".into(), Page::WiFi, Icon::WiFi, "wifi wi-fi wireless network wlan password join hotspot internet"),
+                ("Network".into(), Page::Network, Icon::Network, "network ethernet cable wired iphone phone usb tethering hotspot address ip"),
+            ]),
             ("Look", vec![
                 ("Appearance".into(), Page::Appearance, Icon::Appearance, "style light dark accent color frost tab tint controls size"),
                 ("Theme and fonts".into(), Page::Theme, Icon::Fonts, "theme font fonts monospace interface icons cursor"),
@@ -2562,6 +2578,7 @@ impl Program for App {
             Page::Dock => "Dock".into(),
             Page::Keyboard => "Keyboard".into(),
             Page::WiFi => "Wi-Fi".into(),
+            Page::Network => "Network".into(),
             Page::Mouse => "Mouse".into(),
             Page::Touchpad => "Touchpad".into(),
             Page::Touchscreen => "Touchscreen".into(),
@@ -2601,6 +2618,7 @@ impl Program for App {
             Page::Dock => self.dock(),
             Page::Keyboard => self.keyboard(),
             Page::WiFi => self.wifi_page(),
+            Page::Network => self.network_page(),
             Page::Mouse => self.mouse_page(),
             Page::Touchpad => self.touchpad_page(),
             Page::Touchscreen => self.touchscreen_page(),

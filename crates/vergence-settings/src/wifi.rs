@@ -51,6 +51,8 @@ pub struct Wifi {
     said: String,
     /// The thread that hears wpa_supplicant's events has started.
     started: bool,
+    /// Every interface, for the Network page.
+    pub all: Vec<ifaces::Iface>,
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +161,7 @@ impl App {
             let _ = std::thread::Builder::new().name("wifi".into()).spawn(move || listen(mail));
         }
         let all = ifaces::list().unwrap_or_default();
+        self.wifi.all = all.clone();
         self.wifi.cable = all.iter().any(ifaces::is_cable);
         let link = all.iter().find(|f| f.kind == ifaces::Kind::WiFi).cloned();
         self.wifi.iface = link.as_ref().map(|f| f.name.clone());
@@ -210,6 +213,9 @@ impl App {
                 self.wifi_read();
             }
             WifiMsg::Tick => {
+                if self.page == Page::Network {
+                    self.wifi_read();
+                }
                 if self.page == Page::WiFi {
                     if self.wifi_wanted()
                         && let Some(c) = self.wifi_client()
@@ -246,7 +252,7 @@ impl App {
                     }
                     _ => {}
                 }
-                if self.page == Page::WiFi && !matches!(e, wpa::Event::Other(_)) {
+                if matches!(self.page, Page::WiFi | Page::Network) && !matches!(e, wpa::Event::Other(_)) {
                     self.wifi_read();
                 }
             }
@@ -435,5 +441,91 @@ impl App {
         }
         items.push(self.advanced("wifi", adv));
         self.page_layout("Wi-Fi", about, items)
+    }
+}
+
+/// Addresses as shown: IPv4 first, then IPv6 but link-local ones (Advanced has every one).
+fn shown_addrs(f: &ifaces::Iface) -> String {
+    let mut v4: Vec<String> = Vec::new();
+    let mut v6: Vec<String> = Vec::new();
+    for (a, _) in &f.addrs {
+        match a {
+            std::net::IpAddr::V4(x) => v4.push(x.to_string()),
+            std::net::IpAddr::V6(x) if (x.segments()[0] & 0xffc0) != 0xfe80 => v6.push(x.to_string()),
+            _ => {}
+        }
+    }
+    v4.extend(v6);
+    v4.join(", ")
+}
+
+impl App {
+    /// The Network page (settings milestone 1, step 5): the computer's
+    /// connections by the names people use: each network cable ("Ethernet"),
+    /// a phone sharing its connection by USB ("iPhone (USB)"), and Wi-Fi in
+    /// one line with its own page. Read only: addresses are dhcpcd's.
+    pub fn network_page(&self) -> Element<Message> {
+        let w = &self.wifi;
+        let about = "The computer's connections: network cables, a phone by USB, and Wi-Fi.";
+        let links: Vec<&ifaces::Iface> = w.all.iter().filter(|f| matches!(f.kind, ifaces::Kind::Wired | ifaces::Kind::Phone) && !ifaces::is_virtual(&f.name) && f.mac.is_some()).collect();
+        let ethernets = links.iter().filter(|f| f.kind == ifaces::Kind::Wired).count();
+        let mut items = Vec::new();
+        for f in &links {
+            let phone = f.kind == ifaces::Kind::Phone;
+            let title = if phone {
+                "iPhone (USB)".to_string()
+            } else if ethernets > 1 {
+                format!("Ethernet ({})", f.name)
+            } else {
+                "Ethernet".to_string()
+            };
+            let addrs = shown_addrs(f);
+            let (state, detail) = match (f.carrier, phone) {
+                (true, _) if !addrs.is_empty() => ("Connected".to_string(), addrs),
+                (true, _) => ("Connected".to_string(), "Waiting for an address.".to_string()),
+                (false, false) => ("Cable not connected".to_string(), String::new()),
+                (false, true) => ("Not sharing its connection".to_string(), "On the iPhone: trust this computer, and turn on Personal Hotspot.".to_string()),
+            };
+            items.push(self.group(Some(&title), vec![setting(&state, &detail, space())]));
+        }
+        if links.is_empty() {
+            items.push(self.group(None, vec![setting("No network cable port", "", space())]));
+        }
+        // Wi-Fi in a line.
+        let wifi_line = if let Some((what, _)) = &w.problem {
+            what.clone()
+        } else if w.status.connected() {
+            format!("Connected to {}.", w.status.ssid.clone().unwrap_or_default())
+        } else if !self.wifi_wanted() {
+            "Off.".to_string()
+        } else {
+            "Not connected.".to_string()
+        };
+        items.push(self.group(
+            Some("Wi-Fi"),
+            vec![setting(&wifi_line, "", button(label("Wi-Fi").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Go(Page::WiFi)).name("Open Wi-Fi"))],
+        ));
+        if !links.iter().any(|f| f.kind == ifaces::Kind::Phone) {
+            items.push(label("An iPhone by cable shows here once it shares its connection: plug it in, trust this computer, and turn on Personal Hotspot.").size(11.0).dim().wrap().width(Length::FILL));
+        }
+        // Advanced: every interface, as the system has it.
+        let adv = w
+            .all
+            .iter()
+            .map(|f| {
+                let addrs: Vec<String> = f.addrs.iter().map(|(a, p)| format!("{a}/{p}")).collect();
+                let state = format!(
+                    "{:?}, {}{}{}{}",
+                    f.kind,
+                    if f.up { "up" } else { "down" },
+                    if f.carrier { ", carrier" } else { "" },
+                    f.mac.as_deref().map(|m| format!(", {m}")).unwrap_or_default(),
+                    if addrs.is_empty() { String::new() } else { format!(", {}", addrs.join(" ")) }
+                );
+                setting(&f.name, &state, space())
+            })
+            .collect();
+        items.push(self.advanced("network", adv));
+        self.page_layout("Network", about, items)
     }
 }
