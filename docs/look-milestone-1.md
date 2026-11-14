@@ -167,7 +167,22 @@ Bar Proportions"):
   light terminal, light bar on either) are looks we support, since the bar
   follows Style and the terminal its own scheme; the contrast test covers
   the mixed pairs (the text under the bar shows through more there).
-- **Still open**: the bar's height (32, 36, 40 or 44).
+- **The window buttons' resting shade** as strong as the inactive tabs'
+  while the window is focused; none when it is not (icons only), one more
+  sign of which window is in front.
+- **The superuser's red is deeper** (both styles, the tab and the bar's
+  tint), which also gives the white title more contrast.
+- **Size of controls** (Dave, 2026-11-13: "yes, per-monitor automatic,
+  standard 36"): Compact 32, **Standard 36** (today's), Large 44 (bar
+  height; tabs, buttons, margins and gaps with it, as the mock-up's
+  presets). Not tied to scale: scale already makes a point the same
+  physical size on every monitor. A desktop-wide choice in Settings >
+  Appearance, and per screen in Settings > Screens: Automatic (Large on a
+  monitor with a touch panel, from the server's panel ties; the desktop's
+  choice elsewhere), Compact, Standard or Large. A window takes the size
+  of the monitor its center is on (memory's rule); moving it changes only
+  the bar's inset. The size is one value in vergence-look so the dock,
+  menus and widgets can follow later; text size stays a separate setting.
 
 ## Steps
 
@@ -190,7 +205,11 @@ Bar Proportions"):
    Linux and FreeBSD, the colors in both styles.
 7. **Rounded corners**: the mask, the border on the curve, square when
    maximized.
-8. **Settings**: Reduce transparency beside High contrast and Reduce motion;
+8. **Size of controls**: Compact, Standard, Large in vergence-look and
+   vergence-bar; the per-screen Automatic (touch panel) rule in the
+   server; a window's bar follows the monitor its center is on; the
+   settings (Appearance and Screens).
+9. **Settings**: Reduce transparency beside High contrast and Reduce motion;
    docs (whitepaper §6 look, this plan's notes).
 
 ## Acceptance
