@@ -180,6 +180,18 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
   firmware), and the text console seemed to have no keyboard until Dave
   unplugged it. install.sh should say, where a GPU's GL would be software,
   which packages give it a driver (step 5).
+- **Benchmarks on Hubble with NVK** (glmark2): offscreen 1280x720, Intel
+  4383 and the NVIDIA card thousands of FPS a scene; **offscreen 4K, Intel
+  397, NVIDIA 1229** (3x; the heaviest blur 96 vs 391 FPS). Full screen on
+  the 14" rendered by the NVIDIA card (`DRI_PRIME=1`: NVIDIA renders, Intel
+  composes, NVIDIA copies to the screen): at 300%, 176 to 228 FPS but
+  glmark2 drew a 3840x2160 frame as points and showed its top-left third
+  (it ignores the scale); with the 14" set to 100% for the test (restored
+  after), **native 4K, 124 to 171 FPS, score 148**, 1 slow frame in 48 s, a
+  full 4K copy about 15 ms (one 23.8 ms). Open: clients are asked for frames
+  faster than the screen refreshes (glmark2 above 60 FPS on a 60 Hz screen;
+  46 FPS in a window on the panel earlier): frame callbacks should follow
+  each screen's own refresh.
 
 ## Steps
 

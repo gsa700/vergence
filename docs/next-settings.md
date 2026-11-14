@@ -97,3 +97,15 @@ limited size allowance to preserve the layout".
   is open to anyone at it), then a login manager on the same password code
   (PAM on all three systems; part runs as root, so a narrow design and a
   security review). A milestone or two.
+
+## From Dave, 2026-11-14 afternoon (for a later settings milestone)
+
+- **Ethernet like Wi-Fi**: the Network page's cable with its link speed and
+  duplex (Linux /sys, FreeBSD the interface's media), live traffic in and out
+  with a chart, as the Wi-Fi page has.
+- **Resolution and refresh rate** on each screen's page, from the modes the
+  monitor offers (the server takes the preferred mode today); and beside
+  Scale, the resolution it comes to ("Looks like 1280 x 720, native 3840 x
+  2160").
+- **A UPS page** of its own (local UPS by USB only), and **low-battery
+  actions** were offered and deferred ("not yet").
