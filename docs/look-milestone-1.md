@@ -308,8 +308,8 @@ Bar Proportions"):
   4.5:1 over any frost the floor allows, a test over a color grid; the
   mock-up's 56 did not). Seen on Hubble by desktop.toml: the page-color
   tab, the frosted one, and the solid bar (raw pixels: solid 56,56,56,
-  frosted 51,54,55). 390 tests on all three. Not yet seen: the settings
-  app's new rows on screen.
+  frosted 51,54,55). 390 tests on all three. The settings app's new rows
+  seen on Hubble (vctl tree and a shot).
 
 ## Steps
 
