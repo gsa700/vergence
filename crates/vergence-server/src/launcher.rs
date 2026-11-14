@@ -60,6 +60,10 @@ struct Open {
     tab: Option<usize>,
     /// The tabs shown, after All: those that have an application.
     tabs: Vec<usize>,
+    /// A finger down on it: where it came down, the scroll then, and
+    /// whether it has moved far enough to be a drag (a tap starts or
+    /// chooses when the finger lifts; a drag scrolls).
+    held: Option<(Point<f64, Logical>, i32, bool)>,
 }
 
 impl Open {
@@ -108,7 +112,7 @@ impl Server {
         let tabs = vergence_shell::launcher::tabs(&self.shelf.apps, &all).into_iter().map(|(t, _)| t).collect();
         tracing::info!("apps: opened");
         self.close_menu();
-        self.launcher.open = Some(Open { at: Rectangle::new((x, y).into(), (w, h).into()), typed: String::new(), selected: 0, scroll: 0, tab: None, tabs });
+        self.launcher.open = Some(Open { at: Rectangle::new((x, y).into(), (w, h).into()), typed: String::new(), selected: 0, scroll: 0, tab: None, tabs, held: None });
         self.redraw_all();
     }
 
@@ -184,11 +188,34 @@ impl Server {
     /// A press while the popup is open: on an application, it is started; on
     /// the popup's own ground, nothing; anywhere else, the popup closes.
     pub fn launcher_press(&mut self, at: Point<f64, Logical>) {
-        let count = self.launcher_found().len();
-        let Some(open) = self.launcher.open.as_ref() else { return };
+        let Some(open) = self.launcher.open.as_mut() else { return };
         if !open.at.to_f64().contains(at) {
             return self.launcher_close();
         }
+        // A finger: nothing yet; lifted where it came down it is a tap, moved it scrolls.
+        if self.touch.fingers_last {
+            open.held = Some((at, open.scroll, false));
+            return;
+        }
+        self.launcher_activate(at);
+    }
+
+    /// A finger lifted from the launcher: a tap if it did not move.
+    pub fn launcher_release(&mut self, at: Point<f64, Logical>) {
+        let Some(open) = self.launcher.open.as_mut() else { return };
+        if let Some((from, _, moved)) = open.held.take()
+            && !moved
+        {
+            self.launcher_activate(from);
+        }
+        let _ = at;
+    }
+
+    /// A click (or a tap) at `at` on the launcher: a tab is chosen, an
+    /// application started.
+    fn launcher_activate(&mut self, at: Point<f64, Logical>) {
+        let count = self.launcher_found().len();
+        let Some(open) = self.launcher.open.as_ref() else { return };
         let (x, y) = (at.x.floor() as i32, at.y.floor() as i32);
         if let Some((tab, _)) = open.tab_rects().into_iter().find(|(_, r)| x >= r.x && x < r.right() && y >= r.y && y < r.bottom()) {
             let open = self.launcher.open.as_mut().unwrap();
@@ -203,6 +230,28 @@ impl Server {
         }
     }
 
+    /// A right press (or a finger held) on an application: its menu, the
+    /// dock's own (open it, pin it to the dock or unpin it). Elsewhere on the
+    /// popup, nothing.
+    pub fn launcher_menu(&mut self, at: Point<f64, Logical>) {
+        let found = self.launcher_found();
+        let Some(open) = self.launcher.open.as_ref() else { return };
+        let grid = open.grid();
+        let Some(index) = grid.at(found.len(), at.x.floor() as i32, at.y.floor() as i32) else { return };
+        let Some(entry) = found.get(index).map(|i| self.shelf.apps[*i].clone()) else { return };
+        let cell = grid.cell(index);
+        let pinned = self.shelf.config.pinned.contains(&entry.id);
+        let acts = vec![
+            (Act::Start(entry.id.clone()), "Open".to_string()),
+            if pinned { (Act::Unpin(entry.id.clone()), "Unpin from the dock".to_string()) } else { (Act::Pin(entry.id.clone()), "Pin to the dock".to_string()) },
+        ];
+        if let Some(open) = self.launcher.open.as_mut() {
+            open.selected = index;
+        }
+        self.open_shelf_menu(Rectangle::new((cell.x, cell.y).into(), (cell.w, cell.h).into()), vergence_shell::Edge::Right, acts);
+        self.redraw_all();
+    }
+
     /// The pointer moved: the application under it is the selected one.
     pub fn launcher_hover(&mut self, at: Point<f64, Logical>) {
         if self.launcher.open.is_none() {
@@ -210,6 +259,19 @@ impl Server {
         }
         let count = self.launcher_found().len();
         let Some(open) = self.launcher.open.as_mut() else { return };
+        // A finger held: past a few points it drags the grid with it.
+        if let Some((from, scroll, moved)) = open.held {
+            let dy = from.y - at.y;
+            if moved || dy.abs() > 6.0 {
+                let to = (scroll + dy.round() as i32).clamp(0, open.grid().max_scroll(count));
+                open.held = Some((from, scroll, true));
+                if to != open.scroll {
+                    open.scroll = to;
+                    self.redraw_all();
+                }
+            }
+            return;
+        }
         if let Some(index) = open.grid().at(count, at.x.floor() as i32, at.y.floor() as i32)
             && index != open.selected
         {

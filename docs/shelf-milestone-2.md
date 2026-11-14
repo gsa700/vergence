@@ -88,7 +88,18 @@ shows changes), the frost under it by the server.
   kepler (FreeBSD, 4K at 2.5): centered at 256,144 1024 x 576, frosted
   over the wallpaper and a terminal; "browser" finds Firefox; Page Down to
   Internet then System, Page Up back to All; a click on System. 400 tests
-  on all three. Not yet: the right-click menu, flick scrolling (step 4).
+  on all three.
+- **Step 4 done** (2026-11-13): a right press on an application opens the
+  dock's own menu beside it (Open; Pin to the dock or Unpin from the dock),
+  frosted over the launcher; Open closes the launcher, pinning leaves it
+  open. With a menu over the launcher the seat now takes the menu as the one
+  open (a press on it had counted as one outside the launcher and closed
+  it, found on kepler). Fingers: a finger's press only marks where it came
+  down; lifted there it is a click (a tab chosen, an application started),
+  moved more than 6 points it drags the grid (no momentum yet). Seen on
+  kepler by vctl: pin and unpin through the menu (the dock shows Foot, then
+  not), a tap opening the launcher from the dock, a tap on System, a drag
+  over an application starting nothing. 400 tests on all three.
 
 ## Steps
 

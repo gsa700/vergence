@@ -164,10 +164,12 @@ impl Server {
     /// Before each event: the seat knows which menu is open, and forgets
     /// windows and surfaces that have gone.
     pub fn dispatch_sync(&mut self) {
-        let menu = if self.launcher_is_open() {
-            Some(vergence_seat::Menu::Popup)
-        } else if self.menu_is_open() {
+        // A menu open over the launcher (an application's menu there) comes
+        // first: a press on it is the menu's, not one outside the launcher.
+        let menu = if self.menu_is_open() {
             Some(vergence_seat::Menu::Menu)
+        } else if self.launcher_is_open() {
+            Some(vergence_seat::Menu::Popup)
         } else {
             None
         };
@@ -455,7 +457,9 @@ impl Server {
                 }
             }
             Target::Server(Part::Menu) if pressed => self.menu_press(pos),
+            Target::Server(Part::Popup) if pressed && button == vergence_seat::BTN_RIGHT => self.launcher_menu(pos),
             Target::Server(Part::Popup) if pressed => self.launcher_press(pos),
+            Target::Server(Part::Popup) => self.launcher_release(pos),
             Target::Server(Part::Note) if pressed => self.notify_press(pos),
             // The dock: a left press is a click or the start of a drag, let go where
             // it ends; a right press is an icon's menu.

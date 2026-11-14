@@ -290,6 +290,10 @@ impl Server {
             }
             Entry::Shelf(act, label) => {
                 tracing::info!("shelf: {label}");
+                // Opening an application from the launcher's menu closes the launcher, as a click on it does.
+                if matches!(act, crate::shelf::Act::Start(_)) {
+                    self.launcher_close();
+                }
                 self.shelf_act(act.clone());
             }
             Entry::Tab(w, tab, act, label) => {
