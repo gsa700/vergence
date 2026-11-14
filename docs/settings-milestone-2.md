@@ -2,7 +2,10 @@
 
 Drafted 2026-11-14 from Dave's afternoon notes (docs/next-settings.md, "From
 Dave, 2026-11-14 afternoon"), first in docs/apps-roadmap.md's order ("That
-looks good"). **Draft: questions for Dave at the end.**
+looks good"). **Accepted 2026-11-14: "1 yes, 2 off, 3 more than one tab open
+or an active tab present, 4 agree with settings"** (the keep-or-revert dialog;
+the physical-size switch off by default; the terminal asks with several tabs
+or a tab running something; the dock's Forget opens the settings app).
 
 ## Where things stand
 
@@ -74,9 +77,12 @@ A UPS's battery joins with the UPS page (not this milestone).
 
 ### Closing a terminal with several tabs
 
-Closing a terminal window with more than one tab asks first: **"Close 3
-tabs?"** with Close and Cancel, a modal dialog over the window (window styles
-milestone 1). One tab closes as now.
+Closing a terminal window asks first when it has **more than one tab, or a
+tab running something** other than its idle shell (a build, an SSH session,
+an editor: the tab's shell has a child process), with Close and Cancel, a
+modal dialog over the window (window styles milestone 1): "Close 3 tabs?",
+or "A program is running in this tab (ssh). Close it?". One idle tab closes
+as now.
 
 ## Steps
 
@@ -102,7 +108,8 @@ milestone 1). One tab closes as now.
    other.
 6. An app's places forgotten from the Windows page and from the dock: its
    next window opens in the default place; Forget all empties the list.
-7. Closing a terminal with three tabs asks; Cancel keeps it.
+7. Closing a terminal with three tabs asks, and with one tab running `sleep
+   100` asks; Cancel keeps it; one idle tab closes without asking.
 
 ## Not in this milestone
 
