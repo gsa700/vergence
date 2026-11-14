@@ -25,11 +25,13 @@
 //! Version 7 (2026-11-14, settings milestone 1): the input devices
 //! ([`Topic::Inputs`]): those present and the kinds the machine has had, so
 //! the settings app shows a Touchpad or Touchscreen page once there is one.
+//! Version 8 (2026-11-14, GPUs milestone 1): each screen says which GPU shows
+//! it and which draws it (`OutputInfo::shown_by`, `drawn_by`).
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -228,6 +230,11 @@ pub struct OutputInfo {
     /// its scale before the size preference (chosen, or the default).
     pub default_scale: f64,
     pub base_scale: f64,
+    /// The GPU the screen is connected to, in words ("NVIDIA graphics
+    /// (nouveau)"), and the one that draws it (the same, or the main GPU
+    /// when the frames are drawn there and copied: GPUs milestone 1).
+    pub shown_by: String,
+    pub drawn_by: String,
 }
 
 /// Client to server.
@@ -502,7 +509,7 @@ impl ServerMsg {
                 let mut e = Encoder::frame(op::OUTPUTS);
                 e.u32(*serial).count(outputs.len());
                 for o in outputs {
-                    e.str(&o.id).str(&o.name).str(&o.description).i32(o.x).i32(o.y).i32(o.width).i32(o.height).f64(o.scale).str(&o.note).f64(o.default_scale).f64(o.base_scale);
+                    e.str(&o.id).str(&o.name).str(&o.description).i32(o.x).i32(o.y).i32(o.width).i32(o.height).f64(o.scale).str(&o.note).f64(o.default_scale).f64(o.base_scale).str(&o.shown_by).str(&o.drawn_by);
                 }
                 e.str(setup);
                 e
@@ -577,8 +584,8 @@ impl ServerMsg {
             op::ERROR => ServerMsg::Error { serial: d.u32()?, code: ErrorCode::from_wire(d.u16()?), message: d.str()? },
             op::OUTPUTS => {
                 let serial = d.u32()?;
-                // Each output: four strings (4 bytes each at least), four i32, one f64.
-                let n = d.count(4 + 4 + 4 + 16 + 8 + 4 + 16)?;
+                // Each output: six strings (4 bytes each at least), four i32, three f64.
+                let n = d.count(4 + 4 + 4 + 16 + 8 + 4 + 16 + 4 + 4)?;
                 let mut outputs = Vec::with_capacity(n);
                 for _ in 0..n {
                     outputs.push(OutputInfo {
@@ -593,6 +600,8 @@ impl ServerMsg {
                         note: d.str()?,
                         default_scale: d.f64()?,
                         base_scale: d.f64()?,
+                        shown_by: d.str()?,
+                        drawn_by: d.str()?,
                     });
                 }
                 let setup = d.str()?;
@@ -645,8 +654,8 @@ mod tests {
 
     fn outputs() -> Vec<OutputInfo> {
         vec![
-            OutputInfo { id: "3f2a9c0e1b7d4a55".into(), name: "eDP-1".into(), description: "14\" 4K".into(), x: 0, y: 0, width: 1170, height: 658, scale: 3.283_333, note: "calculated".into(), default_scale: 3.0, base_scale: 3.0 },
-            OutputInfo { id: "9b1c22d4e5f60718".into(), name: "HDMI-A-1".into(), description: "ASUS VS229".into(), x: 1170, y: 0, width: 1794, height: 1009, scale: 1.075, note: "set by hand".into(), default_scale: 1.0, base_scale: 1.25 },
+            OutputInfo { id: "3f2a9c0e1b7d4a55".into(), name: "eDP-1".into(), description: "14\" 4K".into(), x: 0, y: 0, width: 1170, height: 658, scale: 3.283_333, note: "calculated".into(), default_scale: 3.0, base_scale: 3.0, shown_by: "Intel graphics (i915)".into(), drawn_by: "Intel graphics (i915)".into() },
+            OutputInfo { id: "9b1c22d4e5f60718".into(), name: "HDMI-A-1".into(), description: "ASUS VS229".into(), x: 1170, y: 0, width: 1794, height: 1009, scale: 1.075, note: "set by hand".into(), default_scale: 1.0, base_scale: 1.25, shown_by: "NVIDIA graphics (nouveau)".into(), drawn_by: "Intel graphics (i915)".into() },
         ]
     }
 

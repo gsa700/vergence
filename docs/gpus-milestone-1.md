@@ -204,6 +204,17 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
   relay turn that only looks whether the copy may start no longer asks
   windows for their next frame. Hubble: es2gears **144.0 FPS on the panel
   (144 Hz), 59.98 on the 14" (60 Hz)**.
+- **Step 5's Screens page in** (2026-11-14): bus protocol **v8**, each
+  screen's `OutputInfo` says which GPU shows it and which draws it
+  (`shown_by`, `drawn_by`, the GPU named by its driver: "NVIDIA graphics
+  (nouveau)"); a screen shown by one GPU and drawn by another has a
+  Graphics row in its Display section ("Shown by NVIDIA graphics (nouveau),
+  drawn by Intel graphics (i915) and copied there"), every screen one in
+  Advanced; and Shown at says what the scale comes to ("it looks like 1280
+  x 720 (3840 x 2160 pixels)", Dave's ask). `vbus outputs` prints both. On
+  Hubble over the bus: eDP-1 Intel/Intel, HDMI-A-1 NVIDIA/Intel. All three
+  machines on v8 (Techbench's dev session; its installed one needs Dave's
+  sudo). 476 tests (kepler 472).
 
 ## Steps
 

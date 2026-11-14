@@ -176,7 +176,27 @@ fn log(g: &GpuInfo) {
     }
 }
 
+/// A GPU in words, by its driver: "NVIDIA graphics (nouveau)".
+pub fn words(driver: &str) -> String {
+    let vendor = match driver {
+        "i915" | "xe" => "Intel",
+        "nouveau" | "nvidia-drm" | "nvidia" => "NVIDIA",
+        "amdgpu" | "radeon" => "AMD",
+        "" => return "graphics".into(),
+        _ => return format!("{driver} graphics"),
+    };
+    format!("{vendor} graphics ({driver})")
+}
+
 impl Server {
+    /// Which GPU shows (or, `drawn`, draws) the screen with this connector
+    /// name, in words; empty when there is no DRM backend (nested).
+    pub fn gpu_words(&self, connector: &str, drawn: bool) -> String {
+        let Some(path) = self.backend.as_ref().and_then(|b| b.gpu_path(connector, drawn)) else { return String::new() };
+        let driver = self.gpus.iter().find(|g| g.path == path).map(|g| g.driver.as_str()).unwrap_or("");
+        words(driver)
+    }
+
     /// For `vctl gpus`.
     pub fn describe_gpus(&self) -> String {
         if self.gpus.is_empty() {
@@ -209,6 +229,14 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpus_in_words() {
+        assert_eq!(words("i915"), "Intel graphics (i915)");
+        assert_eq!(words("nouveau"), "NVIDIA graphics (nouveau)");
+        assert_eq!(words("amdgpu"), "AMD graphics (amdgpu)");
+        assert_eq!(words("vkms"), "vkms graphics");
+    }
 
     #[test]
     fn fourcc_names() {

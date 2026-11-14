@@ -2301,11 +2301,25 @@ impl App {
             let screen_controls: Vec<String> = SCREEN_CONTROLS_NAMES.iter().map(|s| s.to_string()).collect();
             let mut rows = vec![
                 setting("Scale", note, scale_slider(self.scale, o, &marks)),
-                setting("Shown at", "The scale with Size applied.", row(shown_row).spacing(8.0).align(Align::Center)),
+                setting(
+                    "Shown at",
+                    &format!(
+                        "The scale with Size applied: it looks like {} \u{d7} {} ({} \u{d7} {} pixels).",
+                        o.width,
+                        o.height,
+                        (o.width as f64 * o.scale).round() as i64,
+                        (o.height as f64 * o.scale).round() as i64
+                    ),
+                    row(shown_row).spacing(8.0).align(Align::Center),
+                ),
                 setting("Size of controls", "Automatic: Large with a touch panel, else the desktop's (Appearance).", choice(screen_controls, Some(disp::controls(&self.desktop, &o.id)), Message::ScreenControls).width(Length::Fixed(160.0)).name("Size of controls")),
             ];
             if !multi {
                 rows.push(setting("Size", &format!("How big everything is: {}%.", (self.size * 100.0).round()), size_slider(self.size)));
+            }
+            // A screen on one GPU drawn by another (GPUs milestone 1) says so up front.
+            if !o.shown_by.is_empty() && o.shown_by != o.drawn_by {
+                rows.push(setting("Graphics", &format!("Shown by {}, drawn by {} and copied there.", o.shown_by, o.drawn_by), space()));
             }
             items.push(self.group(Some("Display"), rows));
         }
@@ -2321,6 +2335,10 @@ impl App {
         // How the scale was found and what the screen is, for the curious.
         if let Some(o) = o {
             let mut rows = vec![setting("How the scale was found", &o.note, space())];
+            if !o.shown_by.is_empty() {
+                let g = if o.shown_by == o.drawn_by { o.shown_by.clone() } else { format!("Shown by {}, drawn by {}", o.shown_by, o.drawn_by) };
+                rows.push(setting("Graphics", &g, space()));
+            }
             // A laptop's panel often has no make and model: its connector stands in.
             if !o.description.is_empty() && o.description != o.name {
                 rows.push(setting("Monitor", &o.description, space()));

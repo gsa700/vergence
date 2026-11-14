@@ -1061,6 +1061,13 @@ pub fn screens_on(state: &mut Server) {
 }
 
 impl Backend {
+    /// The device path of the GPU that shows (or, `drawn`, draws) a screen.
+    pub fn gpu_path(&self, connector: &str, drawn: bool) -> Option<String> {
+        let (key, _) = self.surfaces.iter().find(|(_, s)| s.connector == connector)?;
+        let gpu = if drawn { 0 } else { key.0 };
+        self.devices.get(gpu).map(|d| d.path.clone())
+    }
+
     /// Draw every monitor in full on its next frame (wallpaper or settings changed).
     pub fn redraw_all(&mut self) {
         for s in self.surfaces.values_mut() {

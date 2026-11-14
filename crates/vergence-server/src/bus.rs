@@ -437,6 +437,8 @@ impl Server {
                     note: self.scale_notes.get(&o.name()).map(|s| s.how.clone()).unwrap_or_default(),
                     default_scale: self.scale_notes.get(&o.name()).map(|s| s.default).unwrap_or(1.0),
                     base_scale: self.scale_notes.get(&o.name()).map(|s| s.base).unwrap_or(1.0),
+                    shown_by: self.gpu_words(&o.name(), false),
+                    drawn_by: self.gpu_words(&o.name(), true),
                 })
             })
             .collect();

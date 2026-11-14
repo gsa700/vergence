@@ -115,6 +115,8 @@ fn output(rng: &mut Rng) -> OutputInfo {
         note: rng.string(80),
         default_scale: rng.f64(),
         base_scale: rng.f64(),
+        shown_by: rng.string(40),
+        drawn_by: rng.string(40),
     }
 }
 

@@ -139,6 +139,9 @@ fn run(socket: Option<std::path::PathBuf>, args: &[String]) -> Result<(), Box<dy
 fn print_outputs(outputs: &[OutputInfo]) {
     for o in outputs {
         println!("{} {:?} at {},{} size {}x{} scale {:.4} ({}) id {}", o.name, o.description, o.x, o.y, o.width, o.height, o.scale, o.note, o.id);
+        if !o.shown_by.is_empty() {
+            println!("  shown by {}, drawn by {}", o.shown_by, o.drawn_by);
+        }
     }
 }
 
