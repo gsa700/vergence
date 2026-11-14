@@ -259,6 +259,14 @@ impl Server {
                     self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message: format!("no notification {nid} of yours") });
                 }
             }
+            ClientMsg::ListPlaces { serial } => {
+                let apps = self.places_apps();
+                self.bus_send(id, ServerMsg::Places { serial, apps });
+            }
+            ClientMsg::ForgetPlaces { serial, app } => {
+                self.forget_places(&app);
+                self.bus_send(id, ServerMsg::Done { serial });
+            }
             ClientMsg::GetSettings { serial } => {
                 let settings = crate::settings::all(&self.settings.current);
                 self.bus_send(id, ServerMsg::Settings { serial, complete: true, settings });
@@ -439,6 +447,8 @@ impl Server {
                     base_scale: self.scale_notes.get(&o.name()).map(|s| s.base).unwrap_or(1.0),
                     shown_by: self.gpu_words(&o.name(), false),
                     drawn_by: self.gpu_words(&o.name(), true),
+                    modes: self.backend.as_ref().map(|b| b.modes_of(&o.name()).0).unwrap_or_default(),
+                    mode: self.backend.as_ref().map_or(u32::MAX, |b| b.modes_of(&o.name()).1),
                 })
             })
             .collect();

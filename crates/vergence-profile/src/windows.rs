@@ -33,6 +33,12 @@ pub struct WindowId {
 }
 
 impl WindowId {
+    /// The app a window belongs to, by name: its class, else its instance,
+    /// lower case ("firefox", "vergence-term").
+    pub fn app_name(&self) -> String {
+        if self.class.is_empty() { self.instance.to_lowercase() } else { self.class.to_lowercase() }
+    }
+
     /// e.g. "Navigator/firefox #1", or "vergence-term/vergence-term (main) 3f2a…" with a token.
     pub fn describe(&self) -> String {
         let role = if self.role.is_empty() { String::new() } else { format!(" ({})", self.role) };
@@ -267,6 +273,33 @@ impl WindowStore {
         n
     }
 
+    /// The apps with places (their class, else instance) and how many places
+    /// each, on every setup, by name.
+    pub fn apps(&self) -> Vec<(String, u32)> {
+        let mut out: Vec<(String, u32)> = Vec::new();
+        for w in self.profiles.iter().flat_map(|p| &p.windows) {
+            let app = w.id.app_name();
+            match out.iter_mut().find(|(a, _)| *a == app) {
+                Some(e) => e.1 += 1,
+                None => out.push((app, 1)),
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// Forget every place of an app (by [`WindowId::app_name`]), or of every
+    /// app when `app` is None; how many were forgotten.
+    pub fn forget_app(&mut self, app: Option<&str>) -> usize {
+        let mut n = 0;
+        for p in &mut self.profiles {
+            let before = p.windows.len();
+            p.windows.retain(|w| app.is_some_and(|a| w.id.app_name() != a));
+            n += before - p.windows.len();
+        }
+        n
+    }
+
     /// Remove the profiles whose key starts with `prefix` (non-empty).
     pub fn forget(&mut self, prefix: &str) -> usize {
         if prefix.is_empty() {
@@ -403,5 +436,17 @@ mod tests {
         let u = t.untokened();
         assert_eq!((u.token.as_str(), u.index, u.class.as_str()), ("", 0, "vergence-term"));
         assert!(t.describe().ends_with("cafe…"));
+    }
+
+    #[test]
+    fn apps_listed_and_forgotten() {
+        let mut store = WindowStore::default();
+        store.get_mut_or_new("a").windows.extend([w("Firefox", 0, 0), w("vergence-term", 0, 0)]);
+        store.get_mut_or_new("b").windows.extend([w("vergence-term", 0, 0), w("vergence-term", 1, 100)]);
+        assert_eq!(store.apps(), vec![("firefox".to_string(), 1), ("vergence-term".to_string(), 3)]);
+        assert_eq!(store.forget_app(Some("vergence-term")), 3);
+        assert_eq!(store.apps(), vec![("firefox".to_string(), 1)]);
+        assert_eq!(store.forget_app(None), 1);
+        assert!(store.apps().is_empty());
     }
 }

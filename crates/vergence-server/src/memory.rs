@@ -363,6 +363,20 @@ pub fn today() -> u32 {
 }
 
 impl Server {
+    /// The apps window memory keeps places for, and how many each (bus `ListPlaces`).
+    pub fn places_apps(&self) -> Vec<(String, u32)> {
+        self.memory.store.apps()
+    }
+
+    /// Forget an app's places on every setup, or every app's (`app` empty);
+    /// saved at once (bus `ForgetPlaces`; settings milestone 2). Open windows
+    /// stay where they are and are remembered again when they move.
+    pub fn forget_places(&mut self, app: &str) {
+        let n = self.memory.store.forget_app((!app.is_empty()).then_some(app));
+        tracing::info!("memory: forgot {n} places of {}", if app.is_empty() { "every app" } else { app });
+        self.memory.save();
+    }
+
     /// The user closed a window with a token for good: where it was becomes
     /// its program's last-closed place (a new window starts there), and its
     /// token is forgotten on every monitor setup.

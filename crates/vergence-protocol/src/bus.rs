@@ -26,12 +26,15 @@
 //! ([`Topic::Inputs`]): those present and the kinds the machine has had, so
 //! the settings app shows a Touchpad or Touchscreen page once there is one.
 //! Version 8 (2026-11-14, GPUs milestone 1): each screen says which GPU shows
-//! it and which draws it (`OutputInfo::shown_by`, `drawn_by`).
+//! it and which draws it (`OutputInfo::shown_by`, `drawn_by`). Version 9
+//! (2026-11-14, settings milestone 2): each screen lists its modes and which
+//! is running (`OutputInfo::modes`, `mode`); window memory's apps can be
+//! listed and forgotten (`ListPlaces`, `ForgetPlaces`, `Places`).
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 8;
+pub const VERSION: u32 = 9;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -235,6 +238,20 @@ pub struct OutputInfo {
     /// when the frames are drawn there and copied: GPUs milestone 1).
     pub shown_by: String,
     pub drawn_by: String,
+    /// The monitor's modes, each once (largest first, as the monitor lists
+    /// them), and the one running: an index into `modes`, or `u32::MAX`.
+    pub modes: Vec<ModeInfo>,
+    pub mode: u32,
+}
+
+/// A monitor's mode: its size in pixels, its refresh in millihertz (59940 is
+/// 59.94 Hz, kept apart from 60000), and whether the monitor prefers it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModeInfo {
+    pub width: u32,
+    pub height: u32,
+    pub refresh_mhz: u32,
+    pub preferred: bool,
 }
 
 /// Client to server.
@@ -260,6 +277,11 @@ pub enum ClientMsg {
     Notify { serial: u32, replaces: u32, summary: String, body: String, urgency: u8, timeout_ms: i32, actions: Vec<(String, String)> },
     /// Close one of this client's notifications. Reply: Done, or an error.
     CloseNotification { serial: u32, id: u32 },
+    /// The apps window memory keeps places for. Reply: [`ServerMsg::Places`].
+    ListPlaces { serial: u32 },
+    /// Forget every place of an app (its class), on every setup; an empty
+    /// `app` forgets all. Reply: Done.
+    ForgetPlaces { serial: u32, app: String },
     /// Windows (window.rs).
     Window(crate::window::WinRequest),
 }
@@ -290,6 +312,8 @@ pub enum ServerMsg {
     /// The input devices present, and every kind this machine has had
     /// (remembered by the server across sessions): an event (serial 0).
     Inputs { serial: u32, devices: Vec<InputInfo>, seen: Vec<InputKind> },
+    /// The apps window memory keeps places for (their class) and how many places each.
+    Places { serial: u32, apps: Vec<(String, u32)> },
     /// Windows (window.rs).
     Window(crate::window::WinEvent),
 }
@@ -304,6 +328,8 @@ mod op {
     pub const GET_SETTINGS: u16 = 6;
     pub const NOTIFY: u16 = 7;
     pub const CLOSE_NOTIFICATION: u16 = 8;
+    pub const LIST_PLACES: u16 = 9;
+    pub const FORGET_PLACES: u16 = 10;
     // Server to client.
     pub const WELCOME: u16 = 1;
     pub const PONG: u16 = 2;
@@ -315,6 +341,7 @@ mod op {
     pub const NOTIFICATION_CLOSED: u16 = 8;
     pub const ACTION_INVOKED: u16 = 9;
     pub const INPUTS: u16 = 10;
+    pub const PLACES: u16 = 11;
 }
 
 fn put_setting_value(e: &mut Encoder, v: &SettingValue) {
@@ -398,6 +425,16 @@ impl ClientMsg {
                 e.u32(*serial).u32(*id);
                 e
             }
+            ClientMsg::ListPlaces { serial } => {
+                let mut e = Encoder::frame(op::LIST_PLACES);
+                e.u32(*serial);
+                e
+            }
+            ClientMsg::ForgetPlaces { serial, app } => {
+                let mut e = Encoder::frame(op::FORGET_PLACES);
+                e.u32(*serial).str(app);
+                e
+            }
             // Its descriptors are lost here: send it with encode_with_fds.
             ClientMsg::Window(w) => return w.encode().map(|(bytes, _)| bytes),
         };
@@ -473,6 +510,12 @@ impl ClientMsg {
                 let id = d.u32().map_err(|e| bad(serial, e))?;
                 Ok(ClientMsg::CloseNotification { serial, id })
             }
+            op::LIST_PLACES => Ok(ClientMsg::ListPlaces { serial: d.u32().map_err(|e| bad(0, e))? }),
+            op::FORGET_PLACES => {
+                let serial = d.u32().map_err(|e| bad(0, e))?;
+                let app = d.str().map_err(|e| bad(serial, e))?;
+                Ok(ClientMsg::ForgetPlaces { serial, app })
+            }
             other => {
                 // Every request starts with its serial; answer with it if present.
                 let serial = d.u32().unwrap_or(0);
@@ -509,7 +552,11 @@ impl ServerMsg {
                 let mut e = Encoder::frame(op::OUTPUTS);
                 e.u32(*serial).count(outputs.len());
                 for o in outputs {
-                    e.str(&o.id).str(&o.name).str(&o.description).i32(o.x).i32(o.y).i32(o.width).i32(o.height).f64(o.scale).str(&o.note).f64(o.default_scale).f64(o.base_scale).str(&o.shown_by).str(&o.drawn_by);
+                    e.str(&o.id).str(&o.name).str(&o.description).i32(o.x).i32(o.y).i32(o.width).i32(o.height).f64(o.scale).str(&o.note).f64(o.default_scale).f64(o.base_scale).str(&o.shown_by).str(&o.drawn_by).count(o.modes.len());
+                    for m in &o.modes {
+                        e.u32(m.width).u32(m.height).u32(m.refresh_mhz).bool(m.preferred);
+                    }
+                    e.u32(o.mode);
                 }
                 e.str(setup);
                 e
@@ -536,6 +583,14 @@ impl ServerMsg {
             ServerMsg::ActionInvoked { id, key } => {
                 let mut e = Encoder::frame(op::ACTION_INVOKED);
                 e.u32(*id).str(key);
+                e
+            }
+            ServerMsg::Places { serial, apps } => {
+                let mut e = Encoder::frame(op::PLACES);
+                e.u32(*serial).count(apps.len());
+                for (a, n) in apps {
+                    e.str(a).u32(*n);
+                }
                 e
             }
             ServerMsg::Inputs { serial, devices, seen } => {
@@ -584,8 +639,8 @@ impl ServerMsg {
             op::ERROR => ServerMsg::Error { serial: d.u32()?, code: ErrorCode::from_wire(d.u16()?), message: d.str()? },
             op::OUTPUTS => {
                 let serial = d.u32()?;
-                // Each output: six strings (4 bytes each at least), four i32, three f64.
-                let n = d.count(4 + 4 + 4 + 16 + 8 + 4 + 16 + 4 + 4)?;
+                // Each output: six strings (4 bytes each at least), four i32, three f64, a count and an index.
+                let n = d.count(4 + 4 + 4 + 16 + 8 + 4 + 16 + 4 + 4 + 8)?;
                 let mut outputs = Vec::with_capacity(n);
                 for _ in 0..n {
                     outputs.push(OutputInfo {
@@ -602,6 +657,15 @@ impl ServerMsg {
                         base_scale: d.f64()?,
                         shown_by: d.str()?,
                         drawn_by: d.str()?,
+                        modes: {
+                            let n = d.count(13)?;
+                            let mut v = Vec::with_capacity(n);
+                            for _ in 0..n {
+                                v.push(ModeInfo { width: d.u32()?, height: d.u32()?, refresh_mhz: d.u32()?, preferred: d.bool()? });
+                            }
+                            v
+                        },
+                        mode: d.u32()?,
                     });
                 }
                 let setup = d.str()?;
@@ -621,6 +685,15 @@ impl ServerMsg {
             op::NOTIFIED => ServerMsg::Notified { serial: d.u32()?, id: d.u32()? },
             op::NOTIFICATION_CLOSED => ServerMsg::NotificationClosed { id: d.u32()?, reason: d.u32()? },
             op::ACTION_INVOKED => ServerMsg::ActionInvoked { id: d.u32()?, key: d.str()? },
+            op::PLACES => {
+                let serial = d.u32()?;
+                let n = d.count(8)?;
+                let mut apps = Vec::with_capacity(n);
+                for _ in 0..n {
+                    apps.push((d.str()?, d.u32()?));
+                }
+                ServerMsg::Places { serial, apps }
+            }
             op::INPUTS => {
                 let serial = d.u32()?;
                 // Each device: a string (4 bytes at least) and its kind.
@@ -654,8 +727,8 @@ mod tests {
 
     fn outputs() -> Vec<OutputInfo> {
         vec![
-            OutputInfo { id: "3f2a9c0e1b7d4a55".into(), name: "eDP-1".into(), description: "14\" 4K".into(), x: 0, y: 0, width: 1170, height: 658, scale: 3.283_333, note: "calculated".into(), default_scale: 3.0, base_scale: 3.0, shown_by: "Intel graphics (i915)".into(), drawn_by: "Intel graphics (i915)".into() },
-            OutputInfo { id: "9b1c22d4e5f60718".into(), name: "HDMI-A-1".into(), description: "ASUS VS229".into(), x: 1170, y: 0, width: 1794, height: 1009, scale: 1.075, note: "set by hand".into(), default_scale: 1.0, base_scale: 1.25, shown_by: "NVIDIA graphics (nouveau)".into(), drawn_by: "Intel graphics (i915)".into() },
+            OutputInfo { id: "3f2a9c0e1b7d4a55".into(), name: "eDP-1".into(), description: "14\" 4K".into(), x: 0, y: 0, width: 1170, height: 658, scale: 3.283_333, note: "calculated".into(), default_scale: 3.0, base_scale: 3.0, shown_by: "Intel graphics (i915)".into(), drawn_by: "Intel graphics (i915)".into(), modes: vec![ModeInfo { width: 3840, height: 2160, refresh_mhz: 60000, preferred: true }, ModeInfo { width: 1920, height: 1080, refresh_mhz: 59940, preferred: false }], mode: 0 },
+            OutputInfo { id: "9b1c22d4e5f60718".into(), name: "HDMI-A-1".into(), description: "ASUS VS229".into(), x: 1170, y: 0, width: 1794, height: 1009, scale: 1.075, note: "set by hand".into(), default_scale: 1.0, base_scale: 1.25, shown_by: "NVIDIA graphics (nouveau)".into(), drawn_by: "Intel graphics (i915)".into(), modes: Vec::new(), mode: u32::MAX },
         ]
     }
 
@@ -679,6 +752,9 @@ mod tests {
                 actions: vec![("default".into(), "Open".into()), ("log".into(), "Show log".into())],
             },
             ClientMsg::CloseNotification { serial: 16, id: 3 },
+            ClientMsg::ListPlaces { serial: 17 },
+            ClientMsg::ForgetPlaces { serial: 18, app: "vergence-term".into() },
+            ClientMsg::ForgetPlaces { serial: 19, app: String::new() },
         ] {
             assert_eq!(ClientMsg::decode(&frame(&m.encode().unwrap())).unwrap(), m);
         }
@@ -707,6 +783,8 @@ mod tests {
                 seen: vec![InputKind::Keyboard, InputKind::Touchpad, InputKind::Touchscreen],
             },
             ServerMsg::Inputs { serial: 0, devices: Vec::new(), seen: Vec::new() },
+            ServerMsg::Places { serial: 20, apps: vec![("vergence-term".into(), 3), ("firefox".into(), 1)] },
+            ServerMsg::Places { serial: 21, apps: Vec::new() },
             ServerMsg::Settings {
                 serial: 0,
                 complete: true,

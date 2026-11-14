@@ -108,6 +108,9 @@ struct Surface {
     /// On another GPU: the buffers the primary draws into (system memory,
     /// linear), and the hidden scale-1 output the copy is shown through.
     relay: Option<Relay>,
+    /// The monitor's modes (each once) and the one running, for the bus.
+    modes: Vec<vergence_protocol::bus::ModeInfo>,
+    mode: u32,
 }
 
 /// "Drawn here, shown there" (GPUs milestone 1, step 3): the primary draws
@@ -634,6 +637,16 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     }
     let mode_id = conn.modes().iter().position(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED)).unwrap_or(0);
     let Some(&drm_mode) = conn.modes().get(mode_id) else { return };
+    // Every mode the monitor offers, each once, for the settings app (bus v9).
+    let mut modes: Vec<vergence_protocol::bus::ModeInfo> = Vec::new();
+    for m in conn.modes() {
+        let info = mode_info(m);
+        if !modes.iter().any(|x| (x.width, x.height, x.refresh_mhz) == (info.width, info.height, info.refresh_mhz)) {
+            modes.push(info);
+        }
+    }
+    let running = mode_info(&drm_mode);
+    let mode_index = modes.iter().position(|x| (x.width, x.height, x.refresh_mhz) == (running.width, running.height, running.refresh_mhz)).map_or(u32::MAX, |i| i as u32);
     let wl_mode = WlMode::from(drm_mode);
     let (w, h) = drm_mode.size();
 
@@ -698,7 +711,7 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     if gpu > 0 {
         tracing::info!("{name}: shown by {}, drawn by {} and copied there", b.devices[gpu].path, b.devices[0].path);
     }
-    b.surfaces.insert((gpu, crtc), Surface { output, drm_output, connector: name, last: std::time::Instant::now(), scale, id, px: (w as u32, h as u32), mm, edid: identity, global, relay });
+    b.surfaces.insert((gpu, crtc), Surface { output, drm_output, connector: name, last: std::time::Instant::now(), scale, id, px: (w as u32, h as u32), mm, edid: identity, global, relay, modes, mode: mode_index });
 }
 
 /// The GL renderer's name ("Mesa Intel(R) UHD Graphics (CML GT2)", "llvmpipe ...").
@@ -715,6 +728,17 @@ fn gl_renderer(r: &mut GlesRenderer) -> String {
 fn is_software(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
     ["llvmpipe", "softpipe", "swrast", "software"].iter().any(|s| n.contains(s))
+}
+
+/// A DRM mode as the bus says it: pixels, refresh in millihertz (from the
+/// pixel clock and the totals, so 59.94 and 60 stay apart), preferred or not.
+fn mode_info(m: &smithay::reexports::drm::control::Mode) -> vergence_protocol::bus::ModeInfo {
+    let (w, h) = m.size();
+    let (_, _, htotal) = m.hsync();
+    let (_, _, vtotal) = m.vsync();
+    let total = htotal as u64 * vtotal as u64;
+    let refresh_mhz = if total > 0 { (m.clock() as u64 * 1_000_000 / total) as u32 } else { m.vrefresh() * 1000 };
+    vergence_protocol::bus::ModeInfo { width: w as u32, height: h as u32, refresh_mhz, preferred: m.mode_type().contains(ModeTypeFlags::PREFERRED) }
 }
 
 /// A linear XRGB8888 buffer in the primary GPU's memory, the size of a screen
@@ -1098,6 +1122,11 @@ pub fn screens_on(state: &mut Server) {
 }
 
 impl Backend {
+    /// A screen's modes and the index of the one running (u32::MAX: unknown).
+    pub fn modes_of(&self, connector: &str) -> (Vec<vergence_protocol::bus::ModeInfo>, u32) {
+        self.surfaces.values().find(|s| s.connector == connector).map_or((Vec::new(), u32::MAX), |s| (s.modes.clone(), s.mode))
+    }
+
     /// The device path of the GPU that shows (or, `drawn`, draws) a screen.
     pub fn gpu_path(&self, connector: &str, drawn: bool) -> Option<String> {
         let (key, _) = self.surfaces.iter().find(|(_, s)| s.connector == connector)?;

@@ -82,7 +82,9 @@ fn topic(rng: &mut Rng) -> Topic {
 
 fn client(rng: &mut Rng) -> ClientMsg {
     let serial = rng.next() as u32;
-    match rng.below(8) {
+    match rng.below(10) {
+        8 => ClientMsg::ListPlaces { serial },
+        9 => ClientMsg::ForgetPlaces { serial, app: rng.string(40) },
         0 => ClientMsg::Hello { version: rng.next() as u32, app_id: rng.string(60) },
         1 => ClientMsg::Ping { serial },
         2 => ClientMsg::Subscribe { serial, topic: topic(rng) },
@@ -117,6 +119,8 @@ fn output(rng: &mut Rng) -> OutputInfo {
         base_scale: rng.f64(),
         shown_by: rng.string(40),
         drawn_by: rng.string(40),
+        modes: (0..rng.below(6)).map(|_| vergence_protocol::bus::ModeInfo { width: rng.next() as u32, height: rng.next() as u32, refresh_mhz: rng.next() as u32, preferred: rng.below(2) == 1 }).collect(),
+        mode: rng.next() as u32,
     }
 }
 
@@ -134,7 +138,8 @@ fn setting(rng: &mut Rng) -> Setting {
 
 fn server(rng: &mut Rng) -> ServerMsg {
     let serial = rng.next() as u32;
-    match rng.below(10) {
+    match rng.below(11) {
+        9 => ServerMsg::Places { serial, apps: (0..rng.below(6)).map(|_| (rng.string(30), rng.next() as u32)).collect() },
         0 => ServerMsg::Welcome { version: rng.next() as u32, client_id: rng.next() as u32 },
         1 => ServerMsg::Pong { serial },
         2 => ServerMsg::Done { serial },

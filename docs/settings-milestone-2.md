@@ -84,6 +84,21 @@ modal dialog over the window (window styles milestone 1): "Close 3 tabs?",
 or "A program is running in this tab (ssh). Close it?". One idle tab closes
 as now.
 
+## Progress
+
+- **Step 1 in: bus protocol v9** (2026-11-14). `OutputInfo::modes` (each
+  mode once: pixels, refresh in millihertz from the pixel clock and totals
+  so 59.94 and 60 stay apart, preferred) and `mode` (the running one's
+  index); `ListPlaces`, `ForgetPlaces { app }` (empty: all) and `Places`
+  (app, count); vergence-profile's `WindowStore::apps`, `forget_app`,
+  `WindowId::app_name` (class, else instance, lower case), tested; the
+  server answers from window memory and saves. `vbus outputs` prints the
+  modes (`*` running, `+` preferred), `vbus places` the apps. Hubble: the
+  panel 1920x1080 at 144 (preferred, running) and 60 Hz; 13 apps with
+  places (the terminal 124). kepler (the 14" moved back): 3840x2160 at 30 Hz
+  (its HDMI's limit; 60 on Hubble's NVIDIA HDMI), 34 modes, the 200% chosen
+  on Hubble followed the monitor. All three on v9. 477 tests (kepler 473).
+
 ## Steps
 
 1. **Protocol v9**: modes and the current mode in `OutputInfo`; `ListPlaces`,

@@ -47,6 +47,14 @@ fn run(socket: Option<std::path::PathBuf>, args: &[String]) -> Result<(), Box<dy
             ServerMsg::Outputs { outputs, .. } => print_outputs(&outputs),
             other => return Err(format!("unexpected {other:?}").into()),
         },
+        Some("places") => match c.request(|serial| ClientMsg::ListPlaces { serial })? {
+            ServerMsg::Places { apps, .. } => {
+                for (a, n) in apps {
+                    println!("{a}: {n} places");
+                }
+            }
+            other => return Err(format!("unexpected {other:?}").into()),
+        },
         Some("settings") => match c.request(|serial| ClientMsg::GetSettings { serial })? {
             ServerMsg::Settings { settings, .. } => print_settings(&settings),
             other => return Err(format!("unexpected {other:?}").into()),
@@ -141,6 +149,15 @@ fn print_outputs(outputs: &[OutputInfo]) {
         println!("{} {:?} at {},{} size {}x{} scale {:.4} ({}) id {}", o.name, o.description, o.x, o.y, o.width, o.height, o.scale, o.note, o.id);
         if !o.shown_by.is_empty() {
             println!("  shown by {}, drawn by {}", o.shown_by, o.drawn_by);
+        }
+        let modes: Vec<String> = o
+            .modes
+            .iter()
+            .enumerate()
+            .map(|(i, m)| format!("{}{}x{}@{:.2}{}", if i as u32 == o.mode { "*" } else { "" }, m.width, m.height, m.refresh_mhz as f64 / 1000.0, if m.preferred { "+" } else { "" }))
+            .collect();
+        if !modes.is_empty() {
+            println!("  modes: {}", modes.join(" "));
         }
     }
 }
