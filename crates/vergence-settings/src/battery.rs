@@ -8,6 +8,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
+use vergence_power::history::{self, Record};
 use vergence_power::{Gpu, Power, State, duration_text};
 
 use super::*;
@@ -23,7 +24,14 @@ pub struct BatteryPage {
     /// Watts drawn (or taken in), oldest first, while the page is open.
     history: VecDeque<f64>,
     started: bool,
+    /// The kept history (the server writes it): the last day or week.
+    range: usize,
+    records: Vec<Record>,
+    records_read: Option<std::time::Instant>,
 }
+
+/// The history's ranges, in seconds, and their names.
+const RANGES: [(u64, &str, &str); 2] = [(24 * 3600, "Last 24 hours", "24 hours ago"), (7 * 24 * 3600, "Last 7 days", "7 days ago")];
 
 impl App {
     /// Whether the machine has a battery (the sidebar shows the page then).
@@ -46,6 +54,16 @@ impl App {
         }
         self.battery.power = vergence_power::power();
         self.battery.gpus = vergence_power::gpus();
+        // The kept history, once a minute (the server writes a line a minute).
+        if self.battery.records_read.is_none_or(|t| t.elapsed() >= Duration::from_secs(60)) {
+            self.battery.records_read = Some(std::time::Instant::now());
+            let since = history::now().saturating_sub(RANGES[1].0);
+            self.battery.records = history::path().map(|p| history::read(&p, since)).unwrap_or_default();
+        }
+    }
+
+    pub fn battery_range(&mut self, i: usize) {
+        self.battery.range = i.min(RANGES.len() - 1);
     }
 
     pub fn battery_sample(&mut self) {
@@ -106,6 +124,42 @@ impl App {
             ));
             let title = if p.batteries.len() > 1 { b.name.clone() } else { "Battery".into() };
             items.push(self.group(Some(&title), rows));
+        }
+        // The kept history: the charge over a day or a week, and what it comes to.
+        if !p.batteries.is_empty() {
+            let (span, _, ago) = RANGES[self.battery.range];
+            let to = history::now();
+            let from = to.saturating_sub(span);
+            let shown: Vec<Record> = self.battery.records.iter().copied().filter(|r| r.t >= from).collect();
+            let names: Vec<String> = RANGES.iter().map(|(_, n, _)| n.to_string()).collect();
+            let sum = history::summary(&shown);
+            let words = if sum.on_battery < 60 {
+                if shown.is_empty() { "Nothing kept yet: a line is written every minute.".to_string() } else { "Not on battery in this time.".to_string() }
+            } else {
+                let mut w = format!("On battery {}, {}% used", duration_text((sum.on_battery / 60) as u32), sum.used);
+                if let Some(a) = sum.avg_watts {
+                    w.push_str(&format!(", {a:.1} W on average"));
+                }
+                w.push('.');
+                w
+            };
+            let chart = panel(
+                column(vec![
+                    charge_chart(shown, from, to),
+                    row(vec![label(ago).size(10.0).dim(), space().width(Length::FILL), label("now").size(10.0).dim()]).width(Length::FILL),
+                ])
+                .spacing(2.0)
+                .width(Length::FILL),
+            )
+            .padding(Padding::hv(6.0, 12.0))
+            .width(Length::FILL);
+            items.push(self.group(
+                Some("History"),
+                vec![
+                    setting("Charge", &words, choice(names, Some(self.battery.range), Message::BatteryRange).width(Length::Fixed(150.0)).name("History range")),
+                    chart,
+                ],
+            ));
         }
         // The GPUs: an awake discrete one is the usual drain.
         if !self.battery.gpus.is_empty() {
@@ -187,6 +241,36 @@ fn battery_mark<M: 'static>(pct: u8, charging: bool) -> Element<M> {
     })
     .width(Length::Fixed(60.0))
     .height(Length::Fixed(26.0))
+}
+
+/// The charge from `from` to `to` (seconds since 1970): 0 to 100%, a line
+/// broken where the machine slept or was off, a green band under the
+/// stretches spent charging.
+fn charge_chart<M: 'static>(records: Vec<Record>, from: u64, to: u64) -> Element<M> {
+    drawing(move |scene: &mut Scene, _: &mut Fonts, r: Rect, t: &Theme| {
+        let faint = Color::rgba(t.dim.r, t.dim.g, t.dim.b, 45);
+        for pct in [0.0f32, 50.0, 100.0] {
+            let y = r.y + r.h - pct / 100.0 * r.h;
+            scene.line(Point::new(r.x, y), Point::new(r.x + r.w, y), 1.0, faint);
+        }
+        let span = to.saturating_sub(from).max(1) as f32;
+        let x_of = |s: u64| r.x + (s.saturating_sub(from) as f32 / span).clamp(0.0, 1.0) * r.w;
+        let y_of = |p: u8| r.y + r.h - p.min(100) as f32 / 100.0 * r.h;
+        let green = Color::rgba(0x30, 0xb0, 0x4f, 70);
+        for pair in records.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            if b.t <= a.t || b.t - a.t > history::GAP {
+                continue;
+            }
+            if a.state == State::Charging {
+                let (xa, xb) = (x_of(a.t), x_of(b.t));
+                scene.fill(Rect::new(xa, r.y, (xb - xa).max(1.0), r.h), green);
+            }
+            scene.line(Point::new(x_of(a.t), y_of(a.percent)), Point::new(x_of(b.t), y_of(b.percent)), 1.8, t.accent);
+        }
+    })
+    .width(Length::FILL)
+    .height(Length::Fixed(90.0))
 }
 
 /// Watts over the last two minutes, from 0 (bottom) to the larger of 10 W

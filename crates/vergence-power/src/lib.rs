@@ -10,6 +10,8 @@
 //! - FreeBSD: ACPI's sysctls `hw.acpi.battery.{life,time,state,rate}` and
 //!   `hw.acpi.acline`; no per-GPU sleep (the GPU list is empty there).
 
+pub mod history;
+
 /// What a battery is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum State {

@@ -29,6 +29,7 @@ vergence-edid.workspace = true
 vergence-xsettings.workspace = true
 vergence-protocol.workspace = true
 vergence-net.workspace = true
+vergence-power.workspace = true
 vergence-sound.workspace = true
 vergence-dbus.workspace = true
 x11rb = "0.13"

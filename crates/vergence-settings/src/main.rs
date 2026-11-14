@@ -372,6 +372,8 @@ enum Message {
     Wifi(wifi::WifiMsg),
     /// Time to read the battery again (battery.rs).
     BatterySample,
+    /// The battery history's range: the last day or week.
+    BatteryRange(usize),
     /// The Advanced part of a page opened or closed, by its key.
     Advanced(&'static str),
     // Sound: an output's volume (as it slides), its mute, making it the
@@ -859,6 +861,7 @@ impl App {
             Message::Go(p) => self.open(p),
             Message::Wifi(m) => self.wifi_handle(m),
             Message::BatterySample => self.battery_sample(),
+            Message::BatteryRange(i) => self.battery_range(i),
             Message::Advanced(key) => {
                 if !self.advanced.remove(key) {
                     self.advanced.insert(key);

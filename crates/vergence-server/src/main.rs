@@ -43,6 +43,7 @@ mod dialogs;
 mod tint;
 mod inputs;
 mod network;
+mod battery;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;
@@ -61,6 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state = Server::new(&mut event_loop, display);
     state.start_wallpaper();
     state.start_network();
+    state.start_battery_history();
     state.start_settings();
     state.start_energy();
 

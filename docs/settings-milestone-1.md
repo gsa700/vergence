@@ -326,6 +326,16 @@ by the computer through usbmuxd before it hands out a connection (Question
   Intel (i915) awake, NVIDIA (nouveau) asleep. Tests on fake /sys trees
   (Hubble's charge-based A32-K55; an energy-based one charging; GPUs).
   470 tests (kepler 466: the /sys tests are Linux's).
+  **History** (Dave: "chart and track the battery longer than two minutes
+  ... battery users will want it"): the server writes a line a minute while
+  there is a battery (its battery.rs thread, the real session only) to
+  ~/.local/state/vergence/battery.csv (0600; seconds, percent, watts,
+  state), trimmed to a week each day (vergence-power history.rs, tested:
+  lines, junk, summary, trimming, the file's mode). The page's History card:
+  the charge over the last 24 hours or 7 days (a choice), broken where the
+  machine slept or was off, green under charging, and "On battery 2 h 10 min,
+  35% used, 9.8 W on average". Hubble: recording since 14:24, on battery.
+  473 tests (kepler 469).
 - **A UPS** (Dave: "could that also do UPS monitoring on workstations?",
   "here I have this mac plugged into a small ups and it monitors it just
   like a laptop battery", "couldn't we add a user to the UPS group?"):
