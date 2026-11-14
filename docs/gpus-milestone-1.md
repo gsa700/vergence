@@ -137,6 +137,13 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
   100 pointer moves on each screen, **0 slow frames** (before, every frame
   on the 14" took 20 to 40 ms). Slow-frame warnings name the screen;
   `VERGENCE_RELAY_TIMES=1` logs every relay turn.
+- **Unplugged** (Dave): HDMI-A-1 removed, the windows back on the panel, the
+  NVIDIA card **suspended**, the draw on battery 13.3 W falling to 9.9 W in
+  30 s (acceptance 4). Dave saw **glitches** on the 4K screen: the pipeline
+  drew newer frames every 3 ms while one waited, and could cycle into the
+  buffer the NVIDIA GPU was still copying. Now no frame is drawn while one
+  waits to be copied, and the buffer copied last is never drawn into until
+  another has been copied. To be seen on the screen again.
 
 ## Steps
 

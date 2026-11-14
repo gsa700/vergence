@@ -123,6 +123,10 @@ struct Relay {
     frame: usize,
     /// The newest drawn buffer not copied yet.
     pending: Option<usize>,
+    /// The buffer copied last: the showing GPU may still be reading it, so it
+    /// is not drawn into until another has been copied (drawing over it
+    /// mid-copy glitched the 14" on Hubble, 2026-11-14).
+    copied: Option<usize>,
     damage: smithay::backend::renderer::damage::OutputDamageTracker,
     /// The output the showing GPU's frame goes through: the screen's mode at scale 1.
     _plain: Output,
@@ -647,7 +651,7 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
         let dev = &mut b.devices[gpu];
         let Some(copier) = dev.renderer.as_mut() else { return };
         let r = dev.manager.lock().initialize_output::<_, RelayElements>(crtc, drm_mode, &[conn.handle()], &plain, planes, copier, &DrmOutputRenderElements::default());
-        relay = Some(Relay { bufs, next: 0, frame: 0, pending: None, damage, _plain: plain });
+        relay = Some(Relay { bufs, next: 0, frame: 0, pending: None, copied: None, damage, _plain: plain });
         r
     };
     let drm_output = match initialized {
@@ -871,17 +875,22 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
     let _ = state.display_handle.flush_clients();
 }
 
-/// A screen on another GPU, one turn: the primary draws any change into the
-/// next free buffer without waiting, and the showing GPU copies the newest
-/// buffer whose drawing has finished (checked, never waited for).
+/// A screen on another GPU, one turn: the showing GPU copies the frame drawn
+/// last once its drawing has finished (checked, never waited for), and the
+/// primary draws the next change into a buffer that is neither waiting nor
+/// the one copied last.
 fn relay_frame(primary: &mut GlesRenderer, copier: Option<&mut GlesRenderer>, s: &mut Surface, elements: &[OutputElements], clear: [f32; 4]) -> Result<Relayed, String> {
     use smithay::backend::renderer::{Bind, ImportDma, element::{Kind, texture::{TextureBuffer, TextureRenderElement}}};
     let copier = copier.ok_or("no renderer on the showing GPU")?;
     let relay = s.relay.as_mut().ok_or("no relay buffers")?;
     let t0 = std::time::Instant::now();
-    // Draw: into the next buffer that is not the one waiting to be copied.
-    let i = relay.next;
-    if relay.pending != Some(i) {
+    // Draw, unless a frame is still waiting to be copied (the newest change is
+    // drawn once that one is out): into the next buffer, never the one copied last.
+    let mut i = relay.next;
+    if relay.copied == Some(i) {
+        i = (i + 1) % relay.bufs.len();
+    }
+    if relay.pending.is_none() {
         let age = if relay.bufs[i].drawn == 0 { 0 } else { relay.frame + 1 - relay.bufs[i].drawn };
         let drawn = {
             let mut fb = primary.bind(&mut relay.bufs[i].dmabuf).map_err(|e| format!("bind: {e}"))?;
@@ -892,10 +901,7 @@ fn relay_frame(primary: &mut GlesRenderer, copier: Option<&mut GlesRenderer>, s:
             relay.frame += 1;
             relay.bufs[i].drawn = relay.frame;
             relay.bufs[i].sync = Some(sync);
-            // A newer frame: the older one waiting is not copied any more.
-            if let Some(old) = relay.pending.replace(i) {
-                relay.bufs[old].sync = None;
-            }
+            relay.pending = Some(i);
             relay.next = (i + 1) % relay.bufs.len();
         }
     }
@@ -906,6 +912,7 @@ fn relay_frame(primary: &mut GlesRenderer, copier: Option<&mut GlesRenderer>, s:
     // Copy: the newest finished frame onto the showing GPU's scan-out buffer.
     let t1 = std::time::Instant::now();
     relay.pending = None;
+    relay.copied = Some(p);
     relay.bufs[p].sync = None;
     if relay.bufs[p].texture.is_none() {
         relay.bufs[p].texture = Some(copier.import_dmabuf(&relay.bufs[p].dmabuf, None).map_err(|e| format!("import on the showing GPU: {e}"))?);
