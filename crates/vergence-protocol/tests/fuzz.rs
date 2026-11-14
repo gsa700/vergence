@@ -3,7 +3,7 @@
 //! 2026-11-08). Deterministic (a fixed seed); FUZZ_ITERS raises the count for a
 //! long run: `FUZZ_ITERS=2000000 cargo test --release -p vergence-protocol`.
 
-use vergence_protocol::bus::{ClientMsg, ErrorCode, OutputInfo, ServerMsg, Setting, SettingValue, Topic};
+use vergence_protocol::bus::{ClientMsg, ErrorCode, InputInfo, InputKind, OutputInfo, ServerMsg, Setting, SettingValue, Topic};
 use vergence_protocol::wire::{FrameReader, MAX_FRAME};
 
 struct Rng(u64);
@@ -132,7 +132,7 @@ fn setting(rng: &mut Rng) -> Setting {
 
 fn server(rng: &mut Rng) -> ServerMsg {
     let serial = rng.next() as u32;
-    match rng.below(9) {
+    match rng.below(10) {
         0 => ServerMsg::Welcome { version: rng.next() as u32, client_id: rng.next() as u32 },
         1 => ServerMsg::Pong { serial },
         2 => ServerMsg::Done { serial },
@@ -141,6 +141,11 @@ fn server(rng: &mut Rng) -> ServerMsg {
         5 => ServerMsg::Settings { serial, complete: rng.below(2) == 1, settings: (0..rng.below(12)).map(|_| setting(rng)).collect() },
         6 => ServerMsg::Notified { serial, id: rng.next() as u32 },
         7 => ServerMsg::NotificationClosed { id: rng.next() as u32, reason: rng.next() as u32 },
+        8 => ServerMsg::Inputs {
+            serial,
+            devices: (0..rng.below(6)).map(|_| InputInfo { name: rng.string(60), kind: InputKind::from_wire(rng.next() as u8) }).collect(),
+            seen: (0..rng.below(5)).map(|_| InputKind::from_wire(rng.next() as u8)).collect(),
+        },
         _ => ServerMsg::ActionInvoked { id: rng.next() as u32, key: rng.string(40) },
     }
 }

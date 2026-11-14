@@ -36,7 +36,8 @@
 // seat decided for the fingers (Wayland touch through Smithay, a native
 // window's over the bus, a window going with its finger).
 //
-// Not yet: a way to make the tie by touching the screen (settings app).
+// The settings app's Touchscreen page makes the tie from a list of screens;
+// not yet by touching the screen itself.
 
 use std::collections::{HashMap, HashSet};
 

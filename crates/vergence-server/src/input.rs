@@ -183,6 +183,10 @@ impl Server {
                 // lines a notch moves (pointer.rs). A wheel that gives no smooth
                 // amount moves 15 a notch (libinput's v120 counts 120 a notch).
                 let source = event.source();
+                // Only a touchpad scrolls with fingers (inputs.rs).
+                if source == AxisSource::Finger {
+                    self.inputs_touchpad_used();
+                }
                 let k = self.scroll_factor(source);
                 let amount = |axis| k * event.amount(axis).unwrap_or_else(|| event.amount_v120(axis).unwrap_or(0.0) * 15.0 / 120.0);
                 let notches = |axis| event.amount_v120(axis).map(|v| v * k);

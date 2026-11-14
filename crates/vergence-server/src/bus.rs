@@ -276,6 +276,10 @@ impl Server {
                         let settings = crate::settings::all(&self.settings.current);
                         self.bus_send(id, ServerMsg::Settings { serial: 0, complete: true, settings });
                     }
+                    Topic::Inputs => {
+                        let m = self.bus_inputs();
+                        self.bus_send(id, m);
+                    }
                 }
             }
             ClientMsg::Unsubscribe { serial, topic } => {
@@ -454,6 +458,11 @@ impl Server {
         for id in ids {
             self.bus_send(id, ServerMsg::Settings { serial: 0, complete: false, settings: changed.to_vec() });
         }
+    }
+
+    /// The clients subscribed to a topic.
+    pub fn bus_subscribers(&self, topic: Topic) -> Vec<u32> {
+        self.bus.clients.iter().filter(|(_, c)| c.topics.contains(&topic)).map(|(id, _)| *id).collect()
     }
 
     /// Call after monitors were added, removed, moved or rescaled: subscribers

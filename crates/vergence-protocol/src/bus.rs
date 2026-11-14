@@ -22,11 +22,14 @@
 //! (`Bar::Tools`), their presses heard as `BarButton`. Version 6
 //! (2026-11-14): the server tells a window the wallpaper's color behind it
 //! (`Tint`), for a window that mixes a little of it into its grounds.
+//! Version 7 (2026-11-14, settings milestone 1): the input devices
+//! ([`Topic::Inputs`]): those present and the kinds the machine has had, so
+//! the settings app shows a Touchpad or Touchscreen page once there is one.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -37,6 +40,9 @@ pub enum Topic {
     /// The desktop settings (appearance, theme, fonts, cursor): all of them
     /// on subscribe, then the ones that changed.
     Settings,
+    /// The input devices: on subscribe, then whenever one comes or goes or
+    /// a kind is seen for the first time.
+    Inputs,
 }
 
 impl Topic {
@@ -44,6 +50,7 @@ impl Topic {
         match self {
             Topic::Outputs => 1,
             Topic::Settings => 2,
+            Topic::Inputs => 3,
         }
     }
 
@@ -51,6 +58,7 @@ impl Topic {
         match v {
             1 => Some(Topic::Outputs),
             2 => Some(Topic::Settings),
+            3 => Some(Topic::Inputs),
             _ => None,
         }
     }
@@ -59,6 +67,7 @@ impl Topic {
         match self {
             Topic::Outputs => "outputs",
             Topic::Settings => "settings",
+            Topic::Inputs => "inputs",
         }
     }
 
@@ -66,9 +75,65 @@ impl Topic {
         match s {
             "outputs" => Some(Topic::Outputs),
             "settings" => Some(Topic::Settings),
+            "inputs" => Some(Topic::Inputs),
             _ => None,
         }
     }
+}
+
+/// What kind of input device something is. Values are fixed on the wire;
+/// a kind from a newer server is kept as `Other`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InputKind {
+    Keyboard,
+    Mouse,
+    Touchpad,
+    Touchscreen,
+    Other(u8),
+}
+
+impl InputKind {
+    pub fn to_wire(self) -> u8 {
+        match self {
+            InputKind::Keyboard => 1,
+            InputKind::Mouse => 2,
+            InputKind::Touchpad => 3,
+            InputKind::Touchscreen => 4,
+            InputKind::Other(v) => v,
+        }
+    }
+
+    pub fn from_wire(v: u8) -> InputKind {
+        match v {
+            1 => InputKind::Keyboard,
+            2 => InputKind::Mouse,
+            3 => InputKind::Touchpad,
+            4 => InputKind::Touchscreen,
+            v => InputKind::Other(v),
+        }
+    }
+
+    /// Its name in words and in files ("touchpad").
+    pub fn name(self) -> &'static str {
+        match self {
+            InputKind::Keyboard => "keyboard",
+            InputKind::Mouse => "mouse",
+            InputKind::Touchpad => "touchpad",
+            InputKind::Touchscreen => "touchscreen",
+            InputKind::Other(_) => "other",
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<InputKind> {
+        [InputKind::Keyboard, InputKind::Mouse, InputKind::Touchpad, InputKind::Touchscreen].into_iter().find(|k| k.name() == s)
+    }
+}
+
+/// An input device present now: its name (the device's own, untrusted) and kind.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InputInfo {
+    pub name: String,
+    pub kind: InputKind,
 }
 
 /// A setting's value. Tags are fixed on the wire.
@@ -215,6 +280,9 @@ pub enum ServerMsg {
     NotificationClosed { id: u32, reason: u32 },
     /// The user chose an action on one of this client's notifications.
     ActionInvoked { id: u32, key: String },
+    /// The input devices present, and every kind this machine has had
+    /// (remembered by the server across sessions): an event (serial 0).
+    Inputs { serial: u32, devices: Vec<InputInfo>, seen: Vec<InputKind> },
     /// Windows (window.rs).
     Window(crate::window::WinEvent),
 }
@@ -239,6 +307,7 @@ mod op {
     pub const NOTIFIED: u16 = 7;
     pub const NOTIFICATION_CLOSED: u16 = 8;
     pub const ACTION_INVOKED: u16 = 9;
+    pub const INPUTS: u16 = 10;
 }
 
 fn put_setting_value(e: &mut Encoder, v: &SettingValue) {
@@ -462,6 +531,18 @@ impl ServerMsg {
                 e.u32(*id).str(key);
                 e
             }
+            ServerMsg::Inputs { serial, devices, seen } => {
+                let mut e = Encoder::frame(op::INPUTS);
+                e.u32(*serial).count(devices.len());
+                for dev in devices {
+                    e.str(&dev.name).u8(dev.kind.to_wire());
+                }
+                e.count(seen.len());
+                for k in seen {
+                    e.u8(k.to_wire());
+                }
+                e
+            }
             // Its descriptors are lost here: send it with encode_with_fds.
             ServerMsg::Window(w) => return w.encode().map(|(bytes, _)| bytes),
         };
@@ -531,6 +612,21 @@ impl ServerMsg {
             op::NOTIFIED => ServerMsg::Notified { serial: d.u32()?, id: d.u32()? },
             op::NOTIFICATION_CLOSED => ServerMsg::NotificationClosed { id: d.u32()?, reason: d.u32()? },
             op::ACTION_INVOKED => ServerMsg::ActionInvoked { id: d.u32()?, key: d.str()? },
+            op::INPUTS => {
+                let serial = d.u32()?;
+                // Each device: a string (4 bytes at least) and its kind.
+                let n = d.count(5)?;
+                let mut devices = Vec::with_capacity(n);
+                for _ in 0..n {
+                    devices.push(InputInfo { name: d.str()?, kind: InputKind::from_wire(d.u8()?) });
+                }
+                let n = d.count(1)?;
+                let mut seen = Vec::with_capacity(n);
+                for _ in 0..n {
+                    seen.push(InputKind::from_wire(d.u8()?));
+                }
+                ServerMsg::Inputs { serial, devices, seen }
+            }
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -592,6 +688,16 @@ mod tests {
             ServerMsg::Notified { serial: 15, id: 3 },
             ServerMsg::NotificationClosed { id: 3, reason: 2 },
             ServerMsg::ActionInvoked { id: 3, key: "log".into() },
+            ServerMsg::Inputs {
+                serial: 0,
+                devices: vec![
+                    InputInfo { name: "AT Translated Set 2 keyboard".into(), kind: InputKind::Keyboard },
+                    InputInfo { name: "ELAN0712:00 04F3:30FD Touchpad".into(), kind: InputKind::Touchpad },
+                    InputInfo { name: "a pen".into(), kind: InputKind::Other(9) },
+                ],
+                seen: vec![InputKind::Keyboard, InputKind::Touchpad, InputKind::Touchscreen],
+            },
+            ServerMsg::Inputs { serial: 0, devices: Vec::new(), seen: Vec::new() },
             ServerMsg::Settings {
                 serial: 0,
                 complete: true,
@@ -642,6 +748,9 @@ mod tests {
         assert_eq!(Topic::from_name("outputs"), Some(Topic::Outputs));
         assert_eq!(Topic::from_name(Topic::Outputs.name()), Some(Topic::Outputs));
         assert_eq!(Topic::from_name("settings"), Some(Topic::Settings));
+        assert_eq!(Topic::from_name("inputs"), Some(Topic::Inputs));
+        assert_eq!(InputKind::from_name("touchpad"), Some(InputKind::Touchpad));
+        assert_eq!(InputKind::from_name(InputKind::Touchscreen.name()), Some(InputKind::Touchscreen));
         assert_eq!(Topic::from_name("notifications"), None);
     }
 }

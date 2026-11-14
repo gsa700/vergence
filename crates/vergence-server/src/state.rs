@@ -139,6 +139,8 @@ pub struct Server {
     /// Touch panels present, by name (look milestone 1: a screen with one
     /// gets the Large size of controls when its setting is Automatic).
     pub touch_panels: Vec<String>,
+    /// The input devices and the kinds this machine has had (inputs.rs).
+    pub inputs: crate::inputs::Inputs,
     /// The idle clock, screens off and sleep (energy.rs).
     pub energy: crate::energy::Energy,
     pub popups: PopupManager,
@@ -279,6 +281,7 @@ impl Server {
             launcher: Default::default(),
             pointer_devices: Vec::new(),
             touch_panels: Vec::new(),
+            inputs: Default::default(),
             touch: Default::default(),
             energy: crate::energy::Energy::new(),
             popups,

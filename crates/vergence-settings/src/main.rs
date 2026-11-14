@@ -11,15 +11,17 @@
 //
 // Pages: Appearance; Theme and fonts; Windows (title bar controls, either side,
 // chosen buttons); Dock (place, gap, hiding, opacity, pinned applications);
-// Keyboard (key repeat: on, delay, rate, a box to try it); Mouse and touchpad
-// (speed, acceleration, scrolling lines, natural scrolling, primary button,
-// middle click, double-click speed; the touchpad's tapping, scrolling and
-// right click; the server's pointer.rs applies them); Energy
-// (screens off and sleep after idle, the sleep command); Screens (several screens: an overview to arrange them and
-// the size preference) with a page per screen (scale, wallpaper); About.
+// Keyboard (key repeat: on, delay, rate, a box to try it); Mouse (speed,
+// acceleration, scrolling lines, natural scrolling, primary button, middle
+// click, double-click speed); Touchpad (tapping, scrolling, right click) and
+// Touchscreen (which screen a panel is on), each shown once the machine has
+// had one (the server's inputs.rs remembers; pointer.rs applies the
+// settings); Wallpaper; Accessibility; Energy (screens off and sleep after
+// idle, the sleep command); Screens (several screens: an overview to arrange
+// them and the size preference) with a page per screen (scale); About.
 //
 // Files: ~/.config/vergence/desktop.toml ([appearance], [keyboard], [mouse],
-// [touchpad], [shelf], [wallpaper],
+// [touchpad], [touch], [shelf], [wallpaper],
 // [pictures], [displays]) and settings.toml (theme, fonts, the title bar
 // layout); the server applies both within a second. The screens come from the
 // session bus (crates/vergence-protocol), followed live, on a thread of their
@@ -40,7 +42,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use vergence_protocol::bus::{ClientMsg, OutputInfo, ServerMsg, Topic};
+use vergence_protocol::bus::{ClientMsg, InputInfo, InputKind, OutputInfo, ServerMsg, Topic};
 use vergence_render::text;
 use vergence_scene::{Color, Image, Point, Rect, Scene};
 use vergence_text::Fonts;
@@ -135,8 +137,8 @@ mod search_tests {
 
     #[test]
     fn pages_are_found_by_name_first_then_by_their_settings() {
-        assert_eq!(search_match("mouse", "Mouse and touchpad", "pointer speed"), Some(true));
-        assert_eq!(search_match("touch", "Mouse and touchpad", "pointer speed"), Some(true), "anywhere in the name");
+        assert_eq!(search_match("mouse", "Mouse", "pointer speed"), Some(true));
+        assert_eq!(search_match("pad", "Touchpad", "pointer speed"), Some(true), "anywhere in the name");
         assert_eq!(search_match("fro", "Appearance", "style light dark frost"), Some(false), "a setting's word, by its start");
         assert_eq!(search_match("ost", "Appearance", "style light dark frost"), None, "not the middle of a setting's word");
         assert_eq!(search_match("", "Appearance", "frost"), None);
@@ -155,6 +157,8 @@ enum Icon {
     Screen,
     Keyboard,
     Pointer,
+    Touchpad,
+    Touchscreen,
     Sound,
     Accessibility,
     Energy,
@@ -168,7 +172,7 @@ impl Icon {
             Icon::Appearance | Icon::Fonts | Icon::Wallpaper => Color::rgb(0x2f, 0x6f, 0xd6),
             Icon::Windows | Icon::Dock => Color::rgb(0x5b, 0x5f, 0x6b),
             Icon::Screen => Color::rgb(0x1f, 0x8a, 0x8a),
-            Icon::Keyboard | Icon::Pointer => Color::rgb(0x6e, 0x55, 0xc9),
+            Icon::Keyboard | Icon::Pointer | Icon::Touchpad | Icon::Touchscreen => Color::rgb(0x6e, 0x55, 0xc9),
             Icon::Sound => Color::rgb(0xd2, 0x3f, 0x6a),
             Icon::Accessibility => Color::rgb(0x1f, 0x6f, 0xe0),
             Icon::Energy => Color::rgb(0x3f, 0x9a, 0x3a),
@@ -240,6 +244,18 @@ fn icon_mark<M: 'static>(icon: Icon) -> Element<M> {
                 scene.stroke(Rect::new(x + 6.5, y + 4.5, 7.0, 11.0), 3.5, 1.4, w);
                 line(scene, (10.0, 4.8), (10.0, 8.5));
             }
+            // A pad with its two buttons.
+            Icon::Touchpad => {
+                scene.stroke(Rect::new(x + 4.5, y + 5.0, 11.0, 10.0), 2.0, 1.4, w);
+                line(scene, (4.8, 12.0), (15.2, 12.0));
+                line(scene, (10.0, 12.0), (10.0, 14.8));
+            }
+            // A screen and a fingertip on it.
+            Icon::Touchscreen => {
+                scene.stroke(Rect::new(x + 4.0, y + 5.0, 12.0, 8.5), 1.5, 1.4, w);
+                scene.fill_rounded(Rect::new(x + 9.0, y + 8.0, 3.0, 3.0), 1.5, w);
+                line(scene, (8.0, 15.5), (12.0, 15.5));
+            }
             // A speaker.
             Icon::Sound => {
                 scene.fill(Rect::new(x + 5.0, y + 8.0, 3.0, 4.0), w);
@@ -294,7 +310,10 @@ enum Page {
     Windows,
     Dock,
     Keyboard,
-    Pointer,
+    Mouse,
+    /// Shown once the machine has had one (the server remembers: bus `inputs`).
+    Touchpad,
+    Touchscreen,
     Energy,
     Sound,
     /// High contrast, motion, transparency, size (settings milestone 1).
@@ -387,6 +406,10 @@ enum Message {
     SleepCommandSubmit,
     // Screens.
     Outputs(Vec<OutputInfo>, String),
+    /// The input devices present and the kinds seen (bus `inputs`).
+    Inputs(Vec<InputInfo>, Vec<InputKind>),
+    /// A touch panel (by its name) put on a screen (by id; None: the primary).
+    PanelScreen(String, Option<String>),
     Size(f32),
     SizeDone,
     Scale(f32),
@@ -474,6 +497,9 @@ struct App {
     monos: Vec<String>,
     // Screens.
     outputs: Vec<OutputInfo>,
+    /// The input devices present, and the kinds the machine has had (bus `inputs`).
+    inputs: Vec<InputInfo>,
+    inputs_seen: Vec<InputKind>,
     setup: String,
     size: f32,
     scale: f32,
@@ -645,6 +671,8 @@ impl App {
             fonts: theme::font_families(false),
             monos: theme::font_families(true),
             outputs: Vec::new(),
+            inputs: Vec::new(),
+            inputs_seen: Vec::new(),
             setup: String::new(),
             scale: 1.0,
             arrange_drag: None,
@@ -841,6 +869,23 @@ impl App {
             }),
             Message::WinFlag(key, on) => self.save_table("windows", |t| {
                 t.insert(key.into(), on.into());
+            }),
+            Message::Inputs(devices, seen) => {
+                self.inputs = devices;
+                self.inputs_seen = seen;
+            }
+            Message::PanelScreen(name, screen) => self.save(|d| {
+                let touch = d.entry("touch").or_insert_with(|| toml::Value::Table(toml::Table::new()));
+                let Some(touch) = touch.as_table_mut() else { return };
+                let panels = touch.entry("panel").or_insert_with(|| toml::Value::Array(Vec::new()));
+                let Some(panels) = panels.as_array_mut() else { return };
+                panels.retain(|p| p.get("name").and_then(|n| n.as_str()) != Some(name.as_str()));
+                if let Some(id) = screen {
+                    let mut t = toml::Table::new();
+                    t.insert("name".into(), name.clone().into());
+                    t.insert("screen".into(), id.into());
+                    panels.push(toml::Value::Table(t));
+                }
             }),
             Message::Outputs(outputs, setup) => {
                 let current = self.wall_output().map(|o| o.id.clone());
@@ -1294,8 +1339,12 @@ impl App {
             ("Screens", screens),
             ("Input", vec![
                 ("Keyboard".into(), Page::Keyboard, Icon::Keyboard, "keyboard repeat delay layout keys"),
-                ("Mouse and touchpad".into(), Page::Pointer, Icon::Pointer, "mouse touchpad pointer speed scroll natural tap click double"),
-            ]),
+                ("Mouse".into(), Page::Mouse, Icon::Pointer, "mouse pointer speed acceleration scroll wheel natural button left handed middle click double"),
+            ]
+            .into_iter()
+            .chain(self.has_had(InputKind::Touchpad).then(|| ("Touchpad".into(), Page::Touchpad, Icon::Touchpad, "touchpad trackpad pointer speed scroll natural tap click drag edge fingers typing palm")))
+            .chain(self.has_had(InputKind::Touchscreen).then(|| ("Touchscreen".into(), Page::Touchscreen, Icon::Touchscreen, "touchscreen touch screen panel finger tap press")))
+            .collect()),
             ("Sound", vec![("Sound".into(), Page::Sound, Icon::Sound, "sound volume output speaker headphones mute audio")]),
             ("Accessibility", vec![("Accessibility".into(), Page::Accessibility, Icon::Accessibility, "accessibility contrast motion transparency size")]),
             ("System", vec![
@@ -1545,8 +1594,9 @@ impl App {
         self.pointer_table(table).and_then(|t| t.get(key)).and_then(|v| v.as_str()).unwrap_or("").to_string()
     }
 
-    fn pointer(&self) -> Element<Message> {
-        let speed = |table: &'static str| {
+    /// A pointer speed slider for desktop.toml's `table` (mouse or touchpad).
+    fn speed_row(&self, table: &'static str) -> Element<Message> {
+        {
             let v = self.pointer_float(table, "speed", 0.0).clamp(-1.0, 1.0);
             let words = if v < -0.05 { "slower" } else if v > 0.05 { "faster" } else { "standard" };
             row(vec![
@@ -1555,8 +1605,12 @@ impl App {
             ])
             .spacing(8.0)
             .align(Align::Center)
-        };
-        let lines = |table: &'static str| {
+        }
+    }
+
+    /// Lines a notch or a stroke scrolls, for `table`.
+    fn lines_row(&self, table: &'static str) -> Element<Message> {
+        {
             let n = self.pointer_int(table, "scroll-lines", 3).clamp(1, 10);
             row(vec![
                 slider(1.0, 10.0, n as f32, move |v| Message::PointerSlide(table, "scroll-lines", v)).step(1.0).marks(vec![3.0]).on_release(Message::PointerSave(table, "scroll-lines")).width(Length::Fixed(220.0)).name("Scrolling speed"),
@@ -1564,7 +1618,25 @@ impl App {
             ])
             .spacing(8.0)
             .align(Align::Center)
-        };
+        }
+    }
+
+    /// The devices of a kind present now, by name, for an input page's Advanced part.
+    fn devices_of(&self, kind: InputKind) -> Vec<Element<Message>> {
+        let mut names: Vec<&str> = self.inputs.iter().filter(|d| d.kind == kind).map(|d| d.name.as_str()).collect();
+        names.dedup();
+        if names.is_empty() {
+            return vec![setting("None connected now", "", space())];
+        }
+        names.into_iter().map(|n| setting(&short_name(n, 80), "", space())).collect()
+    }
+
+    /// Whether the machine has had a device of this kind (the server remembers).
+    fn has_had(&self, kind: InputKind) -> bool {
+        self.inputs_seen.contains(&kind) || self.inputs.iter().any(|d| d.kind == kind && kind != InputKind::Touchpad)
+    }
+
+    fn mouse_page(&self) -> Element<Message> {
         let dc = self.pointer_int("mouse", "double-click", 400).clamp(200, 900);
         let tested = match self.click_test.1 {
             0 => "Double-click the button to try it.".to_string(),
@@ -1572,13 +1644,13 @@ impl App {
             n => format!("{n} double-clicks so far."),
         };
         let mouse = vec![
-            setting("Pointer speed", "How far the pointer goes for a move of the hand.", speed("mouse")),
+            setting("Pointer speed", "How far the pointer goes for a move of the hand.", self.speed_row("mouse")),
             setting(
                 "Acceleration",
                 "On: a fast move takes the pointer farther. Off: always the same distance, for precise work and games.",
                 switch(self.pointer_flag("mouse", "acceleration", true), |on| Message::PointerFlag("mouse", "acceleration", on)).name("Acceleration"),
             ),
-            setting("Scrolling speed", "How many lines a notch of the wheel moves, in every app.", lines("mouse")),
+            setting("Scrolling speed", "How many lines a notch of the wheel moves, in every app.", self.lines_row("mouse")),
             setting(
                 "Natural scrolling",
                 "The content follows the wheel, as on a Mac.",
@@ -1605,10 +1677,18 @@ impl App {
                 .align(Align::Center),
             ),
         ];
+        self.page_layout(
+            "Mouse",
+            "How the pointer moves and scrolls. Changes apply at once, to every mouse plugged in.",
+            vec![self.group(None, mouse), self.advanced("mouse", self.devices_of(InputKind::Mouse)), self.status_line()],
+        )
+    }
+
+    fn touchpad_page(&self) -> Element<Message> {
         let pad_scroll = (self.pointer_word("touchpad", "scroll") == "edge") as usize;
         let pad_click = (self.pointer_word("touchpad", "click") == "fingers") as usize;
         let pad = vec![
-            setting("Pointer speed", "", speed("touchpad")),
+            setting("Pointer speed", "", self.speed_row("touchpad")),
             setting("Tap to click", "A tap is a click; two fingers, a right click.", switch(self.pointer_flag("touchpad", "tap-to-click", true), |on| Message::PointerFlag("touchpad", "tap-to-click", on)).name("Tap to click")),
             setting("Tap and drag", "Tap, then touch again and move: a drag.", switch(self.pointer_flag("touchpad", "tap-and-drag", true), |on| Message::PointerFlag("touchpad", "tap-and-drag", on)).name("Tap and drag")),
             setting(
@@ -1621,7 +1701,7 @@ impl App {
                 "",
                 choice(vec!["Two fingers".into(), "Along the edge".into()], Some(pad_scroll), Message::PadScroll).width(Length::Fixed(160.0)).name("Scrolling"),
             ),
-            setting("Scrolling speed", "", lines("touchpad")),
+            setting("Scrolling speed", "", self.lines_row("touchpad")),
             setting(
                 "Right click",
                 "On the pad's bottom right corner, or with two fingers anywhere.",
@@ -1633,11 +1713,59 @@ impl App {
                 switch(self.pointer_flag("touchpad", "disable-while-typing", true), |on| Message::PointerFlag("touchpad", "disable-while-typing", on)).name("Off while typing"),
             ),
         ];
-        self.page_layout(
-            "Mouse and touchpad",
-            "How the pointer moves and scrolls. Changes apply at once, to every mouse or touchpad plugged in.",
-            vec![self.group(Some("Mouse"), mouse), self.group(Some("Touchpad"), pad), label("The touchpad settings apply when one is connected.").size(11.0).dim(), self.status_line()],
-        )
+        let mut items = vec![self.group(None, pad)];
+        if !self.inputs.iter().any(|d| d.kind == InputKind::Touchpad) {
+            items.push(label("No touchpad is connected now; these apply when one is.").size(11.0).dim());
+        }
+        items.push(self.advanced("touchpad", self.devices_of(InputKind::Touchpad)));
+        items.push(self.status_line());
+        self.page_layout("Touchpad", "Tapping, scrolling and clicking with the pad. Changes apply at once.", items)
+    }
+
+    /// Which screen each touch panel is on (touch.rs in the server: a panel
+    /// says where on itself it was touched, not which monitor it is glued
+    /// to), and what a finger does.
+    fn touchscreen_page(&self) -> Element<Message> {
+        let panels: Vec<&str> = {
+            let mut v: Vec<&str> = self.inputs.iter().filter(|d| d.kind == InputKind::Touchscreen).map(|d| d.name.as_str()).collect();
+            v.dedup();
+            v
+        };
+        let tied = |name: &str| -> Option<String> {
+            self.desktop.get("touch")?.get("panel")?.as_array()?.iter().find(|p| p.get("name").and_then(|n| n.as_str()) == Some(name))?.get("screen")?.as_str().map(str::to_string)
+        };
+        let mut items = Vec::new();
+        if panels.is_empty() {
+            items.push(self.group(None, vec![setting("No touch screen is connected now", "Its settings come back when it is.", space())]));
+        }
+        for name in &panels {
+            let mut names = vec!["The primary screen".to_string()];
+            names.extend(self.outputs.iter().map(screen_label));
+            let at = tied(name).and_then(|id| self.outputs.iter().position(|o| o.id == id)).map_or(0, |i| i + 1);
+            let ids: Vec<String> = self.outputs.iter().map(|o| o.id.clone()).collect();
+            let panel_name = name.to_string();
+            let control: Element<Message> = if self.outputs.len() > 1 {
+                choice(names, Some(at), move |i| Message::PanelScreen(panel_name.clone(), if i == 0 { None } else { ids.get(i - 1).cloned() })).width(Length::Fixed(200.0)).name("Screen")
+            } else {
+                label(names.get(1).cloned().unwrap_or_else(|| names[0].clone())).dim()
+            };
+            items.push(self.group(Some(&short_name(name, 60)), vec![setting("On the screen", "The screen this panel is glued to: a touch lands there.", control)]));
+        }
+        items.push(self.group(
+            Some("Fingers"),
+            vec![
+                setting("Tap", "On a window: what the program makes of it. Elsewhere (the dock, a menu, a title bar, the desktop): a click.", space()),
+                setting("Touch and hold", "Half a second still on a dock icon or the desktop: its menu, as the right button.", space()),
+                setting(
+                    "Size of controls",
+                    "A screen with a touch panel shows Large window bars and buttons unless its own setting says otherwise.",
+                    button(label("Screens").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Go(if self.outputs.len() > 1 { Page::Overview } else { Page::Screen(0) })).name("Open Screens"),
+                ),
+            ],
+        ));
+        items.push(self.advanced("touchscreen", self.devices_of(InputKind::Touchscreen)));
+        items.push(self.status_line());
+        self.page_layout("Touchscreen", "Touch panels: which screen each is on, and what a finger does.", items)
     }
 
     fn keyboard(&self) -> Element<Message> {
@@ -1666,6 +1794,7 @@ impl App {
             vec![
                 self.group(Some("Key repeat"), rows),
                 self.group(Some("Try it"), vec![setting("Test", "Hold a key down here.", field(&self.key_test, Message::KeyTest).placeholder("Type here").width(Length::Fixed(260.0)).name("Test"))]),
+                self.advanced("keyboard", self.devices_of(InputKind::Keyboard)),
                 self.status_line(),
             ],
         )
@@ -2409,7 +2538,9 @@ impl Program for App {
             Page::Windows => "Windows".into(),
             Page::Dock => "Dock".into(),
             Page::Keyboard => "Keyboard".into(),
-            Page::Pointer => "Mouse and touchpad".into(),
+            Page::Mouse => "Mouse".into(),
+            Page::Touchpad => "Touchpad".into(),
+            Page::Touchscreen => "Touchscreen".into(),
             Page::Sound => "Sound".into(),
             Page::Energy => "Energy".into(),
             Page::Accessibility => "Accessibility".into(),
@@ -2445,7 +2576,9 @@ impl Program for App {
             Page::Windows => self.windows(),
             Page::Dock => self.dock(),
             Page::Keyboard => self.keyboard(),
-            Page::Pointer => self.pointer(),
+            Page::Mouse => self.mouse_page(),
+            Page::Touchpad => self.touchpad_page(),
+            Page::Touchscreen => self.touchscreen_page(),
             Page::Energy => self.energy(),
             Page::Sound => self.sound_page(),
             Page::Accessibility => self.accessibility(),
@@ -2719,11 +2852,16 @@ fn bus_outputs(mail: Mail) {
         if bus.request(|serial| ClientMsg::Subscribe { serial, topic: Topic::Outputs }).is_err() {
             return;
         }
+        // The input devices (protocol v7): which input pages to show.
+        let _ = bus.request(|serial| ClientMsg::Subscribe { serial, topic: Topic::Inputs });
         // The bus going away ends this; nothing reconnects in a loop.
         while let Ok(m) = bus.next_event() {
-            if let ServerMsg::Outputs { outputs, setup, .. } = m
-                && !mail.send(Message::Outputs(outputs, setup))
-            {
+            let sent = match m {
+                ServerMsg::Outputs { outputs, setup, .. } => mail.send(Message::Outputs(outputs, setup)),
+                ServerMsg::Inputs { devices, seen, .. } => mail.send(Message::Inputs(devices, seen)),
+                _ => true,
+            };
+            if !sent {
                 return;
             }
         }

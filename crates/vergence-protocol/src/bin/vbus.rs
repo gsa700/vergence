@@ -53,7 +53,7 @@ fn run(socket: Option<std::path::PathBuf>, args: &[String]) -> Result<(), Box<dy
         },
         Some("watch") => {
             let name = args.get(1).map(String::as_str).unwrap_or("");
-            let topic = Topic::from_name(name).ok_or_else(|| format!("no topic {name:?} (topics: outputs, settings)"))?;
+            let topic = Topic::from_name(name).ok_or_else(|| format!("no topic {name:?} (topics: outputs, settings, inputs)"))?;
             c.request(|serial| ClientMsg::Subscribe { serial, topic })?;
             loop {
                 match c.next_event()? {
@@ -64,6 +64,13 @@ fn run(socket: Option<std::path::PathBuf>, args: &[String]) -> Result<(), Box<dy
                     ServerMsg::Settings { complete, settings, .. } => {
                         println!("-- settings{}", if complete { " (all)" } else { " (changed)" });
                         print_settings(&settings);
+                    }
+                    ServerMsg::Inputs { devices, seen, .. } => {
+                        println!("-- inputs");
+                        for d in &devices {
+                            println!("{:<12} {}", d.kind.name(), d.name.chars().filter(|c| !c.is_control()).collect::<String>());
+                        }
+                        println!("seen: {}", seen.iter().map(|k| k.name()).collect::<Vec<_>>().join(", "));
                     }
                     other => println!("{other:?}"),
                 }

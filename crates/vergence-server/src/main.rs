@@ -41,6 +41,7 @@ mod style;
 mod fullscreen;
 mod dialogs;
 mod tint;
+mod inputs;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;

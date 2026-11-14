@@ -43,10 +43,10 @@ pub const SCROLL_LINES: u32 = 3;
 
 /// A touchpad taps; a mouse does not. A Logitech multi-device receiver says
 /// it has a touchpad whether or not anything paired with it has one (seen on
-/// kepler, 2026-11-10): settings given to it then reach nothing. Before the
-/// settings app shows its touchpad part only when there is one, a touchpad
-/// should count as present once it has sent something only a touchpad sends.
-fn is_touchpad(d: &Device) -> bool {
+/// kepler, 2026-11-10): settings given to it then reach nothing. So the
+/// settings app's Touchpad page waits until one has scrolled with fingers
+/// (inputs.rs).
+pub fn is_touchpad(d: &Device) -> bool {
     d.config_tap_finger_count() > 0
 }
 
@@ -65,6 +65,7 @@ impl Server {
     /// A device appeared: a pointing one gets the settings and is kept.
     pub fn pointer_device_added(&mut self, mut d: Device) {
         tracing::info!("input: device {:?} (touch {}, pointer {}, keyboard {})", d.name(), d.has_capability(DeviceCapability::Touch), d.has_capability(DeviceCapability::Pointer), d.has_capability(DeviceCapability::Keyboard));
+        self.inputs_device_added(&d);
         if d.has_capability(DeviceCapability::Touch) && !self.touch_panels.contains(&d.name().to_string()) {
             tracing::info!("touch: panel {:?} present", d.name());
             self.touch_panels.push(d.name().to_string());
@@ -79,6 +80,7 @@ impl Server {
     }
 
     pub fn pointer_device_removed(&mut self, d: &Device) {
+        self.inputs_device_removed(d);
         if d.has_capability(DeviceCapability::Touch) {
             let name = d.name().to_string();
             self.touch_panels.retain(|n| *n != name);

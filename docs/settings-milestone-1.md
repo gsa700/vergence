@@ -43,7 +43,7 @@ own, drawn as scenes: Question 3), and a search field at the top:
 | Look | Appearance, Theme and fonts, Wallpaper |
 | Desktop | Windows, Dock |
 | Screens | Screens (the overview, or the one screen), each screen when there are several |
-| Input | Keyboard, Mouse and touchpad |
+| Input | Keyboard, Mouse, Touchpad and Touchscreen (the last two once the machine has had one) |
 | Sound | Sound |
 | Accessibility | Accessibility |
 | System | Energy, About |
@@ -160,12 +160,32 @@ by the computer through usbmuxd before it hands out a connection (Question
   monitor's make and model (when it has one), its connector, size and place,
   its identity. On Hubble (shots): opened on Screens, kept open after Windows
   and back; Sound's HDMI outputs told apart. Wi-Fi's comes with step 4.
+- **Step 2b in: input pages by kind** (2026-11-14; Dave: "maybe have
+  seperate entries for: keyboard, mouse, trackpad, touchscreen", then
+  "Mixed"; the word Touchpad left to Claude). Bus protocol **v7**: topic
+  `inputs`, `ServerMsg::Inputs { devices (name, kind), seen }`, kinds
+  Keyboard, Mouse, Touchpad, Touchscreen (others kept as a number). The
+  server's inputs.rs keeps the devices present (a keyboard only with letters:
+  no power buttons) and the kinds the machine has had, in
+  ~/.local/state/vergence/inputs.toml (0600); a touchscreen counts when
+  present, a touchpad only once it scrolls with fingers (a Logitech receiver
+  claims a touchpad: kepler, and Hubble's too). The settings app: Keyboard
+  and Mouse always, Touchpad and Touchscreen once had; each with an Advanced
+  part naming the devices present. Touchscreen: which screen each panel is
+  on (desktop.toml `[[touch.panel]]`, a choice with several screens, the
+  server rereads it), what a tap and a hold do, a way to Screens for the
+  size of controls. Checked: Hubble shows Keyboard and Mouse (its touchpad
+  waits for a two-finger scroll, Dave's to do), Mouse's Advanced lists the
+  mice; kepler shows Touchscreen, not Touchpad, its page names the SW4101C
+  on HDMI-A-1. 444 tests on all three; Hubble and kepler installed with v7,
+  Techbench's installed session needs `sudo tools/install.sh`.
 
 ## Steps
 
 1. **The sidebar in groups**: headings, the Accessibility page, the Wallpaper
    page, the search field; the page icons.
-2. **The Advanced part**, as a widget of the settings app.
+2. **The Advanced part**, as a widget of the settings app. 2b. **Input pages
+   by kind** (added 2026-11-14), with bus protocol v7's input devices.
 3. **vergence-net**: the wpa_supplicant client (commands, replies, events,
    scan results parsed, its security: lengths and characters checked), the
    interfaces and their addresses (getifaddrs, on both systems); tests
