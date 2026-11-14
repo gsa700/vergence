@@ -303,4 +303,9 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
    the server waits, a 0.45 s hitch on waking. Then moved off the main
    thread (Dave: "move the wake probe off the main thread"): on screens on, a
    thread per other GPU does the forced probe that wakes it and tells the main
-   loop, which scans its connectors then, quickly, the card being awake.
+   loop, which scans its connectors then, quickly, the card being awake. The
+   hitch stayed (468 ms on the next wake): it was never the probe but the
+   laptop panel lit again, the first frame after the screens come on being a
+   mode set the kernel finishes before the server goes on (eDP-1's frame both
+   times). It falls while the panel is still powering up, so nothing frozen
+   is seen; a non-blocking mode set could remove it if it ever matters.
