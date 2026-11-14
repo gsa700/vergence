@@ -267,8 +267,10 @@ Bar Proportions"):
   the strip with the lines before its top row (`PaneLook::above`; none on
   the alternate screen), clipped to the strip so none shows in the pane's
   own room (a sliver did, first try; fixed). Seen on Hubble in both styles:
-  output scrolls up under the bar; the frost is measurably there (light bar
-  237-243 against its solid 228-235, dark 66-72 against 56) but subtle: the
+  output scrolls up under the bar; the frost is measurably there but
+  subtle (raw pixels, dark: frost 51,54,55 against the solid 56,56,56; the
+  figures first written here came from a color-managed reader and were
+  off, corrected 2026-11-13): the
   14 pt blur with the contrast floor turns lines into an even haze, so a
   smaller FROST_RADIUS is the lever if Dave wants lines to read as lines.
   387 tests on all three (no new ones beyond the protocol lists).
@@ -290,6 +292,24 @@ Bar Proportions"):
   sleep 20` ran from a script, back within a second after. 389 tests on
   all three (the effective user and the group search on Linux and on
   FreeBSD's ps path); the red not yet seen on kepler's screen.
+- **Step 9 done** (2026-11-13, ahead of 5, 7 and 8): the settings.
+  Settings > Appearance has a "Desktop look" group, **Frost** (Clear,
+  Standard, Heavy) and **Tab in front** (Page color, Frosted), and
+  **Reduce transparency** beside High contrast and Reduce motion
+  (desktop.toml `[appearance]` `frost`, `front-tab`,
+  `reduce-transparency`; the server publishes them under its own
+  namespace, `org.vergence.look`, which the settings portal passes on like
+  the rest). Frost sets the frost's own strength (`frost_strength`: 0.3,
+  0.5, 0.75; the contrast floor still raises it where reading needs).
+  Reduce transparency turns the frost off and makes the dock solid
+  whatever its own opacity says (menus and popups are solid already; step
+  5's frost behind them will honor it). A frosted tab in front is a white
+  veil (`front_veil`: 200 light; 40 dark, the most that keeps every title
+  4.5:1 over any frost the floor allows, a test over a color grid; the
+  mock-up's 56 did not). Seen on Hubble by desktop.toml: the page-color
+  tab, the frosted one, and the solid bar (raw pixels: solid 56,56,56,
+  frosted 51,54,55). 390 tests on all three. Not yet seen: the settings
+  app's new rows on screen.
 
 ## Steps
 

@@ -176,6 +176,21 @@ pub const MENU_INK_OFF: Rgb = SHELF_DARK.menu_ink_off;
 /// The frost under a bar (look milestone 1, step 3): its own strength (the
 /// Frost setting's Standard, of 1), and the blur's reach in points.
 pub const FROST_STRENGTH: f32 = 0.5;
+/// The Frost setting's steps (Clear, Standard, Heavy): the frost's own
+/// strength; the contrast floor raises it wherever reading needs more.
+pub const fn frost_strength(step: u32) -> f32 {
+    match step {
+        0 => 0.3,
+        2 => 0.75,
+        _ => FROST_STRENGTH,
+    }
+}
+/// The tab in front when the Tab in front setting is Frosted: a veil of
+/// white laid on the bar (of 255; in dark kept to what leaves every title at
+/// 4.5:1 over any frost the floor allows, checked over a grid of colors).
+pub const fn front_veil(light: bool) -> u8 {
+    if light { 200 } else { 40 }
+}
 pub const FROST_RADIUS: f32 = 14.0;
 
 /// The contrast the bar's ink must keep over the bare frost so that it keeps
@@ -394,6 +409,31 @@ mod tests {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// The frosted tab in front keeps the bar's rule over any frost that
+    /// keeps the floor (and over the solid grounds).
+    #[test]
+    fn the_frosted_front_tab_keeps_titles_readable() {
+        for light in [false, true] {
+            let l = bar_look(light);
+            let veil = front_veil(light);
+            let white = Rgb(255, 255, 255);
+            for r in (0..=255).step_by(15) {
+                for g in (0..=255).step_by(15) {
+                    for b in (0..=255).step_by(15) {
+                        let ground = Rgb(r as u8, g as u8, b as u8);
+                        if contrast(l.ink, ground) >= frost_need(light, true) {
+                            let c = contrast(l.ink, over(ground, white, veil));
+                            assert!(c >= 4.5, "light {light}: {ground:?} {c:.2}");
+                        }
+                    }
+                }
+            }
+            for ground in [l.ground, l.alert_ground] {
+                assert!(contrast(l.ink, over(ground, white, veil)) >= 4.5, "light {light}: solid {ground:?}");
             }
         }
     }

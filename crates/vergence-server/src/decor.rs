@@ -106,7 +106,7 @@ pub struct Decor {
 
 /// A bar drawn for one scale: what it shows, and the pixels.
 struct BarPicture {
-    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, bool, bool, Vec<bool>),
+    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, bool, bool, Vec<bool>, bool),
     buffer: MemoryRenderBuffer,
     /// Its pixels' width and height (the scale's, not the bar's points).
     px: (i32, i32),
@@ -246,6 +246,9 @@ impl Server {
     /// are frosted (their picture's top is what lies under it); the others
     /// keep a solid bar.
     fn frost_program(&mut self, renderer: &mut GlesRenderer) -> Option<smithay::backend::renderer::gles::GlesTexProgram> {
+        if self.reduce_transparency() {
+            return None;
+        }
         let high_contrast = self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "contrast".to_string())) == Some(&vergence_protocol::bus::SettingValue::U32(1));
         if high_contrast {
             return None;
@@ -282,6 +285,20 @@ impl Server {
                 }
             })
             .clone()
+    }
+
+    /// Reduce transparency (Settings > Appearance; look milestone 1): bars,
+    /// the dock and menus solid.
+    pub fn reduce_transparency(&self) -> bool {
+        self.settings.current.get(&(crate::settings::LOOK.to_string(), "reduce-transparency".to_string())) == Some(&vergence_protocol::bus::SettingValue::Bool(true))
+    }
+
+    /// A number of the desktop's own look (org.vergence.look), or 0.
+    fn look_setting(&self, key: &str) -> u32 {
+        match self.settings.current.get(&(crate::settings::LOOK.to_string(), key.to_string())) {
+            Some(vergence_protocol::bus::SettingValue::U32(v)) => *v,
+            _ => if key == "frost" { 1 } else { 0 },
+        }
     }
 
     /// Whether the desktop is in its light style (org.freedesktop.appearance
@@ -396,6 +413,8 @@ impl Server {
         let light = self.light_style();
         let style = vergence_look::bar_look(light);
         let frost = self.frost_program(renderer);
+        let strength = vergence_look::frost_strength(self.look_setting("frost"));
+        let front_frosted = self.look_setting("front-tab") == 1;
         self.decor.retain(|w, _| w.alive());
         // A window on its way back from the dock is put in its place when it arrives.
         self.shelf_motions_end();
@@ -466,10 +485,10 @@ impl Server {
                         alerts = order.iter().map(|&i| alerts.get(i).copied().unwrap_or(false)).collect();
                         shown = order.iter().position(|&i| i == front).unwrap_or(0);
                     }
-                    let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent, light, frosted, alerts.clone());
+                    let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent, light, frosted, alerts.clone(), front_frosted);
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
-                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, false, false, Vec::new()),
+                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, false, false, Vec::new(), false),
                         buffer: MemoryRenderBuffer::new(Fourcc::Abgr8888, (1, 1), 1, Transform::Normal, None),
                         px: (1, 1),
                     });
@@ -487,11 +506,17 @@ impl Server {
                             None if active => (style.front, style.ink),
                             None => (style.front_off, style.ink_off),
                         };
+                        // Tab in front: Frosted (the setting) is a white veil on the bar, its ink the bar's.
+                        let (pane, ink) = if front_frosted {
+                            (vergence_scene::Color::rgba(255, 255, 255, vergence_look::front_veil(light)), if active { style.ink } else { style.ink_off })
+                        } else {
+                            (vergence_scene::Color::rgb(front.0, front.1, front.2), ink)
+                        };
                         let look = vergence_bar::Look {
                             bar: style,
                             frosted,
                             focused: active,
-                            pane: vergence_scene::Color::rgb(front.0, front.1, front.2),
+                            pane,
                             pane_ink: vergence_scene::Color::rgb(ink.0, ink.1, ink.2),
                             font: face,
                             font_size: vergence_bar::FONT_SIZE,
@@ -543,7 +568,7 @@ impl Server {
                         let uniforms = vec![
                             Uniform::new("texel", UniformValue::_2f(1.0 / px.w.max(1) as f32, 1.0 / px.h.max(1) as f32)),
                             Uniform::new("radius", UniformValue::_1f(vergence_look::FROST_RADIUS * per_point as f32)),
-                            Uniform::new("tint", UniformValue::_4f(gr, gg, gb, vergence_look::FROST_STRENGTH)),
+                            Uniform::new("tint", UniformValue::_4f(gr, gg, gb, strength)),
                             Uniform::new("ink", UniformValue::_3f(ir, ig, ib)),
                             Uniform::new("need", UniformValue::_1f(vergence_look::frost_need(light, active))),
                         ];

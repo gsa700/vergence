@@ -7,6 +7,9 @@
 //       accent         = "#3b82f6"          (unset: no accent)
 //       contrast       = "normal" | "high"
 //       reduced-motion = false
+//       frost          = "clear" | "standard" | "heavy"   (the server's own: org.vergence.look)
+//       front-tab      = "page" | "frosted"
+//       reduce-transparency = false
 //   ~/.config/vergence/desktop.toml  [keyboard]   (the settings app's Keyboard page)
 //   ~/.config/vergence/desktop.toml  [energy]     screens off and sleep after idle (energy.rs)
 //       repeat       = true
@@ -38,6 +41,10 @@ use vergence_protocol::bus::{Setting, SettingValue};
 use crate::Server;
 
 pub const APPEARANCE: &str = "org.freedesktop.appearance";
+/// The desktop's own look (look milestone 1): frost u (0 clear, 1 standard,
+/// 2 heavy), front-tab u (0 the page's color, 1 frosted),
+/// reduce-transparency b. Only the server and our own tools read these.
+pub const LOOK: &str = "org.vergence.look";
 pub const INTERFACE: &str = "org.gnome.desktop.interface";
 pub const KEYBOARD: &str = "org.gnome.desktop.peripherals.keyboard";
 pub const WM: &str = "org.gnome.desktop.wm.preferences";
@@ -104,6 +111,14 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
     let reduced = appearance.get("reduced-motion").and_then(|v| v.as_bool()).unwrap_or(false);
     put(APPEARANCE, "reduced-motion", SettingValue::U32(reduced as u32));
     put(INTERFACE, "enable-animations", SettingValue::Bool(!reduced));
+    let frost = match text("frost").as_deref() {
+        Some("clear") => 0,
+        Some("heavy") => 2,
+        _ => 1,
+    };
+    put(LOOK, "frost", SettingValue::U32(frost));
+    put(LOOK, "front-tab", SettingValue::U32((text("front-tab").as_deref() == Some("frosted")) as u32));
+    put(LOOK, "reduce-transparency", SettingValue::Bool(appearance.get("reduce-transparency").and_then(|v| v.as_bool()).unwrap_or(false)));
 
     let keyboard = desktop
         .and_then(|t| t.parse::<toml::Table>().ok())

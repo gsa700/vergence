@@ -1160,7 +1160,8 @@ impl Server {
             (&item.key, &item.name, windows.len(), item.focused, icon.is_some(), away).hash(&mut hasher);
         }
         starting.hash(&mut hasher);
-        let glass = (self.shelf.config.opacity.filter(|o| o.is_finite()).unwrap_or(1.0).clamp(0.3, 1.0) * 255.0).round() as u8;
+        // Reduce transparency (look milestone 1): the dock is solid whatever its own setting says.
+        let glass = if self.reduce_transparency() { 255 } else { (self.shelf.config.opacity.filter(|o| o.is_finite()).unwrap_or(1.0).clamp(0.3, 1.0) * 255.0).round() as u8 };
         glass.hash(&mut hasher);
         light.hash(&mut hasher);
         (accent.r, accent.g, accent.b).hash(&mut hasher);

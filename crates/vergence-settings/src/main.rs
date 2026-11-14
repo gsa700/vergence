@@ -87,6 +87,12 @@ fn installed_doc_dir() -> Option<PathBuf> {
     dir.join("THIRD-PARTY-NOTICES.md").is_file().then_some(dir)
 }
 const SCHEME_NAMES: [&str; 3] = ["App default", "Dark", "Light"];
+/// The Frost choice's names and their values in desktop.toml (Standard when unset).
+const FROST_NAMES: [&str; 3] = ["Clear", "Standard", "Heavy"];
+const FROST_VALUES: [&str; 3] = ["clear", "standard", "heavy"];
+/// The tab in front: the page's own color, or frosted (page when unset).
+const FRONT_TAB_NAMES: [&str; 2] = ["Page color", "Frosted"];
+const FRONT_TAB_VALUES: [&str; 2] = ["page", "frosted"];
 const FITS: [&str; 4] = ["Fill", "Fit", "Center", "Stretch"];
 const SWATCHES: [&str; 8] = ["#3b82f6", "#8b5cf6", "#ec4899", "#ef4444", "#e05a00", "#eab308", "#22c55e", "#6b7280"];
 /// The accent where the user names none: the settings app's own blue.
@@ -131,6 +137,11 @@ enum Message {
     AccentSubmit,
     Contrast(bool),
     Motion(bool),
+    /// The desktop's own look (look milestone 1): how much shows through
+    /// the frost, the tab in front, and Reduce transparency.
+    Frost(usize),
+    FrontTab(usize),
+    Transparency(bool),
     // Theme and fonts.
     Pick(&'static str, String),
     FontSize(bool, String),
@@ -554,6 +565,15 @@ impl App {
             }),
             Message::Motion(on) => self.save_appearance(|t| {
                 t.insert("reduced-motion".into(), on.into());
+            }),
+            Message::Frost(i) => self.save_appearance(|t| {
+                t.insert("frost".into(), FROST_VALUES[i.min(2)].into());
+            }),
+            Message::FrontTab(i) => self.save_appearance(|t| {
+                t.insert("front-tab".into(), FRONT_TAB_VALUES[i.min(1)].into());
+            }),
+            Message::Transparency(on) => self.save_appearance(|t| {
+                t.insert("reduce-transparency".into(), on.into());
             }),
             Message::Pick(key, value) => self.set_x(key, &value),
             Message::FontSize(mono, size) => {
@@ -1060,6 +1080,11 @@ impl App {
         let contrast = appearance_text(&self.desktop, "contrast") == "high";
         let motion = self.desktop.get("appearance").and_then(|a| a.get("reduced-motion")).and_then(|v| v.as_bool()).unwrap_or(false);
         let names: Vec<String> = SCHEME_NAMES.iter().map(|s| s.to_string()).collect();
+        let transparency = self.desktop.get("appearance").and_then(|a| a.get("reduce-transparency")).and_then(|v| v.as_bool()).unwrap_or(false);
+        let frost = FROST_VALUES.iter().position(|v| *v == appearance_text(&self.desktop, "frost")).unwrap_or(1);
+        let front = FRONT_TAB_VALUES.iter().position(|v| *v == appearance_text(&self.desktop, "front-tab")).unwrap_or(0);
+        let frost_names: Vec<String> = FROST_NAMES.iter().map(|s| s.to_string()).collect();
+        let front_names: Vec<String> = FRONT_TAB_NAMES.iter().map(|s| s.to_string()).collect();
         self.page_layout(
             "Appearance",
             "Light or dark, the accent color, contrast and motion. Every app that follows the desktop changes at once.",
@@ -1073,9 +1098,14 @@ impl App {
                         field(&self.accent_text, Message::AccentText).placeholder("#rrggbb").on_submit(Message::AccentSubmit).width(Length::Fixed(120.0)).name("Custom accent"),
                     ),
                 ]),
+                self.group(Some("Desktop look"), vec![
+                    setting("Frost", "How much of a window shows through its bar. Titles stay readable whatever is under them.", choice(frost_names, Some(frost), Message::Frost).width(Length::Fixed(160.0)).name("Frost")),
+                    setting("Tab in front", "In the page's own color, joined to it, or frosted like the rest of the bar.", choice(front_names, Some(front), Message::FrontTab).width(Length::Fixed(160.0)).name("Tab in front")),
+                ]),
                 self.group(Some("Accessibility"), vec![
-                    setting("High contrast", "Apps that support it draw stronger edges and text.", switch(contrast, Message::Contrast).name("High contrast")),
+                    setting("High contrast", "Apps that support it draw stronger edges and text. The desktop's bars are solid.", switch(contrast, Message::Contrast).name("High contrast")),
                     setting("Reduce motion", "Apps that support it turn off animations.", switch(motion, Message::Motion).name("Reduce motion")),
+                    setting("Reduce transparency", "Bars, the dock and menus are solid: nothing shows through them.", switch(transparency, Message::Transparency).name("Reduce transparency")),
                 ]),
                 self.status_line(),
             ],
