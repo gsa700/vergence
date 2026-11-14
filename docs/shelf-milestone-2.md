@@ -106,6 +106,25 @@ shows changes), the frost under it by the server.
 - Live tiles (shelf milestone 1's "milestone 2"): later.
 - The most used applications first: see Question 2.
 
+## Ideas noted for later (Dave, 2026-11-13: "note it as an idea and move on")
+
+- **The dock anchored in a corner**, one end at the corner with the apps
+  button in it (the easiest target on a screen); status tiles at the end
+  nearest the corner. Claude's view: the cheap, real ergonomic gain.
+- **A second arm** from that corner along the other edge (apps down the
+  side, a short arm of tiles along the top, or as the user drags them):
+  windows keep clear of both, cards open toward the middle. Costs a second
+  edge (vertical room on wide screens), longer trips on big desks, two
+  places to learn and more settings; an option, not the default, and not
+  built until someone misses it.
+- **Tiles from other programs**: any program publishes a tile's value and
+  actions on the session bus (whitepaper §6.9); the desktop provides the
+  everyday ones. A small command-line publisher so a shell script (a rack
+  or UPS check) can publish one. A program's new tile lands in the drawer
+  until the user pins it, is labeled with its program, and is rate and
+  size limited; stepping out onto the dock when in trouble can be turned
+  off per tile.
+
 ## Questions for Dave (answered 2026-11-13: (a) to all four)
 
 1. **Which tabs.** (a) "All" and a short fixed list (Internet, Office,
