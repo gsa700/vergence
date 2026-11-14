@@ -81,6 +81,7 @@ impl XwmHandler for Server {
         if remembered.is_some_and(|(_, max)| max) {
             self.toggle_maximize(&w);
         }
+        self.window_opened(&w);
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {

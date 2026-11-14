@@ -128,6 +128,9 @@ pub struct Dispatch {
     pub keyboard_native: Option<Win>,
     /// Alt+Tab's switching in progress (switch.rs).
     pub switching: Option<crate::switch::Switching>,
+    /// When a key was last typed into a window (opened.rs: a window that opens
+    /// after it does not take the keyboard from that window).
+    pub typed_at: Option<std::time::Instant>,
 }
 
 impl Dispatch {

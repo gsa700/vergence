@@ -35,6 +35,7 @@ mod win;
 mod native;
 mod sound;
 mod switch;
+mod opened;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;

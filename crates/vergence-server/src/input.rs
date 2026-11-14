@@ -50,7 +50,10 @@ impl Server {
             self.native_modifiers(&n);
         }
         match out {
-            KeyOut::Forward(_) => {
+            KeyOut::Forward(target) => {
+                if pressed && target.is_some() {
+                    self.input.typed_at = Some(std::time::Instant::now());
+                }
                 if let Some(w) = native {
                     self.native_key(&w, code.raw(), pressed, serial.into(), time.millis());
                 }
@@ -246,6 +249,8 @@ impl Server {
         }
         let id = self.win_id(window);
         self.input.seat.focus(Some(id));
+        // It has had the keyboard: its dock icon need ask for nothing (opened.rs).
+        self.shelf.attention.retain(|w| w != window);
     }
 
     /// No window has the keyboard (a press on the bare desktop, the last

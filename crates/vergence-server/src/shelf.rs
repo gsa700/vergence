@@ -366,6 +366,14 @@ pub struct Shelf {
     /// Applications started from the dock that have shown no window yet
     /// (entry id, when started, how many windows it had then).
     starting: Vec<(String, std::time::Instant, usize)>,
+    /// Windows that opened behind the focused one (opened.rs): their icon asks
+    /// for attention until they have had the keyboard.
+    pub attention: Vec<Win>,
+    /// Applications the person started (dock, launcher, session restore) and
+    /// when, for opened.rs: the first window of each takes the keyboard. Kept
+    /// apart from `starting`, which ends when the dock counts a new window,
+    /// and a Wayland window is counted before it is first shown.
+    pub launched: Vec<(String, std::time::Instant)>,
     /// With `hide`: the dock is out (shown); where it is sliding to and
     /// since when; since when the pointer has been away from it.
     pub out: bool,
@@ -1058,6 +1066,8 @@ impl Server {
                         tracing::info!("shelf: started {} (pid {pid})", entry.name);
                         let had = self.shelf_items().iter().find(|(i, _)| i.key == key).map_or(0, |(_, w)| w.len());
                         self.shelf.starting.retain(|(k, ..)| *k != key);
+                        self.shelf.launched.retain(|(k, since)| *k != key && since.elapsed() < STARTING);
+                        self.shelf.launched.push((key.clone(), std::time::Instant::now()));
                         self.shelf.starting.push((key, std::time::Instant::now(), had));
                     }
                     Err(e) => tracing::warn!("shelf: {} could not be started: {e}", entry.name),
@@ -1168,6 +1178,13 @@ impl Server {
         // One that is starting says so with a mark that grows and shrinks, ten
         // steps a second (a still one where motion is not wanted).
         let moving = self.motion_wanted();
+        // One whose window opened behind the focused one (opened.rs): its long
+        // mark blinks, twice a second (steady where motion is not wanted).
+        self.shelf.attention.retain(|w| w.alive());
+        let asking: Vec<Option<bool>> = items
+            .iter()
+            .map(|(_, windows)| windows.iter().any(|w| self.shelf.attention.contains(w)).then(|| !moving || (self.start_time.elapsed().as_millis() / 500) % 2 == 0))
+            .collect();
         let starting: Vec<Option<u8>> = items
             .iter()
             .map(|(item, _)| {
@@ -1180,6 +1197,7 @@ impl Server {
             (&item.key, &item.name, windows.len(), item.focused, icon.is_some(), away).hash(&mut hasher);
         }
         starting.hash(&mut hasher);
+        asking.hash(&mut hasher);
         // The frost behind the dock (look milestone 1, step 5): its ground is then
         // the frost, drawn under the picture; Reduce transparency (or no frost
         // on this renderer) leaves the dock as its own setting says, solid if that.
@@ -1218,6 +1236,8 @@ impl Server {
                 let (long, mark) = match starting[index] {
                     // From 6 points to 18 and back in a second.
                     Some(step) => (6.0 + 12.0 * (1.0 - (step as f32 - 5.0).abs() / 5.0), accent),
+                    None if asking[index] == Some(true) => (18.0, accent),
+                    None if asking[index] == Some(false) => (6.0, color(s.mark)),
                     None if item.focused => (18.0, accent),
                     None => (6.0, color(s.mark)),
                 };

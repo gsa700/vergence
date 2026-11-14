@@ -104,6 +104,7 @@ impl Server {
             if max {
                 self.toggle_maximize(w);
             }
+            self.window_opened(w);
             return;
         }
         let Some(out) = self.output_at_pointer() else { return };
@@ -117,6 +118,7 @@ impl Server {
         // Wayland windows opened at once stacked in the middle, 2026-11-12).
         let r = self.clear_of_siblings(w, Rectangle::new(center(area, fitted), fitted), out);
         self.space.map_element(w.clone(), r.loc, false);
+        self.window_opened(w);
     }
 }
 

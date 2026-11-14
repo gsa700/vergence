@@ -407,6 +407,7 @@ impl Server {
                         self.toggle_maximize(&w);
                     }
                     tracing::info!("native: {:?} window {window} shown at {},{}", n.app_id, place.x, place.y);
+                    self.window_opened(&w);
                 }
             }
             WinRequest::Maximize { window, on } => {

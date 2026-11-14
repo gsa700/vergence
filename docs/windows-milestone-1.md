@@ -167,6 +167,21 @@ All the server's, ahead of any program, through the seat's filter:
   **Found**: the server gives a new window no keyboard of its own (only a
   click, a finger, the dock or vctl do): a window opened from the launcher
   waits for a click before it can be typed in.
+  **Fixed the same day** (Dave: "build the new window focus first";
+  opened.rs): a new window takes the keyboard when nothing has it, when it
+  is the focused program's own (a new terminal window, a dialog, a torn-off
+  tab), or when its application was just started from the dock, the
+  launcher or session restore (shelf.rs `launched`, the first window of
+  each start within 15 s) and no key has gone into another window since.
+  Otherwise it opens behind and its dock icon's long mark blinks twice a
+  second (steady where motion is not wanted) until it has had the keyboard.
+  Found on the way: a Wayland window is in the space from its creation, so
+  the dock's `starting` had already ended when it was first shown; hence
+  `launched`, kept apart. Live on kepler by vctl: after a restart the
+  restored windows take the keyboard; foot spawned by itself under a
+  focused terminal stays behind and blinks (seen in shots); foot started
+  from the launcher takes the keyboard; a second terminal window takes it.
+  4 tests of the rule; 418 on Hubble, kepler and Techbench.
 
 ## Steps
 
