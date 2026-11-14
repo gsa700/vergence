@@ -51,32 +51,42 @@ build once than in every app:
    every screen, energy on battery and on power, forget an app's window
    places with a confirmation, confirm closing several tabs, the UPS page,
    low-battery actions). Small, and most are asked for already.
-2. **Three small native tools that make the app framework**: **Calculator**
+2. **App settings** (Dave, 2026-11-14: "settings per app (terminal and
+   settings itself right now), and the ability to choose per app display
+   settings ... dark terminal with light toolbar, light terminal with dark
+   titlebar, etc."): the toolkit's preferences window with inherit-or-
+   override rows (whitepaper §6.10, decided 2026-11-10), the terminal and
+   the settings app first; and per-app look: the app's content style and
+   its window bar's style (light or dark) chosen apart. This **changes a
+   decision**: §6.10 says window furniture "is the desktop's alone and has
+   no per-application override"; the bar's light/dark becomes a per-app
+   override (the bar's layout, buttons and corners stay the desktop's).
+3. **Three small native tools that make the app framework**: **Calculator**
    (basic, with a scientific mode), **Running Applications** (processes:
    Linux /proc, FreeBSD's kern.proc sysctls; end, kill, by window too),
    **Hardware** (CPU, GPU, memory, disks, network: vergence-power,
    vergence-net and the GPU probe already read much of it). Each small;
    together they settle the framework every later app uses.
-3. **Text editing in the toolkit, then the Text Editor**: line numbers,
+4. **Text editing in the toolkit, then the Text Editor**: line numbers,
    autocomplete (words of the open documents first; languages later), find
    and replace, tabs; **Spellchecking** with it, as a toolkit service every
    native text field can use.
-4. **Open/Save dialogs and file types, then the Viewer** (pictures first,
+5. **Open/Save dialogs and file types, then the Viewer** (pictures first,
    PDF and video by the answers below) **and the File Manager** (Finder's
    space-bar preview through the Viewer; remote file systems by the
    system's own mounts).
-5. **Backup**, then into the file manager: ZFS snapshots on FreeBSD (and
+6. **Backup**, then into the file manager: ZFS snapshots on FreeBSD (and
    Linux with ZFS), `zfs send` to remote hosts over SSH, rsync where there
    is no ZFS; a file's versions from its snapshots in the file manager.
-6. **Disk utility**: disks, partitions, file systems, ZFS pools, SMART;
+7. **Disk utility**: disks, partitions, file systems, ZFS pools, SMART;
    changing anything needs root, so a small root helper of our own (as the
    sound helper on FreeBSD), designed with §7.3.
-7. **Code Navigator** and **agentic apps**: on the agent interface the
+8. **Code Navigator** and **agentic apps**: on the agent interface the
    whitepaper plans (§6.8, "any agent can be plugged in"); the agentic app
    idea wants a section of its own in the whitepaper first: what a spec is,
    how a generated app is confined (it runs as the user), and what a shared
    hub would hold.
-8. **Web browser, then Mail**: the largest by far, and the most borrowed;
+9. **Web browser, then Mail**: the largest by far, and the most borrowed;
    last, and only by Dave's word.
 
 ## Questions for Dave (when each app's turn comes)
