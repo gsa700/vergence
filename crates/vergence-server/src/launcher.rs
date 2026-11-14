@@ -23,20 +23,25 @@ use smithay::{
     utils::{Logical, Point, Rectangle, Transform},
 };
 use vergence_scene::{Color, Image, Point as ScenePoint, Rect as SceneRect, Scene};
-use vergence_shell::{Edge, Rect, launcher::{Grid, Step, search, step}};
+use vergence_shell::{Rect, launcher::{Grid, Step, step}};
 
 use crate::{Server, decor::SceneElement, shelf::Act};
 
-/// The popup's size in points (less on a screen too small for it), the
-/// room around its contents, the search field's height, and a cell.
-const WIDTH: i32 = 536;
-const HEIGHT: i32 = 452;
-const PAD: i32 = 12;
-const FIELD_H: i32 = 34;
-const CELL_W: i32 = 128;
-const CELL_H: i32 = 84;
+/// The launcher's size (shelf milestone 2): about two thirds of its
+/// screen, held between these, in points; the room around its contents,
+/// the search field's and the tabs' heights, a tab's widest, and a cell.
+const MIN_W: i32 = 560;
+const MIN_H: i32 = 420;
+const MAX_W: i32 = 1040;
+const MAX_H: i32 = 760;
+const PAD: i32 = 16;
+const FIELD_H: i32 = 40;
+const TABS_H: i32 = 30;
+const TAB_W: i32 = 124;
+const CELL_W: i32 = 132;
+const CELL_H: i32 = 120;
 /// An application's icon in the grid, in points.
-const ICON: i32 = 32;
+const ICON: i32 = 64;
 
 #[derive(Default)]
 pub struct Launcher {
@@ -51,6 +56,10 @@ struct Open {
     typed: String,
     selected: usize,
     scroll: i32,
+    /// The tab chosen (an index into vergence-shell's TABS); None: All.
+    tab: Option<usize>,
+    /// The tabs shown, after All: those that have an application.
+    tabs: Vec<usize>,
 }
 
 impl Open {
@@ -58,8 +67,16 @@ impl Open {
         Rect::new(self.at.loc.x + PAD, self.at.loc.y + PAD, self.at.size.w - 2 * PAD, FIELD_H)
     }
 
+    /// The tabs' row: All, then each of `tabs`, as (tab, rectangle).
+    fn tab_rects(&self) -> Vec<(Option<usize>, Rect)> {
+        let y = self.at.loc.y + PAD + FIELD_H + 10;
+        let n = (self.tabs.len() + 1) as i32;
+        let w = ((self.at.size.w - 2 * PAD) / n.max(1)).min(TAB_W);
+        std::iter::once(None).chain(self.tabs.iter().map(|t| Some(*t))).enumerate().map(|(i, t)| (t, Rect::new(self.at.loc.x + PAD + i as i32 * w, y, w - 4, TABS_H))).collect()
+    }
+
     fn grid(&self) -> Grid {
-        let top = PAD + FIELD_H + PAD;
+        let top = PAD + FIELD_H + 10 + TABS_H + 12;
         let mut g = Grid::new(Rect::new(self.at.loc.x + PAD, self.at.loc.y + top, self.at.size.w - 2 * PAD, self.at.size.h - top - PAD), CELL_W, CELL_H);
         g.scroll = self.scroll;
         g
@@ -80,27 +97,18 @@ impl Server {
         if self.launcher.open.is_some() {
             return self.launcher_close();
         }
-        // Beside the dock's head, on the windows' side; with no dock, in the
-        // middle of the screen the pointer is on.
-        let screen = self.shelf_screen().or_else(|| self.output_at_pointer());
-        let Some(screen) = screen else { return };
+        // In the middle of the screen the pointer is on (shelf milestone 2,
+        // Dave's answer: it opens where you are looking), about two thirds of it.
+        let Some(screen) = self.output_at_pointer().or_else(|| self.shelf_screen()) else { return };
         let area = self.work_area(screen);
-        let (w, h) = (WIDTH.min(area.size.w), HEIGHT.min(area.size.h));
-        let gap = vergence_look::SHELF_POPUP_GAP as i32;
-        let (x, y) = match self.shelf.dock {
-            Some(d) => match self.shelf_side(d) {
-                Edge::Left => (d.loc.x - gap - w, d.loc.y),
-                Edge::Right => (d.loc.x + d.size.w + gap, d.loc.y),
-                Edge::Top => (d.loc.x, d.loc.y - gap - h),
-                Edge::Bottom => (d.loc.x, d.loc.y + d.size.h + gap),
-            },
-            None => (area.loc.x + (area.size.w - w) / 2, area.loc.y + (area.size.h - h) / 2),
-        };
-        let x = x.min(area.loc.x + area.size.w - w).max(area.loc.x);
-        let y = y.min(area.loc.y + area.size.h - h).max(area.loc.y);
+        let w = (area.size.w * 2 / 3).clamp(MIN_W, MAX_W).min(area.size.w);
+        let h = (area.size.h * 2 / 3).clamp(MIN_H, MAX_H).min(area.size.h);
+        let (x, y) = (area.loc.x + (area.size.w - w) / 2, area.loc.y + (area.size.h - h) / 2);
+        let all = vergence_shell::launcher::search(&self.shelf.apps, "");
+        let tabs = vergence_shell::launcher::tabs(&self.shelf.apps, &all).into_iter().map(|(t, _)| t).collect();
         tracing::info!("apps: opened");
         self.close_menu();
-        self.launcher.open = Some(Open { at: Rectangle::new((x, y).into(), (w, h).into()), typed: String::new(), selected: 0, scroll: 0 });
+        self.launcher.open = Some(Open { at: Rectangle::new((x, y).into(), (w, h).into()), typed: String::new(), selected: 0, scroll: 0, tab: None, tabs });
         self.redraw_all();
     }
 
@@ -113,7 +121,7 @@ impl Server {
 
     /// The applications shown now, as places in the shelf's list.
     fn launcher_found(&self) -> Vec<usize> {
-        self.launcher.open.as_ref().map(|o| search(&self.shelf.apps, &o.typed)).unwrap_or_default()
+        self.launcher.open.as_ref().map(|o| vergence_shell::launcher::search_in(&self.shelf.apps, &o.typed, o.tab)).unwrap_or_default()
     }
 
     fn launcher_start(&mut self, index: usize) {
@@ -136,7 +144,20 @@ impl Server {
             _ => None,
         };
         match (sym, arrow) {
+            // Escape clears what was typed, then closes.
+            (key::KEY_Escape, _) if !open.typed.is_empty() => {
+                open.typed.clear();
+                (open.selected, open.scroll) = (0, 0);
+            }
             (key::KEY_Escape, _) => return self.launcher_close(),
+            // Page Up and Page Down (with Ctrl or without) go through the tabs.
+            (key::KEY_Page_Up | key::KEY_Page_Down, _) => {
+                let order: Vec<Option<usize>> = std::iter::once(None).chain(open.tabs.iter().map(|t| Some(*t))).collect();
+                let at = order.iter().position(|t| *t == open.tab).unwrap_or(0);
+                let next = if sym == key::KEY_Page_Down { (at + 1).min(order.len() - 1) } else { at.saturating_sub(1) };
+                open.tab = order[next];
+                (open.selected, open.scroll) = (0, 0);
+            }
             (key::KEY_Return | key::KEY_KP_Enter, _) => {
                 let selected = open.selected;
                 return self.launcher_start(selected);
@@ -167,6 +188,15 @@ impl Server {
         let Some(open) = self.launcher.open.as_ref() else { return };
         if !open.at.to_f64().contains(at) {
             return self.launcher_close();
+        }
+        let (x, y) = (at.x.floor() as i32, at.y.floor() as i32);
+        if let Some((tab, _)) = open.tab_rects().into_iter().find(|(_, r)| x >= r.x && x < r.right() && y >= r.y && y < r.bottom()) {
+            let open = self.launcher.open.as_mut().unwrap();
+            if open.tab != tab {
+                (open.tab, open.selected, open.scroll) = (tab, 0, 0);
+                self.redraw_all();
+            }
+            return;
         }
         if let Some(index) = open.grid().at(count, at.x.floor() as i32, at.y.floor() as i32) {
             self.launcher_start(index);
@@ -224,6 +254,7 @@ impl Server {
         let color = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
         let (typed, selected) = (open.typed.clone(), open.selected);
         let (grid, field) = (open.grid(), open.field());
+        let (tab, tab_rects) = (open.tab, open.tab_rects());
         let found = self.launcher_found();
         // The cells that show, each with its application and its icon once that has come.
         let pixels = (ICON as f64 * scale).round() as u32;
@@ -243,7 +274,8 @@ impl Server {
         // With the frost on, the popup's ground is the frost, drawn under its picture.
         let frost = self.frost_program(renderer);
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (&typed, selected, grid.scroll, scale.to_bits(), at.size.w, at.size.h, found.len(), light, frost.is_some()).hash(&mut hasher);
+        (&typed, selected, grid.scroll, scale.to_bits(), at.size.w, at.size.h, found.len(), light, frost.is_some(), tab, tab_rects.len()).hash(&mut hasher);
+        let counts = vergence_shell::launcher::tabs(&self.shelf.apps, &found);
         for (index, _, name, icon) in &cells {
             (index, name, icon.is_some()).hash(&mut hasher);
         }
@@ -279,6 +311,30 @@ impl Server {
                 }
                 scene.pop_clip();
             }
+            // The tabs: All and those that have an application; the chosen one shaded.
+            // While something is typed, each says how many it holds of the finds.
+            if let Some(face) = face {
+                let size = 12.5;
+                let m = fonts.metrics(face, size);
+                for (t, r) in &tab_rects {
+                    let r = local(*r);
+                    let chosen = *t == tab;
+                    if chosen {
+                        scene.fill_rounded(r, vergence_look::RADIUS, color(s.hover));
+                    }
+                    let name = t.map_or("All", |t| vergence_shell::launcher::TABS[t]);
+                    let label = match (t, typed.is_empty()) {
+                        (Some(t), false) => format!("{name} {}", counts.iter().find(|(c, _)| c == t).map_or(0, |(_, n)| *n)),
+                        (None, false) => format!("{name} {}", found.len()),
+                        _ => name.to_string(),
+                    };
+                    let (_, width) = fonts.layout(face, size, &label);
+                    scene.push_clip(r, 0.0);
+                    let ink = if chosen || typed.is_empty() { s.menu_ink } else { s.menu_ink_off };
+                    vergence_render::text(&mut scene, fonts, face, size, color(ink), ScenePoint::new((r.x + (r.w - width).max(8.0) / 2.0).round(), (r.y + (r.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), &label);
+                    scene.pop_clip();
+                }
+            }
             // The grid, cut off at its area's edges.
             scene.push_clip(local(grid.area), 0.0);
             if found.is_empty()
@@ -310,15 +366,47 @@ impl Server {
                         }
                     }
                 }
-                // The name under it: in the middle, or from the left and cut off if it is too long.
+                // The name under it, in the middle: two lines at most, the second
+                // ending in an ellipsis if even that is too little.
                 if let Some(face) = face {
                     let size = 12.5;
                     let m = fonts.metrics(face, size);
-                    let (_, width) = fonts.layout(face, size, name);
                     let room = c.w - 12.0;
+                    let fits = |fonts: &mut vergence_text::Fonts, t: &str| fonts.layout(face, size, t).1 <= room;
+                    let mut lines: Vec<String> = Vec::new();
+                    let mut line = String::new();
+                    for word in name.split_whitespace() {
+                        let tried = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
+                        if fits(fonts, &tried) || line.is_empty() {
+                            line = tried;
+                        } else {
+                            lines.push(std::mem::take(&mut line));
+                            line = word.to_string();
+                        }
+                    }
+                    if !line.is_empty() {
+                        lines.push(line);
+                    }
+                    if lines.len() > 2 {
+                        let rest = lines[1..].join(" ");
+                        lines.truncate(1);
+                        lines.push(rest);
+                    }
+                    if let Some(last) = lines.last_mut()
+                        && !fits(fonts, last)
+                    {
+                        while !last.is_empty() && !fits(fonts, &format!("{last}…")) {
+                            last.pop();
+                        }
+                        last.push('…');
+                    }
                     scene.push_clip(SceneRect::new(c.x + 6.0, c.y, room, c.h), 0.0);
-                    let x = if width < room { c.x + 6.0 + (room - width) / 2.0 } else { c.x + 6.0 };
-                    vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink), ScenePoint::new(x.round(), (square.y + square.h + 8.0 + m.ascent).round()), name);
+                    let line_h = (m.ascent + m.descent + m.line_gap).ceil();
+                    for (i, l) in lines.iter().enumerate() {
+                        let (_, width) = fonts.layout(face, size, l);
+                        let x = c.x + 6.0 + ((room - width) / 2.0).max(0.0);
+                        vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink), ScenePoint::new(x.round(), (square.y + square.h + 8.0 + m.ascent + i as f32 * line_h).round()), l);
+                    }
                     scene.pop_clip();
                 }
             }

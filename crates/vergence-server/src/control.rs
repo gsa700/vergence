@@ -232,6 +232,8 @@ impl Server {
                         "Down" => vec![108],
                         "Left" => vec![105],
                         "Right" => vec![106],
+                        "Page_Up" | "Prior" => vec![104],
+                        "Page_Down" | "Next" => vec![109],
                         "Super" => vec![125],
                         // The volume keys (KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP).
                         "Mute" => vec![113],

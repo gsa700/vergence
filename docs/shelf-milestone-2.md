@@ -75,6 +75,20 @@ shows changes), the frost under it by the server.
   finds by a name's word, the name, GenericName ("browser" finds Firefox),
   a keyword, then the comment; `tabs` lists the tabs that have an
   application with the count of finds in each. Tests for each.
+- **Steps 2 and 3 done** (2026-11-13): the panel, frosted. It opens in
+  the middle of the screen the pointer is on, two thirds of it (560 x 420
+  to 1040 x 760 points), frosted over what is behind (look milestone 1's
+  backdrop; the plain ground without the frost). Under the search field a
+  row of tabs, All and those that have an application (`Open::tab_rects`;
+  the chosen one shaded; while something is typed each shows how many of
+  the finds it holds); a click or Page Up / Page Down (with Ctrl or
+  without) chooses one. The grid: 64-point icons, names under them on two
+  lines at most, the second ending in an ellipsis. Escape clears what was
+  typed, then closes. `vctl key` knows Page_Up and Page_Down. Seen on
+  kepler (FreeBSD, 4K at 2.5): centered at 256,144 1024 x 576, frosted
+  over the wallpaper and a terminal; "browser" finds Firefox; Page Down to
+  Internet then System, Page Up back to All; a click on System. 400 tests
+  on all three. Not yet: the right-click menu, flick scrolling (step 4).
 
 ## Steps
 
