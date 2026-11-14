@@ -460,6 +460,8 @@ enum Message {
     PanelScreen(String, Option<String>),
     Size(f32),
     SizeDone,
+    /// "Windows the same size on every screen" (settings milestone 2).
+    SameSize(bool),
     Scale(f32),
     ScaleDone,
     ScaleDefault,
@@ -1052,6 +1054,7 @@ impl App {
                     self.save_pinned(pinned);
                 }
             }
+            Message::SameSize(on) => self.save(|d| disp::set_same_size(d, on)),
             Message::Size(v) => self.size = if (v - 1.0).abs() < 0.035 { 1.0 } else { v },
             Message::Repeat(on) => self.save_keyboard(|t| {
                 t.insert("repeat".into(), on.into());
@@ -2283,7 +2286,14 @@ impl App {
             vec![
                 self.group(None, vec![panel(self.arrangement(None, true, 240.0)).padding(8.0).width(Length::FILL)]),
                 label("Double-click a screen for its own settings.").size(11.0).dim(),
-                self.group(None, vec![setting("Size", &format!("How big everything is, on every screen: {}%.", (self.size * 100.0).round()), size_slider(self.size))]),
+                self.group(None, vec![
+                    setting("Size", &format!("How big everything is, on every screen: {}%.", (self.size * 100.0).round()), size_slider(self.size)),
+                    setting(
+                        "Windows the same size on every screen",
+                        "Each screen at its exact calculated scale, so a window looks the same size moving between them. Off: the nearest whole scale where it is close, the sharpest; on, apps that draw only at whole scales may look a little soft.",
+                        switch(disp::same_size(&self.desktop), Message::SameSize).name("Windows the same size on every screen"),
+                    ),
+                ]),
                 self.status_line(),
             ],
         )
@@ -2331,6 +2341,12 @@ impl App {
             ];
             if !multi {
                 rows.push(setting("Size", &format!("How big everything is: {}%.", (self.size * 100.0).round()), size_slider(self.size)));
+                // With one screen it still decides for the screens it meets later.
+                rows.push(setting(
+                    "Windows the same size on every screen",
+                    "This screen and any other at its exact calculated scale, so a window looks the same size on each; off, the nearest whole scale where close, the sharpest.",
+                    switch(disp::same_size(&self.desktop), Message::SameSize).name("Windows the same size on every screen"),
+                ));
             }
             rows.extend(mode_rows);
             // A screen on one GPU drawn by another (GPUs milestone 1) says so up front.

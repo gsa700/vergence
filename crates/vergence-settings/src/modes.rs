@@ -35,9 +35,18 @@ pub fn rates(modes: &[ModeInfo], size: (u32, u32)) -> Vec<ModeInfo> {
     v
 }
 
-/// "60 Hz", "59.94 Hz".
+/// "60 Hz", "59.94 Hz (video)": a rate a thousandth below a whole one
+/// (59.94, 29.97, 23.976, 119.88) is television's, kept for video that is
+/// made at it (Dave, 2026-11-14: "label it").
 pub fn rate_words(mhz: u32) -> String {
-    if mhz % 1000 == 0 { format!("{} Hz", mhz / 1000) } else { format!("{:.2} Hz", mhz as f64 / 1000.0).replace(".00", "") }
+    if mhz % 1000 == 0 {
+        return format!("{} Hz", mhz / 1000);
+    }
+    let whole = ((mhz as f64 / 1000.0) * 1.001).round();
+    let video = whole > 0.0 && ((whole * 1000.0 / 1.001) - mhz as f64).abs() < 15.0;
+    let n = format!("{:.3}", mhz as f64 / 1000.0);
+    let n = n.trim_end_matches('0').trim_end_matches('.');
+    if video { format!("{n} Hz (video)") } else { format!("{n} Hz") }
 }
 
 /// The mode as desktop.toml writes it.
@@ -251,7 +260,9 @@ mod tests {
         let r = rates(&modes, (1920, 1080));
         assert_eq!(r.iter().map(|m| m.refresh_mhz).collect::<Vec<_>>(), vec![60000, 59940], "fastest first");
         assert_eq!(rate_words(60000), "60 Hz");
-        assert_eq!(rate_words(59940), "59.94 Hz");
+        assert_eq!(rate_words(59940), "59.94 Hz (video)");
+        assert_eq!(rate_words(23976), "23.976 Hz (video)");
+        assert_eq!(rate_words(60020), "60.02 Hz");
         assert_eq!(mode_text(&m(1920, 1080, 59940, false)), "1920x1080@59.94");
         assert_eq!(mode_text(&m(3840, 2160, 60000, true)), "3840x2160@60");
         let mut d = Table::new();

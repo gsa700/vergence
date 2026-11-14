@@ -116,6 +116,18 @@ as now.
   at 60 picked, not kept: back after 15 s; picked and kept: stayed; put back
   to 4K. Hubble's panel 144 to 60 Hz and back (by desktop.toml). 479 tests
   (kepler 475).
+- **Rates labeled** (Dave: "label it"): a rate a thousandth below a whole
+  one (59.94, 29.97, 23.976) reads "59.94 Hz (video)": television's rates,
+  kept for video made at them.
+- **Step 3 in: the same physical size** (2026-11-14). desktop.toml
+  `[displays] same-size = true`: every screen whose scale is not chosen by
+  hand takes its exact calculated scale (in 120ths, never below 1) instead
+  of the nearest whole number; a chosen scale still wins. The calculation
+  includes each screen's viewing distance, so it is the same size to the
+  eye (Contract 1's reference unit), the same in millimeters on screens at
+  the same distance. The switch on the Screens overview, and on a single
+  screen's page (it decides for screens met later too). Hubble's panel: off
+  100%, on 104% ("the same size as on every screen"), off again.
 
 ## Steps
 

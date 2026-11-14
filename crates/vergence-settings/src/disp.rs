@@ -23,6 +23,20 @@ pub fn size(desktop: &Table) -> f64 {
     desktop.get("displays").and_then(|d| d.get("size")).and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))).unwrap_or(1.0)
 }
 
+/// "Windows the same size on every screen" (`[displays] same-size`), off by default.
+pub fn same_size(desktop: &Table) -> bool {
+    desktop.get("displays").and_then(|d| d.get("same-size")).and_then(Value::as_bool).unwrap_or(false)
+}
+
+pub fn set_same_size(desktop: &mut Table, on: bool) {
+    let d = displays_mut(desktop);
+    if on {
+        d.insert("same-size".into(), true.into());
+    } else {
+        d.remove("same-size");
+    }
+}
+
 pub fn set_size(desktop: &mut Table, size: f64) {
     displays_mut(desktop).insert("size".into(), ((size * 100.0).round() / 100.0).into());
 }

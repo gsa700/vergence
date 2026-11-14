@@ -36,6 +36,11 @@ use vergence_profile::scaling::{Distance, derive};
 #[serde(default)]
 pub struct DisplaysConfig {
     pub size: Option<f64>,
+    /// "Windows the same size on every screen" (settings milestone 2): every
+    /// screen whose scale is not chosen takes its exact calculated scale,
+    /// not the nearest whole number. desktop.toml `[displays] same-size`.
+    #[serde(rename = "same-size")]
+    pub same_size: Option<bool>,
     pub screen: Vec<ScreenConfig>,
     pub arrangement: Vec<Arrangement>,
 }
@@ -128,7 +133,10 @@ impl DisplaysConfig {
             None => Distance::Desktop,
         };
         let d = derive(px, mm, dist, 1.0);
-        let default = sharp(d.exact);
+        // The same size everywhere: the exact scale (in the 120ths apps draw
+        // at, never below 1); else the sharpest near it.
+        let same = self.same_size.unwrap_or(false);
+        let default = if same { crate::scale_in_120ths(d.exact.max(1.0)) } else { sharp(d.exact) };
         let calc = match d.note {
             Some(n) => format!("calculated 1 ({n})"),
             None => format!("calculated {:.2} for {:.0} ppi at {} distance", d.exact, d.ppi.unwrap_or(0.0), format!("{dist:?}").to_lowercase()),
@@ -136,6 +144,7 @@ impl DisplaysConfig {
         let chosen = conf.and_then(|c| c.scale).filter(|s| s.is_finite() && (0.5..=8.0).contains(s));
         let (base, how) = match chosen {
             Some(s) => (s, format!("chosen {}; the default is {} ({calc})", pct(s), pct(default))),
+            None if same => (default, format!("default {}, the same size as on every screen ({calc})", pct(default))),
             None if default == d.exact.max(1.0 / 120.0) => (default, format!("default: {calc}")),
             None => (default, format!("default {}, the sharpest near it ({calc})", pct(default))),
         };
@@ -290,5 +299,18 @@ mod mode_tests {
         assert_eq!(parse_mode("0x1080@60"), None);
         assert_eq!(parse_mode("99999x1080@60"), None);
         assert_eq!(parse_mode("1920x1080@abc"), None);
+    }
+
+    #[test]
+    fn the_same_size_everywhere_uses_exact_scales() {
+        let plain: super::DisplaysConfig = toml::from_str("").unwrap();
+        let same: super::DisplaysConfig = toml::from_str("same-size = true").unwrap();
+        // The 14" 4K at desk distance: calculated 3.28, sharp 3.
+        let a = plain.scale_for("x", "HDMI-A-1", (3840, 2160), Some((310, 174)));
+        let b = same.scale_for("x", "HDMI-A-1", (3840, 2160), Some((310, 174)));
+        assert_eq!(a.default, 3.0);
+        assert!((b.default - 3.28).abs() < 0.02, "{}", b.default);
+        assert_eq!((b.default * 120.0).fract(), 0.0, "in 120ths");
+        assert!(b.how.contains("same size"));
     }
 }
