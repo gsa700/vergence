@@ -191,4 +191,35 @@ fi
 if [ -n "$user" ] && ! id -Gn "$user" | tr ' ' '\n' | grep -qx wheel; then
     echo "wifi: $user is not in wheel, so the settings app cannot use Wi-Fi (add them to wheel to allow it)"
 fi
+# ---- system setup: a driver for every GPU (GPUs milestone 1) ----
+# A second GPU shows its screens with a renderer of its own; without that
+# GPU's own OpenGL, Mesa falls back to software on the CPU and its screens
+# are slow (Hubble's NVIDIA card: 40 to 77 ms a 4K frame, 2026-11-14). Mesa
+# runs nouveau's OpenGL through Zink, which needs NVK and the Vulkan loader.
+# Said here, not installed: they are the system's packages.
+if [ "$(uname -s)" = Linux ]; then
+    distro=$(. /etc/os-release 2>/dev/null; echo "${ID:-}")
+    for dev in /sys/class/drm/card[0-9]*/device; do
+        [ -e "$dev/driver" ] || continue
+        drv=$(basename "$(readlink "$dev/driver")")
+        case "$drv" in
+            nouveau)
+                icd=; lib=
+                for f in /usr/share/vulkan/icd.d/nouveau_icd*.json; do [ -e "$f" ] && icd=1; done
+                for f in /usr/lib/libvulkan.so.1 /usr/lib64/libvulkan.so.1 /usr/lib/*/libvulkan.so.1; do [ -e "$f" ] && lib=1; done
+                if [ -n "$icd" ] && [ -n "$lib" ]; then
+                    echo "gpu: NVIDIA (nouveau): OpenGL through Zink on NVK, on the GPU"
+                else
+                    case "$distro" in
+                        void) pkgs="mesa-vulkan-nouveau vulkan-loader (xbps-install)" ;;
+                        fedora) pkgs="mesa-vulkan-drivers vulkan-loader (dnf install)" ;;
+                        debian|ubuntu) pkgs="mesa-vulkan-drivers libvulkan1 (apt install)" ;;
+                        *) pkgs="Mesa's NVK Vulkan driver and the Vulkan loader" ;;
+                    esac
+                    echo "gpu: NVIDIA (nouveau) has no OpenGL of its own: screens on it would be drawn by the CPU. Install $pkgs" >&2
+                fi
+                ;;
+        esac
+    done
+fi
 echo "start: 'vergence' from a text console, or choose Vergence at the login screen"

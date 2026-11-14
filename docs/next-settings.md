@@ -119,3 +119,10 @@ limited size allowance to preserve the layout".
 - **Energy on battery and on power** (Dave, 2026-11-14): separate settings
   (screens off, sleep) while on battery and while on mains power, and later
   while on a UPS's battery; vergence-power already tells which.
+- **Same physical size on every screen** (Dave, 2026-11-14: "Make windows on
+  all monitors the same physical size", applying the design theory across
+  whatever screens are installed or memorized): a switch on the Screens
+  overview that uses each screen's exact calculated scale (Contract 1's
+  reference unit; the 14" at 3.28, not snapped to 300%) for every screen,
+  connected or remembered, so a window keeps its size in millimeters moving
+  between them; off (today): whole-number scales where close, for sharpness.

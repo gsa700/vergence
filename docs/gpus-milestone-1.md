@@ -215,6 +215,13 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
   Hubble over the bus: eDP-1 Intel/Intel, HDMI-A-1 NVIDIA/Intel. All three
   machines on v8 (Techbench's dev session; its installed one needs Dave's
   sudo). 476 tests (kepler 472).
+- **install.sh names a second GPU's driver** (step 5): on Linux, for each
+  nouveau GPU it checks for NVK's ICD and the Vulkan loader and says either
+  "OpenGL through Zink on NVK, on the GPU" or which packages to install
+  (Void, Fedora, Debian names) because its screens would be drawn by the
+  CPU; it installs nothing. Hubble: "on the GPU" (it said otherwise before
+  the check looked at each file on its own). Techbench (i915 only) and
+  kepler (FreeBSD) print nothing new.
 
 ## Steps
 
