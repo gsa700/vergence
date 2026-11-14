@@ -18,6 +18,18 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   crate, a dependency or a version, copy Cargo.lock back from the build box
   (`scp hubble:src/vergence/Cargo.lock .`) and commit it: Cargo updates it
   there, never here (it was stale for three changes, 2026-11-11). Fake monitors for tests: docs/milestone-1.md, "Found on Hubble".
+- **GPU hangs: keep the evidence** (2026-11-14). On kepler run tests as
+  `tools/test-guard.sh 480 -- cargo test -q --workspace`: if they run over,
+  it saves `tools/gpu-report.sh`'s report (each stuck process's threads and
+  kernel stacks, the i915 error state, the kernel's log) before stopping
+  them. Run `tools/gpu-report.sh [pid...]` by hand on any hang or freeze
+  before killing or rebooting, then `tools/fetch-gpu-reports.sh` to copy the
+  reports to Control (~/vergence-gpu-reports/; a reinstall lost the
+  2026-11-10 dump). Found 2026-11-14: the vergence-render GPU test hung on
+  kepler in the kernel (a page fault on a mapped GPU buffer in drm-kmod's
+  linuxkpi path, `_vm_page_busy_sleep`, during glReadPixels in
+  `a_buffer_for_the_display_server_holds_the_same_picture`), not a GPU
+  reset: unkillable until reboot.
 - **vergd, phase 1's X11 daemon, is retired** (Dave, 2026-11-10): removed
   from the workspace with tools/install-autostart.sh; git keeps it (last as
   `crates/vergd` in 4a2f00f). Its files' formats live on in vergence-profile
