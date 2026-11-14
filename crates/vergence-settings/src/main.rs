@@ -33,6 +33,7 @@ mod theme;
 mod thumbs;
 mod wall;
 mod battery;
+mod modes;
 mod wifi;
 mod winbar;
 
@@ -372,6 +373,11 @@ enum Message {
     Wifi(wifi::WifiMsg),
     /// Time to read the battery again (battery.rs).
     BatterySample,
+    /// A screen's resolution or refresh rate picked (modes.rs), and the
+    /// keep-or-revert dialog's answer.
+    Resolution(usize),
+    Refresh(usize),
+    KeepMode(bool),
     /// The battery history's range: the last day or week.
     BatteryRange(usize),
     /// The Advanced part of a page opened or closed, by its key.
@@ -524,6 +530,9 @@ struct App {
     wifi: wifi::Wifi,
     /// The Battery page's state (battery.rs).
     battery: battery::BatteryPage,
+    /// A new mode waiting to be kept, and whether to ask about it now (modes.rs).
+    mode_pending: Option<modes::Pending>,
+    mode_ask: bool,
     page: Page,
     /// The Sound page (vergence-sound): the system, read when the page opens,
     /// and its outputs as last read.
@@ -705,6 +714,8 @@ impl App {
             advanced: HashSet::new(),
             wifi: Default::default(),
             battery: Default::default(),
+            mode_pending: None,
+            mode_ask: false,
             accent_text: appearance_text(&desktop, "accent"),
             size: disp::size(&desktop) as f32,
             sleep_cmd: energy_cmd(&desktop),
@@ -861,6 +872,9 @@ impl App {
             Message::Go(p) => self.open(p),
             Message::Wifi(m) => self.wifi_handle(m),
             Message::BatterySample => self.battery_sample(),
+            Message::Resolution(i) => self.pick_mode(Some(i), None),
+            Message::Refresh(i) => self.pick_mode(None, Some(i)),
+            Message::KeepMode(keep) => self.settle_mode(keep),
             Message::BatteryRange(i) => self.battery_range(i),
             Message::Advanced(key) => {
                 if !self.advanced.remove(key) {
@@ -2299,6 +2313,7 @@ impl App {
                 shown_row.push(button(label("Default").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press(Message::ScaleDefault));
             }
             let screen_controls: Vec<String> = SCREEN_CONTROLS_NAMES.iter().map(|s| s.to_string()).collect();
+            let mode_rows = self.mode_rows(o);
             let mut rows = vec![
                 setting("Scale", note, scale_slider(self.scale, o, &marks)),
                 setting(
@@ -2317,6 +2332,7 @@ impl App {
             if !multi {
                 rows.push(setting("Size", &format!("How big everything is: {}%.", (self.size * 100.0).round()), size_slider(self.size)));
             }
+            rows.extend(mode_rows);
             // A screen on one GPU drawn by another (GPUs milestone 1) says so up front.
             if !o.shown_by.is_empty() && o.shown_by != o.drawn_by {
                 rows.push(setting("Graphics", &format!("Shown by {}, drawn by {} and copied there.", o.shown_by, o.drawn_by), space()));
@@ -2703,7 +2719,16 @@ impl Program for App {
 
     fn update(&mut self, m: Message, window: &mut Window) {
         let was = self.page;
+        if matches!(m, Message::KeepMode(_)) {
+            window.cancel_timer(modes::REVERT_TIMER);
+        }
         self.handle(m);
+        // A new mode: ask, and go back by itself unless kept.
+        if std::mem::take(&mut self.mode_ask) {
+            let until = std::time::Instant::now() + modes::KEEP_FOR;
+            window.open_window(vergence_widgets::window(modes::KeepDialog { mail: self.mail.clone(), until, theme: Program::theme(self) }));
+            window.wake_after(modes::REVERT_TIMER, modes::KEEP_FOR);
+        }
         // The window is named after its page (Alt+Tab, the dock; the bar draws no title).
         if self.page != was {
             window.set_title(&self.title());
@@ -2725,13 +2750,26 @@ impl Program for App {
         false
     }
 
-    fn woken(&mut self, _: &mut Window) -> bool {
+    fn woken(&mut self, window: &mut Window) -> bool {
         let mut any = false;
         while let Ok(m) = self.inbox.try_recv() {
+            // The keep-or-revert dialog answered: its window's timer is not needed.
+            if matches!(m, Message::KeepMode(_)) {
+                window.cancel_timer(modes::REVERT_TIMER);
+            }
             self.handle(m);
             any = true;
         }
         any
+    }
+
+    fn timer(&mut self, id: u64, _: &mut Window) -> bool {
+        // 15 s and not kept (the dialog closed, or no answer): back it goes.
+        if id == modes::REVERT_TIMER && self.mode_pending.is_some() {
+            self.settle_mode(false);
+            return true;
+        }
+        false
     }
 
     fn scale(&mut self, s: f32) -> bool {

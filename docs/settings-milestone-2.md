@@ -98,6 +98,24 @@ as now.
   places (the terminal 124). kepler (the 14" moved back): 3840x2160 at 30 Hz
   (its HDMI's limit; 60 on Hubble's NVIDIA HDMI), 34 modes, the 200% chosen
   on Hubble followed the monitor. All three on v9. 477 tests (kepler 473).
+- **Step 2 in: resolution and refresh rate** (2026-11-14). Each screen's
+  page: Resolution (the monitor's sizes, its preferred one "(recommended)")
+  and Refresh rate (that size's rates, fastest first; "59.94 Hz" apart from
+  "60 Hz"), written as `[[displays.screen]] mode = "2560x1440@60"`; the
+  server picks that mode only if the connector offers it (within 0.05 Hz;
+  else its preferred, logged) and sets a screen up again when its chosen
+  mode changes. A new mode opens "Keep this resolution?" (modal, a countdown
+  driven from its waker), and the settings window's own 15 s timer puts the
+  old choice back unless Keep is pressed, so closing the dialog reverts too.
+  Found on the way and fixed: dialogs took window memory's place and size
+  of the program's last closed window (the dialog came up 840 x 1044, its
+  buttons off the screen): windows with a parent, dialogs, palettes and
+  splash screens now have no memory identity, and the toolkit opens a
+  dialog or palette at its own smallest size; the dialog used the toolkit's
+  default theme, now the app's. kepler (the 14", 4K at 30 Hz): 2560 x 1440
+  at 60 picked, not kept: back after 15 s; picked and kept: stayed; put back
+  to 4K. Hubble's panel 144 to 60 Hz and back (by desktop.toml). 479 tests
+  (kepler 475).
 
 ## Steps
 

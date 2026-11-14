@@ -111,6 +111,18 @@ impl Server {
     /// Who a window is: class and its place among open windows of that class.
     /// None for windows the memory leaves alone (menus, skipped apps, no class).
     pub fn window_identity(&mut self, w: &Win) -> Option<WindowId> {
+        // Dialogs, palettes and splash screens are placed by their parent
+        // (dialogs.rs), never from memory: a settings dialog took the size of
+        // the settings window last closed, its buttons off the screen (kepler,
+        // 2026-11-14).
+        // A window with a parent counts too: its parent is known when it is
+        // created, its kind only once its style arrives, which can be after
+        // the server first places it.
+        use crate::style::Kind;
+        let style = self.window_style(w);
+        if style.parent.is_some() || matches!(style.kind, Kind::Dialog | Kind::Palette | Kind::Splash) {
+            return None;
+        }
         if let Some(id) = self.memory.ids.get(w) {
             return Some(id.clone());
         }

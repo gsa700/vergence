@@ -111,6 +111,8 @@ struct Surface {
     /// The monitor's modes (each once) and the one running, for the bus.
     modes: Vec<vergence_protocol::bus::ModeInfo>,
     mode: u32,
+    /// Its connector, to set it up again in another mode.
+    handle: connector::Handle,
 }
 
 /// "Drawn here, shown there" (GPUs milestone 1, step 3): the primary draws
@@ -610,6 +612,38 @@ fn setup_changed(state: &mut Server, anchors: Vec<(crate::win::Win, String, smit
 pub fn displays_changed(state: &mut Server) {
     let cfg = crate::displays::load();
     let anchors = state.window_anchors();
+    // A screen whose chosen mode is not the one running (or that lost its
+    // choice) is set up again in it (settings milestone 2).
+    let redo: Vec<(Key, connector::Handle)> = state
+        .backend
+        .as_ref()
+        .map(|b| {
+            b.surfaces
+                .iter()
+                .filter(|(_, s)| {
+                    let running = s.modes.get(s.mode as usize).map(|m| (m.width, m.height, m.refresh_mhz));
+                    let preferred = s.modes.iter().find(|m| m.preferred).or(s.modes.first()).map(|m| (m.width, m.height, m.refresh_mhz));
+                    let want = cfg.mode_for(&s.id).filter(|w| s.modes.iter().any(|m| m.width == w.0 && m.height == w.1 && (m.refresh_mhz as i64 - w.2 as i64).abs() <= 50)).or(preferred);
+                    match (want, running) {
+                        (Some(w), Some(r)) => !(w.0 == r.0 && w.1 == r.1 && (w.2 as i64 - r.2 as i64).abs() <= 50),
+                        _ => false,
+                    }
+                })
+                .map(|(k, s)| (*k, s.handle))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !redo.is_empty() {
+        for (key, handle) in &redo {
+            tracing::info!("displays: a new mode chosen; setting the screen up again");
+            disconnect(state, *key);
+            connect_if_there(state, key.0, *handle, key.1);
+        }
+        setup_changed(state, anchors.clone());
+        for (key, _) in &redo {
+            render(state, *key);
+        }
+    }
     let mut notes = Vec::new();
     let Some(b) = state.backend.as_mut() else { return };
     for s in b.surfaces.values_mut() {
@@ -635,7 +669,24 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     if gpu > 0 && b.surfaces.values().any(|s| s.connector == name) {
         name = format!("{name}@{}", b.devices[gpu].path.rsplit('/').next().unwrap_or("gpu"));
     }
-    let mode_id = conn.modes().iter().position(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED)).unwrap_or(0);
+    // The monitor's identity first: a mode chosen for it in the settings app
+    // (desktop.toml, by its EDID id) decides the mode; else the preferred one.
+    let edid = edid_of(b.devices[gpu].manager.device(), conn.handle());
+    let identity = edid.clone().unwrap_or_else(|| name.clone().into_bytes());
+    let id = vergence_profile::monitor_id(&identity);
+    let preferred = conn.modes().iter().position(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED)).unwrap_or(0);
+    let wanted = crate::displays::load().mode_for(&id);
+    // Only a mode the monitor itself offers: never one taken on trust.
+    let chosen = wanted.and_then(|(ww, wh, wr)| {
+        conn.modes().iter().position(|m| {
+            let i = mode_info(m);
+            i.width == ww && i.height == wh && (i.refresh_mhz as i64 - wr as i64).abs() <= 50
+        })
+    });
+    if let (Some((ww, wh, wr)), None) = (wanted, chosen) {
+        tracing::warn!("{name}: {ww}x{wh} at {:.2} Hz is not one of its modes; its preferred mode instead", wr as f64 / 1000.0);
+    }
+    let mode_id = chosen.unwrap_or(preferred);
     let Some(&drm_mode) = conn.modes().get(mode_id) else { return };
     // Every mode the monitor offers, each once, for the settings app (bus v9).
     let mut modes: Vec<vergence_protocol::bus::ModeInfo> = Vec::new();
@@ -651,11 +702,8 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     let (w, h) = drm_mode.size();
 
     // The panel's size from its EDID (the connector's mm are only the base block's).
-    let edid = edid_of(b.devices[gpu].manager.device(), conn.handle());
     let parsed = edid.as_deref().and_then(|e| vergence_edid::Edid::parse(e).ok());
     let mm = parsed.as_ref().and_then(|e| e.physical_size_mm()).map(|(a, c)| (a as u32, c as u32)).or_else(|| conn.size());
-    let identity = edid.clone().unwrap_or_else(|| name.clone().into_bytes());
-    let id = vergence_profile::monitor_id(&identity);
     // Calculated from the EDID, the screen's viewing distance and the size
     // preference, or set by hand (displays.rs). In 120ths, as wp-fractional-scale-v1
     // tells it to apps: the output at exactly the scale the apps draw at, so their
@@ -711,7 +759,7 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     if gpu > 0 {
         tracing::info!("{name}: shown by {}, drawn by {} and copied there", b.devices[gpu].path, b.devices[0].path);
     }
-    b.surfaces.insert((gpu, crtc), Surface { output, drm_output, connector: name, last: std::time::Instant::now(), scale, id, px: (w as u32, h as u32), mm, edid: identity, global, relay, modes, mode: mode_index });
+    b.surfaces.insert((gpu, crtc), Surface { output, drm_output, connector: name, last: std::time::Instant::now(), scale, id, px: (w as u32, h as u32), mm, edid: identity, global, relay, modes, mode: mode_index, handle: conn.handle() });
 }
 
 /// The GL renderer's name ("Mesa Intel(R) UHD Graphics (CML GT2)", "llvmpipe ...").

@@ -46,6 +46,18 @@ pub struct ScreenConfig {
     pub id: String,
     pub distance: Option<String>,
     pub scale: Option<f64>,
+    /// A mode chosen in the settings app: "3840x2160@60", "1920x1080@59.94"
+    /// (settings milestone 2). The server sets it only if the monitor offers it.
+    pub mode: Option<String>,
+}
+
+/// "3840x2160@59.94" -> (3840, 2160, 59940): width, height, refresh in millihertz.
+pub fn parse_mode(s: &str) -> Option<(u32, u32, u32)> {
+    let (size, rate) = s.trim().split_once('@')?;
+    let (w, h) = size.split_once('x')?;
+    let hz: f64 = rate.trim().parse().ok()?;
+    let (w, h): (u32, u32) = (w.trim().parse().ok()?, h.trim().parse().ok()?);
+    (w > 0 && h > 0 && w <= 16384 && h <= 16384 && hz > 1.0 && hz < 1000.0).then(|| (w, h, (hz * 1000.0).round() as u32))
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
@@ -96,6 +108,11 @@ impl DisplaysConfig {
     }
 
     /// The size preference, kept to a sane range.
+    /// The mode chosen for a screen, if any.
+    pub fn mode_for(&self, id: &str) -> Option<(u32, u32, u32)> {
+        self.screen.iter().find(|s| s.id == id).and_then(|s| s.mode.as_deref()).and_then(parse_mode)
+    }
+
     pub fn size(&self) -> f64 {
         self.size.filter(|s| s.is_finite()).unwrap_or(1.0).clamp(0.5, 3.0)
     }
@@ -257,5 +274,21 @@ mod tests {
         // Negative places are moved to 0, 0.
         let c = cfg("[[displays.arrangement]]\nsetup = \"s\"\nplaces = [{ id = \"a\", x = -1170, y = -10 }, { id = \"b\", x = 0, y = 0 }]\n");
         assert_eq!(lay_out(&c, "s", &screens), [(0, 0), (1170, 10)]);
+    }
+}
+
+#[cfg(test)]
+mod mode_tests {
+    use super::parse_mode;
+
+    #[test]
+    fn modes_as_written() {
+        assert_eq!(parse_mode("3840x2160@60"), Some((3840, 2160, 60000)));
+        assert_eq!(parse_mode("1920x1080@59.94"), Some((1920, 1080, 59940)));
+        assert_eq!(parse_mode(" 1280x720 @ 50 "), Some((1280, 720, 50000)));
+        assert_eq!(parse_mode("1920x1080"), None);
+        assert_eq!(parse_mode("0x1080@60"), None);
+        assert_eq!(parse_mode("99999x1080@60"), None);
+        assert_eq!(parse_mode("1920x1080@abc"), None);
     }
 }

@@ -190,6 +190,14 @@ impl<P: Program> vergence_ui::App for Host<P> {
         self.program.style()
     }
 
+    /// A dialog or palette opens at its own smallest size, not at the
+    /// toolkit's 820 x 520 for another window.
+    fn opening_size(&self) -> Option<(u32, u32)> {
+        let st = self.program.style();
+        let small = matches!(st.kind, vergence_ui::WinKind::Dialog | vergence_ui::WinKind::Palette);
+        (small && st.min.0 > 0.0 && st.min.1 > 0.0).then(|| (st.min.0.ceil() as u32, st.min.1.ceil() as u32))
+    }
+
     fn under_bar(&self) -> bool {
         self.program.under_bar()
     }
