@@ -161,8 +161,7 @@ Bar Proportions"):
   their size (Claude's advice, 2026-11-13: little room gained, touch
   worse).
 - **Inactive tabs are shaded** in both styles (they disappeared into the
-  frost): a light veil in dark, a soft grey in light; the tab in front a
-  stronger veil in dark and near-white in light.
+  frost): a light veil in dark, a soft grey in light.
 - **The bar and the terminal may differ**: all four (dark bar on a dark or
   light terminal, light bar on either) are looks we support, since the bar
   follows Style and the terminal its own scheme; the contrast test covers
@@ -181,9 +180,13 @@ Bar Proportions"):
   transparency still giving the solid tint. The tint never goes below what
   the contrast test passes (mixed pairs included), so Clear is as clear as
   stays legible, not a free choice of zero.
-- **Still open**: the tab in front as a veil over the frost, or solid in
-  the terminal's own color (text scrolling behind everything but it); the
-  mock-up's "Front tab" switch.
+- **The tab in front is the page's color** (Dave, 2026-11-13: "front tab
+  should be page color, maybe with the alt in settings"): solid in the
+  program's own background (the terminal's scheme, as today's bar does),
+  so it reads as the top of the page below it and the text scrolls behind
+  the frost everywhere but there; in a mixed pair it matches the terminal,
+  not the bar. A root tab stays red. Settings > Appearance offers the
+  other look, **Front tab: Page color, Frosted** (a veil over the frost).
 - **Size of controls** (Dave, 2026-11-13: "yes, per-monitor automatic,
   standard 36"): Compact 32, **Standard 36** (today's), Large 44 (bar
   height; tabs, buttons, margins and gaps with it, as the mock-up's
@@ -221,7 +224,7 @@ Bar Proportions"):
    vergence-bar; the per-screen Automatic (touch panel) rule in the
    server; a window's bar follows the monitor its center is on; the
    settings (Appearance and Screens).
-9. **Settings**: Frost (Clear, Standard, Heavy) and Reduce transparency beside High contrast and Reduce motion;
+9. **Settings**: Frost (Clear, Standard, Heavy), Front tab (Page color, Frosted) and Reduce transparency beside High contrast and Reduce motion;
    docs (whitepaper §6 look, this plan's notes).
 
 ## Acceptance
