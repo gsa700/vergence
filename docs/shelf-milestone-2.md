@@ -100,6 +100,17 @@ shows changes), the frost under it by the server.
   kepler by vctl: pin and unpin through the menu (the dock shows Foot, then
   not), a tap opening the launcher from the dock, a tap on System, a drag
   over an application starting nothing. 400 tests on all three.
+- **Step 5 done** (2026-11-13): whitepaper §6.9's apps button describes
+  the launcher (Draft 0.11); shelf milestone 1's live tiles point to their
+  later place. **Acceptance**: 1 met (400 tests on all three); 2 met on
+  kepler (Super's tap not tried from vctl; the dock's button opens it in the
+  middle of the pointer's screen with the field ready; "browser" finds
+  Firefox; typing "term" and Enter not run by hand); 3 met (tabs only with
+  applications; Page Down, a click and a finger change them); 4 met for the
+  frost (seen on kepler) and Reduce transparency by the shared code, the
+  contrast of light and dark by look milestone 1's tests; 5 seen at kepler's
+  scale 2.5 (sharp, in proportion); Hubble's monitor at scale 1 is Dave's to
+  look at.
 
 ## Steps
 

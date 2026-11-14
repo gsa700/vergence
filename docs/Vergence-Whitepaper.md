@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "13 November 2026 — Draft 0.10"
+date: "13 November 2026 — Draft 0.11"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.10 · 13 November 2026
+David Erickson (AB0R), with Claude · Draft 0.11 · 13 November 2026
 
 ---
 
@@ -343,7 +343,7 @@ The contracts above are where Vergence is new. The shell, the part of the deskto
 
 *Revised on 10 November 2026, when the first of it was on a screen:* the shelf is a **dock**, a rounded panel as tall as what it holds, floating a small gap in from the edge so that the desktop shows around it, and **it can be dragged**. Dropped near an edge of any screen it settles along that edge (upright at the sides, level at the top and bottom) and windows keep clear of it; dropped anywhere else it floats where it was put, over the windows. Which it does, where, the gap, and whether windows keep clear are settings. The right edge of the main monitor is where it starts.
 
-- **The apps button**, in the top corner, the easiest target on the screen. It opens a compact popup beside the shelf: a grid of every installed application, with a search field. Typing filters the grid. The same field will later run **named desktop actions** ("move this window to the left monitor", "screens off"), the list that voice control and automation use under permission (§6.5, §7), so there is one command surface for hands, voice and agents.
+- **The apps button**, in the top corner, the easiest target on the screen. It opens the **launcher** (revised 13 November 2026, shelf milestone 2; it was a compact popup beside the shelf): a frosted panel in the middle of the screen the pointer is on, about two thirds of it, opened by the button or Super tapped alone. A search field across the top is ready at once; typing filters the grid by an application's name, then what kind of program it is ("browser" finds Firefox), its keywords and its description. Under the field, tabs: All, and those of a short fixed list (Internet, Office, Graphics, Sound & Video, Development, Games, Education, Utilities, System) that hold an application, filled from the categories every application's desktop entry already declares, so nothing is kept by hand. Large icons with their names under them; arrows move, Enter starts, Escape clears and then closes; a right press offers Open and Pin to the dock; a finger taps to start and drags to scroll. The same field will later run **named desktop actions** ("move this window to the left monitor", "screens off"), the list that voice control and automation use under permission (§6.5, §7), so there is one command surface for hands, voice and agents.
 - **Applications**: pinned and running, one icon each, with a mark beside those that are running. An application with several windows lists them in a small popup. The shelf on the main monitor shows the windows of every monitor, grouped by screen, except those of a monitor that has its own shelf. A minimized window goes to its application's icon; there are no separate icons for minimized windows.
 - **Live tiles**: clock, volume, network, battery. A tile is not a small window. Its owner **publishes a value and a set of actions on the session bus (§6.8), and the server draws it** in the desktop's style. Tiles are therefore sharp at any scale, look alike whoever supplies them, are readable by a screen reader (Contract 3), and cannot draw anything misleading in the shelf. Detail (a calendar, a volume slider, a list of networks) opens in a popup beside the tile. Controls have real steps the user can set.
 

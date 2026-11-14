@@ -667,7 +667,7 @@ Done, as every milestone, when it has run on Hubble (Void), on Techbench
 
 ## Not in this milestone
 
-- **Live tiles** (clock, volume, network, battery) and their bus protocol:
+- **Live tiles** (moved after shelf milestone 2, the launcher, 2026-11-13; see whitepaper §6.9's revision of that day: tiles in layers and the drawer) (clock, volume, network, battery) and their bus protocol:
   shelf milestone 2. The strip's bottom part stays empty until then.
 - **Away windows** (windows of an unplugged monitor shown on the shelf).
 - **Named desktop actions** in the search field.
