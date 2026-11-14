@@ -113,6 +113,23 @@ for now (DHCP is dhcpcd's). An iPhone by cable usually needs to be trusted
 by the computer through usbmuxd before it hands out a connection (Question
 2).
 
+## Progress
+
+- **Step 1 in, but the Wallpaper page** (2026-11-14): the sidebar in groups
+  (Look, Desktop, Screens, Input, Sound, Accessibility, System; Connections
+  comes with steps 4 and 5), a heading over each, each page with its icon (a
+  20-point rounded square in its group's color with a white mark drawn as a
+  scene: half circle, A, window, dock, screen, keys, mouse, speaker, person,
+  bolt, i), the search field at the top (pages by name, then by the words of
+  their settings, a word's start; Enter opens the first; `search_match`
+  tested); the Accessibility page (High contrast, Reduce transparency, Size,
+  Reduce motion, a way to Theme and fonts), Appearance keeping a row that
+  says their state and opens it. The sidebar is 210 points (the bar's back
+  and forward follow). On Hubble (shots): the groups and icons; "frost" left
+  Appearance, "contrast" left Accessibility and Enter opened it. The
+  Wallpaper page (every screen's picture in one place) is its own piece,
+  next. 441 tests on Hubble, kepler and Techbench.
+
 ## Steps
 
 1. **The sidebar in groups**: headings, the Accessibility page, the Wallpaper

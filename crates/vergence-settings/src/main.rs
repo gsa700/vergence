@@ -113,7 +113,156 @@ const ALT_TAB: [(&str, &str); 2] = [("Every screen", "all"), ("This screen", "sc
 const DEFAULT_ACCENT: Color = Color::rgb(0x3b, 0x82, 0xf6);
 const WHITE: Color = Color::rgb(255, 255, 255);
 /// The sidebar's width, in points: the bar's back and forward start after it.
-const SIDEBAR_W: f32 = 200.0;
+const SIDEBAR_W: f32 = 210.0;
+
+/// Whether a page answers a search (`q` lower case): Some(true) by its name,
+/// Some(false) by the words of its settings (each word's start), None not.
+fn search_match(q: &str, name: &str, words: &str) -> Option<bool> {
+    if q.is_empty() {
+        None
+    } else if name.to_lowercase().contains(q) {
+        Some(true)
+    } else if words.split(' ').any(|w| w.starts_with(q)) {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::search_match;
+
+    #[test]
+    fn pages_are_found_by_name_first_then_by_their_settings() {
+        assert_eq!(search_match("mouse", "Mouse and touchpad", "pointer speed"), Some(true));
+        assert_eq!(search_match("touch", "Mouse and touchpad", "pointer speed"), Some(true), "anywhere in the name");
+        assert_eq!(search_match("fro", "Appearance", "style light dark frost"), Some(false), "a setting's word, by its start");
+        assert_eq!(search_match("ost", "Appearance", "style light dark frost"), None, "not the middle of a setting's word");
+        assert_eq!(search_match("", "Appearance", "frost"), None);
+    }
+}
+
+/// A page's icon in the sidebar (settings milestone 1; Dave: (a), colored
+/// rounded squares with a white mark, as macOS's).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Icon {
+    Appearance,
+    Fonts,
+    Windows,
+    Dock,
+    Screen,
+    Keyboard,
+    Pointer,
+    Sound,
+    Accessibility,
+    Energy,
+    About,
+}
+
+impl Icon {
+    /// Its square's color (one per kind of page, readable under a white mark).
+    fn color(self) -> Color {
+        match self {
+            Icon::Appearance | Icon::Fonts => Color::rgb(0x2f, 0x6f, 0xd6),
+            Icon::Windows | Icon::Dock => Color::rgb(0x5b, 0x5f, 0x6b),
+            Icon::Screen => Color::rgb(0x1f, 0x8a, 0x8a),
+            Icon::Keyboard | Icon::Pointer => Color::rgb(0x6e, 0x55, 0xc9),
+            Icon::Sound => Color::rgb(0xd2, 0x3f, 0x6a),
+            Icon::Accessibility => Color::rgb(0x1f, 0x6f, 0xe0),
+            Icon::Energy => Color::rgb(0x3f, 0x9a, 0x3a),
+            Icon::About => Color::rgb(0x70, 0x74, 0x7c),
+        }
+    }
+}
+
+/// A page's icon: a rounded square of its color with a white mark drawn in it.
+fn icon_mark<M: 'static>(icon: Icon) -> Element<M> {
+    drawing(move |scene: &mut Scene, _: &mut Fonts, r: Rect, _: &Theme| {
+        let s = 20.0f32;
+        let (x, y) = (r.x + (r.w - s) / 2.0, r.y + (r.h - s) / 2.0);
+        scene.fill_rounded(Rect::new(x, y, s, s), 5.0, icon.color());
+        let w = Color::rgb(255, 255, 255);
+        let p = |dx: f32, dy: f32| Point::new(x + dx, y + dy);
+        let line = |scene: &mut Scene, a: (f32, f32), b: (f32, f32)| {
+            scene.line(p(a.0, a.1), p(b.0, b.1), 1.6, w);
+        };
+        match icon {
+            // Half light, half dark.
+            Icon::Appearance => {
+                scene.stroke(Rect::new(x + 5.0, y + 5.0, 10.0, 10.0), 5.0, 1.6, w);
+                scene.fill(Rect::new(x + 10.0, y + 5.5, 4.4, 9.0), w);
+            }
+            // An A.
+            Icon::Fonts => {
+                line(scene, (6.0, 15.0), (10.0, 5.0));
+                line(scene, (10.0, 5.0), (14.0, 15.0));
+                line(scene, (7.6, 11.0), (12.4, 11.0));
+            }
+            // A window with its bar.
+            Icon::Windows => {
+                scene.stroke(Rect::new(x + 4.5, y + 5.5, 11.0, 9.0), 1.5, 1.4, w);
+                scene.fill(Rect::new(x + 4.5, y + 5.5, 11.0, 2.5), w);
+            }
+            // A dock of three.
+            Icon::Dock => {
+                scene.stroke(Rect::new(x + 4.0, y + 11.0, 12.0, 5.0), 2.0, 1.4, w);
+                for i in 0..3 {
+                    scene.fill_rounded(Rect::new(x + 5.5 + i as f32 * 3.5, y + 12.5, 2.0, 2.0), 1.0, w);
+                }
+            }
+            // A screen on its stand.
+            Icon::Screen => {
+                scene.stroke(Rect::new(x + 4.0, y + 5.0, 12.0, 8.0), 1.5, 1.4, w);
+                line(scene, (10.0, 13.0), (10.0, 15.5));
+                line(scene, (7.0, 15.5), (13.0, 15.5));
+            }
+            // Keys.
+            Icon::Keyboard => {
+                scene.stroke(Rect::new(x + 3.5, y + 6.5, 13.0, 8.0), 1.5, 1.4, w);
+                for (kx, ky) in [(6.0, 9.0), (9.0, 9.0), (12.0, 9.0), (7.0, 12.0)] {
+                    scene.fill(Rect::new(x + kx, y + ky, 1.6, 1.4), w);
+                }
+                scene.fill(Rect::new(x + 9.0, y + 12.0, 4.6, 1.4), w);
+            }
+            // A mouse.
+            Icon::Pointer => {
+                scene.stroke(Rect::new(x + 6.5, y + 4.5, 7.0, 11.0), 3.5, 1.4, w);
+                line(scene, (10.0, 4.8), (10.0, 8.5));
+            }
+            // A speaker.
+            Icon::Sound => {
+                scene.fill(Rect::new(x + 5.0, y + 8.0, 3.0, 4.0), w);
+                line(scene, (8.0, 8.0), (11.0, 5.5));
+                line(scene, (11.0, 5.5), (11.0, 14.5));
+                line(scene, (11.0, 14.5), (8.0, 12.0));
+                line(scene, (13.5, 8.0), (14.5, 10.0));
+                line(scene, (14.5, 10.0), (13.5, 12.0));
+            }
+            // A person.
+            Icon::Accessibility => {
+                scene.fill_rounded(Rect::new(x + 8.6, y + 3.8, 2.8, 2.8), 1.4, w);
+                line(scene, (5.5, 8.0), (14.5, 8.0));
+                line(scene, (10.0, 8.0), (10.0, 12.0));
+                line(scene, (10.0, 12.0), (7.5, 16.0));
+                line(scene, (10.0, 12.0), (12.5, 16.0));
+            }
+            // A bolt.
+            Icon::Energy => {
+                line(scene, (11.5, 4.0), (7.0, 10.5));
+                line(scene, (7.0, 10.5), (13.0, 9.5));
+                line(scene, (13.0, 9.5), (8.5, 16.0));
+            }
+            // An i.
+            Icon::About => {
+                scene.fill_rounded(Rect::new(x + 9.1, y + 4.5, 1.8, 1.8), 0.9, w);
+                line(scene, (10.0, 8.5), (10.0, 15.0));
+            }
+        }
+    })
+    .width(Length::Fixed(22.0))
+    .height(Length::Fixed(22.0))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -125,6 +274,8 @@ enum Page {
     Pointer,
     Energy,
     Sound,
+    /// High contrast, motion, transparency, size (settings milestone 1).
+    Accessibility,
     Overview,
     Screen(usize),
     About,
@@ -154,6 +305,9 @@ enum Message {
     Frost(usize),
     FrontTab(usize),
     Transparency(bool),
+    /// The sidebar's search field: typed, and Enter (the first page found).
+    Search(String),
+    SearchGo,
     /// Windows tinted with the wallpaper's color (window styles milestone 1).
     WallpaperTint(bool),
     /// The size of controls: the desktop's (Appearance), a screen's own (Screens).
@@ -272,6 +426,8 @@ struct App {
     forward: Vec<Page>,
     /// The strip under the server's frosted bar (Theme::top), for the pages' layout.
     top: std::cell::Cell<f32>,
+    /// What is typed in the sidebar's search field (settings milestone 1).
+    search: String,
     page: Page,
     /// The Sound page (vergence-sound): the system, read when the page opens,
     /// and its outputs as last read.
@@ -448,6 +604,7 @@ impl App {
             back: Vec::new(),
             forward: Vec::new(),
             top: std::cell::Cell::new(0.0),
+            search: String::new(),
             accent_text: appearance_text(&desktop, "accent"),
             size: disp::size(&desktop) as f32,
             sleep_cmd: energy_cmd(&desktop),
@@ -609,6 +766,16 @@ impl App {
             Message::FrontTab(i) => self.save_appearance(|t| {
                 t.insert("front-tab".into(), FRONT_TAB_VALUES[i.min(1)].into());
             }),
+            Message::Search(s) => self.search = s.chars().take(64).collect(),
+            Message::SearchGo => {
+                if let Some(p) = self.found_pages().first().copied() {
+                    if p != self.page {
+                        self.back.push(self.page);
+                        self.forward.clear();
+                    }
+                    self.open(p);
+                }
+            }
             Message::Transparency(on) => self.save_appearance(|t| {
                 t.insert("reduce-transparency".into(), on.into());
             }),
@@ -1065,37 +1232,92 @@ impl App {
 
     // ---- the view ----
 
+    /// The pages in the sidebar's groups (settings milestone 1; Dave: "pages
+    /// are grouped by type"), each with its group's color for its icon and
+    /// the words its settings go by, for the search.
+    fn page_groups(&self) -> Vec<(&'static str, Vec<(String, Page, Icon, &'static str)>)> {
+        let multi = self.outputs.len() > 1;
+        let screens_page = if multi { Page::Overview } else { Page::Screen(0) };
+        let mut screens = vec![(if self.outputs.is_empty() { "Wallpaper".to_string() } else { "Screens".to_string() }, screens_page, Icon::Screen, "screen display monitor scale resolution arrangement wallpaper picture")];
+        if multi {
+            for (i, o) in self.outputs.iter().enumerate() {
+                screens.push((screen_label(o), Page::Screen(i), Icon::Screen, "screen display monitor scale wallpaper"));
+            }
+        }
+        vec![
+            ("Look", vec![
+                ("Appearance".into(), Page::Appearance, Icon::Appearance, "style light dark accent color frost tab tint wallpaper controls size"),
+                ("Theme and fonts".into(), Page::Theme, Icon::Fonts, "theme font fonts monospace interface icons cursor"),
+            ]),
+            ("Desktop", vec![
+                ("Windows".into(), Page::Windows, Icon::Windows, "window title bar buttons controls minimize maximize close snap snapping alt tab keys x11"),
+                ("Dock".into(), Page::Dock, Icon::Dock, "dock shelf pin hide opacity gap edge"),
+            ]),
+            ("Screens", screens),
+            ("Input", vec![
+                ("Keyboard".into(), Page::Keyboard, Icon::Keyboard, "keyboard repeat delay layout keys"),
+                ("Mouse and touchpad".into(), Page::Pointer, Icon::Pointer, "mouse touchpad pointer speed scroll natural tap click double"),
+            ]),
+            ("Sound", vec![("Sound".into(), Page::Sound, Icon::Sound, "sound volume output speaker headphones mute audio")]),
+            ("Accessibility", vec![("Accessibility".into(), Page::Accessibility, Icon::Accessibility, "accessibility contrast motion transparency size")]),
+            ("System", vec![
+                ("Energy".into(), Page::Energy, Icon::Energy, "energy power sleep screens off idle"),
+                ("About".into(), Page::About, Icon::About, "about version license notices"),
+            ]),
+        ]
+    }
+
+    /// The pages the search finds: by name, then by the words of their settings.
+    fn found_pages(&self) -> Vec<Page> {
+        let q = self.search.trim().to_lowercase();
+        if q.is_empty() {
+            return Vec::new();
+        }
+        let all: Vec<(String, Page, &str)> = self.page_groups().into_iter().flat_map(|(_, pages)| pages.into_iter().map(|(n, p, _, words)| (n, p, words))).collect();
+        let mut found: Vec<Page> = all.iter().filter(|(n, _, w)| search_match(&q, n, w) == Some(true)).map(|(_, p, _)| *p).collect();
+        for (n, p, words) in &all {
+            if !found.contains(p) && search_match(&q, n, words) == Some(false) {
+                found.push(*p);
+            }
+        }
+        found
+    }
+
     fn sidebar(&self) -> Element<Message> {
-        let item = |text: String, page: Page, selected: bool, child: bool| -> Element<Message> {
+        let selected_page = |p: Page| match p {
+            Page::About => matches!(self.page, Page::About | Page::LicenseText | Page::Notices),
+            p => self.page == p,
+        };
+        let item = |text: String, page: Page, icon: Icon, child: bool| -> Element<Message> {
+            let selected = selected_page(page);
             let l = label(text).size(if child { 12.0 } else { 13.0 }).weight(if selected { 600 } else { 400 });
-            button(row(vec![l, space().width(Length::FILL)]).width(Length::FILL))
+            button(row(vec![icon_mark(icon), l, space().width(Length::FILL)]).spacing(8.0).align(Align::Center).width(Length::FILL))
                 .look(if selected { ButtonLook::Chosen } else { ButtonLook::Plain })
-                .padding(Padding { top: 6.0, bottom: 6.0, left: if child { 26.0 } else { 12.0 }, right: 12.0 })
+                .padding(Padding { top: 4.0, bottom: 4.0, left: if child { 22.0 } else { 8.0 }, right: 10.0 })
                 .on_press(Message::Go(page))
                 .width(Length::FILL)
         };
-        let multi = self.outputs.len() > 1;
-        let screens_page = if multi { Page::Overview } else { Page::Screen(0) };
-        let screens_selected = if multi { self.page == Page::Overview } else { matches!(self.page, Page::Screen(_)) };
-        let mut items = vec![
-            item("Appearance".into(), Page::Appearance, self.page == Page::Appearance, false),
-            item("Theme and fonts".into(), Page::Theme, self.page == Page::Theme, false),
-            item("Windows".into(), Page::Windows, self.page == Page::Windows, false),
-            item("Dock".into(), Page::Dock, self.page == Page::Dock, false),
-            item("Keyboard".into(), Page::Keyboard, self.page == Page::Keyboard, false),
-            item("Mouse and touchpad".into(), Page::Pointer, self.page == Page::Pointer, false),
-            item("Sound".into(), Page::Sound, self.page == Page::Sound, false),
-            item("Energy".into(), Page::Energy, self.page == Page::Energy, false),
-            item(if self.outputs.is_empty() { "Wallpaper".into() } else { "Screens".into() }, screens_page, screens_selected, false),
+        let mut items: Vec<Element<Message>> = vec![
+            field(&self.search, Message::Search).placeholder("Search").on_submit(Message::SearchGo).width(Length::FILL).name("Search settings"),
+            space().height(Length::Fixed(8.0)),
         ];
-        if multi {
-            for (i, o) in self.outputs.iter().enumerate() {
-                items.push(item(screen_label(o), Page::Screen(i), self.page == Page::Screen(i), true));
+        let found = self.found_pages();
+        let searching = !self.search.trim().is_empty();
+        for (heading, pages) in self.page_groups() {
+            let pages: Vec<_> = pages.into_iter().filter(|(_, p, ..)| !searching || found.contains(p)).collect();
+            if pages.is_empty() {
+                continue;
             }
+            items.push(label(heading).size(11.0).dim().weight(600));
+            for (i, (name, page, icon, _)) in pages.into_iter().enumerate() {
+                let child = heading == "Screens" && i > 0;
+                items.push(item(name, page, icon, child));
+            }
+            items.push(space().height(Length::Fixed(6.0)));
         }
-        items.push(space().height(Length::Fixed(14.0)));
-        let about = matches!(self.page, Page::About | Page::LicenseText | Page::Notices);
-        items.push(item("About".into(), Page::About, about, false));
+        if searching && found.is_empty() {
+            items.push(label("Nothing by that name.").size(12.0).dim());
+        }
         // Its color runs up under the frosted bar; its items start below it.
         panel(column(items).spacing(2.0).width(Length::FILL))
             .padding(Padding { top: 12.0 + self.top.get(), bottom: 12.0, left: 10.0, right: 10.0 })
@@ -1103,6 +1325,29 @@ impl App {
             .width(Length::Fixed(SIDEBAR_W))
             .height(Length::FILL)
             .name("Pages")
+    }
+
+    /// High contrast, motion, transparency and the size of everything, in one
+    /// place (settings milestone 1): the same keys as before, so nothing a
+    /// program reads changes.
+    fn accessibility(&self) -> Element<Message> {
+        let contrast = appearance_text(&self.desktop, "contrast") == "high";
+        let motion = self.desktop.get("appearance").and_then(|a| a.get("reduced-motion")).and_then(|v| v.as_bool()).unwrap_or(false);
+        let transparency = self.desktop.get("appearance").and_then(|a| a.get("reduce-transparency")).and_then(|v| v.as_bool()).unwrap_or(false);
+        self.page_layout(
+            "Accessibility",
+            "Contrast, motion and transparency for the whole desktop, and how big everything is.",
+            vec![
+                self.group(Some("Seeing"), vec![
+                    setting("High contrast", "Apps that support it draw stronger edges and text. The desktop's bars are solid.", switch(contrast, Message::Contrast).name("High contrast")),
+                    setting("Reduce transparency", "Bars, the dock and menus are solid: nothing shows through them.", switch(transparency, Message::Transparency).name("Reduce transparency")),
+                    setting("Size", &format!("How big everything is, on every screen: {}%.", (self.size * 100.0).round()), size_slider(self.size)),
+                ]),
+                self.group(Some("Motion"), vec![setting("Reduce motion", "Apps that support it turn off animations.", switch(motion, Message::Motion).name("Reduce motion"))]),
+                self.group(None, vec![setting("Fonts", "The interface and monospace fonts and their sizes are in Theme and fonts.", button(label("Theme and fonts")).on_press(Message::Go(Page::Theme)).name("Open Theme and fonts"))]),
+                self.status_line(),
+            ],
+        )
     }
 
     fn appearance(&self) -> Element<Message> {
@@ -1166,11 +1411,11 @@ impl App {
                         switch(self.desktop.get("appearance").and_then(|a| a.get("wallpaper-tint")).and_then(|v| v.as_bool()).unwrap_or(true), Message::WallpaperTint).name("Tint windows with the wallpaper's color"),
                     ),
                 ]),
-                self.group(Some("Accessibility"), vec![
-                    setting("High contrast", "Apps that support it draw stronger edges and text. The desktop's bars are solid.", switch(contrast, Message::Contrast).name("High contrast")),
-                    setting("Reduce motion", "Apps that support it turn off animations.", switch(motion, Message::Motion).name("Reduce motion")),
-                    setting("Reduce transparency", "Bars, the dock and menus are solid: nothing shows through them.", switch(transparency, Message::Transparency).name("Reduce transparency")),
-                ]),
+                self.group(None, vec![setting(
+                    "Accessibility",
+                    &format!("High contrast {}, reduce motion {}, reduce transparency {}: on their own page now.", if contrast { "on" } else { "off" }, if motion { "on" } else { "off" }, if transparency { "on" } else { "off" }),
+                    button(label("Accessibility")).on_press(Message::Go(Page::Accessibility)).name("Open Accessibility"),
+                )]),
                 self.status_line(),
             ],
         )
@@ -2046,6 +2291,7 @@ impl Program for App {
             Page::Pointer => "Mouse and touchpad".into(),
             Page::Sound => "Sound".into(),
             Page::Energy => "Energy".into(),
+            Page::Accessibility => "Accessibility".into(),
             Page::Overview => "Screens".into(),
             Page::Screen(i) => self.outputs.get(i).map(screen_label).unwrap_or_else(|| "Screens".into()),
             Page::About | Page::LicenseText | Page::Notices => "About".into(),
@@ -2080,6 +2326,7 @@ impl Program for App {
             Page::Pointer => self.pointer(),
             Page::Energy => self.energy(),
             Page::Sound => self.sound_page(),
+            Page::Accessibility => self.accessibility(),
             Page::Overview => self.overview(),
             Page::Screen(_) if self.browser.is_some() => self.browser_page(),
             Page::Screen(_) => self.screen(),
