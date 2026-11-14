@@ -39,3 +39,15 @@ seen once a few pages have one (whitepaper §6.9, layers, 2026-11-13).
   access (group, or a small root helper as sound-default is) to be settled
   in the plan.
 - **Bluetooth: "skip BlueZ for now"**: no BlueZ on Hubble; the page waits.
+
+## The iPhone: by cable and by its hotspot (Dave, 2026-11-14)
+
+"make sure it will take a direct cable connection from my iphone as well as
+wifi to it's hotspot". By Wi-Fi it is one more network in the list. By cable
+the phone's USB tethering appears as a wired-style interface (Linux `ipheth`,
+FreeBSD `ipheth(4)`): the Network page lists it as a connection (the phone's
+name, connected or not, its address) and asks for its address by DHCP as it
+does for wired. On Linux the phone usually wants usbmuxd running (Apple's USB
+pairing daemon) before it hands out a connection: borrowing a daemon, so a
+question for Dave when the plan is drafted. To check on each machine with
+Dave's phone (Control already uses it this way, over USB).
