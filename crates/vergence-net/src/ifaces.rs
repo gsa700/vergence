@@ -28,6 +28,22 @@ pub struct Iface {
     pub mac: Option<String>,
     /// Its addresses, each with its prefix length.
     pub addrs: Vec<(IpAddr, u8)>,
+    /// Bytes received and sent since the interface came up, from the
+    /// system's own counters (Linux: 32 bits, so they wrap; see [`delta`]).
+    pub rx_bytes: Option<u64>,
+    pub tx_bytes: Option<u64>,
+}
+
+/// How much a byte counter grew between two readings, across a wrap: Linux's
+/// getifaddrs counters are 32 bits (`struct rtnl_link_stats`).
+pub fn delta(old: u64, new: u64) -> u64 {
+    if new >= old {
+        new - old
+    } else if old <= u32::MAX as u64 {
+        new + (1u64 << 32) - old
+    } else {
+        0
+    }
 }
 
 /// What an interface seems to be, by its name: the names both systems give.
@@ -213,6 +229,12 @@ pub fn list() -> io::Result<Vec<Iface>> {
                 if len <= 8 {
                     f.mac = mac_text(unsafe { std::slice::from_raw_parts(e.ifa_addr.add(12), len) });
                 }
+                // ifa_data: struct rtnl_link_stats, rx_bytes at 8, tx_bytes at 12 (u32).
+                if !e.ifa_data.is_null() {
+                    let d = e.ifa_data as *const u8;
+                    f.rx_bytes = Some(unsafe { std::ptr::read_unaligned(d.add(8) as *const u32) } as u64);
+                    f.tx_bytes = Some(unsafe { std::ptr::read_unaligned(d.add(12) as *const u32) } as u64);
+                }
             }
             // FreeBSD: sockaddr_dl, sdl_nlen at 5, sdl_alen at 6, the name
             // then the address from sdl_data at 8; ifa_data the if_data,
@@ -224,7 +246,11 @@ pub fn list() -> io::Result<Vec<Iface>> {
                     f.mac = mac_text(unsafe { std::slice::from_raw_parts(e.ifa_addr.add(8 + nlen), alen) });
                 }
                 if !e.ifa_data.is_null() {
-                    f.carrier |= unsafe { *(e.ifa_data as *const u8).add(4) } == sys::LINK_STATE_UP;
+                    let d = e.ifa_data as *const u8;
+                    f.carrier |= unsafe { *d.add(4) } == sys::LINK_STATE_UP;
+                    // struct if_data: ifi_ibytes at 64, ifi_obytes at 72 (u64).
+                    f.rx_bytes = Some(unsafe { std::ptr::read_unaligned(d.add(64) as *const u64) });
+                    f.tx_bytes = Some(unsafe { std::ptr::read_unaligned(d.add(72) as *const u64) });
                 }
             }
             _ => {}
@@ -255,7 +281,7 @@ mod tests {
 
     #[test]
     fn what_counts_as_a_cable() {
-        let iface = |name: &str, kind: Kind, carrier: bool| Iface { name: name.into(), kind, up: true, carrier, mac: Some("aa:bb:cc:dd:ee:ff".into()), addrs: vec![] };
+        let iface = |name: &str, kind: Kind, carrier: bool| Iface { name: name.into(), kind, up: true, carrier, mac: Some("aa:bb:cc:dd:ee:ff".into()), ..Default::default() };
         assert!(is_cable(&iface("enp5s0", Kind::Wired, true)));
         assert!(is_cable(&iface("em0", Kind::Wired, true)));
         assert!(is_cable(&iface("eth1", Kind::Phone, true)), "a phone's USB tethering is a cable");
@@ -271,6 +297,13 @@ mod tests {
     }
 
     #[test]
+    fn counters_across_a_wrap() {
+        assert_eq!(delta(100, 250), 150);
+        assert_eq!(delta(u32::MAX as u64 - 9, 10), 20, "a 32-bit counter wrapped");
+        assert_eq!(delta(u64::MAX - 5, 3), 0, "a 64-bit one reset: no guess");
+    }
+
+    #[test]
     fn prefixes() {
         assert_eq!(prefix_of(&[255, 255, 255, 0]), 24);
         assert_eq!(prefix_of(&[255, 255, 240, 0]), 20);
@@ -283,5 +316,6 @@ mod tests {
         let lo = all.iter().find(|f| f.kind == Kind::Loopback).expect("a loopback interface");
         assert!(lo.up);
         assert!(lo.addrs.iter().any(|(a, p)| *a == IpAddr::V4(Ipv4Addr::LOCALHOST) && *p == 8), "{lo:?}");
+        assert!(lo.rx_bytes.is_some() && lo.tx_bytes.is_some(), "the loopback's counters: {lo:?}");
     }
 }

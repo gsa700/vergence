@@ -53,7 +53,20 @@ pub struct Wifi {
     started: bool,
     /// Every interface, for the Network page.
     pub all: Vec<ifaces::Iface>,
+    /// The network in use's signal every two seconds while the page is open
+    /// (dBm, oldest first; the last two minutes), and for which network.
+    history: std::collections::VecDeque<i32>,
+    history_of: Option<String>,
+    /// The Wi-Fi interface's byte counters at the last sample, and the rates
+    /// in and out since then (bits a second).
+    last_bytes: Option<(std::time::Instant, u64, u64)>,
+    rates: Option<(f64, f64)>,
 }
+
+/// Samples kept for the signal chart: two minutes at one every two seconds.
+const HISTORY: usize = 60;
+/// How often the signal and the traffic are sampled while the page is open.
+const SAMPLE: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub enum WifiMsg {
@@ -61,6 +74,8 @@ pub enum WifiMsg {
     /// Time to scan again; an event from wpa_supplicant.
     Tick,
     Event(wpa::Event),
+    /// Time to sample the signal and the traffic.
+    Sample,
     Pick(usize),
     Password(String),
     ShowPassword(bool),
@@ -88,6 +103,7 @@ fn listen(mail: Mail) {
             continue;
         };
         let mut last = std::time::Instant::now();
+        let mut sampled = std::time::Instant::now();
         loop {
             match events.next(Duration::from_secs(1)) {
                 Ok(Some(e)) => {
@@ -101,6 +117,12 @@ fn listen(mail: Mail) {
                 }
                 Ok(None) => {}
                 Err(_) => break,
+            }
+            if sampled.elapsed() >= SAMPLE {
+                sampled = std::time::Instant::now();
+                if !mail.send(Message::Wifi(WifiMsg::Sample)) {
+                    return;
+                }
             }
             if last.elapsed() >= RESCAN {
                 last = std::time::Instant::now();
@@ -125,6 +147,70 @@ fn bars_mark<M: 'static>(n: u8) -> Element<M> {
     })
     .width(Length::Fixed(22.0))
     .height(Length::Fixed(16.0))
+}
+
+/// The color a signal's strength wears: green when good, amber when fair,
+/// red when weak (the system colors macOS and iOS use for the same).
+fn strength_color(bars: u8) -> Color {
+    match bars {
+        3..=4 => Color::rgb(0x30, 0xb0, 0x4f),
+        2 => Color::rgb(0xf0, 0x9a, 0x0a),
+        _ => Color::rgb(0xe5, 0x3e, 0x35),
+    }
+}
+
+/// Signal bars in the strength's color (the network in use).
+fn bars_colored<M: 'static>(n: u8) -> Element<M> {
+    drawing(move |scene: &mut Scene, _: &mut Fonts, r: Rect, t: &Theme| {
+        let (x0, base) = (r.x + (r.w - 18.0) / 2.0, r.y + r.h / 2.0 + 6.0);
+        let on = strength_color(n);
+        for i in 0..4u8 {
+            let h = 3.0 + i as f32 * 3.0;
+            let c = if i < n { on } else { Color::rgba(t.dim.r, t.dim.g, t.dim.b, 90) };
+            scene.fill_rounded(Rect::new(x0 + i as f32 * 5.0, base - h, 3.0, h), 1.0, c);
+        }
+    })
+    .width(Length::Fixed(22.0))
+    .height(Length::Fixed(16.0))
+}
+
+/// The signal over the last two minutes: a line from -90 dBm (bottom) to
+/// -30 dBm (top), in the latest sample's strength color, with faint lines
+/// where the bars change.
+fn signal_chart<M: 'static>(samples: Vec<i32>) -> Element<M> {
+    drawing(move |scene: &mut Scene, _: &mut Fonts, r: Rect, t: &Theme| {
+        let y_of = |dbm: i32| r.y + r.h - ((dbm.clamp(-90, -30) + 90) as f32 / 60.0) * r.h;
+        let faint = Color::rgba(t.dim.r, t.dim.g, t.dim.b, 50);
+        for edge in [-55, -67, -75] {
+            let y = y_of(edge);
+            scene.line(Point::new(r.x, y), Point::new(r.x + r.w, y), 1.0, faint);
+        }
+        if samples.len() < 2 {
+            return;
+        }
+        let color = strength_color(wpa::bars(*samples.last().unwrap_or(&-90)));
+        let step = r.w / (HISTORY - 1) as f32;
+        // The newest at the right edge.
+        let x0 = r.x + r.w - step * (samples.len() - 1) as f32;
+        for (i, pair) in samples.windows(2).enumerate() {
+            let a = Point::new(x0 + step * i as f32, y_of(pair[0]));
+            let b = Point::new(x0 + step * (i + 1) as f32, y_of(pair[1]));
+            scene.line(a, b, 1.8, color);
+        }
+    })
+    .width(Length::Fixed(180.0))
+    .height(Length::Fixed(30.0))
+}
+
+/// A rate in bits a second, in words: "2.4 Mb/s", "860 kb/s".
+fn rate_text(bits: f64) -> String {
+    if bits >= 1e6 {
+        format!("{:.1} Mb/s", bits / 1e6)
+    } else if bits >= 1e3 {
+        format!("{:.0} kb/s", bits / 1e3)
+    } else {
+        format!("{bits:.0} b/s")
+    }
 }
 
 /// A signal in a word, by its bars.
@@ -236,6 +322,39 @@ impl App {
                         let _ = c.scan();
                     }
                     self.wifi_read();
+                }
+            }
+            WifiMsg::Sample => {
+                if self.page != Page::WiFi {
+                    return;
+                }
+                let Some(c) = self.wifi_client() else { return };
+                let status = c.status().unwrap_or_default();
+                if !status.connected() {
+                    self.wifi.history.clear();
+                    self.wifi.rates = None;
+                    return;
+                }
+                if self.wifi.history_of != status.ssid {
+                    self.wifi.history.clear();
+                    self.wifi.history_of = status.ssid.clone();
+                }
+                if let Ok(Some(g)) = c.signal() {
+                    self.wifi.history.push_back(g.rssi);
+                    while self.wifi.history.len() > HISTORY {
+                        self.wifi.history.pop_front();
+                    }
+                    self.wifi.signal = Some(g);
+                }
+                let iface = self.wifi.iface.clone();
+                let counters = ifaces::list().ok().and_then(|all| all.into_iter().find(|f| Some(&f.name) == iface.as_ref())).and_then(|f| Some((f.rx_bytes?, f.tx_bytes?)));
+                if let Some((rx, tx)) = counters {
+                    let now = std::time::Instant::now();
+                    if let Some((then, rx0, tx0)) = self.wifi.last_bytes {
+                        let secs = now.duration_since(then).as_secs_f64().max(0.1);
+                        self.wifi.rates = Some((ifaces::delta(rx0, rx) as f64 * 8.0 / secs, ifaces::delta(tx0, tx) as f64 * 8.0 / secs));
+                    }
+                    self.wifi.last_bytes = Some((now, rx, tx));
                 }
             }
             WifiMsg::Event(e) => {
@@ -377,16 +496,24 @@ impl App {
             // stays in Advanced.
             let n = w.signal.as_ref().map_or(0, |s| wpa::bars(s.rssi));
             let band = w.status.freq.and_then(wpa::band_channel).map(|(b, ch)| format!("In use. {b}, channel {ch}.")).unwrap_or_else(|| "In use.".into());
-            top.push(setting(&w.status.ssid.clone().unwrap_or_default(), &band, bars_mark(n)));
+            top.push(setting(&w.status.ssid.clone().unwrap_or_default(), &band, bars_colored(n)));
             let value = |t: String| label(t).dim();
             if let Some(g) = &w.signal {
-                top.push(setting("Signal", "", value(format!("{} dBm, {}", g.rssi, signal_word(g.rssi)))));
+                let chart: Vec<i32> = w.history.iter().copied().collect();
+                top.push(setting(
+                    "Signal",
+                    "The last two minutes.",
+                    row(vec![signal_chart(chart), value(format!("{} dBm, {}", g.rssi, signal_word(g.rssi))).width(Length::Fixed(130.0)).align(Align::End)]).spacing(12.0).align(Align::Center),
+                ));
                 if let Some(m) = g.link_mbps {
                     top.push(setting("Speed", "", value(format!("{m} Mb/s"))));
                 }
             }
             let v4 = w.link.as_ref().and_then(|f| f.addrs.iter().find(|(a, _)| a.is_ipv4())).map(|(a, _)| a.to_string()).or_else(|| w.status.ip.clone());
             top.push(setting("Address", "", value(v4.unwrap_or_else(|| "Waiting for one".into()))));
+            if let Some((rx, tx)) = w.rates {
+                top.push(setting("Traffic", "Now, in and out.", value(format!("in {}, out {}", rate_text(rx), rate_text(tx)))));
+            }
         }
         items.push(self.group(None, top));
         // Said by the card above while connected.

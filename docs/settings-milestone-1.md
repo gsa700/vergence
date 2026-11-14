@@ -286,6 +286,16 @@ by the computer through usbmuxd before it hands out a connection (Question
    note when Wi-Fi is on, has joined nothing for 20 s and networks are in
    range, the hotspot named first, once per such spell. Hubble:
    OMG!MyPhone set to join only when chosen (saved disabled=1). 464 tests.
+   The network in use up front (Dave: "some of the connection statistics
+   right up front"): band and channel, Signal (dBm and a word), Speed,
+   Address; then ("make the signal indicator green? or maybe add a little
+   chart"): its bars in green, amber or red by strength, a chart of the
+   last two minutes' signal (sampled every 2 s while the page is open), and
+   Traffic in and out from the interface's byte counters (vergence-net:
+   Linux's 32-bit rtnl_link_stats, wrap handled; FreeBSD's if_data). Dave:
+   "later when we build out the dock info icons we can grab the same for
+   that one": the network tile's card (live tiles, whitepaper §6.9) is to
+   reuse wifi.rs's signal_chart, strength_color and rate_text. 465 tests.
 4. The iPhone by cable: the page says what it lacks (met); a connection:
    **parked** (needs pairing).
 5. kepler says there is no Wi-Fi device (met); Techbench has no Wi-Fi card,
