@@ -170,6 +170,16 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
   `vulkan-loader` (Void), confirm the copier is Zink on NVK, time the copy
   again. Hubble's battery was run flat by Dave meanwhile (the history kept
   the drain to 0%).
+- **NVK installed on Hubble** (Void's `mesa-vulkan-nouveau`, `vulkan-loader`;
+  test tools glmark2 and mesa-demos too): nouveau's GL is now "zink Vulkan
+  1.4 (NVIDIA GeForce GTX 1650 (NVK TU117))", and the server logs "card1
+  copies with zink ... NVK". A window moved 20 times across the 14": no
+  relay turn over 20 ms, one slow frame in all (the copy had been llvmpipe,
+  the CPU, at 40 to 77 ms a full frame). Boot note: with the 14" on the HDMI
+  port at boot, nouveau took about 70 s to bring up its console (GSP
+  firmware), and the text console seemed to have no keyboard until Dave
+  unplugged it. install.sh should say, where a GPU's GL would be software,
+  which packages give it a driver (step 5).
 
 ## Steps
 
