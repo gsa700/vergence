@@ -34,7 +34,7 @@ impl Server {
         let Some(keys) = self.input.keys.as_mut() else { return };
         let key = keys.feed(code, pressed);
         let mods = keys.mods();
-        let out = self.input.seat.key(crate::keys::seat_key(key.sym), pressed, mods);
+        let out = self.input.seat.key(crate::keys::seat_key(key.sym, code.raw()), pressed, mods);
         let native = match out {
             KeyOut::Forward(Some(id)) => self.input.window(id).filter(|w| w.native().is_some()),
             _ => None,
@@ -68,6 +68,9 @@ impl Server {
             KeyOut::Apps => self.launcher_toggle(),
             KeyOut::Popup => self.launcher_key(key.sym, key.typed),
             KeyOut::Volume(step) => self.volume_key(step),
+            KeyOut::Switch(s) => self.switch_key(s),
+            // Snapping by keys is step 3 of windows milestone 1.
+            KeyOut::Window(k) => tracing::debug!("window key {k:?}: not yet"),
             KeyOut::Swallow => {}
         }
     }

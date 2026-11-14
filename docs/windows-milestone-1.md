@@ -141,6 +141,24 @@ All the server's, ahead of any program, through the seat's filter:
 - **Alt+`** (the key above Tab) does the same among the focused application's
   windows only: useful with one terminal process for all its windows.
 
+## Progress
+
+- **Step 1 in** (2026-11-14): the order of use is the seat's
+  (`Seat::order_of_use`, kept wherever a window takes the keyboard: a press,
+  a finger, the server's own focus; a window leaves it when it goes, not when
+  minimized); the seat names Tab, the key above Tab (by position, evdev 41),
+  Alt and the arrows; its filter switches with Alt+Tab and Alt+` (every key
+  the switcher's while it runs, Escape cancels, Alt let go chooses; the
+  popup keeps its keys; Ctrl or Super with Alt+Tab stay the program's) and
+  turns Super with an arrow into a window key, each behind its setting
+  (`set_window_keys`). The server (switch.rs) snapshots the dock's windows
+  in that order when switching begins and steps through them; the choice
+  takes the keyboard, a minimized one coming back. Alt+Tab works already,
+  unseen (the list is step 4); the window keys are caught and do nothing
+  until step 3. 12 new seat tests; the fuzz test takes the new keys, checks
+  the order of use (no window twice, the focused one first) and that every
+  new rule runs. 414 tests on Hubble, kepler and Techbench.
+
 ## Steps
 
 1. **The order of use and the keys in the seat**: the server's list of

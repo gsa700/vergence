@@ -154,7 +154,7 @@ impl Seat {
         };
         if let Some(w) = t.window() {
             out.push(Out::Focus(w));
-            self.keyboard.focus = Some(w);
+            self.keyboard.took(w);
         }
         let left = button == BTN_LEFT;
         let p = &mut self.pointer;

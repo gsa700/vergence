@@ -68,10 +68,18 @@ impl Keys {
     }
 }
 
-/// The seat's name for a key symbol.
-pub fn seat_key(sym: u32) -> vergence_seat::keyboard::Key {
+/// The key above Tab, by position (evdev's KEY_GRAVE, 41, plus xkb's 8):
+/// Alt+` means that key whatever the layout prints on it.
+const GRAVE_CODE: u32 = 41 + 8;
+
+/// The seat's name for a key, from its symbol (and, for the key above Tab,
+/// its code: xkb's, evdev's plus 8).
+pub fn seat_key(sym: u32, code: u32) -> vergence_seat::keyboard::Key {
     use vergence_seat::keyboard::Key;
     use xkb::keysyms as k;
+    if code == GRAVE_CODE {
+        return Key::Grave;
+    }
     match sym {
         k::KEY_BackSpace => Key::BackSpace,
         k::KEY_Escape => Key::Escape,
@@ -79,6 +87,13 @@ pub fn seat_key(sym: u32) -> vergence_seat::keyboard::Key {
         k::KEY_XF86AudioRaiseVolume => Key::VolumeUp,
         k::KEY_XF86AudioLowerVolume => Key::VolumeDown,
         k::KEY_XF86AudioMute => Key::Mute,
+        // Shift+Tab is ISO_Left_Tab in most keymaps.
+        k::KEY_Tab | k::KEY_ISO_Left_Tab => Key::Tab,
+        k::KEY_Alt_L | k::KEY_Alt_R => Key::Alt,
+        k::KEY_Left => Key::Left,
+        k::KEY_Right => Key::Right,
+        k::KEY_Up => Key::Up,
+        k::KEY_Down => Key::Down,
         s if (k::KEY_XF86Switch_VT_1..k::KEY_XF86Switch_VT_1 + 12).contains(&s) => Key::Vt((s - k::KEY_XF86Switch_VT_1 + 1) as u8),
         _ => Key::Other,
     }

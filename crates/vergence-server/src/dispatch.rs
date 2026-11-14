@@ -126,6 +126,8 @@ pub struct Dispatch {
     pub keys: Option<crate::keys::Keys>,
     /// The native window that has the keyboard (Smithay's focus is none then).
     pub keyboard_native: Option<Win>,
+    /// Alt+Tab's switching in progress (switch.rs).
+    pub switching: Option<crate::switch::Switching>,
 }
 
 impl Dispatch {
@@ -399,6 +401,7 @@ impl Server {
                     }
                 }
                 Out::Unfocus => self.unfocus_all(),
+                Out::SwitchCancel => self.input.switching = None,
                 Out::Maximize(id) => {
                     if let Some(w) = self.input.wins.get(&id).cloned() {
                         self.toggle_maximize(&w);

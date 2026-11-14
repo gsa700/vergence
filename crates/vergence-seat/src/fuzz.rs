@@ -4,7 +4,7 @@
 //! Deterministic (a fixed seed); FUZZ_ITERS raises the count for a long run:
 //! `FUZZ_ITERS=1000000 cargo test --release -p vergence-seat fuzz`.
 
-use crate::keyboard::{Key, Mods};
+use crate::keyboard::{Key, KeyOut, Mods, Switch};
 use crate::*;
 
 struct Rng(u64);
@@ -104,12 +104,14 @@ fn fuzz_the_seat() {
     let buttons = [BTN_LEFT, BTN_RIGHT, BTN_MIDDLE];
     // How often each kind of answer came: a stream that never reaches a rule tests nothing.
     let mut seen = [0usize; 8];
+    // The same for the keyboard: switching begun, ended, a window key.
+    let mut keys_seen = [0usize; 3];
     // The last long-press timer the seat asked for: firing it is the case that matters.
     let mut timer = 0u64;
-    let keys = [Key::BackSpace, Key::Escape, Key::Super, Key::VolumeUp, Key::Mute, Key::Vt(2), Key::Vt(0), Key::Other];
+    let keys = [Key::BackSpace, Key::Escape, Key::Super, Key::VolumeUp, Key::Mute, Key::Vt(2), Key::Vt(0), Key::Tab, Key::Grave, Key::Alt, Key::Left, Key::Up, Key::Other];
     for step in 0..iters() {
         now += rng.below(500) as u64;
-        let mods = Mods { ctrl: rng.below(8) == 0, alt: rng.below(5) == 0, shift: false, logo: rng.below(8) == 0 };
+        let mods = Mods { ctrl: rng.below(8) == 0, alt: rng.below(3) == 0, shift: rng.below(6) == 0, logo: rng.below(8) == 0 };
         let out = match rng.below(20) {
             0..=4 => seat.motion(target(&mut rng)),
             5..=8 => {
@@ -119,7 +121,18 @@ fn fuzz_the_seat() {
             9 => seat.axis(target(&mut rng)),
             10 => {
                 let k = keys[rng.below(keys.len())];
-                let _ = seat.key(k, rng.below(2) == 0, mods);
+                match seat.key(k, rng.below(2) == 0, mods) {
+                    KeyOut::Switch(Switch::Begin { .. }) => {
+                        assert!(seat.switching(), "step {step}: switching began but the seat is not switching");
+                        keys_seen[0] += 1;
+                    }
+                    KeyOut::Switch(Switch::Choose | Switch::Cancel) => {
+                        assert!(!seat.switching(), "step {step}: switching ended but the seat still switches");
+                        keys_seen[1] += 1;
+                    }
+                    KeyOut::Window(_) => keys_seen[2] += 1,
+                    _ => {}
+                }
                 Vec::new()
             }
             11 => {
@@ -198,9 +211,16 @@ fn fuzz_the_seat() {
         }
         // The seat and the watch agree on what the pointer is on.
         assert_eq!(seat.pointer_focus(), watch.entered, "step {step}: the seat's focus and its enters disagree");
+        // The order of use: no window twice, and the focused one first.
+        let used = seat.order_of_use();
+        assert!(used.iter().enumerate().all(|(i, w)| !used[..i].contains(w)), "step {step}: a window twice in the order of use: {used:?}");
+        if let Some(f) = seat.keyboard_focus() {
+            assert_eq!(used.first(), Some(&f), "step {step}: the focused window is not the most recently used");
+        }
     }
     if iters() >= 100_000 {
         assert!(seen.iter().all(|n| *n > 0), "some rules never ran: {seen:?} (enter, press, release, grab, grab end, close menu, touch down, long press)");
+        assert!(keys_seen.iter().all(|n| *n > 0), "some key rules never ran: {keys_seen:?} (switch begin, switch end, window key)");
     }
     eprintln!("fuzz: {} events; enter {}, press {}, release {}, grab {}, grab end {}, close menu {}, touch down {}, long press {}", iters(), seen[0], seen[1], seen[2], seen[3], seen[4], seen[5], seen[6], seen[7]);
 }

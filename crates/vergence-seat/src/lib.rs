@@ -19,8 +19,10 @@
 //!   at a time.
 //! - **The keyboard** ([`keyboard`]): the server's own keys are filtered
 //!   first (Ctrl+Alt+Backspace, the consoles, the volume keys, Super tapped
-//!   alone, Escape for a menu, everything while the popup is open), then
-//!   the focused window has them.
+//!   alone, Escape for a menu, everything while the popup is open, Alt+Tab
+//!   and Alt+` switching windows, Super with an arrow for the window keys),
+//!   then the focused window has them. The seat keeps the order in which
+//!   windows last had the keyboard (windows milestone 1).
 //! - **Touch** ([`touch`]): a finger on a window is the window's from its
 //!   first contact to its last; the first finger anywhere else is the
 //!   pointer with its left button held; a long, still press there is the
@@ -186,6 +188,9 @@ pub enum Out {
     FingerMoveEnd(WinId),
     /// No finger rests on the dock any more (no name beside an icon).
     Unhover,
+    // ---- switching ----
+    /// Alt+Tab's switching ended without a choice (the screens went off).
+    SwitchCancel,
 }
 
 /// The seat: one pointer, one keyboard, the touch panels.
@@ -226,6 +231,12 @@ impl Seat {
     /// The window that has the keyboard, if any.
     pub fn keyboard_focus(&self) -> Option<WinId> {
         self.keyboard.focus
+    }
+
+    /// Every window that has had the keyboard, the most recent first (Alt+Tab's
+    /// order). A window stays in it while minimized and leaves when it goes.
+    pub fn order_of_use(&self) -> &[WinId] {
+        &self.keyboard.used
     }
 
     /// The server opened a menu or the popup (it takes the keyboard's keys
@@ -279,6 +290,7 @@ impl Seat {
         if self.keyboard.focus == Some(window) {
             self.keyboard.focus = None;
         }
+        self.keyboard.used.retain(|&w| w != window);
         self.touch.window_gone(window, &mut out);
         out
     }
@@ -290,6 +302,9 @@ impl Seat {
         self.end_grab(&mut out);
         if self.menu.take().is_some() {
             out.push(Out::CloseMenu);
+        }
+        if self.keyboard.switching.take().is_some() {
+            out.push(Out::SwitchCancel);
         }
         if let Some(t) = self.pointer.focus.take() {
             if !self.pointer.held.is_empty() {

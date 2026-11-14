@@ -69,7 +69,7 @@ impl Seat {
         if let Some(t) = under.filter(|t| t.is_content() && !ours) {
             let w = t.window().expect("content has a window");
             out.push(Out::Focus(w));
-            self.keyboard.focus = Some(w);
+            self.keyboard.took(w);
             self.touch.on_windows.push((slot, t));
             out.push(Out::TouchDown(t, slot));
             return out;
