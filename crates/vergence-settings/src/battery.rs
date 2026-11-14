@@ -131,9 +131,11 @@ impl App {
         let mut adv = Vec::new();
         for b in &p.batteries {
             if let Some(h) = b.health() {
-                let detail = match (b.full_wh, b.design_wh, b.full_mah, b.design_mah) {
-                    (Some(f), Some(d), _, _) => format!("Holds {f:.1} of {d:.1} Wh when new."),
-                    (_, _, Some(f), Some(d)) => format!("Holds {f:.0} of {d:.0} mAh when new."),
+                // In the battery's own units: a charge-based one's watt-hours
+                // would be worked out at today's voltage, which sags as it runs down.
+                let detail = match (b.full_mah, b.design_mah, b.full_wh, b.design_wh) {
+                    (Some(f), Some(d), _, _) => format!("Holds {f:.0} of {d:.0} mAh when new."),
+                    (_, _, Some(f), Some(d)) => format!("Holds {f:.1} of {d:.1} Wh when new."),
                     _ => String::new(),
                 };
                 adv.push(setting(&format!("Health: {h}%"), &detail, space()));

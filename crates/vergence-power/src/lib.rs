@@ -49,7 +49,8 @@ pub struct Battery {
 impl Battery {
     /// How much it holds now against when new, 0 to 100.
     pub fn health(&self) -> Option<u8> {
-        let (now, new) = match (self.full_wh, self.design_wh, self.full_mah, self.design_mah) {
+        // The battery's own units first (charge-based ones' watt-hours depend on the voltage now).
+        let (now, new) = match (self.full_mah, self.design_mah, self.full_wh, self.design_wh) {
             (Some(f), Some(d), _, _) => (f, d),
             (_, _, Some(f), Some(d)) => (f, d),
             _ => return None,
