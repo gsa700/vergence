@@ -51,3 +51,26 @@ does for wired. On Linux the phone usually wants usbmuxd running (Apple's USB
 pairing daemon) before it hands out a connection: borrowing a daemon, so a
 question for Dave when the plan is drafted. To check on each machine with
 Dave's phone (Control already uses it this way, over USB).
+
+## The settings window's shape (Dave, 2026-11-14, from macOS's System Settings)
+
+Dave's screenshot, docs/reference/macos-system-settings-2026-11-14.png ("shows
+what should be the default layout"; "the titlebar on the right side is using
+the translucent effect as we do on terminal so we should too, that is a good
+place for it"). Earlier the same morning: settings needs no maximize and no
+tabs; "model it like macos does without the hardcoded size limit, or with a
+limited size allowance to preserve the layout".
+
+- Portrait: about 830 x 1100 points. Opens about 840 wide and as tall as the
+  screen allows, up to about 1100; width 760 to 1100, height free, no
+  maximize; window memory after that.
+- No bar across the whole window: the sidebar runs to the top edge, the
+  window buttons on it, search under them; then (later) an account card;
+  the grouped pages, each with a small icon (question for Dave).
+- The page's own bar over the right side: back and forward, then the page's
+  title; translucent, the page scrolling up under it (our frost, as the
+  terminal's content under its bar). Built as a "sidebar" window style in the
+  window styles milestone: the server's frosted bar over the whole top, the
+  sidebar drawn up under it, the title placed over the page; back and
+  forward need the bar to carry a program's own buttons (protocol).
+- Pages: section headings over rounded groups of rows, as ours already are.

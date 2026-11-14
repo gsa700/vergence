@@ -22,9 +22,39 @@ static LOAD_FIRST: extern "C" fn() = {
     load_first
 };
 
-fn gpu() -> Option<Gpu> {
+/// The GPU tests take turns: on FreeBSD (drm-kmod 6.12.85, Mesa iris, Intel
+/// gen9) two threads of one process mapping GPU buffers at once can deadlock
+/// in the kernel, the thread faulting on a mapping waiting forever for a busy
+/// page while the others wait on the process's mapping lock, unkillable until
+/// a reboot (kepler 2026-11-14: in parallel it hung by the 19th run, one at a
+/// time 200 runs never did; tools/gpu-report.sh caught both stacks). Not ours
+/// to fix there; the tests stop doing it.
+static TURNS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// A GPU renderer, held for one test at a time.
+struct Turn {
+    gpu: Gpu,
+    _turn: std::sync::MutexGuard<'static, ()>,
+}
+
+impl std::ops::Deref for Turn {
+    type Target = Gpu;
+    fn deref(&self) -> &Gpu {
+        &self.gpu
+    }
+}
+
+impl std::ops::DerefMut for Turn {
+    fn deref_mut(&mut self) -> &mut Gpu {
+        &mut self.gpu
+    }
+}
+
+fn gpu() -> Option<Turn> {
+    // A test that failed holding the turn leaves it poisoned; the next still runs.
+    let turn = TURNS.lock().unwrap_or_else(|e| e.into_inner());
     match Gpu::new() {
-        Ok(g) => Some(g),
+        Ok(gpu) => Some(Turn { gpu, _turn: turn }),
         Err(e) => {
             eprintln!("skipped: no GPU renderer on this machine ({e})");
             None
