@@ -116,3 +116,6 @@ limited size allowance to preserve the layout".
 - **Confirmations** (Dave, 2026-11-14): a dialog before forgetting an app's
   window places, and before closing a terminal window with several tabs
   open ("Close 3 tabs?"), on window styles milestone 1's dialogs.
+- **Energy on battery and on power** (Dave, 2026-11-14): separate settings
+  (screens off, sleep) while on battery and while on mains power, and later
+  while on a UPS's battery; vergence-power already tells which.
