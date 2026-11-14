@@ -1,9 +1,14 @@
 # Working in this repository
 
-Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Vergence-Whitepaper.md,
-the current milestone is docs/bus-milestone-1.md (the session bus; the server's is docs/server-milestone-1.md; phase 1's, frozen, are docs/milestone-1.md to -4.md), status is in README.md.
-The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md: steps 1 to 5 are in (the dock, applications, clicks, minimize, pins, session restore, the apps button and popup; crates/vergence-shell, the server's shelf.rs); step 6 too (the Dock page, hiding, Terminal=true entries through `vergence-term -e`; docks on several screens parked by Dave); acceptance 1, 3 and 6 wait for Hubble's two monitors. Widgets (crates/vergence-widgets), the settings app moved onto them and iced removed: docs/toolkit-milestone-2.md, closed 2026-11-10 (two items carried forward, see its header). Now: the native window protocol under the toolkit (whitepaper §6.3 to §6.5), docs/native-milestone-1.md: steps 1 to 5 in (the wire, the server's `Win`, native windows on the screen, input, GPU pictures and the clipboard: crates/vergence-server/src/native.rs, `vnative` in vergence-ui to try it; the toolkit's native road, crates/vergence-ui/src/native.rs, so the terminal and settings app open natively in a Vergence session, `VERGENCE_UI_WAYLAND=1` for the old road); step 6 too (placement requests and memory, the meaning tree, `vctl tree`). The milestone is closed (2026-11-11: all eight acceptance checks on Hubble, kepler and Techbench; under GNOME the toolkit draws its own bar and border where the server draws none). Sound page (docs/sound-milestone-1.md, accepted 2026-11-11: crates/vergence-sound with OSS and ALSA back ends, a FreeBSD root helper for the default output only, libexec/vergence/sound-default, PipeWire not yet, volume keys 5%; steps 1 to 5 in; kepler's own sound hardware is dropped, Dave 2026-11-11), then Smithay's replacement in docs/borrowed-review.md's order. Seat milestone 1 (docs/seat-milestone-1.md, 2026-11-12): every pointer, keyboard and touch event goes through crates/vergence-seat (decisions, no Smithay) and the server's dispatch.rs (carrying them out); a native window has the keyboard from the server, so no code of ours runs in Smithay's KeyboardTarget callbacks any more (they hold the keyboard's lock: the server froze there on 2026-11-11, which is why). Bar milestone 1 (docs/bar-milestone-1.md, closed 2026-11-12): the server draws every native window's bar, tabs included (crates/vergence-bar; bus protocol v2), persistence tokens and one terminal process for all its windows on either road, tab dragging and menus, window memory per resolution and scale of a setup; under GNOME our bars follow GNOME's button layout; tab dragging under other desktops carried forward.
-**Order of work since 2026-11-09 (whitepaper §9):** the toolkit's (vergence-ui, named 2026-11-11) drawing and text core with the terminal on it (§6.10; docs/toolkit-milestone-1.md, closed 2026-11-10: the terminal, crates/vergence-term, is on it and its iced interface is gone; the look both the server and the toolkit draw with is crates/vergence-look, and the window bar is vergence_ui::bar), then the shelf on the same drawing code, then widgets and the settings app (docs/toolkit-milestone-2.md; crates/vergence-widgets), then iced is removed (done 2026-11-10). GPU first; a CPU reference renderer for tests and GPU-less machines (`VERGENCE_RENDER=cpu`).
+Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Vergence-Whitepaper.md (Draft 0.12, 2026-11-14; §9 has the status and the order of work), status is also in README.md, and each milestone has its plan and progress in docs/*-milestone-*.md. Phase 1 (docs/milestone-1.md to -4.md, the X11 daemon vergd) is frozen and its daemon retired. Phase 2, the server, is the daily session on Hubble, kepler and Techbench.
+
+**Phase 2 milestones, as of 2026-11-14:**
+- Done and closed: the session bus (docs/bus-milestone-1.md; the server's bring-up is docs/server-milestone-1.md); toolkit 1 and 2 (docs/toolkit-milestone-1.md, -2.md, 2026-11-10: vergence-ui with crates/vergence-scene, -render, -text, -wl, -widgets; the terminal, crates/vergence-term, and the settings app on it; iced removed; two items carried forward, see toolkit-milestone-2's header); native windows (docs/native-milestone-1.md, 2026-11-11: crates/vergence-server/src/native.rs, the toolkit's native road crates/vergence-ui/src/native.rs, `VERGENCE_UI_WAYLAND=1` for the Wayland road, placement requests and memory, the meaning tree, `vctl tree`; under GNOME the toolkit draws its own bar and border); the bar (docs/bar-milestone-1.md, 2026-11-12: the server draws every native window's bar, tabs included, from crates/vergence-bar, bus protocol v2, persistence tokens, one terminal process for all its windows, tab dragging and menus, window memory per resolution and scale of a setup; under GNOME our bars follow GNOME's button layout; tab dragging under other desktops carried forward).
+- All steps in: sound (docs/sound-milestone-1.md, 2026-11-11: crates/vergence-sound, OSS and ALSA back ends, the FreeBSD root helper libexec/vergence/sound-default for the default output only, volume keys 5%; PipeWire not yet; kepler's own sound hardware dropped, Dave 2026-11-11).
+- All steps in, checks by hand still open: seat 1 (docs/seat-milestone-1.md, 2026-11-12: every pointer, keyboard and touch event goes through crates/vergence-seat, decisions with no Smithay, and the server's dispatch.rs; nothing of ours runs in Smithay's KeyboardTarget callbacks, which hold the keyboard's lock: the server froze there on 2026-11-11; by hand: key repeat, Alt+drag, Firefox, X11, clipboard, drag and drop, dragging and hiding docks, notification cards); shelf 1 (docs/shelf-milestone-1.md: the dock, applications, minimize, pins, session restore, Dock page, hiding, Terminal=true entries through `vergence-term -e`; crates/vergence-shell, the server's shelf.rs; acceptance 1, 3 and 6 wait for two monitors on one machine; docks on several screens parked by Dave); shelf 2, the Apps launcher (docs/shelf-milestone-2.md, 2026-11-13: launcher.rs in the server and vergence-shell; Super's tap and Hubble at scale 1 are Dave's); look 1 (docs/look-milestone-1.md, 2026-11-13: the frost, a blur pass in the server's GPU renderer, Clear/Standard/Heavy, Reduce transparency; light and dark with contrast floors; content under the frosted bar; red tab for root; rounded corners at 5 pt; control sizes; crates/vergence-look; corner resizing and the red tab on kepler are Dave's to try).
+- Not built yet: live tiles, snapping and Alt+Tab (a windows milestone), docks on several screens, the rest of Smithay's replacement in docs/borrowed-review.md's order (the window space and the renderer next), explicit sync and several GPUs (whitepaper §8.3), packages.
+
+**Order of work since 2026-11-09 (whitepaper §9):** 1. the toolkit's drawing and text core with the terminal on it (done 2026-11-10); 2. the shell on the same drawing code (dock, session restore, launcher done; live tiles, snapping, keyboard switching left); 3. widgets and the settings app, iced removed (done 2026-11-10); 4. windows, placement and accessibility on the native protocol (done 2026-11-11, with the seat and the bar on them), explicit sync and the rest of §8.3 alongside (left). The look both the server and the toolkit draw with is crates/vergence-look. GPU first; a CPU reference renderer for tests and GPU-less machines (`VERGENCE_RENDER=cpu`).
 
 - **Started 2026-11-06** (Dave's go). The source lives here on Control (the
   main git copy, pushed to GitHub; Control has no Rust). Build and test on the
@@ -19,19 +24,21 @@ The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md: s
   and vergence-xsettings, which the server uses. **X11 applications are off
   by default** in a Vergence session since the same day: desktop.toml
   `[x11] enabled = true` (the settings app's Windows page) starts Xwayland.
-- **The phase 2 server on Hubble's real monitors**: Hubble has no display
-  manager since 2026-11-07 (lightdm disabled: its Wayland sessions were
-  fragile on FreeBSD without logind; `sudo sysrc lightdm_enable=YES` brings it
-  back). Log in on the text console, then `vergence` (~/bin link to
-  tools/vergence-session; Ctrl+Alt+Backspace ends it) or `xfce`
-  (tools/start-xfce: loads ~/.xprofile, then startxfce4). Log
-  ~/.local/state/vergence/server.log (was ~/vergence-drm.log until 2026-11-09).
-  Wallpaper: ~/.config/vergence/desktop.toml. Over SSH, `~/bin/vctl` (tools/vctl; finds the
-  socket in /var/run/xdg/<user> or /tmp/xdg-<uid>) drives it: `vctl shot` then copy
-  ~/vergence-shots/*.png back to look, `vctl windows`, `vctl spawn
-  tools/xtest.sh`, `vctl move`, and `vctl restart` after a rebuild (no hand at
-  the console needed). Window indices are the stacking order (they change on
-  focus).
+- **The phase 2 server on Hubble** (Void since 2026-11-09; since 2026-11-12
+  its disk runs in Mobilenode, the ASUS TUF F15: Intel UHD panel at 1080p
+  144 Hz, GTX 1650 on the external outputs, dual boot with Windows): no
+  display manager and no Xfce. Log in on the text console (agetty), then
+  `vergence` (installed in /usr/local/bin; Ctrl+Alt+Backspace ends it). After
+  a change: `tools/sync-hubble.sh`, `cargo build --release` there, `sudo
+  tools/install.sh`, `vctl restart`. Log ~/.local/state/vergence/server.log;
+  settings in ~/.config/vergence (desktop.toml, settings.toml; the
+  control-socket file is there, so the installed session has `vctl`). Over
+  SSH, `vctl` (tools/vctl, installed in /usr/local/bin; finds the socket in
+  $XDG_RUNTIME_DIR, /tmp/xdg-<uid> on Void, /run/user/<uid> on Fedora,
+  /var/run/xdg/<user> on FreeBSD) drives it: `vctl shot` then, after about 2 s
+  (it returns before the PNG is written), copy ~/vergence-shots/*.png back to
+  look; `vctl windows`, `vctl spawn`, `vctl move`, `vctl key`, `vctl restart`.
+  Window indices are the stacking order (they change on focus).
 - **Hubble is a project machine** (Dave, 2026-11-06): breaking its session
   for the project is fine; his accounts and data still need care. Fake
   EDIDs: `vergence-harness fake` (in /tmp on Hubble: fake1, fake4k, fake24,
@@ -101,8 +108,8 @@ The shell (whitepaper §6.9, decided 2026-11-09) is docs/shelf-milestone-1.md: s
 - **Xfce is only a host** (Dave, 2026-11-06): nothing new is built on
   Xfce's internals (xfconf, xfsettingsd); everything works under any EWMH
   window manager, and pieces the phase 2 server needs (e.g. the XSETTINGS
-  manager) are written to carry over. Xfce stays the desktop on Hubble until
-  the server replaces it.
+  manager) are written to carry over. No machine runs Xfce for the project
+  any more: Hubble left it with FreeBSD on 2026-11-09.
 - **Security rules** (whitepaper §7.3): no network socket, no
   unauthenticated control interface, saved state owner-only (0600). The
   server's sockets (control, bus, D-Bus edge) check the peer's uid. The
