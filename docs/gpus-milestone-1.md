@@ -292,5 +292,9 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
    Battery page shows the NVIDIA GPU awake while plugged.
 4. Unplugged, the NVIDIA GPU asleep and the draw falling back: **met**
    (13.3 W to 9.9 W in 30 s).
-5. Hotplug both ways while the session runs: **met**; with the screens off:
-   not tried by hand.
+5. Hotplug both ways while the session runs: **met**. With the screens off
+   (Dave, 2026-11-14): unplugged while off, the 14" stayed listed after
+   waking: the NVIDIA card had gone to sleep with its screen blanked, and a
+   sleeping card sees no cable leave (the kernel still said "connected").
+   Fixed: the other GPUs' connectors are probed again (a forced probe, which
+   wakes the card) whenever the screens come back on. **Met** once retried.

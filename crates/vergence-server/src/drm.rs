@@ -1033,6 +1033,21 @@ pub fn screens_off(state: &mut Server) {
 /// Energy (energy.rs): every monitor back on, each with a full frame (the first
 /// queued frame after a clear enables the CRTC again).
 pub fn screens_on(state: &mut Server) {
+    // The other GPUs' connectors, probed again: with the screens off such a GPU
+    // has nothing to do and sleeps, and a sleeping GPU sees no cable come or go
+    // (Hubble's NVIDIA card kept the 14" "connected" after Dave unplugged it
+    // with the screens off, 2026-11-14). The scan's forced probe wakes it.
+    let others = state.backend.as_ref().map_or(0, |b| b.devices.len().saturating_sub(1));
+    if others > 0 {
+        let anchors = state.window_anchors();
+        let mut changed = false;
+        for gpu in 1..=others {
+            changed |= scan_gpu(state, gpu, false);
+        }
+        if changed {
+            setup_changed(state, anchors);
+        }
+    }
     let waiting = state.backend.as_mut().map(|b| std::mem::take(&mut b.waiting)).unwrap_or_default();
     if !waiting.is_empty() {
         let anchors = state.window_anchors();
