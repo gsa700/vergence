@@ -17,12 +17,14 @@
 //! `Configure` carries the `inset` it draws there; a tab may be marked
 //! `alert` (its program runs as the superuser). Version 4 (2026-11-14,
 //! window styles milestone 1): a window says its kind, whether it is modal,
-//! and its smallest and largest size (`Style`).
+//! and its smallest and largest size (`Style`). Version 5 (2026-11-14): a
+//! bar may carry the program's own buttons and say where its title starts
+//! (`Bar::Tools`), their presses heard as `BarButton`.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

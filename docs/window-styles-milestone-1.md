@@ -185,6 +185,29 @@ The settings app is the first sidebar window.
   place, on top; a modal dialog opened over the palette, the parent dimmed,
   a press on it flashed the bolder outline (shot). 440 tests on Hubble,
   kepler and Techbench.
+- **Step 5 in** (2026-11-14): bus protocol v5: `Bar::Tools` (the program's
+  own buttons, each an id, an icon (back, forward), a name for Contract 3 and
+  whether it can be pressed, up to 8; and where the title starts) and the
+  event `BarButton`. vergence-bar's `Layout::tools_sized` (the buttons from
+  `from` or after the window's, then the title), `Part::Tool`, chevrons,
+  faint when they cannot be pressed. The server draws them (decor.rs
+  `tools_of`), the seat's `Part::Tool` takes their presses, and the program
+  hears `BarButton` for one that can be pressed. The toolkit: `App::bar_button`;
+  vergence-widgets `Program::under_bar`, `bar`, `bar_button` (the bar sent
+  when it changes, a frame drawn after a press) and `Theme::top`. **Found**:
+  the toolkit sent a bar description and the request to draw under the bar
+  only for apps that draw a frame of their own elsewhere (the terminal), so
+  the settings app was heard on neither; on the native road both now go for
+  any app that asks. The settings app: `WinKind::Sidebar`, 760 x 480 to 1100
+  wide, asks 840 x 1100 (the server fits the height to the screen), draws
+  under the bar (its sidebar's color up behind the window buttons, its page
+  scrolling up under the frost), back and forward after the sidebar (200
+  points) and the page's name as the title (`set_title` on every page
+  change), history through the pages it has shown. Live on Hubble: the
+  layout (shot: sidebar to the top, chevrons after it, "Appearance"), then
+  Windows, Dock, back, back, forward, forward: the title Windows, Dock,
+  Windows, Appearance, Windows, Dock, the chevrons enabled and faint to
+  match. 440 tests on Hubble, kepler and Techbench.
 
 ## Steps
 

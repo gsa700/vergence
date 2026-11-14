@@ -225,7 +225,7 @@ impl Server {
         }
         // Anything of a window a modal dialog blocks is the dialog's (dialogs.rs).
         let hit_window = match self.hit(pos) {
-            Hit::Surface(w, ..) | Hit::Native(w) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Minimize(w) | Hit::Edge(w, _) | Hit::Tab(w, _) | Hit::CloseTab(w, _) | Hit::Plus(w) => Some(w),
+            Hit::Surface(w, ..) | Hit::Native(w) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Minimize(w) | Hit::Edge(w, _) | Hit::Tab(w, _) | Hit::CloseTab(w, _) | Hit::Plus(w) | Hit::Tool(w, _) => Some(w),
             _ => None,
         };
         if let Some(modal) = hit_window.and_then(|w| self.modal_of(&w)) {
@@ -245,6 +245,7 @@ impl Server {
             Hit::Tab(w, i) => Target::Server(Part::Tab(self.win_id(&w), i as u32)),
             Hit::CloseTab(w, i) => Target::Server(Part::CloseTab(self.win_id(&w), i as u32)),
             Hit::Plus(w) => Target::Server(Part::Plus(self.win_id(&w))),
+            Hit::Tool(w, i) => Target::Server(Part::Tool(self.win_id(&w), i as u32)),
             Hit::Shelf => Target::Server(Part::Dock),
             Hit::Nothing => Target::Server(Part::Desktop),
         })
@@ -503,6 +504,14 @@ impl Server {
             Target::Server(Part::Dock) if !pressed && self.shelf.held.is_some_and(|(b, _)| b == button) => self.shelf_release(pos),
             Target::Server(Part::Desktop) if pressed && button == vergence_seat::BTN_RIGHT => self.open_menu(pos),
             Target::Server(Part::Switcher) if pressed && button == vergence_seat::BTN_LEFT => self.switch_click(pos),
+            // A program's own bar button (window styles milestone 1): the program hears it.
+            Target::Server(Part::Tool(id, i)) if pressed && button == vergence_seat::BTN_LEFT => {
+                if let Some(Win::Native(n)) = self.input.wins.get(&id).cloned()
+                    && let Some(tool) = self.bar_tool_id(&Win::Native(n.clone()), i as usize)
+                {
+                    self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(WinEvent::BarButton { window: n.id, id: tool }));
+                }
+            }
             Target::Server(Part::Blocked(id)) if pressed => {
                 if let Some(d) = self.input.wins.get(&id).cloned() {
                     self.flash_dialog(&d);

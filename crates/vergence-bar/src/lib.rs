@@ -218,8 +218,18 @@ pub enum Part {
     /// The close button of this tab.
     CloseTab(usize),
     Plus,
+    /// One of the program's own buttons ([`Layout::tools_sized`]), by its place.
+    Tool(usize),
     /// Bare bar: dragging it moves the window.
     Bar,
+}
+
+/// The icon of a program's own bar button (window styles milestone 1: the
+/// settings app's back and forward).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ToolIcon {
+    Back,
+    Forward,
 }
 
 fn inside(r: &Rect, x: f32, y: f32) -> bool {
@@ -235,6 +245,8 @@ pub struct Layout {
     pub plus: Rect,
     /// Where the window's title is written, in a bar without tabs.
     pub title: Option<Rect>,
+    /// The program's own buttons ([`Layout::tools_sized`]), left to right.
+    pub tools: Vec<Rect>,
     /// True if the window's buttons are on the left: tabs then close on their left too.
     pub controls_left: bool,
     /// The proportions it was laid out at.
@@ -269,7 +281,7 @@ impl Layout {
             closes.push(close);
             x += tab_w + z.gap;
         }
-        Layout { buttons, tabs, closes, plus: Rect::new(x, top, z.plus_w, z.item_h), title: None, controls_left, sizes: z }
+        Layout { buttons, tabs, closes, plus: Rect::new(x, top, z.plus_w, z.item_h), title: None, tools: Vec::new(), controls_left, sizes: z }
     }
 
     /// The bar of a window without tabs: its buttons, and between them the
@@ -283,7 +295,27 @@ impl Layout {
         let (buttons, start, end) = Layout::buttons(width, left, right, &z);
         let top = z.bar_h - z.item_h;
         let title = Rect::new(start + 6.0, top, (end - start - 12.0).max(0.0), z.item_h);
-        Layout { buttons, tabs: Vec::new(), closes: Vec::new(), plus: Rect::new(end, top, 0.0, z.item_h), title: Some(title), controls_left: !left.is_empty(), sizes: z }
+        Layout { buttons, tabs: Vec::new(), closes: Vec::new(), plus: Rect::new(end, top, 0.0, z.item_h), title: Some(title), tools: Vec::new(), controls_left: !left.is_empty(), sizes: z }
+    }
+
+    /// The bar of a window with `count` buttons of its own (back and forward,
+    /// say) and the title after them, both starting `from` points in (the
+    /// width of a sidebar the content has on the left), or after the window's
+    /// buttons if they reach further.
+    pub fn tools_sized(width: f32, left: &[WinButton], right: &[WinButton], z: Sizes, from: f32, count: usize) -> Layout {
+        let (buttons, start, end) = Layout::buttons(width, left, right, &z);
+        let top = z.bar_h - z.item_h;
+        let mut x = start.max(from + z.side);
+        let mut tools = Vec::new();
+        for _ in 0..count {
+            if x + z.button_w > end {
+                break;
+            }
+            tools.push(Rect::new(x, top, z.button_w, z.item_h));
+            x += z.button_w + z.gap;
+        }
+        let title = Rect::new(x + 6.0, top, (end - x - 12.0).max(0.0), z.item_h);
+        Layout { buttons, tabs: Vec::new(), closes: Vec::new(), plus: Rect::new(end, top, 0.0, z.item_h), title: Some(title), tools, controls_left: !left.is_empty(), sizes: z }
     }
 
     /// The window's buttons on their sides, and where the room between them
@@ -325,8 +357,23 @@ impl Layout {
         if inside(&self.plus, x, y) {
             return Some(Part::Plus);
         }
+        if let Some(i) = self.tools.iter().position(|r| inside(r, x, y)) {
+            return Some(Part::Tool(i));
+        }
         Some(Part::Bar)
     }
+}
+
+/// A program button's icon, centered in its box: a chevron.
+fn tool_icon(scene: &mut Scene, r: &Rect, what: ToolIcon, size: f32, ink: Color) {
+    let (cx, cy, h) = (r.x + r.w / 2.0, r.y + r.h / 2.0, size / 2.0);
+    let s = match what {
+        ToolIcon::Back => 1.0,
+        ToolIcon::Forward => -1.0,
+    };
+    let w = h * 0.6;
+    scene.line(Point::new(cx + s * w, cy - h), Point::new(cx - s * w, cy), 1.5, ink);
+    scene.line(Point::new(cx - s * w, cy), Point::new(cx + s * w, cy + h), 1.5, ink);
 }
 
 /// An icon's lines, centered in a box.
@@ -382,6 +429,9 @@ pub struct Look<'a> {
     /// faint, while its ghost follows the pointer and a line shows where it
     /// would land (Dave, 2026-11-12).
     pub dragged: Option<usize>,
+    /// The program's own buttons' icons and whether each can be pressed
+    /// ([`Layout::tools`] gives where).
+    pub tools: &'a [(ToolIcon, bool)],
 }
 
 /// Draws the bar across the top of the scene.
@@ -477,6 +527,16 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
     if layout.plus.w > 0.0 {
         tab_shape(scene, &layout.plus, if look.hover == Some(Part::Plus) { shape_hover } else { tab_rest });
         icon(scene, &layout.plus, Part::Plus, 12.0, ink);
+    }
+    // The program's own buttons: shaded under the pointer, faint when they cannot be pressed.
+    for (i, r) in layout.tools.iter().enumerate() {
+        let Some(&(what, enabled)) = look.tools.get(i) else { continue };
+        if enabled && look.hover == Some(Part::Tool(i)) {
+            let drawn = Rect::new(r.x + vergence_look::BUTTON_INSET_X, r.y + vergence_look::BUTTON_INSET_Y, r.w - 2.0 * vergence_look::BUTTON_INSET_X, r.h - 2.0 * vergence_look::BUTTON_INSET_Y);
+            scene.fill_rounded(drawn, RADIUS, shape_hover);
+        }
+        let mark = if enabled { ink } else { Color::rgba(ink.r, ink.g, ink.b, FAINT) };
+        tool_icon(scene, r, what, 12.0, mark);
     }
     if let (Some(room), Some(face)) = (&layout.title, look.font)
         && room.w > 10.0

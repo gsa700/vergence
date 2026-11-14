@@ -24,6 +24,11 @@ pub struct Theme {
     pub opacity: f32,
     /// The longest time between two clicks of a double-click, in ms.
     pub double_click: u32,
+    /// The strip at the window's top under the server's frosted bar, in
+    /// points, for a program that draws under it (`Program::under_bar`; 0
+    /// otherwise): what is laid out there shows through the frost and takes
+    /// no presses.
+    pub top: f32,
 }
 
 fn c(rgb: Rgb) -> Color {
@@ -49,6 +54,7 @@ impl Theme {
             text_size: 13.0,
             opacity: 1.0,
             double_click: 400,
+            top: 0.0,
         };
         if high_contrast {
             // Text on pure black or white, edges as strong as the text.

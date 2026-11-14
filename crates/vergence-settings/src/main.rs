@@ -112,6 +112,8 @@ const BETWEEN_SCREENS: [(&str, &str); 2] = [("Never snap", "never"), ("After a s
 const ALT_TAB: [(&str, &str); 2] = [("Every screen", "all"), ("This screen", "screen")];
 const DEFAULT_ACCENT: Color = Color::rgb(0x3b, 0x82, 0xf6);
 const WHITE: Color = Color::rgb(255, 255, 255);
+/// The sidebar's width, in points: the bar's back and forward start after it.
+const SIDEBAR_W: f32 = 200.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -262,6 +264,12 @@ struct ArrangeDrag {
 }
 
 struct App {
+    /// The pages shown before (back) and after (forward) this one, for the
+    /// bar's back and forward (window styles milestone 1).
+    back: Vec<Page>,
+    forward: Vec<Page>,
+    /// The strip under the server's frosted bar (Theme::top), for the pages' layout.
+    top: std::cell::Cell<f32>,
     page: Page,
     /// The Sound page (vergence-sound): the system, read when the page opens,
     /// and its outputs as last read.
@@ -435,6 +443,9 @@ impl App {
         let mail = Mail { tx, waker: Arc::new(OnceLock::new()) };
         let mut app = App {
             page: Page::Appearance,
+            back: Vec::new(),
+            forward: Vec::new(),
+            top: std::cell::Cell::new(0.0),
             accent_text: appearance_text(&desktop, "accent"),
             size: disp::size(&desktop) as f32,
             sleep_cmd: energy_cmd(&desktop),
@@ -566,7 +577,15 @@ impl App {
 
     fn handle(&mut self, m: Message) {
         match m {
-            Message::Go(p) => self.open(p),
+            Message::Go(p) => {
+                // A new page: the one left goes on the way back, the way forward is gone.
+                if p != self.page {
+                    self.back.push(self.page);
+                    self.back.truncate(64);
+                    self.forward.clear();
+                }
+                self.open(p)
+            }
             Message::Scheme(i) => self.save_appearance(|t| {
                 t.insert("color-scheme".into(), SCHEMES[i.min(2)].into());
             }),
@@ -1072,10 +1091,11 @@ impl App {
         items.push(space().height(Length::Fixed(14.0)));
         let about = matches!(self.page, Page::About | Page::LicenseText | Page::Notices);
         items.push(item("About".into(), Page::About, about, false));
+        // Its color runs up under the frosted bar; its items start below it.
         panel(column(items).spacing(2.0).width(Length::FILL))
-            .padding(Padding { top: 12.0, bottom: 12.0, left: 10.0, right: 10.0 })
+            .padding(Padding { top: 12.0 + self.top.get(), bottom: 12.0, left: 10.0, right: 10.0 })
             .radius(0.0)
-            .width(Length::Fixed(200.0))
+            .width(Length::Fixed(SIDEBAR_W))
             .height(Length::FILL)
             .name("Pages")
     }
@@ -2005,19 +2025,25 @@ impl App {
 impl Program for App {
     type Message = Message;
 
+    /// The page's name, shown in the bar over the page (as macOS's).
     fn title(&self) -> String {
-        "Vergence Settings".into()
+        match self.page {
+            Page::Appearance => "Appearance".into(),
+            Page::Theme => "Theme and fonts".into(),
+            Page::Windows => "Windows".into(),
+            Page::Dock => "Dock".into(),
+            Page::Keyboard => "Keyboard".into(),
+            Page::Pointer => "Mouse and touchpad".into(),
+            Page::Sound => "Sound".into(),
+            Page::Energy => "Energy".into(),
+            Page::Overview => "Screens".into(),
+            Page::Screen(i) => self.outputs.get(i).map(screen_label).unwrap_or_else(|| "Screens".into()),
+            Page::About | Page::LicenseText | Page::Notices => "About".into(),
+        }
     }
 
     fn app_id(&self) -> String {
         "vergence-settings".into()
-    }
-
-    /// Its layout holds from 760 x 480 to 1100 wide (window styles milestone 1;
-    /// Dave, 2026-11-14: "a limited size allowance to preserve the layout"); no
-    /// maximize. The sidebar kind and its portrait shape come in step 5.
-    fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { min: (760.0, 480.0), max: (1100.0, 0.0), ..Default::default() }
     }
 
     fn theme(&self) -> Theme {
@@ -2034,6 +2060,7 @@ impl Program for App {
     }
 
     fn view(&self, t: &Theme) -> Element<Message> {
+        self.top.set(t.top);
         let page = match self.page {
             Page::Appearance => self.appearance(),
             Page::Theme => self.theme_page(),
@@ -2053,8 +2080,45 @@ impl Program for App {
         row(vec![self.sidebar().color(t.sidebar), vrule().color(t.line), page.width(Length::FILL).height(Length::FILL)]).width(Length::FILL).height(Length::FILL)
     }
 
-    fn update(&mut self, m: Message, _: &mut Window) {
+    /// A sidebar window (window styles milestone 1; Dave's screenshot of
+    /// macOS's System Settings): its content runs up under the server's
+    /// frosted bar, 760 x 480 to 1100 wide, no maximize.
+    fn style(&self) -> vergence_ui::Style {
+        vergence_ui::Style { kind: vergence_ui::WinKind::Sidebar, min: (760.0, 480.0), max: (1100.0, 0.0), ..Default::default() }
+    }
+
+    fn under_bar(&self) -> bool {
+        true
+    }
+
+    /// Back and forward in the bar over the page, then the page's name (the
+    /// window's title), starting where the sidebar ends.
+    fn bar(&self) -> Option<vergence_ui::Bar> {
+        Some(vergence_ui::Bar::Tools {
+            buttons: vec![
+                vergence_ui::BarButton { id: 1, icon: vergence_ui::BarIcon::Back, name: "Back".into(), enabled: !self.back.is_empty() },
+                vergence_ui::BarButton { id: 2, icon: vergence_ui::BarIcon::Forward, name: "Forward".into(), enabled: !self.forward.is_empty() },
+            ],
+            from: (SIDEBAR_W + 1.0) as f64,
+        })
+    }
+
+    fn bar_button(&mut self, id: u32, window: &mut Window) {
+        let (from, to) = if id == 1 { (&mut self.back, &mut self.forward) } else { (&mut self.forward, &mut self.back) };
+        if let Some(p) = from.pop() {
+            to.push(self.page);
+            self.open(p);
+            window.set_title(&self.title());
+        }
+    }
+
+    fn update(&mut self, m: Message, window: &mut Window) {
+        let was = self.page;
         self.handle(m);
+        // The bar shows the page's name (window styles milestone 1).
+        if self.page != was {
+            window.set_title(&self.title());
+        }
     }
 
     fn waker(&mut self, waker: Waker) {
@@ -2111,7 +2175,9 @@ impl App {
     fn page_layout(&self, title: &str, description: &str, items: Vec<Element<Message>>) -> Element<Message> {
         let mut all = vec![self.title_card(title, description)];
         all.extend(items);
-        scroll(panel(column(all).spacing(16.0).width(Length::FILL)).padding(22.0).width(Length::FILL)).name("Page")
+        // The page scrolls up under the frosted bar (look milestone 1's content under the bar).
+        let top = self.top.get();
+        scroll(panel(column(all).spacing(16.0).width(Length::FILL)).padding(Padding { top: 22.0 + top, bottom: 22.0, left: 22.0, right: 22.0 }).width(Length::FILL)).name("Page")
     }
 
     /// A group of settings in a rounded card, a hairline between rows.
@@ -2293,7 +2359,9 @@ fn main() -> std::io::Result<()> {
         eprintln!("vergence-settings: runs in a Vergence session only ({} is not set)", vergence_protocol::BUS_ENV);
         std::process::exit(1);
     }
-    vergence_widgets::run(App::new(), (880, 640))
+    // Portrait (Dave's screenshot of macOS's System Settings): the server fits
+    // the height to the screen; window memory decides after the first time.
+    vergence_widgets::run(App::new(), (840, 1100))
 }
 
 #[cfg(test)]

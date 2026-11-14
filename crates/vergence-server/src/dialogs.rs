@@ -115,7 +115,7 @@ impl Server {
         let palettes: Vec<Win> = self.space.elements().filter(|w| self.window_style(w).kind == Kind::Palette).cloned().collect();
         // The application in front: the focused window's (a palette's own parent's app counts too).
         let front = focused.cloned();
-        let mut same = |s: &mut Server, p: &Win| match (&front, s.window_style(p).parent) {
+        let same = |s: &mut Server, p: &Win| match (&front, s.window_style(p).parent) {
             (Some(f), Some(parent)) => *f == *p || *f == parent || s.same_program(f, &parent),
             _ => false,
         };

@@ -92,7 +92,32 @@ pub enum Bar {
     /// front may wear; `menu` the program's own entries for a tab's menu,
     /// after the server's (Close, Close the others, Move to a new window).
     Tabs { tabs: Vec<Tab>, front: u32, plus: bool, accent: Option<u32>, menu: Vec<MenuEntry> },
+    /// The program's own buttons (back and forward, say) and then the
+    /// window's title, both starting `from` points in from the window's left
+    /// (a sidebar's width), or after the window's buttons if they reach
+    /// further (window styles milestone 1: the settings app).
+    Tools { buttons: Vec<BarButton>, from: f64 },
 }
+
+/// A program's own button in its bar: an id it chose (unique, not 0), what
+/// it shows, its name (for Contract 3), and whether it can be pressed now.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BarButton {
+    pub id: u32,
+    pub icon: BarIcon,
+    pub name: String,
+    pub enabled: bool,
+}
+
+/// What a program's bar button shows; the server draws it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarIcon {
+    Back,
+    Forward,
+}
+
+/// The most buttons a bar may carry of its program's own.
+pub const MAX_BAR_BUTTONS: usize = 8;
 
 /// One tab: an id the program chose (unique in the window, not 0), its
 /// title, and whether it has a close button.
@@ -328,6 +353,8 @@ pub enum WinEvent {
     TabJoin { window: u32, tab: u32, into: u32, to: u32 },
     /// One of the program's own tab-menu entries was chosen.
     TabMenu { window: u32, tab: u32, entry: u32 },
+    /// One of the program's own bar buttons ([`Bar::Tools`]) was pressed.
+    BarButton { window: u32, id: u32 },
 }
 
 pub(crate) mod op {
@@ -377,6 +404,7 @@ pub(crate) mod op {
     pub const TAB_OUT: u16 = 124;
     pub const TAB_JOIN: u16 = 125;
     pub const TAB_MENU: u16 = 126;
+    pub const BAR_BUTTON: u16 = 127;
 
     /// Whether an opcode is a window message's (either way).
     pub fn is_window(opcode: u16) -> bool {
@@ -454,6 +482,18 @@ fn put_bar(e: &mut Encoder, bar: &Bar) {
                 e.u32(m.id).str(&m.label);
             }
         }
+        Bar::Tools { buttons, from } => {
+            e.u8(2).count(buttons.len());
+            for b in buttons {
+                e.u32(b.id).u8(match b.icon {
+                    BarIcon::Back => 0,
+                    BarIcon::Forward => 1,
+                })
+                .str(&b.name)
+                .bool(b.enabled);
+            }
+            e.f64(*from);
+        }
     }
 }
 
@@ -497,6 +537,31 @@ fn get_bar(d: &mut Decoder) -> Result<Bar, WireError> {
                 menu.push(MenuEntry { id, label });
             }
             Bar::Tabs { tabs, front, plus, accent, menu }
+        }
+        2 => {
+            let n = d.count(7)?;
+            if n > MAX_BAR_BUTTONS {
+                return Err(WireError::TooLong(n));
+            }
+            let mut buttons: Vec<BarButton> = Vec::with_capacity(n);
+            for _ in 0..n {
+                let id = d.u32()?;
+                let icon = match d.u8()? {
+                    0 => BarIcon::Back,
+                    1 => BarIcon::Forward,
+                    _ => return Err(WireError::BadValue("bar button icon")),
+                };
+                let (name, enabled) = (title(d)?, d.bool()?);
+                if id == 0 || buttons.iter().any(|b| b.id == id) {
+                    return Err(WireError::BadValue("bar button id"));
+                }
+                buttons.push(BarButton { id, icon, name, enabled });
+            }
+            let from = finite(d.f64()?, "where the title starts")?;
+            if !(0.0..=4096.0).contains(&from) {
+                return Err(WireError::BadValue("where the title starts"));
+            }
+            Bar::Tools { buttons, from }
         }
         _ => return Err(WireError::BadValue("bar")),
     })
@@ -873,6 +938,11 @@ impl WinEvent {
                 e.u32(*window).u32(*tab).u32(*into).u32(*to);
                 e
             }
+            WinEvent::BarButton { window, id } => {
+                let mut e = Encoder::frame(op::BAR_BUTTON);
+                e.u32(*window).u32(*id);
+                e
+            }
             WinEvent::TabMenu { window, tab, entry } => {
                 let mut e = Encoder::frame(op::TAB_MENU);
                 e.u32(*window).u32(*tab).u32(*entry);
@@ -943,6 +1013,7 @@ impl WinEvent {
             op::TAB_OUT => WinEvent::TabOut { window: d.u32()?, tab: d.u32()?, place: get_place(&mut d)? },
             op::TAB_JOIN => WinEvent::TabJoin { window: d.u32()?, tab: d.u32()?, into: d.u32()?, to: d.u32()? },
             op::TAB_MENU => WinEvent::TabMenu { window: d.u32()?, tab: d.u32()?, entry: d.u32()? },
+            op::BAR_BUTTON => WinEvent::BarButton { window: d.u32()?, id: d.u32()? },
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -1053,6 +1124,16 @@ mod tests {
             WinRequest::Copy { input_serial: 5, kinds: vec!["text/plain;charset=utf-8".into()] },
             WinRequest::Paste { serial: 8, kind: "text/plain".into() },
             WinRequest::Bar { window: 1, bar: Bar::Plain },
+            WinRequest::Bar {
+                window: 1,
+                bar: Bar::Tools {
+                    buttons: vec![
+                        BarButton { id: 1, icon: BarIcon::Back, name: "Back".into(), enabled: false },
+                        BarButton { id: 2, icon: BarIcon::Forward, name: "Forward".into(), enabled: true },
+                    ],
+                    from: 220.0,
+                },
+            },
             WinRequest::UnderBar { window: 1 },
             WinRequest::Style { window: 1, kind: WinKind::Dialog, modal: true, min: (320.0, 200.0), max: (0.0, 0.0) },
             WinRequest::Style { window: 2, kind: WinKind::Sidebar, modal: false, min: (760.0, 480.0), max: (1100.0, 0.0) },
@@ -1121,6 +1202,7 @@ mod tests {
             WinEvent::TabOut { window: 1, tab: 4, place: Place::Monitor { id: "8ec9".into(), x: 300.0, y: 200.0 } },
             WinEvent::TabJoin { window: 1, tab: 4, into: 2, to: 0 },
             WinEvent::TabMenu { window: 1, tab: 4, entry: 1 },
+            WinEvent::BarButton { window: 1, id: 2 },
         ];
         for m in all {
             let (bytes, fds) = m.encode().unwrap();

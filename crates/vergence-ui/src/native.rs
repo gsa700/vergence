@@ -180,7 +180,11 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
     let wake_pending = Arc::new(AtomicBool::new(false));
     let waker = Waker { pipe: Arc::new(wake_write.into()), pending: wake_pending.clone() };
     app.waker(waker.clone());
-    let under_bar = bar_by_server && app.under_bar();
+    // On the native road the server draws every window's bar, whether or not
+    // the app would draw one elsewhere (`bar_by_server` says only that): an app
+    // that asks to draw under it, or describes it, is heard (2026-11-14: the
+    // settings app, which draws no frame, was neither).
+    let under_bar = app.under_bar();
     let app_style = app.style();
     let mut first = Win::new(1, Run::Borrowed(app), size, bar_by_server);
     first.created = true;
@@ -488,7 +492,7 @@ impl<'a> Native<'a> {
                     if let Some(i) = self.index(window) {
                         self.windows[i].created = true;
                         self.windows[i].app.get().token_given(&token);
-                        if self.windows[i].bar_by_server && self.windows[i].app.get().under_bar() {
+                        if self.windows[i].app.get().under_bar() {
                             self.send(WinRequest::UnderBar { window })?;
                         }
                         if let Some(r) = style_request(self.windows[i].app.get().style(), window) {
@@ -669,6 +673,7 @@ impl<'a> Native<'a> {
             }
             // The bar's events (bar milestone 1): what was done with the tabs the server drew.
             WinEvent::TabChosen { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::Chosen(tab), w))?,
+            WinEvent::BarButton { window, id } => self.with_window(window, |app, w| app.bar_button(id, w))?,
             WinEvent::TabClose { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::Close(tab), w))?,
             WinEvent::TabCloseOthers { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::CloseOthers(tab), w))?,
             WinEvent::TabNew { window } => self.with_window(window, |app, w| app.tab(TabEvent::New, w))?,
@@ -830,8 +835,7 @@ impl<'a> Native<'a> {
             w.closing = true;
         }
         // The bar, when the server draws it and it has changed (bar milestone 1).
-        if w.bar_by_server
-            && w.app.get().tabs_by_server()
+        if w.app.get().tabs_by_server()
             && let Some(bar) = w.app.get().bar()
         {
             self.send(WinRequest::Bar { window: id, bar })?;

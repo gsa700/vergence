@@ -87,6 +87,8 @@ pub enum Hit {
     Tab(Win, usize),
     CloseTab(Win, usize),
     Plus(Win),
+    /// One of a native window's own bar buttons, by its place.
+    Tool(Win, usize),
     /// The body of a native window (native.rs): its input comes in step 4.
     Native(Win),
     /// The shelf's strip (shelf.rs): in front of every window.
@@ -174,12 +176,13 @@ struct Frame {
 }
 
 impl Frame {
-    fn of(content: Rectangle<i32, Logical>, buttons: &(Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>), tabs: Option<Tabs>, z: vergence_bar::Sizes) -> Frame {
+    fn of(content: Rectangle<i32, Logical>, buttons: &(Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>), tabs: Option<Tabs>, tools: Option<(f32, usize)>, z: vergence_bar::Sizes) -> Frame {
         let h = z.bar_h as i32;
         let title = Rectangle::new((content.loc.x, content.loc.y - h).into(), (content.size.w, h).into());
-        let layout = match &tabs {
-            Some(t) => vergence_bar::Layout::sized(content.size.w as f32, t.titles.len(), t.shown, &buttons.0, &buttons.1, z),
-            None => vergence_bar::Layout::plain_sized(content.size.w as f32, &buttons.0, &buttons.1, z),
+        let layout = match (&tabs, tools) {
+            (Some(t), _) => vergence_bar::Layout::sized(content.size.w as f32, t.titles.len(), t.shown, &buttons.0, &buttons.1, z),
+            (None, Some((from, n))) => vergence_bar::Layout::tools_sized(content.size.w as f32, &buttons.0, &buttons.1, z, from, n),
+            (None, None) => vergence_bar::Layout::plain_sized(content.size.w as f32, &buttons.0, &buttons.1, z),
         };
         Frame { content, title, layout, tabs }
     }
@@ -279,7 +282,7 @@ impl Server {
             let left = buttons.0.contains(&vergence_bar::WinButton::Close) || buttons.1.is_empty();
             buttons = if left { (vec![vergence_bar::WinButton::Close], vec![]) } else { (vec![], vec![vergence_bar::WinButton::Close]) };
             let z = self.bar_sizes(w);
-            return self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, None, z))).flatten();
+            return self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, None, None, z))).flatten();
         }
         // No maximize button where the window cannot be maximized (style.rs).
         if !self.maximizable(w) {
@@ -287,7 +290,8 @@ impl Server {
             buttons.1.retain(|b| *b != vergence_bar::WinButton::Maximize);
         }
         let z = self.bar_sizes(w);
-        self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, tabs_of(w), z))).flatten()
+        let tools = tools_of(w).map(|(from, t)| (from, t.len()));
+        self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, tabs_of(w), tools, z))).flatten()
     }
 
     /// The size of controls for a screen (look milestone 1, step 8): its own
@@ -546,6 +550,7 @@ impl Server {
                     Some(Part::Tab(i)) => return Hit::Tab(w.clone(), i),
                     Some(Part::CloseTab(i)) => return Hit::CloseTab(w.clone(), i),
                     Some(Part::Plus) => return Hit::Plus(w.clone()),
+                    Some(Part::Tool(i)) => return Hit::Tool(w.clone(), i),
                     Some(_) => return Hit::Title(w.clone()),
                     None => {}
                 }
@@ -601,6 +606,7 @@ impl Server {
                 Hit::Tab(w, i) => Some((w, Part::Tab(i))),
                 Hit::CloseTab(w, i) => Some((w, Part::CloseTab(i))),
                 Hit::Plus(w) => Some((w, Part::Plus)),
+                Hit::Tool(w, i) => Some((w, Part::Tool(i))),
                 _ => None,
             }
         };
@@ -760,7 +766,9 @@ impl Server {
                     // (Dave, 2026-11-12). The row is not reordered under the drag: a
                     // row drawn with fewer titles than its layout had a blank tab.
                     let dragged = preview.map(|(from, _)| from).filter(|&i| i < titles.len());
-                    let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded, dragged));
+                    // The program's own buttons (icons, pressable): part of what the picture shows.
+                    let tools: Vec<(vergence_bar::ToolIcon, bool)> = tools_of(&w).map(|(_, t)| t.into_iter().map(|(i, e, _)| (i, e)).collect()).unwrap_or_default();
+                    let key = (title.clone(), width, active, hover, format!("{layout_text}{tools:?}"), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded, dragged));
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
                         key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, (false, false, Vec::new(), false, false, None)),
@@ -801,6 +809,7 @@ impl Server {
                             shown,
                             hover,
                             dragged,
+                            tools: &tools,
                         };
                         // Rounded: the bar's top corners cut to the one radius (its bottom goes on into the window).
                         if rounded {
@@ -1058,6 +1067,34 @@ fn tabs_of(w: &Win) -> Option<Tabs> {
             ids: tabs.iter().map(|t| t.id).collect(),
             accent,
         }),
-        vergence_protocol::window::Bar::Plain => None,
+        _ => None,
+    }
+}
+
+/// A native window's own bar buttons (window styles milestone 1): where the
+/// title starts, and each button's icon, whether it can be pressed, and id.
+fn tools_of(w: &Win) -> Option<(f32, Vec<(vergence_bar::ToolIcon, bool, u32)>)> {
+    match w.native()?.bar()? {
+        vergence_protocol::window::Bar::Tools { buttons, from } => Some((
+            from as f32,
+            buttons
+                .iter()
+                .map(|b| {
+                    let icon = match b.icon {
+                        vergence_protocol::window::BarIcon::Back => vergence_bar::ToolIcon::Back,
+                        vergence_protocol::window::BarIcon::Forward => vergence_bar::ToolIcon::Forward,
+                    };
+                    (icon, b.enabled, b.id)
+                })
+                .collect(),
+        )),
+        _ => None,
+    }
+}
+
+impl Server {
+    /// The id of a native window's own bar button at `index`, if it can be pressed.
+    pub fn bar_tool_id(&self, w: &Win, index: usize) -> Option<u32> {
+        tools_of(w).and_then(|(_, t)| t.get(index).filter(|(_, enabled, _)| *enabled).map(|(_, _, id)| *id))
     }
 }

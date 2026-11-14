@@ -73,6 +73,21 @@ pub trait Program {
         vergence_ui::Style::default()
     }
 
+    /// True if the window draws under the server's frosted bar: the strip's
+    /// height is `Theme::top` when the view is built.
+    fn under_bar(&self) -> bool {
+        false
+    }
+
+    /// The bar the server draws: its own buttons and where the title starts
+    /// (`Bar::Tools`), say. None: a plain bar with the title.
+    fn bar(&self) -> Option<vergence_ui::Bar> {
+        None
+    }
+
+    /// One of its own bar buttons was pressed (the id it gave it).
+    fn bar_button(&mut self, _id: u32, _window: &mut Window) {}
+
     /// Another thread used the [`Waker`]. True if the state changed.
     fn woken(&mut self, _window: &mut Window) -> bool {
         false
@@ -138,6 +153,8 @@ struct Host<P: Program> {
     /// The meaning last handed to the server (Contract 3): sent again only
     /// when it differs.
     meaning_sent: Option<vergence_ui::MeaningTree>,
+    /// The bar last handed to the server: sent again only when it differs.
+    bar_sent: Option<vergence_ui::Bar>,
 }
 
 /// The toolkit's own timer (the caret's blink).
@@ -169,6 +186,31 @@ impl<P: Program> vergence_ui::App for Host<P> {
 
     fn style(&self) -> vergence_ui::Style {
         self.program.style()
+    }
+
+    fn under_bar(&self) -> bool {
+        self.program.under_bar()
+    }
+
+    fn tabs_by_server(&self) -> bool {
+        self.program.bar().is_some()
+    }
+
+    fn bar(&mut self) -> Option<vergence_ui::Bar> {
+        let bar = self.program.bar();
+        if bar.is_some() && bar != self.bar_sent {
+            self.bar_sent = bar.clone();
+            bar
+        } else {
+            None
+        }
+    }
+
+    fn bar_button(&mut self, id: u32, window: &mut Window) {
+        self.program.bar_button(id, window);
+        self.stale = true;
+        // A new frame: the page it shows, and the bar's new description after it.
+        window.redraw();
     }
 
     fn background(&self) -> Color {
@@ -277,8 +319,9 @@ impl<P: Program> Host<P> {
             self.scale = frame.scale;
             self.stale |= self.program.scale(frame.scale);
         }
-        if self.stale || self.laid_at != (frame.width, frame.height) {
+        if self.stale || self.laid_at != (frame.width, frame.height) || self.theme.top != frame.top {
             self.theme = self.program.theme();
+            self.theme.top = frame.top;
             let root = self.program.view(&self.theme);
             let mut measure = FontsMeasure { fonts, family: &self.theme.font };
             self.ui.layout(root, frame.width, frame.height, &mut measure, self.theme.text_size);
@@ -301,14 +344,14 @@ impl<P: Program> Host<P> {
 /// `Window::open_window` (its opener is its parent: a dialog's, say).
 pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
     let theme = program.theme();
-    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None })
+    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None })
 }
 
 /// Opens the program's window and runs until it is closed. `size` is the
 /// size asked for, in reference units.
 pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {
     let theme = program.theme();
-    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None };
+    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None };
     vergence_ui::run(&mut host, size)
 }
 

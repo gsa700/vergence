@@ -134,7 +134,7 @@ pub struct Frame {
 
 /// What the bar's description is made of ([`App::bar`]): the native
 /// protocol's own types.
-pub use vergence_protocol::window::{Bar, MenuEntry as BarMenuEntry, Place as BarPlace, Tab as BarTab};
+pub use vergence_protocol::window::{Bar, BarButton, BarIcon, MenuEntry as BarMenuEntry, Place as BarPlace, Tab as BarTab};
 
 /// What the user did with the tabs the server drew ([`App::tab`]); each
 /// tab named by the id the program gave it in [`App::bar`].
@@ -514,6 +514,10 @@ pub trait App {
 
     /// Something was done with a tab the server drew.
     fn tab(&mut self, _event: TabEvent, _window: &mut Window) {}
+
+    /// One of the window's own bar buttons ([`Bar::Tools`], the server draws
+    /// them) was pressed: the id the window gave it.
+    fn bar_button(&mut self, _id: u32, _window: &mut Window) {}
 
     /// The window's meaning (Contract 3), when it has changed since it was
     /// last asked: asked after each frame on the native road. None: as before.
@@ -1604,7 +1608,7 @@ impl<'a> Runner<'a> {
         let layout = self.bar_layout(i);
         let font = self.fonts.face("sans-serif", 400, false);
         let w = &self.windows[i];
-        let look = bar::Look { bar: vergence_look::bar_look(self.light), frosted: false, focused: w.active, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font, font_size: BAR_FONT_SIZE, titles: &[], alerts: &[], title, shown: 0, hover: w.bar_hover, dragged: None };
+        let look = bar::Look { bar: vergence_look::bar_look(self.light), frosted: false, focused: w.active, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font, font_size: BAR_FONT_SIZE, titles: &[], alerts: &[], title, shown: 0, hover: w.bar_hover, dragged: None, tools: &[] };
         bar::draw(scene, &mut self.fonts, &layout, &look);
     }
 

@@ -74,6 +74,8 @@ pub enum Part {
     Tab(WinId, u32),
     CloseTab(WinId, u32),
     Plus(WinId),
+    /// One of a window's own bar buttons (window styles milestone 1), by its place.
+    Tool(WinId, u32),
     /// The dock (the shelf).
     Dock,
     /// The applications popup.
@@ -107,7 +109,7 @@ impl Target {
     pub fn window(&self) -> Option<WinId> {
         match *self {
             Target::Surface(w, _) | Target::Native(w) => Some(w),
-            Target::Server(Part::Title(w) | Part::Edge(w, _) | Part::Close(w) | Part::Maximize(w) | Part::Minimize(w) | Part::Tab(w, _) | Part::CloseTab(w, _) | Part::Plus(w) | Part::Blocked(w)) => Some(w),
+            Target::Server(Part::Title(w) | Part::Edge(w, _) | Part::Close(w) | Part::Maximize(w) | Part::Minimize(w) | Part::Tab(w, _) | Part::CloseTab(w, _) | Part::Plus(w) | Part::Blocked(w) | Part::Tool(w, _)) => Some(w),
             Target::Server(_) => None,
         }
     }
