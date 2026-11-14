@@ -34,7 +34,8 @@ volume, everywhere in the session. Our own code, on FreeBSD and Linux.
   (now the M920q's ALC235, pcm0: a test tone and Firefox both heard; the
   jack senses its plug). The 2026-11-11 silence on the M910q was most
   likely the same mute, and so may be the Scarlett's below if it went into
-  the iD24 too (not rechecked). kepler's sound is back in use for testing.
+  the iD24 too (not rechecked). kepler's sound is back in use for testing:
+  the Sound page's test tone checked there by Dave the same morning, good.
 - **Void (Hubble)** has plain ALSA, no PipeWire or PulseAudio: one card,
   `/dev/snd/controlC0` (group `audio`) for its controls. The default
   output is per user, in `~/.asoundrc`: no privilege.
