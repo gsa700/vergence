@@ -113,3 +113,6 @@ limited size allowance to preserve the layout".
   messy"): in the app's dock menu ("Forget window places") and on the Windows
   page (apps with saved places, each with Forget, and Forget all), clearing
   its entries in window memory for every setup.
+- **Confirmations** (Dave, 2026-11-14): a dialog before forgetting an app's
+  window places, and before closing a terminal window with several tabs
+  open ("Close 3 tabs?"), on window styles milestone 1's dialogs.
