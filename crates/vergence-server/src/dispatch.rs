@@ -251,6 +251,7 @@ impl Server {
     /// what has it. The mouse, a pointing finger and `vctl pointer` come here.
     pub fn pointer_to(&mut self, pos: Point<f64, Logical>, time: InputTime) {
         self.dispatch_sync();
+        self.tab_hold_check();
         self.pointer_hover(pos);
         let under = self.target_at(pos);
         self.pointer_follow(pos, time, under);
@@ -291,6 +292,7 @@ impl Server {
     /// press`/`release` come here.
     pub fn handle_button(&mut self, button: u32, state: ButtonState, time: InputTime) {
         self.dispatch_sync();
+        self.tab_hold_check();
         let pos = self.pointer_location();
         let under = self.target_at(pos);
         let mods = self.seat.get_keyboard().map(|k| k.modifier_state()).map(|m| vergence_seat::keyboard::Mods { ctrl: m.ctrl, alt: m.alt, shift: m.shift, logo: m.logo }).unwrap_or_default();
@@ -439,6 +441,12 @@ impl Server {
     /// A press or release, to whatever the seat said.
     fn deliver_button(&mut self, t: Target, button: u32, pressed: bool, pos: Point<f64, Logical>, time: InputTime) {
         let serial = SERIAL_COUNTER.next_serial();
+        // A tab held: the left button's release ends it, wherever the seat sends it.
+        if !pressed && button == vergence_seat::BTN_LEFT && self.input.tab_hold.is_some() && !matches!(t, Target::Server(Part::Tab(..))) {
+            tracing::info!("tab: let go over {t:?}, not the tab's bar");
+            self.tab_release(pos);
+            return;
+        }
         match t {
             Target::Surface(..) => {
                 let Some(pointer) = self.seat.get_pointer() else { return };
@@ -522,12 +530,52 @@ impl Server {
             self.pointer_image.status = CursorImageStatus::Named(CursorIcon::Grabbing);
         }
         if let Some(drag) = hold.drag {
-            let landing = drag.landing(&layout, bar.size.w as f32, lx, ly);
-            if hold.landing != Some(landing) {
-                hold.landing = Some(landing);
-                self.redraw_all();
-            }
+            hold.landing = Some(drag.landing(&layout, bar.size.w as f32, lx, ly));
+            // Every step: the ghost follows the pointer, the line goes where it would land.
+            self.redraw_all();
         }
+    }
+
+    /// A tab held with no button held any more: the seat let go of the press
+    /// without a release reaching the tab (a window gone, a drag and drop,
+    /// the screens off). The hold ends, said in the log, and the bar is drawn
+    /// as it is (Techbench, 2026-11-12: a bar stuck mid-drag).
+    fn tab_hold_check(&mut self) {
+        if self.input.tab_hold.is_some() && !self.input.seat.buttons_held() {
+            let hold = self.input.tab_hold.take().unwrap();
+            tracing::warn!("tab: a hold on tab {} ended with no release (dragged: {})", hold.index, hold.drag.is_some());
+            self.pointer_image.status = CursorImageStatus::default_named();
+            self.redraw_all();
+        }
+    }
+
+    /// Where the line goes that shows a dragged tab's landing: the window
+    /// whose bar shows it, and before which of its tabs (the count: after
+    /// the last). In its own row, or another window's of the same program
+    /// under the pointer, also while a window is moved by its only tab.
+    pub fn tab_mark(&self) -> Option<(Win, usize)> {
+        let pos = self.pointer_location();
+        if let Some(hold) = self.input.tab_hold.as_ref().filter(|h| h.drag.is_some()) {
+            return match hold.landing? {
+                vergence_bar::Landing::At(to) => vergence_bar::gap_of(hold.index, to).map(|g| (hold.window.clone(), g)),
+                vergence_bar::Landing::Outside => self.join_target(&hold.window, pos, false).ok().map(|(w, _, to)| (w, to as usize)),
+            };
+        }
+        let (w, _) = self.input.tab_move.as_ref()?;
+        matches!(self.input.running, Some(Running::Move { .. })).then_some(())?;
+        self.join_target(w, pos, true).ok().map(|(w, _, to)| (w, to as usize))
+    }
+
+    /// The ghost of a tab being dragged: its window, which tab, and where its
+    /// top left goes (under the pointer where it was taken hold of).
+    pub fn tab_ghost(&self) -> Option<(Win, usize, Point<f64, Logical>)> {
+        let hold = self.input.tab_hold.as_ref()?;
+        let drag = hold.drag?;
+        let (bar, layout) = self.bar_of(&hold.window)?;
+        let tab = layout.tabs.get(hold.index)?;
+        let pos = self.pointer_location();
+        let dy = hold.from.y - (bar.loc.y as f64 + tab.y as f64);
+        Some((hold.window.clone(), hold.index, Point::from((pos.x - drag.grab() as f64, pos.y - dy))))
     }
 
     /// Where a tab being dragged in window `w` would go: its place, and its
@@ -546,18 +594,28 @@ impl Server {
     fn tab_release(&mut self, pos: Point<f64, Logical>) {
         let Some(hold) = self.input.tab_hold.take() else { return };
         self.redraw_all();
+        if hold.drag.is_some() {
+            self.pointer_image.status = CursorImageStatus::default_named();
+        }
         let (Some(_), Win::Native(n)) = (hold.drag, &hold.window) else { return };
-        let Some(tab) = self.tab_id(&hold.window, hold.index) else { return };
+        let Some(tab) = self.tab_id(&hold.window, hold.index) else {
+            tracing::info!("tab: dropped, but the window has no tab {} any more", hold.index);
+            return;
+        };
         let (client, window) = (n.client, n.id);
         let event = match hold.landing {
             Some(vergence_bar::Landing::At(to)) if to != hold.index => WinEvent::TabMoved { window, tab, to: to as u32 },
-            Some(vergence_bar::Landing::At(_)) | None => return,
-            Some(vergence_bar::Landing::Outside) => {
-                match self.join_target(&hold.window, pos, false) {
-                    Some((into, to)) => WinEvent::TabJoin { window, tab, into, to },
-                    None => WinEvent::TabOut { window, tab, place: self.drop_place(pos, n.size()) },
-                }
+            Some(vergence_bar::Landing::At(_)) | None => {
+                tracing::info!("tab: dropped at {:.0},{:.0} in its own place", pos.x, pos.y);
+                return;
             }
+            Some(vergence_bar::Landing::Outside) => match self.join_target(&hold.window, pos, false) {
+                Ok((_, into, to)) => WinEvent::TabJoin { window, tab, into, to },
+                Err(why) => {
+                    tracing::info!("tab: dropped at {:.0},{:.0} out of its window, {why}: a window of its own", pos.x, pos.y);
+                    WinEvent::TabOut { window, tab, place: self.drop_place(pos, n.size()) }
+                }
+            },
         };
         tracing::info!("tab: {event:?}");
         self.bus_send(client, vergence_protocol::bus::ServerMsg::Window(event));
@@ -567,24 +625,32 @@ impl Server {
     /// in its row the pointer is at: where a tab dropped there joins. `from`,
     /// the tab's window, is looked through when it is the one being moved
     /// (`moving`); otherwise it hides what is below it like any other.
-    fn join_target(&self, from: &Win, pos: Point<f64, Logical>, moving: bool) -> Option<(u32, u32)> {
-        let Win::Native(n) = from else { return None };
+    /// Err says why not, for the log.
+    fn join_target(&self, from: &Win, pos: Point<f64, Logical>, moving: bool) -> Result<(Win, u32, u32), String> {
+        let Win::Native(n) = from else { return Err("not a native window".into()) };
         let at = pos.to_i32_round::<i32>();
         for w in self.space.elements().rev().filter(|w| !moving || *w != from) {
+            let on_bar = self.bar_of(w).filter(|(bar, _)| bar.contains(at));
             if let Win::Native(m) = w
                 && m.client == n.client
                 && w != from
-                && let Some((bar, layout)) = self.bar_of(w).filter(|(bar, _)| bar.contains(at))
+                && let Some((bar, layout)) = on_bar.as_ref()
             {
                 let x = (pos.x - bar.loc.x as f64) as f32;
-                return Some((m.id, layout.tabs.iter().filter(|r| r.x + r.w / 2.0 < x).count() as u32));
+                return Ok((w.clone(), m.id, layout.tabs.iter().filter(|r| r.x + r.w / 2.0 < x).count() as u32));
             }
             // Any other window over the spot (its bar or its content) hides what is below.
-            if self.bar_of(w).is_some_and(|(bar, _)| bar.contains(at)) || self.space.element_geometry(w).is_some_and(|g| g.contains(at)) {
-                return None;
+            if on_bar.is_some() || self.space.element_geometry(w).is_some_and(|g| g.contains(at)) {
+                let what = match w {
+                    _ if w == from => "its own window".to_string(),
+                    Win::Native(m) if m.client == n.client => format!("the content of native window {}, not its bar", m.id),
+                    Win::Native(m) => format!("a window of another program (native window {}, client {})", m.id, m.client),
+                    _ => "a Wayland or X11 window".to_string(),
+                };
+                return Err(format!("over {what}"));
             }
         }
-        None
+        Err("over the desktop".into())
     }
 
     /// Where a window for a tab dropped at `pos` goes: its bar under the
@@ -712,6 +778,9 @@ impl Server {
                     }
                 }
                 self.input.running = Some(Running::Move { window, from, loc, unmaximize_on_drag });
+                if self.input.tab_move.is_some() {
+                    self.redraw_all();
+                }
             }
             Some(Running::Resize { window, edges, from, initial, .. }) => {
                 let size = resized(&window, edges, initial, pos - from);
@@ -751,11 +820,17 @@ impl Server {
                 if let Some((w, index)) = tab_move.filter(|(w, _)| *w == window)
                     && let Win::Native(n) = &w
                     && let Some(tab) = self.tab_id(&w, index)
-                    && let Some((into, to)) = self.join_target(&w, self.pointer_location(), true)
                 {
-                    let event = WinEvent::TabJoin { window: n.id, tab, into, to };
-                    tracing::info!("tab: {event:?}");
-                    self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(event));
+                    let pos = self.pointer_location();
+                    match self.join_target(&w, pos, true) {
+                        Ok((_, into, to)) => {
+                            let event = WinEvent::TabJoin { window: n.id, tab, into, to };
+                            tracing::info!("tab: {event:?}");
+                            self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(event));
+                        }
+                        Err(why) => tracing::info!("tab: window {} moved by its only tab, let go at {:.0},{:.0} {why}: stays a window", n.id, pos.x, pos.y),
+                    }
+                    self.redraw_all();
                 }
             }
             Some(Running::Resize { window, size, .. }) => {

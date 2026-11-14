@@ -378,6 +378,10 @@ pub struct Look<'a> {
     pub shown: usize,
     /// What the pointer is over.
     pub hover: Option<Part>,
+    /// The tab being dragged (the server's, dispatch.rs): left in its place,
+    /// faint, while its ghost follows the pointer and a line shows where it
+    /// would land (Dave, 2026-11-12).
+    pub dragged: Option<usize>,
 }
 
 /// Draws the bar across the top of the scene.
@@ -423,6 +427,21 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
         scene.pop_clip();
     };
     for (i, tab) in layout.tabs.iter().enumerate() {
+        if look.dragged == Some(i) {
+            // Being dragged: an empty slot with its title faint, no close.
+            tab_shape(scene, tab, tab_rest);
+            if let (Some(face), Some(title)) = (look.font, look.titles.get(i)) {
+                let (from, to) = (tab.x + 12.0, tab.x + tab.w - 8.0);
+                if to - from > 10.0 {
+                    scene.push_clip(Rect::new(from, tab.y, to - from, tab.h), 0.0);
+                    let m = fonts.metrics(face, look.font_size);
+                    let baseline = tab.y + ((tab.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round() - 1.0;
+                    text(scene, fonts, face, look.font_size, Color::rgba(ink.r, ink.g, ink.b, FAINT), Point::new(from, baseline), title);
+                    scene.pop_clip();
+                }
+            }
+            continue;
+        }
         let shown = i == look.shown;
         let hovered = matches!(look.hover, Some(Part::Tab(t) | Part::CloseTab(t)) if t == i);
         let alert = look.alerts.get(i).copied().unwrap_or(false);
@@ -471,6 +490,53 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
     }
 }
 
+/// The alpha of a dragged tab's title left in its slot.
+pub const FAINT: u8 = 90;
+/// The insertion line's width, in points.
+pub const GAP_LINE: f32 = 3.0;
+
+/// Where the line goes that shows a tab landing before tab `before` of the
+/// row (`before` == the count: after the last): its middle, in the window's
+/// points; None with no tabs.
+pub fn gap_x(layout: &Layout, before: usize) -> Option<f32> {
+    let last = layout.tabs.last()?;
+    Some(match layout.tabs.get(before) {
+        Some(t) if before == 0 => t.x - 2.0,
+        Some(t) => {
+            let prev = &layout.tabs[before - 1];
+            (prev.x + prev.w + t.x) / 2.0
+        }
+        None => last.x + last.w + 2.0,
+    })
+}
+
+/// A drag of tab `from` landing at `to` ([`Landing::At`], counted with the
+/// dragged tab out of the row): before which tab of the row as it stands the
+/// line goes. None: its own place, nothing moves.
+pub fn gap_of(from: usize, to: usize) -> Option<usize> {
+    match to.cmp(&from) {
+        std::cmp::Ordering::Equal => None,
+        std::cmp::Ordering::Less => Some(to),
+        std::cmp::Ordering::Greater => Some(to + 1),
+    }
+}
+
+/// The ghost of a dragged tab: the tab, `w` by `h`, in `fill` with its title
+/// in `ink`, for the server to draw under the pointer.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_ghost(scene: &mut Scene, fonts: &mut Fonts, w: f32, h: f32, title: &str, font: Option<FaceId>, font_size: f32, fill: Color, ink: Color) {
+    scene.fill_rounded(Rect::new(0.0, 0.0, w, h), RADIUS, fill);
+    if let Some(face) = font
+        && w > 30.0
+    {
+        scene.push_clip(Rect::new(12.0, 0.0, w - 20.0, h), 0.0);
+        let m = fonts.metrics(face, font_size);
+        let baseline = ((h - (m.ascent + m.descent)) / 2.0 + m.ascent).round() - 1.0;
+        text(scene, fonts, face, font_size, ink, Point::new(12.0, baseline), title);
+        scene.pop_clip();
+    }
+}
+
 /// How far a press on a tab moves before it is a drag, in points.
 pub const DRAG_START: f32 = 6.0;
 /// How far beyond the bar (above, below, or past the window's sides) a
@@ -503,6 +569,11 @@ impl TabDrag {
 
     /// Where the dragged tab's left edge is drawn with the pointer at `x`:
     /// with the pointer, kept within the row of tabs.
+    /// Where along the tab the pointer took hold, from its left edge.
+    pub fn grab(&self) -> f32 {
+        self.grab
+    }
+
     pub fn drawn_x(&self, layout: &Layout, x: f32) -> f32 {
         let (Some(first), Some(last)) = (layout.tabs.first(), layout.tabs.last()) else { return x - self.grab };
         (x - self.grab).clamp(first.x, last.x)
@@ -575,6 +646,24 @@ mod tests {
     }
 
     const LEFT: [WinButton; 2] = [WinButton::Close, WinButton::Minimize];
+
+    /// The insertion line: between two tabs' edges, before the first, after
+    /// the last; a landing at its own place shows none.
+    #[test]
+    fn the_insertion_line_stands_between_tabs() {
+        let l = Layout::new(900.0, 3, 0, &LEFT, &[]);
+        let (a, b) = (l.tabs[0], l.tabs[1]);
+        let mid = gap_x(&l, 1).unwrap();
+        assert!(mid >= a.x + a.w && mid <= b.x, "{mid} between {} and {}", a.x + a.w, b.x);
+        assert!(gap_x(&l, 0).unwrap() < a.x);
+        let last = l.tabs[2];
+        assert!(gap_x(&l, 3).unwrap() > last.x + last.w);
+        assert_eq!(gap_x(&Layout::new(900.0, 0, 0, &LEFT, &[]), 0), None);
+        assert_eq!(gap_of(1, 1), None);
+        assert_eq!(gap_of(2, 0), Some(0), "to the front: before the first");
+        assert_eq!(gap_of(0, 2), Some(3), "first to last of three: after the last");
+        assert_eq!(gap_of(0, 1), Some(2), "one along: after the next one");
+    }
 
     #[test]
     fn the_layout_string_says_which_side() {

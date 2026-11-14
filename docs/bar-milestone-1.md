@@ -487,12 +487,24 @@ one process.
      `f.layout`), so the last slot is drawn with no title. That is meant
      to last only while dragging; on Techbench the window stayed so, so
      the server's `tab_hold` was not cleared: the drag's end was missed.
-  To do: log every tab drop (where, what was under the pointer, why it
-  joined or not) and a hold whose release never came; end a hold when no
-  button is held any more; draw the preview with a layout of the
-  preview's own count. Then Dave repeats the drags with a real mouse.
+  **Done 2026-11-13:** every drop is logged with where it was let go and
+  why it joined or not ("tab: window 4 moved by its only tab, let go at
+  330,140 over the content of native window 1, not its bar: stays a
+  window"). Techbench's log of 11-12 points that way for (1): window 2's
+  bar was at y 303-339 and the torn-off window's tab was let go at
+  y 375-434 three times, on window 2's content, which never joined; with
+  nothing showing where a drop lands, a near miss looked like a failed
+  join. For (2): a left release anywhere ends the hold, and a hold with
+  no button held any more (the seat let the press go without a release
+  reaching the tab) ends with a warning in the log; the row is no longer
+  reordered under the drag (the dragged tab stays, faint), so no blank
+  tab can be drawn. Dave to repeat with a real mouse.
 - **Where a dragged tab will go** (Dave, 2026-11-12: "ghost tab and
-  insertion line, note those for tomorrow too"). A ghost of the tab under
+  insertion line, note those for tomorrow too"). **Done 2026-11-13**:
+  vergence-bar `Look::dragged`, `gap_x`, `gap_of`, `draw_ghost`; the
+  server draws the ghost and the accent line over every window (a window
+  moved by its only tab covers the bar it is let go on, so a line drawn in
+  that bar was hidden). A ghost of the tab under
   the pointer for the whole drag; an insertion line in the accent color
   between tabs where it would land, in its own row and in another
   terminal's row while the pointer is over it (so a join is seen before

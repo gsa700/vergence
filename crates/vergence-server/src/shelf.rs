@@ -1131,6 +1131,17 @@ impl Server {
         out
     }
 
+    /// The accent the settings name (Appearance), or the default.
+    pub fn accent(&self) -> Color {
+        match self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "accent-color".to_string())) {
+            Some(vergence_protocol::bus::SettingValue::Rgb(r, g, b)) => Color::rgb((r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8),
+            _ => {
+                let a = vergence_look::ACCENT;
+                Color::rgb(a.0, a.1, a.2)
+            }
+        }
+    }
+
     /// The strip's picture on `out`, if it is on that screen.
     pub fn shelf_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
         let color = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
@@ -1142,10 +1153,7 @@ impl Server {
         let Some(strip) = self.shelf_dock(items.len()).filter(|r| r.overlaps(out)) else { return Vec::new() };
         let pixels = (running::ICON as f64 * scale).round() as u32;
         let icons: Vec<Option<Arc<Icon>>> = items.iter().map(|(item, _)| self.shelf_icon(&item.icon, pixels)).collect();
-        let accent = match self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "accent-color".to_string())) {
-            Some(vergence_protocol::bus::SettingValue::Rgb(r, g, b)) => Color::rgb((r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8),
-            _ => color(vergence_look::ACCENT),
-        };
+        let accent = self.accent();
         // An application all of whose windows are minimized is there, but faint.
         let away: Vec<bool> = items.iter().map(|(_, windows)| !windows.is_empty() && windows.iter().all(|w| self.is_minimized(w))).collect();
         // One that is starting says so with a mark that grows and shrinks, ten

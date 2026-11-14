@@ -111,13 +111,18 @@ pub struct Decor {
     /// The frost of its own top strip, and its picture with rounded corners.
     frost: crate::backdrop::ShadedSlot,
     round: crate::backdrop::ShadedSlot,
+    /// The line showing where a dragged tab would land in this bar.
+    mark: Id,
+    /// The ghost of a tab dragged out of this bar: what it shows (title, size,
+    /// scale's bits, light) and its pixels.
+    ghost: Option<((String, i32, i32, u64, bool), MemoryRenderBuffer, (i32, i32))>,
 }
 
 /// A bar drawn for one scale: what it shows, and the pixels.
 struct BarPicture {
     /// What it shows: title, width, focused, hover, button layout, tabs, the
     /// one in front, accent; then light, frosted, alerts, frosted front tab, rounded.
-    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, (bool, bool, Vec<bool>, bool, bool)),
+    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, (bool, bool, Vec<bool>, bool, bool, Option<usize>)),
     buffer: MemoryRenderBuffer,
     /// Its pixels' width and height (the scale's, not the bar's points).
     px: (i32, i32),
@@ -146,6 +151,8 @@ impl Decor {
             backdrop: None,
             frost: Default::default(),
             round: Default::default(),
+            mark: Id::new(),
+            ghost: None,
         }
     }
 }
@@ -187,6 +194,11 @@ impl Frame {
 
 /// A logical rectangle on an output, in its physical pixels, corners rounded like
 /// window positions are.
+/// A color channel from 0-255 to 0.0-1.0.
+fn unit(c: u8) -> f32 {
+    c as f32 / 255.0
+}
+
 fn physical(r: Rectangle<f64, Logical>, output_loc: Point<i32, Logical>, scale: f64) -> Rectangle<i32, Physical> {
     let a = (r.loc - output_loc.to_f64()).to_physical(scale).to_i32_round::<i32>();
     let b = (r.loc + r.size.to_point() - output_loc.to_f64()).to_physical(scale).to_i32_round::<i32>();
@@ -302,6 +314,64 @@ impl Server {
 
     /// A window's bar: where it is on the desktop, and how it is laid out
     /// (tab drags and the tab menu, dispatch.rs).
+    /// The line where a dragged tab would land, in the accent (dispatch.rs, tab_mark).
+    fn tab_mark_element(&mut self, out: Rectangle<i32, Logical>, scale: f64) -> Option<SceneElement> {
+        let (w, before) = self.tab_mark()?;
+        let (bar, layout) = self.bar_of(&w)?;
+        let x = vergence_bar::gap_x(&layout, before)?;
+        let t = layout.tabs.first()?;
+        let r = Rectangle::<f64, Logical>::new(
+            (bar.loc.x as f64 + (x - vergence_bar::GAP_LINE / 2.0) as f64, bar.loc.y as f64 + t.y as f64 + 2.0).into(),
+            (vergence_bar::GAP_LINE as f64, t.h as f64 - 4.0).into(),
+        );
+        if !r.overlaps(out.to_f64()) {
+            return None;
+        }
+        let a = self.accent();
+        let d = self.decor.entry(w).or_insert_with(Decor::new);
+        let c = [unit(a.r), unit(a.g), unit(a.b), 1.0];
+        Some(SceneElement::Solid(SolidColorRenderElement::new(d.mark.clone(), physical(r, out.loc, scale), d.commit, c, Kind::Unspecified)))
+    }
+
+    /// The ghost of a tab being dragged, under the pointer where it was
+    /// taken hold of: the tab in the bar's front color, a little see-through.
+    fn tab_ghost_element(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64, light: bool) -> Option<SceneElement> {
+        let (w, index, at) = self.tab_ghost()?;
+        let (_, layout) = self.bar_of(&w)?;
+        let tab = *layout.tabs.get(index)?;
+        let r = Rectangle::<f64, Logical>::new(at, (tab.w as f64, tab.h as f64).into());
+        if !r.overlaps(out.to_f64()) {
+            return None;
+        }
+        let title = tabs_of(&w).and_then(|t| t.titles.get(index).cloned()).unwrap_or_default();
+        let style = vergence_look::bar_look(light);
+        let key = (title.clone(), tab.w as i32, tab.h as i32, scale.to_bits(), light);
+        let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
+        let d = self.decor.entry(w.clone()).or_insert_with(Decor::new);
+        if d.ghost.as_ref().is_none_or(|(k, ..)| *k != key) {
+            let face = fonts.face("sans-serif", 400, false);
+            let mut scene = vergence_scene::Scene::new(tab.w, tab.h);
+            let (f, i) = (style.front, style.ink);
+            vergence_bar::draw_ghost(&mut scene, fonts, tab.w, tab.h, &title, face, vergence_bar::FONT_SIZE, vergence_scene::Color::rgba(f.0, f.1, f.2, 215), vergence_scene::Color::rgb(i.0, i.1, i.2));
+            match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)) {
+                Ok(p) => {
+                    let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+                    d.ghost = Some((key, buffer, (p.width as i32, p.height as i32)));
+                }
+                Err(e) => {
+                    tracing::warn!("tab ghost: {e}");
+                    return None;
+                }
+            }
+        }
+        let (_, buffer, px) = d.ghost.as_ref()?;
+        let whole = Rectangle::<f64, Logical>::from_size((px.0 as f64, px.1 as f64).into());
+        let loc = (at - out.loc.to_f64()).to_physical(scale).to_i32_round::<i32>();
+        MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), buffer, None, Some(whole), Some((tab.w.round() as i32, tab.h.round() as i32).into()), Kind::Unspecified)
+            .ok()
+            .map(SceneElement::Memory)
+    }
+
     pub fn bar_of(&self, w: &Win) -> Option<(Rectangle<i32, Logical>, vergence_bar::Layout)> {
         self.frame_of(w).map(|f| (f.title, f.layout))
     }
@@ -530,6 +600,11 @@ impl Server {
         elements.extend(self.shelf_elements(renderer, out, scale));
         // Then windows on their way into the dock or out of it.
         elements.extend(self.shelf_motion_elements(renderer, out, scale));
+        // Then a dragged tab's ghost, over every window (dispatch.rs, tab_ghost).
+        elements.extend(self.tab_ghost_element(renderer, out, scale, light));
+        // And the line showing where it would land: over every window too, since
+        // a window moved by its only tab covers the bar it is let go on.
+        elements.extend(self.tab_mark_element(out, scale));
         for w in windows {
             let frame = self.frame_of(&w);
             let border = self.border_of(&w);
@@ -609,29 +684,17 @@ impl Server {
                     // The bar, vergence-bar's, drawn once per scale and again when what it shows changes.
                     let hover = hovered.as_ref().filter(|(hw, _)| *hw == w).map(|(_, p)| *p);
                     let width = f.title.size.w;
-                    let (mut titles, mut shown, accent) = f.tabs.as_ref().map(|t| (t.titles.clone(), t.shown, t.accent)).unwrap_or_default();
-                    let mut alerts = f.tabs.as_ref().map(|t| t.alerts.clone()).unwrap_or_default();
-                    // A tab being dragged (dispatch.rs): the row as it would be if let
-                    // go now; out of the window, without it.
-                    if let Some((from, to)) = preview
-                        && from < titles.len()
-                    {
-                        let front = shown;
-                        let mut order: Vec<usize> = (0..titles.len()).collect();
-                        match to {
-                            Some(to) => vergence_bar::reorder(&mut order, from, to),
-                            None => {
-                                order.remove(from);
-                            }
-                        }
-                        titles = order.iter().map(|&i| titles[i].clone()).collect();
-                        alerts = order.iter().map(|&i| alerts.get(i).copied().unwrap_or(false)).collect();
-                        shown = order.iter().position(|&i| i == front).unwrap_or(0);
-                    }
-                    let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded));
+                    let (titles, shown, accent) = f.tabs.as_ref().map(|t| (t.titles.clone(), t.shown, t.accent)).unwrap_or_default();
+                    let alerts = f.tabs.as_ref().map(|t| t.alerts.clone()).unwrap_or_default();
+                    // A tab being dragged (dispatch.rs): left in its place, faint; its
+                    // ghost follows the pointer and a line shows where it would land
+                    // (Dave, 2026-11-12). The row is not reordered under the drag: a
+                    // row drawn with fewer titles than its layout had a blank tab.
+                    let dragged = preview.map(|(from, _)| from).filter(|&i| i < titles.len());
+                    let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded, dragged));
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
-                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, (false, false, Vec::new(), false, false)),
+                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, (false, false, Vec::new(), false, false, None)),
                         buffer: MemoryRenderBuffer::new(Fourcc::Abgr8888, (1, 1), 1, Transform::Normal, None),
                         px: (1, 1),
                     });
@@ -668,6 +731,7 @@ impl Server {
                             title: &title,
                             shown,
                             hover,
+                            dragged,
                         };
                         // Rounded: the bar's top corners cut to the one radius (its bottom goes on into the window).
                         if rounded {
