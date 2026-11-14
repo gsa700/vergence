@@ -119,6 +119,9 @@ struct State {
     /// What its bar shows, as last sent (bar milestone 1); none: a plain bar
     /// with its title, as before. The server draws it from step 3.
     bar: Option<vergence_protocol::window::Bar>,
+    /// It draws under its bar (look milestone 1): its pictures are the bar's
+    /// height taller, the strip at their top under the bar.
+    under_bar: bool,
 }
 
 /// Native windows' share of the pointer and the keyboard (step 4).
@@ -193,6 +196,12 @@ impl NativeWindow {
 
     pub fn cursor(&self) -> smithay::input::pointer::CursorIcon {
         self.state.lock().unwrap().cursor
+    }
+
+    /// The strip at the top of its pictures that lies under the server's bar,
+    /// in points: the bar's height for a window that draws under its bar, else 0.
+    pub fn inset(&self) -> i32 {
+        if self.state.lock().unwrap().under_bar { crate::decor::TITLE_H } else { 0 }
     }
 
     /// What its bar shows, as last sent (none: its title).
@@ -302,6 +311,7 @@ impl Server {
                         cursor: smithay::input::pointer::CursorIcon::Default,
                         meaning: None,
                         bar: None,
+                        under_bar: false,
                     }),
                     user_data: UserDataMap::new(),
                 });
@@ -398,6 +408,16 @@ impl Server {
                 let Some(w) = self.natives.get(&(client, window)).cloned() else { return };
                 if on != self.restore.contains_key(&w) {
                     self.toggle_maximize(&w);
+                }
+            }
+            // It draws under its bar (look milestone 1): told the inset at once.
+            WinRequest::UnderBar { window } => {
+                if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
+                    let was = std::mem::replace(&mut n.state.lock().unwrap().under_bar, true);
+                    if !was {
+                        self.native_send_configure(&n);
+                        self.redraw_all();
+                    }
                 }
             }
             // What the bar shows (bar milestone 1): kept, and drawn from step 3.
@@ -626,12 +646,13 @@ impl Server {
     }
 
     fn native_send_configure(&mut self, n: &NativeWindow) {
-        let (serial, size, scale, maximized, activated) = {
+        let (serial, size, scale, maximized, activated, under_bar) = {
             let mut s = n.state.lock().unwrap();
             s.sent_serial = s.sent_serial.wrapping_add(1).max(1);
-            (s.sent_serial, s.size, s.scale, s.maximized, s.activated)
+            (s.sent_serial, s.size, s.scale, s.maximized, s.activated, s.under_bar)
         };
-        let ev = WinEvent::Configure { window: n.id, serial, width: size.w as f64, height: size.h as f64, scale, maximized, activated };
+        let inset = if under_bar { crate::decor::TITLE_H as f64 } else { 0.0 };
+        let ev = WinEvent::Configure { window: n.id, serial, width: size.w as f64, height: size.h as f64, scale, maximized, activated, inset };
         self.bus_send(n.client, ServerMsg::Window(ev));
     }
 

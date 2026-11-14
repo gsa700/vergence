@@ -207,7 +207,15 @@ pub enum WinRequest {
     /// What the window's bar shows now; the server draws it (it draws every
     /// native window's bar). Sent again whenever it changes.
     Bar { window: u32, bar: Bar },
+    /// This window draws under its bar (look milestone 1): its pictures are
+    /// taller by the `inset` each [`WinEvent::Configure`] gives, the strip
+    /// at their top lies under the server's bar (frosted there), and nothing
+    /// that takes input belongs in it. Sent once, after Create.
+    UnderBar { window: u32 },
 }
+
+/// The tallest strip a window may be asked to draw under its bar, in points.
+pub const MAX_INSET: f64 = 256.0;
 
 /// What the server tells a client about its windows.
 #[derive(Debug, Clone, PartialEq)]
@@ -215,7 +223,10 @@ pub enum WinEvent {
     /// The window exists; `token` names it on later runs (Contract 2).
     Created { serial: u32, window: u32, token: String },
     /// Draw at this size, for this scale (Contract 1); answer with AckConfigure.
-    Configure { window: u32, serial: u32, width: f64, height: f64, scale: f64, maximized: bool, activated: bool },
+    /// `inset`: the strip at the top of the window's picture under the
+    /// server's bar (points; 0 unless it asked with [`WinRequest::UnderBar`]):
+    /// the picture is `height + inset` tall and the content below the strip.
+    Configure { window: u32, serial: u32, width: f64, height: f64, scale: f64, maximized: bool, activated: bool, inset: f64 },
     /// The user asked for the window to close.
     Close { window: u32 },
     /// The last picture is on the screen: draw the next when there is one.
@@ -282,6 +293,7 @@ pub(crate) mod op {
     pub const COPY: u16 = 112;
     pub const PASTE: u16 = 113;
     pub const BAR: u16 = 114;
+    pub const UNDER_BAR: u16 = 115;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -547,6 +559,11 @@ impl WinRequest {
                 put_bar(&mut e, bar);
                 e
             }
+            WinRequest::UnderBar { window } => {
+                let mut e = Encoder::frame(op::UNDER_BAR);
+                e.u32(*window);
+                e
+            }
         };
         Ok((e.finish()?, fds))
     }
@@ -632,6 +649,7 @@ impl WinRequest {
             op::COPY => WinRequest::Copy { input_serial: d.u32()?, kinds: get_kinds(&mut d)? },
             op::PASTE => WinRequest::Paste { serial: d.u32()?, kind: d.str()? },
             op::BAR => WinRequest::Bar { window: d.u32()?, bar: get_bar(&mut d)? },
+            op::UNDER_BAR => WinRequest::UnderBar { window: d.u32()? },
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -654,9 +672,9 @@ impl WinEvent {
                 e.u32(*serial).u32(*window).str(token);
                 e
             }
-            WinEvent::Configure { window, serial, width, height, scale, maximized, activated } => {
+            WinEvent::Configure { window, serial, width, height, scale, maximized, activated, inset } => {
                 let mut e = Encoder::frame(op::CONFIGURE);
-                e.u32(*window).u32(*serial).f64(*width).f64(*height).f64(*scale).bool(*maximized).bool(*activated);
+                e.u32(*window).u32(*serial).f64(*width).f64(*height).f64(*scale).bool(*maximized).bool(*activated).f64(*inset);
                 e
             }
             WinEvent::Close { window } => {
@@ -811,6 +829,13 @@ impl WinEvent {
                 scale: finite(d.f64()?, "scale")?,
                 maximized: d.bool()?,
                 activated: d.bool()?,
+                inset: {
+                    let inset = finite(d.f64()?, "inset")?;
+                    if !(0.0..=MAX_INSET).contains(&inset) {
+                        return Err(WireError::BadValue("inset"));
+                    }
+                    inset
+                },
             },
             op::CLOSE => WinEvent::Close { window: d.u32()? },
             op::FRAME => WinEvent::Frame { window: d.u32()?, time_ms: d.u32()? },
@@ -933,6 +958,7 @@ mod tests {
             WinRequest::Copy { input_serial: 5, kinds: vec!["text/plain;charset=utf-8".into()] },
             WinRequest::Paste { serial: 8, kind: "text/plain".into() },
             WinRequest::Bar { window: 1, bar: Bar::Plain },
+            WinRequest::UnderBar { window: 1 },
             WinRequest::Bar {
                 window: 1,
                 bar: Bar::Tabs {
@@ -972,7 +998,7 @@ mod tests {
     fn every_event_survives_the_wire() {
         let all = vec![
             WinEvent::Created { serial: 7, window: 1, token: "t1".into() },
-            WinEvent::Configure { window: 1, serial: 2, width: 880.0, height: 640.0, scale: 1.5, maximized: false, activated: true },
+            WinEvent::Configure { window: 1, serial: 2, width: 880.0, height: 640.0, scale: 1.5, maximized: false, activated: true, inset: 36.0 },
             WinEvent::Close { window: 1 },
             WinEvent::Frame { window: 1, time_ms: 1234 },
             WinEvent::PointerEnter { window: 1, serial: 3, x: 1.5, y: 2.5 },

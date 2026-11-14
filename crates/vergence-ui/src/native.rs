@@ -104,6 +104,8 @@ struct Win<'a> {
     timers: Vec<(u64, Instant)>,
     /// The server draws this window's tabbed bar (App::tabs_by_server).
     bar_by_server: bool,
+    /// The strip under the server's bar it draws (look milestone 1), points.
+    inset: f32,
 }
 
 /// The connection and what a program's windows share.
@@ -178,8 +180,12 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
     let wake_pending = Arc::new(AtomicBool::new(false));
     let waker = Waker { pipe: Arc::new(wake_write.into()), pending: wake_pending.clone() };
     app.waker(waker.clone());
+    let under_bar = bar_by_server && app.under_bar();
     let mut first = Win::new(1, Run::Borrowed(app), size, bar_by_server);
     first.created = true;
+    if under_bar {
+        client.send(&ClientMsg::Window(WinRequest::UnderBar { window: 1 })).map_err(client_error)?;
+    }
     let mut n = Native {
         client,
         gpu,
@@ -256,6 +262,7 @@ impl<'a> Win<'a> {
             fingers: Vec::new(),
             timers: Vec::new(),
             bar_by_server,
+            inset: 0.0,
         }
     }
 }
@@ -471,13 +478,17 @@ impl<'a> Native<'a> {
                     if let Some(i) = self.index(window) {
                         self.windows[i].created = true;
                         self.windows[i].app.get().token_given(&token);
+                        if self.windows[i].bar_by_server && self.windows[i].app.get().under_bar() {
+                            self.send(WinRequest::UnderBar { window })?;
+                        }
                     }
                 }
             }
-            WinEvent::Configure { window, serial, width, height, scale, .. } => {
+            WinEvent::Configure { window, serial, width, height, scale, inset, .. } => {
                 self.send(WinRequest::AckConfigure { window, serial })?;
                 let Some(i) = self.index(window) else { return Ok(()) };
                 let w = &mut self.windows[i];
+                w.inset = if inset.is_finite() && (0.0..=vergence_protocol::window::MAX_INSET).contains(&inset) { inset as f32 } else { 0.0 };
                 if width.is_finite() && height.is_finite() && width >= 1.0 && height >= 1.0 {
                     (w.width, w.height) = (width.round() as u32, height.round() as u32);
                 }
@@ -508,6 +519,8 @@ impl<'a> Native<'a> {
             }
             WinEvent::PointerEnter { window, x, y, .. } => {
                 let Some(i) = self.index(window) else { return Ok(()) };
+                // Positions in the scene's points: below the strip under the bar.
+                let y = y + self.windows[i].inset as f64;
                 self.windows[i].pointer_at = Some((x as f32, y as f32));
                 // A pointer that enters has no shape until it is given one.
                 let shape = self.windows[i].cursor.wire() as u16;
@@ -521,6 +534,7 @@ impl<'a> Native<'a> {
                 self.tell(window, Input::PointerLeft)?;
             }
             WinEvent::PointerMotion { window, x, y, .. } => {
+                let y = y + self.index(window).map_or(0.0, |i| self.windows[i].inset as f64);
                 if let Some(i) = self.index(window) {
                     self.windows[i].pointer_at = Some((x as f32, y as f32));
                 }
@@ -548,7 +562,7 @@ impl<'a> Native<'a> {
             }
             WinEvent::Touch { window, id, phase, x, y, .. } => {
                 let Some(i) = self.index(window) else { return Ok(()) };
-                let (x, y) = (x as f32, y as f32);
+                let (x, y) = (x as f32, y as f32 + self.windows[i].inset);
                 match phase {
                     0 => {
                         // A finger's press is as good as a button's (the clipboard, moving).
@@ -770,7 +784,7 @@ impl<'a> Native<'a> {
     fn draw(&mut self, i: usize) -> io::Result<()> {
         let t = Instant::now();
         let w = &mut self.windows[i];
-        let frame = Frame { width: w.width as f32, height: w.height as f32, scale: w.scale as f32, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: w.bar_by_server };
+        let frame = Frame { width: w.width as f32, height: w.height as f32 + w.inset, scale: w.scale as f32, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: w.bar_by_server, top: w.inset };
         let id = w.id;
         let scene = w.app.get().scene(&frame, &mut self.fonts);
         let background = self.windows[i].app.get().background();

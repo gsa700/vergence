@@ -175,25 +175,6 @@ fn physical(r: Rectangle<f64, Logical>, output_loc: Point<i32, Logical>, scale: 
     Rectangle::new(a, (b.x - a.x, b.y - a.y).into())
 }
 
-/// Whether the frost preview is on (see `Server::frost_program`).
-fn frost_preview() -> bool {
-    use std::sync::Mutex;
-    use std::time::{Duration, Instant};
-    static SEEN: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
-    if std::env::var_os("VERGENCE_FROST").is_some() {
-        return true;
-    }
-    let mut seen = SEEN.lock().unwrap();
-    if let Some((at, on)) = *seen
-        && at.elapsed() < Duration::from_secs(1)
-    {
-        return on;
-    }
-    let on = vergence_bar::settings_path().is_some_and(|p| p.with_file_name("frost-preview").exists());
-    *seen = Some((Instant::now(), on));
-    on
-}
-
 /// A native window's picture as a GPU texture, with its size in pixels and
 /// in points: imported the first time it is asked for, on whichever monitor
 /// that is. None for a picture in shared memory or one that failed to import.
@@ -259,14 +240,10 @@ impl Server {
     /// The frost's program, compiled on first use; None where bars are solid:
     /// High contrast on (it asks for solid grounds), a software renderer
     /// (llvmpipe, softpipe: the blur would cost more than it gives), or a
-    /// shader that would not compile. Until the content runs under the bar
-    /// (look milestone 1, step 4) the frost is a preview, shown only with
-    /// VERGENCE_FROST=1 or the file ~/.config/vergence/frost-preview (looked
-    /// for once a second at most); both go with step 4.
+    /// shader that would not compile. Only windows that draw under their bar
+    /// are frosted (their picture's top is what lies under it); the others
+    /// keep a solid bar.
     fn frost_program(&mut self, renderer: &mut GlesRenderer) -> Option<smithay::backend::renderer::gles::GlesTexProgram> {
-        if !frost_preview() {
-            return None;
-        }
         let high_contrast = self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "contrast".to_string())) == Some(&vergence_protocol::bus::SettingValue::U32(1));
         if high_contrast {
             return None;
@@ -460,8 +437,9 @@ impl Server {
                     elements.push(solid(8, Rectangle::new((r.loc.x - e, r.loc.y).into(), (e, r.size.h).into()), c));
                     elements.push(solid(9, Rectangle::new((r.loc.x + r.size.w, r.loc.y).into(), (e, r.size.h).into()), c));
                 }
-                // A native window's picture on the GPU, which its bar's frost is made from.
-                let under = frost.as_ref().and_then(|_| native_texture(renderer, &w));
+                // A native window that draws under its bar, with its picture on the
+                // GPU: the strip at the picture's top is frosted into the bar.
+                let under = frost.as_ref().filter(|_| w.native().is_some_and(|n| n.inset() > 0)).and_then(|_| native_texture(renderer, &w));
                 if let Some(f) = frame {
                     let frosted = under.is_some();
                     // The bar, vergence-bar's, drawn once per scale and again when what it shows changes.
@@ -566,7 +544,9 @@ impl Server {
             // drawn for, from the window's top left corner.
             if let Some(n) = w.native() {
                 if let Some(p) = n.picture() {
-                    let at = (loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+                    // A window that draws under its bar starts that much higher.
+                    let top = Point::<i32, Logical>::from((loc.x, loc.y - n.inset()));
+                    let at = (top - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
                     let whole = Rectangle::<f64, Logical>::from_size((p.px.w as f64, p.px.h as f64).into());
                     match &p.content {
                         crate::native::Content::Memory(buffer) => {

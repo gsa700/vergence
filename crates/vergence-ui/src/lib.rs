@@ -124,6 +124,12 @@ pub struct Frame {
     /// on the native road, with its tabs if [`App::tabs_by_server`]): the
     /// scene leaves it out and starts at the top.
     pub bar_by_server: bool,
+    /// The strip at the top of the scene that lies under the server's bar,
+    /// for a window that draws under it ([`App::under_bar`]; 0 otherwise):
+    /// `height` includes it, the content goes below it, and nothing there
+    /// takes input (the bar's presses are the server's). Input positions are
+    /// in the scene's own points, the strip included.
+    pub top: f32,
 }
 
 /// What the bar's description is made of ([`App::bar`]): the native
@@ -470,6 +476,14 @@ pub trait App {
     /// [`App::tab`], and draws no bar of its own ([`Frame::bar_by_server`]).
     /// Elsewhere it draws its own bar as before.
     fn tabs_by_server(&self) -> bool {
+        false
+    }
+
+    /// True if the window draws under its bar (look milestone 1): on the
+    /// native road, where the server draws the bar, its scene is taller by
+    /// [`Frame::top`] and what it draws in that strip is shown under the bar,
+    /// frosted. Elsewhere nothing changes.
+    fn under_bar(&self) -> bool {
         false
     }
 
@@ -1699,7 +1713,7 @@ impl<'a> Runner<'a> {
         let t = Instant::now();
         let w = &self.windows[i];
         let bar_h = w.bar_h();
-        let frame = Frame { width: w.width as f32, height: (w.height as f32 - bar_h).max(1.0), scale: w.scale120 as f32 / 120.0, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: false };
+        let frame = Frame { width: w.width as f32, height: (w.height as f32 - bar_h).max(1.0), scale: w.scale120 as f32 / 120.0, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: false, top: 0.0 };
         let mut scene = self.windows[i].app.get().scene(&frame, &mut self.fonts);
         if self.windows[i].frame {
             let title = self.windows[i].app.get().title();

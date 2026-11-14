@@ -563,9 +563,12 @@ struct Terminal {
     /// The tab in front.
     shown: usize,
 
-    /// The bar's height in the window: BAR_H when it draws its own, 0 when
-    /// the server draws it (native road, bar milestone 1).
+    /// Where the rows start: below our own bar (BAR_H) when we draw it;
+    /// below the strip under the server's bar when it draws it and we draw
+    /// under it (look milestone 1: only old lines show there); else 0.
     bar_h: f32,
+    /// We draw our own bar (other desktops); else the server draws it.
+    own_bar: bool,
     /// The bar as last described to the server: each tab's id and title, the front one.
     bar_told: Option<(Vec<(u32, String)>, u32, u32)>,
     waker: Option<Waker>,
@@ -705,6 +708,7 @@ impl Terminal {
             shown: 0,
 
             bar_h: BAR_H,
+            own_bar: true,
             bar_told: None,
 
             waker: None,
@@ -859,7 +863,7 @@ impl Terminal {
 
     /// What of our own bar is at a point; nothing when the server draws the bar.
     fn bar_at(&self, x: f32, y: f32) -> Option<Part> {
-        if self.bar_h == 0.0 { None } else { self.layout().at(x, y) }
+        if self.own_bar { self.layout().at(x, y) } else { None }
     }
 
     /// The room under the bar, which the front tab's panes share.
@@ -1346,6 +1350,9 @@ struct PaneLook<'a> {
     keyboard: bool,
     /// The scrollbar's thumb is held.
     thumb_held: bool,
+    /// How much room above the pane lies under the window's bar: filled with
+    /// the lines before the top row (none on the alternate screen).
+    above: f32,
 }
 
 /// Draws one terminal in its room.
@@ -1357,16 +1364,19 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
     // The font and glyph of each plain character, regular and bold, found once
     // a frame: a screen of text asks for the same hundred some thousands of times.
     let mut plain: [[Option<(u32, u32)>; 128]; 2] = [[None; 128]; 2];
+    // Under the window's bar, above the top row: the lines before it, as many
+    // as reach into the strip (look milestone 1). The alternate screen has none.
+    let extra = if s.grid.alt || look.above <= 0.0 { 0 } else { (((look.above + PAD) / ch).ceil() as usize).min(top_line) };
     scene.push_clip(area, 0.0);
     // The screen is one grid of cells ([`vergence_scene::Command::Cells`]): each
     // cell its ground (none where it is the terminal's own), its ink, its glyph.
     let columns = s.grid.cols;
-    let mut cells: Vec<SceneCell> = Vec::with_capacity(columns * s.grid.rows);
+    let mut cells: Vec<SceneCell> = Vec::with_capacity(columns * (s.grid.rows + extra));
     // Combining marks are few, and drawn over the grid as glyph runs of their own.
-    let mut marks: Vec<(u32, Color, Point, Glyph)> = Vec::new();
-    for r in 0..s.grid.rows {
-        let line = s.shown(r);
-        let top = first + r as f32 * ch;
+    let mut marks: Vec<(usize, u32, Color, Point, Glyph)> = Vec::new();
+    for r in 0..s.grid.rows + extra {
+        let line = if r < extra { s.grid.abs_line(top_line - (extra - r)).unwrap_or(&[]) } else { s.shown(r - extra) };
+        let top = first + (r as f32 - extra as f32) * ch;
         for (col, cell) in line.iter().take(columns).enumerate() {
             let st = cell.style;
             let (mut ink, mut ground) = (p.resolve(st.fg, p.fg, st.bold), p.resolve(st.bg, p.bg, false));
@@ -1399,7 +1409,7 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
                     let (face, glyph) = fonts.glyph(own, mark);
                     let font = font_number(scene, fonts, numbers, face);
                     let after = fonts.advance(face, glyph, size) < cw * 0.5;
-                    marks.push((font, ink, Point::new(left, top + mt.baseline), Glyph { id: glyph, x: (col + if after { cell.width.max(1) as usize } else { 0 }) as f32 * cw, y: 0.0 }));
+                    marks.push((r, font, ink, Point::new(left, top + mt.baseline), Glyph { id: glyph, x: (col + if after { cell.width.max(1) as usize } else { 0 }) as f32 * cw, y: 0.0 }));
                 }
             }
             cells.push(out);
@@ -1407,8 +1417,21 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
         // A line shorter than the screen is wide (kept from a narrower one) ends in nothing.
         cells.resize((r + 1) * columns, SceneCell::default());
     }
-    scene.cells(Point::new(left, first), cw, ch, mt.baseline, size, columns as u32, cells);
-    for (font, ink, origin, glyph) in marks {
+    // The lines before the top row only in the strip under the bar, cut at
+    // its edge: none of them shows in the pane's own room.
+    let below = cells.split_off(extra * columns);
+    if extra > 0 {
+        scene.pop_clip();
+        scene.push_clip(Rect::new(area.x, area.y - look.above, area.w, look.above), 0.0);
+        scene.cells(Point::new(left, first - extra as f32 * ch), cw, ch, mt.baseline, size, columns as u32, cells);
+        for (_, font, ink, origin, glyph) in marks.iter().filter(|m| m.0 < extra) {
+            scene.glyphs(*font, size, *ink, *origin, vec![*glyph]);
+        }
+        scene.pop_clip();
+        scene.push_clip(area, 0.0);
+    }
+    scene.cells(Point::new(left, first), cw, ch, mt.baseline, size, columns as u32, below);
+    for (_, font, ink, origin, glyph) in marks.into_iter().filter(|m| m.0 >= extra) {
         scene.glyphs(font, size, ink, origin, vec![glyph]);
     }
     // What is selected, tinted over its text.
@@ -1462,6 +1485,12 @@ impl App for Terminal {
 
     // Bar milestone 1: in a Vergence session the server draws the tabs.
     fn tabs_by_server(&self) -> bool {
+        true
+    }
+
+    /// The output runs up under the frosted bar (look milestone 1); the
+    /// rows start below it.
+    fn under_bar(&self) -> bool {
         true
     }
 
@@ -2029,8 +2058,10 @@ impl App for Terminal {
         let (cw, ch) = (mt.cell_w, mt.cell_h);
         // The grid that fits a room: the whole of it for a new tab, a pane's for its terminal.
         let fit = |w: f32, h: f32| ((((w - 2.0 * PAD) / cw).floor().max(2.0) as usize).min(2000), (((h - 2.0 * PAD) / ch).floor().max(1.0) as usize).min(1000));
-        // The server draws the bar on the native road; the room starts at the top then.
-        self.bar_h = if frame.bar_by_server { 0.0 } else { BAR_H };
+        // The server draws the bar on the native road: the room starts at the top
+        // then, or below the strip we draw under its bar.
+        self.own_bar = !frame.bar_by_server;
+        self.bar_h = if frame.bar_by_server { frame.top } else { BAR_H };
         self.fits = fit(frame.width, frame.height - self.bar_h);
         // The tabs behind are fitted as well, whenever the window's or the cells'
         // size changes: a program in a tab nobody is looking at is told its real
@@ -2073,7 +2104,9 @@ impl App for Terminal {
                 let row = s.top_line() + if up { 0 } else { s.grid.rows - 1 };
                 s.drag_selection((col, row));
             }
-            let look = PaneLook { palette: p, metrics: mt, size, keyboard: active && self.focused, thumb_held: active && matches!(self.held, Some(Held::Thumb(_))) };
+            // A pane along the top of a window that draws under its bar fills the strip above it.
+            let above = if !self.own_bar && area.y <= self.bar_h + 0.5 { self.bar_h } else { 0.0 };
+            let look = PaneLook { palette: p, metrics: mt, size, keyboard: active && self.focused, thumb_held: active && matches!(self.held, Some(Held::Thumb(_))), above };
             draw_pane(&mut scene, fonts, &mut numbers, s, *area, &look);
         }
         // The lines between panes; the one held, in the accent.

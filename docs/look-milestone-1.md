@@ -251,6 +251,27 @@ Bar Proportions"):
   readable; one 159 ms frame when the shader compiled. 387 tests on all
   three. **Left of step 3**: the GPU test against the CPU reference, the
   frost for shared-memory pictures, and frame-time checks on kepler.
+- **Step 4 done** (2026-11-13): content under the bar. Bus protocol
+  version 3: `WinRequest::UnderBar` (a window draws under its bar) and
+  `WinEvent::Configure`'s `inset` (the strip at the top of its picture under
+  the bar, 0 to `MAX_INSET` = 256, checked on decoding; the round-trip lists
+  carry both). The server answers UnderBar with a configure carrying the
+  bar's height, draws such a window's picture that much higher, and frosts
+  exactly that strip; the preview switch is gone: windows that draw under
+  their bar are frosted, others keep a solid bar. The window's size, memory
+  and placement are its content's, unchanged. vergence-ui: `App::under_bar`,
+  `Frame::top` (the scene `height` includes it), pointer and finger
+  positions moved down by the inset. The terminal draws under its bar: its
+  rows start below the strip (`bar_h` is the inset, so the size it reports
+  to its programs counts only those rows), and a pane along the top fills
+  the strip with the lines before its top row (`PaneLook::above`; none on
+  the alternate screen), clipped to the strip so none shows in the pane's
+  own room (a sliver did, first try; fixed). Seen on Hubble in both styles:
+  output scrolls up under the bar; the frost is measurably there (light bar
+  237-243 against its solid 228-235, dark 66-72 against 56) but subtle: the
+  14 pt blur with the contrast floor turns lines into an even haze, so a
+  smaller FROST_RADIUS is the lever if Dave wants lines to read as lines.
+  387 tests on all three (no new ones beyond the protocol lists).
 
 ## Steps
 

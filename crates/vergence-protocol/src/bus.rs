@@ -12,12 +12,14 @@
 //! notifications ([`ClientMsg::Notify`]), whose events go only to the client
 //! that made them. Version 2 (2026-11-12, bar milestone 1): the server
 //! draws every native window's bar; `Create` lost `own_frame`, and the
-//! window's own Move and Resize requests are gone.
+//! window's own Move and Resize requests are gone. Version 3 (2026-11-13,
+//! look milestone 1): a window may draw under its bar (`UnderBar`), and
+//! `Configure` carries the `inset` it draws there.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
