@@ -843,6 +843,10 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
     } else {
         relay_frame(&mut b.renderer, b.devices[crtc.0].renderer.as_mut(), s, &elements, clear)
     };
+    // A relay turn that only looked whether the copy may start is no frame:
+    // windows are not asked for their next one then (asking on every 3 ms look
+    // had glmark2 drawing ~110 frames a second for a 60 Hz screen).
+    let paced = !matches!(outcome, Ok(Relayed::Waiting));
     match outcome {
         Ok(Relayed::Waiting) => {
             // The primary is still drawing it: look again in 3 ms, not a frame.
@@ -893,7 +897,7 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
             .max_by_key(|(a, _, _)| *a);
         if let Some((_, o, sc)) = main {
             window.with_surfaces(|_, states| with_fractional_scale(states, |fs| fs.set_preferred_scale(sc)));
-            if *o == output {
+            if *o == output && paced {
                 window.send_frame(o, start, Some(Duration::ZERO), |_, _| Some(o.clone()));
             }
         }
@@ -901,13 +905,16 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
     // A client's own cursor surface (animated ones wait for this).
     if let smithay::input::pointer::CursorImageStatus::Surface(cs) = &state.pointer_image.status
         && geo.to_f64().contains(pointer_at)
+        && paced
     {
         smithay::desktop::utils::send_frames_surface_tree(cs, &output, start, Some(Duration::ZERO), |_, _| {
             Some(output.clone())
         });
     }
     // Native windows on this monitor that wait for a frame, and scale changes (native.rs).
-    state.native_frames(&output);
+    if paced {
+        state.native_frames(&output);
+    }
     state.space.refresh();
     state.popups.cleanup();
     let _ = state.display_handle.flush_clients();

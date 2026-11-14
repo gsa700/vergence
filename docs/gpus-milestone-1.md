@@ -196,7 +196,14 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
   ("Silicon Works Multi-touch SW4101C"), tied to the 14" on the
   Touchscreen page (its two-screen choice, untried until now), and the
   server logged its touches "on screen ae05ec511722c55d" (the 14"): touch
-  by USB, the picture from the NVIDIA card's HDMI (acceptance 2's touch).
+  by USB, the picture from the NVIDIA card's HDMI (acceptance 2's touch). Dave:
+  Firefox on the 14" "scrolls clicks and zooms FB".
+- **Frame pacing**: glmark2 benchmarks with vsync off (swap interval 0), so
+  its frame rates were throughput, not pacing (the 46 FPS earlier was the
+  CPU copy). Paced with es2gears, which waits for each frame request: a
+  relay turn that only looks whether the copy may start no longer asks
+  windows for their next frame. Hubble: es2gears **144.0 FPS on the panel
+  (144 Hz), 59.98 on the 14" (60 Hz)**.
 
 ## Steps
 
