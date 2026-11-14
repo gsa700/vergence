@@ -143,6 +143,8 @@ pub struct Server {
     pub inputs: crate::inputs::Inputs,
     /// The "no network cable" notification while it is shown (network.rs).
     pub network_note: Option<u32>,
+    /// Every GPU on the seat as probed at start (gpus.rs; `vctl gpus`).
+    pub gpus: Vec<crate::gpus::GpuInfo>,
     /// The idle clock, screens off and sleep (energy.rs).
     pub energy: crate::energy::Energy,
     pub popups: PopupManager,
@@ -285,6 +287,7 @@ impl Server {
             touch_panels: Vec::new(),
             inputs: Default::default(),
             network_note: None,
+            gpus: Vec::new(),
             touch: Default::default(),
             energy: crate::energy::Energy::new(),
             popups,

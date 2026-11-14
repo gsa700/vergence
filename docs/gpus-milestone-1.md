@@ -4,7 +4,10 @@ Drafted 2026-11-14, when Dave plugged the 14" 4K touch monitor into
 Hubble's HDMI port and nothing showed (Dave: "yes, draft the multi-GPU
 milestone plan"). The whitepaper's §8.3 has the design this milestone
 starts: one renderer per GPU, capabilities probed and never assumed by
-vendor, explicit sync later. **Draft: questions for Dave at the end.**
+vendor, explicit sync later. **Accepted 2026-11-14: "yes to your
+proposals, go ahead with step 1"** (our own code for the second GPU; the
+Intel GPU draws external screens by default; nouveau now, NVIDIA's driver
+and explicit sync as the next GPU milestone).
 
 ## Where things stand (read 2026-11-14 on Hubble)
 
@@ -88,6 +91,22 @@ The NVIDIA proprietary driver (Hubble runs nouveau), explicit sync (needed
 for NVIDIA's own driver; §8.3, decision 1), rendering client windows on the
 NVIDIA GPU and telling clients which GPU sits under them, GPU reset
 recovery across two GPUs, more than two GPUs, multi-card walls.
+
+## Progress
+
+- **Step 1 in: the probe** (2026-11-14). The server's gpus.rs opens every
+  GPU on the seat at start (through libseat, no mode set, no master),
+  reads its driver, connectors (and which have a screen), the formats its
+  planes scan out, and through EGL on its own GBM device the formats it
+  renders to and imports, with whether linear XRGB/ARGB8888 is among them;
+  logs it, keeps it for `vctl gpus`, and closes it again. On Hubble: card0
+  i915 [0000:00:02.0], eDP-1 with a screen, renders 106 formats and imports
+  199; card1 nouveau [0000:01:00.0], **HDMI-A-1 with a screen**, DP-1,
+  renders 80 and imports 114; **both render and import linear XRGB**, so
+  way 1 (drawn on Intel, shown by NVIDIA, a shared linear buffer) needs no
+  copy; the NVIDIA card suspends again after the probe. kepler: one i915,
+  five connectors, no screen (its 14" monitor is on Hubble now). 474 tests
+  (kepler 470).
 
 ## Steps
 

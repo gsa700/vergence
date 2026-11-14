@@ -112,6 +112,8 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
     let context = EGLContext::new(&display)?;
     let renderer = unsafe { GlesRenderer::new(context)? };
     let render_formats: FormatSet = renderer.egl_context().dmabuf_render_formats().iter().copied().collect();
+    // Every GPU on the seat, probed and logged (GPUs milestone 1, step 1).
+    state.gpus = crate::gpus::probe(&mut session_handle, &seat, &path);
     state.shm_formats_from(&renderer);
 
     // GPU buffers from apps (linux-dmabuf v4): Xwayland's glamor and GL apps draw on

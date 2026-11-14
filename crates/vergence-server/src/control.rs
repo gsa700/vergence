@@ -178,6 +178,7 @@ impl Server {
                 format!("shot: next frame of each monitor -> {}/<connector>.png", dir.display())
             }
             "windows" => self.describe_windows(),
+            "gpus" => self.describe_gpus(),
             // The order of use, most recent first, and the focused window (Alt+Tab's order).
             "used" => self.order_of_use_report(),
             // Alt+Tab's list: what it holds, which row is stepped to, whether it shows.
@@ -376,7 +377,7 @@ impl Server {
                 self.loop_signal.stop();
                 "quitting".into()
             }
-            _ => "commands: shot, windows, shelf, session, apps, key <name> (chords: ctrl+v), type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
+            _ => "commands: shot, windows, gpus, shelf, session, apps, key <name> (chords: ctrl+v), type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
         }
     }
 
