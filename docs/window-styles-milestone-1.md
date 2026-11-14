@@ -64,7 +64,7 @@ From Dave's screenshot of macOS's System Settings:
   server's frosted bar (look milestone 1, content under the bar). Over the
   sidebar the frost blends into it, the window buttons on it; over the page
   it frosts the page scrolling up under it, as the terminal's output does.
-- **The page's title and back and forward in the bar**, over the page, not
+- **The page's title and back and forward in the bar** (both dropped from the settings app's bar on 2026-11-14 at Dave's word, docs/settings-milestone-1.md; the protocol keeps `Bar::Tools`), over the page, not
   over the sidebar: the bar description (bus protocol) gains the program's
   own **bar buttons** (an icon, a name for Contract 3, enabled or not; the
   server draws them, the program hears the press, as with tabs) and **where

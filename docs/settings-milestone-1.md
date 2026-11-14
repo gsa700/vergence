@@ -129,6 +129,22 @@ by the computer through usbmuxd before it hands out a connection (Question
   Appearance, "contrast" left Accessibility and Enter opened it. The
   Wallpaper page (every screen's picture in one place) is its own piece,
   next. 441 tests on Hubble, kepler and Techbench.
+- **Step 1 done: the Wallpaper page** (2026-11-14): `Page::Wallpaper(screen)`
+  in Look (a picture icon), the sidebar entry opening the primary screen's;
+  with several screens a row of them first, each with the picture it shows
+  (the primary marked), choosing whose wallpaper the page sets; then Same as
+  the primary screen, Make primary, Fit, Background color, the pictures and
+  Your pictures, as the screen pages had them. The screen pages keep scale,
+  Shown at, Size of controls and the arrangement, and a Wallpaper row saying
+  the picture with a button to the page. Without any screen the Screens
+  group is left out (it said "Wallpaper" before). **The bar over the page is
+  empty** (Dave, 2026-11-14: "drop the heading and the forward back arrows
+  above the right pane"): no back and forward (the history went with them),
+  and the server draws no title in a sidebar window's bar (decor.rs); the
+  window is still named after its page for Alt+Tab and the dock. On Hubble
+  (shots): the page on its one screen; a nested server with two screens: the
+  row, choosing "right", giving it the panda (its own entry in desktop.toml,
+  the desktop and its tile changed). 442 tests on all three.
 
 ## Steps
 

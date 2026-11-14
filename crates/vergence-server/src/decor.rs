@@ -669,7 +669,9 @@ impl Server {
                 continue;
             }
             if frame.is_some() || border.is_some() {
-                let title = self.window_title(&w);
+                // A sidebar window's bar carries no title: its page shows its own
+                // name (Dave, 2026-11-14: drop the heading over the page).
+                let title = if self.window_style(&w).kind == crate::style::Kind::Sidebar { String::new() } else { self.window_title(&w) };
                 let active = focused.as_ref() == Some(&w);
                 let preview = self.tab_preview(&w);
                 let d = self.decor.entry(w.clone()).or_insert_with(Decor::new);

@@ -112,7 +112,7 @@ const BETWEEN_SCREENS: [(&str, &str); 2] = [("Never snap", "never"), ("After a s
 const ALT_TAB: [(&str, &str); 2] = [("Every screen", "all"), ("This screen", "screen")];
 const DEFAULT_ACCENT: Color = Color::rgb(0x3b, 0x82, 0xf6);
 const WHITE: Color = Color::rgb(255, 255, 255);
-/// The sidebar's width, in points: the bar's back and forward start after it.
+/// The sidebar's width, in points.
 const SIDEBAR_W: f32 = 210.0;
 
 /// Whether a page answers a search (`q` lower case): Some(true) by its name,
@@ -149,6 +149,7 @@ mod search_tests {
 enum Icon {
     Appearance,
     Fonts,
+    Wallpaper,
     Windows,
     Dock,
     Screen,
@@ -164,7 +165,7 @@ impl Icon {
     /// Its square's color (one per kind of page, readable under a white mark).
     fn color(self) -> Color {
         match self {
-            Icon::Appearance | Icon::Fonts => Color::rgb(0x2f, 0x6f, 0xd6),
+            Icon::Appearance | Icon::Fonts | Icon::Wallpaper => Color::rgb(0x2f, 0x6f, 0xd6),
             Icon::Windows | Icon::Dock => Color::rgb(0x5b, 0x5f, 0x6b),
             Icon::Screen => Color::rgb(0x1f, 0x8a, 0x8a),
             Icon::Keyboard | Icon::Pointer => Color::rgb(0x6e, 0x55, 0xc9),
@@ -198,6 +199,15 @@ fn icon_mark<M: 'static>(icon: Icon) -> Element<M> {
                 line(scene, (6.0, 15.0), (10.0, 5.0));
                 line(scene, (10.0, 5.0), (14.0, 15.0));
                 line(scene, (7.6, 11.0), (12.4, 11.0));
+            }
+            // A picture: hills under a sun.
+            Icon::Wallpaper => {
+                scene.stroke(Rect::new(x + 4.0, y + 5.0, 12.0, 10.0), 1.5, 1.4, w);
+                scene.fill_rounded(Rect::new(x + 11.6, y + 6.8, 2.4, 2.4), 1.2, w);
+                line(scene, (5.0, 14.0), (8.5, 9.5));
+                line(scene, (8.5, 9.5), (11.0, 12.5));
+                line(scene, (10.5, 12.0), (12.5, 10.5));
+                line(scene, (12.5, 10.5), (15.0, 13.5));
             }
             // A window with its bar.
             Icon::Windows => {
@@ -278,6 +288,9 @@ enum Page {
     Accessibility,
     Overview,
     Screen(usize),
+    /// Every screen's picture in one place (settings milestone 1): the
+    /// screen whose wallpaper is open, by index (0 with one screen or none).
+    Wallpaper(usize),
     About,
     /// About's sub-pages: the license texts, and the code Vergence is built with.
     LicenseText,
@@ -420,10 +433,6 @@ struct ArrangeDrag {
 }
 
 struct App {
-    /// The pages shown before (back) and after (forward) this one, for the
-    /// bar's back and forward (window styles milestone 1).
-    back: Vec<Page>,
-    forward: Vec<Page>,
     /// The strip under the server's frosted bar (Theme::top), for the pages' layout.
     top: std::cell::Cell<f32>,
     /// What is typed in the sidebar's search field (settings milestone 1).
@@ -601,8 +610,6 @@ impl App {
         let mail = Mail { tx, waker: Arc::new(OnceLock::new()) };
         let mut app = App {
             page: Page::Appearance,
-            back: Vec::new(),
-            forward: Vec::new(),
             top: std::cell::Cell::new(0.0),
             search: String::new(),
             accent_text: appearance_text(&desktop, "accent"),
@@ -707,6 +714,20 @@ impl App {
         }
     }
 
+    /// The screen whose wallpaper the page shows: a screen page's, or the
+    /// Wallpaper page's chosen screen.
+    fn wall_output(&self) -> Option<&OutputInfo> {
+        match self.page {
+            Page::Screen(i) | Page::Wallpaper(i) => self.outputs.get(i),
+            _ => None,
+        }
+    }
+
+    /// The primary screen's index, for the Wallpaper page's sidebar entry.
+    fn primary_index(&self) -> usize {
+        self.primary().and_then(|p| self.outputs.iter().position(|o| o.id == p)).unwrap_or(0)
+    }
+
     fn primary(&self) -> Option<String> {
         let ids: Vec<String> = self.outputs.iter().map(|o| o.id.clone()).collect();
         wall::primary(&self.desktop, &ids)
@@ -715,7 +736,7 @@ impl App {
     /// Where the open screen page's wallpaper is kept: None for the primary
     /// (and the only) screen; else its id and label.
     fn scope(&self) -> Option<(String, String)> {
-        let o = self.current_output()?;
+        let o = self.wall_output()?;
         (self.primary().as_deref() != Some(o.id.as_str())).then(|| (o.id.clone(), screen_label(o)))
     }
 
@@ -736,15 +757,7 @@ impl App {
 
     fn handle(&mut self, m: Message) {
         match m {
-            Message::Go(p) => {
-                // A new page: the one left goes on the way back, the way forward is gone.
-                if p != self.page {
-                    self.back.push(self.page);
-                    self.back.truncate(64);
-                    self.forward.clear();
-                }
-                self.open(p)
-            }
+            Message::Go(p) => self.open(p),
             Message::Scheme(i) => self.save_appearance(|t| {
                 t.insert("color-scheme".into(), SCHEMES[i.min(2)].into());
             }),
@@ -769,10 +782,6 @@ impl App {
             Message::Search(s) => self.search = s.chars().take(64).collect(),
             Message::SearchGo => {
                 if let Some(p) = self.found_pages().first().copied() {
-                    if p != self.page {
-                        self.back.push(self.page);
-                        self.forward.clear();
-                    }
                     self.open(p);
                 }
             }
@@ -810,14 +819,18 @@ impl App {
                 t.insert(key.into(), on.into());
             }),
             Message::Outputs(outputs, setup) => {
-                let current = self.current_output().map(|o| o.id.clone());
+                let current = self.wall_output().map(|o| o.id.clone());
                 self.outputs = outputs;
                 self.setup = setup;
                 self.arrange_drag = None;
                 // Keep the same screen's page if it is still there.
                 if let Page::Screen(_) = self.page {
-                    let i = current.and_then(|id| self.outputs.iter().position(|o| o.id == id)).unwrap_or(0);
+                    let i = current.clone().and_then(|id| self.outputs.iter().position(|o| o.id == id)).unwrap_or(0);
                     self.page = Page::Screen(i);
+                }
+                if let Page::Wallpaper(_) = self.page {
+                    let i = current.clone().and_then(|id| self.outputs.iter().position(|o| o.id == id)).unwrap_or(0);
+                    self.page = Page::Wallpaper(i);
                 }
                 if self.page == Page::Overview && self.outputs.len() <= 1 {
                     self.page = Page::Screen(0);
@@ -1042,7 +1055,7 @@ impl App {
                 }
             }
             Message::MakePrimary => {
-                if let Some(new) = self.current_output().map(|o| o.id.clone()) {
+                if let Some(new) = self.wall_output().map(|o| o.id.clone()) {
                     let old = self.primary().and_then(|p| self.outputs.iter().find(|o| o.id == p).map(|o| (o.id.clone(), screen_label(o))));
                     self.save(|d| wall::make_primary(d, old.as_ref().map(|(i, l)| (i.as_str(), l.as_str())), &new));
                 }
@@ -1238,16 +1251,17 @@ impl App {
     fn page_groups(&self) -> Vec<(&'static str, Vec<(String, Page, Icon, &'static str)>)> {
         let multi = self.outputs.len() > 1;
         let screens_page = if multi { Page::Overview } else { Page::Screen(0) };
-        let mut screens = vec![(if self.outputs.is_empty() { "Wallpaper".to_string() } else { "Screens".to_string() }, screens_page, Icon::Screen, "screen display monitor scale resolution arrangement wallpaper picture")];
+        let mut screens = vec![("Screens".to_string(), screens_page, Icon::Screen, "screen display monitor scale resolution arrangement")];
         if multi {
             for (i, o) in self.outputs.iter().enumerate() {
-                screens.push((screen_label(o), Page::Screen(i), Icon::Screen, "screen display monitor scale wallpaper"));
+                screens.push((screen_label(o), Page::Screen(i), Icon::Screen, "screen display monitor scale"));
             }
         }
-        vec![
+        let mut groups = vec![
             ("Look", vec![
-                ("Appearance".into(), Page::Appearance, Icon::Appearance, "style light dark accent color frost tab tint wallpaper controls size"),
+                ("Appearance".into(), Page::Appearance, Icon::Appearance, "style light dark accent color frost tab tint controls size"),
                 ("Theme and fonts".into(), Page::Theme, Icon::Fonts, "theme font fonts monospace interface icons cursor"),
+                ("Wallpaper".into(), Page::Wallpaper(self.primary_index()), Icon::Wallpaper, "wallpaper picture pictures background image photo fit color primary"),
             ]),
             ("Desktop", vec![
                 ("Windows".into(), Page::Windows, Icon::Windows, "window title bar buttons controls minimize maximize close snap snapping alt tab keys x11"),
@@ -1264,7 +1278,12 @@ impl App {
                 ("Energy".into(), Page::Energy, Icon::Energy, "energy power sleep screens off idle"),
                 ("About".into(), Page::About, Icon::About, "about version license notices"),
             ]),
-        ]
+        ];
+        // No screen (none reported yet): nothing for the Screens pages to show.
+        if self.outputs.is_empty() {
+            groups.retain(|(h, _)| *h != "Screens");
+        }
+        groups
     }
 
     /// The pages the search finds: by name, then by the words of their settings.
@@ -1286,6 +1305,7 @@ impl App {
     fn sidebar(&self) -> Element<Message> {
         let selected_page = |p: Page| match p {
             Page::About => matches!(self.page, Page::About | Page::LicenseText | Page::Notices),
+            Page::Wallpaper(_) => matches!(self.page, Page::Wallpaper(_)),
             p => self.page == p,
         };
         let item = |text: String, page: Page, icon: Icon, child: bool| -> Element<Message> {
@@ -2025,18 +2045,8 @@ impl App {
     fn screen(&self) -> Element<Message> {
         let multi = self.outputs.len() > 1;
         let o = self.current_output();
-        let scope = self.scope();
-        let shown = wall::shown(&self.desktop, scope.as_ref().map(|(i, _)| i.as_str()));
-        let is_primary = scope.is_none();
-        let primary_label = self.primary().and_then(|p| self.outputs.iter().find(|o| o.id == p)).map(screen_label).unwrap_or_default();
-        let title = o.map(screen_label).unwrap_or_else(|| "Wallpaper".into());
-        let description = if !multi {
-            "Its scale and wallpaper, drawn at the screen's own pixels.".to_string()
-        } else if is_primary {
-            "The primary screen: its wallpaper is the default, shown on every other screen that has none of its own.".to_string()
-        } else {
-            format!("Shows the primary screen's wallpaper ({primary_label}) unless it has its own.")
-        };
+        let title = o.map(screen_label).unwrap_or_else(|| "Screens".into());
+        let description = if multi { "Its scale and where it sits, drawn at the screen's own pixels." } else { "Its scale, drawn at the screen's own pixels." };
         let mut items: Vec<Element<Message>> = Vec::new();
         if multi && let Page::Screen(i) = self.page {
             items.push(self.group(None, vec![panel(self.arrangement(Some(i), false, 110.0)).padding(6.0).width(Length::FILL)]));
@@ -2066,6 +2076,68 @@ impl App {
             }
             items.push(self.group(Some("Display"), rows));
         }
+        // Its picture is chosen on the Wallpaper page (settings milestone 1).
+        if let Page::Screen(i) = self.page {
+            let shown = wall::shown(&self.desktop, self.scope().as_ref().map(|(id, _)| id.as_str()));
+            let what = shown.image.as_deref().and_then(|p| p.file_stem()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| format!("Color {}", shown.color));
+            items.push(self.group(
+                Some("Wallpaper"),
+                vec![setting(&short_name(&what, 40), "Chosen on the Wallpaper page.", button(label("Wallpaper").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Go(Page::Wallpaper(i))).name("Open Wallpaper"))],
+            ));
+        }
+        items.push(self.status_line());
+        self.page_layout(&title, description, items)
+    }
+
+    /// Every screen's picture in one place (settings milestone 1): with
+    /// several screens, a row of them to choose whose wallpaper is open, then
+    /// its picture, fit and color, and the pictures to choose from.
+    fn wallpaper(&self) -> Element<Message> {
+        let multi = self.outputs.len() > 1;
+        let scope = self.scope();
+        let shown = wall::shown(&self.desktop, scope.as_ref().map(|(i, _)| i.as_str()));
+        let is_primary = scope.is_none();
+        let primary_label = self.primary().and_then(|p| self.outputs.iter().find(|o| o.id == p)).map(screen_label).unwrap_or_default();
+        let description = if !multi {
+            "The picture behind your windows, drawn at the screen's own pixels.".to_string()
+        } else if is_primary {
+            "The primary screen's wallpaper is the default, shown on every other screen that has none of its own.".to_string()
+        } else {
+            format!("Shows the primary screen's wallpaper ({primary_label}) unless it has its own.")
+        };
+        let (accent, card) = (self.accent(), self.card_color());
+        let mut items: Vec<Element<Message>> = Vec::new();
+        if multi {
+            // The screens, each with the picture it shows.
+            let open = match self.page {
+                Page::Wallpaper(i) => i,
+                _ => 0,
+            };
+            let primary = self.primary();
+            let mut screens_out = Vec::new();
+            for (i, o) in self.outputs.iter().enumerate() {
+                let own = (primary.as_deref() != Some(o.id.as_str())).then_some(o.id.as_str());
+                let its = wall::shown(&self.desktop, own);
+                let pic: Element<Message> = match its.image.as_ref().and_then(|p| self.grid.get(p)) {
+                    Some(img) => picture(img.clone()).width(Length::Fixed(thumbs::GRID_W)).height(Length::Fixed(thumbs::GRID_H)),
+                    None => panel(space()).color(parse_hex(&its.color).unwrap_or(card)).radius(0.0).width(Length::Fixed(thumbs::GRID_W)).height(Length::Fixed(thumbs::GRID_H)),
+                };
+                let mut name = screen_label(o);
+                if primary.as_deref() == Some(o.id.as_str()) {
+                    name.push_str(" (primary)");
+                }
+                let caption = label(short_name(&name, 25)).size(11.0).width(Length::Fixed(thumbs::GRID_W));
+                screens_out.push(
+                    button(column(vec![pic, caption]).spacing(4.0))
+                        .padding(3.0)
+                        .look(ButtonLook::Custom { fill: None, edge: (i == open).then_some((accent, 3.0)), radius: 6.0 })
+                        .on_press(Message::Go(Page::Wallpaper(i)))
+                        .name(name)
+                        .key(1000 + i as u64),
+                );
+            }
+            items.push(self.group(Some("Screens"), vec![row(screens_out).spacing(8.0).wrap().width(Length::FILL)]));
+        }
         let mut wp: Vec<Element<Message>> = Vec::new();
         if multi && !is_primary {
             let detail = if shown.own { "Off: this screen has its own.".to_string() } else { format!("Shows {primary_label}'s wallpaper.") };
@@ -2088,7 +2160,6 @@ impl App {
         ));
         items.push(self.group(Some("Wallpaper"), wp));
         // The pictures.
-        let (accent, card) = (self.accent(), self.card_color());
         let mut tiles_out = Vec::new();
         for (i, p) in self.files.iter().enumerate() {
             let selected = shown.image.as_deref() == Some(p.as_path());
@@ -2126,7 +2197,7 @@ impl App {
         ));
         items.push(self.group(Some("Your pictures"), yours));
         items.push(self.status_line());
-        self.page_layout(&title, &description, items)
+        self.page_layout("Wallpaper", &description, items)
     }
 
     fn browser_page(&self) -> Element<Message> {
@@ -2294,6 +2365,7 @@ impl Program for App {
             Page::Accessibility => "Accessibility".into(),
             Page::Overview => "Screens".into(),
             Page::Screen(i) => self.outputs.get(i).map(screen_label).unwrap_or_else(|| "Screens".into()),
+            Page::Wallpaper(_) => "Wallpaper".into(),
             Page::About | Page::LicenseText | Page::Notices => "About".into(),
         }
     }
@@ -2328,8 +2400,9 @@ impl Program for App {
             Page::Sound => self.sound_page(),
             Page::Accessibility => self.accessibility(),
             Page::Overview => self.overview(),
-            Page::Screen(_) if self.browser.is_some() => self.browser_page(),
             Page::Screen(_) => self.screen(),
+            Page::Wallpaper(_) if self.browser.is_some() => self.browser_page(),
+            Page::Wallpaper(_) => self.wallpaper(),
             Page::About => self.about(),
             Page::LicenseText => self.license_page(),
             Page::Notices => self.notices_page(),
@@ -2348,31 +2421,17 @@ impl Program for App {
         true
     }
 
-    /// Back and forward in the bar over the page, then the page's name (the
-    /// window's title), starting where the sidebar ends.
+    /// No buttons and no title in the bar over the page (Dave, 2026-11-14:
+    /// the page shows its own name); the bar still starts where the sidebar
+    /// ends.
     fn bar(&self) -> Option<vergence_ui::Bar> {
-        Some(vergence_ui::Bar::Tools {
-            buttons: vec![
-                vergence_ui::BarButton { id: 1, icon: vergence_ui::BarIcon::Back, name: "Back".into(), enabled: !self.back.is_empty() },
-                vergence_ui::BarButton { id: 2, icon: vergence_ui::BarIcon::Forward, name: "Forward".into(), enabled: !self.forward.is_empty() },
-            ],
-            from: (SIDEBAR_W + 1.0) as f64,
-        })
-    }
-
-    fn bar_button(&mut self, id: u32, window: &mut Window) {
-        let (from, to) = if id == 1 { (&mut self.back, &mut self.forward) } else { (&mut self.forward, &mut self.back) };
-        if let Some(p) = from.pop() {
-            to.push(self.page);
-            self.open(p);
-            window.set_title(&self.title());
-        }
+        Some(vergence_ui::Bar::Tools { buttons: Vec::new(), from: (SIDEBAR_W + 1.0) as f64 })
     }
 
     fn update(&mut self, m: Message, window: &mut Window) {
         let was = self.page;
         self.handle(m);
-        // The bar shows the page's name (window styles milestone 1).
+        // The window is named after its page (Alt+Tab, the dock; the bar draws no title).
         if self.page != was {
             window.set_title(&self.title());
         }
