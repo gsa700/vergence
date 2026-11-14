@@ -7,7 +7,7 @@ page, Wi-Fi by wpa_supplicant ("wpa_supplicant is fine"), no Bluetooth yet
 of our own, an Advanced part per page) and his screenshot of macOS's System
 Settings (docs/reference/macos-system-settings-2026-11-14.png). Comes after
 window styles milestone 1, which made the settings app a sidebar window.
-**Accepted 2026-11-14: Dave agreed to the Wi-Fi switch below and answered
+**All steps in 2026-11-14; acceptance below. Accepted 2026-11-14: Dave agreed to the Wi-Fi switch below and answered
 the proposals ("yes to your proposals on the rest"); VPN parked ("lets just
 park that for now").**
 
@@ -254,7 +254,31 @@ by the computer through usbmuxd before it hands out a connection (Question
   it. Read only. On Hubble (shots, on Wi-Fi, cable out): Ethernet "Cable
   not connected", Wi-Fi "Connected to dNET1.". The phone by cable is Dave's
   to plug in (usbmuxd not installed, to see whether it tethers without).
-  462 tests on all three.
+  462 tests on all three. Dave plugged the cable back in: Wi-Fi off by
+  itself, the page "Ethernet: Connected" and "Wi-Fi: Off.". The iPhone:
+  seen (Apple 05ac:12a8), left in USB configuration 1; switched to 4 by
+  hand, ipheth made `enp0s20f0u4c4i2` (the page: "iPhone (USB): Not
+  sharing its connection"), never a link; the phone asked "Trust" on each
+  reconnect and kept nothing, since the computer's half of the pairing is
+  usbmuxd's. **Parked** (Dave, 2026-11-14: "3, park the cable for now");
+  docs/next-settings.md has the options.
+- **Step 6 in: docs** (2026-11-14): whitepaper Draft 0.15 (§6.9 "The settings
+  app as built", §9), README, CLAUDE.md, docs/next-settings.md, this plan.
+
+## Where acceptance stands (2026-11-14)
+
+1. Tests: 462 on Hubble, kepler and Techbench. **Met.**
+2. Groups, headings, icons, "frost" finds Appearance, every old page
+   reached, moved settings work. **Met** (Hubble shots).
+3. Wi-Fi on Hubble: networks with signal (met), join with the password and
+   an address (met, Dave), wrong password said (met), turning off and on
+   (met, and by the cable both ways, Dave), Advanced (met). Forgetting and
+   the phone's hotspot: **open, Dave's** (Forget tested against the fake
+   wpa_supplicant only).
+4. The iPhone by cable: the page says what it lacks (met); a connection:
+   **parked** (needs pairing).
+5. kepler says there is no Wi-Fi device (met); Techbench has no Wi-Fi card,
+   so the NetworkManager message is untried on hardware.
 
 ## Steps
 

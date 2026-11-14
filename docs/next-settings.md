@@ -52,6 +52,14 @@ pairing daemon) before it hands out a connection: borrowing a daemon, so a
 question for Dave when the plan is drafted. To check on each machine with
 Dave's phone (Control already uses it this way, over USB).
 
+**Tried 2026-11-14 on Hubble, parked** (Dave: "3, park the cable for now"):
+without usbmuxd the phone stays in USB configuration 1; switched to 4 by
+hand, ipheth makes its interface but it never gets a link, and the phone
+asks "Trust" again on every reconnect, because the computer's half of the
+pairing (keys, a stored pairing record, a session held open) is missing.
+Later: Void's usbmuxd with libimobiledevice (borrowing: ask), or our own
+USB mux and pairing (likely a TLS library). The hotspot by Wi-Fi works.
+
 ## The settings window's shape (Dave, 2026-11-14, from macOS's System Settings)
 
 Dave's screenshot, docs/reference/macos-system-settings-2026-11-14.png ("shows
