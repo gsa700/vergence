@@ -68,6 +68,11 @@ pub struct BarLook {
     pub shape_rest: u8,
     pub tab_rest: u8,
     pub shape_hover: u8,
+    /// A tab whose program runs as the superuser (its title white on it),
+    /// and the bar's ground while such a tab is in front, focused or not.
+    pub alert: Rgb,
+    pub alert_ground: Rgb,
+    pub alert_ground_off: Rgb,
 }
 
 /// The dark style (the desktop's first look), and the light one. Their
@@ -87,6 +92,9 @@ pub const BAR_DARK: BarLook = BarLook {
     shape_rest: 20,
     tab_rest: 26,
     shape_hover: 41,
+    alert: Rgb(128, 26, 26),
+    alert_ground: Rgb(56, 12, 14),
+    alert_ground_off: Rgb(60, 32, 34),
 };
 
 pub const BAR_LIGHT: BarLook = BarLook {
@@ -102,6 +110,9 @@ pub const BAR_LIGHT: BarLook = BarLook {
     shape_rest: 16,
     tab_rest: 22,
     shape_hover: 30,
+    alert: Rgb(148, 30, 28),
+    alert_ground: Rgb(244, 212, 208),
+    alert_ground_off: Rgb(246, 234, 232),
 };
 
 /// The bar look for light or dark.
@@ -322,6 +333,17 @@ mod tests {
                 }
                 let button = over(ground, l.shape, l.shape_rest);
                 assert!(contrast(ink, button) >= 3.0, "{name}: button mark {:.2}", contrast(ink, button));
+                // While a superuser's tab is in front: the same on the alarm ground.
+                let alarm = if focused { l.alert_ground } else { l.alert_ground_off };
+                for (what, g) in [("alarm ground", alarm), ("tab behind on it", over(alarm, l.shape, l.tab_rest)), ("under the pointer on it", over(alarm, l.shape, l.shape_hover))] {
+                    let c = contrast(ink, g);
+                    assert!(c >= need, "{name}, focused {focused}: title on {what} {c:.2} < {need}");
+                }
+            }
+            // The superuser's tab: its white title on its red, alone and under the pointer.
+            for g in [l.alert, over(l.alert, l.shape, l.shape_hover)] {
+                let c = contrast(Rgb(255, 255, 255), g);
+                assert!(c >= 4.5, "{name}: white on the alarm tab {c:.2}");
             }
         }
         assert!(contrast(Rgb(255, 255, 255), CLOSE) >= 4.5);

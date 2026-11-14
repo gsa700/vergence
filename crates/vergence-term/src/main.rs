@@ -177,6 +177,10 @@ const WHEEL_LINES: isize = 3;
 /// The terminal's timers (`Window::wake_after`).
 const TIMER_LONG_PRESS: u64 = 1;
 const TIMER_FLICK: u64 = 2;
+/// Once a second: has a tab's program become the superuser, or stopped
+/// being (look milestone 1)? A frame, and the bar told, only if one has.
+const TIMER_ROOT: u64 = 3;
+const ROOT_TICK: Duration = Duration::from_secs(1);
 /// A flick: the least speed that throws the text (units a second), the
 /// most, how fast it slows (a fraction of its speed lost a second, as an
 /// exponent), where it stops, and how often it moves the text.
@@ -396,6 +400,9 @@ struct Session {
     /// terminal in a flood holds that nearly all the time, and the window
     /// would wait for it at every wake only to learn "draw me".
     news: Arc<AtomicU8>,
+    /// The foreground process group last looked at, whether it runs as the
+    /// superuser, and when that was asked (look milestone 1: the red tab).
+    root_seen: std::cell::Cell<Option<(u32, bool, Instant)>>,
 }
 
 /// The screen changed: a frame is wanted if this terminal is in front. Up
@@ -466,11 +473,33 @@ impl Session {
             said.fetch_or(NEWS_STATE, Ordering::SeqCst);
             waker.wake();
         })?;
-        Ok(Session { screen, pty, title: String::new(), news })
+        Ok(Session { screen, pty, title: String::new(), news, root_seen: std::cell::Cell::new(None) })
     }
 
     fn label(&self) -> String {
         if self.title.is_empty() { "Terminal".into() } else { self.title.clone() }
+    }
+
+    /// Whether the program the user is typing to runs as the superuser
+    /// (sudo -s, su, sudo's own password prompt, sudo make install while it
+    /// runs, a script's sudo). The foreground group is asked each time (a
+    /// system call); whether any of its processes is the superuser when the
+    /// group changes, or every two seconds while it does not (Linux reads
+    /// /proc; FreeBSD runs one `ps`, so at most one every two seconds a pane).
+    /// A terminal started as root is red throughout.
+    fn as_root(&self) -> bool {
+        // Every process of the group counts, the shell's own group included: a
+        // script leads the group the sudo it runs is in (found on Hubble).
+        let Some(group) = self.pty.foreground() else { return false };
+        if let Some((seen, root, at)) = self.root_seen.get()
+            && seen == group
+            && at.elapsed() < Duration::from_secs(2)
+        {
+            return root;
+        }
+        let root = program::group_has_root(group);
+        self.root_seen.set(Some((group, root, Instant::now())));
+        root
     }
 
     /// Makes the terminal's grid cols x rows, if it is not, and tells its program.
@@ -509,6 +538,11 @@ impl Tab {
     }
 
     /// The tab is called what its active terminal is.
+    /// A pane of the tab runs its program as the superuser.
+    fn as_root(&self) -> bool {
+        self.panes.iter().any(|(_, s)| s.as_root())
+    }
+
     fn label(&self) -> String {
         self.session(self.active).map_or_else(|| "Terminal".into(), Session::label)
     }
@@ -569,8 +603,10 @@ struct Terminal {
     bar_h: f32,
     /// We draw our own bar (other desktops); else the server draws it.
     own_bar: bool,
+    /// The superuser check's timer is running.
+    root_timer: bool,
     /// The bar as last described to the server: each tab's id and title, the front one.
-    bar_told: Option<(Vec<(u32, String)>, u32, u32)>,
+    bar_told: Option<(Vec<(u32, String, bool)>, u32, u32)>,
     waker: Option<Waker>,
     palette: Palette,
     /// How opaque the ground is (vergence_ui::opacity_setting): less than 1,
@@ -709,6 +745,7 @@ impl Terminal {
 
             bar_h: BAR_H,
             own_bar: true,
+            root_timer: false,
             bar_told: None,
 
             waker: None,
@@ -1524,7 +1561,7 @@ impl App for Terminal {
     }
 
     fn bar(&mut self) -> Option<vergence_ui::Bar> {
-        let tabs: Vec<(u32, String)> = self.tabs.iter().map(|t| (t.id, t.label())).collect();
+        let tabs: Vec<(u32, String, bool)> = self.tabs.iter().map(|t| (t.id, t.label(), t.as_root())).collect();
         let front = self.tabs.get(self.shown).map_or(0, |t| t.id);
         // The tab in front is the page's color (look milestone 1): our ground.
         let bg = self.palette.bg;
@@ -1533,7 +1570,7 @@ impl App for Terminal {
             return None;
         }
         let bar = vergence_ui::Bar::Tabs {
-            tabs: tabs.iter().map(|(id, title)| vergence_ui::BarTab { id: *id, title: title.chars().take(200).collect(), closable: true }).collect(),
+            tabs: tabs.iter().map(|(id, title, root)| vergence_ui::BarTab { id: *id, title: title.chars().take(200).collect(), closable: true, alert: *root }).collect(),
             front,
             plus: true,
             accent: Some(page),
@@ -1656,6 +1693,14 @@ impl App for Terminal {
     fn timer(&mut self, id: u64, window: &mut Window) {
         let now = Instant::now();
         match id {
+            TIMER_ROOT => {
+                let now_root: Vec<bool> = self.tabs.iter().map(Tab::as_root).collect();
+                let told: Vec<bool> = self.bar_told.as_ref().map(|(tabs, ..)| tabs.iter().map(|t| t.2).collect()).unwrap_or_default();
+                if now_root != told {
+                    window.redraw();
+                }
+                window.wake_after(TIMER_ROOT, ROOT_TICK);
+            }
             // A finger held still on the text is the right button there: the menu.
             TIMER_LONG_PRESS => {
                 if let Some(vergence_ui::touch::Gesture::LongPress { x, y }) = self.fingers.long_press(now)
@@ -1685,6 +1730,11 @@ impl App for Terminal {
     }
 
     fn woken(&mut self, window: &mut Window) {
+        // The superuser check's timer, armed at the first wake (output, settings).
+        if !self.root_timer {
+            self.root_timer = true;
+            window.wake_after(TIMER_ROOT, ROOT_TICK);
+        }
         self.open_asked(window);
         self.take_moves(window);
         // Asked once the window has shown a frame: a request made before the
@@ -2082,8 +2132,9 @@ impl App for Terminal {
 
         if !frame.bar_by_server {
             let titles: Vec<String> = self.tabs.iter().map(Tab::label).collect();
+            let alerts: Vec<bool> = self.tabs.iter().map(Tab::as_root).collect();
             let layout = Layout::new(frame.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right);
-            bar::draw(&mut scene, fonts, &layout, &bar::Look { bar: vergence_look::bar_look(self.settings.light), frosted: false, focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, title: "", shown: self.shown, hover: self.hover });
+            bar::draw(&mut scene, fonts, &layout, &bar::Look { bar: vergence_look::bar_look(self.settings.light), frosted: false, focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, alerts: &alerts, title: "", shown: self.shown, hover: self.hover });
         }
 
         let Some(tab) = self.tabs.get(self.shown) else { return scene };

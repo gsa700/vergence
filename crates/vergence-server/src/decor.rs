@@ -106,7 +106,7 @@ pub struct Decor {
 
 /// A bar drawn for one scale: what it shows, and the pixels.
 struct BarPicture {
-    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, bool, bool),
+    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, bool, bool, Vec<bool>),
     buffer: MemoryRenderBuffer,
     /// Its pixels' width and height (the scale's, not the bar's points).
     px: (i32, i32),
@@ -116,6 +116,8 @@ struct BarPicture {
 /// front, its accent, and each tab's id (what the program calls it).
 struct Tabs {
     titles: Vec<String>,
+    /// Which tabs run as the superuser (look milestone 1).
+    alerts: Vec<bool>,
     shown: usize,
     accent: Option<u32>,
     ids: Vec<u32>,
@@ -446,6 +448,7 @@ impl Server {
                     let hover = hovered.as_ref().filter(|(hw, _)| *hw == w).map(|(_, p)| *p);
                     let width = f.title.size.w;
                     let (mut titles, mut shown, accent) = f.tabs.as_ref().map(|t| (t.titles.clone(), t.shown, t.accent)).unwrap_or_default();
+                    let mut alerts = f.tabs.as_ref().map(|t| t.alerts.clone()).unwrap_or_default();
                     // A tab being dragged (dispatch.rs): the row as it would be if let
                     // go now; out of the window, without it.
                     if let Some((from, to)) = preview
@@ -460,12 +463,13 @@ impl Server {
                             }
                         }
                         titles = order.iter().map(|&i| titles[i].clone()).collect();
+                        alerts = order.iter().map(|&i| alerts.get(i).copied().unwrap_or(false)).collect();
                         shown = order.iter().position(|&i| i == front).unwrap_or(0);
                     }
-                    let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent, light, frosted);
+                    let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent, light, frosted, alerts.clone());
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
-                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, false, false),
+                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, false, false, Vec::new()),
                         buffer: MemoryRenderBuffer::new(Fourcc::Abgr8888, (1, 1), 1, Transform::Normal, None),
                         px: (1, 1),
                     });
@@ -492,6 +496,7 @@ impl Server {
                             font: face,
                             font_size: vergence_bar::FONT_SIZE,
                             titles: &titles,
+                            alerts: &alerts,
                             title: &title,
                             shown,
                             hover,
@@ -524,7 +529,14 @@ impl Server {
                         let rows = (TITLE_H as f64 * per_point).round().min(px.h as f64);
                         let strip = Rectangle::<f64, Logical>::from_size((px.w as f64, rows).into());
                         let inner = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at.to_f64(), texture, None, Some(strip), Some(f.title.size), Kind::Unspecified);
-                        let (ground, ink) = if active { (style.ground, style.ink) } else { (style.ground_off, style.ink_off) };
+                        // The frost's tint: the bar's ground, the alarm's while a superuser's tab is in front.
+                        let front_alert = alerts.get(shown).copied().unwrap_or(false);
+                        let (ground, ink) = match (front_alert, active) {
+                            (true, true) => (style.alert_ground, style.ink),
+                            (true, false) => (style.alert_ground_off, style.ink_off),
+                            (false, true) => (style.ground, style.ink),
+                            (false, false) => (style.ground_off, style.ink_off),
+                        };
                         let unit = |c: vergence_look::Rgb| (c.0 as f32 / 255.0, c.1 as f32 / 255.0, c.2 as f32 / 255.0);
                         let (gr, gg, gb) = unit(ground);
                         let (ir, ig, ib) = unit(ink);
@@ -678,6 +690,7 @@ fn tabs_of(w: &Win) -> Option<Tabs> {
         vergence_protocol::window::Bar::Tabs { tabs, front, accent, .. } => Some(Tabs {
             shown: tabs.iter().position(|t| t.id == front).unwrap_or(0),
             titles: tabs.iter().map(|t| t.title.clone()).collect(),
+            alerts: tabs.iter().map(|t| t.alert).collect(),
             ids: tabs.iter().map(|t| t.id).collect(),
             accent,
         }),

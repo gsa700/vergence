@@ -14,7 +14,8 @@
 //! draws every native window's bar; `Create` lost `own_frame`, and the
 //! window's own Move and Resize requests are gone. Version 3 (2026-11-13,
 //! look milestone 1): a window may draw under its bar (`UnderBar`), and
-//! `Configure` carries the `inset` it draws there.
+//! `Configure` carries the `inset` it draws there; a tab may be marked
+//! `alert` (its program runs as the superuser).
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 

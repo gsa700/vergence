@@ -19,6 +19,7 @@ unsafe extern "C" {
     fn setsid() -> i32;
     fn signal(signum: i32, handler: usize) -> usize;
     fn ioctl(fd: i32, request: std::ffi::c_ulong, ...) -> i32;
+    fn tcgetpgrp(fd: i32) -> i32;
 }
 
 const O_RDWR: i32 = 2;
@@ -127,6 +128,14 @@ impl Pty {
     /// The program's process id (its working directory is read by it, program.rs).
     pub fn pid(&self) -> u32 {
         self.child.id()
+    }
+
+    /// The terminal's foreground process group: the program the user is
+    /// typing to now (the shell itself, or what it started). Asked of the
+    /// master (POSIX: Linux and FreeBSD answer there for the slave).
+    pub fn foreground(&self) -> Option<u32> {
+        let group = unsafe { tcgetpgrp(self.master.as_raw_fd()) };
+        (group > 0).then_some(group as u32)
     }
 
     /// A handle for reading the shell's output on another thread.

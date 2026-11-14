@@ -272,6 +272,24 @@ Bar Proportions"):
   14 pt blur with the contrast floor turns lines into an even haze, so a
   smaller FROST_RADIUS is the lever if Dave wants lines to read as lines.
   387 tests on all three (no new ones beyond the protocol lists).
+- **Step 6 done** (2026-11-13): red for the superuser. The protocol's `Tab`
+  has `alert` (part of today's version 3); the server draws an alert tab in
+  `BarLook::alert` (dark 128,26,26; light 148,30,28) with a white title, and
+  while it is in front the bar's ground and the frost's tint are
+  `alert_ground`/`_off`; the contrast test covers both (white on the alarm
+  tab; titles on the alarm grounds, focused 4.5:1, unfocused 3:1). The
+  terminal asks each pane's pty for its foreground group (`tcgetpgrp`) and
+  whether any process in that group runs as root (`program::group_has_root`:
+  Linux /proc, FreeBSD one `ps`), cached two seconds per group; checked
+  after each frame and once a second by a timer armed at the first wake
+  (`TIMER_ROOT`), which asks for a frame only when a tab's answer changed.
+  Found on Hubble on the way: the bar was only told after frames (a quiet
+  sudo never turned red), and checking only the group's leader missed a
+  script's sudo (the script leads the group), as did treating the shell's
+  own group as "at the prompt". Seen on Hubble: a tab red while `sudo -n
+  sleep 20` ran from a script, back within a second after. 389 tests on
+  all three (the effective user and the group search on Linux and on
+  FreeBSD's ps path); the red not yet seen on kepler's screen.
 
 ## Steps
 

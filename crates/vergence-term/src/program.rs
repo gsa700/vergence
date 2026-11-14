@@ -232,9 +232,74 @@ pub fn cwd_of(pid: u32) -> Option<String> {
     }
 }
 
+/// The effective user of process `pid`, if it can be read: Linux's
+/// /proc/<pid>/status (its Uid line: real, effective, saved, filesystem);
+/// elsewhere (FreeBSD) `ps -o uid=`, which prints the effective user.
+pub fn euid_of(pid: u32) -> Option<u32> {
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+        status.lines().find_map(|l| l.strip_prefix("Uid:")).and_then(|ids| ids.split_whitespace().nth(1)?.parse().ok())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let out = std::process::Command::new("ps").args(["-o", "uid=", "-p", &pid.to_string()]).stderr(std::process::Stdio::null()).output().ok()?;
+        String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+    }
+}
+
+/// Whether any process of process group `group` runs as the superuser (a
+/// script's group holds the sudo it runs, though the script leads it):
+/// Linux's /proc/<pid>/stat for each process's group; elsewhere (FreeBSD)
+/// one `ps` listing of every process's group and effective user.
+pub fn group_has_root(group: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(dir) = std::fs::read_dir("/proc") else { return false };
+        dir.flatten().filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok()).any(|pid| {
+            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { return false };
+            // After the name in parentheses: state, parent, group, ...
+            let pgrp = stat.rfind(')').and_then(|i| stat[i + 1..].split_whitespace().nth(2)?.parse::<u32>().ok());
+            pgrp == Some(group) && euid_of(pid) == Some(0)
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let Ok(out) = std::process::Command::new("ps").args(["-ax", "-o", "pgid=", "-o", "uid="]).stderr(std::process::Stdio::null()).output() else { return false };
+        String::from_utf8_lossy(&out.stdout).lines().any(|l| {
+            let mut f = l.split_whitespace();
+            f.next().and_then(|g| g.parse::<u32>().ok()) == Some(group) && f.next() == Some("0")
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The red tab's question, answered on each platform: this test's own
+    /// process is the user running it; a process that does not exist, none.
+    #[test]
+    fn the_effective_user_of_a_process_is_read() {
+        unsafe extern "C" {
+            fn geteuid() -> u32;
+        }
+        assert_eq!(euid_of(std::process::id()), Some(unsafe { geteuid() }));
+        assert_eq!(euid_of(999_999_999), None);
+    }
+
+    /// This test's own process group has a superuser in it only if the
+    /// tests run as root.
+    #[test]
+    fn a_process_group_is_searched_for_the_superuser() {
+        unsafe extern "C" {
+            fn geteuid() -> u32;
+            fn getpgrp() -> i32;
+        }
+        let (me, group) = unsafe { (geteuid(), getpgrp() as u32) };
+        assert_eq!(group_has_root(group), me == 0);
+        assert!(!group_has_root(999_999_999));
+    }
 
     #[test]
     fn the_state_file_round_trips_and_a_bad_one_opens_nothing() {

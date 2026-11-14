@@ -328,6 +328,9 @@ pub struct Look<'a> {
     pub font: Option<FaceId>,
     pub font_size: f32,
     pub titles: &'a [String],
+    /// Which tabs' programs run as the superuser: drawn in the alarm red,
+    /// and the bar's ground goes red while one of them is in front.
+    pub alerts: &'a [bool],
     /// The window's title, for a bar without tabs ([`Layout::plain`]).
     pub title: &'a str,
     pub shown: usize,
@@ -342,8 +345,15 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
     let shape_rest = shape(l.shape, l.shape_rest);
     let tab_rest = shape(l.shape, l.tab_rest);
     let shape_hover = shape(l.shape, l.shape_hover);
+    let front_alert = !layout.tabs.is_empty() && look.alerts.get(look.shown).copied().unwrap_or(false);
     if !look.frosted {
-        scene.fill(Rect::new(0.0, 0.0, scene.width, BAR_H), color(if look.focused { l.ground } else { l.ground_off }));
+        let ground = match (front_alert, look.focused) {
+            (true, true) => l.alert_ground,
+            (true, false) => l.alert_ground_off,
+            (false, true) => l.ground,
+            (false, false) => l.ground_off,
+        };
+        scene.fill(Rect::new(0.0, 0.0, scene.width, BAR_H), color(ground));
     }
     for (b, r) in &layout.buttons {
         let part = Part::Button(*b);
@@ -373,8 +383,12 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
     for (i, tab) in layout.tabs.iter().enumerate() {
         let shown = i == look.shown;
         let hovered = matches!(look.hover, Some(Part::Tab(t) | Part::CloseTab(t)) if t == i);
-        let tab_ink = if shown { look.pane_ink } else { ink };
-        tab_shape(scene, tab, if shown { look.pane } else if hovered { shape_hover } else { tab_rest });
+        let alert = look.alerts.get(i).copied().unwrap_or(false);
+        let tab_ink = if alert { Color::rgb(255, 255, 255) } else if shown { look.pane_ink } else { ink };
+        tab_shape(scene, tab, if alert { color(l.alert) } else if shown { look.pane } else if hovered { shape_hover } else { tab_rest });
+        if alert && hovered {
+            tab_shape(scene, tab, shape_hover);
+        }
         let mut text_from = tab.x + 12.0;
         let mut text_to = tab.x + tab.w - 8.0;
         if let Some(close) = &layout.closes[i] {
