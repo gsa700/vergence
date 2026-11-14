@@ -322,7 +322,8 @@ All the server's, ahead of any program, through the seat's filter:
   Alt+`). 5 met for a logout and login on kepler (refitting to a new size of
   the setup by the unit tests). 6 met (snapping Off/Ctrl by default; window
   keys with drag snapping off). 7 met (50 of 50 within a frame of arriving;
-  the light-style cost above). Left: a finger drag on kepler by hand.
+  the light-style cost above). The finger drag on kepler by hand: met
+  (Dave, 2026-11-14 10:51, "worked"). **The milestone is closed.**
 
 ## Steps
 
