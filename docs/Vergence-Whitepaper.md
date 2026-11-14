@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "14 November 2026 — Draft 0.12"
+date: "14 November 2026 — Draft 0.13"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.12 · 14 November 2026
+David Erickson (AB0R), with Claude · Draft 0.13 · 14 November 2026
 
 ---
 
@@ -368,8 +368,8 @@ A vertical shelf has no room for text, so names appear when the pointer rests on
 **Windows.**
 
 - Windows **float**, and the server remembers where they were put. There is no automatic tiling, which would move windows the user had placed, and there are **no workspaces**: monitors and placement memory do that job, and window memory stays keyed to the monitor setup alone.
-- **Snapping**: dragging a window to an edge gives it half the screen, to a corner a quarter, with the shelf counting as the edge. It can be switched off.
-- **Keyboard**: Alt+Tab steps through windows, most recently used first, in a small list in the middle of the screen. One key opens the apps popup with the search field ready, so anything can be started or found by typing.
+- **Snapping**, asked for and never stumbled into (built 14 November 2026): a window dragged to a screen's left or right edge takes that half, to a corner a quarter, to the top edge the whole screen (or the top half, by a setting); the bottom edge alone does nothing, and edges between two screens let the window across unless a setting makes a short press there snap. By default only a drag during which Ctrl is held snaps; it can be set to always or never. A tint shows where the window will go. The screen is its work area, so the shelf counts as the edge exactly as its own settings say: a shelf that keeps windows clear is the edge, one that hides when covered leaves the whole edge to the window. Snapped windows keep a little room (3 points) round and between them; one dragged away comes out at its earlier size under the pointer, and window memory brings a snapped window back snapped. The maximize button carries the same layouts, as pictures in a menu that opens on a deliberate pause over it (switchable) or a right click; the title bar's right-click menu and a long press on it have them too, so they are there with or without the button.
+- **Keyboard**: Super with the arrows snaps the focused window to a half (walking it across every half of every screen), maximizes it, brings it back or minimizes it, whatever the buttons and the drag setting. Alt+Tab steps through windows, most recently used first: a quick Alt+Tab goes to the window used before, and holding Alt shows a frosted list in the middle of the screen, icons and titles, minimized windows faint; Alt+\` does the same among one application's windows. A new window takes the keyboard when it was asked for (nothing had it, it is the focused program's own, or its application was just started and nothing has been typed elsewhere since); otherwise it opens behind and its icon on the shelf asks for attention. One key opens the apps popup with the search field ready, so anything can be started or found by typing.
 - **Menus stay in each window.** There is no global menu bar.
 - **Dialogs** stay attached to the window they belong to and move with it.
 - **The desktop** is wallpaper only, with no icons on it; a right-click on it opens a short menu of applications.
@@ -555,14 +555,15 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
   - **The seat** (12 November): every pointer, keyboard and touch event is decided by the project's own dispatcher (vergence-seat): focus, grabs, moves and resizes, menus, the server's own keys. It is the first step of Smithay's replacement (§8).
   - **The bar** (closed 12 November): the server draws every native window's bar, tabs included, which the program describes and the server draws and drags: reorder, tear off, join another window. Each window has a persistence token, so it comes back exactly where it was; window places are kept per monitor setup and per resolution and scale of it (Contract 2). Window controls are on the left by default, either side by choice, and under GNOME the project's bars follow GNOME's layout.
   - **The shell** (§6.9, 10 and 13 November): the dock, drawn by the server, rounded and floating, at any edge or anywhere, with running and pinned applications, minimized windows, hiding, and session restore (the running applications are started again at the next session and window memory puts their windows back); and the Apps launcher, a frosted panel in the middle of the pointer's screen with a search field, category tabs from the desktop entries and each application's menu, by mouse, keyboard or finger.
+  - **Windows** (14 November): snapping (asked for: by default while Ctrl is held), the maximize button's and title bar's layouts, Super with the arrows, Alt+Tab and Alt+\` with their list, new windows taking the keyboard only when asked for, every choice on the settings app's Windows page (§6.9).
   - **The look** (13 November): the frost (what is under a bar, the dock, a menu or the launcher blurred and tinted on the GPU, with a plain tint where Reduce transparency asks for it or there is no GPU), light and dark versions of everything with contrast checked in both, a native window's content running under its frosted bar, a terminal tab turning red while a program in it runs as root, rounded window corners at the one radius, and the size of controls settled together.
 
-  Still open within phase 2: checks by hand left in the seat, shelf and look milestones; docks on more than one screen; live tiles; snapping and Alt+Tab (a windows milestone); the rest of Smithay's replacement (the window space and the renderer next, then the DRM/KMS and input back ends); explicit sync, more than one GPU and the NVIDIA card (§8.3); and packages for Void, FreeBSD and Fedora (today `tools/install.sh` installs under a prefix).
+  Still open within phase 2: checks by hand left in the seat, shelf and look milestones; docks on more than one screen; live tiles; the rest of Smithay's replacement (the window space and the renderer next, then the DRM/KMS and input back ends); explicit sync, more than one GPU and the NVIDIA card (§8.3); and packages for Void, FreeBSD and Fedora (today `tools/install.sh` installs under a prefix).
 
 **The order of work in phase 2, from 9 November 2026,** with where each step stands:
 
 1. **The toolkit's drawing and text core, and the terminal on it** (§6.10). *Done 10 November.* It moved ahead of the shell when the borrowed toolkit's faults were measured under load: with six busy tabs in a window of 3792 × 2118 pixels its software renderer held one processor core and nothing else, and its GPU renderer was ten to fifteen times faster on the same load but lost the window's buttons.
-2. **The shell** (§6.9), built in the server on the same drawing code. *The dock, session restore and the Apps launcher are done (10 and 13 November); live tiles, snapping and keyboard switching remain.*
+2. **The shell** (§6.9), built in the server on the same drawing code. *The dock, session restore and the Apps launcher are done (10 and 13 November), snapping and keyboard switching too (14 November); live tiles remain.*
 3. **Widgets, and the settings app on them**; the borrowed toolkit removed. *Done 10 November.*
 4. **Windows, placement and accessibility on the native protocol**, which the toolkit then uses instead of Wayland, and explicit sync and the rest of §8.3 alongside as hardware allows. *The protocol, placement and the first meaning tree are done (11 November), with the seat and the bar on them (12 November); explicit sync and several GPUs remain.*
 

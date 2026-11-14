@@ -167,13 +167,36 @@ impl Server {
         let items = self.shelf_items();
         let focused = self.keyboard_window();
         let windows: Vec<Win> = if app {
-            let Some(f) = focused else { return Vec::new() };
-            match items.into_iter().find(|(_, ws)| ws.contains(&f)) {
+            let Some(ref f) = focused else { return Vec::new() };
+            match items.into_iter().find(|(_, ws)| ws.contains(f)) {
                 Some((_, ws)) => ws,
                 None => return Vec::new(),
             }
         } else {
             items.into_iter().flat_map(|(_, ws)| ws).collect()
+        };
+        // `alt-tab = "screen"`: only those on the focused window's screen (by their middle).
+        let windows: Vec<Win> = match focused.as_ref().and_then(|f| self.space.element_geometry(f)).filter(|_| self.snap.config.alt_tab_screen && !app) {
+            Some(g) => {
+                let mid = (g.loc.x + g.size.w / 2, g.loc.y + g.size.h / 2);
+                let screen = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|o| o.contains(mid));
+                windows
+                    .into_iter()
+                    .filter(|w| {
+                        let Some(screen) = screen else { return true };
+                        // A minimized window counts on the screen it goes back to.
+                        let at = self.shelf.minimized.iter().find(|(m, _)| m == w).map(|(_, p)| *p);
+                        let geo = self.space.element_geometry(w);
+                        let mid = match (at, geo) {
+                            (Some(p), _) => (p.x + w.geometry().size.w / 2, p.y + w.geometry().size.h / 2),
+                            (None, Some(g)) => (g.loc.x + g.size.w / 2, g.loc.y + g.size.h / 2),
+                            _ => return true,
+                        };
+                        screen.contains(mid)
+                    })
+                    .collect()
+            }
+            None => windows,
         };
         let mut list: Vec<Win> = self.input.seat.order_of_use().iter().filter_map(|&id| self.input.window(id)).filter(|w| windows.contains(w)).collect();
         for w in windows {

@@ -283,6 +283,26 @@ All the server's, ahead of any program, through the seat's filter:
   kepler: the list over two and three windows (shots), Escape left the focus
   on foot, a click on minimized foot's row brought it back with the keyboard.
   434 tests on Hubble, kepler and Techbench.
+- **Step 6 in** (2026-11-14): Settings > Windows, "Snapping and switching":
+  the drag setting (Off / While Ctrl is held / Always), the top edge, edges
+  between screens, the preview, room between snapped windows, the layouts on
+  the maximize button's hover, the window keys, what Alt+Tab shows (every
+  screen / this screen: the server keeps to the focused window's screen,
+  minimized windows by where they go back to), Alt+`; the rows that only
+  matter while drag snapping is on are disabled while it is Off. The server
+  tells the seat the window keys' and Alt+`'s settings. Whitepaper §6.9 and
+  §9 (Draft 0.13), README, CLAUDE.md. Live on Hubble: the page (shot; the
+  tree lists every row with its default), and `window-keys = false` taking
+  Super+Left from the server at once, back on when removed. 434 tests on
+  Hubble and Techbench; kepler's suite waits for the GPU loop it is running.
+- **Acceptance, where it stands** (2026-11-14): 1 met on Hubble and
+  Techbench (kepler's run waits, see the GPU test above). 2 met on kepler by
+  vctl (native terminal and foot; with a finger not yet tried by hand; the
+  settings app snapped on Hubble by key). 3 not yet: the nested server with
+  two virtual monitors. 4 met on kepler (Alt+Tab, the list, minimized, Escape,
+  Alt+`). 5 met for a logout and login on kepler (refitting to a new size of
+  the setup by the unit tests). 6 met (snapping Off/Ctrl by default; window
+  keys with drag snapping off). 7 not re-measured since step 1.
 
 ## Steps
 

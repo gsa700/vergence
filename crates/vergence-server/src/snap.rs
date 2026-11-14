@@ -78,6 +78,13 @@ pub struct SnapConfig {
     /// `gaps`: snapped windows keep a little room round and between them
     /// (default true; vergence-shell `snap::GAP`).
     pub gaps: bool,
+    /// `window-keys`: Super with the arrows (default true).
+    pub window_keys: bool,
+    /// `app-switch`: Alt+` among one application's windows (default true).
+    pub app_switch: bool,
+    /// `alt-tab = "screen"`: Alt+Tab lists only the windows on the focused
+    /// window's screen (default "all").
+    pub alt_tab_screen: bool,
 }
 
 impl SnapConfig {
@@ -88,7 +95,7 @@ impl SnapConfig {
 
 impl Default for SnapConfig {
     fn default() -> SnapConfig {
-        SnapConfig { mode: SnapMode::Ctrl, top_half: false, between: false, preview: true, layouts_hover: true, gaps: true }
+        SnapConfig { mode: SnapMode::Ctrl, top_half: false, between: false, preview: true, layouts_hover: true, gaps: true, window_keys: true, app_switch: true, alt_tab_screen: false }
     }
 }
 
@@ -105,7 +112,7 @@ pub fn config_from(text: &str) -> SnapConfig {
         Some(toml::Value::String(s)) if s == "off" => SnapMode::Off,
         _ => d.mode,
     };
-    SnapConfig { mode, top_half: word("top-edge") == "half", between: word("between-screens") == "press", preview: flag("preview", d.preview), layouts_hover: flag("layouts-hover", d.layouts_hover), gaps: flag("gaps", d.gaps) }
+    SnapConfig { mode, top_half: word("top-edge") == "half", between: word("between-screens") == "press", preview: flag("preview", d.preview), layouts_hover: flag("layouts-hover", d.layouts_hover), gaps: flag("gaps", d.gaps), window_keys: flag("window-keys", d.window_keys), app_switch: flag("app-switch", d.app_switch), alt_tab_screen: word("alt-tab") == "screen" }
 }
 
 fn load_config() -> SnapConfig {
@@ -177,6 +184,8 @@ impl Server {
             tracing::info!("snap: {c:?}");
             self.snap.config = c;
         }
+        // The seat filters these keys: it is told whether they are the server's.
+        self.input.seat.set_window_keys(c.window_keys, c.app_switch);
     }
 
     /// The pointer moved while a window is moved by it: aim, or stop aiming.
@@ -498,7 +507,9 @@ mod tests {
         assert_eq!(SnapConfig::default().mode, SnapMode::Ctrl, "only with Ctrl held unless the settings say otherwise");
         assert_eq!(config_from("[windows]\npreview = false\n").mode, SnapMode::Ctrl);
         let c = config_from("[windows]\nsnap = true\ntop-edge = \"half\"\nbetween-screens = \"press\"\npreview = false\nlayouts-hover = false\n");
-        assert_eq!(c, SnapConfig { mode: SnapMode::Always, top_half: true, between: true, preview: false, layouts_hover: false, gaps: true });
+        assert_eq!(c, SnapConfig { mode: SnapMode::Always, top_half: true, between: true, preview: false, layouts_hover: false, gaps: true, window_keys: true, app_switch: true, alt_tab_screen: false });
+        let c = config_from("[windows]\nwindow-keys = false\napp-switch = false\nalt-tab = \"screen\"\n");
+        assert!(!c.window_keys && !c.app_switch && c.alt_tab_screen);
         assert!(!config_from("[windows]\ngaps = false\n").gaps);
         assert_eq!(config_from("[windows]\nsnap = false\n").mode, SnapMode::Off);
         assert_eq!(config_from("[windows]\nsnap = \"off\"\n").mode, SnapMode::Off);
