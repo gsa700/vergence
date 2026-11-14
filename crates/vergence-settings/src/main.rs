@@ -2013,6 +2013,13 @@ impl Program for App {
         "vergence-settings".into()
     }
 
+    /// Its layout holds from 760 x 480 to 1100 wide (window styles milestone 1;
+    /// Dave, 2026-11-14: "a limited size allowance to preserve the layout"); no
+    /// maximize. The sidebar kind and its portrait shape come in step 5.
+    fn style(&self) -> vergence_ui::Style {
+        vergence_ui::Style { min: (760.0, 480.0), max: (1100.0, 0.0), ..Default::default() }
+    }
+
     fn theme(&self) -> Theme {
         let text = toml::to_string(&self.desktop).unwrap_or_default();
         let mut t = Theme::new(self.dark(), self.accent(), appearance_text(&self.desktop, "contrast") == "high");

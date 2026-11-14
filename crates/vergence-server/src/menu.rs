@@ -308,7 +308,7 @@ impl Server {
             entries.push(Entry::Layout(w.clone(), LayoutAct::Snap(Zone::Top), "Top half".into()));
         }
         let placed = self.restore.contains_key(w) || self.snap.snapped.contains_key(w);
-        if !self.restore.contains_key(w) {
+        if !self.restore.contains_key(w) && self.maximizable(w) {
             entries.push(Entry::Layout(w.clone(), LayoutAct::Maximize, "Maximize".into()));
         }
         if placed {

@@ -1600,6 +1600,12 @@ impl App for Terminal {
         true
     }
 
+    /// Small enough for a corner, never smaller than a few lines (window
+    /// styles milestone 1); no largest size, so it can be maximized.
+    fn style(&self) -> vergence_ui::Style {
+        vergence_ui::Style { min: (320.0, 160.0), ..Default::default() }
+    }
+
     // Step 6: the terminal keeps its windows' tokens (program.rs).
     fn token(&self) -> String {
         if self.present.is_empty() { "new".into() } else { self.present.clone() }

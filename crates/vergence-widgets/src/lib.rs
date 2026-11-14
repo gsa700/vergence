@@ -67,6 +67,12 @@ pub trait Program {
     /// threads to wake it.
     fn waker(&mut self, _waker: Waker) {}
 
+    /// The window's kind and size limits (window styles milestone 1); a
+    /// normal window with none by default.
+    fn style(&self) -> vergence_ui::Style {
+        vergence_ui::Style::default()
+    }
+
     /// Another thread used the [`Waker`]. True if the state changed.
     fn woken(&mut self, _window: &mut Window) -> bool {
         false
@@ -159,6 +165,10 @@ impl<P: Program> vergence_ui::App for Host<P> {
 
     fn app_id(&self) -> String {
         self.program.app_id()
+    }
+
+    fn style(&self) -> vergence_ui::Style {
+        self.program.style()
     }
 
     fn background(&self) -> Color {

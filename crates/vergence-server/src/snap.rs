@@ -272,7 +272,17 @@ impl Server {
         let Some(before) = before else { return };
         let r = rectangle(r);
         let top = if self.has_title(w) { self.bar_h_in(screen) } else { 0 };
-        let content = Rectangle::new((r.loc.x, r.loc.y + top).into(), (r.size.w, r.size.h - top).into());
+        let mut content = Rectangle::new((r.loc.x, r.loc.y + top).into(), (r.size.w, r.size.h - top).into());
+        // A window with a largest size smaller than its part stays at that size,
+        // against the part's side (style.rs, window styles milestone 1).
+        let fitted = self.within_limits(w, content.size);
+        if fitted != content.size {
+            let right = matches!(zone, Zone::Right | Zone::TopRight | Zone::BottomRight);
+            let bottom = matches!(zone, Zone::BottomLeft | Zone::BottomRight);
+            let x = if right { content.loc.x + content.size.w - fitted.w } else { content.loc.x };
+            let y = if bottom { content.loc.y + content.size.h - fitted.h } else { content.loc.y };
+            content = Rectangle::new((x, y).into(), fitted);
+        }
         self.set_window_rect(w, content, false);
         self.set_tiled(w, Some(zone));
         self.snap.snapped.insert(w.clone(), Snapped { zone, before });

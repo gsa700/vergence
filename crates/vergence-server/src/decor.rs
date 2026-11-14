@@ -267,7 +267,12 @@ impl Server {
     }
 
     fn frame_of(&self, w: &Win) -> Option<Frame> {
-        let buttons = self.button_layout();
+        let mut buttons = self.button_layout();
+        // No maximize button where the window cannot be maximized (style.rs).
+        if !self.maximizable(w) {
+            buttons.0.retain(|b| *b != vergence_bar::WinButton::Maximize);
+            buttons.1.retain(|b| *b != vergence_bar::WinButton::Maximize);
+        }
         let z = self.bar_sizes(w);
         self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, tabs_of(w), z))).flatten()
     }
@@ -524,7 +529,8 @@ impl Server {
                     None => {}
                 }
             }
-            if let Some(b) = self.border_of(w) {
+            // A window of a fixed size has no resize band (style.rs).
+            if let Some(b) = self.border_of(w).filter(|_| self.resizable(w)) {
                 let whole = b.to_f64();
                 let outer = Rectangle::new((b.loc.x - BORDER, b.loc.y - BORDER).into(), (b.size.w + 2 * BORDER, b.size.h + 2 * BORDER).into());
                 if outer.to_f64().contains(pos) && !whole.contains(pos) {
@@ -916,6 +922,11 @@ impl Server {
         if let Some(old) = self.restore.remove(w) {
             self.set_window_rect(w, old, false);
             self.remember(w);
+            return;
+        }
+        // A window whose largest size is smaller than its screen stays as it is
+        // (style.rs): no button, and a double-click on its bar does nothing.
+        if !self.maximizable(w) {
             return;
         }
         let Some(mut geo) = self.space.element_geometry(w) else { return };

@@ -128,6 +128,23 @@ The settings app is the first sidebar window.
   its 500 x 120 smallest size, its Open File dialog `kind=Dialog` with
   parent "Mozilla Firefox" and its 590 x 374 smallest (not modal: Firefox's
   GTK 3 has no xdg-dialog).
+- **Step 2 in** (2026-11-14): style.rs `maximizable` (no largest size, or
+  one that holds its screen's work area; never a fixed size), `resizable`
+  (not fixed) and `within_limits`; the bar leaves out Maximize where it does
+  not apply, and the layouts menu its row; toggle-maximize (the button, a
+  double-click on the bar, Super+Up, the menu, the top edge) leaves such a
+  window as it is; a fixed-size window has no resize band; resizing keeps
+  every road's limits (the old Wayland/X11-only check in dispatch.rs gave
+  way to `within_limits`); snapping puts a window at its largest size
+  against its part's side (right parts right, bottom parts bottom) and at
+  least its smallest. The toolkit's `Program::style` passes through
+  vergence-widgets; the settings app says 760 x 480 to 1100 wide, the
+  terminal 320 x 160 smallest. Live on Hubble: the settings bar has close
+  and minimize only (shot), its menu no Maximize row (shot), a double-click
+  on its bar and Super+Up leave it as it is, its right edge dragged 195
+  points further stops at 1100; on a nested screen 1889 wide with the top
+  edge set to the top half, it snapped to the top at 1100 x 480 against the
+  left (the part 1833 x 473). 439 tests on Hubble, kepler and Techbench.
 
 ## Steps
 

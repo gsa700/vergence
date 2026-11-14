@@ -117,6 +117,39 @@ impl Server {
         WinStyle::default()
     }
 
+    /// Whether a window can be maximized: no largest size, or one that holds
+    /// the work area of the screen it is mostly on (window styles milestone 1,
+    /// step 2). A fixed-size window never can.
+    pub fn maximizable(&self, w: &Win) -> bool {
+        let s = self.window_style(w);
+        if s.fixed() {
+            return false;
+        }
+        let Some(max) = s.max else { return true };
+        let Some(geo) = self.space.element_geometry(w) else { return true };
+        let screen = self
+            .space
+            .outputs()
+            .filter_map(|o| self.space.output_geometry(o))
+            .max_by_key(|g| g.intersection(geo).map_or(0, |i| i.size.w as i64 * i.size.h as i64));
+        let Some(screen) = screen else { return true };
+        let area = self.work_area(screen);
+        let top = if self.has_title(w) { self.bar_h_in(screen) } else { 0 };
+        max.w >= area.size.w && max.h >= area.size.h - top
+    }
+
+    /// Whether a window can be resized by hand: not one of a fixed size.
+    pub fn resizable(&self, w: &Win) -> bool {
+        !self.window_style(w).fixed()
+    }
+
+    /// A size kept within a window's limits.
+    pub fn within_limits(&self, w: &Win, size: Size<i32, Logical>) -> Size<i32, Logical> {
+        let s = self.window_style(w);
+        let (min, max) = (s.min.unwrap_or_default(), s.max.unwrap_or((i32::MAX, i32::MAX).into()));
+        Size::from((size.w.min(max.w).max(min.w.max(1)), size.h.min(max.h).max(min.h.max(1))))
+    }
+
     /// For `vctl windows`: the kind, modal, limits and parent in a few words.
     pub fn describe_style(&self, w: &Win) -> String {
         let s = self.window_style(w);

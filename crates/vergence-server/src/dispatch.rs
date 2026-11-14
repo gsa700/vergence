@@ -30,7 +30,6 @@ use smithay::{
         wayland_server::{Resource, backend::ObjectId, protocol::wl_surface::WlSurface},
     },
     utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER, Size},
-    wayland::{compositor, shell::xdg::SurfaceCachedState},
 };
 use vergence_protocol::window::WinEvent;
 use vergence_seat::{Edges, Out, Part, Target, WinId};
@@ -813,7 +812,7 @@ impl Server {
                 }
             }
             Some(Running::Resize { window, edges, from, initial, .. }) => {
-                let size = resized(&window, edges, initial, pos - from);
+                let size = self.within_limits(&window, resized(edges, initial, pos - from));
                 let mut loc = initial.loc;
                 if edges.intersects(ResizeEdge::LEFT) {
                     loc.x += initial.size.w - size.w;
@@ -941,7 +940,9 @@ impl Server {
 }
 
 /// A window's new size for a resize by `delta` from its edges, within its own limits.
-fn resized(window: &Win, edges: ResizeEdge, initial: Rectangle<i32, Logical>, delta: Point<f64, Logical>) -> Size<i32, Logical> {
+/// The size a resize from `initial` by `delta` asks for (style.rs keeps it
+/// within the window's limits, whatever road the window came by).
+fn resized(edges: ResizeEdge, initial: Rectangle<i32, Logical>, delta: Point<f64, Logical>) -> Size<i32, Logical> {
     let (mut w, mut h) = (initial.size.w, initial.size.h);
     if edges.intersects(ResizeEdge::LEFT | ResizeEdge::RIGHT) {
         let dx = if edges.intersects(ResizeEdge::LEFT) { -delta.x } else { delta.x };
@@ -951,15 +952,5 @@ fn resized(window: &Win, edges: ResizeEdge, initial: Rectangle<i32, Logical>, de
         let dy = if edges.intersects(ResizeEdge::TOP) { -delta.y } else { delta.y };
         h = (initial.size.h as f64 + dy) as i32;
     }
-    let (min, max) = match window.toplevel() {
-        Some(t) => compositor::with_states(t.wl_surface(), |states| {
-            let mut guard = states.cached_state.get::<SurfaceCachedState>();
-            let d = guard.current();
-            (d.min_size, d.max_size)
-        }),
-        None => window.x11_surface().map(|x| (x.min_size().unwrap_or_default(), x.max_size().unwrap_or_default())).unwrap_or_default(),
-    };
-    let max_w = if max.w == 0 { i32::MAX } else { max.w };
-    let max_h = if max.h == 0 { i32::MAX } else { max.h };
-    Size::from((w.max(min.w.max(1)).min(max_w), h.max(min.h.max(1)).min(max_h)))
+    Size::from((w.max(1), h.max(1)))
 }
