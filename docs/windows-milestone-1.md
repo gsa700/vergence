@@ -295,14 +295,34 @@ All the server's, ahead of any program, through the seat's filter:
   tree lists every row with its default), and `window-keys = false` taking
   Super+Left from the server at once, back on when removed. 434 tests on
   Hubble and Techbench; kepler's suite waits for the GPU loop it is running.
-- **Acceptance, where it stands** (2026-11-14): 1 met on Hubble and
-  Techbench (kepler's run waits, see the GPU test above). 2 met on kepler by
+- **Acceptance 3 and 7, and two findings** (2026-11-14, Hubble): a nested
+  server with two 1280 x 800 virtual screens side by side (scale 1.125):
+  Super+Right walked foot from the left screen's right half (beside its
+  dock) to the right screen's left and right halves, then nothing. **Found**:
+  the screens overlapped by a point (854 wide, the next at 853: the layout
+  rounds at a fractional scale), and the shared edge snapped from both
+  sides; vergence-shell's `zone_at` now counts screens within a point of
+  each other as touching (a test of that layout). Then with the default
+  "never" the shared edge aimed at nothing from either side and the outer
+  edge snapped; with "press", let go after 0.1 s the window only moved,
+  after 0.7 s it snapped. Clicks (vterm-stress, 50 tab clicks at 144 Hz):
+  50 of 50 drawn, each at most a frame after the press reached the
+  terminal, but 3.4 to 3.6 ms on average and 15.5 to 18 ms at worst in
+  light style against 1.85 and 12.0 in dark. **Found**: the terminal's
+  light contrast floor (e32c846) recomputed each cell's pair whenever the
+  pair changed; now remembered per pair (`readable_cached`): light 2.73 to
+  2.83 ms, worst 13.2 to 17.5 ms; still about a millisecond over dark, to
+  look at again. 436 tests on Hubble, kepler (under test-guard) and
+  Techbench.
+- **Acceptance, where it stands** (2026-11-14): 1 met on Hubble, kepler and
+  Techbench. 2 met on kepler by
   vctl (native terminal and foot; with a finger not yet tried by hand; the
   settings app snapped on Hubble by key). 3 not yet: the nested server with
   two virtual monitors. 4 met on kepler (Alt+Tab, the list, minimized, Escape,
   Alt+`). 5 met for a logout and login on kepler (refitting to a new size of
   the setup by the unit tests). 6 met (snapping Off/Ctrl by default; window
-  keys with drag snapping off). 7 not re-measured since step 1.
+  keys with drag snapping off). 7 met (50 of 50 within a frame of arriving;
+  the light-style cost above). Left: a finger drag on kepler by hand.
 
 ## Steps
 

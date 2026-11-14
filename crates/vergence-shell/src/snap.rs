@@ -71,12 +71,17 @@ pub fn zone_at(x: f64, y: f64, screen: Rect, screens: &[Rect]) -> Option<(Zone, 
     let near_bottom = screen.bottom() - 1 - y < CORNER;
     let near_left = x - screen.x < CORNER;
     let near_right = screen.right() - 1 - x < CORNER;
-    // Another screen touching this edge where the pointer is.
+    // Another screen touching this edge where the pointer is. "Touching"
+    // allows a point of overlap or gap: at a fractional scale the server's
+    // layout can round a screen's width up and the next one's start down
+    // (Hubble, 2026-11-14: 1280 pixels at 1.125 gave a screen 854 wide and the
+    // next at 853, and the shared edge snapped from both sides).
+    let near = |a: i32, b: i32| (a - b).abs() <= 1;
     let others = || screens.iter().filter(move |o| **o != screen);
-    let beyond_left = others().any(|o| o.right() == screen.x && y >= o.y && y < o.bottom());
-    let beyond_right = others().any(|o| o.x == screen.right() && y >= o.y && y < o.bottom());
-    let beyond_top = others().any(|o| o.bottom() == screen.y && x >= o.x && x < o.right());
-    let beyond_bottom = others().any(|o| o.y == screen.bottom() && x >= o.x && x < o.right());
+    let beyond_left = others().any(|o| near(o.right(), screen.x) && y >= o.y && y < o.bottom());
+    let beyond_right = others().any(|o| near(o.x, screen.right()) && y >= o.y && y < o.bottom());
+    let beyond_top = others().any(|o| near(o.bottom(), screen.y) && x >= o.x && x < o.right());
+    let beyond_bottom = others().any(|o| near(o.y, screen.bottom()) && x >= o.x && x < o.right());
     if left || right {
         let shared = if left { beyond_left } else { beyond_right };
         let zone = match (left, near_top, near_bottom) {
@@ -269,6 +274,21 @@ mod tests {
         let below = Rect::new(0, 1080, 1920, 1080);
         assert_eq!(zone_at(900.0, 1080.0, below, &[S, below]), Some((Zone::Top, true)));
         assert_eq!(zone_at(5.0, 1079.0, S, &[S, below]), Some((Zone::BottomLeft, true)));
+    }
+
+    #[test]
+    fn screens_overlapping_or_apart_by_a_point_still_share_their_edge() {
+        // Hubble's nested pair at scale 1.125: 854 wide, the next starting at 853.
+        let l = Rect::new(0, 0, 854, 928);
+        let r = Rect::new(853, 0, 854, 928);
+        assert_eq!(zone_at(853.0, 400.0, l, &[l, r]), Some((Zone::Right, true)));
+        assert_eq!(zone_at(853.5, 400.0, r, &[l, r]), Some((Zone::Left, true)));
+        // A point apart.
+        let r2 = Rect::new(855, 0, 854, 928);
+        assert_eq!(zone_at(853.0, 400.0, l, &[l, r2]), Some((Zone::Right, true)));
+        // Two points apart is not touching.
+        let r3 = Rect::new(856, 0, 854, 928);
+        assert_eq!(zone_at(853.0, 400.0, l, &[l, r3]), Some((Zone::Right, false)));
     }
 
     #[test]

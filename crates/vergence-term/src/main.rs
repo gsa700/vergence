@@ -228,6 +228,32 @@ fn readable(ink: Color, ground: Color, floor: f32) -> Color {
     Color::rgba(to as u8, to as u8, to as u8, ink.a)
 }
 
+/// `readable`, remembered: every pair of colors a screen has worked out once
+/// (2026-11-14: with only the last pair kept, a busy light screen such as
+/// btop's alternated between pairs and redid the up to 20 contrast steps cell
+/// after cell; tab clicks on Hubble went from 1.85 ms to 3.5 ms on average,
+/// 18 ms at worst). Kept per thread, a few thousand pairs at most.
+fn readable_cached(ink: Color, ground: Color, floor: f32, floor_bits: u32) -> Color {
+    use std::{cell::RefCell, collections::HashMap};
+    thread_local! {
+        static PAIRS: RefCell<HashMap<(u32, u32, u32), Color>> = RefCell::new(HashMap::new());
+    }
+    let pack = |c: Color| u32::from_be_bytes([c.r, c.g, c.b, c.a]);
+    let key = (pack(ink), pack(ground), floor_bits);
+    PAIRS.with(|m| {
+        let mut m = m.borrow_mut();
+        if let Some(c) = m.get(&key) {
+            return *c;
+        }
+        if m.len() >= 4096 {
+            m.clear();
+        }
+        let c = readable(ink, ground, floor);
+        m.insert(key, c);
+        c
+    })
+}
+
 const fn rgb(v: u32) -> Color {
     Color::rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
 }
@@ -1445,6 +1471,7 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
     // Combining marks are few, and drawn over the grid as glyph runs of their own.
     let mut marks: Vec<(usize, u32, Color, Point, Glyph)> = Vec::new();
     let mut floor_memo = ((p.fg, p.fg), p.fg);
+    let floor_bits = p.floor.to_bits();
     for r in 0..s.grid.rows + extra {
         let line = if r < extra { s.grid.abs_line(top_line - (extra - r)).unwrap_or(&[]) } else { s.shown(r - extra) };
         let top = first + (r as f32 - extra as f32) * ch;
@@ -1459,7 +1486,7 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
             // rule, so the last pair's answer is kept.
             if p.floor > 0.0 {
                 if floor_memo.0 != (ink, ground) {
-                    floor_memo = ((ink, ground), readable(ink, ground, p.floor));
+                    floor_memo = ((ink, ground), readable_cached(ink, ground, p.floor, floor_bits));
                 }
                 ink = floor_memo.1;
             }
@@ -2402,6 +2429,15 @@ mod tests {
     /// at the floor on the page (Hubble, 2026-11-13: Tango's whites and brights
     /// vanished on white); a color that already reads is left alone; the hue
     /// stays (red stays reddest).
+    #[test]
+    fn the_remembered_answer_is_the_worked_out_one() {
+        for (ink, ground) in [(rgb(0xef2929), rgb(0xffffff)), (rgb(0x2e3436), rgb(0xffffff)), (rgb(0xeeeeec), rgb(0x000000))] {
+            let worked = readable(ink, ground, LIGHT_FLOOR);
+            assert_eq!(readable_cached(ink, ground, LIGHT_FLOOR, LIGHT_FLOOR.to_bits()), worked);
+            assert_eq!(readable_cached(ink, ground, LIGHT_FLOOR, LIGHT_FLOOR.to_bits()), worked, "and again from memory");
+        }
+    }
+
     #[test]
     fn light_palettes_keep_text_readable() {
         let rgb3 = |c: Color| vergence_look::Rgb(c.r, c.g, c.b);
