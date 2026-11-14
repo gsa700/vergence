@@ -8,7 +8,9 @@
 //! understood is left out, never guessed at.
 //!
 //! Read from an entry: Type, Name, Exec, Icon, TryExec, Terminal,
-//! NoDisplay, Hidden, OnlyShowIn, NotShowIn, StartupWMClass, Keywords.
+//! NoDisplay, Hidden, OnlyShowIn, NotShowIn, StartupWMClass, Keywords,
+//! GenericName, Comment, Categories (the last three for the launcher, shelf
+//! milestone 2).
 //! Translated names
 //! (`Name[de]`) are not used yet.
 
@@ -17,6 +19,8 @@
 pub const MAX_FILE: usize = 256 * 1024;
 const MAX_VALUE: usize = 4096;
 const MAX_ARGS: usize = 256;
+/// The most categories and keywords kept from one entry.
+pub const MAX_LIST: usize = 32;
 
 /// This desktop's name, as OnlyShowIn and NotShowIn name desktops (and as
 /// the session's XDG_CURRENT_DESKTOP says it).
@@ -45,6 +49,11 @@ pub struct Entry {
     /// The class its windows carry, where that is not its id.
     pub startup_wm_class: String,
     pub keywords: Vec<String>,
+    /// What kind of program it is ("Web Browser"), a sentence about it, and
+    /// the freedesktop categories it declares (the launcher's tabs).
+    pub generic_name: String,
+    pub comment: String,
+    pub categories: Vec<String>,
 }
 
 /// A value as the file means it: `\s`, `\n`, `\t`, `\r` and `\\` are a
@@ -182,7 +191,10 @@ pub fn parse(id: &str, text: &str) -> Option<Entry> {
             "OnlyShowIn" => only_elsewhere = !names(value),
             "NotShowIn" => not_here = names(value),
             "StartupWMClass" => entry.startup_wm_class = unescape(value),
-            "Keywords" => entry.keywords = unescape(value).split(';').map(str::trim).filter(|k| !k.is_empty()).map(str::to_string).collect(),
+            "Keywords" => entry.keywords = unescape(value).split(';').map(str::trim).filter(|k| !k.is_empty()).take(MAX_LIST).map(str::to_string).collect(),
+            "GenericName" => entry.generic_name = unescape(value),
+            "Comment" => entry.comment = unescape(value),
+            "Categories" => entry.categories = unescape(value).split(';').map(str::trim).filter(|k| !k.is_empty()).take(MAX_LIST).map(str::to_string).collect(),
             _ => {}
         }
     }
@@ -209,6 +221,21 @@ mod tests {
 
     fn list(items: &[&str]) -> Option<Vec<String>> {
         Some(items.iter().map(|s| s.to_string()).collect())
+    }
+
+    /// The launcher's keys (shelf milestone 2): what kind of program, a
+    /// comment, its categories; long lists are cut.
+    #[test]
+    fn generic_name_comment_and_categories_are_read() {
+        let many: String = (0..100).map(|i| format!("C{i};")).collect();
+        let text = format!("[Desktop Entry]\nType=Application\nName=Firefox\nExec=firefox %u\nGenericName=Web Browser\nComment=Browse the\\sWeb\nCategories=Network;WebBrowser;\nKeywords={many}\n");
+        let e = parse("firefox", &text).expect("an entry");
+        assert_eq!(e.generic_name, "Web Browser");
+        assert_eq!(e.comment, "Browse the Web");
+        assert_eq!(e.categories, ["Network", "WebBrowser"]);
+        assert_eq!(e.keywords.len(), MAX_LIST);
+        let text = format!("[Desktop Entry]\nType=Application\nName=X\nExec=x\nCategories={many}\n");
+        assert_eq!(parse("x", &text).expect("an entry").categories.len(), MAX_LIST);
     }
 
     #[test]

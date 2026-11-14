@@ -64,7 +64,21 @@ and Super open the same panel.
 Drawn as now (a scene, the CPU renderer, one picture redrawn when what it
 shows changes), the frost under it by the server.
 
+## Progress
+
+- **Step 1 done** (2026-11-13): vergence-shell reads GenericName, Comment
+  and Categories (lists cut at `MAX_LIST`, 32); `launcher::TABS` and
+  `tab_of` fold the main categories into the nine tabs (Network to
+  Internet; AudioVideo, Audio and Video to Sound & Video; Education and
+  Science to Education; Utility to Utilities; Settings and System to
+  System); `search_in` narrows by a tab while nothing is typed and ranks
+  finds by a name's word, the name, GenericName ("browser" finds Firefox),
+  a keyword, then the comment; `tabs` lists the tabs that have an
+  application with the count of finds in each. Tests for each.
+
 ## Steps
+
+
 
 1. **Categories and words**: vergence-shell reads Categories, GenericName,
    Keywords and Comment; the fold into the tab list; search by name, then

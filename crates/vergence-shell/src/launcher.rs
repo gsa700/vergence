@@ -4,16 +4,50 @@
 
 use crate::{Rect, desktop::Entry};
 
+/// The launcher's category tabs after "All" (shelf milestone 2, Dave's
+/// choice 2026-11-13: a short fixed list, each shown only when it has an
+/// application), from the freedesktop main categories entries declare.
+pub const TABS: [&str; 9] = ["Internet", "Office", "Graphics", "Sound & Video", "Development", "Games", "Education", "Utilities", "System"];
+
+/// The tab an entry belongs in: the first of its categories that is one of
+/// the main ones, folded into TABS; None for an entry that declares none
+/// (it is found under All and by typing).
+pub fn tab_of(e: &Entry) -> Option<usize> {
+    e.categories.iter().find_map(|c| match c.as_str() {
+        "Network" => Some(0),
+        "Office" => Some(1),
+        "Graphics" => Some(2),
+        "AudioVideo" | "Audio" | "Video" => Some(3),
+        "Development" => Some(4),
+        "Game" => Some(5),
+        "Education" | "Science" => Some(6),
+        "Utility" => Some(7),
+        "Settings" | "System" => Some(8),
+        _ => None,
+    })
+}
+
 /// The applications to show for what has been typed, as places in
 /// `entries`. Nothing typed: every one that is to be shown (not hidden,
 /// not NoDisplay), by name. Something typed: those whose name has a word
-/// beginning with it, then those with it anywhere in the name, then those
-/// with it in a keyword; by name within each. Case is not looked at.
+/// beginning with it, then those with it anywhere in the name, then in what
+/// kind of program it is (GenericName: "browser" finds Firefox), then in a
+/// keyword, then in its comment; by name within each. Case is not looked at.
 pub fn search(entries: &[Entry], typed: &str) -> Vec<usize> {
+    search_in(entries, typed, None)
+}
+
+/// [`search`] in one tab (an index into TABS), or all of them. Typing
+/// searches every tab whatever is chosen: the tab chosen applies to the
+/// list with nothing typed.
+pub fn search_in(entries: &[Entry], typed: &str, tab: Option<usize>) -> Vec<usize> {
     let typed = typed.trim().to_lowercase();
     let mut found: Vec<(u8, String, usize)> = Vec::new();
     for (index, e) in entries.iter().enumerate() {
         if e.hidden || e.no_display {
+            continue;
+        }
+        if typed.is_empty() && tab.is_some() && tab_of(e) != tab {
             continue;
         }
         let name = e.name.to_lowercase();
@@ -21,8 +55,12 @@ pub fn search(entries: &[Entry], typed: &str) -> Vec<usize> {
             0
         } else if name.contains(&typed) {
             1
-        } else if e.keywords.iter().any(|k| k.to_lowercase().contains(&typed)) {
+        } else if e.generic_name.to_lowercase().contains(&typed) {
             2
+        } else if e.keywords.iter().any(|k| k.to_lowercase().contains(&typed)) {
+            3
+        } else if e.comment.to_lowercase().contains(&typed) {
+            4
         } else {
             continue;
         };
@@ -30,6 +68,25 @@ pub fn search(entries: &[Entry], typed: &str) -> Vec<usize> {
     }
     found.sort();
     found.into_iter().map(|(.., index)| index).collect()
+}
+
+/// The tabs to show (indices into TABS, in TABS' order: those with an
+/// application to show) and, for each, how many of what was found are in
+/// it (with something typed, the tabs say where the finds are).
+pub fn tabs(entries: &[Entry], found: &[usize]) -> Vec<(usize, usize)> {
+    let mut count = [0usize; TABS.len()];
+    let mut present = [false; TABS.len()];
+    for e in entries.iter().filter(|e| !e.hidden && !e.no_display) {
+        if let Some(t) = tab_of(e) {
+            present[t] = true;
+        }
+    }
+    for &i in found {
+        if let Some(t) = entries.get(i).and_then(tab_of) {
+            count[t] += 1;
+        }
+    }
+    (0..TABS.len()).filter(|&t| present[t]).map(|t| (t, count[t])).collect()
 }
 
 /// The grid of applications: so many columns of cells this size, in an
@@ -118,6 +175,68 @@ pub fn step(selected: usize, count: usize, columns: usize, step: Step) -> usize 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn app(name: &str, generic: &str, categories: &str, keywords: &[&str], comment: &str) -> Entry {
+        Entry {
+            id: name.to_lowercase(),
+            name: name.into(),
+            generic_name: generic.into(),
+            categories: categories.split(';').filter(|c| !c.is_empty()).map(str::to_string).collect(),
+            keywords: keywords.iter().map(|k| k.to_string()).collect(),
+            comment: comment.into(),
+            ..Entry::default()
+        }
+    }
+
+    fn apps() -> Vec<Entry> {
+        vec![
+            app("Firefox", "Web Browser", "Network;WebBrowser;", &["internet", "www"], "Browse the World Wide Web"),
+            app("Terminal", "Terminal", "System;TerminalEmulator;", &["shell", "command"], "Use the command line"),
+            app("AlbumWall", "Music Player", "AudioVideo;Audio;Player;", &[], "Your albums on the wall"),
+            app("Settings", "", "Settings;", &["preferences"], "Change the desktop's settings"),
+            app("htop", "Process Viewer", "System;Monitor;ConsoleOnly;", &["cpu"], "Show what runs"),
+            app("Notes", "", "", &[], "Jot things down"),
+        ]
+    }
+
+    #[test]
+    fn categories_fold_into_the_short_list_of_tabs() {
+        let a = apps();
+        let names: Vec<Option<&str>> = a.iter().map(|e| tab_of(e).map(|t| TABS[t])).collect();
+        assert_eq!(names, [Some("Internet"), Some("System"), Some("Sound & Video"), Some("System"), Some("System"), None]);
+    }
+
+    #[test]
+    fn what_kind_of_program_it_is_and_its_comment_are_searched() {
+        let a = apps();
+        let names = |found: Vec<usize>| found.into_iter().map(|i| a[i].name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(search(&a, "browser")), ["Firefox"], "GenericName finds it");
+        assert_eq!(names(search(&a, "music")), ["AlbumWall"]);
+        assert_eq!(names(search(&a, "jot")), ["Notes"], "the comment, last");
+        assert_eq!(names(search(&a, "term")), ["Terminal"], "a name's word first");
+        assert_eq!(names(search(&a, "cpu")), ["htop"], "a keyword");
+    }
+
+    #[test]
+    fn a_tab_narrows_the_list_until_something_is_typed() {
+        let a = apps();
+        let names = |found: Vec<usize>| found.into_iter().map(|i| a[i].name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(search_in(&a, "", Some(8))), ["htop", "Settings", "Terminal"]);
+        assert_eq!(names(search_in(&a, "", Some(0))), ["Firefox"]);
+        assert_eq!(names(search_in(&a, "browser", Some(8))), ["Firefox"], "typing searches every tab");
+        assert_eq!(search_in(&a, "", None).len(), 6);
+    }
+
+    #[test]
+    fn only_tabs_with_applications_show_with_their_finds_counted() {
+        let a = apps();
+        let all = search(&a, "");
+        let shown: Vec<(&str, usize)> = tabs(&a, &all).into_iter().map(|(t, n)| (TABS[t], n)).collect();
+        assert_eq!(shown, [("Internet", 1), ("Sound & Video", 1), ("System", 3)]);
+        let found = search(&a, "s");
+        let shown: Vec<(&str, usize)> = tabs(&a, &found).into_iter().map(|(t, n)| (TABS[t], n)).collect();
+        assert!(shown.iter().any(|&(t, n)| t == "System" && n >= 2), "{shown:?}");
+    }
 
     fn entry(name: &str, keywords: &[&str]) -> Entry {
         Entry { id: name.to_lowercase().replace(' ', "-"), name: name.into(), exec: vec!["x".into()], keywords: keywords.iter().map(|k| k.to_string()).collect(), ..Entry::default() }
