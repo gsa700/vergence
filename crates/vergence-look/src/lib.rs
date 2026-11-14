@@ -162,6 +162,24 @@ pub const MENU: Rgb = SHELF_DARK.menu;
 pub const MENU_INK: Rgb = SHELF_DARK.menu_ink;
 pub const MENU_INK_OFF: Rgb = SHELF_DARK.menu_ink_off;
 
+/// The frost under a bar (look milestone 1, step 3): its own strength (the
+/// Frost setting's Standard, of 1), and the blur's reach in points.
+pub const FROST_STRENGTH: f32 = 0.5;
+pub const FROST_RADIUS: f32 = 14.0;
+
+/// The contrast the bar's ink must keep over the bare frost so that it keeps
+/// the bar's rule (4.5:1 focused, 3:1 not) on the shapes laid on the frost
+/// too (a tab behind, a button, anything under the pointer). Worked out over
+/// a grid of colors; the test below checks it.
+pub const fn frost_need(light: bool, focused: bool) -> f32 {
+    match (light, focused) {
+        (false, true) => 7.0,
+        (false, false) => 5.1,
+        (true, true) => 5.85,
+        (true, false) => 4.05,
+    }
+}
+
 /// How far a window button's drawn shape stands in from its press area, at
 /// the sides and at the top and bottom (look milestone 1: the buttons float
 /// on the tabs' line, the tabs stay joined to the window below; the press
@@ -326,6 +344,34 @@ mod tests {
             ] {
                 let c = contrast(ink, ground);
                 assert!(c >= need, "{name}: {what} {c:.2} < {need}");
+            }
+        }
+    }
+
+    /// A frost that keeps frost_need keeps the bar's rule with every shape
+    /// laid on it, over a grid of colors.
+    #[test]
+    fn the_frost_floor_covers_the_shapes_on_it() {
+        for light in [false, true] {
+            let l = bar_look(light);
+            for focused in [true, false] {
+                let (ink, rule) = if focused { (l.ink, 4.5) } else { (l.ink_off, 3.0) };
+                let need = frost_need(light, focused);
+                let shapes = [l.shape_rest, l.tab_rest, l.shape_hover];
+                for r in (0..=255).step_by(15) {
+                    for g in (0..=255).step_by(15) {
+                        for b in (0..=255).step_by(15) {
+                            let ground = Rgb(r as u8, g as u8, b as u8);
+                            if contrast(ink, ground) < need {
+                                continue;
+                            }
+                            for a in shapes {
+                                let c = contrast(ink, over(ground, l.shape, a));
+                                assert!(c >= rule, "light {light} focused {focused}: {ground:?} with shape {a}: {c:.2}");
+                            }
+                        }
+                    }
+                }
             }
         }
     }

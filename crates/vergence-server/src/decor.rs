@@ -70,6 +70,7 @@ smithay::backend::renderer::element::render_elements! {
     Moving = crate::shelf::Moving,
     /// A native window's GPU picture (native.rs).
     Texture = smithay::backend::renderer::element::texture::TextureRenderElement<smithay::backend::renderer::gles::GlesTexture>,
+    Frost = smithay::backend::renderer::gles::element::TextureShaderElement,
 }
 
 /// What is under a point of the desktop.
@@ -105,7 +106,7 @@ pub struct Decor {
 
 /// A bar drawn for one scale: what it shows, and the pixels.
 struct BarPicture {
-    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, bool),
+    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, bool, bool),
     buffer: MemoryRenderBuffer,
     /// Its pixels' width and height (the scale's, not the bar's points).
     px: (i32, i32),
@@ -174,6 +175,46 @@ fn physical(r: Rectangle<f64, Logical>, output_loc: Point<i32, Logical>, scale: 
     Rectangle::new(a, (b.x - a.x, b.y - a.y).into())
 }
 
+/// Whether the frost preview is on (see `Server::frost_program`).
+fn frost_preview() -> bool {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static SEEN: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+    if std::env::var_os("VERGENCE_FROST").is_some() {
+        return true;
+    }
+    let mut seen = SEEN.lock().unwrap();
+    if let Some((at, on)) = *seen
+        && at.elapsed() < Duration::from_secs(1)
+    {
+        return on;
+    }
+    let on = vergence_bar::settings_path().is_some_and(|p| p.with_file_name("frost-preview").exists());
+    *seen = Some((Instant::now(), on));
+    on
+}
+
+/// A native window's picture as a GPU texture, with its size in pixels and
+/// in points: imported the first time it is asked for, on whichever monitor
+/// that is. None for a picture in shared memory or one that failed to import.
+fn native_texture(renderer: &mut GlesRenderer, w: &Win) -> Option<(smithay::backend::renderer::element::texture::TextureBuffer<smithay::backend::renderer::gles::GlesTexture>, smithay::utils::Size<i32, smithay::utils::Buffer>, smithay::utils::Size<i32, Logical>)> {
+    let n = w.native()?;
+    let p = n.picture()?;
+    let crate::native::Content::Gpu(g) = &p.content else { return None };
+    let mut g = g.lock().unwrap();
+    if g.texture.is_none() && !g.failed {
+        use smithay::backend::renderer::ImportDma;
+        match renderer.import_dmabuf(&g.dmabuf, None) {
+            Ok(t) => g.texture = Some(smithay::backend::renderer::element::texture::TextureBuffer::from_texture(renderer, t, 1, Transform::Normal, None)),
+            Err(e) => {
+                g.failed = true;
+                tracing::warn!("native window GPU picture: {e:?}");
+            }
+        }
+    }
+    Some((g.texture.clone()?, p.px, p.logical))
+}
+
 impl Server {
     /// Does the server draw this window's title bar?
     pub fn has_title(&self, w: &Win) -> bool {
@@ -213,6 +254,55 @@ impl Server {
     /// (Gtk/DecorationLayout; vergence-bar's default, on the left, if unset).
     pub fn button_layout(&self) -> (Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>) {
         vergence_bar::decoration_layout(&self.button_layout_text())
+    }
+
+    /// The frost's program, compiled on first use; None where bars are solid:
+    /// High contrast on (it asks for solid grounds), a software renderer
+    /// (llvmpipe, softpipe: the blur would cost more than it gives), or a
+    /// shader that would not compile. Until the content runs under the bar
+    /// (look milestone 1, step 4) the frost is a preview, shown only with
+    /// VERGENCE_FROST=1 or the file ~/.config/vergence/frost-preview (looked
+    /// for once a second at most); both go with step 4.
+    fn frost_program(&mut self, renderer: &mut GlesRenderer) -> Option<smithay::backend::renderer::gles::GlesTexProgram> {
+        if !frost_preview() {
+            return None;
+        }
+        let high_contrast = self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "contrast".to_string())) == Some(&vergence_protocol::bus::SettingValue::U32(1));
+        if high_contrast {
+            return None;
+        }
+        self.frost
+            .get_or_insert_with(|| {
+                use smithay::backend::renderer::gles::{UniformName, UniformType, ffi};
+                let name = renderer
+                    .with_context(|gl| unsafe {
+                        let p = gl.GetString(ffi::RENDERER);
+                        if p.is_null() { String::new() } else { std::ffi::CStr::from_ptr(p as *const std::ffi::c_char).to_string_lossy().into_owned() }
+                    })
+                    .unwrap_or_default();
+                if name.contains("llvmpipe") || name.contains("softpipe") {
+                    tracing::info!("frost: off, drawing in software ({name})");
+                    return None;
+                }
+                let uniforms = [
+                    UniformName::new("texel", UniformType::_2f),
+                    UniformName::new("radius", UniformType::_1f),
+                    UniformName::new("tint", UniformType::_4f),
+                    UniformName::new("ink", UniformType::_3f),
+                    UniformName::new("need", UniformType::_1f),
+                ];
+                match renderer.compile_custom_texture_shader(vergence_render::blur::FROST_SHADER, &uniforms) {
+                    Ok(p) => {
+                        tracing::info!("frost: on ({name})");
+                        Some(p)
+                    }
+                    Err(e) => {
+                        tracing::warn!("frost: the shader did not compile, bars stay solid: {e:?}");
+                        None
+                    }
+                }
+            })
+            .clone()
     }
 
     /// Whether the desktop is in its light style (org.freedesktop.appearance
@@ -326,6 +416,7 @@ impl Server {
         // Light or dark (Settings > Appearance > Style; look milestone 1).
         let light = self.light_style();
         let style = vergence_look::bar_look(light);
+        let frost = self.frost_program(renderer);
         self.decor.retain(|w, _| w.alive());
         // A window on its way back from the dock is put in its place when it arrives.
         self.shelf_motions_end();
@@ -369,7 +460,10 @@ impl Server {
                     elements.push(solid(8, Rectangle::new((r.loc.x - e, r.loc.y).into(), (e, r.size.h).into()), c));
                     elements.push(solid(9, Rectangle::new((r.loc.x + r.size.w, r.loc.y).into(), (e, r.size.h).into()), c));
                 }
+                // A native window's picture on the GPU, which its bar's frost is made from.
+                let under = frost.as_ref().and_then(|_| native_texture(renderer, &w));
                 if let Some(f) = frame {
+                    let frosted = under.is_some();
                     // The bar, vergence-bar's, drawn once per scale and again when what it shows changes.
                     let hover = hovered.as_ref().filter(|(hw, _)| *hw == w).map(|(_, p)| *p);
                     let width = f.title.size.w;
@@ -390,10 +484,10 @@ impl Server {
                         titles = order.iter().map(|&i| titles[i].clone()).collect();
                         shown = order.iter().position(|&i| i == front).unwrap_or(0);
                     }
-                    let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent, light);
+                    let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent, light, frosted);
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
-                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, false),
+                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, false, false),
                         buffer: MemoryRenderBuffer::new(Fourcc::Abgr8888, (1, 1), 1, Transform::Normal, None),
                         px: (1, 1),
                     });
@@ -413,6 +507,7 @@ impl Server {
                         };
                         let look = vergence_bar::Look {
                             bar: style,
+                            frosted,
                             focused: active,
                             pane: vergence_scene::Color::rgb(front.0, front.1, front.2),
                             pane_ink: vergence_scene::Color::rgb(ink.0, ink.1, ink.2),
@@ -442,6 +537,28 @@ impl Server {
                         Ok(e) => elements.push(SceneElement::Memory(e)),
                         Err(e) => tracing::warn!("title bar: {e:?}"),
                     }
+                    // Behind it, the frost: the top of the window's own picture, blurred
+                    // and tinted (vergence_render::blur), the tint raised where the
+                    // bar's ink needs it.
+                    if let (Some(program), Some((texture, px, logical))) = (frost.as_ref(), under.as_ref()) {
+                        use smithay::backend::renderer::gles::{Uniform, UniformValue, element::TextureShaderElement};
+                        let per_point = px.w as f64 / logical.w.max(1) as f64;
+                        let rows = (TITLE_H as f64 * per_point).round().min(px.h as f64);
+                        let strip = Rectangle::<f64, Logical>::from_size((px.w as f64, rows).into());
+                        let inner = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at.to_f64(), texture, None, Some(strip), Some(f.title.size), Kind::Unspecified);
+                        let (ground, ink) = if active { (style.ground, style.ink) } else { (style.ground_off, style.ink_off) };
+                        let unit = |c: vergence_look::Rgb| (c.0 as f32 / 255.0, c.1 as f32 / 255.0, c.2 as f32 / 255.0);
+                        let (gr, gg, gb) = unit(ground);
+                        let (ir, ig, ib) = unit(ink);
+                        let uniforms = vec![
+                            Uniform::new("texel", UniformValue::_2f(1.0 / px.w.max(1) as f32, 1.0 / px.h.max(1) as f32)),
+                            Uniform::new("radius", UniformValue::_1f(vergence_look::FROST_RADIUS * per_point as f32)),
+                            Uniform::new("tint", UniformValue::_4f(gr, gg, gb, vergence_look::FROST_STRENGTH)),
+                            Uniform::new("ink", UniformValue::_3f(ir, ig, ib)),
+                            Uniform::new("need", UniformValue::_1f(vergence_look::frost_need(light, active))),
+                        ];
+                        elements.push(SceneElement::Frost(TextureShaderElement::new(inner, program.clone(), uniforms)));
+                    }
                 }
             }
             let Some(loc) = self.space.element_location(&w) else { continue };
@@ -458,23 +575,9 @@ impl Server {
                                 Err(e) => tracing::warn!("native window picture: {e:?}"),
                             }
                         }
-                        crate::native::Content::Gpu(g) => {
-                            // Imported the first time it is drawn, on whichever monitor that is.
-                            let mut g = g.lock().unwrap();
-                            if g.texture.is_none() && !g.failed {
-                                use smithay::backend::renderer::ImportDma;
-                                match renderer.import_dmabuf(&g.dmabuf, None) {
-                                    Ok(t) => {
-                                        g.texture = Some(smithay::backend::renderer::element::texture::TextureBuffer::from_texture(renderer, t, 1, Transform::Normal, None));
-                                    }
-                                    Err(e) => {
-                                        g.failed = true;
-                                        tracing::warn!("native window GPU picture: {e:?}");
-                                    }
-                                }
-                            }
-                            if let Some(t) = &g.texture {
-                                let e = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at.to_f64(), t, None, Some(whole), Some(p.logical), Kind::Unspecified);
+                        crate::native::Content::Gpu(_) => {
+                            if let Some((t, _, _)) = native_texture(renderer, &w) {
+                                let e = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at.to_f64(), &t, None, Some(whole), Some(p.logical), Kind::Unspecified);
                                 elements.push(SceneElement::Texture(e));
                             }
                         }

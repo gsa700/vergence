@@ -79,6 +79,10 @@ pub struct Server {
     pub shot_pending: Vec<String>,
     /// The desktop font for title text (None: titles without text).
     pub title_font: Option<crate::text::TextFont>,
+    /// The frost's shader program (look milestone 1, step 3), compiled the
+    /// first time a bar is frosted; None inside when the renderer cannot
+    /// frost (software drawing, or the shader failed): bars are then solid.
+    pub frost: Option<Option<smithay::backend::renderer::gles::GlesTexProgram>>,
     /// Wayland windows already placed (place.rs: on their first sized commit).
     pub placed: std::collections::HashSet<Win>,
     /// When X11 windows were mapped (a move soon after is the app restoring its place).
@@ -230,6 +234,7 @@ impl Server {
             restore: Default::default(),
             shot_pending: Vec::new(),
             title_font: crate::text::TextFont::load(),
+            frost: None,
             placed: Default::default(),
             mapped_at: Default::default(),
             dmabuf: None,

@@ -2052,7 +2052,7 @@ impl App for Terminal {
         if !frame.bar_by_server {
             let titles: Vec<String> = self.tabs.iter().map(Tab::label).collect();
             let layout = Layout::new(frame.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right);
-            bar::draw(&mut scene, fonts, &layout, &bar::Look { bar: vergence_look::bar_look(self.settings.light), focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, title: "", shown: self.shown, hover: self.hover });
+            bar::draw(&mut scene, fonts, &layout, &bar::Look { bar: vergence_look::bar_look(self.settings.light), frosted: false, focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, title: "", shown: self.shown, hover: self.hover });
         }
 
         let Some(tab) = self.tabs.get(self.shown) else { return scene };

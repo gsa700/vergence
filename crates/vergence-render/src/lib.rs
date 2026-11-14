@@ -21,6 +21,7 @@
 //! A renderer takes a scene from anyone: it validates before it draws, and
 //! refuses sizes that would need an absurd buffer.
 
+pub mod blur;
 pub mod cpu;
 mod gl;
 pub mod gpu;

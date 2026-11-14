@@ -318,6 +318,9 @@ fn icon(scene: &mut Scene, r: &Rect, what: Part, size: f32, ink: Color) {
 pub struct Look<'a> {
     /// The style's colors (vergence_look::bar_look: light or dark).
     pub bar: &'a vergence_look::BarLook,
+    /// The bar's ground is a frost drawn under it (the server's, look
+    /// milestone 1): leave it out, draw only what stands on it.
+    pub frosted: bool,
     pub focused: bool,
     /// The terminal's own ground and text: the shown tab is drawn in them, joined to the pane.
     pub pane: Color,
@@ -339,7 +342,9 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
     let shape_rest = shape(l.shape, l.shape_rest);
     let tab_rest = shape(l.shape, l.tab_rest);
     let shape_hover = shape(l.shape, l.shape_hover);
-    scene.fill(Rect::new(0.0, 0.0, scene.width, BAR_H), color(if look.focused { l.ground } else { l.ground_off }));
+    if !look.frosted {
+        scene.fill(Rect::new(0.0, 0.0, scene.width, BAR_H), color(if look.focused { l.ground } else { l.ground_off }));
+    }
     for (b, r) in &layout.buttons {
         let part = Part::Button(*b);
         // The buttons float on the tabs' line: drawn inset, pressed anywhere in

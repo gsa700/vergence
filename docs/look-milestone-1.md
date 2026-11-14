@@ -229,6 +229,28 @@ Bar Proportions"):
   the name label and the menu's label rasters are keyed by the style; the
   menu's solid parts are redrawn when it changes. 382 tests on all three;
   the desktop menu, dock and apps popup seen on Hubble in both styles.
+- **Step 3, the frost in, as a preview** (2026-11-13): vergence-render's
+  `blur` module: `FROST_SHADER` (GLSL ES 1.00 for Smithay's texture-shader
+  programs: 24 samples on a golden-angle spiral weighted by a bell, then the
+  style's tint) and `frost`, the same arithmetic on the CPU as the
+  reference. **The tint adapts per pixel**: it starts at the frost's own
+  strength (`FROST_STRENGTH`, 0.5) and is raised, by halving ten times, just
+  far enough that the bar's ink keeps `frost_need` over what is under it
+  (7.0 / 5.1 dark focused / unfocused, 5.85 / 4.05 light: the floor that
+  keeps 4.5:1 / 3:1 on the shapes laid on the frost too, checked over a grid
+  of colors). Dark content under a dark bar stays at 50%; a white page under
+  a dark bar takes about 91%, nearly solid. The server compiles the program
+  on first use (`Server::frost_program`; none with High contrast, on a
+  software renderer, or if it fails) and, for a native window whose picture
+  is on the GPU, draws the bar's ground transparent (`Look::frosted`) over a
+  `TextureShaderElement` of the picture's top strip; shared-memory pictures
+  keep the solid bar for now. Until step 4 the picture's top is the content
+  just below the bar, so the frost is a preview: on only with
+  `VERGENCE_FROST=1` or `~/.config/vergence/frost-preview`. Seen on Hubble
+  (Mesa, UHD CML GT2) over htop: its meters blurred in the bar, titles
+  readable; one 159 ms frame when the shader compiled. 387 tests on all
+  three. **Left of step 3**: the GPU test against the CPU reference, the
+  frost for shared-memory pictures, and frame-time checks on kepler.
 
 ## Steps
 
