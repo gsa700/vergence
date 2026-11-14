@@ -585,6 +585,7 @@ impl Server {
         let round = self.round_program(renderer);
         let mut reinset: Vec<Win> = Vec::new();
         let strength = vergence_look::frost_strength(self.look_setting("frost"));
+        let frost_r = vergence_look::frost_radius(self.look_setting("frost"));
         let front_frosted = self.look_setting("front-tab") == 1;
         self.decor.retain(|w, _| w.alive());
         // A window on its way back from the dock is put in its place when it arrives.
@@ -775,7 +776,7 @@ impl Server {
                             strength,
                             ink: crate::backdrop::unit(ink),
                             need: vergence_look::frost_need(light, active),
-                            radius: vergence_look::FROST_RADIUS * scale as f32,
+                            radius: frost_r * scale as f32,
                             corner: 0.0,
                             bottom: false,
                         };
@@ -804,7 +805,7 @@ impl Server {
                         let (ir, ig, ib) = unit(ink);
                         let uniforms = vec![
                             Uniform::new("texel", UniformValue::_2f(1.0 / px.w.max(1) as f32, 1.0 / px.h.max(1) as f32)),
-                            Uniform::new("radius", UniformValue::_1f(vergence_look::FROST_RADIUS * per_point as f32)),
+                            Uniform::new("radius", UniformValue::_1f(frost_r * per_point as f32)),
                             Uniform::new("tint", UniformValue::_4f(gr, gg, gb, strength)),
                             Uniform::new("ink", UniformValue::_3f(ir, ig, ib)),
                             Uniform::new("need", UniformValue::_1f(vergence_look::frost_need(light, active))),

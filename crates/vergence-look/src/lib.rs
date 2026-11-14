@@ -174,7 +174,7 @@ pub const MENU_INK: Rgb = SHELF_DARK.menu_ink;
 pub const MENU_INK_OFF: Rgb = SHELF_DARK.menu_ink_off;
 
 /// The frost under a bar (look milestone 1, step 3): its own strength (the
-/// Frost setting's Standard, of 1), and the blur's reach in points.
+/// Frost setting's Standard, of 1).
 pub const FROST_STRENGTH: f32 = 0.5;
 /// The Frost setting's steps (Clear, Standard, Heavy): the frost's own
 /// strength; the contrast floor raises it wherever reading needs more.
@@ -191,7 +191,20 @@ pub const fn frost_strength(step: u32) -> f32 {
 pub const fn front_veil(light: bool) -> u8 {
     if light { 200 } else { 40 }
 }
-pub const FROST_RADIUS: f32 = 14.0;
+/// The blur's reach in points at Standard. The blur's weights fall off as
+/// exp(-2r²) over the reach, so its spread (a CSS blur's px) is half of it:
+/// 12 is the mock-up's 6 px that Dave chose (2026-11-13: "better, I see it
+/// now"); 14 was there before the steps took the blur too.
+pub const FROST_RADIUS: f32 = 12.0;
+/// The Frost setting's steps (Clear, Standard, Heavy): the blur's reach in
+/// points (spread 4, 6 and 10 px), stepped with the strength.
+pub const fn frost_radius(step: u32) -> f32 {
+    match step {
+        0 => 8.0,
+        2 => 20.0,
+        _ => FROST_RADIUS,
+    }
+}
 
 /// The contrast the bar's ink must keep over the bare frost so that it keeps
 /// the bar's rule (4.5:1 focused, 3:1 not) on the shapes laid on the frost
@@ -330,6 +343,16 @@ pub const PALETTE_LIGHT: Palette = Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Frost steps go from clear to heavy in the blur and the strength
+    /// both; Standard is the mock-up's 6 px blur that Dave chose.
+    #[test]
+    fn frost_steps_blur_and_tint_together() {
+        assert!(frost_radius(0) < frost_radius(1) && frost_radius(1) < frost_radius(2));
+        assert!(frost_strength(0) < frost_strength(1) && frost_strength(1) < frost_strength(2));
+        assert_eq!(frost_radius(1) / 2.0, 6.0, "Standard spreads 6 px, as the mock-up's CSS blur(6px)");
+        assert_eq!(frost_radius(9), FROST_RADIUS);
+    }
 
     /// Look milestone 1's contrast rule for the bars, both styles: titles
     /// 4.5:1 on all they stand on while the window has the keyboard, 3:1

@@ -316,6 +316,7 @@ impl Server {
         let look = vergence_look::shelf_look(light);
         let frost = self.frost_program(renderer);
         let strength = vergence_look::frost_strength(self.look_setting("frost"));
+        let frost_r = vergence_look::frost_radius(self.look_setting("frost"));
         let Some(m) = self.menu.as_mut() else { return Vec::new() };
         if m.light != light {
             m.light = light;
@@ -378,7 +379,7 @@ impl Server {
                     strength,
                     ink: crate::backdrop::unit(look.menu_ink),
                     need: 5.0,
-                    radius: vergence_look::FROST_RADIUS * scale as f32,
+                    radius: frost_r * scale as f32,
                     corner: 0.0,
                     bottom: false,
                 };

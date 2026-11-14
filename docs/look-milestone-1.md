@@ -180,6 +180,12 @@ Bar Proportions"):
   transparency still giving the solid tint. The tint never goes below what
   the contrast test passes (mixed pairs included), so Clear is as clear as
   stays legible, not a free choice of zero.
+  **2026-11-13 late:** the steps now take the blur too, as decided (it
+  had stayed at 14 for all three). The blur's weights fall off as
+  exp(-2r²) over its reach, so a reach of R spreads like a CSS blur of
+  R/2 px: Clear 8 (4 px), **Standard 12 (6 px, the mock-up's)**, Heavy 20
+  (10 px). The haze seen over a white page is mostly the contrast floor
+  raising the tint (to about 91% there), not the blur.
 - **The tab in front is the page's color** (Dave, 2026-11-13: "front tab
   should be page color, maybe with the alt in settings"): solid in the
   program's own background (the terminal's scheme, as today's bar does),

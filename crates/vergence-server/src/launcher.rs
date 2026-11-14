@@ -498,7 +498,7 @@ impl Server {
                 strength: vergence_look::frost_strength(self.look_setting("frost")),
                 ink: crate::backdrop::unit(s.menu_ink),
                 need: 5.0,
-                radius: vergence_look::FROST_RADIUS * scale as f32,
+                radius: vergence_look::frost_radius(self.look_setting("frost")) * scale as f32,
                 corner: vergence_look::RADIUS * scale as f32,
                 bottom: true,
             };
