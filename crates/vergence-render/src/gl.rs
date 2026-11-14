@@ -144,7 +144,11 @@ library! {
         fn glDeleteProgram(program: u32);
         fn glGetUniformLocation(program: u32, name: *const c_char) -> i32;
         fn glUniform1i(location: i32, value: i32);
+        fn glUniform1f(location: i32, x: f32);
         fn glUniform2f(location: i32, x: f32, y: f32);
+        fn glUniform3f(location: i32, x: f32, y: f32, z: f32);
+        fn glUniform4f(location: i32, x: f32, y: f32, z: f32, w: f32);
+        fn glBindAttribLocation(program: u32, index: u32, name: *const c_char);
         fn glGenVertexArrays(count: i32, arrays: *mut u32);
         fn glBindVertexArray(array: u32);
         fn glDeleteVertexArrays(count: i32, arrays: *const u32);

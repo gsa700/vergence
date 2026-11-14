@@ -350,6 +350,13 @@ Bar Proportions"):
   three. Found on the way: kepler built stale code twice (an rsync with
   kept times delivered sources older than a build made before the sync;
   touching the sources forces the rebuild).
+- **Step 3's GPU test in** (2026-11-13): `Gpu::shader_pass` runs a texture
+  shader of the server's conventions over a picture on this machine's GPU
+  and reads it back; tests/gpu.rs holds `FROST_SHADER` to `blur::frost`
+  (mean difference under one step, at most 1% of pixels more than three
+  apart) and `ROUND_SHADER` to `round::cover` (alpha within two steps), in
+  the dark and light styles. Run on the GPU on all three (Hubble; kepler's
+  UHD 630 on FreeBSD; Techbench's UHD 770), not skipped. 395 tests.
 
 ## Steps
 

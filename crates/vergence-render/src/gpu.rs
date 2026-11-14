@@ -583,6 +583,115 @@ impl Gpu {
     }
 
     /// The texture this renderer draws into when it is given no buffer, at this size.
+    /// Runs a texture shader (the conventions of the GLES renderer the server
+    /// composites with: `tex`, `alpha`, `v_coords`, a `//_DEFINES_` line) over
+    /// the whole of a picture (8-bit RGBA, alpha multiplied in, rows from the
+    /// top) and reads the result back, rows from the top: so the server's
+    /// shaders ([`crate::blur`], [`crate::round`]) are tested on this GPU
+    /// against their CPU arithmetic. `uniforms` are floats by name, one to
+    /// four each.
+    pub fn shader_pass(&mut self, fragment: &str, rgba: &[u8], w: u32, h: u32, uniforms: &[(&str, &[f32])]) -> Result<Pixmap, GpuError> {
+        if w == 0 || h == 0 || rgba.len() != (w * h * 4) as usize {
+            return Err(GpuError::Render(RenderError::Size));
+        }
+        const VERTEX_PASS: &str = "#version 100\nattribute vec2 pos;\nvarying vec2 v_coords;\nvoid main() {\n    v_coords = pos;\n    gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0);\n}\n";
+        let fragment = fragment.replace("//_DEFINES_", "");
+        // SAFETY: EGL and GL calls on this renderer's own context, made current
+        // here; every pointer outlives its call; what is made is released.
+        unsafe {
+            if (self.egl.eglMakeCurrent)(self.display, std::ptr::null_mut(), std::ptr::null_mut(), self.context) == 0 {
+                return Err(GpuError::Egl("eglMakeCurrent", (self.egl.eglGetError)()));
+            }
+            let target = self.own_target(w, h)?;
+            let gl = &self.gl;
+            let compile = |kind: u32, source: &str| -> Result<u32, GpuError> {
+                let shader = (gl.glCreateShader)(kind);
+                let (text, len) = (source.as_ptr() as *const c_char, source.len() as i32);
+                (gl.glShaderSource)(shader, 1, &text, &len);
+                (gl.glCompileShader)(shader);
+                let mut ok = 0;
+                (gl.glGetShaderiv)(shader, gl::GL_COMPILE_STATUS, &mut ok);
+                if ok == 0 {
+                    let mut log = [0 as c_char; 2048];
+                    let mut n = 0;
+                    (gl.glGetShaderInfoLog)(shader, log.len() as i32, &mut n, log.as_mut_ptr());
+                    (gl.glDeleteShader)(shader);
+                    return Err(GpuError::Program(CStr::from_ptr(log.as_ptr()).to_string_lossy().into_owned()));
+                }
+                Ok(shader)
+            };
+            let vertex = compile(gl::GL_VERTEX_SHADER, VERTEX_PASS)?;
+            let frag = match compile(gl::GL_FRAGMENT_SHADER, &fragment) {
+                Ok(f) => f,
+                Err(e) => {
+                    (gl.glDeleteShader)(vertex);
+                    return Err(e);
+                }
+            };
+            let program = (gl.glCreateProgram)();
+            (gl.glAttachShader)(program, vertex);
+            (gl.glAttachShader)(program, frag);
+            (gl.glBindAttribLocation)(program, 0, c"pos".as_ptr());
+            (gl.glLinkProgram)(program);
+            (gl.glDeleteShader)(vertex);
+            (gl.glDeleteShader)(frag);
+            let mut ok = 0;
+            (gl.glGetProgramiv)(program, gl::GL_LINK_STATUS, &mut ok);
+            if ok == 0 {
+                (gl.glDeleteProgram)(program);
+                return Err(GpuError::Program("the shader pass did not link".into()));
+            }
+            let mut texture = 0u32;
+            (gl.glGenTextures)(1, &mut texture);
+            (gl.glActiveTexture)(gl::GL_TEXTURE0);
+            (gl.glBindTexture)(gl::GL_TEXTURE_2D, texture);
+            for (name, value) in [(gl::GL_TEXTURE_MIN_FILTER, gl::GL_NEAREST), (gl::GL_TEXTURE_MAG_FILTER, gl::GL_NEAREST), (gl::GL_TEXTURE_WRAP_S, gl::GL_CLAMP_TO_EDGE), (gl::GL_TEXTURE_WRAP_T, gl::GL_CLAMP_TO_EDGE)] {
+                (gl.glTexParameteri)(gl::GL_TEXTURE_2D, name, value as i32);
+            }
+            (gl.glPixelStorei)(gl::GL_UNPACK_ALIGNMENT, 1);
+            (gl.glTexImage2D)(gl::GL_TEXTURE_2D, 0, gl::GL_RGBA8 as i32, w as i32, h as i32, 0, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, rgba.as_ptr() as *const c_void);
+            let quad: [f32; 8] = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+            let (mut vao, mut vbo) = (0u32, 0u32);
+            (gl.glGenVertexArrays)(1, &mut vao);
+            (gl.glBindVertexArray)(vao);
+            (gl.glGenBuffers)(1, &mut vbo);
+            (gl.glBindBuffer)(gl::GL_ARRAY_BUFFER, vbo);
+            (gl.glBufferData)(gl::GL_ARRAY_BUFFER, std::mem::size_of_val(&quad) as isize, quad.as_ptr() as *const c_void, gl::GL_STREAM_DRAW);
+            (gl.glEnableVertexAttribArray)(0);
+            (gl.glVertexAttribPointer)(0, 2, gl::GL_FLOAT, 0, 8, std::ptr::null());
+            (gl.glVertexAttribDivisor)(0, 0);
+            (gl.glBindFramebuffer)(gl::GL_FRAMEBUFFER, target);
+            (gl.glViewport)(0, 0, w as i32, h as i32);
+            (gl.glDisable)(gl::GL_BLEND);
+            (gl.glDisable)(gl::GL_DITHER);
+            (gl.glUseProgram)(program);
+            let at = |name: &str| {
+                let c = std::ffi::CString::new(name).unwrap_or_default();
+                (gl.glGetUniformLocation)(program, c.as_ptr())
+            };
+            (gl.glUniform1i)(at("tex"), 0);
+            (gl.glUniform1f)(at("alpha"), 1.0);
+            for (name, v) in uniforms {
+                let l = at(name);
+                match v.len() {
+                    1 => (gl.glUniform1f)(l, v[0]),
+                    2 => (gl.glUniform2f)(l, v[0], v[1]),
+                    3 => (gl.glUniform3f)(l, v[0], v[1], v[2]),
+                    _ => (gl.glUniform4f)(l, v[0], v[1], v[2], v[3]),
+                }
+            }
+            (gl.glDrawArraysInstanced)(gl::GL_TRIANGLE_STRIP, 0, 4, 1);
+            let mut pixmap = Pixmap::new(w, h);
+            (gl.glPixelStorei)(gl::GL_PACK_ALIGNMENT, 1);
+            (gl.glReadPixels)(0, 0, w as i32, h as i32, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, pixmap.data.as_mut_ptr() as *mut c_void);
+            (gl.glDeleteBuffers)(1, &vbo);
+            (gl.glDeleteVertexArrays)(1, &vao);
+            (gl.glDeleteTextures)(1, &texture);
+            (gl.glDeleteProgram)(program);
+            Ok(pixmap)
+        }
+    }
+
     fn own_target(&mut self, w: u32, h: u32) -> Result<u32, GpuError> {
         let gl = &self.gl;
         // SAFETY: a current context (the caller's); what is made is released on failure.

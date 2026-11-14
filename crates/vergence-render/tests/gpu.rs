@@ -353,3 +353,66 @@ fn a_grid_of_cells_is_drawn_as_its_fills_and_glyphs() {
         }
     }
 }
+
+/// The server's frost shader on this GPU against its CPU reference
+/// (vergence-render's blur, look milestone 1): the same picture frosted
+/// both ways must agree but for the GPU's rounding (and, rarely, a pixel
+/// where the tint's bisection lands one step apart).
+#[test]
+fn the_frost_shader_on_the_gpu_matches_its_cpu_reference() {
+    use vergence_render::blur::{FROST_SHADER, Frost, frost};
+    let Some(mut g) = gpu() else { return };
+    let (w, h) = (96usize, 48usize);
+    let mut rgba = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        for x in 0..w {
+            let text = (x / 3 + y / 2) % 4 == 0;
+            rgba.extend(if text { [235u8, 235, 235, 255] } else { [(x * 2) as u8, 30, (y * 4) as u8, 255] });
+        }
+    }
+    for f in [
+        Frost { tint: [51, 61, 82], strength: 0.5, ink: [235, 235, 235], need: 7.0, radius: 10.0 },
+        Frost { tint: [228, 230, 235], strength: 0.3, ink: [29, 29, 31], need: 5.85, radius: 6.0 },
+    ] {
+        let cpu = frost(&rgba, w, h, h, &f);
+        let unit = |c: [u8; 3]| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0];
+        let t = unit(f.tint);
+        let gpu = match g.shader_pass(FROST_SHADER, &rgba, w as u32, h as u32, &[
+            ("texel", &[1.0 / w as f32, 1.0 / h as f32]),
+            ("radius", &[f.radius]),
+            ("tint", &[t[0], t[1], t[2], f.strength]),
+            ("ink", &unit(f.ink)),
+            ("need", &[f.need]),
+            ("corner", &[0.0]),
+        ]) {
+            Ok(p) => p,
+            Err(e) => panic!("the frost shader on this GPU: {e}"),
+        };
+        let (mut worst, mut far, mut total) = (0u8, 0usize, 0u64);
+        for (p, q) in gpu.data.chunks_exact(4).zip(cpu.chunks_exact(4)) {
+            let d = p[..3].iter().zip(&q[..3]).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+            worst = worst.max(d);
+            far += (d > 3) as usize;
+            total += d as u64;
+        }
+        let mean = total as f64 / (w * h) as f64;
+        assert!(mean < 1.0 && far * 100 <= w * h, "{f:?}: mean {mean:.2}, {far} pixels off by more than 3, worst {worst}");
+    }
+}
+
+/// The rounded corners' shader on this GPU against its arithmetic.
+#[test]
+fn the_round_shader_on_the_gpu_matches_its_arithmetic() {
+    use vergence_render::round::{ROUND_SHADER, cover};
+    let Some(mut g) = gpu() else { return };
+    let (w, h, r) = (64u32, 40u32, 9.0f32);
+    let rgba = vec![200u8; (w * h * 4) as usize];
+    let out = g.shader_pass(ROUND_SHADER, &rgba, w, h, &[("size", &[w as f32, h as f32]), ("radius", &[r])]).expect("the round shader on this GPU");
+    for y in 0..h {
+        for x in 0..w {
+            let want = (200.0 * cover(x as f32 + 0.5, y as f32 + 0.5, w as f32, h as f32, r)).round() as i32;
+            let got = out.data[((y * w + x) * 4 + 3) as usize] as i32;
+            assert!((want - got).abs() <= 2, "({x}, {y}): alpha {got}, want {want}");
+        }
+    }
+}
