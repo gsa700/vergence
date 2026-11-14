@@ -9,7 +9,8 @@ good place for it"), and wallpaper tinting ("yes, add it to the window
 styles plan"). Comes after windows milestone 1 and before the settings
 milestone ("finish windows first"; window styles next, then settings).
 **Accepted 2026-11-14: Dave answered (a) to all four questions at the
-end** ("yes to all").
+end** ("yes to all"). **All seven steps in the same day**; open checks under
+Progress.
 
 ## Where things stand (read 2026-11-14, 0e34eb3)
 
@@ -222,6 +223,23 @@ The settings app is the first sidebar window.
   (41, 39, 39) tinted against (38, 38, 40) with the switch off: warmed by the
   sunset wallpaper, slight as meant. 441 tests on Hubble, kepler and
   Techbench.
+
+- **Step 7 in** (2026-11-14): whitepaper §6.9 (kinds of window) and §9
+  (Draft 0.14), README, CLAUDE.md.
+- **Acceptance, where it stands** (2026-11-14): 1 met (441 tests on all
+  three). 2 met for native dialogs (vdialog: slim bar, close only, over and
+  with the parent, out of Alt+Tab; modal dims and blocks); a Wayland dialog
+  (Firefox's Open File, GTK 3) reads as a dialog of its parent, but its bar
+  is the program's own and it sends no modal hint; GTK 4 and an X11 dialog
+  not yet tried. 3 met for the settings app (largest width: no maximize
+  button or menu row, a double-click does nothing); a fixed-size window not
+  yet tried live (the rule is the same code). 4 met on Hubble (portrait,
+  1100 at most, snapped at 1100 against its side on a wide nested screen,
+  title and back and forward in the frosted bar, the sidebar up under it,
+  history). 5 met on a nested server (palette above its application's
+  windows, gone while foot was in front, back on top). 6 met on Hubble in dark
+  style (the sidebar warmed by the wallpaper behind it; contrast unchanged:
+  grounds move 8%).
 
 ## Steps
 
