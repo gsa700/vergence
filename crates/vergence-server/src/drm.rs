@@ -111,23 +111,27 @@ struct Surface {
 }
 
 /// "Drawn here, shown there" (GPUs milestone 1, step 3): the primary draws
-/// the screen into one of three linear buffers in turn; the showing GPU takes
-/// the newest finished one in as a texture and copies it into its own
-/// scan-out buffer. Nothing waits: a buffer is copied once its fence has
-/// signaled (the two drivers on Hubble share no fences, so a GPU-side wait
-/// fell back to blocking the server 10 to 25 ms a frame).
+/// the screen into one linear buffer in its own memory, and the showing GPU
+/// takes it in as a texture and copies **only what changed** into its own
+/// scan-out buffers (its compositor's damage tracking, fed the primary's
+/// damage). A full 4K copy takes nouveau 60 to 77 ms (reading system memory
+/// over PCIe), so copying whole frames could not keep up and the screen
+/// flipped to half-copied ones (Hubble's 14", 2026-11-14). The two steps take
+/// turns on the one buffer: the primary draws, the showing GPU copies once the
+/// primary's fence has signaled (checked, never waited on), and finishes its
+/// copy before the flip and before the primary draws again.
 struct Relay {
-    bufs: Vec<RelayBuf>,
-    next: usize,
+    buf: RelayBuf,
+    /// The buffer as a texture on the showing GPU, with the damage of each
+    /// draw recorded on it (imported at the first copy).
+    shown: Option<smithay::backend::renderer::element::texture::TextureRenderBuffer<smithay::backend::renderer::gles::GlesTexture>>,
     /// Calls to the damage tracker so far, drawn or not (its history has one
-    /// entry for each; a buffer's age is counted in them).
+    /// entry for each; the buffer's age is counted in them).
     frame: usize,
-    /// The newest drawn buffer not copied yet.
-    pending: Option<usize>,
-    /// The buffer copied last: the showing GPU may still be reading it, so it
-    /// is not drawn into until another has been copied (drawing over it
-    /// mid-copy glitched the 14" on Hubble, 2026-11-14).
-    copied: Option<usize>,
+    /// A frame is drawn and not copied yet.
+    pending: bool,
+    /// The area the last draw changed, in pixels (for the log).
+    last_damage_px: i64,
     damage: smithay::backend::renderer::damage::OutputDamageTracker,
     /// The output the showing GPU's frame goes through: the screen's mode at scale 1.
     _plain: Output,
@@ -135,9 +139,7 @@ struct Relay {
 
 struct RelayBuf {
     dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
-    /// Its texture on the showing GPU, imported once.
-    texture: Option<smithay::backend::renderer::gles::GlesTexture>,
-    /// The frame it was last drawn in (0: never).
+    /// The call it was last drawn in (0: never).
     drawn: usize,
     /// Its drawing's fence, until copied.
     sync: Option<smithay::backend::renderer::sync::SyncPoint>,
@@ -643,16 +645,16 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
         // copy is pixel for pixel; the real output keeps the screen's own scale.
         let plain = Output::new(format!("{name} (copy)"), PhysicalProperties { size: (0, 0).into(), subpixel: Subpixel::Unknown, make: "Vergence".into(), model: String::new(), serial_number: String::new() });
         plain.change_current_state(Some(wl_mode), Some(Transform::Normal), Some(Scale::Integer(1)), None);
-        let bufs = match relay_buffers(&b.gbm, w as u32, h as u32) {
+        let buf = match relay_buffer(&b.gbm, w as u32, h as u32) {
             Ok(v) => v,
-            Err(e) => return tracing::warn!("{name}: no buffers to draw it in: {e}"),
+            Err(e) => return tracing::warn!("{name}: no buffer to draw it in: {e}"),
         };
         let size = smithay::utils::Size::<i32, smithay::utils::Physical>::from((w as i32, h as i32));
         let damage = smithay::backend::renderer::damage::OutputDamageTracker::new(size, scale, Transform::Normal);
         let dev = &mut b.devices[gpu];
         let Some(copier) = dev.renderer.as_mut() else { return };
         let r = dev.manager.lock().initialize_output::<_, RelayElements>(crtc, drm_mode, &[conn.handle()], &plain, planes, copier, &DrmOutputRenderElements::default());
-        relay = Some(Relay { bufs, next: 0, frame: 0, pending: None, copied: None, damage, _plain: plain });
+        relay = Some(Relay { buf, shown: None, frame: 0, pending: false, last_damage_px: 0, damage, _plain: plain });
         r
     };
     let drm_output = match initialized {
@@ -665,18 +667,14 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     b.surfaces.insert((gpu, crtc), Surface { output, drm_output, connector: name, last: std::time::Instant::now(), scale, id, px: (w as u32, h as u32), mm, edid: identity, global, relay });
 }
 
-/// Three linear XRGB8888 buffers in the primary GPU's memory, the size of a
-/// screen on another GPU (the format both GPUs render and import: gpus.rs).
-fn relay_buffers(gbm: &GbmDevice<DrmDeviceFd>, w: u32, h: u32) -> Result<Vec<RelayBuf>, String> {
+/// A linear XRGB8888 buffer in the primary GPU's memory, the size of a screen
+/// on another GPU (the format both GPUs render and import: gpus.rs).
+fn relay_buffer(gbm: &GbmDevice<DrmDeviceFd>, w: u32, h: u32) -> Result<RelayBuf, String> {
     use smithay::backend::allocator::{Allocator, Modifier, dmabuf::AsDmabuf};
     let mut alloc = GbmAllocator::new(gbm.clone(), GbmBufferFlags::RENDERING);
-    (0..3)
-        .map(|_| {
-            let bo = alloc.create_buffer(w, h, Fourcc::Xrgb8888, &[Modifier::Linear]).map_err(|e| format!("{e:?}"))?;
-            let dmabuf = bo.export().map_err(|e| format!("{e:?}"))?;
-            Ok(RelayBuf { dmabuf, texture: None, drawn: 0, sync: None })
-        })
-        .collect()
+    let bo = alloc.create_buffer(w, h, Fourcc::Xrgb8888, &[Modifier::Linear]).map_err(|e| format!("{e:?}"))?;
+    let dmabuf = bo.export().map_err(|e| format!("{e:?}"))?;
+    Ok(RelayBuf { dmabuf, drawn: 0, sync: None })
 }
 
 /// The EDID blob DRM keeps for a connector.
@@ -790,11 +788,14 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
     }
     elements.extend(state.scene(&mut b.renderer, &output, s.scale).into_iter().map(OutputElements::Scene));
 
-    // The control socket's `shot`: this monitor's frame, rendered once more offscreen.
+    // The control socket's `shot`: this monitor's frame, rendered once more
+    // offscreen; for a screen on another GPU, the very buffer copied to it last
+    // (what is on the screen, glitches and all).
     if let Some(i) = state.shot_pending.iter().position(|n| *n == s.connector) {
         state.shot_pending.remove(i);
         let size = output.current_mode().map(|m| m.size).unwrap_or_default();
-        match capture(&mut b.renderer, &elements, size, s.scale, state.background_color(&s.connector)) {
+        let shown = s.relay.as_mut().filter(|r| r.buf.drawn > 0).map(|r| read_back(&mut b.renderer, &mut r.buf.dmabuf, size));
+        match shown.unwrap_or_else(|| capture(&mut b.renderer, &elements, size, s.scale, state.background_color(&s.connector))) {
             Ok(rgba) => crate::control::save_png(s.connector.clone(), size.w as u32, size.h as u32, rgba),
             Err(e) => tracing::warn!("shot {}: {e}", s.connector),
         }
@@ -876,61 +877,81 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
     let _ = state.display_handle.flush_clients();
 }
 
-/// A screen on another GPU, one turn: the showing GPU copies the frame drawn
-/// last once its drawing has finished (checked, never waited for), and the
-/// primary draws the next change into a buffer that is neither waiting nor
-/// the one copied last.
+/// A screen on another GPU, one turn: a frame drawn and not yet copied is
+/// copied once its fence has signaled, only its damage; otherwise the
+/// primary draws any change and records its damage for the copy.
 fn relay_frame(primary: &mut GlesRenderer, copier: Option<&mut GlesRenderer>, s: &mut Surface, elements: &[OutputElements], clear: [f32; 4]) -> Result<Relayed, String> {
-    use smithay::backend::renderer::{Bind, ImportDma, element::{Kind, texture::{TextureBuffer, TextureRenderElement}}};
+    use smithay::backend::renderer::{Bind, ImportDma, element::{Kind, texture::{TextureRenderBuffer, TextureRenderElement}}};
+    use smithay::utils::{Buffer, Rectangle};
     let copier = copier.ok_or("no renderer on the showing GPU")?;
-    let relay = s.relay.as_mut().ok_or("no relay buffers")?;
+    let relay = s.relay.as_mut().ok_or("no relay buffer")?;
     let t0 = std::time::Instant::now();
-    // Draw, unless a frame is still waiting to be copied (the newest change is
-    // drawn once that one is out): into the next buffer, never the one copied last.
-    let mut i = relay.next;
-    if relay.copied == Some(i) {
-        i = (i + 1) % relay.bufs.len();
-    }
-    if relay.pending.is_none() {
-        let age = if relay.bufs[i].drawn == 0 { 0 } else { relay.frame + 1 - relay.bufs[i].drawn };
+    if !relay.pending {
+        // Draw any change; its damage goes to the copy. The one buffer always
+        // holds the newest frame (the last call drew into it, or nothing had
+        // changed), so its age is 1. (Counting calls since it was drawn ran past
+        // the few frames the tracker keeps, and every frame was drawn and
+        // copied whole: 8.3 million pixels, 40 to 65 ms on nouveau.)
+        let age = if relay.buf.drawn == 0 { 0 } else { 1 };
         let drawn = {
-            let mut fb = primary.bind(&mut relay.bufs[i].dmabuf).map_err(|e| format!("bind: {e}"))?;
+            let mut fb = primary.bind(&mut relay.buf.dmabuf).map_err(|e| format!("bind: {e}"))?;
             let r = relay.damage.render_output(primary, &mut fb, age, elements, clear).map_err(|e| format!("draw: {e:?}"))?;
-            r.damage.is_some().then(|| r.sync.clone())
+            r.damage.map(|d| (d.iter().map(|r| Rectangle::<i32, Buffer>::new((r.loc.x, r.loc.y).into(), (r.size.w, r.size.h).into())).collect::<Vec<_>>(), r.sync.clone()))
         };
-        // The tracker keeps a history entry for every call, drawn or not, and a
-        // buffer's age counts those entries: counting only frames drawn left
-        // stale patches behind the pointer (Hubble's 14", 2026-11-14).
         relay.frame += 1;
-        if let Some(sync) = drawn {
-            relay.bufs[i].drawn = relay.frame;
-            relay.bufs[i].sync = Some(sync);
-            relay.pending = Some(i);
-            relay.next = (i + 1) % relay.bufs.len();
+        let Some((rects, sync)) = drawn else { return Ok(Relayed::Nothing) };
+        relay.buf.drawn = relay.frame;
+        relay.buf.sync = Some(sync);
+        relay.pending = true;
+        relay.last_damage_px = rects.iter().map(|r| r.size.w as i64 * r.size.h as i64).sum();
+        if let Some(shown) = relay.shown.as_mut() {
+            let _ = shown.render().draw(|_| Ok::<_, ()>(rects));
         }
     }
-    let Some(p) = relay.pending else { return Ok(Relayed::Nothing) };
-    if !relay.bufs[p].sync.as_ref().is_none_or(|sy| sy.is_reached()) {
+    if !relay.buf.sync.as_ref().is_none_or(|sy| sy.is_reached()) {
         return Ok(Relayed::Waiting);
     }
-    // Copy: the newest finished frame onto the showing GPU's scan-out buffer.
+    // Copy what changed onto the showing GPU's scan-out buffer.
     let t1 = std::time::Instant::now();
-    relay.pending = None;
-    relay.copied = Some(p);
-    relay.bufs[p].sync = None;
-    if relay.bufs[p].texture.is_none() {
-        relay.bufs[p].texture = Some(copier.import_dmabuf(&relay.bufs[p].dmabuf, None).map_err(|e| format!("import on the showing GPU: {e}"))?);
+    relay.pending = false;
+    relay.buf.sync = None;
+    if relay.shown.is_none() {
+        let tex = copier.import_dmabuf(&relay.buf.dmabuf, None).map_err(|e| format!("import on the showing GPU: {e}"))?;
+        relay.shown = Some(TextureRenderBuffer::from_texture(copier, tex, 1, Transform::Normal, None));
     }
-    let tex = relay.bufs[p].texture.clone().ok_or("no texture")?;
-    let tb = TextureBuffer::from_texture(copier, tex, 1, Transform::Normal, None);
-    let el = TextureRenderElement::from_texture_buffer((0.0, 0.0), &tb, None, None, None, Kind::Unspecified);
+    let shown = relay.shown.as_ref().ok_or("no texture")?;
+    let el = TextureRenderElement::from_texture_render_buffer((0.0, 0.0), shown, None, None, None, Kind::Unspecified);
     let els = [RelayElements::Texture(el)];
     let empty = s.drm_output.render_frame(copier, &els, clear, FrameFlags::DEFAULT).map_err(|e| format!("copy: {e:?}"))?.is_empty;
+    let damage_px = relay.last_damage_px;
+    let tr = std::time::Instant::now();
+    // The copy must be finished before the screen flips to it and before the
+    // primary draws into the buffer again: nouveau's EGL gives no fence the
+    // kernel can wait on.
+    let _ = copier.with_context(|gl| unsafe { gl.Finish() });
     let t2 = std::time::Instant::now();
     if std::env::var_os("VERGENCE_RELAY_TIMES").is_some() || (t2 - t0).as_millis() > 20 {
-        tracing::info!("relay {}: draw {:.1} ms, copy {:.1} ms", s.connector, (t1 - t0).as_secs_f64() * 1e3, (t2 - t1).as_secs_f64() * 1e3);
+        tracing::info!(
+            "relay {}: draw {:.1} ms, copy submitted {:.1} ms, finished {:.1} ms, {} px copied",
+            s.connector,
+            (t1 - t0).as_secs_f64() * 1e3,
+            (tr - t1).as_secs_f64() * 1e3,
+            (t2 - tr).as_secs_f64() * 1e3,
+            damage_px
+        );
     }
     Ok(if empty { Relayed::Nothing } else { Relayed::Shown })
+}
+
+/// A relay buffer's pixels as the screen got them (R, G, B, A bytes, top row first).
+fn read_back(renderer: &mut GlesRenderer, dmabuf: &mut smithay::backend::allocator::dmabuf::Dmabuf, size: smithay::utils::Size<i32, smithay::utils::Physical>) -> Result<Vec<u8>, String> {
+    use smithay::backend::renderer::{Bind, ExportMem};
+    let buf = smithay::utils::Size::<i32, smithay::utils::Buffer>::from((size.w, size.h));
+    let fb = renderer.bind(dmabuf).map_err(|e| e.to_string())?;
+    let mapping = renderer.copy_framebuffer(&fb, smithay::utils::Rectangle::from_size(buf), Fourcc::Abgr8888).map_err(|e| e.to_string())?;
+    drop(fb);
+    let bytes = renderer.map_texture(&mapping).map_err(|e| e.to_string())?;
+    Ok(bytes.to_vec())
 }
 
 /// Render `elements` into an offscreen buffer the size of the monitor and read it back

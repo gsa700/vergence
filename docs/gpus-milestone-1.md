@@ -144,6 +144,21 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
   buffer the NVIDIA GPU was still copying. Now no frame is drawn while one
   waits to be copied, and the buffer copied last is never drawn into until
   another has been copied. To be seen on the screen again.
+  Still glitching (Dave: "when the mouse moves", then "without me moving the
+  mouse"). `vctl shot` of a screen on another GPU now reads back the very
+  buffer the screen got: clean and steady, so the fault was on the NVIDIA
+  side. Timed for real (the earlier 1 ms was only the submission): **a full
+  4K copy takes nouveau 40 to 77 ms**, and with no fence from nouveau's EGL
+  the screen flipped to half-copied frames. And every frame was drawn and
+  copied whole (8.3 million pixels): the buffer ages ran past the few frames
+  Smithay's tracker keeps. Now one buffer, age always 1 (it always holds the
+  newest frame), the Intel GPU's damage passed to the NVIDIA side
+  (`TextureRenderBuffer`, so its compositor copies only those rectangles),
+  and the copy finished (`glFinish`) before the flip and before the Intel
+  GPU draws again. Hubble: 0 slow frames idle for 10 s; 2 in 60 pointer
+  moves on the 14" (the full copies after start); a pointer move copies a
+  few thousand pixels. Full-screen changes still cost a 40 ms copy: why
+  nouveau's copy from system memory is that slow is open.
 
 ## Steps
 
