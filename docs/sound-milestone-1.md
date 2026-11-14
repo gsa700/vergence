@@ -28,6 +28,13 @@ volume, everywhere in the session. Our own code, on FreeBSD and Linux.
   The Realtek ALC294 seems to want a vendor setup for its headphone
   amplifier that FreeBSD's driver does not do. Not this milestone's to
   fix, but the page must be honest about an output that does not work.
+  **Corrected 2026-11-14: it was not kepler.** The jack is cabled to the
+  inputs of the Audient iD24 on Control, and those inputs were muted in
+  Audient's software on the Mac. With them unmuted, kepler's jack plays
+  (now the M920q's ALC235, pcm0: a test tone and Firefox both heard; the
+  jack senses its plug). The 2026-11-11 silence on the M910q was most
+  likely the same mute, and so may be the Scarlett's below if it went into
+  the iD24 too (not rechecked). kepler's sound is back in use for testing.
 - **Void (Hubble)** has plain ALSA, no PipeWire or PulseAudio: one card,
   `/dev/snd/controlC0` (group `audio`) for its controls. The default
   output is per user, in `~/.asoundrc`: no privilege.
