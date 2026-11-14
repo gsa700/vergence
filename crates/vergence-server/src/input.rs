@@ -72,8 +72,8 @@ impl Server {
             KeyOut::Popup => self.launcher_key(key.sym, key.typed),
             KeyOut::Volume(step) => self.volume_key(step),
             KeyOut::Switch(s) => self.switch_key(s),
-            // Snapping by keys is step 3 of windows milestone 1.
-            KeyOut::Window(k) => tracing::debug!("window key {k:?}: not yet"),
+            // Super with an arrow (snap.rs).
+            KeyOut::Window(k) => self.window_key(k),
             KeyOut::Swallow => {}
         }
     }

@@ -129,6 +129,11 @@ counts as the edge, stays the Dock page's to set, as now.
   once. A plain click still maximizes or restores, as now.
 - **Settings**: the hover can be switched off; right-click and long press
   always work. The panel does not depend on the drag setting.
+- **With the maximize button hidden** (Dave hides it: "if like me a user
+  hides the maximize button, the keys still work"): the window keys have
+  their own switch and never depend on the buttons, and the title bar's
+  right-click menu gets **Snap to…** with the same pictures, so the layouts
+  are there with or without the button.
 
 ### Keys for windows
 
@@ -231,6 +236,16 @@ All the server's, ahead of any program, through the seat's filter:
   after a restart; with the dock set never to hide (keep-clear) the right half
   stops at the dock (935 to 1870), with it hiding it reaches the edge. 426
   tests on Hubble, kepler and Techbench.
+- **Step 3 in** (2026-11-14): vergence-shell `key_act` and `beside` (the
+  window keys' rule, the screen beside by overlap up and down; 5 tests: a
+  window walked across every half of two screens and back, quarters along
+  their row and between rows, Up and Down, screens diagonal or missing); the
+  server's `window_key` applies it to the window with the keyboard (the
+  screen most of it is on). Live on kepler by vctl with drag-snapping off:
+  Right from the right half nothing (one screen), Up maximized, Down back to
+  its place before the snap, Left the left half, Down back, Down minimized;
+  then Alt+Tab brought the minimized window back. 431 tests on Hubble,
+  kepler and Techbench.
 
 ## Steps
 
@@ -247,7 +262,7 @@ All the server's, ahead of any program, through the seat's filter:
 3. **Snapping by keys**: Super+arrows, across monitors.
 4. **Ctrl+drag and the maximize button's layouts**: the three-way drag
    setting; the panel (hover after 0.7 s, right-click, long press), its
-   pictures, light and dark, frosted.
+   pictures, light and dark, frosted; Snap to… in the title bar's menu.
 5. **Alt+Tab**: the panel, the rows, the keys, the delay, minimized windows,
    the click; Alt+`.
 6. **The settings and the docs**: Settings > Windows, every row in the table

@@ -112,6 +112,96 @@ pub fn zone_rect(zone: Zone, area: Rect, top_half: bool) -> (Rect, bool) {
     (r, false)
 }
 
+/// An arrow pressed with Super (the window keys).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arrow {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+/// How a window stands now, for the window keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Standing {
+    Free,
+    Maximized,
+    Snapped(Zone),
+}
+
+/// What a window key does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyAct {
+    /// Into this part of the screen at this place in the list given.
+    Snap(Zone, usize),
+    Maximize,
+    /// Back to where it was before it was maximized or snapped.
+    Restore,
+    Minimize,
+    Nothing,
+}
+
+/// The screen next to `screens[at]` in `dir` (left or right): one beside it
+/// whose span up and down overlaps its own, the nearest first.
+pub fn beside(screens: &[Rect], at: usize, right: bool) -> Option<usize> {
+    let s = screens.get(at)?;
+    screens
+        .iter()
+        .enumerate()
+        .filter(|(i, o)| *i != at && o.y < s.bottom() && s.y < o.bottom() && if right { o.x >= s.right() - 1 } else { o.right() <= s.x + 1 })
+        .min_by_key(|(_, o)| if right { o.x - s.right() } else { s.x - o.right() })
+        .map(|(i, _)| i)
+}
+
+/// Super with an arrow (docs/windows-milestone-1.md, "Keys for windows"):
+///
+/// - Left and Right snap to that half; from one half the other way to the
+///   other half, and on from there to the far half of the screen beside, so
+///   a window walks across every half of every screen. Quarters move along
+///   their row the same way.
+/// - Up maximizes; from a lower quarter, the upper one.
+/// - Down from an upper quarter gives the lower one; from maximized or
+///   another part, back to where it was; from nowhere, minimized.
+pub fn key_act(standing: Standing, arrow: Arrow, at: usize, screens: &[Rect]) -> KeyAct {
+    use Zone::*;
+    let (right, horizontal) = match arrow {
+        Arrow::Left => (false, true),
+        Arrow::Right => (true, true),
+        _ => (false, false),
+    };
+    if horizontal {
+        // The part on the near side (where Left or Right goes on this screen),
+        // and the one on the far side (where it goes on the screen beside).
+        let (near, far) = match (standing, right) {
+            (Standing::Snapped(TopLeft | TopRight), true) => (TopRight, TopLeft),
+            (Standing::Snapped(TopLeft | TopRight), false) => (TopLeft, TopRight),
+            (Standing::Snapped(BottomLeft | BottomRight), true) => (BottomRight, BottomLeft),
+            (Standing::Snapped(BottomLeft | BottomRight), false) => (BottomLeft, BottomRight),
+            (_, true) => (Right, Left),
+            (_, false) => (Left, Right),
+        };
+        return if standing == Standing::Snapped(near) {
+            match beside(screens, at, right) {
+                Some(next) => KeyAct::Snap(far, next),
+                None => KeyAct::Nothing,
+            }
+        } else {
+            KeyAct::Snap(near, at)
+        };
+    }
+    match (standing, arrow) {
+        (Standing::Snapped(BottomLeft), Arrow::Up) => KeyAct::Snap(TopLeft, at),
+        (Standing::Snapped(BottomRight), Arrow::Up) => KeyAct::Snap(TopRight, at),
+        (Standing::Maximized, Arrow::Up) => KeyAct::Nothing,
+        (_, Arrow::Up) => KeyAct::Maximize,
+        (Standing::Snapped(TopLeft), Arrow::Down) => KeyAct::Snap(BottomLeft, at),
+        (Standing::Snapped(TopRight), Arrow::Down) => KeyAct::Snap(BottomRight, at),
+        (Standing::Maximized | Standing::Snapped(_), Arrow::Down) => KeyAct::Restore,
+        (Standing::Free, Arrow::Down) => KeyAct::Minimize,
+        _ => KeyAct::Nothing,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,5 +270,63 @@ mod tests {
     fn a_point_off_the_screen_is_no_zone() {
         assert_eq!(zone_at(-1.0, 5.0, S, &[S]), None);
         assert_eq!(zone_at(1920.0, 5.0, S, &[S]), None);
+    }
+
+    #[test]
+    fn super_right_walks_a_window_across_every_half_of_every_screen() {
+        let screens = [S, Rect::new(1920, 0, 1280, 720)];
+        let mut standing = Standing::Free;
+        let mut at = 0;
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            match key_act(standing, Arrow::Right, at, &screens) {
+                KeyAct::Snap(z, i) => {
+                    standing = Standing::Snapped(z);
+                    at = i;
+                    seen.push((z, i));
+                }
+                KeyAct::Nothing => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!(seen, [(Zone::Right, 0), (Zone::Left, 1), (Zone::Right, 1)], "and no screen beyond the last");
+        // Back again with Left.
+        assert_eq!(key_act(Standing::Snapped(Zone::Left), Arrow::Left, 1, &screens), KeyAct::Snap(Zone::Right, 0));
+        assert_eq!(key_act(Standing::Snapped(Zone::Right), Arrow::Left, 1, &screens), KeyAct::Snap(Zone::Left, 1));
+    }
+
+    #[test]
+    fn from_a_free_or_maximized_window_left_and_right_give_that_half() {
+        assert_eq!(key_act(Standing::Free, Arrow::Left, 0, &[S]), KeyAct::Snap(Zone::Left, 0));
+        assert_eq!(key_act(Standing::Maximized, Arrow::Right, 0, &[S]), KeyAct::Snap(Zone::Right, 0));
+    }
+
+    #[test]
+    fn quarters_move_along_their_row_and_up_and_down_between_rows() {
+        assert_eq!(key_act(Standing::Snapped(Zone::TopLeft), Arrow::Right, 0, &[S]), KeyAct::Snap(Zone::TopRight, 0));
+        assert_eq!(key_act(Standing::Snapped(Zone::BottomRight), Arrow::Left, 0, &[S]), KeyAct::Snap(Zone::BottomLeft, 0));
+        assert_eq!(key_act(Standing::Snapped(Zone::TopLeft), Arrow::Down, 0, &[S]), KeyAct::Snap(Zone::BottomLeft, 0));
+        assert_eq!(key_act(Standing::Snapped(Zone::BottomRight), Arrow::Up, 0, &[S]), KeyAct::Snap(Zone::TopRight, 0));
+    }
+
+    #[test]
+    fn up_maximizes_and_down_restores_or_minimizes() {
+        assert_eq!(key_act(Standing::Free, Arrow::Up, 0, &[S]), KeyAct::Maximize);
+        assert_eq!(key_act(Standing::Snapped(Zone::Left), Arrow::Up, 0, &[S]), KeyAct::Maximize);
+        assert_eq!(key_act(Standing::Maximized, Arrow::Up, 0, &[S]), KeyAct::Nothing);
+        assert_eq!(key_act(Standing::Maximized, Arrow::Down, 0, &[S]), KeyAct::Restore);
+        assert_eq!(key_act(Standing::Snapped(Zone::Right), Arrow::Down, 0, &[S]), KeyAct::Restore);
+        assert_eq!(key_act(Standing::Free, Arrow::Down, 0, &[S]), KeyAct::Minimize);
+    }
+
+    #[test]
+    fn the_screen_beside_is_one_that_overlaps_up_and_down() {
+        let above = Rect::new(1920, -1080, 1920, 1080);
+        let right = Rect::new(1920, 300, 1280, 720);
+        let left = Rect::new(-1280, 0, 1280, 1024);
+        let screens = [S, above, right, left];
+        assert_eq!(beside(&screens, 0, true), Some(2), "not the one diagonally above");
+        assert_eq!(beside(&screens, 0, false), Some(3));
+        assert_eq!(beside(&screens, 3, false), None);
     }
 }

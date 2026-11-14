@@ -32,7 +32,8 @@ use smithay::{
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{IsAlive, Logical, Point, Rectangle, Transform},
 };
-use vergence_shell::snap::{Zone, zone_at, zone_rect};
+use vergence_seat::keyboard::WindowKey;
+use vergence_shell::snap::{Arrow, KeyAct, Standing, Zone, key_act, zone_at, zone_rect};
 
 use crate::{Server, decor::SceneElement, win::Win};
 
@@ -308,6 +309,53 @@ impl Server {
         let whole = Rectangle::<f64, Logical>::from_size((px.0 as f64, px.1 as f64).into());
         let loc = (r.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), buffer, None, Some(whole), Some(r.size), Kind::Unspecified).ok().map(SceneElement::Memory)
+    }
+
+    /// Super with an arrow, for the window with the keyboard (vergence-shell
+    /// `key_act` decides; docs/windows-milestone-1.md, "Keys for windows").
+    pub fn window_key(&mut self, k: WindowKey) {
+        let Some(w) = self.keyboard_window() else { return };
+        if self.is_minimized(&w) {
+            return;
+        }
+        let screens: Vec<Rectangle<i32, Logical>> = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
+        // The screen most of it is on (its place before, if maximized or snapped,
+        // would put a window back on a screen it has left by keys).
+        let Some(geo) = self.space.element_geometry(&w) else { return };
+        let at = screens.iter().enumerate().max_by_key(|(_, g)| g.intersection(geo).map_or(0, |i| i.size.w as i64 * i.size.h as i64)).map(|(i, _)| i);
+        let Some(at) = at else { return };
+        let standing = match (self.restore.contains_key(&w), self.snap.snapped.get(&w)) {
+            (true, _) => Standing::Maximized,
+            (_, Some(s)) => Standing::Snapped(s.zone),
+            _ => Standing::Free,
+        };
+        let arrow = match k {
+            WindowKey::Left => Arrow::Left,
+            WindowKey::Right => Arrow::Right,
+            WindowKey::Up => Arrow::Up,
+            WindowKey::Down => Arrow::Down,
+        };
+        let all: Vec<vergence_shell::Rect> = screens.iter().map(|g| shell_rect(*g)).collect();
+        let act = key_act(standing, arrow, at, &all);
+        tracing::info!("window key {k:?}: {:?} {standing:?} -> {act:?}", self.window_title(&w));
+        match act {
+            KeyAct::Snap(zone, i) => self.snap_apply(&w, zone, screens[i]),
+            KeyAct::Maximize => {
+                if !self.restore.contains_key(&w) {
+                    self.toggle_maximize(&w);
+                }
+            }
+            KeyAct::Restore => {
+                if self.restore.contains_key(&w) {
+                    self.toggle_maximize(&w);
+                } else if let Some(before) = self.unsnap(&w) {
+                    self.set_window_rect(&w, before, false);
+                    self.remember(&w);
+                }
+            }
+            KeyAct::Minimize => self.minimize(&w),
+            KeyAct::Nothing => {}
+        }
     }
 
     /// For `vctl snap`: the choices, what is aimed, and the snapped windows.
