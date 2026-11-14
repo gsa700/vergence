@@ -591,6 +591,8 @@ impl Server {
         // A window on its way back from the dock is put in its place when it arrives.
         self.shelf_motions_end();
         let windows: Vec<Win> = self.space.elements().rev().cloned().collect();
+        // A maximize button rested on opens its layouts (snap.rs).
+        self.layouts_tick();
         // In front of everything: the desktop menu, if open (menu.rs).
         let mut elements = self.menu_elements(renderer, out, scale);
         // Then notifications, in front of every window (notify.rs).

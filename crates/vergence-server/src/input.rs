@@ -44,6 +44,12 @@ impl Server {
         if let Some(k) = self.seat.get_keyboard() {
             k.input::<(), _>(self, code, state, serial, time, |_, _, _| if to_smithay { FilterResult::Forward } else { FilterResult::Intercept(()) });
         }
+        // Ctrl pressed while a window is moved: with the "ctrl" setting it may now
+        // snap, and the preview shows without waiting for the pointer to move.
+        if key.mods_changed && mods.ctrl && self.is_moving() {
+            let at = self.pointer_location();
+            self.snap_track(at);
+        }
         if key.mods_changed
             && let Some(n) = self.input.keyboard_native.clone()
         {

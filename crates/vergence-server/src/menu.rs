@@ -55,9 +55,28 @@ enum Entry {
     /// Something to do with a tab of a native window's bar (bar milestone 1):
     /// the window, the tab's id, what, and what the menu calls it.
     Tab(crate::win::Win, u32, TabAct, String),
+    /// Something to do with a window (windows milestone 1, step 4: the
+    /// layouts on its maximize button and its title bar), and what the menu
+    /// calls it. Layouts have a small picture before their name.
+    Layout(crate::win::Win, LayoutAct, String),
     Separator,
     Exit,
 }
+
+/// What a window's menu does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutAct {
+    Snap(vergence_shell::snap::Zone),
+    Maximize,
+    /// Back to where it was before it was maximized or snapped.
+    Restore,
+    Minimize,
+    Close,
+}
+
+/// The little picture of a layout: a screen 24 x 16 points, the part filled.
+const ICON_W: i32 = 24;
+const ICON_H: i32 = 16;
 
 /// What a tab's menu does (bar milestone 1): the server's entries, then the program's own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +113,11 @@ pub struct OpenMenu {
     light: bool,
     /// The frost behind it (look milestone 1, step 5).
     backdrop: crate::backdrop::Slot,
+    /// Damage ids for the layouts' pictures: five per entry (four lines, the part).
+    icons: Vec<Id>,
+    /// Opened by the pointer resting on a maximize button: it closes when the
+    /// pointer has left both (snap.rs, `layouts_tick`).
+    pub by_hover: bool,
 }
 
 /// The apps for the menu: desktop.toml's, else the usual ones that are installed.
@@ -185,6 +209,7 @@ impl Server {
         }
         entries.push(Entry::Exit);
         let ids = (0..6 + entries.len()).map(|_| Id::new()).collect();
+        let icons = (0..5 * entries.len()).map(|_| Id::new()).collect();
         let mut m = OpenMenu {
             at: pos.to_i32_round(),
             entries,
@@ -194,6 +219,8 @@ impl Server {
             labels: HashMap::new(),
             light: false,
             backdrop: None,
+            icons,
+            by_hover: false,
         };
         if let Some(out) = self.output_at_pointer().map(|o| self.work_area(o)) {
             let (w, h) = (WIDTH, m.height());
@@ -237,7 +264,8 @@ impl Server {
             return;
         }
         let ids = (0..6 + entries.len()).map(|_| Id::new()).collect();
-        let mut m = OpenMenu { at: slot.loc, entries, hover: None, ids, commit: CommitCounter::default(), labels: HashMap::new(), light: false, backdrop: None };
+        let icons = (0..5 * entries.len()).map(|_| Id::new()).collect();
+        let mut m = OpenMenu { at: slot.loc, entries, hover: None, ids, commit: CommitCounter::default(), labels: HashMap::new(), light: false, backdrop: None, icons, by_hover: false };
         // Beside the icon, on the side `towards` names, a little off the dock.
         let off = vergence_look::SHELF_POPUP_GAP as i32;
         m.at = match towards {
@@ -258,6 +286,67 @@ impl Server {
 
     pub fn close_menu(&mut self) {
         self.menu = None;
+    }
+
+    /// A window's menu (windows milestone 1, step 4): the layouts, below its
+    /// maximize button (`on_button`) or at the pointer on its title bar, where
+    /// Minimize and Close follow them.
+    pub fn open_window_menu(&mut self, w: &crate::win::Win, on_button: bool) {
+        use vergence_shell::snap::Zone;
+        let mut entries: Vec<Entry> = [
+            (Zone::Left, "Left half"),
+            (Zone::Right, "Right half"),
+            (Zone::TopLeft, "Top left"),
+            (Zone::TopRight, "Top right"),
+            (Zone::BottomLeft, "Bottom left"),
+            (Zone::BottomRight, "Bottom right"),
+        ]
+        .into_iter()
+        .map(|(z, name)| Entry::Layout(w.clone(), LayoutAct::Snap(z), name.into()))
+        .collect();
+        if self.snap.config.top_half {
+            entries.push(Entry::Layout(w.clone(), LayoutAct::Snap(Zone::Top), "Top half".into()));
+        }
+        let placed = self.restore.contains_key(w) || self.snap.snapped.contains_key(w);
+        if !self.restore.contains_key(w) {
+            entries.push(Entry::Layout(w.clone(), LayoutAct::Maximize, "Maximize".into()));
+        }
+        if placed {
+            entries.push(Entry::Layout(w.clone(), LayoutAct::Restore, "Back to where it was".into()));
+        }
+        if !on_button {
+            entries.push(Entry::Separator);
+            entries.push(Entry::Layout(w.clone(), LayoutAct::Minimize, "Minimize".into()));
+            entries.push(Entry::Layout(w.clone(), LayoutAct::Close, "Close".into()));
+        }
+        let at = self.pointer_location().to_i32_round();
+        let slot = if on_button {
+            self.bar_of(w)
+                .and_then(|(bar, layout)| layout.buttons.iter().find(|(b, _)| *b == vergence_bar::WinButton::Maximize).map(|(_, r)| Rectangle::new((bar.loc.x + r.x as i32, bar.loc.y + r.y as i32).into(), (r.w as i32, r.h as i32).into())))
+                .unwrap_or(Rectangle::new(at, (1, 1).into()))
+        } else {
+            Rectangle::new(at, (1, 1).into())
+        };
+        self.open_beside(slot, vergence_shell::Edge::Bottom, entries);
+    }
+
+    /// Is `pos` on the open menu or within `pad` points of it?
+    pub fn menu_near(&self, pos: Point<f64, Logical>, pad: i32) -> bool {
+        self.menu.as_ref().is_some_and(|m| {
+            let r = m.rect();
+            Rectangle::<i32, Logical>::new((r.loc.x - pad, r.loc.y - pad).into(), (r.size.w + 2 * pad, r.size.h + 2 * pad).into()).to_f64().contains(pos)
+        })
+    }
+
+    /// Whether the open menu was opened by the pointer resting on a maximize button.
+    pub fn menu_by_hover(&self) -> bool {
+        self.menu.as_ref().is_some_and(|m| m.by_hover)
+    }
+
+    pub fn set_menu_by_hover(&mut self) {
+        if let Some(m) = self.menu.as_mut() {
+            m.by_hover = true;
+        }
     }
 
     /// Pointer motion while the menu is open: the entry under it lights up.
@@ -301,6 +390,13 @@ impl Server {
                 let (w, tab, act) = (w.clone(), *tab, *act);
                 self.tab_act(&w, tab, act);
             }
+            Entry::Layout(w, act, label) => {
+                tracing::info!("window menu: {label}");
+                let (w, act) = (w.clone(), *act);
+                if smithay::utils::IsAlive::alive(&w) {
+                    self.layout_act(&w, act);
+                }
+            }
             Entry::Exit => {
                 tracing::info!("menu: exit");
                 self.loop_signal.stop();
@@ -317,6 +413,10 @@ impl Server {
         let frost = self.frost_program(renderer);
         let strength = vergence_look::frost_strength(self.look_setting("frost"));
         let frost_r = vergence_look::frost_radius(self.look_setting("frost"));
+        let accent = {
+            let a = self.accent();
+            [a.r as f32 / 255.0, a.g as f32 / 255.0, a.b as f32 / 255.0, 1.0]
+        };
         let Some(m) = self.menu.as_mut() else { return Vec::new() };
         if m.light != light {
             m.light = light;
@@ -340,12 +440,15 @@ impl Server {
                 Entry::Window(_, title) => title.clone(),
                 Entry::Shelf(_, label) => label.clone(),
                 Entry::Tab(_, _, _, label) => label.clone(),
+                Entry::Layout(_, _, label) => label.clone(),
                 Entry::Exit => "Exit Vergence".into(),
                 Entry::Separator => continue,
             };
             let Some(font) = font else { continue };
             let r = rows[i];
-            let text = Rectangle::new((r.loc.x + 8, r.loc.y).into(), (r.size.w - 16, r.size.h).into());
+            // A layout's picture takes the row's start (drawn below with the solids).
+            let indent = if matches!(e, Entry::Layout(_, LayoutAct::Snap(_) | LayoutAct::Maximize, _)) { 8 + ICON_W } else { 0 };
+            let text = Rectangle::new((r.loc.x + 8 + indent, r.loc.y).into(), (r.size.w - 16 - indent, r.size.h).into());
             let (pw, ph) = ((text.size.w as f64 * scale).round() as i32, (text.size.h as f64 * scale).round() as i32);
             let buf = m.labels.entry((i, scale.to_bits(), light)).or_insert_with(|| {
                 let rgba = font.render(&label, pw as usize, ph as usize, scale, look.menu_ink.floats3());
@@ -357,6 +460,33 @@ impl Server {
             if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(renderer, at, buf, None, Some(src), Some(size), Kind::Unspecified) {
                 els.push(SceneElement::Memory(el));
             }
+        }
+        // The layouts' pictures: a small screen, its part filled in the accent.
+        for (i, e) in m.entries.iter().enumerate() {
+            let zone = match e {
+                Entry::Layout(_, LayoutAct::Snap(z), _) => Some(*z),
+                Entry::Layout(_, LayoutAct::Maximize, _) => None,
+                _ => continue,
+            };
+            let r = rows[i];
+            let (x, y) = (r.loc.x + 8, r.loc.y + (r.size.h - ICON_H) / 2);
+            let screen = vergence_shell::Rect::new(x, y, ICON_W, ICON_H);
+            let part = match zone {
+                Some(z) => vergence_shell::snap::zone_rect(z, screen, true).0,
+                None => screen,
+            };
+            let lines = [
+                Rectangle::new((x, y).into(), (ICON_W, 1).into()),
+                Rectangle::new((x, y + ICON_H - 1).into(), (ICON_W, 1).into()),
+                Rectangle::new((x, y).into(), (1, ICON_H).into()),
+                Rectangle::new((x + ICON_W - 1, y).into(), (1, ICON_H).into()),
+            ];
+            for (k, l) in lines.into_iter().enumerate() {
+                els.push(SceneElement::Solid(SolidColorRenderElement::new(m.icons[5 * i + k].clone(), phys(l), m.commit, look.menu_ink.floats(), Kind::Unspecified)));
+            }
+            // Inside the picture's line, a point of room round the part.
+            let fill = Rectangle::new((part.x + 2, part.y + 2).into(), ((part.w - 3).max(1), (part.h - 3).max(1)).into());
+            els.push(SceneElement::Solid(SolidColorRenderElement::new(m.icons[5 * i + 4].clone(), phys(fill), m.commit, accent, Kind::Unspecified)));
         }
         // Hover, separators, edge and background (back).
         if let Some(h) = m.hover {

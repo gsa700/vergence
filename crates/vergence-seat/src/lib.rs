@@ -188,6 +188,10 @@ pub enum Out {
     FingerMoveEnd(WinId),
     /// No finger rests on the dock any more (no name beside an icon).
     Unhover,
+    /// A window's menu (windows milestone 1, step 4: the layouts): a right
+    /// click on its title bar or maximize button (`on_button`), or a long
+    /// press on its title bar.
+    WindowMenu { window: WinId, on_button: bool },
     // ---- switching ----
     /// Alt+Tab's switching ended without a choice (the screens went off).
     SwitchCancel,

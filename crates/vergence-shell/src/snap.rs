@@ -17,6 +17,10 @@ use crate::Rect;
 pub const EDGE: i32 = 2;
 /// How near a corner, along the edge, makes a quarter instead of a half.
 pub const CORNER: i32 = 24;
+/// The room between snapped windows, and between them and the screen's
+/// edges, where the settings keep it (Dave, 2026-11-14: "should the windows
+/// have a little buffer between them? Like the terminal when we split it?").
+pub const GAP: i32 = 6;
 
 /// A part of a screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -92,6 +96,28 @@ pub fn zone_at(x: f64, y: f64, screen: Rect, screens: &[Rect]) -> Option<(Zone, 
         return Some((if near_left { Zone::BottomLeft } else { Zone::BottomRight }, beyond_bottom));
     }
     None
+}
+
+/// The same with `gap` points round and between the parts (a maximized
+/// window still fills the area).
+pub fn zone_rect_gapped(zone: Zone, area: Rect, top_half: bool, gap: i32) -> (Rect, bool) {
+    if zone == Zone::Top && !top_half || gap <= 0 {
+        return zone_rect(zone, area, top_half);
+    }
+    let inner = Rect::new(area.x + gap, area.y + gap, area.w - 2 * gap, area.h - 2 * gap);
+    let (hw, hh) = ((inner.w - gap) / 2, (inner.h - gap) / 2);
+    let (rx, rw) = (inner.x + hw + gap, inner.w - hw - gap);
+    let (by, bh) = (inner.y + hh + gap, inner.h - hh - gap);
+    let r = match zone {
+        Zone::Left => Rect::new(inner.x, inner.y, hw, inner.h),
+        Zone::Right => Rect::new(rx, inner.y, rw, inner.h),
+        Zone::TopLeft => Rect::new(inner.x, inner.y, hw, hh),
+        Zone::TopRight => Rect::new(rx, inner.y, rw, hh),
+        Zone::BottomLeft => Rect::new(inner.x, by, hw, bh),
+        Zone::BottomRight => Rect::new(rx, by, rw, bh),
+        Zone::Top => Rect::new(inner.x, inner.y, inner.w, hh),
+    };
+    (r, false)
 }
 
 /// The rectangle of `zone` in `area` (a screen's work area), and whether the
@@ -256,6 +282,21 @@ mod tests {
         assert_eq!((tl.bottom(), bl.y, bl.bottom()), (539, 539, 1079));
         assert_eq!(zone_rect(Zone::Top, a, false), (a, true));
         assert_eq!(zone_rect(Zone::Top, a, true), (Rect::new(64, 0, 1855, 539), false));
+    }
+
+    #[test]
+    fn with_a_gap_the_parts_keep_it_round_and_between_them() {
+        let a = Rect::new(0, 0, 1920, 1080);
+        let (l, _) = zone_rect_gapped(Zone::Left, a, false, GAP);
+        let (r, _) = zone_rect_gapped(Zone::Right, a, false, GAP);
+        assert_eq!((l.x, l.y, l.bottom()), (6, 6, 1074));
+        assert_eq!(r.x - l.right(), 6, "the gap between them");
+        assert_eq!(1920 - r.right(), 6, "and at the edge");
+        let (tl, _) = zone_rect_gapped(Zone::TopLeft, a, false, GAP);
+        let (bl, _) = zone_rect_gapped(Zone::BottomLeft, a, false, GAP);
+        assert_eq!(bl.y - tl.bottom(), 6);
+        assert_eq!(zone_rect_gapped(Zone::Top, a, false, GAP), (a, true), "maximized fills the area");
+        assert_eq!(zone_rect_gapped(Zone::Left, a, false, 0), zone_rect(Zone::Left, a, false));
     }
 
     #[test]

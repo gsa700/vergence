@@ -245,6 +245,9 @@ impl Server {
                         "Super" => vec![125],
                         // The key above Tab (KEY_GRAVE), for Alt+`.
                         "grave" => vec![41],
+                        // A modifier alone (Ctrl tapped during a drag snaps it, snap.rs).
+                        "Control" => vec![29],
+                        "Shift" => vec![42],
                         // The volume keys (KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP).
                         "Mute" => vec![113],
                         "VolumeDown" => vec![114],

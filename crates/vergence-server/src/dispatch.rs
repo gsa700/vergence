@@ -410,6 +410,12 @@ impl Server {
                 }
                 Out::Unfocus => self.unfocus_all(),
                 Out::SwitchCancel => self.input.switching = None,
+                Out::WindowMenu { window, on_button } => {
+                    if let Some(w) = self.input.wins.get(&window).cloned() {
+                        self.open_window_menu(&w, on_button);
+                        self.redraw_all();
+                    }
+                }
                 Out::Maximize(id) => {
                     if let Some(w) = self.input.wins.get(&id).cloned() {
                         self.toggle_maximize(&w);
@@ -748,6 +754,7 @@ impl Server {
         self.smithay_let_go(pos, time);
         let Some(loc) = self.space.element_location(&window) else { return };
         let unmaximize_on_drag = self.restore.contains_key(&window) || self.snap.snapped.contains_key(&window);
+        self.snap.ctrl_seen = false;
         self.input.running = Some(Running::Move { window, from: pos, loc, unmaximize_on_drag });
     }
 

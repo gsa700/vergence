@@ -190,6 +190,11 @@ impl Seat {
                 out.push(Out::Minimize(w));
                 p.swallow(button);
             }
+            // A right click on the bar or the maximize button: the window's menu.
+            Target::Server(Part::Title(w) | Part::Maximize(w)) if button == BTN_RIGHT => {
+                out.push(Out::WindowMenu { window: w, on_button: matches!(t, Target::Server(Part::Maximize(_))) });
+                p.swallow(button);
+            }
             // The frame's other buttons do nothing.
             Target::Server(Part::Title(_) | Part::Edge(..) | Part::Close(_) | Part::Maximize(_) | Part::Minimize(_)) => p.swallow(button),
             Target::Server(Part::Desktop) => {
@@ -293,6 +298,22 @@ mod tests {
 
     fn alt() -> keyboard::Mods {
         keyboard::Mods { alt: true, ..Default::default() }
+    }
+
+    #[test]
+    fn a_right_click_on_the_bar_or_the_maximize_button_is_the_windows_menu() {
+        let mut seat = Seat::new();
+        let bar = Target::Server(Part::Title(W1));
+        let out = seat.button(BTN_RIGHT, true, Some(bar), Default::default(), 0);
+        assert!(out.contains(&Out::WindowMenu { window: W1, on_button: false }));
+        assert!(!out.iter().any(|o| matches!(o, Out::MoveBegin(_))));
+        // Its release goes nowhere.
+        assert!(seat.button(BTN_RIGHT, false, Some(bar), Default::default(), 10).iter().all(|o| !matches!(o, Out::Release(..))));
+        let max = Target::Server(Part::Maximize(W2));
+        assert!(seat.button(BTN_RIGHT, true, Some(max), Default::default(), 20).contains(&Out::WindowMenu { window: W2, on_button: true }));
+        // A left click there still maximizes.
+        seat.button(BTN_RIGHT, false, Some(max), Default::default(), 30);
+        assert!(seat.button(BTN_LEFT, true, Some(max), Default::default(), 40).contains(&Out::Maximize(W2)));
     }
 
     #[test]

@@ -18,7 +18,7 @@
 //! Where a finger "meant" when it came down a little off a button (the
 //! server's REACH) is the server's: it passes the target it decided on.
 
-use crate::{BTN_LEFT, Menu, Out, Part, Seat, Slot, Target, WinId, keyboard::Mods};
+use crate::{BTN_LEFT, Grab, Menu, Out, Part, Seat, Slot, Target, WinId, keyboard::Mods};
 
 /// How far a long press may wander, in points.
 pub const STILL: f64 = 10.0;
@@ -82,7 +82,7 @@ impl Seat {
         out.extend(self.motion(under));
         out.extend(self.button(BTN_LEFT, true, under, Mods::default(), now_ms));
         self.touch.presses += 1;
-        self.touch.resting = (!ours && matches!(under, Some(Target::Server(Part::Dock | Part::Desktop)))).then_some((x, y));
+        self.touch.resting = (!ours && matches!(under, Some(Target::Server(Part::Dock | Part::Desktop | Part::Title(_))))).then_some((x, y));
         out.push(Out::LongPressTimer(self.touch.presses));
         out
     }
@@ -130,7 +130,11 @@ impl Seat {
         if press != self.touch.presses || self.touch.pointing.is_none() || self.touch.resting.take().is_none() {
             return out;
         }
-        let under = self.pointer.focus.filter(|_| self.pointer.held.contains(&BTN_LEFT));
+        // A finger on a title bar began moving its window at once: the bar is what it pressed.
+        let under = match self.grab {
+            Some(Grab::Move { window, button: BTN_LEFT }) => Some(Target::Server(Part::Title(window))),
+            _ => self.pointer.focus.filter(|_| self.pointer.held.contains(&BTN_LEFT)),
+        };
         match under {
             Some(Target::Server(Part::Dock)) => {
                 // The press the dock was holding is not a click any more: no release goes to it.
@@ -141,6 +145,17 @@ impl Seat {
             Some(Target::Server(Part::Desktop)) => {
                 out.extend(self.button(BTN_LEFT, false, under, Mods::default(), 0));
                 out.push(Out::DesktopMenu);
+                self.menu = Some(Menu::Menu);
+            }
+            // On a title bar: the window's menu. The move the press began ends
+            // where it is (the finger rested), and its lifting is no release.
+            Some(Target::Server(Part::Title(w))) => {
+                if matches!(self.grab, Some(Grab::Move { window, .. }) if window == w) {
+                    self.grab = None;
+                    out.push(Out::GrabEnd(w));
+                }
+                self.pointer.held.retain(|b| *b != BTN_LEFT);
+                out.push(Out::WindowMenu { window: w, on_button: false });
                 self.menu = Some(Menu::Menu);
             }
             _ => return out,
@@ -236,6 +251,19 @@ mod tests {
     }
 
     #[test]
+    fn a_long_still_press_on_a_title_bar_is_the_windows_menu_not_a_move() {
+        let mut seat = Seat::new();
+        let bar = Target::Server(Part::Title(W1));
+        let out = seat.touch_down(0, 300.0, 20.0, Some(bar), 0);
+        assert!(out.contains(&Out::MoveBegin(W1)));
+        let out = seat.touch_long_press(1);
+        assert_eq!(out, vec![Out::GrabEnd(W1), Out::WindowMenu { window: W1, on_button: false }]);
+        assert_eq!(seat.grab(), None);
+        assert_eq!(seat.menu(), Some(Menu::Menu));
+        assert!(seat.touch_up(0, Some(bar), 900).iter().all(|o| !matches!(o, Out::Release(..))));
+    }
+
+    #[test]
     fn a_finger_that_wanders_or_an_old_timer_is_no_long_press() {
         let mut seat = Seat::new();
         let desk = Target::Server(Part::Desktop);
@@ -245,10 +273,14 @@ mod tests {
         seat.touch_up(0, Some(desk), 100);
         seat.touch_down(0, 300.0, 300.0, Some(desk), 200);
         assert!(seat.touch_long_press(1).is_empty());
-        // A long press on a title bar is nothing (it is a move).
+        // A finger that moves along a title bar is a move, not the window's menu
+        // (a still one is: windows milestone 1, step 4).
         seat.touch_up(0, Some(desk), 300);
-        seat.touch_down(0, 300.0, 300.0, Some(Target::Server(Part::Title(W1))), 400);
+        let bar = Target::Server(Part::Title(W1));
+        seat.touch_down(0, 300.0, 300.0, Some(bar), 400);
+        seat.touch_motion(0, 340.0, 310.0, Some(bar));
         assert!(seat.touch_long_press(3).is_empty());
+        assert!(matches!(seat.grab(), Some(Grab::Move { window: W1, .. })));
     }
 
     #[test]

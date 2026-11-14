@@ -2,10 +2,15 @@
 //
 // While a window is moved by the pointer, the pointer at a screen's edge aims
 // it at a part of that screen (vergence-shell snap.rs decides which); letting
-// go there puts it there. Off by default (Dave, 2026-11-14: "I am really not a
-// snap window person"): desktop.toml `[windows] snap = true` turns it on, and
-// the other choices sit beside it there (the settings app's Windows page,
-// step 5). The screen's part is taken from its work area, the one maximize
+// go there puts it there. Not by default (Dave, 2026-11-14: "I am really not a
+// snap window person"): by default only while Ctrl is held at some time during
+// the drag ("maybe drag with a modifier like control+drag"); desktop.toml
+// `[windows] snap = "ctrl" | "always" | "off"` (true and false read as always
+// and off), and the other choices sit beside it there (the settings app's
+// Windows page, step 6). The maximize button and the title bar carry the same
+// layouts in a menu (menu.rs, `open_window_menu`), opened by a right click, a
+// long press on the bar, or the pointer resting 0.7 s on the button
+// (`layouts-hover`). The screen's part is taken from its work area, the one maximize
 // uses, so the dock counts as the edge exactly as its own settings say.
 //
 // A snapped window keeps where it was before (`Snapped::before`), apart from
@@ -33,7 +38,7 @@ use smithay::{
     utils::{IsAlive, Logical, Point, Rectangle, Transform},
 };
 use vergence_seat::keyboard::WindowKey;
-use vergence_shell::snap::{Arrow, KeyAct, Standing, Zone, key_act, zone_at, zone_rect};
+use vergence_shell::snap::{Arrow, KeyAct, Standing, Zone, key_act, zone_at, zone_rect, zone_rect_gapped};
 
 use crate::{Server, decor::SceneElement, win::Win};
 
@@ -43,11 +48,23 @@ const DWELL: Duration = Duration::from_millis(150);
 /// the settings let that snap at all.
 const PRESS: Duration = Duration::from_millis(500);
 
+/// When a drag to an edge snaps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapMode {
+    Off,
+    /// Only if Ctrl is held at some time during the drag (the default).
+    Ctrl,
+    Always,
+}
+
+/// How long the pointer rests on a maximize button before its layouts show.
+const HOVER: Duration = Duration::from_millis(700);
+
 /// desktop.toml `[windows]`: the choices, with their defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SnapConfig {
-    /// `snap`: dragging to an edge snaps (default false).
-    pub on: bool,
+    /// `snap`: when dragging to an edge snaps (default "ctrl").
+    pub mode: SnapMode,
     /// `top-edge = "half"`: the top edge gives the top half (default "maximize").
     pub top_half: bool,
     /// `between-screens = "press"`: edges with a screen beyond snap after a
@@ -55,11 +72,23 @@ pub struct SnapConfig {
     pub between: bool,
     /// `preview`: show where it will go (default true).
     pub preview: bool,
+    /// `layouts-hover`: the pointer resting on a maximize button opens its
+    /// layouts (default true; a right click always does).
+    pub layouts_hover: bool,
+    /// `gaps`: snapped windows keep a little room round and between them
+    /// (default true; vergence-shell `snap::GAP`).
+    pub gaps: bool,
+}
+
+impl SnapConfig {
+    fn gap(&self) -> i32 {
+        if self.gaps { vergence_shell::snap::GAP } else { 0 }
+    }
 }
 
 impl Default for SnapConfig {
     fn default() -> SnapConfig {
-        SnapConfig { on: false, top_half: false, between: false, preview: true }
+        SnapConfig { mode: SnapMode::Ctrl, top_half: false, between: false, preview: true, layouts_hover: true, gaps: true }
     }
 }
 
@@ -69,7 +98,14 @@ pub fn config_from(text: &str) -> SnapConfig {
     let Some(t) = text.parse::<toml::Table>().ok().and_then(|t| t.get("windows").and_then(|w| w.as_table()).cloned()) else { return d };
     let flag = |k: &str, or: bool| t.get(k).and_then(|v| v.as_bool()).unwrap_or(or);
     let word = |k: &str| t.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
-    SnapConfig { on: flag("snap", d.on), top_half: word("top-edge") == "half", between: word("between-screens") == "press", preview: flag("preview", d.preview) }
+    let mode = match t.get("snap") {
+        Some(toml::Value::Boolean(true)) => SnapMode::Always,
+        Some(toml::Value::Boolean(false)) => SnapMode::Off,
+        Some(toml::Value::String(s)) if s == "always" => SnapMode::Always,
+        Some(toml::Value::String(s)) if s == "off" => SnapMode::Off,
+        _ => d.mode,
+    };
+    SnapConfig { mode, top_half: word("top-edge") == "half", between: word("between-screens") == "press", preview: flag("preview", d.preview), layouts_hover: flag("layouts-hover", d.layouts_hover), gaps: flag("gaps", d.gaps) }
 }
 
 fn load_config() -> SnapConfig {
@@ -109,6 +145,10 @@ impl Aim {
 pub struct Snap {
     pub config: SnapConfig,
     aim: Option<Aim>,
+    /// Ctrl has been held during this drag (with the "ctrl" mode it snaps).
+    pub ctrl_seen: bool,
+    /// The maximize button the pointer rests on, and since when.
+    hover: Option<(Win, Instant)>,
     pub snapped: std::collections::HashMap<Win, Snapped>,
     /// Parts window memory had for windows not yet shown (opened.rs applies them).
     pub recalled: std::collections::HashMap<Win, Zone>,
@@ -117,7 +157,7 @@ pub struct Snap {
 
 impl Default for Snap {
     fn default() -> Snap {
-        Snap { config: load_config(), aim: None, snapped: Default::default(), recalled: Default::default(), picture: None }
+        Snap { config: load_config(), aim: None, ctrl_seen: false, hover: None, snapped: Default::default(), recalled: Default::default(), picture: None }
     }
 }
 
@@ -142,7 +182,15 @@ impl Server {
     /// The pointer moved while a window is moved by it: aim, or stop aiming.
     pub fn snap_track(&mut self, pos: Point<f64, Logical>) {
         let c = self.snap.config;
-        let aim = if c.on { self.snap_aim(pos, c) } else { None };
+        if self.input.keys.as_ref().is_some_and(|k| k.mods().ctrl) {
+            self.snap.ctrl_seen = true;
+        }
+        let on = match c.mode {
+            SnapMode::Off => false,
+            SnapMode::Ctrl => self.snap.ctrl_seen,
+            SnapMode::Always => true,
+        };
+        let aim = if on { self.snap_aim(pos, c) } else { None };
         let was = self.snap.aim.map(|a| (a.zone, a.screen, a.shown()));
         match (self.snap.aim, aim) {
             // Still the same part of the same screen: it keeps its time.
@@ -163,7 +211,7 @@ impl Server {
         if shared && !c.between {
             return None;
         }
-        let (r, _) = zone_rect(zone, shell_rect(self.work_area(screen)), c.top_half);
+        let (r, _) = zone_rect_gapped(zone, shell_rect(self.work_area(screen)), c.top_half, c.gap());
         Some((zone, screen, rectangle(r), shared))
     }
 
@@ -202,7 +250,7 @@ impl Server {
     fn snap_apply_from(&mut self, w: &Win, zone: Zone, screen: Rectangle<i32, Logical>, from: Option<Rectangle<i32, Logical>>) {
         self.snap.snapped.retain(|w, _| w.alive());
         let area = self.work_area(screen);
-        let (r, max) = zone_rect(zone, shell_rect(area), self.snap.config.top_half);
+        let (r, max) = zone_rect_gapped(zone, shell_rect(area), self.snap.config.top_half, self.snap.config.gap());
         if max {
             if !self.restore.contains_key(w) {
                 self.toggle_maximize(w);
@@ -279,8 +327,9 @@ impl Server {
             return None;
         }
         let aim = self.snap.aim.filter(|a| a.shown() && self.snap.config.preview)?;
-        // A little inside the part, so its line shows against the screen's edge.
-        let inset = 6;
+        // Where the window will go; without gaps a little inside, so its line
+        // shows against the screen's edge.
+        let inset = if self.snap.config.gaps { 0 } else { 6 };
         let r = Rectangle::<i32, Logical>::new((aim.rect.loc.x + inset, aim.rect.loc.y + inset).into(), (aim.rect.size.w - 2 * inset, aim.rect.size.h - 2 * inset).into());
         if !r.overlaps(out) || r.size.w <= 0 || r.size.h <= 0 {
             return None;
@@ -358,6 +407,71 @@ impl Server {
         }
     }
 
+    /// A choice in a window's menu (menu.rs).
+    pub fn layout_act(&mut self, w: &Win, act: crate::menu::LayoutAct) {
+        use crate::menu::LayoutAct;
+        match act {
+            LayoutAct::Snap(zone) => {
+                let Some(geo) = self.space.element_geometry(w) else { return };
+                let screens: Vec<Rectangle<i32, Logical>> = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
+                let screen = screens.iter().max_by_key(|g| g.intersection(geo).map_or(0, |i| i.size.w as i64 * i.size.h as i64)).copied();
+                if let Some(screen) = screen {
+                    self.snap_apply(w, zone, screen);
+                }
+            }
+            LayoutAct::Maximize => {
+                if !self.restore.contains_key(w) {
+                    self.toggle_maximize(w);
+                }
+            }
+            LayoutAct::Restore => {
+                if self.restore.contains_key(w) {
+                    self.toggle_maximize(w);
+                } else if let Some(before) = self.unsnap(w) {
+                    self.set_window_rect(w, before, false);
+                    self.remember(w);
+                }
+            }
+            LayoutAct::Minimize => self.minimize(w),
+            LayoutAct::Close => self.close_window(w),
+        }
+        self.redraw_all();
+    }
+
+    /// Each frame: the pointer resting on a maximize button opens its layouts
+    /// after `HOVER`; a menu opened that way closes once the pointer has left
+    /// both the button and the menu (with the gap between them to cross).
+    pub fn layouts_tick(&mut self) {
+        let at = self.pointer_location();
+        let on_button = match self.hit(at) {
+            crate::decor::Hit::Maximize(w) => Some(w),
+            _ => None,
+        };
+        if self.menu_by_hover() {
+            if on_button.is_none() && !self.menu_near(at, vergence_look::SHELF_POPUP_GAP as i32 + 4) {
+                self.close_menu();
+                self.redraw_all();
+            }
+            self.snap.hover = None;
+            return;
+        }
+        let quiet = self.snap.config.layouts_hover && !self.menu_is_open() && !self.input.seat.buttons_held() && !self.is_moving();
+        match on_button.filter(|_| quiet) {
+            Some(w) => match &self.snap.hover {
+                Some((hw, since)) if *hw == w => {
+                    if since.elapsed() >= HOVER {
+                        self.snap.hover = None;
+                        self.open_window_menu(&w, true);
+                        self.set_menu_by_hover();
+                        self.redraw_all();
+                    }
+                }
+                _ => self.snap.hover = Some((w, Instant::now())),
+            },
+            None => self.snap.hover = None,
+        }
+    }
+
     /// For `vctl snap`: the choices, what is aimed, and the snapped windows.
     pub fn snap_report(&self) -> String {
         let mut out = vec![format!("{:?}", self.snap.config)];
@@ -381,11 +495,16 @@ mod tests {
     #[test]
     fn snapping_is_off_unless_desktop_toml_says_so() {
         assert_eq!(config_from(""), SnapConfig::default());
-        assert!(!config_from("[windows]\npreview = false\n").on);
-        let c = config_from("[windows]\nsnap = true\ntop-edge = \"half\"\nbetween-screens = \"press\"\npreview = false\n");
-        assert_eq!(c, SnapConfig { on: true, top_half: true, between: true, preview: false });
+        assert_eq!(SnapConfig::default().mode, SnapMode::Ctrl, "only with Ctrl held unless the settings say otherwise");
+        assert_eq!(config_from("[windows]\npreview = false\n").mode, SnapMode::Ctrl);
+        let c = config_from("[windows]\nsnap = true\ntop-edge = \"half\"\nbetween-screens = \"press\"\npreview = false\nlayouts-hover = false\n");
+        assert_eq!(c, SnapConfig { mode: SnapMode::Always, top_half: true, between: true, preview: false, layouts_hover: false, gaps: true });
+        assert!(!config_from("[windows]\ngaps = false\n").gaps);
+        assert_eq!(config_from("[windows]\nsnap = false\n").mode, SnapMode::Off);
+        assert_eq!(config_from("[windows]\nsnap = \"off\"\n").mode, SnapMode::Off);
+        assert_eq!(config_from("[windows]\nsnap = \"always\"\n").mode, SnapMode::Always);
         // Words it does not know leave the defaults.
-        let c = config_from("[windows]\nsnap = true\ntop-edge = \"sideways\"\n");
-        assert!(c.on && !c.top_half && !c.between && c.preview);
+        let c = config_from("[windows]\nsnap = \"sometimes\"\ntop-edge = \"sideways\"\n");
+        assert!(c.mode == SnapMode::Ctrl && !c.top_half && !c.between && c.preview && c.layouts_hover);
     }
 }
