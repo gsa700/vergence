@@ -317,8 +317,8 @@ All the server's, ahead of any program, through the seat's filter:
 - **Acceptance, where it stands** (2026-11-14): 1 met on Hubble, kepler and
   Techbench. 2 met on kepler by
   vctl (native terminal and foot; with a finger not yet tried by hand; the
-  settings app snapped on Hubble by key). 3 not yet: the nested server with
-  two virtual monitors. 4 met on kepler (Alt+Tab, the list, minimized, Escape,
+  settings app snapped on Hubble by key). 3 met on the nested pair
+  (above). 4 met on kepler (Alt+Tab, the list, minimized, Escape,
   Alt+`). 5 met for a logout and login on kepler (refitting to a new size of
   the setup by the unit tests). 6 met (snapping Off/Ctrl by default; window
   keys with drag snapping off). 7 met (50 of 50 within a frame of arriving;
