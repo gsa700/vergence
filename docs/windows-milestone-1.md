@@ -91,7 +91,8 @@ page, in a "Snapping and switching" group, written to desktop.toml
 
 | Setting | Choices | Default |
 |---|---|---|
-| Snap windows dragged to the screen's edges | on, off | **off** |
+| Snap windows dragged to the screen's edges | Off, While Ctrl is held, Always | **While Ctrl is held** |
+| Layouts on the maximize button open on a hover | on, off | on |
 | The top edge | Maximizes, Top half | Maximizes |
 | Edges between screens | Never snap, Snap after a short press | Never snap |
 | Show where it will go | on (the preview), off | on |
@@ -99,11 +100,35 @@ page, in a "Snapping and switching" group, written to desktop.toml
 | Alt+Tab | Windows on every screen, Windows on this screen | every screen |
 | Alt+` steps among one application's windows | on, off | on |
 
-The snapping rows under the first are dimmed while it is off. The window
+The snapping rows under the first are dimmed while it is Off. **Added
+2026-11-14** (Dave: "make it like windows and macos and build snap options
+into the maximize button, and maybe drag with a modifier like
+control+drag"; "I don't mind the feature as long as it's not overbearing"):
+with "While Ctrl is held", the default, a drag to an edge only moves the
+window unless Ctrl is held at some time during the drag; desktop.toml
+`snap = "ctrl"` (`true` and `false` still read as Always and Off). The window
 keys are a switch of their own: they are asked for, never stumbled into, so
 they stay on with snapping off. Alt+Tab itself has no off switch (a program
 cannot have it either way, see Security). The dock's band, and whether it
 counts as the edge, stays the Dock page's to set, as now.
+
+### Layouts on the maximize button
+
+(Added 2026-11-14, from Dave's use of macOS's green button on Control.)
+
+- **A small frosted panel** beside the maximize button, of pictures of the
+  layouts: the left and right halves, the four quarters, maximized (the top
+  half too where the top edge is set to give it). A click on one puts the
+  window there, on the screen it is on, exactly as a snap does (the same
+  place before, memory, tiled states); Escape or the pointer leaving closes
+  it.
+- **It opens on a deliberate pause**: the pointer resting 0.7 s on the
+  button (longer than Windows' delay, so passing over does nothing), and
+  closes when the pointer has left both the button and the panel. A
+  right-click on the button, or a long press with a finger, opens it at
+  once. A plain click still maximizes or restores, as now.
+- **Settings**: the hover can be switched off; right-click and long press
+  always work. The panel does not depend on the drag setting.
 
 ### Keys for windows
 
@@ -220,9 +245,12 @@ All the server's, ahead of any program, through the seat's filter:
    the zones (a dock on each edge, two monitors side by side and stacked,
    scales 1, 2 and 2.5).
 3. **Snapping by keys**: Super+arrows, across monitors.
-4. **Alt+Tab**: the panel, the rows, the keys, the delay, minimized windows,
+4. **Ctrl+drag and the maximize button's layouts**: the three-way drag
+   setting; the panel (hover after 0.7 s, right-click, long press), its
+   pictures, light and dark, frosted.
+5. **Alt+Tab**: the panel, the rows, the keys, the delay, minimized windows,
    the click; Alt+`.
-5. **The settings and the docs**: Settings > Windows, every row in the table
+6. **The settings and the docs**: Settings > Windows, every row in the table
    above; whitepaper §6.9 (snapping off by default, the top edge, the dock
    as its settings say) and §9; shelf milestone 1's pointer; this plan's
    notes.
