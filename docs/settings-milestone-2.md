@@ -1,0 +1,123 @@
+# Settings milestone 2: screens, cables, energy and window places
+
+Drafted 2026-11-14 from Dave's afternoon notes (docs/next-settings.md, "From
+Dave, 2026-11-14 afternoon"), first in docs/apps-roadmap.md's order ("That
+looks good"). **Draft: questions for Dave at the end.**
+
+## Where things stand
+
+- **Screens**: each screen runs its monitor's preferred mode; a screen's page
+  has its scale, "Shown at" with what it comes to ("looks like 1280 x 720
+  (3840 x 2160 pixels)", since GPUs milestone 1), size of controls, and which
+  GPU shows and draws it. A scale is whole where close (the 14" at 300%,
+  calculated 328%).
+- **Network page**: each cable connected or not, with its addresses; no
+  speed, no traffic. The Wi-Fi page has signal, speed, a chart and traffic.
+- **Energy page**: screens off after, sleep after, one setting for all
+  power; vergence-power knows battery or mains.
+- **Window memory** (the server's memory.rs, ~/.config/vergence/
+  server-windows.toml): places per app and per screen setup, kept until a
+  window is closed for good or unseen 90 days; nothing forgets them by hand.
+- **The terminal** closes a window and every tab in it without asking.
+
+## Design
+
+### Resolution and refresh rate
+
+Each screen's page gets a **Resolution** choice (the monitor's modes, largest
+first, the preferred one marked) and a **Refresh rate** choice (the rates of
+that resolution). Bus protocol v9: `OutputInfo` lists the modes and the
+current one; desktop.toml `[[displays.screen]] mode = "3840x2160@60"`, which
+the server sets (the mode is checked against the connector's list, never
+taken on trust). A new mode shows a **"Keep this resolution?"** dialog that
+puts the old one back after 15 s unless Keep is pressed, so a mode the
+monitor cannot show never strands anyone.
+
+### The same physical size on every screen
+
+A switch on the Screens overview: **"Windows the same size on every
+screen"**. On: every screen whose scale is not chosen by hand takes its exact
+calculated scale (Contract 1's reference unit: the 14" at 328%, not 300%),
+connected or remembered, so a window keeps its size in millimeters moving
+between screens. Off (as now): whole numbers where close, for sharpness. The
+overview says the cost in a line ("slightly soft in apps that only draw at
+whole scales").
+
+### Cables like Wi-Fi
+
+The Network page's cable shows its **link speed and duplex** (1 Gb/s, full)
+in the connected row, and **Traffic** in and out with a two-minute chart (the
+Wi-Fi page's), sampled every 2 s while the page is open. vergence-net reads
+them: Linux from /sys (speed, duplex), FreeBSD from the interface's media
+(SIOCGIFMEDIA), the byte counters it already has.
+
+### Energy on battery and on power
+
+The Energy page in two columns where there is a battery: **On battery** and
+**On power**, each with screens off after and sleep after. desktop.toml
+`[energy]` stays the on-power one; `[energy.battery]` is new, and absent
+means the same as on power. The server's energy.rs follows the mains state
+(vergence-power, read every 30 s and on input) and uses the matching pair.
+A UPS's battery joins with the UPS page (not this milestone).
+
+### Forget an app's window places
+
+- **The Windows page**: a "Window places" group listing the apps with saved
+  places (read from the server, not the file), each with **Forget**, and
+  **Forget all**; each asks first in a dialog ("Forget where Terminal's
+  windows go? They open in the default place next time.").
+- **The dock's app menu**: "Forget window places..." opens the same dialog
+  (the settings app, at the Windows page).
+- Bus protocol v9: `ListPlaces` and `ForgetPlaces { app }` (or all); the
+  server clears the app from window memory for every setup and size and
+  saves. Open windows stay where they are.
+
+### Closing a terminal with several tabs
+
+Closing a terminal window with more than one tab asks first: **"Close 3
+tabs?"** with Close and Cancel, a modal dialog over the window (window styles
+milestone 1). One tab closes as now.
+
+## Steps
+
+1. **Protocol v9**: modes and the current mode in `OutputInfo`; `ListPlaces`,
+   `ForgetPlaces`; tests; all three machines reinstalled together.
+2. **Resolution and refresh rate**, with the keep-or-revert dialog.
+3. **The same physical size switch.**
+4. **Cables like Wi-Fi** (vergence-net: speed, duplex on both systems).
+5. **Energy on battery and on power.**
+6. **Forget window places**: Windows page, dock menu, dialogs.
+7. **The terminal's confirmation.**
+8. **Docs**: whitepaper §6.9 and §9, README, CLAUDE.md, this plan.
+
+## Acceptance
+
+1. Tests green on Hubble, kepler and Techbench.
+2. On Hubble: the 14" switched to 1920 x 1080 and back, and a refresh rate
+   changed on the panel (144 to 60 Hz); a mode not kept reverts by itself.
+3. The physical-size switch on: the 14" at its calculated scale; a window
+   moved between the panel and the 14" keeps its size (measured).
+4. Hubble's cable shows 1 Gb/s full duplex and traffic; kepler's em0 too.
+5. On battery, the battery pair applies (screens off sooner); on power, the
+   other.
+6. An app's places forgotten from the Windows page and from the dock: its
+   next window opens in the default place; Forget all empties the list.
+7. Closing a terminal with three tabs asks; Cancel keeps it.
+
+## Not in this milestone
+
+The UPS page (needs a UPS by USB on one of the machines), low-battery actions
+(Dave: "not yet"), the apps in docs/apps-roadmap.md.
+
+## Questions for Dave
+
+1. **The keep-or-revert dialog** after a resolution change, 15 s: (a) yes;
+   (b) no dialog. Proposed: **(a)**, every desktop does it for good reason.
+2. **The physical-size switch's default**: (a) off (sharp whole scales, as
+   now); (b) on. Proposed: **(a)**.
+3. **The terminal's question**: (a) only with several tabs, as you said; (b)
+   also with one tab running something other than the shell (a build, an
+   SSH session). Proposed: **(a)** now, (b) worth a later look.
+4. **The dock's Forget**: (a) opens the settings app's dialog at the Windows
+   page; (b) a quick question in a notification card. Proposed: **(a)**: one
+   dialog, one place to manage it.
