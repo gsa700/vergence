@@ -206,15 +206,18 @@ impl XwmHandler for Server {
     }
 
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        if let (Some(w), Some(o)) = (self.window_for_x11(&window), self.output_at_pointer()) {
-            let _ = window.set_fullscreen(true);
-            let _ = window.configure(o);
-            self.space.map_element(w, o.loc, true);
+        if let Some(w) = self.window_for_x11(&window) {
+            self.enter_fullscreen(&w, None);
         }
     }
 
     fn unfullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let _ = window.set_fullscreen(false);
+        match self.window_for_x11(&window) {
+            Some(w) => self.leave_fullscreen(&w),
+            None => {
+                let _ = window.set_fullscreen(false);
+            }
+        }
     }
 
     fn resize_request(&mut self, _xwm: XwmId, window: X11Surface, button: u32, edge: X11ResizeEdge) {

@@ -712,7 +712,8 @@ impl Server {
 
     /// True for a point on the dock: the windows behind it get nothing of the pointer.
     pub fn shelf_at(&self, at: Point<f64, Logical>) -> bool {
-        self.shelf.dock.is_some_and(|r| r.to_f64().contains(at))
+        let covered = self.shelf_screen().is_some_and(|s| self.fullscreen_covers(s));
+        !covered && self.shelf.dock.is_some_and(|r| r.to_f64().contains(at))
     }
 
     /// The pointer moved. Over an item of the dock, and resting there half a
@@ -1163,6 +1164,10 @@ impl Server {
 
     /// The strip's picture on `out`, if it is on that screen.
     pub fn shelf_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+        // A full-screen window in front on this screen: no dock over it (fullscreen.rs).
+        if self.fullscreen_covers(out) {
+            return Vec::new();
+        }
         let color = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
         // Light or dark (look milestone 1).
         let light = self.light_style();

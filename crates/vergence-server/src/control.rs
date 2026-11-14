@@ -262,6 +262,11 @@ impl Server {
                         "Super" => vec![125],
                         // The key above Tab (KEY_GRAVE), for Alt+`.
                         "grave" => vec![41],
+                        // The function keys (KEY_F1..F10 are 59..68, F11 and F12 87 and 88).
+                        f if f.len() >= 2 && f.starts_with('F') && f[1..].parse::<u32>().is_ok_and(|n| (1..=12).contains(&n)) => {
+                            let n: u32 = f[1..].parse().unwrap();
+                            vec![if n <= 10 { 58 + n } else { 76 + n }]
+                        }
                         // A modifier alone (Ctrl tapped during a drag snaps it, snap.rs).
                         "Control" => vec![29],
                         "Shift" => vec![42],

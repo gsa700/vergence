@@ -38,6 +38,7 @@ mod switch;
 mod opened;
 mod snap;
 mod style;
+mod fullscreen;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 pub use state::Server;

@@ -69,6 +69,24 @@ impl XdgShellHandler for Server {
         }
     }
 
+    // Full screen (fullscreen.rs): on the screen it names, else the one it is on.
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>) {
+        let found = self.space.elements().find(|w| w.toplevel() == Some(&surface)).cloned();
+        let output = output.and_then(|o| smithay::output::Output::from_resource(&o));
+        if let Some(w) = found {
+            self.enter_fullscreen(&w, output);
+        } else {
+            surface.send_configure();
+        }
+    }
+
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        let found = self.space.elements().find(|w| w.toplevel() == Some(&surface)).cloned();
+        if let Some(w) = found {
+            self.leave_fullscreen(&w);
+        }
+    }
+
     fn minimize_request(&mut self, surface: ToplevelSurface) {
         // The window goes to its icon on the shelf (shelf.rs).
         let found = self.space.elements().find(|w| w.toplevel() == Some(&surface)).cloned();
