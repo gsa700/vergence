@@ -335,9 +335,10 @@ by the computer through usbmuxd before it hands out a connection (Question
   things, UPS should be seperate too. note for later"), shown once the
   machine has had one, as Touchpad and Touchscreen are; install.sh to give UPS devices (by
   maker's USB vendor id, hidraw on Linux, devd on FreeBSD) to a group
-  (NUT's `nut` where it exists, else `ups`) and add the user. NUT's network
-  protocol for the rack UPS (pfSense) is a separate choice for Dave
-  (localhost only, or the LAN too). Needs a UPS cabled to one of the three
+  (NUT's `nut` where it exists, else `ups`) and add the user. Only a UPS
+  connected to the machine itself (Dave, 2026-11-14: "I think local ups is
+  the best approach for a single workstation"): no reading the rack UPS
+  over the LAN through pfSense's NUT. Needs a UPS cabled to one of the three
   machines to test; none is (Techbench's Eaton is no longer on its USB).
 4. The iPhone by cable: the page says what it lacks (met); a connection:
    **parked** (needs pairing).
