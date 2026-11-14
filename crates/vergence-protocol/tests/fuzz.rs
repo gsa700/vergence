@@ -252,6 +252,7 @@ fn window_messages_with_descriptors() {
         WinRequest::Attach { window: 1, buffer: Buffer::Shm { fd: pipe(), width: 64, height: 32, stride: 256, format: 0 }, damage: vec![Damage { x: 0, y: 0, w: 8, h: 8 }] },
         WinRequest::Meaning { window: 1, focus: 2, caret: None, nodes: vec![Node { id: 2, parent: 0, role: "button".into(), name: "OK".into(), value: None, states: vec![], x: 0.0, y: 0.0, w: 10.0, h: 10.0 }] },
         WinRequest::Copy { input_serial: 3, kinds: vec!["text/plain".into()] },
+        WinRequest::Style { window: 1, kind: vergence_protocol::window::WinKind::Dialog, modal: true, min: (320.0, 200.0), max: (1100.0, 0.0) },
         WinRequest::Bar {
             window: 1,
             bar: Bar::Tabs { tabs: vec![Tab { id: 1, title: "a".into(), closable: true, alert: false }, Tab { id: 2, title: "b".into(), closable: false, alert: true }], front: 2, plus: true, accent: Some(0xff0000), menu: vec![MenuEntry { id: 7, label: "m".into() }] },

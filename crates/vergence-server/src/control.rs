@@ -421,7 +421,7 @@ impl Server {
                 None => w.toplevel().and_then(|t| smithay::reexports::wayland_server::Resource::client(t.wl_surface())).and_then(|c| c.get_credentials(&self.display_handle).ok()).map(|c| c.pid as u32),
             };
             let pid = pid.map(|p| format!(" pid {p}")).unwrap_or_default();
-            out.push(format!("{i} {kind} {title:?} {class:?} {geo:?} on {on:?} title-bar={}{pid}", self.has_title(w)));
+            out.push(format!("{i} {kind} {title:?} {class:?} {geo:?} on {on:?} title-bar={}{pid} {}", self.has_title(w), self.describe_style(w)));
         }
         out.join("\n")
     }

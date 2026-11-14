@@ -62,6 +62,9 @@ pub struct Server {
     pub x_scale: f64,
     pub xsettings_tx: Option<std::sync::mpsc::Sender<()>>,
     pub xdg_decoration_state: smithay::wayland::shell::xdg::decoration::XdgDecorationState,
+    /// The xdg-dialog protocol: GTK's and Qt's modal hint (window styles
+    /// milestone 1; style.rs reads the hint).
+    pub xdg_dialog_state: smithay::wayland::shell::xdg::dialog::XdgDialogState,
     /// Title bars: per-window ids for damage tracking (decor.rs).
     pub decor: std::collections::HashMap<Win, crate::decor::Decor>,
     /// Windows on the native protocol, by (bus client, window id) (native.rs).
@@ -179,6 +182,7 @@ impl Server {
         let xwayland_shell_state = smithay::wayland::xwayland_shell::XWaylandShellState::new::<Self>(&dh);
         // Title bars by the server for apps that ask (decor.rs).
         let xdg_decoration_state = smithay::wayland::shell::xdg::decoration::XdgDecorationState::new::<Self>(&dh);
+        let xdg_dialog_state = smithay::wayland::shell::xdg::dialog::XdgDialogState::new::<Self>(&dh);
 
         // A seat is a group of keyboards, pointer and touch devices.
         // A seat typically has a pointer and maintains a keyboard focus and a pointer focus.
@@ -233,6 +237,7 @@ impl Server {
             x_scale: 1.0,
             xsettings_tx: None,
             xdg_decoration_state,
+            xdg_dialog_state,
             decor: Default::default(),
             natives: Default::default(),
             native_input: Default::default(),

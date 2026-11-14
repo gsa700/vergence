@@ -227,6 +227,16 @@ impl Server {
     }
 }
 
+// GTK's and Qt's modal hint (window styles milestone 1). Smithay keeps the hint
+// on the toplevel's data, where style.rs reads it; a change is drawn at once.
+impl smithay::wayland::shell::xdg::dialog::XdgDialogHandler for Server {
+    fn dialog_hint_changed(&mut self, toplevel: ToplevelSurface, hint: smithay::wayland::shell::xdg::dialog::ToplevelDialogHint) {
+        let _ = toplevel;
+        tracing::info!("wayland: a window's dialog hint is now {hint:?}");
+        self.redraw_all();
+    }
+}
+
 // Server-side title bars for apps that ask for them (or leave it to us); an app
 // that asks to draw its own gets that.
 impl smithay::wayland::shell::xdg::decoration::XdgDecorationHandler for Server {

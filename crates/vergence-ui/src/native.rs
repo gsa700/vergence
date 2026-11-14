@@ -181,10 +181,14 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
     let waker = Waker { pipe: Arc::new(wake_write.into()), pending: wake_pending.clone() };
     app.waker(waker.clone());
     let under_bar = bar_by_server && app.under_bar();
+    let app_style = app.style();
     let mut first = Win::new(1, Run::Borrowed(app), size, bar_by_server);
     first.created = true;
     if under_bar {
         client.send(&ClientMsg::Window(WinRequest::UnderBar { window: 1 })).map_err(client_error)?;
+    }
+    if let Some(r) = style_request(app_style, 1) {
+        client.send(&ClientMsg::Window(r)).map_err(client_error)?;
     }
     let mut n = Native {
         client,
@@ -216,6 +220,12 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
         let _ = n.client.send(&ClientMsg::Window(WinRequest::Destroy { window: w.id }));
     }
     result.map(Some)
+}
+
+/// The Style request for an app's window, if it says anything a normal window
+/// without limits would not.
+fn style_request(s: crate::Style, window: u32) -> Option<WinRequest> {
+    (s != crate::Style::default()).then_some(WinRequest::Style { window, kind: s.kind, modal: s.modal, min: s.min, max: s.max })
 }
 
 /// The Create request for a window run by `app` (its serial filled in by the
@@ -480,6 +490,9 @@ impl<'a> Native<'a> {
                         self.windows[i].app.get().token_given(&token);
                         if self.windows[i].bar_by_server && self.windows[i].app.get().under_bar() {
                             self.send(WinRequest::UnderBar { window })?;
+                        }
+                        if let Some(r) = style_request(self.windows[i].app.get().style(), window) {
+                            self.send(r)?;
                         }
                     }
                 }

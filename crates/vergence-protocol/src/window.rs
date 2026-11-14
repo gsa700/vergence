@@ -216,6 +216,56 @@ pub enum WinRequest {
     /// at their top lies under the server's bar (frosted there), and nothing
     /// that takes input belongs in it. Sent once, after Create.
     UnderBar { window: u32 },
+    /// What kind of window this is, whether it is modal (only a dialog can
+    /// be), and its smallest and largest size in points (0 on an axis: no
+    /// limit). After Create, and again whenever it changes (window styles
+    /// milestone 1). The server keeps every size within the limits and draws
+    /// the bar the kind has.
+    Style { window: u32, kind: WinKind, modal: bool, min: (f64, f64), max: (f64, f64) },
+}
+
+/// A window's kind (window styles milestone 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum WinKind {
+    /// A window of its own, as every window was before.
+    #[default]
+    Normal,
+    /// Belongs to its parent (Create's `parent`): a slim bar, close only,
+    /// over the parent and going with it.
+    Dialog,
+    /// A tool panel of its application: a thin bar, above that
+    /// application's windows only.
+    Palette,
+    /// Content running up under the frosted bar, the program's own buttons
+    /// and the title in it (the settings app).
+    Sidebar,
+}
+
+impl WinKind {
+    fn byte(self) -> u8 {
+        match self {
+            WinKind::Normal => 0,
+            WinKind::Dialog => 1,
+            WinKind::Palette => 2,
+            WinKind::Sidebar => 3,
+        }
+    }
+
+    fn from_byte(b: u8) -> Result<WinKind, WireError> {
+        Ok(match b {
+            0 => WinKind::Normal,
+            1 => WinKind::Dialog,
+            2 => WinKind::Palette,
+            3 => WinKind::Sidebar,
+            _ => return Err(WireError::BadValue("window kind")),
+        })
+    }
+}
+
+/// A size limit as sent: finite, not negative (0: none).
+fn limit(v: f64, what: &'static str) -> Result<f64, WireError> {
+    let v = finite(v, what)?;
+    if v < 0.0 { Err(WireError::BadValue(what)) } else { Ok(v) }
 }
 
 /// The tallest strip a window may be asked to draw under its bar, in points.
@@ -298,6 +348,7 @@ pub(crate) mod op {
     pub const PASTE: u16 = 113;
     pub const BAR: u16 = 114;
     pub const UNDER_BAR: u16 = 115;
+    pub const STYLE: u16 = 116;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -568,6 +619,11 @@ impl WinRequest {
                 e.u32(*window);
                 e
             }
+            WinRequest::Style { window, kind, modal, min, max } => {
+                let mut e = Encoder::frame(op::STYLE);
+                e.u32(*window).u8(kind.byte()).u8(*modal as u8).f64(min.0).f64(min.1).f64(max.0).f64(max.1);
+                e
+            }
         };
         Ok((e.finish()?, fds))
     }
@@ -654,6 +710,18 @@ impl WinRequest {
             op::PASTE => WinRequest::Paste { serial: d.u32()?, kind: d.str()? },
             op::BAR => WinRequest::Bar { window: d.u32()?, bar: get_bar(&mut d)? },
             op::UNDER_BAR => WinRequest::UnderBar { window: d.u32()? },
+            op::STYLE => {
+                let window = d.u32()?;
+                let kind = WinKind::from_byte(d.u8()?)?;
+                let modal = d.u8()? != 0;
+                let min = (limit(d.f64()?, "smallest width")?, limit(d.f64()?, "smallest height")?);
+                let max = (limit(d.f64()?, "largest width")?, limit(d.f64()?, "largest height")?);
+                // A largest size below the smallest on an axis that has both is no limit at all.
+                if (max.0 > 0.0 && max.0 < min.0) || (max.1 > 0.0 && max.1 < min.1) {
+                    return Err(WireError::BadValue("largest size below the smallest"));
+                }
+                WinRequest::Style { window, kind, modal: modal && kind == WinKind::Dialog, min, max }
+            }
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -917,6 +985,29 @@ mod tests {
     }
 
     #[test]
+    fn a_bad_style_is_refused_and_only_a_dialog_is_modal() {
+        let decode = |m: WinRequest| {
+            let (bytes, _) = m.encode().unwrap();
+            WinRequest::decode(op::STYLE, &bytes[6..], &mut NoFds)
+        };
+        let style = |kind, modal, min: (f64, f64), max: (f64, f64)| WinRequest::Style { window: 1, kind, modal, min, max };
+        assert!(decode(style(WinKind::Normal, false, (0.0, 0.0), (0.0, 0.0))).is_ok());
+        assert!(decode(style(WinKind::Normal, false, (-1.0, 0.0), (0.0, 0.0))).is_err(), "a negative size");
+        assert!(decode(style(WinKind::Normal, false, (0.0, f64::NAN), (0.0, 0.0))).is_err(), "not a number");
+        assert!(decode(style(WinKind::Normal, false, (500.0, 0.0), (400.0, 0.0))).is_err(), "largest below smallest");
+        assert!(decode(style(WinKind::Normal, false, (500.0, 300.0), (0.0, 200.0))).is_err(), "largest height below smallest");
+        // Fixed size: smallest and largest the same.
+        assert!(decode(style(WinKind::Normal, false, (400.0, 300.0), (400.0, 300.0))).is_ok());
+        // Modal is a dialog's only.
+        assert_eq!(decode(style(WinKind::Palette, true, (0.0, 0.0), (0.0, 0.0))).unwrap(), style(WinKind::Palette, false, (0.0, 0.0), (0.0, 0.0)));
+        assert_eq!(decode(style(WinKind::Dialog, true, (0.0, 0.0), (0.0, 0.0))).unwrap(), style(WinKind::Dialog, true, (0.0, 0.0), (0.0, 0.0)));
+        // An unknown kind.
+        let (mut bytes, _) = style(WinKind::Normal, false, (0.0, 0.0), (0.0, 0.0)).encode().unwrap();
+        bytes[6 + 4] = 9;
+        assert!(WinRequest::decode(op::STYLE, &bytes[6..], &mut NoFds).is_err());
+    }
+
+    #[test]
     fn a_bad_bar_is_refused() {
         let tabs = |ids: &[u32], front: u32| WinRequest::Bar {
             window: 1,
@@ -963,6 +1054,8 @@ mod tests {
             WinRequest::Paste { serial: 8, kind: "text/plain".into() },
             WinRequest::Bar { window: 1, bar: Bar::Plain },
             WinRequest::UnderBar { window: 1 },
+            WinRequest::Style { window: 1, kind: WinKind::Dialog, modal: true, min: (320.0, 200.0), max: (0.0, 0.0) },
+            WinRequest::Style { window: 2, kind: WinKind::Sidebar, modal: false, min: (760.0, 480.0), max: (1100.0, 0.0) },
             WinRequest::Bar {
                 window: 1,
                 bar: Bar::Tabs {

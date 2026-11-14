@@ -391,6 +391,16 @@ impl Waker {
 }
 
 /// A program with one window.
+/// What kind of window an app's is, and its size limits in points (0: none):
+/// told to the server on the native road (window styles milestone 1).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Style {
+    pub kind: vergence_protocol::window::WinKind,
+    pub modal: bool,
+    pub min: (f64, f64),
+    pub max: (f64, f64),
+}
+
 pub trait App {
     fn title(&self) -> String;
 
@@ -485,6 +495,12 @@ pub trait App {
     /// frosted. Elsewhere nothing changes.
     fn under_bar(&self) -> bool {
         false
+    }
+
+    /// The window's kind and size limits ([`Style`]); the default is a normal
+    /// window with none.
+    fn style(&self) -> Style {
+        Style::default()
     }
 
     /// The bar's description, when it has changed since it was last asked:

@@ -15,12 +15,14 @@
 //! window's own Move and Resize requests are gone. Version 3 (2026-11-13,
 //! look milestone 1): a window may draw under its bar (`UnderBar`), and
 //! `Configure` carries the `inset` it draws there; a tab may be marked
-//! `alert` (its program runs as the superuser).
+//! `alert` (its program runs as the superuser). Version 4 (2026-11-14,
+//! window styles milestone 1): a window says its kind, whether it is modal,
+//! and its smallest and largest size (`Style`).
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

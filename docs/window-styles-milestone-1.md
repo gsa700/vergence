@@ -107,6 +107,28 @@ Nothing new for the kinds (they are the program's to say). Settings >
 Appearance gains **Tint windows with the wallpaper's color** (step 6).
 The settings app is the first sidebar window.
 
+## Progress
+
+- **Step 1 in** (2026-11-14): bus protocol v4: `WinRequest::Style` (kind:
+  normal, dialog, palette, sidebar; modal, a dialog's only; smallest and
+  largest size, 0 none; refused when not finite, negative, or a largest
+  below the smallest), sent by the toolkit after Create when an app's
+  `App::style` says more than a normal window without limits. The server
+  (style.rs) has one answer for every road, `window_style`: native windows
+  by what they said (a dialog or palette whose parent is not the same
+  connection's window becomes normal, §7.3), Wayland windows by their parent,
+  xdg-shell's limits and the xdg-dialog hint (Smithay's `XdgDialogState`,
+  registered; the handler redraws), X11 windows by type, transient-for,
+  modal and size hints (`x11_kind`); limits kept sane (none above 16384, no
+  largest below 64 or below the smallest). `vctl windows` gives each
+  window's kind, modal, limits and parent. Tests: the wire (both
+  requests), refusals and modal-only-for-dialogs, the X11 kinds, the
+  limits; the fuzz test seeds Style. 439 on Hubble, kepler and Techbench.
+  Live on Hubble: the terminal and settings app normal, Firefox normal with
+  its 500 x 120 smallest size, its Open File dialog `kind=Dialog` with
+  parent "Mozilla Firefox" and its 590 x 374 smallest (not modal: Firefox's
+  GTK 3 has no xdg-dialog).
+
 ## Steps
 
 1. **Kinds and limits on the wire**: bus protocol v4 (`Create`'s kind, modal

@@ -74,6 +74,15 @@ const MAX_WINDOWS: usize = 64;
 const MIN_SIDE: i32 = 32;
 
 /// A window of the project's own protocol.
+/// What a native window said of itself with `Style`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NativeStyle {
+    pub kind: vergence_protocol::window::WinKind,
+    pub modal: bool,
+    pub min: (f64, f64),
+    pub max: (f64, f64),
+}
+
 pub struct NativeWindow {
     /// The bus connection it belongs to, and the id the client chose.
     pub client: u32,
@@ -124,6 +133,10 @@ struct State {
     /// sent (the bar's height where it is: the size of controls).
     under_bar: bool,
     inset: i32,
+    /// Its parent (Create's, the same connection's window id; 0: none).
+    parent: u32,
+    /// What it said of itself with `Style` (window styles milestone 1).
+    style: Option<NativeStyle>,
 }
 
 /// Native windows' share of the pointer and the keyboard (step 4).
@@ -211,6 +224,12 @@ impl NativeWindow {
     /// What its bar shows, as last sent (none: its title).
     pub fn bar(&self) -> Option<vergence_protocol::window::Bar> {
         self.state.lock().unwrap().bar.clone()
+    }
+
+    /// Its parent's id on its connection (0: none) and what it said of itself.
+    pub fn style(&self) -> (u32, Option<NativeStyle>) {
+        let s = self.state.lock().unwrap();
+        (s.parent, s.style)
     }
 
     fn kill(&self) {
@@ -317,6 +336,8 @@ impl Server {
                         bar: None,
                         under_bar: false,
                         inset: 0,
+                        parent,
+                        style: None,
                     }),
                     user_data: UserDataMap::new(),
                 });
@@ -417,6 +438,23 @@ impl Server {
                 }
             }
             // It draws under its bar (look milestone 1): told the inset at once.
+            // Its kind, modal, limits (window styles milestone 1). A dialog or
+            // palette of another connection's window, or of none, is a normal
+            // window: a program shapes only its own (§7.3).
+            WinRequest::Style { window, kind, modal, min, max } => {
+                if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
+                    let parent = n.state.lock().unwrap().parent;
+                    let owned = parent != 0 && parent != window && self.natives.contains_key(&(client, parent));
+                    let kind = match kind {
+                        vergence_protocol::window::WinKind::Dialog | vergence_protocol::window::WinKind::Palette if !owned => vergence_protocol::window::WinKind::Normal,
+                        k => k,
+                    };
+                    let style = NativeStyle { kind, modal: modal && kind == vergence_protocol::window::WinKind::Dialog, min, max };
+                    tracing::info!("native: window {window} of {:?} is {style:?}", n.app_id);
+                    n.state.lock().unwrap().style = Some(style);
+                    self.redraw_all();
+                }
+            }
             WinRequest::UnderBar { window } => {
                 if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
                     let was = std::mem::replace(&mut n.state.lock().unwrap().under_bar, true);
