@@ -7,7 +7,9 @@ page, Wi-Fi by wpa_supplicant ("wpa_supplicant is fine"), no Bluetooth yet
 of our own, an Advanced part per page) and his screenshot of macOS's System
 Settings (docs/reference/macos-system-settings-2026-11-14.png). Comes after
 window styles milestone 1, which made the settings app a sidebar window.
-**Not accepted yet: questions at the end.**
+**Accepted 2026-11-14: Dave agreed to the Wi-Fi switch below and answered
+the proposals ("yes to your proposals on the rest"); VPN parked ("lets just
+park that for now").**
 
 ## Where things stand (read 2026-11-14, 45b2a4c)
 
@@ -77,7 +79,19 @@ into one when this lands.
   REMOVE_NETWORK, SAVE_CONFIG, and ATTACH for its events: scans done,
   connected, disconnected, wrong password). The same on Void and FreeBSD;
   NetworkManager (Fedora) later, as PipeWire is for sound.
-- **The page**: a switch for Wi-Fi (the interface up or down), the network in
+- **When the radio is on** (Dave, 2026-11-14: "what if we enable wpa on all,
+  but only turn it on when there is no hardline detected? Or, we ask?";
+  agreed): a setting **Wi-Fi: Off / On / When no cable is connected**, the
+  last the default. The server watches the wired links (a carrier on an
+  Ethernet port, or a phone's USB tethering, by the device events it already
+  takes for monitors), debounced by a few seconds, and brings the Wi-Fi
+  interface up or down by the setting; down, the radio neither scans nor
+  sends. The first time Wi-Fi comes on for want of a cable with no known
+  network, a notification says so ("No network cable: Wi-Fi is on. Choose a
+  network...") and opens the page; never again after. install.sh enables
+  wpa_supplicant wherever there is a Wi-Fi card (not where there is none: a
+  service with no card to manage fails and is restarted over and over).
+- **The page**: the Wi-Fi setting above, the network in
   use with its signal, then the networks in range (strongest first, a lock
   for those with a password, the bars of their signal), rescanned every few
   seconds while the page is open. Choosing one asks for its password in the
@@ -141,11 +155,20 @@ by the computer through usbmuxd before it hands out a connection (Question
 
 ## Not in this milestone
 
-- Bluetooth (no BlueZ: Dave, 2026-11-14), NetworkManager, VPN, static
+- Bluetooth (no BlueZ: Dave, 2026-11-14), NetworkManager, VPN (parked: Dave,
+  2026-11-14), static
   addresses, Notifications, Date and time, Users, the account card.
 - A Wi-Fi tile on the dock (live tiles).
 
-## Questions for Dave
+## Questions for Dave (answered 2026-11-14)
+
+Answers: 1 as revised above (install.sh enables wpa_supplicant where there is
+a card; Wi-Fi follows the Off / On / When no cable setting, default the
+last); 2 (b) no usbmuxd at first, to see whether the phone tethers without it;
+3 (a) colored rounded squares with a white mark; 4 (a) search now. VPN: a
+page some day, parked.
+
+The questions as asked:
 
 1. **Enabling wpa_supplicant on Hubble.** (a) `sudo tools/install.sh` enables
    it where it is installed and not running (Void: the runit service; FreeBSD:
