@@ -32,6 +32,7 @@ mod disp;
 mod theme;
 mod thumbs;
 mod wall;
+mod battery;
 mod wifi;
 mod winbar;
 
@@ -165,6 +166,7 @@ enum Icon {
     Sound,
     Accessibility,
     Energy,
+    Battery,
     About,
 }
 
@@ -179,7 +181,7 @@ impl Icon {
             Icon::Keyboard | Icon::Pointer | Icon::Touchpad | Icon::Touchscreen => Color::rgb(0x6e, 0x55, 0xc9),
             Icon::Sound => Color::rgb(0xd2, 0x3f, 0x6a),
             Icon::Accessibility => Color::rgb(0x1f, 0x6f, 0xe0),
-            Icon::Energy => Color::rgb(0x3f, 0x9a, 0x3a),
+            Icon::Energy | Icon::Battery => Color::rgb(0x3f, 0x9a, 0x3a),
             Icon::About => Color::rgb(0x70, 0x74, 0x7c),
         }
     }
@@ -301,6 +303,12 @@ fn icon_mark<M: 'static>(icon: Icon) -> Element<M> {
                 line(scene, (7.0, 10.5), (13.0, 9.5));
                 line(scene, (13.0, 9.5), (8.5, 16.0));
             }
+            // A battery.
+            Icon::Battery => {
+                scene.stroke(Rect::new(x + 3.5, y + 6.5, 11.5, 7.0), 1.5, 1.3, w);
+                scene.fill(Rect::new(x + 15.2, y + 8.6, 1.6, 2.8), w);
+                scene.fill(Rect::new(x + 5.2, y + 8.2, 6.0, 3.6), w);
+            }
             // An i.
             Icon::About => {
                 scene.fill_rounded(Rect::new(x + 9.1, y + 4.5, 1.8, 1.8), 0.9, w);
@@ -341,6 +349,8 @@ enum Page {
     Touchpad,
     Touchscreen,
     Energy,
+    /// The battery and the GPUs (battery.rs); only where there is a battery.
+    Battery,
     Sound,
     /// High contrast, motion, transparency, size (settings milestone 1).
     Accessibility,
@@ -360,6 +370,8 @@ enum Message {
     Go(Page),
     /// The Wi-Fi page (wifi.rs).
     Wifi(wifi::WifiMsg),
+    /// Time to read the battery again (battery.rs).
+    BatterySample,
     /// The Advanced part of a page opened or closed, by its key.
     Advanced(&'static str),
     // Sound: an output's volume (as it slides), its mute, making it the
@@ -508,6 +520,8 @@ struct App {
     advanced: HashSet<&'static str>,
     /// The Wi-Fi page's state (wifi.rs).
     wifi: wifi::Wifi,
+    /// The Battery page's state (battery.rs).
+    battery: battery::BatteryPage,
     page: Page,
     /// The Sound page (vergence-sound): the system, read when the page opens,
     /// and its outputs as last read.
@@ -688,6 +702,7 @@ impl App {
             search: String::new(),
             advanced: HashSet::new(),
             wifi: Default::default(),
+            battery: Default::default(),
             accent_text: appearance_text(&desktop, "accent"),
             size: disp::size(&desktop) as f32,
             sleep_cmd: energy_cmd(&desktop),
@@ -827,6 +842,9 @@ impl App {
         if matches!(p, Page::WiFi | Page::Network) {
             self.wifi_read();
         }
+        if p == Page::Battery {
+            self.battery_read();
+        }
         self.browser = None;
         self.arrange_drag = None;
         let scope = self.scope();
@@ -840,6 +858,7 @@ impl App {
         match m {
             Message::Go(p) => self.open(p),
             Message::Wifi(m) => self.wifi_handle(m),
+            Message::BatterySample => self.battery_sample(),
             Message::Advanced(key) => {
                 if !self.advanced.remove(key) {
                     self.advanced.insert(key);
@@ -1388,8 +1407,13 @@ impl App {
             ("Accessibility", vec![("Accessibility".into(), Page::Accessibility, Icon::Accessibility, "accessibility contrast motion transparency size")]),
             ("System", vec![
                 ("Energy".into(), Page::Energy, Icon::Energy, "energy power sleep screens off idle"),
+            ]
+            .into_iter()
+            .chain(self.has_battery().then(|| ("Battery".into(), Page::Battery, Icon::Battery, "battery charge power watts time left health gpu graphics nvidia")))
+            .chain([
                 ("About".into(), Page::About, Icon::About, "about version license notices"),
-            ]),
+            ])
+            .collect()),
         ];
         // No screen (none reported yet): nothing for the Screens pages to show.
         if self.outputs.is_empty() {
@@ -2579,6 +2603,7 @@ impl Program for App {
             Page::Keyboard => "Keyboard".into(),
             Page::WiFi => "Wi-Fi".into(),
             Page::Network => "Network".into(),
+            Page::Battery => "Battery".into(),
             Page::Mouse => "Mouse".into(),
             Page::Touchpad => "Touchpad".into(),
             Page::Touchscreen => "Touchscreen".into(),
@@ -2619,6 +2644,7 @@ impl Program for App {
             Page::Keyboard => self.keyboard(),
             Page::WiFi => self.wifi_page(),
             Page::Network => self.network_page(),
+            Page::Battery => self.battery_page(),
             Page::Mouse => self.mouse_page(),
             Page::Touchpad => self.touchpad_page(),
             Page::Touchscreen => self.touchscreen_page(),
@@ -2928,6 +2954,8 @@ fn main() -> std::io::Result<()> {
     // `--page wifi`: the page to open with (the server's "no network cable"
     // notification opens Wi-Fi).
     let mut app = App::new();
+    // Whether there is a battery, for the sidebar (the page reads it again when opened).
+    app.battery.power = vergence_power::power();
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--page")
         && args.get(i + 1).map(String::as_str) == Some("wifi")

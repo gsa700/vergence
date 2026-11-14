@@ -1,0 +1,11 @@
+[package]
+name = "vergence-power"
+description = "Vergence's power: batteries, mains power and whether each GPU is awake (Linux and FreeBSD)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Our own code only (whitepaper §8): the systems' own interfaces (Linux's
+# power_supply and PCI runtime power in /sys, FreeBSD's ACPI sysctls).
+[dependencies]

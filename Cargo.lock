@@ -2187,6 +2187,10 @@ name = "vergence-net"
 version = "0.1.0"
 
 [[package]]
+name = "vergence-power"
+version = "0.1.0"
+
+[[package]]
 name = "vergence-profile"
 version = "0.1.0"
 dependencies = [
@@ -2259,6 +2263,7 @@ dependencies = [
  "toml",
  "vergence-look",
  "vergence-net",
+ "vergence-power",
  "vergence-profile",
  "vergence-protocol",
  "vergence-render",

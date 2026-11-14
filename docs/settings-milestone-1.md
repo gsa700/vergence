@@ -316,6 +316,27 @@ by the computer through usbmuxd before it hands out a connection (Question
    on average. The in-use rows (Signal, Speed, Traffic) now stay in place
    while connected, a dash or "Measuring..." until read: rows coming and
    going had moved the switch under the pointer.
+- **Battery page** (2026-11-14; Dave: "yes, add a battery page"): new crate
+  `vergence-power` (Linux /sys power_supply and PCI runtime power; FreeBSD
+  ACPI sysctls), the page in System only where there is a battery: charge
+  with a battery mark (green, amber below 20%, red below 10%; a bolt while
+  charging), time left or to full, power drawn now with a two-minute chart
+  (on battery), each GPU awake or asleep, Advanced with health (now
+  against new), cycles, voltage, make. Hubble: "100%, full, on power";
+  Intel (i915) awake, NVIDIA (nouveau) asleep. Tests on fake /sys trees
+  (Hubble's charge-based A32-K55; an energy-based one charging; GPUs).
+  470 tests (kepler 466: the /sys tests are Linux's).
+- **A UPS** (Dave: "could that also do UPS monitoring on workstations?",
+  "here I have this mac plugged into a small ups and it monitors it just
+  like a laptop battery", "couldn't we add a user to the UPS group?"):
+  planned, not built. A USB UPS is a HID power device (what macOS reads):
+  our own reader of its HID reports (charge, runtime, on line, load) shown
+  on the Battery page as a battery; install.sh to give UPS devices (by
+  maker's USB vendor id, hidraw on Linux, devd on FreeBSD) to a group
+  (NUT's `nut` where it exists, else `ups`) and add the user. NUT's network
+  protocol for the rack UPS (pfSense) is a separate choice for Dave
+  (localhost only, or the LAN too). Needs a UPS cabled to one of the three
+  machines to test; none is (Techbench's Eaton is no longer on its USB).
 4. The iPhone by cable: the page says what it lacks (met); a connection:
    **parked** (needs pairing).
 5. kepler says there is no Wi-Fi device (met); Techbench has no Wi-Fi card,
