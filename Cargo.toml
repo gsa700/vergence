@@ -25,6 +25,7 @@ vergence-shell = { path = "crates/vergence-shell" }
 vergence-widgets = { path = "crates/vergence-widgets" }
 vergence-seat = { path = "crates/vergence-seat" }
 vergence-bar = { path = "crates/vergence-bar" }
+vergence-net = { path = "crates/vergence-net" }
 
 # drm-rs 0.14.1 with the FreeBSD DRM node fixes (patches/README.md).
 [patch.crates-io]

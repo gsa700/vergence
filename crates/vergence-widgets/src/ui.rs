@@ -263,11 +263,16 @@ impl<M: Clone> Ui<M> {
     pub fn layout(&mut self, root: Element<M>, width: f32, height: f32, measure: &mut dyn Measure, text_size: f32) {
         let mut nodes = Vec::new();
         Layout { measure, text_size, lines_seen: Default::default() }.run(root, Rect::new(0.0, 0.0, width, height), &mut nodes);
+        let before: HashSet<Id> = self.nodes.iter().map(|n| n.id).collect();
         self.nodes = nodes;
         self.size = (width, height);
         let alive = |id: Option<Id>, nodes: &[Node<M>]| id.filter(|id| nodes.iter().any(|n| n.id == *id && n.active()));
         self.hover = alive(self.hover, &self.nodes);
         self.focus = alive(self.focus, &self.nodes).filter(|id| self.nodes.iter().any(|n| n.id == *id && n.focusable()));
+        // A field that asks for the keyboard gets it when it first appears.
+        if let Some(n) = self.nodes.iter().find(|n| matches!(n.what, What::Field { autofocus: true, .. }) && !before.contains(&n.id)) {
+            self.focus = Some(n.id);
+        }
         if self.pressed.is_some_and(|(id, _)| alive(Some(id), &self.nodes).is_none()) {
             self.pressed = None;
         }

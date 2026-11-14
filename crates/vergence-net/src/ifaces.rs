@@ -51,6 +51,17 @@ pub fn kind_of(name: &str, loopback: bool) -> Kind {
     }
 }
 
+/// Names of links that are no cable: bridges, tunnels, containers' and
+/// virtual machines' ends, on Linux and FreeBSD.
+const VIRTUAL: [&str; 16] = ["docker", "br-", "virbr", "veth", "tun", "tap", "wg", "tailscale", "zt", "vnet", "vboxnet", "vmnet", "bridge", "epair", "gif", "lxc"];
+
+/// Whether an interface is a network cable with a link at the other end (an
+/// Ethernet port, a phone's USB tethering): the rule Wi-Fi's "When no cable
+/// is connected" goes by, in the server and the settings app alike.
+pub fn is_cable(f: &Iface) -> bool {
+    f.kind == Kind::Wired && f.up && f.carrier && f.mac.is_some() && !VIRTUAL.iter().any(|v| f.name.starts_with(v))
+}
+
 #[repr(C)]
 struct IfAddrs {
     ifa_next: *mut IfAddrs,
@@ -200,6 +211,21 @@ mod tests {
         assert_eq!(kind_of("em0", false), Kind::Wired);
         assert_eq!(kind_of("enp3s0", false), Kind::Wired);
         assert_eq!(kind_of("lo0", true), Kind::Loopback);
+    }
+
+    #[test]
+    fn what_counts_as_a_cable() {
+        let iface = |name: &str, kind: Kind, carrier: bool| Iface { name: name.into(), kind, up: true, carrier, mac: Some("aa:bb:cc:dd:ee:ff".into()), addrs: vec![] };
+        assert!(is_cable(&iface("enp5s0", Kind::Wired, true)));
+        assert!(is_cable(&iface("em0", Kind::Wired, true)));
+        assert!(!is_cable(&iface("enp5s0", Kind::Wired, false)), "no carrier");
+        assert!(!is_cable(&iface("wlp4s0", Kind::WiFi, true)));
+        assert!(!is_cable(&iface("docker0", Kind::Wired, true)));
+        assert!(!is_cable(&iface("virbr0", Kind::Wired, true)));
+        assert!(!is_cable(&iface("wg0", Kind::Wired, true)));
+        let mut lo = iface("lo", Kind::Loopback, true);
+        lo.mac = None;
+        assert!(!is_cable(&lo));
     }
 
     #[test]

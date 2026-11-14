@@ -41,7 +41,7 @@ pub(crate) enum What<M> {
     Switch { on: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     Slider { min: f32, max: f32, step: f32, value: f32, marks: Vec<f32>, on_change: Option<Box<dyn Fn(f32) -> M>>, on_release: Option<M> },
     /// `baseline`: of the text, below the field's top.
-    Field { value: String, placeholder: String, secret: bool, on_input: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, size: f32, baseline: f32 },
+    Field { value: String, placeholder: String, secret: bool, autofocus: bool, on_input: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M>, size: f32, baseline: f32 },
     Choice { options: Vec<String>, selected: Option<usize>, placeholder: String, on_select: Option<Box<dyn Fn(usize) -> M>>, size: f32, baseline: f32, step: f32 },
     /// `content`: the height of what is in it.
     Scroll { content: f32 },
@@ -448,9 +448,9 @@ impl Layout<'_> {
             }
             Kind::Switch { on, on_toggle } => push(out, What::Switch { on, on_toggle }),
             Kind::Slider { min, max, step, value, marks, on_change, on_release } => push(out, What::Slider { min, max, step, value, marks, on_change, on_release }),
-            Kind::Field { value, placeholder, secret, on_input, on_submit } => {
+            Kind::Field { value, placeholder, secret, autofocus, on_input, on_submit } => {
                 let baseline = self.field_baseline(rect.h);
-                push(out, What::Field { value, placeholder, secret, on_input, on_submit, size: self.text_size, baseline });
+                push(out, What::Field { value, placeholder, secret, autofocus, on_input, on_submit, size: self.text_size, baseline });
             }
             Kind::Choice { options, selected, placeholder, on_select } => {
                 let baseline = self.field_baseline(rect.h);

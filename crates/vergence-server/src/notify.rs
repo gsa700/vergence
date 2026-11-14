@@ -252,7 +252,7 @@ impl Server {
         match origin {
             Origin::DBus(conn) => self.dbus_action_invoked(conn, id, key),
             Origin::Bus(client) => self.bus_action_invoked(client, id, key),
-            Origin::Server => {}
+            Origin::Server => self.server_note_action(id, key),
         }
     }
 

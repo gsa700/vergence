@@ -187,6 +187,20 @@ fn a_finger_taps() {
 }
 
 #[test]
+fn a_field_that_asks_for_the_keyboard_gets_it_when_it_appears() {
+    let mut ui = laid(column(vec![two_buttons()]), 300.0, 100.0);
+    assert_eq!(ui.focused(), None);
+    let with_field = || column(vec![two_buttons(), field("", |_| Msg::C).autofocus().name("Password")]);
+    ui.layout(with_field(), 300.0, 100.0, &mut Fixed, 13.0);
+    let id = ui.focused().expect("the new field has the keyboard");
+    // Once there, it does not take the keyboard back on every frame.
+    key(&mut ui, sym::TAB, false);
+    assert_ne!(ui.focused(), Some(id));
+    ui.layout(with_field(), 300.0, 100.0, &mut Fixed, 13.0);
+    assert_ne!(ui.focused(), Some(id));
+}
+
+#[test]
 fn tab_walks_the_controls_and_enter_presses() {
     let mut ui = laid(column(vec![two_buttons(), button(label("C")).on_press(Msg::C)]), 300.0, 100.0);
     assert_eq!(ui.focused(), None);

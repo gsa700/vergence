@@ -132,7 +132,7 @@ pub(crate) enum Kind<M> {
     Stack { children: Vec<Element<M>> },
     Switch { on: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     Slider { min: f32, max: f32, step: f32, value: f32, marks: Vec<f32>, on_change: Option<Box<dyn Fn(f32) -> M>>, on_release: Option<M> },
-    Field { value: String, placeholder: String, secret: bool, on_input: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
+    Field { value: String, placeholder: String, secret: bool, autofocus: bool, on_input: Option<Box<dyn Fn(String) -> M>>, on_submit: Option<M> },
     Choice { options: Vec<String>, selected: Option<usize>, placeholder: String, on_select: Option<Box<dyn Fn(usize) -> M>> },
     Scroll { child: Box<Element<M>> },
     Picture { image: Arc<Image>, fit: Fit, radius: f32, opacity: f32 },
@@ -358,6 +358,15 @@ impl<M> Element<M> {
         self
     }
 
+    /// A field that takes the keyboard when it first appears (a password
+    /// asked for in a page): typing goes there without a click first.
+    pub fn autofocus(mut self) -> Self {
+        if let Kind::Field { autofocus, .. } = &mut self.kind {
+            *autofocus = true;
+        }
+        self
+    }
+
     /// How a picture fills its place.
     pub fn fit(mut self, fit: Fit) -> Self {
         if let Kind::Picture { fit: f, .. } = &mut self.kind {
@@ -458,7 +467,7 @@ pub fn slider<M>(min: f32, max: f32, value: f32, on_change: impl Fn(f32) -> M + 
 /// each change; the program keeps it and gives it back in `value`.
 pub fn field<M>(value: impl Into<String>, on_input: impl Fn(String) -> M + 'static) -> Element<M> {
     Element::new(
-        Kind::Field { value: value.into(), placeholder: String::new(), secret: false, on_input: Some(Box::new(on_input)), on_submit: None },
+        Kind::Field { value: value.into(), placeholder: String::new(), secret: false, autofocus: false, on_input: Some(Box::new(on_input)), on_submit: None },
         Length::FILL,
         Length::Shrink,
     )

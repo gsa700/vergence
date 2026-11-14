@@ -32,6 +32,7 @@ mod disp;
 mod theme;
 mod thumbs;
 mod wall;
+mod wifi;
 mod winbar;
 
 use std::cell::Cell;
@@ -149,6 +150,7 @@ mod search_tests {
 /// rounded squares with a white mark, as macOS's).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Icon {
+    WiFi,
     Appearance,
     Fonts,
     Wallpaper,
@@ -169,6 +171,7 @@ impl Icon {
     /// Its square's color (one per kind of page, readable under a white mark).
     fn color(self) -> Color {
         match self {
+            Icon::WiFi => Color::rgb(0x1e, 0x88, 0xe5),
             Icon::Appearance | Icon::Fonts | Icon::Wallpaper => Color::rgb(0x2f, 0x6f, 0xd6),
             Icon::Windows | Icon::Dock => Color::rgb(0x5b, 0x5f, 0x6b),
             Icon::Screen => Color::rgb(0x1f, 0x8a, 0x8a),
@@ -193,6 +196,14 @@ fn icon_mark<M: 'static>(icon: Icon) -> Element<M> {
             scene.line(p(a.0, a.1), p(b.0, b.1), 1.6, w);
         };
         match icon {
+            // Waves over a dot.
+            Icon::WiFi => {
+                scene.fill_rounded(Rect::new(x + 8.9, y + 13.2, 2.2, 2.2), 1.1, w);
+                line(scene, (7.4, 11.4), (10.0, 9.6));
+                line(scene, (10.0, 9.6), (12.6, 11.4));
+                line(scene, (5.0, 9.0), (10.0, 5.8));
+                line(scene, (10.0, 5.8), (15.0, 9.0));
+            }
             // Half light, half dark.
             Icon::Appearance => {
                 scene.stroke(Rect::new(x + 5.0, y + 5.0, 10.0, 10.0), 5.0, 1.6, w);
@@ -305,6 +316,8 @@ fn chevron<M: 'static>(open: bool) -> Element<M> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
+    /// Wireless networks (settings milestone 1, step 4; wifi.rs).
+    WiFi,
     Appearance,
     Theme,
     Windows,
@@ -332,6 +345,8 @@ enum Page {
 #[derive(Debug, Clone)]
 enum Message {
     Go(Page),
+    /// The Wi-Fi page (wifi.rs).
+    Wifi(wifi::WifiMsg),
     /// The Advanced part of a page opened or closed, by its key.
     Advanced(&'static str),
     // Sound: an output's volume (as it slides), its mute, making it the
@@ -478,6 +493,8 @@ struct App {
     /// The pages whose Advanced part is open (settings milestone 1, step 2):
     /// closed at first, remembered while the app runs.
     advanced: HashSet<&'static str>,
+    /// The Wi-Fi page's state (wifi.rs).
+    wifi: wifi::Wifi,
     page: Page,
     /// The Sound page (vergence-sound): the system, read when the page opens,
     /// and its outputs as last read.
@@ -657,6 +674,7 @@ impl App {
             top: std::cell::Cell::new(0.0),
             search: String::new(),
             advanced: HashSet::new(),
+            wifi: Default::default(),
             accent_text: appearance_text(&desktop, "accent"),
             size: disp::size(&desktop) as f32,
             sleep_cmd: energy_cmd(&desktop),
@@ -793,6 +811,9 @@ impl App {
         if p == Page::Sound {
             self.sound_read();
         }
+        if p == Page::WiFi {
+            self.wifi_read();
+        }
         self.browser = None;
         self.arrange_drag = None;
         let scope = self.scope();
@@ -805,6 +826,7 @@ impl App {
     fn handle(&mut self, m: Message) {
         match m {
             Message::Go(p) => self.open(p),
+            Message::Wifi(m) => self.wifi_handle(m),
             Message::Advanced(key) => {
                 if !self.advanced.remove(key) {
                     self.advanced.insert(key);
@@ -1327,6 +1349,7 @@ impl App {
             }
         }
         let mut groups = vec![
+            ("Connections", vec![("Wi-Fi".into(), Page::WiFi, Icon::WiFi, "wifi wi-fi wireless network wlan password join hotspot internet")]),
             ("Look", vec![
                 ("Appearance".into(), Page::Appearance, Icon::Appearance, "style light dark accent color frost tab tint controls size"),
                 ("Theme and fonts".into(), Page::Theme, Icon::Fonts, "theme font fonts monospace interface icons cursor"),
@@ -2538,6 +2561,7 @@ impl Program for App {
             Page::Windows => "Windows".into(),
             Page::Dock => "Dock".into(),
             Page::Keyboard => "Keyboard".into(),
+            Page::WiFi => "Wi-Fi".into(),
             Page::Mouse => "Mouse".into(),
             Page::Touchpad => "Touchpad".into(),
             Page::Touchscreen => "Touchscreen".into(),
@@ -2576,6 +2600,7 @@ impl Program for App {
             Page::Windows => self.windows(),
             Page::Dock => self.dock(),
             Page::Keyboard => self.keyboard(),
+            Page::WiFi => self.wifi_page(),
             Page::Mouse => self.mouse_page(),
             Page::Touchpad => self.touchpad_page(),
             Page::Touchscreen => self.touchscreen_page(),
@@ -2882,7 +2907,16 @@ fn main() -> std::io::Result<()> {
     }
     // Portrait (Dave's screenshot of macOS's System Settings): the server fits
     // the height to the screen; window memory decides after the first time.
-    vergence_widgets::run(App::new(), (840, 1100))
+    // `--page wifi`: the page to open with (the server's "no network cable"
+    // notification opens Wi-Fi).
+    let mut app = App::new();
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--page")
+        && args.get(i + 1).map(String::as_str) == Some("wifi")
+    {
+        app.open(Page::WiFi);
+    }
+    vergence_widgets::run(app, (840, 1100))
 }
 
 #[cfg(test)]

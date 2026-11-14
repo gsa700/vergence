@@ -204,6 +204,40 @@ by the computer through usbmuxd before it hands out a connection (Question
   state and scanned Dave's two networks with signal, security, band and
   channel; on Hubble and kepler the interfaces, carriers and addresses are
   right. 459 tests on all three.
+- **Step 4 in: the Wi-Fi page** (2026-11-14). install.sh enables
+  wpa_supplicant where there is a Wi-Fi card and no NetworkManager (Void:
+  the runit service, the config given ctrl_interface_group=wheel and
+  update_config=1 if it lacks them; FreeBSD: wlans_ and WPA DHCP in rc.conf,
+  /etc/wpa_supplicant.conf if missing; untried, kepler has no card) and says
+  so; on Hubble it enabled it, the socket directory root:wheel 0750. The
+  server's network.rs: a thread looks at the links every 2 s
+  (vergence-net's `is_cable`: wired, up, carrier, not virtual), a change
+  holding 4 s, and tells wpa_supplicant DISCONNECT or RECONNECT by
+  desktop.toml `[network] wifi` (off, on, auto; default auto), only when
+  what is wanted changes or wpa_supplicant comes back; only in the session
+  on the real screens (--drm), never in a nested test server. The first
+  time Wi-Fi comes on for want of a cable with no known network: one
+  notification, opening the settings app with `--page wifi`
+  (~/.local/state/vergence/network.toml keeps that it was shown). The
+  settings app's Wi-Fi page (wifi.rs; Connections group, a waves icon): the
+  setting, the network in use with bars, the networks in range with lock
+  and bars and Join, rescanned every 10 s while open and Wi-Fi is wanted,
+  the password asked in the page (a secret field that takes the keyboard by
+  itself: new `autofocus()` in vergence-widgets, tested; Show the password),
+  joined, and on WRONG_KEY the try forgotten and the password asked again;
+  known networks with Forget; Advanced with the device, state, signal,
+  channel and band, access point, addresses and hardware address. It says
+  when there is no Wi-Fi device, when Wi-Fi is NetworkManager's, when
+  wpa_supplicant is not running (with what to do) and when the account is
+  not in wheel. On Hubble (shots): off with the cable in ("Off: a network
+  cable is connected"); On listed Dave's networks with bars; in a nested
+  server, a wrong password for dNET1 was refused by the access point, said
+  "Wrong password for dNET1." and asked again, nothing left in
+  wpa_supplicant's list; back to the default, Wi-Fi off again. kepler: "This
+  computer has no Wi-Fi device". Techbench has no Wi-Fi card. Still to do
+  by Dave: join with the real password, forget it, pull the cable (Wi-Fi on
+  by itself, and the notification once), the phone's hotspot. 462 tests on
+  all three.
 
 ## Steps
 

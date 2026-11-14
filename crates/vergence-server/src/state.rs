@@ -141,6 +141,8 @@ pub struct Server {
     pub touch_panels: Vec<String>,
     /// The input devices and the kinds this machine has had (inputs.rs).
     pub inputs: crate::inputs::Inputs,
+    /// The "no network cable" notification while it is shown (network.rs).
+    pub network_note: Option<u32>,
     /// The idle clock, screens off and sleep (energy.rs).
     pub energy: crate::energy::Energy,
     pub popups: PopupManager,
@@ -282,6 +284,7 @@ impl Server {
             pointer_devices: Vec::new(),
             touch_panels: Vec::new(),
             inputs: Default::default(),
+            network_note: None,
             touch: Default::default(),
             energy: crate::energy::Energy::new(),
             popups,

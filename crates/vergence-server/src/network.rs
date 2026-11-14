@@ -1,0 +1,225 @@
+// Wi-Fi follows the cable (settings milestone 1, step 4; Dave, 2026-11-14:
+// "what if we enable wpa on all, but only turn it on when there is no
+// hardline detected?"). ~/.config/vergence/desktop.toml:
+//
+//     [network]
+//     wifi = "auto"   # or "on", "off"; auto: on only while no cable is connected
+//
+// A thread looks every two seconds at the wired links (vergence-net's
+// interfaces: an Ethernet port, or a phone's USB tethering, that is up and
+// has a carrier; virtual ones such as bridges and tunnels left out) and,
+// once that has held for a few seconds, tells each Wi-Fi interface's
+// wpa_supplicant DISCONNECT (it neither joins nor scans) or RECONNECT. It
+// does so only when what is wanted changes, or wpa_supplicant comes back,
+// so nothing is fought over between changes. All of it on the thread:
+// wpa_supplicant's socket can be slow, and the server never waits on it.
+//
+// The first time Wi-Fi comes on for want of a cable while wpa_supplicant
+// knows no network, a notification says so and opens the settings app's
+// Wi-Fi page; never again (~/.local/state/vergence/network.toml, 0600).
+
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use smithay::reexports::calloop::channel::{Event, Sender, channel};
+use vergence_net::{ifaces, wpa};
+
+use crate::state::Server;
+
+/// How often the links are looked at.
+const EVERY: Duration = Duration::from_secs(2);
+/// How long a cable's coming or going must hold before Wi-Fi follows it
+/// (a cable being pushed in flaps).
+const HOLD: Duration = Duration::from_secs(4);
+
+/// What the setting says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WifiSetting {
+    Off,
+    On,
+    Auto,
+}
+
+impl WifiSetting {
+    pub fn from_word(w: &str) -> WifiSetting {
+        match w.trim().to_ascii_lowercase().as_str() {
+            "off" => WifiSetting::Off,
+            "on" => WifiSetting::On,
+            _ => WifiSetting::Auto,
+        }
+    }
+
+    /// Whether Wi-Fi is wanted, with a cable connected or not.
+    pub fn wants(self, cable: bool) -> bool {
+        match self {
+            WifiSetting::Off => false,
+            WifiSetting::On => true,
+            WifiSetting::Auto => !cable,
+        }
+    }
+}
+
+fn setting() -> WifiSetting {
+    let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let table = text.parse::<toml::Table>().unwrap_or_default();
+    table.get("network").and_then(|n| n.get("wifi")).and_then(|v| v.as_str()).map_or(WifiSetting::Auto, WifiSetting::from_word)
+}
+
+fn state_path() -> Option<PathBuf> {
+    let state = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    Some(state.join("vergence/network.toml"))
+}
+
+fn note_shown() -> bool {
+    state_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| t.parse::<toml::Table>().ok()).and_then(|t| t.get("no-cable-note-shown")?.as_bool()).unwrap_or(false)
+}
+
+fn mark_note_shown() {
+    use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt}};
+    let Some(path) = state_path() else { return };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir);
+    }
+    let beside = path.with_extension("toml.new");
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&beside)
+        .and_then(|mut f| f.write_all(b"no-cable-note-shown = true\n"))
+        .and_then(|_| std::fs::rename(&beside, &path));
+    if let Err(e) = written {
+        tracing::warn!("network: can't keep that the note was shown: {e}");
+    }
+}
+
+/// What the thread tells the server.
+enum Said {
+    /// Wi-Fi came on for want of a cable and knows no network: say so, once.
+    NoCable,
+}
+
+/// The thread: watch the links, apply the setting.
+fn watch(tx: Sender<Said>) {
+    let mut seen: Option<(bool, Instant)> = None;
+    let mut applied: Option<(bool, Vec<String>)> = None;
+    let mut first = true;
+    loop {
+        let all = ifaces::list().unwrap_or_default();
+        let cable = all.iter().any(ifaces::is_cable);
+        let now = Instant::now();
+        match seen {
+            Some((c, _)) if c == cable => {}
+            _ => seen = Some((cable, now)),
+        }
+        // At start the links are as they are; later a change must hold.
+        let held = first || seen.is_some_and(|(_, since)| now.duration_since(since) >= HOLD);
+        first = false;
+        let wifi: Vec<String> = all.iter().filter(|f| f.kind == ifaces::Kind::WiFi).map(|f| f.name.clone()).collect();
+        let socks: Vec<(String, PathBuf)> = wpa::sockets().into_iter().filter(|(n, _)| wifi.contains(n)).collect();
+        if held && !socks.is_empty() {
+            let set = setting();
+            let want = set.wants(cable);
+            let names: Vec<String> = socks.iter().map(|(n, _)| n.clone()).collect();
+            if applied.as_ref() != Some(&(want, names.clone())) {
+                let mut ok = true;
+                let mut none_known = true;
+                for (name, path) in &socks {
+                    let done = wpa::Client::open(path).and_then(|c| {
+                        if want { c.reconnect()? } else { c.disconnect()? }
+                        if c.networks().is_ok_and(|n| !n.is_empty()) {
+                            none_known = false;
+                        }
+                        Ok(())
+                    });
+                    match done {
+                        Ok(()) => tracing::info!("network: Wi-Fi {} on {name} ({set:?}, cable {})", if want { "on" } else { "off" }, if cable { "connected" } else { "not connected" }),
+                        Err(e) => {
+                            ok = false;
+                            tracing::warn!("network: Wi-Fi on {name}: {e}");
+                        }
+                    }
+                }
+                if ok {
+                    // Wi-Fi came on because the cable went (not by being set On).
+                    let for_want_of_cable = want && set == WifiSetting::Auto && applied.as_ref().is_none_or(|(w, _)| !w);
+                    if for_want_of_cable && none_known && !note_shown() {
+                        mark_note_shown();
+                        if tx.send(Said::NoCable).is_err() {
+                            return;
+                        }
+                    }
+                    applied = Some((want, names));
+                }
+            }
+        }
+        if socks.is_empty() {
+            // wpa_supplicant gone: apply again when it comes back.
+            applied = None;
+        }
+        std::thread::sleep(EVERY);
+    }
+}
+
+impl Server {
+    /// Start the thread (called once the event loop exists).
+    pub fn start_network(&mut self) {
+        // Only the session on the real screens: a nested server (a test, with
+        // a throwaway home and its own settings) must not switch the
+        // machine's Wi-Fi.
+        if !std::env::args().any(|a| a == "--drm") {
+            tracing::info!("network: nested, so Wi-Fi is left to the session");
+            return;
+        }
+        let (tx, rx) = channel::<Said>();
+        let _ = self.loop_handle.insert_source(rx, |event, _, state| {
+            if let Event::Msg(Said::NoCable) = event {
+                state.network_no_cable_note();
+            }
+        });
+        if let Err(e) = std::thread::Builder::new().name("network".into()).spawn(move || watch(tx)) {
+            tracing::warn!("network: can't start the watch: {e}");
+        }
+    }
+
+    fn network_no_cable_note(&mut self) {
+        let id = self.notify(
+            crate::notify::Origin::Server,
+            crate::notify::Request {
+                app: "Settings".into(),
+                replaces: 0,
+                summary: "No network cable: Wi-Fi is on".into(),
+                body: "Choose a network to join.".into(),
+                urgency: 1,
+                timeout_ms: -1,
+                actions: vec![("default".into(), String::new()), ("wifi".into(), "Choose a network".into())],
+            },
+        );
+        self.network_note = Some(id);
+    }
+
+    /// A notification of the server's own was clicked (notify.rs).
+    pub fn server_note_action(&mut self, id: u32, _key: &str) {
+        if self.network_note == Some(id) {
+            self.network_note = None;
+            if let Err(e) = crate::spawn(std::process::Command::new("vergence-settings").args(["--page", "wifi"])) {
+                tracing::warn!("network: can't open the settings app: {e}");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_setting() {
+        assert_eq!(WifiSetting::from_word("off"), WifiSetting::Off);
+        assert_eq!(WifiSetting::from_word(" On "), WifiSetting::On);
+        assert_eq!(WifiSetting::from_word("anything"), WifiSetting::Auto);
+        assert!(WifiSetting::Auto.wants(false) && !WifiSetting::Auto.wants(true));
+        assert!(WifiSetting::On.wants(true) && !WifiSetting::Off.wants(false));
+    }
+}

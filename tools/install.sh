@@ -26,7 +26,9 @@
 # started (FreeBSD rc.conf; runit's /var/service), and the invoking user
 # (SUDO_USER / DOAS_USER, or --user NAME) joins the group that may talk to it:
 # video on FreeBSD, _seatd on Void. A display manager that offers Wayland
-# sessions lists Vergence after a restart.
+# sessions lists Vergence after a restart. Where there is a Wi-Fi card and
+# no NetworkManager, wpa_supplicant is enabled (runit; FreeBSD's rc.conf
+# wlans_ and WPA DHCP), its control socket for the wheel group.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/.." && pwd)
@@ -135,5 +137,58 @@ if [ -n "${group:-}" ]; then
         if [ "$(uname -s)" = FreeBSD ]; then pw groupmod "$group" -m "$user"; else usermod -aG "$group" "$user"; fi
         echo "seat: $user added to $group (takes effect at the next login)"
     fi
+fi
+# ---- system setup: Wi-Fi (settings milestone 1, step 4) ----
+# wpa_supplicant is enabled where there is a Wi-Fi card and nothing else
+# manages networks; never where there is none (a service with no card to
+# manage fails and is restarted over and over). Its control socket is the
+# wheel group's, so the settings app's Wi-Fi page needs no root. Whether
+# the radio is on is the session's (desktop.toml [network] wifi; default:
+# only while no network cable is connected).
+if [ -d /run/NetworkManager ]; then
+    echo "wifi: NetworkManager manages networks here; nothing to enable"
+elif [ "$(uname -s)" = FreeBSD ]; then
+    devs=$(sysctl -n net.wlan.devices 2>/dev/null || true)
+    if [ -z "$devs" ]; then
+        echo "wifi: no Wi-Fi card; nothing to enable"
+    else
+        dev=${devs%% *}
+        conf=/etc/wpa_supplicant.conf
+        if [ ! -e "$conf" ]; then
+            printf 'ctrl_interface=/var/run/wpa_supplicant\nctrl_interface_group=wheel\nupdate_config=1\n' > "$conf"
+            chmod 600 "$conf"
+            echo "wifi: wrote $conf (control socket for the wheel group, networks saved there)"
+        fi
+        if [ -z "$(sysrc -n "wlans_$dev" 2>/dev/null || true)" ]; then
+            sysrc "wlans_$dev=wlan0" >/dev/null
+            sysrc ifconfig_wlan0="WPA DHCP" >/dev/null
+            service netif start wlan0 >/dev/null 2>&1 || true
+            echo "wifi: $dev as wlan0 with wpa_supplicant and DHCP (rc.conf), started"
+        else
+            echo "wifi: $dev already set up in rc.conf"
+        fi
+    fi
+else
+    cards=
+    for d in /sys/class/net/*; do
+        [ -d "$d/wireless" ] || [ -e "$d/phy80211" ] || continue
+        cards="$cards ${d##*/}"
+    done
+    if [ -z "$cards" ]; then
+        echo "wifi: no Wi-Fi card; nothing to enable"
+    elif [ -d /etc/sv/wpa_supplicant ]; then
+        conf=/etc/wpa_supplicant/wpa_supplicant.conf
+        [ -e "$conf" ] || { mkdir -p /etc/wpa_supplicant; : > "$conf"; chmod 600 "$conf"; }
+        grep -q '^ctrl_interface=' "$conf" || echo 'ctrl_interface=/run/wpa_supplicant' >> "$conf"
+        grep -q '^ctrl_interface_group=' "$conf" || echo 'ctrl_interface_group=wheel' >> "$conf"
+        grep -q '^update_config=' "$conf" || echo 'update_config=1' >> "$conf"
+        [ -e /var/service/wpa_supplicant ] || ln -s /etc/sv/wpa_supplicant /var/service/wpa_supplicant
+        echo "wifi: wpa_supplicant enabled (runit) for$cards; control socket for the wheel group"
+    else
+        echo "wifi: Wi-Fi card$cards: enable wpa_supplicant for your init system (ctrl_interface_group=wheel, update_config=1)" >&2
+    fi
+fi
+if [ -n "$user" ] && ! id -Gn "$user" | tr ' ' '\n' | grep -qx wheel; then
+    echo "wifi: $user is not in wheel, so the settings app cannot use Wi-Fi (add them to wheel to allow it)"
 fi
 echo "start: 'vergence' from a text console, or choose Vergence at the login screen"
