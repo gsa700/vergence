@@ -152,11 +152,12 @@ struct Frame {
 }
 
 impl Frame {
-    fn of(content: Rectangle<i32, Logical>, buttons: &(Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>), tabs: Option<Tabs>) -> Frame {
-        let title = Rectangle::new((content.loc.x, content.loc.y - TITLE_H).into(), (content.size.w, TITLE_H).into());
+    fn of(content: Rectangle<i32, Logical>, buttons: &(Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>), tabs: Option<Tabs>, z: vergence_bar::Sizes) -> Frame {
+        let h = z.bar_h as i32;
+        let title = Rectangle::new((content.loc.x, content.loc.y - h).into(), (content.size.w, h).into());
         let layout = match &tabs {
-            Some(t) => vergence_bar::Layout::new(content.size.w as f32, t.titles.len(), t.shown, &buttons.0, &buttons.1),
-            None => vergence_bar::Layout::plain(content.size.w as f32, &buttons.0, &buttons.1),
+            Some(t) => vergence_bar::Layout::sized(content.size.w as f32, t.titles.len(), t.shown, &buttons.0, &buttons.1, z),
+            None => vergence_bar::Layout::plain_sized(content.size.w as f32, &buttons.0, &buttons.1, z),
         };
         Frame { content, title, layout, tabs }
     }
@@ -171,7 +172,7 @@ impl Frame {
 
     /// Title bar and content.
     fn whole(&self) -> Rectangle<i32, Logical> {
-        Rectangle::new(self.title.loc, (self.content.size.w, self.content.size.h + TITLE_H).into())
+        Rectangle::new(self.title.loc, (self.content.size.w, self.content.size.h + self.title.size.h).into())
     }
 }
 
@@ -243,7 +244,48 @@ impl Server {
 
     fn frame_of(&self, w: &Win) -> Option<Frame> {
         let buttons = self.button_layout();
-        self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, tabs_of(w)))).flatten()
+        let z = self.bar_sizes(w);
+        self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, tabs_of(w), z))).flatten()
+    }
+
+    /// The size of controls for a screen (look milestone 1, step 8): its own
+    /// setting (desktop.toml `[[displays.screen]] controls`), else, on
+    /// Automatic, Large where a touch panel is on it and the desktop's
+    /// choice (Settings > Appearance) elsewhere.
+    pub fn bar_sizes_on(&self, o: &smithay::output::Output) -> vergence_bar::Sizes {
+        let desktop = self.look_setting("size");
+        let Some(id) = crate::memory::monitor_id_of(o) else { return vergence_bar::Sizes::of(desktop) };
+        match self.settings.current.get(&(crate::settings::LOOK.to_string(), format!("size:{id}"))) {
+            Some(vergence_protocol::bus::SettingValue::U32(step)) if *step <= 2 => vergence_bar::Sizes::of(*step),
+            _ if self.touch_panels.iter().any(|p| self.touch_screen_id(p).as_deref() == Some(id.as_str())) => vergence_bar::LARGE,
+            _ => vergence_bar::Sizes::of(desktop),
+        }
+    }
+
+    /// The size of controls for the screen a point is on (the first screen
+    /// when it is on none).
+    pub fn bar_sizes_at(&self, p: Point<i32, Logical>) -> vergence_bar::Sizes {
+        let on = self.space.outputs().find(|o| self.space.output_geometry(o).is_some_and(|g| g.contains(p))).or_else(|| self.space.outputs().next());
+        on.map_or_else(|| vergence_bar::Sizes::of(self.look_setting("size")), |o| self.bar_sizes_on(o))
+    }
+
+    /// A window's size of controls: the screen its center is on (window
+    /// memory's rule).
+    pub fn bar_sizes(&self, w: &Win) -> vergence_bar::Sizes {
+        match self.space.element_geometry(w) {
+            Some(g) => self.bar_sizes_at((g.loc.x + g.size.w / 2, g.loc.y + g.size.h / 2).into()),
+            None => self.bar_sizes_at(self.pointer_location().to_i32_round()),
+        }
+    }
+
+    /// A window's bar height in points.
+    pub fn bar_h(&self, w: &Win) -> i32 {
+        self.bar_sizes(w).bar_h as i32
+    }
+
+    /// The bar height on the screen that holds `area` (its middle).
+    pub fn bar_h_in(&self, area: Rectangle<i32, Logical>) -> i32 {
+        self.bar_sizes_at((area.loc.x + area.size.w / 2, area.loc.y + area.size.h / 2).into()).bar_h as i32
     }
 
     /// A window's bar: where it is on the desktop, and how it is laid out
@@ -263,12 +305,6 @@ impl Server {
         vergence_bar::decoration_layout(&self.button_layout_text())
     }
 
-    /// The frost's program, compiled on first use; None where bars are solid:
-    /// High contrast on (it asks for solid grounds), a software renderer
-    /// (llvmpipe, softpipe: the blur would cost more than it gives), or a
-    /// shader that would not compile. Only windows that draw under their bar
-    /// are frosted (their picture's top is what lies under it); the others
-    /// keep a solid bar.
     /// The rounded corners' program, compiled on first use; None if it would
     /// not compile (windows are then square).
     fn round_program(&mut self, renderer: &mut GlesRenderer) -> Option<smithay::backend::renderer::gles::GlesTexProgram> {
@@ -287,6 +323,12 @@ impl Server {
             .clone()
     }
 
+    /// The frost's program, compiled on first use; None where bars are solid:
+    /// Reduce transparency or High contrast on, a software renderer
+    /// (llvmpipe, softpipe: the blur would cost more than it gives), or a
+    /// shader that would not compile. Only windows that draw under their bar
+    /// are frosted (their picture's top is what lies under it); the others
+    /// keep a solid bar.
     fn frost_program(&mut self, renderer: &mut GlesRenderer) -> Option<smithay::backend::renderer::gles::GlesTexProgram> {
         if self.reduce_transparency() {
             return None;
@@ -340,7 +382,8 @@ impl Server {
     fn look_setting(&self, key: &str) -> u32 {
         match self.settings.current.get(&(crate::settings::LOOK.to_string(), key.to_string())) {
             Some(vergence_protocol::bus::SettingValue::U32(v)) => *v,
-            _ => if key == "frost" { 1 } else { 0 },
+            // Standard Frost and Standard size when unset.
+            _ => if key == "frost" || key == "size" { 1 } else { 0 },
         }
     }
 
@@ -457,6 +500,7 @@ impl Server {
         let style = vergence_look::bar_look(light);
         let frost = self.frost_program(renderer);
         let round = self.round_program(renderer);
+        let mut reinset: Vec<Win> = Vec::new();
         let strength = vergence_look::frost_strength(self.look_setting("frost"));
         let front_frosted = self.look_setting("front-tab") == 1;
         self.decor.retain(|w, _| w.alive());
@@ -533,6 +577,14 @@ impl Server {
                         }
                     }
                 }
+                // A window that draws under its bar and moved to a screen with another
+                // size of controls: told its new inset after this frame.
+                if let (Some(n), Some(f)) = (w.native(), frame.as_ref())
+                    && n.inset() > 0
+                    && n.inset() != f.title.size.h
+                {
+                    reinset.push(w.clone());
+                }
                 let d = self.decor.get_mut(&w).unwrap();
                 // A native window that draws under its bar, with its picture on the
                 // GPU: the strip at the picture's top is frosted into the bar.
@@ -570,7 +622,7 @@ impl Server {
                     });
                     if picture.key != key && width > 0 {
                         let face = fonts.face("sans-serif", 400, false);
-                        let mut scene = vergence_scene::Scene::new(width as f32, TITLE_H as f32);
+                        let mut scene = vergence_scene::Scene::new(width as f32, f.title.size.h as f32);
                         // The tab in front: the program's page color (the terminal's
                         // ground: look milestone 1, "front tab should be page color"),
                         // with whichever ink reads on it; else the style's.
@@ -604,7 +656,7 @@ impl Server {
                         };
                         // Rounded: the bar's top corners cut to the one radius (its bottom goes on into the window).
                         if rounded {
-                            scene.push_clip(vergence_scene::Rect::new(0.0, 0.0, width as f32, TITLE_H as f32 + vergence_look::RADIUS), vergence_look::RADIUS);
+                            scene.push_clip(vergence_scene::Rect::new(0.0, 0.0, width as f32, f.title.size.h as f32 + vergence_look::RADIUS), vergence_look::RADIUS);
                         }
                         vergence_bar::draw(&mut scene, fonts, &f.layout, &look);
                         if rounded {
@@ -634,7 +686,7 @@ impl Server {
                     if let (Some(program), Some((texture, px, logical))) = (frost.as_ref(), under.as_ref()) {
                         use smithay::backend::renderer::gles::{Uniform, UniformValue, element::TextureShaderElement};
                         let per_point = px.w as f64 / logical.w.max(1) as f64;
-                        let rows = (TITLE_H as f64 * per_point).round().min(px.h as f64);
+                        let rows = (f.title.size.h as f64 * per_point).round().min(px.h as f64);
                         let strip = Rectangle::<f64, Logical>::from_size((px.w as f64, rows).into());
                         let inner = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at.to_f64(), texture, None, Some(strip), Some(f.title.size), Kind::Unspecified);
                         // The frost's tint: the bar's ground, the alarm's while a superuser's tab is in front.
@@ -702,6 +754,11 @@ impl Server {
             let surfaces: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = w.render_elements(renderer, render_loc, scale.into(), 1.0);
             elements.extend(surfaces.into_iter().map(SceneElement::Surface));
         }
+        for w in reinset {
+            if let Some(n) = w.native() {
+                self.native_send_configure(n);
+            }
+        }
         // Behind everything: the wallpaper, at this output's own pixels (wallpaper.rs).
         if let Some(mode) = output.current_mode()
             && let Some(e) = self.wallpaper_element(renderer, &output.name(), mode.size, out.size)
@@ -762,7 +819,7 @@ impl Server {
         let Some(out) = out else { return };
         // A screen with the shelf is filled as far as the strip (shelf.rs).
         let out = self.work_area(out);
-        let top = if self.has_title(w) { TITLE_H } else { 0 };
+        let top = if self.has_title(w) { self.bar_h_in(out) } else { 0 };
         let rect = Rectangle::new((out.loc.x, out.loc.y + top).into(), (out.size.w, out.size.h - top).into());
         self.restore.insert(w.clone(), geo);
         self.set_window_rect(w, rect, true);

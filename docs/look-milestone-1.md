@@ -327,6 +327,29 @@ Bar Proportions"):
   pictures go through no shader of ours yet; rounding only their border
   would leave content past the curve); the resize corners were not
   re-checked by hand (the band is outside the curve, unchanged).
+- **Step 8 done** (2026-11-13): the size of controls. vergence-bar's
+  `Sizes` (`COMPACT` 32/26/28, `STANDARD` 36/30/32, `LARGE` 44/36/38: bar,
+  tabs and buttons' height, a button's width; + tab, sides and gaps with
+  them) is carried by every `Layout` (`Layout::sized`, `plain_sized`), so
+  drawing and hit tests agree at any size; the toolkit's own bar stays
+  Standard. The server gives each window the size of the screen its center
+  is on (`bar_sizes`): the screen's own setting (desktop.toml
+  `[[displays.screen]] controls`), else on Automatic Large where a touch
+  panel is on it (the server now notes touch devices as libinput announces
+  them, `touch_panels`, and their screens by tie or the primary one),
+  else the desktop's (`[appearance] controls`). Frames, bars, the frost's
+  strip and the maximize area follow it (`content_area` takes the bar's
+  height); a window that draws under its bar is told a new inset when it
+  moves to a screen of another size. Window memory's cascade and the tab
+  drop offsets keep Standard's height as spacing. Settings: Appearance's
+  Size of controls, and each screen's on the Screens page (Automatic first).
+  Seen on Hubble: Compact, Standard and Large by desktop.toml; on kepler:
+  the touch panel found (it appears ~4 s after the session starts, when
+  devd switches it to touch mode) and its screen's bars Large with no
+  setting (bar top at 107.5 px at scale 2.5, as 44 pt). 393 tests on all
+  three. Found on the way: kepler built stale code twice (an rsync with
+  kept times delivered sources older than a build made before the sync;
+  touching the sources forces the rebuild).
 
 ## Steps
 

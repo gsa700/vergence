@@ -28,7 +28,6 @@ pub const FONT_SIZE: f32 = 13.0;
 /// The least a tab shrinks to, a button's box, the + tab's width.
 const TAB_MIN: f32 = 28.0;
 const BUTTON_W: f32 = 32.0;
-const BUTTON_H: f32 = TAB_H;
 const PLUS_W: f32 = 34.0;
 const SIDE: f32 = 6.0;
 /// The one corner radius (vergence-look).
@@ -37,6 +36,36 @@ const GAP: f32 = 2.0;
 /// A tab narrower than this has no room for its own close button, unless
 /// it is the one shown.
 const CLOSE_NEEDS: f32 = 72.0;
+
+/// A bar's proportions at one size of controls (look milestone 1, step 8;
+/// the presets of the mock-up Dave chose from, 2026-11-13): the bar's
+/// height, its tabs' and buttons' height, a button's width, the + tab's,
+/// the room at the sides and between items. Text stays FONT_SIZE: text size
+/// is a setting of its own.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Sizes {
+    pub bar_h: f32,
+    pub item_h: f32,
+    pub button_w: f32,
+    pub plus_w: f32,
+    pub side: f32,
+    pub gap: f32,
+}
+
+pub const COMPACT: Sizes = Sizes { bar_h: 32.0, item_h: 26.0, button_w: 28.0, plus_w: 30.0, side: 4.0, gap: 2.0 };
+pub const STANDARD: Sizes = Sizes { bar_h: BAR_H, item_h: TAB_H, button_w: BUTTON_W, plus_w: PLUS_W, side: SIDE, gap: GAP };
+pub const LARGE: Sizes = Sizes { bar_h: 44.0, item_h: 36.0, button_w: 38.0, plus_w: 40.0, side: 8.0, gap: 4.0 };
+
+impl Sizes {
+    /// The Size of controls setting's steps: 0 Compact, 1 Standard, 2 Large.
+    pub const fn of(step: u32) -> Sizes {
+        match step {
+            0 => COMPACT,
+            2 => LARGE,
+            _ => STANDARD,
+        }
+    }
+}
 
 const fn color(c: vergence_look::Rgb) -> Color {
     Color::rgb(c.0, c.1, c.2)
@@ -208,65 +237,78 @@ pub struct Layout {
     pub title: Option<Rect>,
     /// True if the window's buttons are on the left: tabs then close on their left too.
     pub controls_left: bool,
+    /// The proportions it was laid out at.
+    pub sizes: Sizes,
 }
 
 impl Layout {
     /// The bar of a window `width` wide with `count` tabs, the tab `shown`
-    /// being the one in front.
+    /// being the one in front, at the Standard size of controls.
     pub fn new(width: f32, count: usize, shown: usize, left: &[WinButton], right: &[WinButton]) -> Layout {
-        let (buttons, start, end) = Layout::buttons(width, left, right);
+        Layout::sized(width, count, shown, left, right, STANDARD)
+    }
+
+    /// [`Layout::new`] at a size of controls (look milestone 1, step 8).
+    pub fn sized(width: f32, count: usize, shown: usize, left: &[WinButton], right: &[WinButton], z: Sizes) -> Layout {
+        let (buttons, start, end) = Layout::buttons(width, left, right, &z);
         // The tabs share what is left after +, down to a least width.
-        let room = (end - start - PLUS_W - GAP).max(0.0);
+        let room = (end - start - z.plus_w - z.gap).max(0.0);
         let n = count.max(1) as f32;
-        let tab_w = ((room - GAP * n) / n).clamp(TAB_MIN, TAB_W);
+        let tab_w = ((room - z.gap * n) / n).clamp(TAB_MIN, TAB_W);
         let controls_left = !left.is_empty();
-        let top = BAR_H - TAB_H;
+        let top = z.bar_h - z.item_h;
         let (mut tabs, mut closes) = (Vec::new(), Vec::new());
         let mut x = start;
         for i in 0..count {
-            let tab = Rect::new(x, top, tab_w, TAB_H);
+            let tab = Rect::new(x, top, tab_w, z.item_h);
             let close = (tab_w >= CLOSE_NEEDS || (i == shown && tab_w >= 44.0)).then(|| {
                 let cx = if controls_left { tab.x + 4.0 } else { tab.x + tab_w - 24.0 };
-                Rect::new(cx, top + (TAB_H - 20.0) / 2.0, 20.0, 20.0)
+                Rect::new(cx, top + (z.item_h - 20.0) / 2.0, 20.0, 20.0)
             });
             tabs.push(tab);
             closes.push(close);
-            x += tab_w + GAP;
+            x += tab_w + z.gap;
         }
-        Layout { buttons, tabs, closes, plus: Rect::new(x, top, PLUS_W, TAB_H), title: None, controls_left }
+        Layout { buttons, tabs, closes, plus: Rect::new(x, top, z.plus_w, z.item_h), title: None, controls_left, sizes: z }
     }
 
     /// The bar of a window without tabs: its buttons, and between them the
     /// room its title is written in. The whole of it moves the window.
     pub fn plain(width: f32, left: &[WinButton], right: &[WinButton]) -> Layout {
-        let (buttons, start, end) = Layout::buttons(width, left, right);
-        let title = Rect::new(start + 6.0, BAR_H - TAB_H, (end - start - 12.0).max(0.0), TAB_H);
-        Layout { buttons, tabs: Vec::new(), closes: Vec::new(), plus: Rect::new(end, BAR_H - TAB_H, 0.0, TAB_H), title: Some(title), controls_left: !left.is_empty() }
+        Layout::plain_sized(width, left, right, STANDARD)
+    }
+
+    /// [`Layout::plain`] at a size of controls.
+    pub fn plain_sized(width: f32, left: &[WinButton], right: &[WinButton], z: Sizes) -> Layout {
+        let (buttons, start, end) = Layout::buttons(width, left, right, &z);
+        let top = z.bar_h - z.item_h;
+        let title = Rect::new(start + 6.0, top, (end - start - 12.0).max(0.0), z.item_h);
+        Layout { buttons, tabs: Vec::new(), closes: Vec::new(), plus: Rect::new(end, top, 0.0, z.item_h), title: Some(title), controls_left: !left.is_empty(), sizes: z }
     }
 
     /// The window's buttons on their sides, and where the room between them
     /// starts and ends.
-    fn buttons(width: f32, left: &[WinButton], right: &[WinButton]) -> (Vec<(WinButton, Rect)>, f32, f32) {
+    fn buttons(width: f32, left: &[WinButton], right: &[WinButton], z: &Sizes) -> (Vec<(WinButton, Rect)>, f32, f32) {
         let mut buttons = Vec::new();
         // As tall as the tabs and standing where they stand (Dave, 2026-11-10).
-        let button_y = BAR_H - TAB_H;
-        let mut x = SIDE;
+        let button_y = z.bar_h - z.item_h;
+        let mut x = z.side;
         for b in left {
-            buttons.push((*b, Rect::new(x, button_y, BUTTON_W, BUTTON_H)));
-            x += BUTTON_W + GAP;
+            buttons.push((*b, Rect::new(x, button_y, z.button_w, z.item_h)));
+            x += z.button_w + z.gap;
         }
-        let mut end = width - SIDE;
+        let mut end = width - z.side;
         for b in right.iter().rev() {
-            end -= BUTTON_W;
-            buttons.push((*b, Rect::new(end, button_y, BUTTON_W, BUTTON_H)));
-            end -= GAP;
+            end -= z.button_w;
+            buttons.push((*b, Rect::new(end, button_y, z.button_w, z.item_h)));
+            end -= z.gap;
         }
-        (buttons, x + if left.is_empty() { 0.0 } else { GAP }, end)
+        (buttons, x + if left.is_empty() { 0.0 } else { z.gap }, end)
     }
 
     /// What is at a point of the window, if the point is in the bar.
     pub fn at(&self, x: f32, y: f32) -> Option<Part> {
-        if !(0.0..BAR_H).contains(&y) {
+        if !(0.0..self.sizes.bar_h).contains(&y) {
             return None;
         }
         if let Some((b, _)) = self.buttons.iter().find(|(_, r)| inside(r, x, y)) {
@@ -353,7 +395,7 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
             (false, true) => l.ground,
             (false, false) => l.ground_off,
         };
-        scene.fill(Rect::new(0.0, 0.0, scene.width, BAR_H), color(ground));
+        scene.fill(Rect::new(0.0, 0.0, scene.width, layout.sizes.bar_h), color(ground));
     }
     for (b, r) in &layout.buttons {
         let part = Part::Button(*b);
@@ -468,7 +510,7 @@ impl TabDrag {
 
     /// Where it would land if let go at (`x`, `y`) of a window `width` wide.
     pub fn landing(&self, layout: &Layout, width: f32, x: f32, y: f32) -> Landing {
-        if y < -DETACH || y > BAR_H + DETACH || x < -DETACH || x > width + DETACH {
+        if y < -DETACH || y > layout.sizes.bar_h + DETACH || x < -DETACH || x > width + DETACH {
             return Landing::Outside;
         }
         let Some(me) = layout.tabs.get(self.tab) else { return Landing::At(0) };
@@ -501,6 +543,27 @@ pub fn reorder<T>(items: &mut Vec<T>, from: usize, to: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each size of controls lays the bar out at its own proportions, and
+    /// what is under a point follows: a Large bar's tab is hit lower down.
+    #[test]
+    fn a_bar_is_laid_out_at_its_size_of_controls() {
+        for z in [COMPACT, STANDARD, LARGE] {
+            let l = Layout::sized(900.0, 3, 0, &LEFT, &[], z);
+            assert_eq!(l.sizes, z);
+            assert_eq!(l.tabs[0].y + l.tabs[0].h, z.bar_h, "tabs stand on the bar's bottom edge");
+            assert_eq!(l.buttons[0].1.w, z.button_w);
+            assert_eq!(l.buttons[0].1.x, z.side);
+            assert!(l.at(450.0, z.bar_h - 1.0).is_some());
+            assert_eq!(l.at(450.0, z.bar_h + 1.0), None);
+        }
+        let large = Layout::sized(900.0, 2, 0, &LEFT, &[], LARGE);
+        assert_eq!(large.at(large.tabs[0].x + 50.0, STANDARD.bar_h + 2.0), Some(Part::Tab(0)), "below a Standard bar's bottom, still a Large tab");
+        assert_eq!(Sizes::of(0), COMPACT);
+        assert_eq!(Sizes::of(1), STANDARD);
+        assert_eq!(Sizes::of(2), LARGE);
+        assert_eq!(Sizes::of(9), STANDARD);
+    }
 
     #[test]
     fn light_is_read_from_the_appearance_section() {

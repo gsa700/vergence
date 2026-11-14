@@ -595,7 +595,7 @@ impl Server {
         let (Some(id), Some(g)) = (crate::memory::monitor_id_of(out), self.space.output_geometry(out)) else {
             return vergence_protocol::window::Place::Anywhere;
         };
-        let area = crate::place::content_area(self.work_area(g), true);
+        let area = crate::place::content_area(self.work_area(g), self.bar_h_in(g));
         let slide = |want: f64, lo: i32, room: i32, side: i32| want.min((lo + room - side) as f64).max(lo as f64);
         let x = slide(pos.x - 120.0, area.loc.x, area.size.w, size.w) - g.loc.x as f64;
         let y = slide(pos.y + crate::decor::TITLE_H as f64 / 2.0, area.loc.y, area.size.h, size.h) - g.loc.y as f64;

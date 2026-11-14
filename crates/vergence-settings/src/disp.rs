@@ -64,6 +64,42 @@ pub fn set_scale(desktop: &mut Table, id: &str, label: &str, scale: Option<f64>)
     };
 }
 
+/// The size of controls a screen's choice names (look milestone 1, step 8):
+/// 0 Automatic (unset), 1 Compact, 2 Standard, 3 Large.
+pub const CONTROLS: [&str; 4] = ["automatic", "compact", "standard", "large"];
+
+pub fn controls(desktop: &Table, id: &str) -> usize {
+    desktop
+        .get("displays")
+        .and_then(|d| d.get("screen"))
+        .and_then(Value::as_array)
+        .and_then(|a| a.iter().find(|s| s.get("id").and_then(Value::as_str) == Some(id)))
+        .and_then(|e| e.get("controls"))
+        .and_then(Value::as_str)
+        .and_then(|c| CONTROLS.iter().position(|x| *x == c))
+        .unwrap_or(0)
+}
+
+/// Set a screen's size of controls (Automatic takes the key away).
+pub fn set_controls(desktop: &mut Table, id: &str, label: &str, choice: usize) {
+    let list = list_mut(displays_mut(desktop), "screen");
+    let i = match list.iter().position(|s| s.get("id").and_then(Value::as_str) == Some(id)) {
+        Some(i) => i,
+        None => {
+            let mut t = Table::new();
+            t.insert("id".into(), id.into());
+            list.push(Value::Table(t));
+            list.len() - 1
+        }
+    };
+    let t = list[i].as_table_mut().unwrap();
+    t.insert("label".into(), label.into());
+    match choice.min(3) {
+        0 => t.remove("controls"),
+        c => t.insert("controls".into(), CONTROLS[c].into()),
+    };
+}
+
 /// The scale slider's marks: every whole number from 1 to `max`, and the
 /// default if it falls between them.
 pub fn detents(default: f64, max: f64) -> Vec<f64> {

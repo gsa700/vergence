@@ -46,7 +46,7 @@ impl XdgShellHandler for Server {
             .unwrap_or_default();
         let gap = crate::decor::TITLE_H * 2;
         // The most it may be (xdg-toplevel configure_bounds): the monitor below a title bar.
-        let room = crate::place::content_area(out, true).size;
+        let room = crate::place::content_area(out, self.bar_h_in(out)).size;
         surface.with_pending_state(|s| s.bounds = Some(room));
         let window = Win::from(Window::new_wayland_window(surface));
         self.space.map_element(window, (out.loc.x + gap, out.loc.y + gap), false);

@@ -10,6 +10,10 @@
 //       frost          = "clear" | "standard" | "heavy"   (the server's own: org.vergence.look)
 //       front-tab      = "page" | "frosted"
 //       reduce-transparency = false
+//       controls       = "compact" | "standard" | "large"  (the size of controls)
+//   ~/.config/vergence/desktop.toml  [[displays.screen]] controls = "automatic"
+//       | "compact" | "standard" | "large"   (a screen's own; Automatic: Large
+//       where a touch panel is on it)
 //   ~/.config/vergence/desktop.toml  [keyboard]   (the settings app's Keyboard page)
 //   ~/.config/vergence/desktop.toml  [energy]     screens off and sleep after idle (energy.rs)
 //       repeat       = true
@@ -119,6 +123,28 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
     put(LOOK, "frost", SettingValue::U32(frost));
     put(LOOK, "front-tab", SettingValue::U32((text("front-tab").as_deref() == Some("frosted")) as u32));
     put(LOOK, "reduce-transparency", SettingValue::Bool(appearance.get("reduce-transparency").and_then(|v| v.as_bool()).unwrap_or(false)));
+    // Size of controls (look milestone 1, step 8): the desktop's, and each
+    // screen's own ("size:<monitor id>", 3 for Automatic: Large where a touch
+    // panel is, the desktop's elsewhere).
+    let step = |t: Option<&str>| match t {
+        Some("compact") => 0,
+        Some("large") => 2,
+        Some("standard") => 1,
+        _ => 3,
+    };
+    put(LOOK, "size", SettingValue::U32(match step(text("controls").as_deref()) {
+        3 => 1,
+        s => s,
+    }));
+    let screens = desktop
+        .and_then(|t| t.parse::<toml::Table>().ok())
+        .and_then(|t| t.get("displays").and_then(|d| d.get("screen")).and_then(|s| s.as_array()).cloned())
+        .unwrap_or_default();
+    for screen in &screens {
+        if let Some(id) = screen.get("id").and_then(|v| v.as_str()) {
+            put(LOOK, &format!("size:{id}"), SettingValue::U32(step(screen.get("controls").and_then(|v| v.as_str()))));
+        }
+    }
 
     let keyboard = desktop
         .and_then(|t| t.parse::<toml::Table>().ok())

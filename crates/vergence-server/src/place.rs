@@ -13,7 +13,9 @@ use smithay::{
     xwayland::X11Surface,
 };
 
-use crate::{Server, decor::TITLE_H};
+use crate::Server;
+#[cfg(test)]
+use crate::decor::TITLE_H;
 
 impl Server {
     /// The monitor the pointer is on (else the first), in logical space.
@@ -32,7 +34,7 @@ impl Server {
 
     /// Where content can go on every monitor (below a title bar if `titled`).
     fn content_areas(&self, titled: bool) -> Vec<Rectangle<i32, Logical>> {
-        self.space.outputs().filter_map(|o| self.space.output_geometry(o)).map(|g| content_area(self.work_area(g), titled)).collect()
+        self.space.outputs().filter_map(|o| self.space.output_geometry(o)).map(|g| content_area(self.work_area(g), if titled { self.bar_h_in(g) } else { 0 })).collect()
     }
 
     /// Does `rect` (content) lie wholly on one monitor, below its title bar if titled?
@@ -56,7 +58,7 @@ impl Server {
         let titled = !x.is_override_redirect() && !x.is_decorated();
         let geo = x.geometry();
         let Some(out) = self.output_at_pointer() else { return geo };
-        let area = content_area(self.work_area(out), titled);
+        let area = content_area(self.work_area(out), if titled { self.bar_h_in(out) } else { 0 });
         let size = fit(geo.size, area.size, x.min_size());
         let asked = x.size_hints().is_some_and(|h| h.position.is_some());
         if asked {
@@ -81,7 +83,7 @@ impl Server {
             })
             .max_by_key(|(a, _)| *a)
             .map(|(_, g)| g)?;
-        Some(content_area(self.work_area(out), self.has_title(w)).size)
+        Some(content_area(self.work_area(out), if self.has_title(w) { self.bar_h_in(out) } else { 0 }).size)
     }
 
     /// Fit and center a Wayland window once it has a size (its first commit).
@@ -105,7 +107,7 @@ impl Server {
             return;
         }
         let Some(out) = self.output_at_pointer() else { return };
-        let area = content_area(self.work_area(out), self.has_title(w));
+        let area = content_area(self.work_area(out), if self.has_title(w) { self.bar_h_in(out) } else { 0 });
         let fitted = fit(size, area.size, None);
         if fitted != size {
             t.with_pending_state(|s| s.size = Some(fitted));
@@ -191,7 +193,7 @@ impl Server {
                 self.toggle_maximize(&w);
             }
             let size = self.space.element_geometry(&w).map(|g| g.size).unwrap_or(geo.size);
-            let area = content_area(self.work_area(out), self.has_title(&w));
+            let area = content_area(self.work_area(out), if self.has_title(&w) { self.bar_h_in(out) } else { 0 });
             let fitted = fit(size, area.size, w.x11_surface().and_then(|x| x.min_size()));
             let r = Rectangle::new(center_of(area, fitted), fitted);
             tracing::info!("hotplug: window rescued onto {:?}", r);
@@ -234,9 +236,9 @@ fn center_of(area: Rectangle<i32, Logical>, size: Size<i32, Logical>) -> Point<i
     center(area, size)
 }
 
-/// A monitor's area below a title bar's height (when titled).
-pub fn content_area(out: Rectangle<i32, Logical>, titled: bool) -> Rectangle<i32, Logical> {
-    let top = if titled { TITLE_H } else { 0 };
+/// A monitor's area below a title bar `top` points tall (0: none; the bar's
+/// height follows the screen's size of controls).
+pub fn content_area(out: Rectangle<i32, Logical>, top: i32) -> Rectangle<i32, Logical> {
     Rectangle::new((out.loc.x, out.loc.y + top).into(), (out.size.w, (out.size.h - top).max(1)).into())
 }
 
@@ -261,7 +263,7 @@ mod tests {
     #[test]
     fn too_tall_window_fits_below_the_title_bar() {
         // AlbumWall's 1131 x 710 on the 14" (1170 x 658 points), with a title bar.
-        let area = content_area(r(0, 0, 1170, 658), true);
+        let area = content_area(r(0, 0, 1170, 658), TITLE_H);
         assert_eq!(area, r(0, TITLE_H, 1170, 658 - TITLE_H));
         let size = fit((1131, 710).into(), area.size, None);
         assert_eq!(size, (1131, 658 - TITLE_H).into());
@@ -271,6 +273,6 @@ mod tests {
     #[test]
     fn minimum_size_wins_and_untitled_uses_the_whole_monitor() {
         assert_eq!(fit((2000, 300).into(), (1170, 658).into(), Some((1300, 100).into())), (1300, 300).into());
-        assert_eq!(content_area(r(1170, 0, 1800, 1013), false), r(1170, 0, 1800, 1013));
+        assert_eq!(content_area(r(1170, 0, 1800, 1013), 0), r(1170, 0, 1800, 1013));
     }
 }

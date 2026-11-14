@@ -64,6 +64,12 @@ impl Server {
 
     /// A device appeared: a pointing one gets the settings and is kept.
     pub fn pointer_device_added(&mut self, mut d: Device) {
+        tracing::info!("input: device {:?} (touch {}, pointer {}, keyboard {})", d.name(), d.has_capability(DeviceCapability::Touch), d.has_capability(DeviceCapability::Pointer), d.has_capability(DeviceCapability::Keyboard));
+        if d.has_capability(DeviceCapability::Touch) && !self.touch_panels.contains(&d.name().to_string()) {
+            tracing::info!("touch: panel {:?} present", d.name());
+            self.touch_panels.push(d.name().to_string());
+            self.redraw_all();
+        }
         if !d.has_capability(DeviceCapability::Pointer) {
             return;
         }
@@ -73,6 +79,10 @@ impl Server {
     }
 
     pub fn pointer_device_removed(&mut self, d: &Device) {
+        if d.has_capability(DeviceCapability::Touch) {
+            let name = d.name().to_string();
+            self.touch_panels.retain(|n| *n != name);
+        }
         self.pointer_devices.retain(|k| k != d);
     }
 

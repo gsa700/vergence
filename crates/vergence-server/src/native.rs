@@ -120,8 +120,10 @@ struct State {
     /// with its title, as before. The server draws it from step 3.
     bar: Option<vergence_protocol::window::Bar>,
     /// It draws under its bar (look milestone 1): its pictures are the bar's
-    /// height taller, the strip at their top under the bar.
+    /// height taller, the strip at their top under the bar; the inset last
+    /// sent (the bar's height where it is: the size of controls).
     under_bar: bool,
+    inset: i32,
 }
 
 /// Native windows' share of the pointer and the keyboard (step 4).
@@ -201,7 +203,7 @@ impl NativeWindow {
     /// The strip at the top of its pictures that lies under the server's bar,
     /// in points: the bar's height for a window that draws under its bar, else 0.
     pub fn inset(&self) -> i32 {
-        if self.state.lock().unwrap().under_bar { crate::decor::TITLE_H } else { 0 }
+        self.state.lock().unwrap().inset
     }
 
     /// What its bar shows, as last sent (none: its title).
@@ -312,6 +314,7 @@ impl Server {
                         meaning: None,
                         bar: None,
                         under_bar: false,
+                        inset: 0,
                     }),
                     user_data: UserDataMap::new(),
                 });
@@ -331,7 +334,7 @@ impl Server {
                     Some(r) => r,
                     None => {
                         let out = self.output_at_pointer().unwrap_or_default();
-                        let area = crate::place::content_area(self.work_area(out), self.has_title(&w));
+                        let area = crate::place::content_area(self.work_area(out), if self.has_title(&w) { self.bar_h_in(out) } else { 0 });
                         let size = crate::place::fit(asked, area.size, Some((MIN_SIDE, MIN_SIDE).into()));
                         // Not exactly on another window of its program.
                         (self.clear_of_siblings(&w, Rectangle::new(crate::place::center(area, size), size), out), false)
@@ -645,13 +648,14 @@ impl Server {
         self.native_send_configure(n);
     }
 
-    fn native_send_configure(&mut self, n: &NativeWindow) {
-        let (serial, size, scale, maximized, activated, under_bar) = {
+    pub(crate) fn native_send_configure(&mut self, n: &NativeWindow) {
+        let bar = self.natives.get(&(n.client, n.id)).cloned().map_or(crate::decor::TITLE_H, |w| self.bar_h(&w));
+        let (serial, size, scale, maximized, activated, inset) = {
             let mut s = n.state.lock().unwrap();
             s.sent_serial = s.sent_serial.wrapping_add(1).max(1);
-            (s.sent_serial, s.size, s.scale, s.maximized, s.activated, s.under_bar)
+            s.inset = if s.under_bar { bar } else { 0 };
+            (s.sent_serial, s.size, s.scale, s.maximized, s.activated, s.inset as f64)
         };
-        let inset = if under_bar { crate::decor::TITLE_H as f64 } else { 0.0 };
         let ev = WinEvent::Configure { window: n.id, serial, width: size.w as f64, height: size.h as f64, scale, maximized, activated, inset };
         self.bus_send(n.client, ServerMsg::Window(ev));
     }

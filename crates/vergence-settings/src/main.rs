@@ -93,6 +93,10 @@ const FROST_VALUES: [&str; 3] = ["clear", "standard", "heavy"];
 /// The tab in front: the page's own color, or frosted (page when unset).
 const FRONT_TAB_NAMES: [&str; 2] = ["Page color", "Frosted"];
 const FRONT_TAB_VALUES: [&str; 2] = ["page", "frosted"];
+/// The size of controls (Standard when unset); a screen's adds Automatic first.
+const CONTROLS_NAMES: [&str; 3] = ["Compact", "Standard", "Large"];
+const CONTROLS_VALUES: [&str; 3] = ["compact", "standard", "large"];
+const SCREEN_CONTROLS_NAMES: [&str; 4] = ["Automatic", "Compact", "Standard", "Large"];
 const FITS: [&str; 4] = ["Fill", "Fit", "Center", "Stretch"];
 const SWATCHES: [&str; 8] = ["#3b82f6", "#8b5cf6", "#ec4899", "#ef4444", "#e05a00", "#eab308", "#22c55e", "#6b7280"];
 /// The accent where the user names none: the settings app's own blue.
@@ -142,6 +146,9 @@ enum Message {
     Frost(usize),
     FrontTab(usize),
     Transparency(bool),
+    /// The size of controls: the desktop's (Appearance), a screen's own (Screens).
+    Controls(usize),
+    ScreenControls(usize),
     // Theme and fonts.
     Pick(&'static str, String),
     FontSize(bool, String),
@@ -575,6 +582,15 @@ impl App {
             Message::Transparency(on) => self.save_appearance(|t| {
                 t.insert("reduce-transparency".into(), on.into());
             }),
+            Message::Controls(i) => self.save_appearance(|t| {
+                t.insert("controls".into(), CONTROLS_VALUES[i.min(2)].into());
+            }),
+            Message::ScreenControls(i) => {
+                if let Some(o) = self.current_output() {
+                    let (id, label) = (o.id.clone(), screen_label(o));
+                    self.save(|d| disp::set_controls(d, &id, &label, i));
+                }
+            }
             Message::Pick(key, value) => self.set_x(key, &value),
             Message::FontSize(mono, size) => {
                 let key = if mono { theme::MONO } else { theme::FONT };
@@ -1085,6 +1101,8 @@ impl App {
         let front = FRONT_TAB_VALUES.iter().position(|v| *v == appearance_text(&self.desktop, "front-tab")).unwrap_or(0);
         let frost_names: Vec<String> = FROST_NAMES.iter().map(|s| s.to_string()).collect();
         let front_names: Vec<String> = FRONT_TAB_NAMES.iter().map(|s| s.to_string()).collect();
+        let controls = CONTROLS_VALUES.iter().position(|v| *v == appearance_text(&self.desktop, "controls")).unwrap_or(1);
+        let controls_names: Vec<String> = CONTROLS_NAMES.iter().map(|s| s.to_string()).collect();
         self.page_layout(
             "Appearance",
             "Light or dark, the accent color, contrast and motion. Every app that follows the desktop changes at once.",
@@ -1101,6 +1119,7 @@ impl App {
                 self.group(Some("Desktop look"), vec![
                     setting("Frost", "How much of a window shows through its bar. Titles stay readable whatever is under them.", choice(frost_names, Some(frost), Message::Frost).width(Length::Fixed(160.0)).name("Frost")),
                     setting("Tab in front", "In the page's own color, joined to it, or frosted like the rest of the bar.", choice(front_names, Some(front), Message::FrontTab).width(Length::Fixed(160.0)).name("Tab in front")),
+                    setting("Size of controls", "Window bars, tabs and buttons. A screen with a touch panel uses Large unless its own setting says otherwise (Screens).", choice(controls_names, Some(controls), Message::Controls).width(Length::Fixed(160.0)).name("Size of controls")),
                 ]),
                 self.group(Some("Accessibility"), vec![
                     setting("High contrast", "Apps that support it draw stronger edges and text. The desktop's bars are solid.", switch(contrast, Message::Contrast).name("High contrast")),
@@ -1688,7 +1707,12 @@ impl App {
             if chosen {
                 shown_row.push(button(label("Default").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press(Message::ScaleDefault));
             }
-            let mut rows = vec![setting("Scale", note, scale_slider(self.scale, o, &marks)), setting("Shown at", &o.note, row(shown_row).spacing(8.0).align(Align::Center))];
+            let screen_controls: Vec<String> = SCREEN_CONTROLS_NAMES.iter().map(|s| s.to_string()).collect();
+            let mut rows = vec![
+                setting("Scale", note, scale_slider(self.scale, o, &marks)),
+                setting("Shown at", &o.note, row(shown_row).spacing(8.0).align(Align::Center)),
+                setting("Size of controls", "Automatic: Large with a touch panel, else the desktop's (Appearance).", choice(screen_controls, Some(disp::controls(&self.desktop, &o.id)), Message::ScreenControls).width(Length::Fixed(160.0)).name("Size of controls")),
+            ];
             if !multi {
                 rows.push(setting("Size", &format!("How big everything is: {}%.", (self.size * 100.0).round()), size_slider(self.size)));
             }

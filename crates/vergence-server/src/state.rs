@@ -124,6 +124,9 @@ pub struct Server {
     pub touch: crate::touch::Touch,
     /// Mice and touchpads, kept to be given the settings again when they change (pointer.rs).
     pub pointer_devices: Vec<smithay::reexports::input::Device>,
+    /// Touch panels present, by name (look milestone 1: a screen with one
+    /// gets the Large size of controls when its setting is Automatic).
+    pub touch_panels: Vec<String>,
     /// The idle clock, screens off and sleep (energy.rs).
     pub energy: crate::energy::Energy,
     pub popups: PopupManager,
@@ -256,6 +259,7 @@ impl Server {
             resume: Default::default(),
             launcher: Default::default(),
             pointer_devices: Vec::new(),
+            touch_panels: Vec::new(),
             touch: Default::default(),
             energy: crate::energy::Energy::new(),
             popups,

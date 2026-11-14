@@ -111,6 +111,14 @@ impl Server {
         }
     }
 
+    /// The id of the screen the panel named `panel` is on: its tie in
+    /// desktop.toml, else the primary screen (as `touch_screen`, without the log).
+    pub fn touch_screen_id(&self, panel: &str) -> Option<String> {
+        let ids: Vec<String> = self.bus_outputs().iter().map(|o| o.id.clone()).collect();
+        let tied = self.touch.ties.iter().find(|(name, _)| name == panel).map(|(_, screen)| screen.clone()).filter(|id| ids.contains(id));
+        tied.or_else(|| vergence_profile::primary(self.shelf.primary.as_deref(), &ids).map(str::to_string))
+    }
+
     /// The screen the panel named `panel` is on.
     pub fn touch_screen(&mut self, panel: &str) -> Option<Rectangle<i32, Logical>> {
         let outputs = self.bus_outputs();
