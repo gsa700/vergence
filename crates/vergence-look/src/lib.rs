@@ -138,9 +138,8 @@ pub fn ink_on(ground: Rgb) -> Rgb {
     if contrast(BAR_DARK.ink, ground) >= contrast(BAR_LIGHT.ink, ground) { BAR_DARK.ink } else { BAR_LIGHT.ink }
 }
 
-/// The dark style's colors under their first names, for what draws in the
-/// dark style alone so far (the dock, the menus: look milestone 1 moves
-/// them onto both styles next).
+/// The dark style's colors under their first names (what still asks for
+/// them by name draws in the dark style).
 pub const BAR_FOCUSED: Rgb = BAR_DARK.ground;
 pub const BAR_UNFOCUSED: Rgb = BAR_DARK.ground_off;
 pub const INK_FOCUSED: Rgb = BAR_DARK.ink;
@@ -156,6 +155,12 @@ pub const CLOSE: Rgb = Rgb(199, 77, 71);
 pub const BUTTON: Rgb = Rgb(184, 184, 184);
 pub const SHAPE_REST: u8 = BAR_DARK.shape_rest;
 pub const SHAPE_HOVER: u8 = BAR_DARK.shape_hover;
+pub const SHELF: Rgb = SHELF_DARK.dock;
+pub const SHELF_EDGE: Rgb = SHELF_DARK.dock_edge;
+pub const SHELF_TILE: Rgb = SHELF_DARK.tile;
+pub const MENU: Rgb = SHELF_DARK.menu;
+pub const MENU_INK: Rgb = SHELF_DARK.menu_ink;
+pub const MENU_INK_OFF: Rgb = SHELF_DARK.menu_ink_off;
 
 /// How far a window button's drawn shape stands in from its press area, at
 /// the sides and at the top and bottom (look milestone 1: the buttons float
@@ -174,17 +179,67 @@ pub const SHELF_GAP: f32 = 1.0;
 /// How far the apps popup and an icon's menu stand off the dock.
 pub const SHELF_POPUP_GAP: f32 = 6.0;
 pub const SHELF_ICON: f32 = 32.0;
-pub const SHELF: Rgb = Rgb(32, 35, 44);
-pub const SHELF_EDGE: Rgb = Rgb(64, 68, 80);
-/// The tile behind the letter of an application that has no icon.
-pub const SHELF_TILE: Rgb = Rgb(70, 78, 98);
 /// The accent, where the user's settings name none: the cursor's blue.
 pub const ACCENT: Rgb = Rgb(114, 159, 207);
 
-/// A menu's ground, its text, and its text for what cannot be chosen.
-pub const MENU: Rgb = Rgb(43, 46, 59);
-pub const MENU_INK: Rgb = Rgb(235, 235, 235);
-pub const MENU_INK_OFF: Rgb = Rgb(128, 128, 134);
+/// What the dock, the apps popup, the name beside a dock icon and the
+/// server's menus are drawn with, in one style (look milestone 1, step 2,
+/// 2026-11-13; dark only until then): the dock's ground and its line, the
+/// tile behind the letter of an application with no icon and that letter,
+/// the marks (the apps button's dots, a running application's mark), a
+/// menu's ground, text, text for what cannot be chosen (and hints), the line
+/// around a menu or popup, the row under the pointer, a menu's separators,
+/// and the popup's search field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShelfLook {
+    pub dock: Rgb,
+    pub dock_edge: Rgb,
+    pub tile: Rgb,
+    pub tile_ink: Rgb,
+    pub mark: Rgb,
+    pub menu: Rgb,
+    pub menu_ink: Rgb,
+    pub menu_ink_off: Rgb,
+    pub edge: Rgb,
+    pub hover: Rgb,
+    pub separator: Rgb,
+    pub field: Rgb,
+}
+
+pub const SHELF_DARK: ShelfLook = ShelfLook {
+    dock: Rgb(32, 35, 44),
+    dock_edge: Rgb(64, 68, 80),
+    tile: Rgb(70, 78, 98),
+    tile_ink: Rgb(235, 235, 235),
+    mark: BAR_DARK.ink_off,
+    menu: Rgb(43, 46, 59),
+    menu_ink: Rgb(235, 235, 235),
+    menu_ink_off: Rgb(128, 128, 134),
+    edge: Rgb(64, 68, 80),
+    hover: Rgb(51, 92, 158),
+    separator: Rgb(77, 79, 87),
+    field: Rgb(32, 35, 44),
+};
+
+pub const SHELF_LIGHT: ShelfLook = ShelfLook {
+    dock: Rgb(238, 239, 243),
+    dock_edge: Rgb(196, 199, 208),
+    tile: Rgb(208, 214, 228),
+    tile_ink: Rgb(29, 29, 31),
+    mark: BAR_LIGHT.ink_off,
+    menu: Rgb(250, 250, 251),
+    menu_ink: Rgb(29, 29, 31),
+    menu_ink_off: Rgb(128, 128, 134),
+    edge: Rgb(200, 202, 210),
+    hover: Rgb(207, 222, 247),
+    separator: Rgb(222, 223, 228),
+    field: Rgb(238, 239, 243),
+};
+
+/// The dock and menu look for light or dark.
+pub const fn shelf_look(light: bool) -> &'static ShelfLook {
+    if light { &SHELF_LIGHT } else { &SHELF_DARK }
+}
 
 /// The grounds and inks of a window built of widgets (the settings app's,
 /// first; moved here 2026-11-10 so every tool of ours shares them). `hover`
@@ -252,6 +307,27 @@ mod tests {
             }
         }
         assert!(contrast(Rgb(255, 255, 255), CLOSE) >= 4.5);
+    }
+
+    /// The dock's and menus' text and marks, both styles: text 4.5:1 on a
+    /// menu, the row under the pointer, the search field and a letter tile;
+    /// hints and what cannot be chosen 3:1; the dock's marks 3:1.
+    #[test]
+    fn dock_and_menu_text_is_readable_in_both_styles() {
+        for (name, l) in [("dark", &SHELF_DARK), ("light", &SHELF_LIGHT)] {
+            for (what, ink, ground, need) in [
+                ("menu", l.menu_ink, l.menu, 4.5),
+                ("row under the pointer", l.menu_ink, l.hover, 4.5),
+                ("search field", l.menu_ink, l.field, 4.5),
+                ("letter tile", l.tile_ink, l.tile, 4.5),
+                ("hint on the menu", l.menu_ink_off, l.menu, 3.0),
+                ("hint in the field", l.menu_ink_off, l.field, 3.0),
+                ("dock mark", l.mark, l.dock, 3.0),
+            ] {
+                let c = contrast(ink, ground);
+                assert!(c >= need, "{name}: {what} {c:.2} < {need}");
+            }
+        }
     }
 
     #[test]

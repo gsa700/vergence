@@ -353,7 +353,7 @@ pub struct Shelf {
     named: bool,
     /// The items' names as last drawn, and the name's picture for a scale.
     names: Vec<String>,
-    label: Option<((String, u64), MemoryRenderBuffer, i32)>,
+    label: Option<((String, u64, bool), MemoryRenderBuffer, i32)>,
     /// Minimized windows, each with the place it goes back to. They are on no
     /// screen (the server's space does not hold them); their application's icon
     /// on the shelf is where they are.
@@ -1131,6 +1131,9 @@ impl Server {
     /// The strip's picture on `out`, if it is on that screen.
     pub fn shelf_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
         let color = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
+        // Light or dark (look milestone 1).
+        let light = self.light_style();
+        let s = vergence_look::shelf_look(light);
         // What the dock shows: each item, its mark, and its icon once that has come.
         let items = self.shelf_items();
         let Some(strip) = self.shelf_dock(items.len()).filter(|r| r.overlaps(out)) else { return Vec::new() };
@@ -1159,6 +1162,7 @@ impl Server {
         starting.hash(&mut hasher);
         let glass = (self.shelf.config.opacity.filter(|o| o.is_finite()).unwrap_or(1.0).clamp(0.3, 1.0) * 255.0).round() as u8;
         glass.hash(&mut hasher);
+        light.hash(&mut hasher);
         (accent.r, accent.g, accent.b).hash(&mut hasher);
         // Level or upright, and which side faces the windows (its marks are on the other).
         let upright = self.shelf.config.placement().upright();
@@ -1170,15 +1174,15 @@ impl Server {
             // on nothing (the desktop shows at its corners).
             let (w, h) = (strip.size.w as f32, strip.size.h as f32);
             let mut scene = Scene::new(w, h);
-            let panel = vergence_look::SHELF;
+            let panel = s.dock;
             scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, Color::rgba(panel.0, panel.1, panel.2, glass));
-            scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, color(vergence_look::SHELF_EDGE));
+            scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, color(s.dock_edge));
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             let face = fonts.face("sans-serif", 700, false).or_else(|| fonts.face("sans-serif", 400, false));
             // The apps button at its head: nine dots.
             for i in 0..9 {
                 let (column, row) = ((i % 3) as f32, (i / 3) as f32);
-                scene.fill_rounded(SceneRect::new(14.0 + column * 8.0, 14.0 + row * 8.0, 4.0, 4.0), 1.0, color(vergence_look::INK_UNFOCUSED));
+                scene.fill_rounded(SceneRect::new(14.0 + column * 8.0, 14.0 + row * 8.0, 4.0, 4.0), 1.0, color(s.mark));
             }
             let local = Rect::new(0, 0, strip.size.w, strip.size.h);
             for (index, ((item, windows), icon)) in items.iter().zip(&icons).enumerate() {
@@ -1191,7 +1195,7 @@ impl Server {
                     // From 6 points to 18 and back in a second.
                     Some(step) => (6.0 + 12.0 * (1.0 - (step as f32 - 5.0).abs() / 5.0), accent),
                     None if item.focused => (18.0, accent),
-                    None => (6.0, color(vergence_look::INK_UNFOCUSED)),
+                    None => (6.0, color(s.mark)),
                 };
                 let faint = away[index];
                 // No mark for one that is neither running nor starting.
@@ -1221,14 +1225,14 @@ impl Server {
                     }
                     None => {
                         // No icon (yet, or at all): a tile with the name's first letter.
-                        scene.fill_rounded(square, vergence_look::RADIUS, color(vergence_look::SHELF_TILE));
+                        scene.fill_rounded(square, vergence_look::RADIUS, color(s.tile));
                         let letter: String = item.name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into());
                         if let Some(face) = face {
                             let size = 18.0;
                             let m = fonts.metrics(face, size);
                             let (_, width) = fonts.layout(face, size, &letter);
                             let origin = ScenePoint::new(square.x + (square.w - width) / 2.0, square.y + ((square.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round());
-                            vergence_render::text(&mut scene, fonts, face, size, color(vergence_look::INK_FOCUSED), origin, &letter);
+                            vergence_render::text(&mut scene, fonts, face, size, color(s.tile_ink), origin, &letter);
                         }
                     }
                 }
@@ -1248,7 +1252,7 @@ impl Server {
         let mut elements = Vec::new();
         let named = self.shelf.hover.filter(|_| self.shelf.named && !self.menu_is_open() && self.shelf.dragged.is_none()).and_then(|i| Some((running::slot(rect(strip), i, upright)?, self.shelf.names.get(i)?.clone())));
         if let Some((slot, name)) = named {
-            let key = (name.clone(), scale.to_bits());
+            let key = (name.clone(), scale.to_bits(), light);
             if self.shelf.label.as_ref().map(|(k, _, _)| k) != Some(&key) {
                 let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                 if let Some(face) = fonts.face("sans-serif", 400, false) {
@@ -1257,10 +1261,10 @@ impl Server {
                     let (_, width) = fonts.layout(face, size, &name);
                     let (w, h) = ((width + 20.0).ceil().min(480.0), 28.0);
                     let mut scene = Scene::new(w, h);
-                    scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, color(vergence_look::MENU));
-                    scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, color(vergence_look::SHELF_EDGE));
+                    scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, color(s.menu));
+                    scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, color(s.edge));
                     scene.push_clip(SceneRect::new(8.0, 0.0, w - 16.0, h), 0.0);
-                    vergence_render::text(&mut scene, fonts, face, size, color(vergence_look::MENU_INK), ScenePoint::new(10.0, ((h - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), &name);
+                    vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink), ScenePoint::new(10.0, ((h - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), &name);
                     scene.pop_clip();
                     if let Ok(p) = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) {
                         let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);

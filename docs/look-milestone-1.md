@@ -219,7 +219,16 @@ Bar Proportions"):
   toolkit's own bar and border (other desktops) follow `desktop_light`:
   Vergence's desktop.toml, or GNOME's color-scheme under GNOME. 381 tests
   on Hubble, kepler and Techbench. Seen on Hubble in both styles, focused
-  and not (vctl shots). Left of step 2: the dock and the server's menus.
+  and not (vctl shots).
+- **Step 2 done** (2026-11-13): the dock, the apps popup, the name beside a
+  dock icon and the server's menus (desktop, dock icon, tab) follow Style
+  too: vergence-look's `ShelfLook` (`SHELF_DARK`, `SHELF_LIGHT`,
+  `shelf_look`) and its contrast test (text 4.5:1 on a menu, the row under
+  the pointer, the search field and a letter tile; hints 3:1; the dock's
+  marks 3:1). menu.rs lost its own colors. The dock's and popup's pictures,
+  the name label and the menu's label rasters are keyed by the style; the
+  menu's solid parts are redrawn when it changes. 382 tests on all three;
+  the desktop menu, dock and apps popup seen on Hubble in both styles.
 
 ## Steps
 

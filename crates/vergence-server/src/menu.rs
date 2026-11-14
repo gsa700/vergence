@@ -37,11 +37,6 @@ const WIDTH: i32 = 220;
 const ITEM_H: i32 = 26;
 const SEP_H: i32 = 9;
 const PAD: i32 = 4;
-const BG: [f32; 4] = [0.16, 0.17, 0.20, 1.0];
-const EDGE: [f32; 4] = [0.30, 0.32, 0.37, 1.0];
-const HOVER: [f32; 4] = [0.20, 0.36, 0.62, 1.0];
-const SEP: [f32; 4] = [0.30, 0.31, 0.34, 1.0];
-const TEXT: [f32; 3] = [0.92, 0.92, 0.92];
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Item {
@@ -92,8 +87,10 @@ pub struct OpenMenu {
     /// Damage ids: background, edge, hover, separators...
     ids: Vec<Id>,
     commit: CommitCounter,
-    /// Label rasters per (entry, scale bits).
-    labels: HashMap<(usize, u64), MemoryRenderBuffer>,
+    /// Label rasters per (entry, scale bits, light).
+    labels: HashMap<(usize, u64, bool), MemoryRenderBuffer>,
+    /// The style it was last drawn in (its solid parts' damage follows it).
+    light: bool,
 }
 
 /// The apps for the menu: desktop.toml's, else the usual ones that are installed.
@@ -192,6 +189,7 @@ impl Server {
             ids,
             commit: CommitCounter::default(),
             labels: HashMap::new(),
+            light: false,
         };
         if let Some(out) = self.output_at_pointer().map(|o| self.work_area(o)) {
             let (w, h) = (WIDTH, m.height());
@@ -235,7 +233,7 @@ impl Server {
             return;
         }
         let ids = (0..3 + entries.len()).map(|_| Id::new()).collect();
-        let mut m = OpenMenu { at: slot.loc, entries, hover: None, ids, commit: CommitCounter::default(), labels: HashMap::new() };
+        let mut m = OpenMenu { at: slot.loc, entries, hover: None, ids, commit: CommitCounter::default(), labels: HashMap::new(), light: false };
         // Beside the icon, on the side `towards` names, a little off the dock.
         let off = vergence_look::SHELF_POPUP_GAP as i32;
         m.at = match towards {
@@ -305,7 +303,14 @@ impl Server {
 
     /// The menu's elements for an output, front to back (empty if closed or elsewhere).
     pub fn menu_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+        // Light or dark (look milestone 1): the dock's and menus' look.
+        let light = self.light_style();
+        let look = vergence_look::shelf_look(light);
         let Some(m) = self.menu.as_mut() else { return Vec::new() };
+        if m.light != light {
+            m.light = light;
+            m.commit.increment();
+        }
         if !m.rect().overlaps(out) {
             return Vec::new();
         }
@@ -331,8 +336,8 @@ impl Server {
             let r = rows[i];
             let text = Rectangle::new((r.loc.x + 8, r.loc.y).into(), (r.size.w - 16, r.size.h).into());
             let (pw, ph) = ((text.size.w as f64 * scale).round() as i32, (text.size.h as f64 * scale).round() as i32);
-            let buf = m.labels.entry((i, scale.to_bits())).or_insert_with(|| {
-                let rgba = font.render(&label, pw as usize, ph as usize, scale, TEXT);
+            let buf = m.labels.entry((i, scale.to_bits(), light)).or_insert_with(|| {
+                let rgba = font.render(&label, pw as usize, ph as usize, scale, look.menu_ink.floats3());
                 MemoryRenderBuffer::from_slice(&rgba, Fourcc::Abgr8888, (pw, ph), 1, Transform::Normal, None)
             });
             let at = (text.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>().to_f64();
@@ -344,19 +349,19 @@ impl Server {
         }
         // Hover, separators, edge and background (back).
         if let Some(h) = m.hover {
-            els.push(SceneElement::Solid(SolidColorRenderElement::new(m.ids[2].clone(), phys(rows[h]), m.commit, HOVER, Kind::Unspecified)));
+            els.push(SceneElement::Solid(SolidColorRenderElement::new(m.ids[2].clone(), phys(rows[h]), m.commit, look.hover.floats(), Kind::Unspecified)));
         }
         for (i, e) in m.entries.iter().enumerate() {
             if *e == Entry::Separator {
                 let r = rows[i];
                 let line = Rectangle::new((r.loc.x + 6, r.loc.y + SEP_H / 2).into(), (r.size.w - 12, 1).into());
-                els.push(SceneElement::Solid(SolidColorRenderElement::new(m.ids[3 + i].clone(), phys(line), m.commit, SEP, Kind::Unspecified)));
+                els.push(SceneElement::Solid(SolidColorRenderElement::new(m.ids[3 + i].clone(), phys(line), m.commit, look.separator.floats(), Kind::Unspecified)));
             }
         }
         let rect = m.rect();
         let inner = Rectangle::new((rect.loc.x + 1, rect.loc.y + 1).into(), (rect.size.w - 2, rect.size.h - 2).into());
-        els.push(SceneElement::Solid(SolidColorRenderElement::new(m.ids[0].clone(), phys(inner), m.commit, BG, Kind::Unspecified)));
-        els.push(SceneElement::Solid(SolidColorRenderElement::new(m.ids[1].clone(), phys(rect), m.commit, EDGE, Kind::Unspecified)));
+        els.push(SceneElement::Solid(SolidColorRenderElement::new(m.ids[0].clone(), phys(inner), m.commit, look.menu.floats(), Kind::Unspecified)));
+        els.push(SceneElement::Solid(SolidColorRenderElement::new(m.ids[1].clone(), phys(rect), m.commit, look.edge.floats(), Kind::Unspecified)));
         els
     }
 }
