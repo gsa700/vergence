@@ -274,6 +274,19 @@ fn icon_mark<M: 'static>(icon: Icon) -> Element<M> {
     .height(Length::Fixed(22.0))
 }
 
+/// The Advanced part's chevron: pointing right while closed, down when open.
+fn chevron<M: 'static>(open: bool) -> Element<M> {
+    drawing(move |scene: &mut Scene, _: &mut Fonts, r: Rect, t: &Theme| {
+        let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+        let pts = if open { [(-3.5, -1.5), (0.0, 2.0), (3.5, -1.5)] } else { [(-1.5, -3.5), (2.0, 0.0), (-1.5, 3.5)] };
+        let p = |(dx, dy): (f32, f32)| Point::new(cx + dx, cy + dy);
+        scene.line(p(pts[0]), p(pts[1]), 1.6, t.dim);
+        scene.line(p(pts[1]), p(pts[2]), 1.6, t.dim);
+    })
+    .width(Length::Fixed(14.0))
+    .height(Length::Fixed(14.0))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
     Appearance,
@@ -300,6 +313,8 @@ enum Page {
 #[derive(Debug, Clone)]
 enum Message {
     Go(Page),
+    /// The Advanced part of a page opened or closed, by its key.
+    Advanced(&'static str),
     // Sound: an output's volume (as it slides), its mute, making it the
     // default, and its test tone.
     SoundVolume(String, f32),
@@ -437,6 +452,9 @@ struct App {
     top: std::cell::Cell<f32>,
     /// What is typed in the sidebar's search field (settings milestone 1).
     search: String,
+    /// The pages whose Advanced part is open (settings milestone 1, step 2):
+    /// closed at first, remembered while the app runs.
+    advanced: HashSet<&'static str>,
     page: Page,
     /// The Sound page (vergence-sound): the system, read when the page opens,
     /// and its outputs as last read.
@@ -612,6 +630,7 @@ impl App {
             page: Page::Appearance,
             top: std::cell::Cell::new(0.0),
             search: String::new(),
+            advanced: HashSet::new(),
             accent_text: appearance_text(&desktop, "accent"),
             size: disp::size(&desktop) as f32,
             sleep_cmd: energy_cmd(&desktop),
@@ -758,6 +777,11 @@ impl App {
     fn handle(&mut self, m: Message) {
         match m {
             Message::Go(p) => self.open(p),
+            Message::Advanced(key) => {
+                if !self.advanced.remove(key) {
+                    self.advanced.insert(key);
+                }
+            }
             Message::Scheme(i) => self.save_appearance(|t| {
                 t.insert("color-scheme".into(), SCHEMES[i.min(2)].into());
             }),
@@ -1719,6 +1743,14 @@ impl App {
         let mut groups = Vec::new();
         for o in &self.sound_outputs {
             let id = o.id.clone();
+            // The system's name for it lives in Advanced, unless another output
+            // goes by the same name here: then it is how the two are told apart.
+            let twin = self.sound_outputs.iter().filter(|x| x.name == o.name).count() > 1;
+            let note = match (twin, o.default) {
+                (true, _) => o.detail.clone(),
+                (false, true) => "Programs that do not choose play here.".to_string(),
+                (false, false) => String::new(),
+            };
             let chosen = if o.default {
                 label("Default").dim()
             } else {
@@ -1740,7 +1772,7 @@ impl App {
             groups.push(self.group(
                 Some(&o.name),
                 vec![
-                    setting(if o.default { "Sound goes here" } else { "Not the default" }, &o.detail, chosen),
+                    setting(if o.default { "Sound goes here" } else { "Not the default" }, &note, chosen),
                     volume,
                     setting("Mute", "", switch(o.muted, move |on| Message::SoundMute(mute_id.clone(), on)).name(&format!("Mute {}", o.name))),
                     setting("Test sound", "A short tone, quiet.", button(label("Play").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::SoundTone(tone_id)).name(&format!("Test {}", o.name))),
@@ -1750,6 +1782,12 @@ impl App {
         if groups.is_empty() {
             groups.push(self.group(None, vec![setting("No outputs", system, space())]));
         }
+        // The devices as the system names them.
+        let mut raw = vec![setting("Sound system", "", label(system).dim())];
+        for o in &self.sound_outputs {
+            raw.push(setting(&o.name, &format!("{} ({})", o.detail, o.id), space()));
+        }
+        groups.push(self.advanced("sound", raw));
         groups.push(self.status_line());
         self.page_layout(title, about, groups)
     }
@@ -2068,7 +2106,7 @@ impl App {
             let screen_controls: Vec<String> = SCREEN_CONTROLS_NAMES.iter().map(|s| s.to_string()).collect();
             let mut rows = vec![
                 setting("Scale", note, scale_slider(self.scale, o, &marks)),
-                setting("Shown at", &o.note, row(shown_row).spacing(8.0).align(Align::Center)),
+                setting("Shown at", "The scale with Size applied.", row(shown_row).spacing(8.0).align(Align::Center)),
                 setting("Size of controls", "Automatic: Large with a touch panel, else the desktop's (Appearance).", choice(screen_controls, Some(disp::controls(&self.desktop, &o.id)), Message::ScreenControls).width(Length::Fixed(160.0)).name("Size of controls")),
             ];
             if !multi {
@@ -2084,6 +2122,18 @@ impl App {
                 Some("Wallpaper"),
                 vec![setting(&short_name(&what, 40), "Chosen on the Wallpaper page.", button(label("Wallpaper").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Go(Page::Wallpaper(i))).name("Open Wallpaper"))],
             ));
+        }
+        // How the scale was found and what the screen is, for the curious.
+        if let Some(o) = o {
+            let mut rows = vec![setting("How the scale was found", &o.note, space())];
+            // A laptop's panel often has no make and model: its connector stands in.
+            if !o.description.is_empty() && o.description != o.name {
+                rows.push(setting("Monitor", &o.description, space()));
+            }
+            rows.push(setting("Connector", &o.name, space()));
+            rows.push(setting("Size", &format!("{} x {} points at {}, {}", o.width, o.height, o.x, o.y), space()));
+            rows.push(setting("Identity", &format!("{} (from its EDID: its settings follow it to any port)", o.id), space()));
+            items.push(self.advanced("screen", rows));
         }
         items.push(self.status_line());
         self.page_layout(&title, description, items)
@@ -2494,6 +2544,23 @@ impl App {
         // The page scrolls up under the frosted bar (look milestone 1's content under the bar).
         let top = self.top.get();
         scroll(panel(column(all).spacing(16.0).width(Length::FILL)).padding(Padding { top: 22.0 + top, bottom: 22.0, left: 22.0, right: 22.0 }).width(Length::FILL)).name(title)
+    }
+
+    /// A page's Advanced part (settings milestone 1, step 2): every other
+    /// option and live status, behind "Advanced" at the page's end; a click
+    /// opens it, and it stays open while the app runs. `key` names it.
+    fn advanced(&self, key: &'static str, rows: Vec<Element<Message>>) -> Element<Message> {
+        let open = self.advanced.contains(key);
+        let head = button(row(vec![chevron(open), label("Advanced").size(12.0).dim().weight(600)]).spacing(4.0).align(Align::Center))
+            .look(ButtonLook::Plain)
+            .padding(Padding::hv(2.0, 4.0))
+            .on_press(Message::Advanced(key))
+            .name(if open { "Close Advanced" } else { "Open Advanced" });
+        let mut parts = vec![row(vec![head, space().width(Length::FILL)]).width(Length::FILL)];
+        if open {
+            parts.push(self.group(None, rows));
+        }
+        column(parts).spacing(6.0).width(Length::FILL)
     }
 
     /// A group of settings in a rounded card, a hairline between rows.

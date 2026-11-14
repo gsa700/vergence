@@ -150,6 +150,16 @@ by the computer through usbmuxd before it hands out a connection (Question
   its one-line description in small dim text, then its groups; the page's
   name stays as the scroll's name for Contract 3. Adding pictures, a
   sub-page with no sidebar entry, keeps its name in bold over its line.
+- **Step 2 in: the Advanced part** (2026-11-14): `advanced(key, rows)` in the
+  settings app, a chevron and "Advanced" in small dim text at a page's end;
+  a click opens its card, and it stays open for the session (per page, a
+  set of keys; not saved). Sound's: the sound system and each output as the
+  system names it ("HDA Intel PCH: HDMI 0 (hw:0,3)"), moved out of the cards,
+  except where two outputs share a name (the system's name stays to tell them
+  apart). A screen's: how the scale was found (moved from Shown at), the
+  monitor's make and model (when it has one), its connector, size and place,
+  its identity. On Hubble (shots): opened on Screens, kept open after Windows
+  and back; Sound's HDMI outputs told apart. Wi-Fi's comes with step 4.
 
 ## Steps
 
