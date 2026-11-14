@@ -127,6 +127,17 @@ fn bars_mark<M: 'static>(n: u8) -> Element<M> {
     .height(Length::Fixed(16.0))
 }
 
+/// A signal in a word, by its bars.
+fn signal_word(dbm: i32) -> &'static str {
+    match wpa::bars(dbm) {
+        4 => "excellent",
+        3 => "good",
+        2 => "fair",
+        1 => "weak",
+        _ => "very weak",
+    }
+}
+
 /// wpa_supplicant's state in a few words.
 fn state_words(s: &str) -> &'static str {
     match s {
@@ -361,11 +372,27 @@ impl App {
         };
         let mut top = vec![setting_row];
         if wanted && w.status.connected() {
+            // The network in use with its numbers up front (Dave, 2026-11-14:
+            // "some of the connection statistics right up front"); the rest
+            // stays in Advanced.
             let n = w.signal.as_ref().map_or(0, |s| wpa::bars(s.rssi));
-            top.push(setting(&w.status.ssid.clone().unwrap_or_default(), "In use.", bars_mark(n)));
+            let band = w.status.freq.and_then(wpa::band_channel).map(|(b, ch)| format!("In use. {b}, channel {ch}.")).unwrap_or_else(|| "In use.".into());
+            top.push(setting(&w.status.ssid.clone().unwrap_or_default(), &band, bars_mark(n)));
+            let value = |t: String| label(t).dim();
+            if let Some(g) = &w.signal {
+                top.push(setting("Signal", "", value(format!("{} dBm, {}", g.rssi, signal_word(g.rssi)))));
+                if let Some(m) = g.link_mbps {
+                    top.push(setting("Speed", "", value(format!("{m} Mb/s"))));
+                }
+            }
+            let v4 = w.link.as_ref().and_then(|f| f.addrs.iter().find(|(a, _)| a.is_ipv4())).map(|(a, _)| a.to_string()).or_else(|| w.status.ip.clone());
+            top.push(setting("Address", "", value(v4.unwrap_or_else(|| "Waiting for one".into()))));
         }
         items.push(self.group(None, top));
-        items.push(label(now).size(12.0).dim());
+        // Said by the card above while connected.
+        if !(wanted && w.status.connected()) {
+            items.push(label(now).size(12.0).dim());
+        }
         // The password, asked in the page.
         if let Some(name) = &w.asking {
             let mut f = field(&w.password, |p| Message::Wifi(WifiMsg::Password(p))).placeholder("Password").on_submit(Message::Wifi(WifiMsg::Join)).width(Length::Fixed(240.0)).name("Password").autofocus();
