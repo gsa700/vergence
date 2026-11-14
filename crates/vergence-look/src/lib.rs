@@ -283,7 +283,11 @@ pub const SHELF_LIGHT: ShelfLook = ShelfLook {
     dock_edge: Rgb(196, 199, 208),
     tile: Rgb(208, 214, 228),
     tile_ink: Rgb(29, 29, 31),
-    mark: BAR_LIGHT.ink_off,
+    // The light style's ink, not its mid grey: a mid grey keeps 3:1 over
+    // neither a dark nor a bright backdrop well, so the frost's floor kept a
+    // light dock over a red and black wallpaper about 80% tinted whatever its
+    // opacity (Hubble, 2026-11-13); this ink needs 30-45% there.
+    mark: BAR_LIGHT.ink,
     menu: Rgb(250, 250, 251),
     menu_ink: Rgb(29, 29, 31),
     menu_ink_off: Rgb(128, 128, 134),

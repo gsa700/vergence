@@ -162,7 +162,11 @@ fn rows_from_top(frame: &GlesFrame<'_, '_>) -> bool {
 /// opens over a still desktop changes nothing behind it, so without the new
 /// commit its texture stayed empty: found on Hubble, a menu and a Wayland
 /// bar frosted only their tint.)
-pub type Slot = Option<(Id, GlesTexture, CommitCounter)>;
+/// The element's id, its texture, its commit, and the look it was last
+/// drawn with: a new look (the dock's opacity, the Frost step, light or
+/// dark) is a new commit, or the screen kept the old frost until something
+/// behind it changed (Hubble, 2026-11-13: "the slider does nothing").
+pub type Slot = Option<(Id, GlesTexture, CommitCounter, Look)>;
 
 /// The backdrop frost over `dst` for a surface whose texture is kept in
 /// `slot` (made or remade here when the size changed). None if the texture
@@ -172,13 +176,13 @@ pub fn element(renderer: &mut GlesRenderer, slot: &mut Slot, dst: Rectangle<i32,
     if dst.size.w <= 0 || dst.size.h <= 0 {
         return None;
     }
-    let fresh = slot.as_ref().is_none_or(|(_, t, _)| (t.width() as i32, t.height() as i32) != (dst.size.w, dst.size.h));
+    let fresh = slot.as_ref().is_none_or(|(_, t, ..)| (t.width() as i32, t.height() as i32) != (dst.size.w, dst.size.h));
     if fresh {
         match Offscreen::<GlesTexture>::create_buffer(renderer, smithay::backend::allocator::Fourcc::Abgr8888, (dst.size.w, dst.size.h).into()) {
             Ok(t) => {
-                let (id, mut commit) = slot.take().map_or_else(|| (Id::new(), CommitCounter::default()), |(id, _, c)| (id, c));
+                let (id, mut commit) = slot.take().map_or_else(|| (Id::new(), CommitCounter::default()), |(id, _, c, _)| (id, c));
                 commit.increment();
-                *slot = Some((id, t, commit));
+                *slot = Some((id, t, commit, *look));
             }
             Err(e) => {
                 tracing::warn!("frost: no texture for {dst:?}: {e:?}");
@@ -186,7 +190,13 @@ pub fn element(renderer: &mut GlesRenderer, slot: &mut Slot, dst: Rectangle<i32,
             }
         }
     }
-    let (id, texture, commit) = slot.as_ref()?;
+    if let Some((_, _, commit, was)) = slot.as_mut()
+        && *was != *look
+    {
+        commit.increment();
+        *was = *look;
+    }
+    let (id, texture, commit, _) = slot.as_ref()?;
     Some(Backdrop::new(id.clone(), *commit, dst, texture.clone(), program, look))
 }
 

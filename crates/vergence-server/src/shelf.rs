@@ -515,6 +515,10 @@ impl Server {
             self.shelf.config = config;
             self.shelf.primary = primary;
             self.shelf_moved();
+            // A change that moves nothing (its opacity) still shows at once: it
+            // waited for the next frame something else asked for (Hubble,
+            // 2026-11-13: "the slider does nothing").
+            self.redraw_all();
         }
     }
 
@@ -1131,6 +1135,11 @@ impl Server {
         out
     }
 
+    /// The dock's opacity setting, 0.3 to 1 (1 if unset).
+    fn shelf_opacity(&self) -> f32 {
+        self.shelf.config.opacity.filter(|o| o.is_finite()).unwrap_or(1.0).clamp(0.3, 1.0)
+    }
+
     /// The accent the settings name (Appearance), or the default.
     pub fn accent(&self) -> Color {
         match self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "accent-color".to_string())) {
@@ -1175,7 +1184,7 @@ impl Server {
         // the frost, drawn under the picture; Reduce transparency (or no frost
         // on this renderer) leaves the dock as its own setting says, solid if that.
         let frost = self.frost_program(renderer);
-        let glass = if frost.is_some() { 0 } else if self.reduce_transparency() { 255 } else { (self.shelf.config.opacity.filter(|o| o.is_finite()).unwrap_or(1.0).clamp(0.3, 1.0) * 255.0).round() as u8 };
+        let glass = if frost.is_some() { 0 } else if self.reduce_transparency() { 255 } else { (self.shelf_opacity() * 255.0).round() as u8 };
         glass.hash(&mut hasher);
         light.hash(&mut hasher);
         (accent.r, accent.g, accent.b).hash(&mut hasher);
@@ -1318,11 +1327,19 @@ impl Server {
         if let Some(program) = frost {
             let dst = Rectangle::<i32, smithay::utils::Physical>::new(a, (b.x - a.x, b.y - a.y).into());
             let s = vergence_look::shelf_look(self.light_style());
+            // The dock's own opacity (Settings > Dock) is the frost's strength, at
+            // Standard as it is, scaled by the Frost step: it had been left out
+            // since the frost came (Dave, 2026-11-13: "the slider does nothing").
+            let step = vergence_look::frost_strength(self.look_setting("frost")) / vergence_look::FROST_STRENGTH;
             let look = crate::backdrop::Look {
                 tint: crate::backdrop::unit(s.dock),
-                strength: vergence_look::frost_strength(self.look_setting("frost")),
+                strength: (self.shelf_opacity() * step).min(1.0),
                 ink: crate::backdrop::unit(s.mark),
-                need: 3.6,
+                // The marks (the apps button's dots, the running marks) are what
+                // must read on it: WCAG's 3:1 for marks that are not text. The
+                // icons stand on tiles of their own. (3.6 kept a light dock over
+                // a dark wallpaper all but solid.)
+                need: 3.0,
                 radius: vergence_look::frost_radius(self.look_setting("frost")) * scale as f32,
                 corner: vergence_look::RADIUS * scale as f32,
                 bottom: true,

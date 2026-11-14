@@ -196,6 +196,36 @@ struct Palette {
     fg: Color,
     accent: Color,
     ansi: [u32; 16],
+    /// The least contrast text keeps against what is behind it (WCAG ratio;
+    /// 0: colors as they are). The light palettes' 16 colors were tuned on
+    /// black, and Tango's whites and brights all but vanish on white (Dave on
+    /// Hubble, 2026-11-13: "the text is light and somewhat hard to see"):
+    /// a color under the floor is darkened, its hue kept, until it reads.
+    floor: f32,
+}
+
+/// The floor of the light palettes: WCAG's for body text.
+const LIGHT_FLOOR: f32 = 4.5;
+
+/// `ink` made to keep `floor` against `ground`: as it is if it does, else
+/// mixed toward black on a light ground (white on a dark one), the least
+/// that reaches it.
+fn readable(ink: Color, ground: Color, floor: f32) -> Color {
+    let rgb = |c: Color| vergence_look::Rgb(c.r, c.g, c.b);
+    let g = rgb(ground);
+    if floor <= 0.0 || ink == ground || vergence_look::contrast(rgb(ink), g) >= floor {
+        return ink;
+    }
+    let to = if vergence_look::luminance(g) > 0.18 { 0.0 } else { 255.0 };
+    let mix = |v: u8, t: f32| (v as f32 + (to - v as f32) * t).round() as u8;
+    for step in 1..=20 {
+        let t = step as f32 / 20.0;
+        let c = Color::rgba(mix(ink.r, t), mix(ink.g, t), mix(ink.b, t), ink.a);
+        if vergence_look::contrast(rgb(c), g) >= floor {
+            return c;
+        }
+    }
+    Color::rgba(to as u8, to as u8, to as u8, ink.a)
 }
 
 const fn rgb(v: u32) -> Color {
@@ -208,6 +238,7 @@ const TANGO: Palette = Palette {
     fg: rgb(0xd3d7cf),
     accent: rgb(0x729fcf),
     ansi: [0x2e3436, 0xcc0000, 0x4e9a06, 0xc4a000, 0x3465a4, 0x75507b, 0x06989a, 0xd3d7cf, 0x555753, 0xef2929, 0x8ae234, 0xfce94f, 0x729fcf, 0xad7fa8, 0x34e2e2, 0xeeeeec],
+    floor: 0.0,
 };
 
 /// Catppuccin Mocha, the first terminal's default.
@@ -216,10 +247,11 @@ const CATPPUCCIN: Palette = Palette {
     fg: rgb(0xcdd6f4),
     accent: rgb(0x89b4fa),
     ansi: [0x45475a, 0xf38ba8, 0xa6e3a1, 0xf9e2af, 0x89b4fa, 0xf5c2e7, 0x94e2d5, 0xbac2de, 0x585b70, 0xf38ba8, 0xa6e3a1, 0xf9e2af, 0x89b4fa, 0xf5c2e7, 0x94e2d5, 0xa6adc8],
+    floor: 0.0,
 };
 
 /// Tango on white, for the light desktop.
-const TANGO_LIGHT: Palette = Palette { bg: rgb(0xffffff), fg: rgb(0x2e3436), accent: rgb(0x3465a4), ansi: TANGO.ansi };
+const TANGO_LIGHT: Palette = Palette { bg: rgb(0xffffff), fg: rgb(0x2e3436), accent: rgb(0x3465a4), ansi: TANGO.ansi, floor: LIGHT_FLOOR };
 
 /// Catppuccin Latte, the light one.
 const LATTE: Palette = Palette {
@@ -227,6 +259,7 @@ const LATTE: Palette = Palette {
     fg: rgb(0x4c4f69),
     accent: rgb(0x1e66f5),
     ansi: [0x5c5f77, 0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xacb0be, 0x6c6f85, 0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xbcc0cc],
+    floor: LIGHT_FLOOR,
 };
 
 /// "#rrggbb" -> a color.
@@ -1411,6 +1444,7 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
     let mut cells: Vec<SceneCell> = Vec::with_capacity(columns * (s.grid.rows + extra));
     // Combining marks are few, and drawn over the grid as glyph runs of their own.
     let mut marks: Vec<(usize, u32, Color, Point, Glyph)> = Vec::new();
+    let mut floor_memo = ((p.fg, p.fg), p.fg);
     for r in 0..s.grid.rows + extra {
         let line = if r < extra { s.grid.abs_line(top_line - (extra - r)).unwrap_or(&[]) } else { s.shown(r - extra) };
         let top = first + (r as f32 - extra as f32) * ch;
@@ -1420,6 +1454,14 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
             if st.inverse {
                 // The text takes the ground's color as it is, not its bright form.
                 (ink, ground) = (ground, ink);
+            }
+            // The palette's floor (light ones): runs of one color pair are the
+            // rule, so the last pair's answer is kept.
+            if p.floor > 0.0 {
+                if floor_memo.0 != (ink, ground) {
+                    floor_memo = ((ink, ground), readable(ink, ground, p.floor));
+                }
+                ink = floor_memo.1;
             }
             if st.dim {
                 ink.a = 153;
@@ -2319,6 +2361,9 @@ mod tests {
         assert_eq!(p.indexed(232), Color::rgb(8, 8, 8));
         assert_eq!(p.indexed(255), Color::rgb(238, 238, 238));
         assert_eq!(p.resolve(CellColor::Rgb(1, 2, 3), p.fg, false), Color::rgb(1, 2, 3));
+        // The dark palettes keep their colors as they are.
+        assert_eq!(TANGO.floor, 0.0);
+        assert_eq!(readable(rgb(0x3465a4), TANGO.bg, TANGO.floor), rgb(0x3465a4));
     }
 
     #[test]
@@ -2352,4 +2397,29 @@ mod tests {
         s.scroll_by(-1000);
         assert_eq!((s.scroll, text(&s, 0)), (0, "line 7".to_string()));
     }
+
+    /// On the light palettes every one of the 16 colors, plain or bold, reads
+    /// at the floor on the page (Hubble, 2026-11-13: Tango's whites and brights
+    /// vanished on white); a color that already reads is left alone; the hue
+    /// stays (red stays reddest).
+    #[test]
+    fn light_palettes_keep_text_readable() {
+        let rgb3 = |c: Color| vergence_look::Rgb(c.r, c.g, c.b);
+        for p in [&TANGO_LIGHT, &LATTE] {
+            for i in 0..16u8 {
+                for bold in [false, true] {
+                    let ink = readable(p.resolve(CellColor::Indexed(i), p.fg, bold), p.bg, p.floor);
+                    let c = vergence_look::contrast(rgb3(ink), rgb3(p.bg));
+                    assert!(c >= LIGHT_FLOOR - 0.01, "color {i} bold {bold}: {c:.2}");
+                }
+            }
+        }
+        assert_eq!(readable(rgb(0x2e3436), rgb(0xffffff), LIGHT_FLOOR), rgb(0x2e3436), "the text color already reads");
+        let red = readable(rgb(0xef2929), rgb(0xffffff), LIGHT_FLOOR);
+        assert!(red.r > red.g && red.r > red.b, "still red: {red:?}");
+        // A cell with a ground of its own: kept against that ground, not the page.
+        let on_black = readable(rgb(0xeeeeec), rgb(0x000000), LIGHT_FLOOR);
+        assert_eq!(on_black, rgb(0xeeeeec));
+    }
+
 }
