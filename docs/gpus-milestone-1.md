@@ -192,6 +192,11 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
   faster than the screen refreshes (glmark2 above 60 FPS on a 60 Hz screen;
   46 FPS in a window on the panel earlier): frame callbacks should follow
   each screen's own refresh.
+- **Touch on the 14"** (Dave plugged its USB, 2026-11-14): the panel seen
+  ("Silicon Works Multi-touch SW4101C"), tied to the 14" on the
+  Touchscreen page (its two-screen choice, untried until now), and the
+  server logged its touches "on screen ae05ec511722c55d" (the 14"): touch
+  by USB, the picture from the NVIDIA card's HDMI (acceptance 2's touch).
 
 ## Steps
 
