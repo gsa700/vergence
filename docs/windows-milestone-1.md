@@ -93,7 +93,7 @@ page, in a "Snapping and switching" group, written to desktop.toml
 |---|---|---|
 | Snap windows dragged to the screen's edges | Off, While Ctrl is held, Always | **While Ctrl is held** |
 | Layouts on the maximize button open on a hover | on, off | on |
-| Room round and between snapped windows (6 points) | on, off | on |
+| Room round and between snapped windows (3 points) | on, off | on |
 | The top edge | Maximizes, Top half | Maximizes |
 | Edges between screens | Never snap, Snap after a short press | Never snap |
 | Show where it will go | on (the preview), off | on |
@@ -259,13 +259,17 @@ All the server's, ahead of any program, through the seat's filter:
   `layouts_tick` opens it after 0.7 s on the maximize button and closes it
   once the pointer has left both (`layouts-hover`); and, from Dave the same
   morning ("should the windows have a little buffer between them? Like the
-  terminal when we split it?"), 6 points round and between snapped windows
+  terminal when we split it?"), 3 points round and between snapped windows
+  (6 at first: "a little too much ... about half that much")
   (`gaps`, on), the preview showing exactly where the window goes. Live on
   kepler by vctl: a plain drag to the edge only moves, Ctrl tapped at the
   edge aims and snaps; the bar's right-click menu (shot) and Right half
   chosen from it; the hover opens it (shot), a row lights under the pointer,
   it closes when the pointer leaves; terminal and foot side by side 6 points
   apart (shot). 434 tests on Hubble, kepler and Techbench.
+  **Found**: vergence-render's GPU test hung once on kepler (2026-11-14
+  09:04, 0% CPU for 16 minutes, the session running on the same card);
+  killed, it then passed three times alone in 0.7 s. Intermittent; to watch.
 
 ## Steps
 

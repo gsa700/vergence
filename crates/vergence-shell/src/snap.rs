@@ -19,8 +19,9 @@ pub const EDGE: i32 = 2;
 pub const CORNER: i32 = 24;
 /// The room between snapped windows, and between them and the screen's
 /// edges, where the settings keep it (Dave, 2026-11-14: "should the windows
-/// have a little buffer between them? Like the terminal when we split it?").
-pub const GAP: i32 = 6;
+/// have a little buffer between them? Like the terminal when we split it?";
+/// 6 was "a little too much ... about half that much").
+pub const GAP: i32 = 3;
 
 /// A part of a screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -289,12 +290,12 @@ mod tests {
         let a = Rect::new(0, 0, 1920, 1080);
         let (l, _) = zone_rect_gapped(Zone::Left, a, false, GAP);
         let (r, _) = zone_rect_gapped(Zone::Right, a, false, GAP);
-        assert_eq!((l.x, l.y, l.bottom()), (6, 6, 1074));
-        assert_eq!(r.x - l.right(), 6, "the gap between them");
-        assert_eq!(1920 - r.right(), 6, "and at the edge");
+        assert_eq!((l.x, l.y, l.bottom()), (GAP, GAP, 1080 - GAP));
+        assert_eq!(r.x - l.right(), GAP, "the gap between them");
+        assert_eq!(1920 - r.right(), GAP, "and at the edge");
         let (tl, _) = zone_rect_gapped(Zone::TopLeft, a, false, GAP);
         let (bl, _) = zone_rect_gapped(Zone::BottomLeft, a, false, GAP);
-        assert_eq!(bl.y - tl.bottom(), 6);
+        assert_eq!(bl.y - tl.bottom(), GAP);
         assert_eq!(zone_rect_gapped(Zone::Top, a, false, GAP), (a, true), "maximized fills the area");
         assert_eq!(zone_rect_gapped(Zone::Left, a, false, 0), zone_rect(Zone::Left, a, false));
     }
