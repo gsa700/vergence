@@ -273,8 +273,10 @@ by the computer through usbmuxd before it hands out a connection (Question
 3. Wi-Fi on Hubble: networks with signal (met), join with the password and
    an address (met, Dave), wrong password said (met), turning off and on
    (met, and by the cable both ways, Dave), Advanced (met). Forgetting and
-   the phone's hotspot: **open, Dave's** (Forget tested against the fake
-   wpa_supplicant only).
+   the phone's hotspot: **met** (Dave, 2026-11-14 ~13:40: forgot dNET1,
+   joined the iPhone's hotspot, pinged 1.1.1.1 with a T-Mobile address,
+   rejoined dNET1 with its password, switched between the two and back, on
+   dNET1 at the end with the hotspot kept as a known network).
 4. The iPhone by cable: the page says what it lacks (met); a connection:
    **parked** (needs pairing).
 5. kepler says there is no Wi-Fi device (met); Techbench has no Wi-Fi card,
