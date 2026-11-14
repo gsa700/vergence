@@ -67,6 +67,21 @@ fn country() -> Option<String> {
     table.get("network").and_then(|n| n.get("country")).and_then(|v| v.as_str()).map(|c| c.trim().to_ascii_uppercase()).filter(|c| wpa::country_ok(c))
 }
 
+/// desktop.toml `[network] wifi-power-save` (default on, the driver's own).
+fn power_save() -> bool {
+    let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let table = text.parse::<toml::Table>().unwrap_or_default();
+    table.get("network").and_then(|n| n.get("wifi-power-save")).and_then(|v| v.as_bool()).unwrap_or(true)
+}
+
+/// Set the card's power saving, quietly where wpa_supplicant cannot (FreeBSD).
+fn apply_power_save(c: &wpa::Client, name: &str, on: bool) {
+    match c.set_power_save(on) {
+        Ok(()) => tracing::info!("network: {name}: power saving {}", if on { "on" } else { "off" }),
+        Err(e) => tracing::debug!("network: {name}: power saving not set here: {e}"),
+    }
+}
+
 fn setting() -> WifiSetting {
     let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
     let table = text.parse::<toml::Table>().unwrap_or_default();
@@ -145,7 +160,7 @@ fn watch(tx: Sender<Said>) {
     let mut told = false;
     // wpa_supplicant readied (WPA3, the country) per socket, and when the
     // known networks were last looked at for WPA3.
-    let mut tuned: Vec<(String, Option<String>)> = Vec::new();
+    let mut tuned: Vec<(String, Option<String>, bool)> = Vec::new();
     let mut upgraded_at: Option<Instant> = None;
     loop {
         let all = ifaces::list().unwrap_or_default();
@@ -170,7 +185,8 @@ fn watch(tx: Sender<Said>) {
                 for (name, path) in &socks {
                     let done = wpa::Client::open(path).and_then(|c| {
                         if want {
-                            c.reconnect()?
+                            c.reconnect()?;
+                            apply_power_save(&c, name, power_save());
                         } else {
                             c.disconnect()?;
                             let _ = c.keep_manual_now();
@@ -216,14 +232,19 @@ fn watch(tx: Sender<Said>) {
         // country setting changes); the known networks every half minute.
         let want_country = country();
         for (name, path) in &socks {
-            if tuned.iter().any(|(n, c)| n == name && *c == want_country) {
+            let want_ps = power_save();
+            if tuned.iter().any(|(n, c, p)| n == name && *c == want_country && *p == want_ps) {
                 continue;
             }
-            match wpa::Client::open(path).and_then(|c| c.tune(want_country.as_deref())) {
+            match wpa::Client::open(path).and_then(|c| {
+                c.tune(want_country.as_deref())?;
+                apply_power_save(&c, name, want_ps);
+                Ok(())
+            }) {
                 Ok(()) => {
                     tracing::info!("network: wpa_supplicant for {name}: WPA3 handshakes on, country {}", want_country.as_deref().unwrap_or("the system's"));
-                    tuned.retain(|(n, _)| n != name);
-                    tuned.push((name.clone(), want_country.clone()));
+                    tuned.retain(|(n, _, _)| n != name);
+                    tuned.push((name.clone(), want_country.clone(), want_ps));
                     upgraded_at = None;
                 }
                 Err(e) => tracing::warn!("network: wpa_supplicant for {name}: {e}"),

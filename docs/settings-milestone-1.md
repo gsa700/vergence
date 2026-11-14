@@ -307,6 +307,15 @@ by the computer through usbmuxd before it hands out a connection (Question
    they take it, rejoining the one in use. Hubble: country = "US"; dNET1
    upgraded, now on 6 GHz channel 37 at 160 MHz, 1921.5 Mb/s in (was 573.5
    on 5 GHz at 40 MHz), the page "In use. 6 GHz, channel 37.". 466 tests.
+   **Power saving** in the Wi-Fi page's Advanced part (Dave: "yes, add the
+   power save switch"): desktop.toml `[network] wifi-power-save` (default
+   on, the driver's), applied by the server through wpa_supplicant's
+   `SET ps` (its nl80211 driver passes it to the kernel; Linux only, FreeBSD's
+   refuses it, logged quietly), at start, on change and each time Wi-Fi
+   comes back on. Hubble: off; pings from Control fell from 170 ms to 13 ms
+   on average. The in-use rows (Signal, Speed, Traffic) now stay in place
+   while connected, a dash or "Measuring..." until read: rows coming and
+   going had moved the switch under the pointer.
 4. The iPhone by cable: the page says what it lacks (met); a connection:
    **parked** (needs pairing).
 5. kepler says there is no Wi-Fi device (met); Techbench has no Wi-Fi card,

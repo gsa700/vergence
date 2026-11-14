@@ -84,6 +84,8 @@ pub enum WifiMsg {
     Forget(u32),
     /// Join a known network by itself, or only when chosen.
     Auto(u32, bool),
+    /// The card's power saving (desktop.toml `[network] wifi-power-save`; the server applies it).
+    PowerSave(bool),
 }
 
 /// The thread: wpa_supplicant's events, and a tick every RESCAN.
@@ -432,6 +434,9 @@ impl App {
                 self.wifi.asking = None;
                 self.wifi.password.clear();
             }
+            WifiMsg::PowerSave(on) => self.save_table("network", |t| {
+                t.insert("wifi-power-save".into(), on.into());
+            }),
             WifiMsg::Auto(id, auto) => {
                 if let Some(c) = self.wifi_client()
                     && let Err(e) = c.set_auto(id, auto)
@@ -500,22 +505,22 @@ impl App {
             let band = w.status.freq.and_then(wpa::band_channel).map(|(b, ch)| format!("In use. {b}, channel {ch}.")).unwrap_or_else(|| "In use.".into());
             top.push(setting(&w.status.ssid.clone().unwrap_or_default(), &band, bars_colored(n)));
             let value = |t: String| label(t).dim();
-            if let Some(g) = &w.signal {
-                let chart: Vec<i32> = w.history.iter().copied().collect();
-                top.push(setting(
-                    "Signal",
-                    "The last two minutes.",
-                    row(vec![signal_chart(chart), value(format!("{} dBm, {}", g.rssi, signal_word(g.rssi))).width(Length::Fixed(130.0)).align(Align::End)]).spacing(12.0).align(Align::Center),
-                ));
-                if let Some(m) = g.link_mbps {
-                    top.push(setting("Speed", "", value(format!("{m} Mb/s"))));
-                }
-            }
+            // Signal and Speed always there while connected (a dash until read),
+            // so the rows never move under the pointer.
+            let chart: Vec<i32> = w.history.iter().copied().collect();
+            let strength = w.signal.as_ref().map_or_else(|| "\u{2014}".to_string(), |g| format!("{} dBm, {}", g.rssi, signal_word(g.rssi)));
+            top.push(setting(
+                "Signal",
+                "The last two minutes.",
+                row(vec![signal_chart(chart), value(strength).width(Length::Fixed(130.0)).align(Align::End)]).spacing(12.0).align(Align::Center),
+            ));
+            let speed = w.signal.as_ref().and_then(|g| g.link_mbps).map_or_else(|| "\u{2014}".to_string(), |m| format!("{m} Mb/s"));
+            top.push(setting("Speed", "", value(speed)));
             let v4 = w.link.as_ref().and_then(|f| f.addrs.iter().find(|(a, _)| a.is_ipv4())).map(|(a, _)| a.to_string()).or_else(|| w.status.ip.clone());
             top.push(setting("Address", "", value(v4.unwrap_or_else(|| "Waiting for one".into()))));
-            if let Some((rx, tx)) = w.rates {
-                top.push(setting("Traffic", "Now, in and out.", value(format!("in {}, out {}", rate_text(rx), rate_text(tx)))));
-            }
+            // Always there while connected, so the page never shifts under the pointer.
+            let traffic = w.rates.map_or_else(|| "Measuring\u{2026}".to_string(), |(rx, tx)| format!("in {}, out {}", rate_text(rx), rate_text(tx)));
+            top.push(setting("Traffic", "Now, in and out.", value(traffic)));
         }
         items.push(self.group(None, top));
         // Said by the card above while connected.
@@ -607,7 +612,16 @@ impl App {
             items.push(self.group(Some("Known networks"), rows));
         }
         // Advanced: the live detail.
-        let mut adv = vec![setting("Device", w.iface.as_deref().unwrap_or(""), space()), setting("State", &w.status.state, space())];
+        let power_save = self.desktop.get("network").and_then(|n| n.get("wifi-power-save")).and_then(|v| v.as_bool()).unwrap_or(true);
+        let mut adv = vec![
+            setting(
+                "Power saving",
+                "On: the card naps between packets, saving battery. Off: quicker replies (pings, remote sessions), a little more power. Linux only for now.",
+                switch(power_save, |on| Message::Wifi(WifiMsg::PowerSave(on))).name("Power saving"),
+            ),
+            setting("Device", w.iface.as_deref().unwrap_or(""), space()),
+            setting("State", &w.status.state, space()),
+        ];
         if let Some(s) = &w.signal {
             adv.push(setting("Signal", &format!("{} dBm{}", s.rssi, s.link_mbps.map(|m| format!(", {m} Mb/s")).unwrap_or_default()), space()));
         }

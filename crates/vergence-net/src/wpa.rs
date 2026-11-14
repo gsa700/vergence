@@ -339,6 +339,14 @@ impl Client {
         Ok(changed)
     }
 
+    /// The card's power saving on or off (wpa_supplicant's `SET ps`, which
+    /// its nl80211 driver passes to the kernel: Linux). Off: quicker
+    /// replies, a little more power. Not kept by wpa_supplicant: set it
+    /// again after the card resets. FreeBSD's wpa_supplicant refuses it.
+    pub fn set_power_save(&self, on: bool) -> Result<()> {
+        self.ok(if on { "SET ps 1" } else { "SET ps 0" })
+    }
+
     /// Join the network in use again (after its settings changed).
     pub fn reassociate(&self) -> Result<()> {
         self.ok("REASSOCIATE")
@@ -997,6 +1005,9 @@ mod tests {
         c.tune(Some("US")).unwrap();
         assert_eq!(*f.sent.lock().unwrap(), ["SET sae_pwe 2", "SET country US"]);
         assert!(matches!(c.tune(Some("us; x")), Err(Error::BadInput(_))));
+        f.sent.lock().unwrap().clear();
+        c.set_power_save(false).unwrap();
+        assert_eq!(*f.sent.lock().unwrap(), ["SET ps 0"]);
         f.sent.lock().unwrap().clear();
         c.join(b"dNET1", Some("correct horse"), nets[0].keys).unwrap();
         let sent = f.sent.lock().unwrap().clone();
