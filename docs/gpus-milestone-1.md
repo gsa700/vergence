@@ -107,6 +107,23 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
   copy; the NVIDIA card suspends again after the probe. kepler: one i915,
   five connectors, no screen (its 14" monitor is on Hubble now). 474 tests
   (kepler 470).
+- **Steps 2 and 3, first light** (2026-11-14, Dave: "step 3 then"). The
+  backend holds a `Device` per GPU with screens (its output manager and
+  connector scanner; screens keyed by GPU and CRTC, CRTC handles being per
+  GPU; a VBlank source per GPU; pause, resume, scans, hotplug and the
+  watchdog for all). **Way 1 as planned failed**: the Intel GPU cannot draw
+  into a buffer nouveau allocates for scan-out (EGL BAD_ALLOC importing it:
+  nouveau scans out of its video memory only). What works, as Xorg does it:
+  the Intel GPU draws the screen into one of two linear XRGB buffers in its
+  own memory (damage by buffer age), waits for it, and the NVIDIA GPU, with
+  a GlesRenderer of its own, takes the buffer in as a texture and copies it
+  into its scan-out buffer, through a hidden scale-1 output so the copy is
+  pixel for pixel. On Hubble: the 14" 4K on HDMI-A-1 at 300%, "shown by
+  /dev/dri/card1, drawn by /dev/dri/card0 and copied there", window memory
+  put the settings window back on it; the NVIDIA card awake while it is
+  plugged in. Frames take 20 to 40 ms (the server waits for the Intel GPU
+  before the copy): to make fast next. 474 tests (kepler 470); kepler's
+  one-GPU session unchanged.
 
 ## Steps
 
