@@ -178,6 +178,8 @@ impl Server {
                 format!("shot: next frame of each monitor -> {}/<connector>.png", dir.display())
             }
             "windows" => self.describe_windows(),
+            // The order of use, most recent first, and the focused window (Alt+Tab's order).
+            "used" => self.order_of_use_report(),
             // Native windows' meaning (Contract 3, native.rs).
             "tree" => self.native_tree_report(),
             "shelf" => self.shelf_report(),
@@ -202,27 +204,31 @@ impl Server {
             // key numbers; what they type is the session's layout's to say).
             "key" | "type" => {
                 // Chords: "ctrl+v", "ctrl+shift+c", "alt+Tab": the modifiers
-                // held (Control_L, Shift_L, Alt_L, Super_L) while the last key
-                // is pressed.
+                // held (Control_L, Shift_L, Alt_L, Super_L) while the keys
+                // after them are pressed in turn ("alt+Tab+Tab+Tab": Alt held
+                // through three Tabs).
                 let mut held: Vec<u32> = Vec::new();
-                let mut name = args.first().copied().unwrap_or("");
-                if cmd == "key" && name.contains('+') && name.len() > 1 {
-                    let parts: Vec<&str> = name.split('+').collect();
-                    for m in &parts[..parts.len() - 1] {
+                let first = args.first().copied().unwrap_or("");
+                let mut names: Vec<&str> = vec![first];
+                if cmd == "key" && first.contains('+') && first.len() > 1 {
+                    let parts: Vec<&str> = first.split('+').collect();
+                    let mods = parts.iter().take_while(|m| matches!(m.to_ascii_lowercase().as_str(), "ctrl" | "control" | "shift" | "alt" | "super")).count().min(parts.len() - 1);
+                    for m in &parts[..mods] {
                         held.push(match m.to_ascii_lowercase().as_str() {
                             "ctrl" | "control" => 29,
                             "shift" => 42,
                             "alt" => 56,
-                            "super" => 125,
-                            other => return format!("key: no modifier {other} (ctrl, shift, alt, super)"),
+                            _ => 125,
                         });
                     }
-                    name = parts[parts.len() - 1];
+                    names = parts[mods..].to_vec();
                 }
                 const ROWS: [(&str, u32); 4] = [("1234567890-=", 2), ("qwertyuiop", 16), ("asdfghjkl", 30), ("zxcvbnm,.", 44)];
                 let letter = |c: char| if c == ' ' { Some(57) } else { ROWS.iter().find_map(|(row, first)| row.find(c).map(|i| first + i as u32)) };
                 let codes: Vec<u32> = if cmd == "key" {
-                    match name {
+                    let mut codes = Vec::new();
+                    for name in names {
+                    codes.extend(match name {
                         "Escape" => vec![1],
                         "Return" => vec![28],
                         "BackSpace" => vec![14],
@@ -235,6 +241,8 @@ impl Server {
                         "Page_Up" | "Prior" => vec![104],
                         "Page_Down" | "Next" => vec![109],
                         "Super" => vec![125],
+                        // The key above Tab (KEY_GRAVE), for Alt+`.
+                        "grave" => vec![41],
                         // The volume keys (KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP).
                         "Mute" => vec![113],
                         "VolumeDown" => vec![114],
@@ -242,9 +250,11 @@ impl Server {
                         other => match other.chars().collect::<Vec<_>>().as_slice() {
                             // One letter or digit, for chords ("ctrl+v").
                             [c] if letter(*c).is_some() => vec![letter(*c).unwrap()],
-                            _ => return format!("key: no key {other} (Escape, Return, BackSpace, Tab, space, Up, Down, Left, Right, Super, Mute, VolumeDown, VolumeUp, a letter; chords like ctrl+v)"),
+                            _ => return format!("key: no key {other} (Escape, Return, BackSpace, Tab, grave, space, Up, Down, Left, Right, Super, Mute, VolumeDown, VolumeUp, a letter; chords like ctrl+v, alt+Tab+Tab)"),
                         },
+                    });
                     }
+                    codes
                 } else {
                     let text = args.join(" ");
                     let mut codes = Vec::new();
@@ -341,6 +351,18 @@ impl Server {
             }
             _ => "commands: shot, windows, shelf, session, apps, key <name> (chords: ctrl+v), type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
         }
+    }
+
+    fn order_of_use_report(&self) -> String {
+        let focused = self.keyboard_window();
+        let mut out = vec![format!("focused: {:?}", focused.as_ref().map(|w| self.window_title(w)))];
+        for (i, id) in self.input.seat.order_of_use().iter().enumerate() {
+            if let Some(w) = self.input.window(*id) {
+                let min = if self.is_minimized(&w) { " (minimized)" } else { "" };
+                out.push(format!("{i}: {}{min}", self.window_title(&w)));
+            }
+        }
+        out.join("\n")
     }
 
     fn describe_windows(&self) -> String {

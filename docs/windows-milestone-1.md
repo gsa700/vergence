@@ -158,6 +158,15 @@ All the server's, ahead of any program, through the seat's filter:
   until step 3. 12 new seat tests; the fuzz test takes the new keys, checks
   the order of use (no window twice, the focused one first) and that every
   new rule runs. 414 tests on Hubble, kepler and Techbench.
+  Run live on kepler by vctl (installed, restarted): Alt+Tab goes to the
+  window used before; Alt+Tab+Tab past the used ones reaches a window never
+  used (foot); Alt+Shift+Tab steps back; Alt+Tab+Escape leaves the focus;
+  Alt+` alternates the two terminal windows and never reaches foot, and
+  from foot (alone in its application) stays. vctl gained `used` (the order
+  of use) and chords with several keys (`alt+Tab+Tab`, `grave`).
+  **Found**: the server gives a new window no keyboard of its own (only a
+  click, a finger, the dock or vctl do): a window opened from the launcher
+  waits for a click before it can be typed in.
 
 ## Steps
 
