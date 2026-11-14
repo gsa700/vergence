@@ -74,3 +74,18 @@ limited size allowance to preserve the layout".
   sidebar drawn up under it, the title placed over the page; back and
   forward need the bar to carry a program's own buttons (protocol).
 - Pages: section headings over rounded groups of rows, as ours already are.
+
+## Answers, 2026-11-14 (Dave: "yes to the rest")
+
+- Order: window styles next (size limits, the plain bar, dialogs, palettes,
+  the sidebar style), then this settings milestone.
+- Page icons in the sidebar: yes, a set of our own (about 16).
+- An account card at the top of the sidebar: yes, once there is a Users page.
+- Applications' own settings (decided 2026-11-10, whitepaper §6.10 since
+  Draft 0.13): after window styles, the toolkit's preferences window with
+  inherit-or-override rows, the terminal first.
+- Later (Dave: "we might need a login manager at some point depending on how
+  much work that is"): a lock screen first (none today: an unattended session
+  is open to anyone at it), then a login manager on the same password code
+  (PAM on all three systems; part runs as root, so a narrow design and a
+  security review). A milestone or two.
