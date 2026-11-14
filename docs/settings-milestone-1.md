@@ -277,6 +277,15 @@ by the computer through usbmuxd before it hands out a connection (Question
    joined the iPhone's hotspot, pinged 1.1.1.1 with a T-Mobile address,
    rejoined dNET1 with its password, switched between the two and back, on
    dNET1 at the end with the hotspot kept as a known network).
+   Then, at Dave's word ("on windows ... I have to click it manually"):
+   **Join automatically** per known network (off: kept disabled in
+   wpa_supplicant while not in use, marked by its id_str
+   `vergence-manual` in wpa_supplicant's own file; choosing it still
+   joins; the server re-disables it once Wi-Fi settles elsewhere or turns
+   off, never mid-join), and ("it could notify: Networks Available") a
+   note when Wi-Fi is on, has joined nothing for 20 s and networks are in
+   range, the hotspot named first, once per such spell. Hubble:
+   OMG!MyPhone set to join only when chosen (saved disabled=1). 464 tests.
 4. The iPhone by cable: the page says what it lacks (met); a connection:
    **parked** (needs pairing).
 5. kepler says there is no Wi-Fi device (met); Techbench has no Wi-Fi card,

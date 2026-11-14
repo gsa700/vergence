@@ -32,6 +32,11 @@ const TIMEOUT: Duration = Duration::from_secs(3);
 /// The largest reply read (scan results with many networks are long).
 const MAX_REPLY: usize = 64 * 1024;
 
+/// A known network's `id_str` when it is joined only when chosen, and when
+/// it is joined by itself again.
+pub const MANUAL: &str = "vergence-manual";
+const AUTO: &str = "vergence-auto";
+
 /// The longest network name (IEEE 802.11: 32 bytes).
 pub const MAX_SSID: usize = 32;
 
@@ -199,14 +204,73 @@ impl Client {
         Ok(parse_scan_results(&self.request("SCAN_RESULTS")?))
     }
 
-    /// The networks wpa_supplicant knows (its configuration).
+    /// The networks wpa_supplicant knows (its configuration), each with
+    /// whether it is joined only when chosen ([`MANUAL`]).
     pub fn networks(&self) -> Result<Vec<Known>> {
-        Ok(parse_networks(&self.request("LIST_NETWORKS")?))
+        let mut all = parse_networks(&self.request("LIST_NETWORKS")?);
+        for k in &mut all {
+            k.manual = self.request(&format!("GET_NETWORK {} id_str", k.id)).is_ok_and(|r| r.trim() == format!("\"{MANUAL}\""));
+        }
+        Ok(all)
+    }
+
+    /// Whether a known network is joined by itself when in range, or only
+    /// when chosen (Dave, 2026-11-14: a phone's hotspot, as Windows does it).
+    /// The mark is the network's `id_str` in wpa_supplicant's own file, so
+    /// it outlives everything here; a network marked so is kept disabled
+    /// while it is not the one in use ([`Client::keep_manual`]), so turning
+    /// it off for the network in use does not drop it.
+    pub fn set_auto(&self, id: u32, auto: bool) -> Result<()> {
+        let mark = if auto { AUTO } else { MANUAL };
+        self.ok(&format!("SET_NETWORK {id} id_str \"{mark}\""))?;
+        if auto {
+            self.ok(&format!("ENABLE_NETWORK {id}"))?;
+        } else {
+            self.keep_manual_now()?;
+        }
+        self.save()
+    }
+
+    /// Let every known network be joined again (SELECT_NETWORK disables
+    /// the others), but those joined only when chosen.
+    pub fn enable_auto(&self) -> Result<()> {
+        for k in self.networks()? {
+            if k.disabled && !k.manual {
+                self.ok(&format!("ENABLE_NETWORK {}", k.id))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Keep the networks joined only when chosen disabled while they are
+    /// not in use, once the interface has settled on a network: while one
+    /// is being joined (it is not yet the one in use) nothing is touched,
+    /// or choosing a hotspot would be undone. True if any changed (saved).
+    pub fn keep_manual(&self) -> Result<bool> {
+        if !self.status()?.connected() {
+            return Ok(false);
+        }
+        self.keep_manual_now()
+    }
+
+    /// The same at once (Wi-Fi just turned off, or the mark just set).
+    pub fn keep_manual_now(&self) -> Result<bool> {
+        let mut changed = false;
+        for k in self.networks()? {
+            if k.manual && !k.current && !k.disabled {
+                self.ok(&format!("DISABLE_NETWORK {}", k.id))?;
+                changed = true;
+            }
+        }
+        if changed {
+            self.save()?;
+        }
+        Ok(changed)
     }
 
     /// Add a network by its name and password (None for an open one), and
     /// join it now. Its id comes back. The others are left as they are;
-    /// once [`Event::Connected`] comes, [`Client::enable_all`] lets them be
+    /// once [`Event::Connected`] comes, [`Client::enable_auto`] lets them be
     /// joined again later, and [`Client::save`] keeps the new one. On
     /// [`Event::WrongKey`] the caller may [`Client::forget`] it.
     pub fn join(&self, ssid: &[u8], password: Option<&str>) -> Result<u32> {
@@ -545,6 +609,8 @@ pub struct Known {
     pub disabled: bool,
     /// Turned away for now (a wrong password, say).
     pub temp_disabled: bool,
+    /// Joined only when chosen, never by itself ([`Client::set_auto`]).
+    pub manual: bool,
 }
 
 /// LIST_NETWORKS: a header, then "id\tssid\tbssid\tflags".
@@ -555,7 +621,7 @@ pub fn parse_networks(text: &str) -> Vec<Known> {
         let Some(Ok(id)) = f.first().map(|v| v.parse()) else { continue };
         let raw = unescape(f.get(1).copied().unwrap_or(""));
         let flags = f.get(3).copied().unwrap_or("");
-        out.push(Known { id, ssid: ssid_text(&raw), ssid_raw: raw, current: flags.contains("[CURRENT]"), disabled: flags.contains("[DISABLED]"), temp_disabled: flags.contains("[TEMP-DISABLED]") });
+        out.push(Known { id, ssid: ssid_text(&raw), ssid_raw: raw, current: flags.contains("[CURRENT]"), disabled: flags.contains("[DISABLED]"), temp_disabled: flags.contains("[TEMP-DISABLED]"), manual: false });
     }
     out
 }
@@ -767,6 +833,40 @@ mod tests {
         let c = Client::open(&f.path).unwrap();
         assert!(matches!(c.join(b"Home", Some("correct horse")), Err(Error::Failed(_))));
         assert_eq!(f.sent.lock().unwrap().last().map(String::as_str), Some("REMOVE_NETWORK 5"));
+    }
+
+    #[test]
+    fn a_network_joined_only_when_chosen_is_kept_disabled_when_not_in_use() {
+        let f = fake(
+            vec![
+                ("LIST_NETWORKS", "network id / ssid / bssid / flags\n0\tHome\tany\t[CURRENT]\n1\tPhone\tany\t\n2\tOld\tany\t[DISABLED]\n"),
+                ("GET_NETWORK 1 id_str", "\"vergence-manual\"\n"),
+                ("GET_NETWORK", "FAIL\n"),
+                ("SET_NETWORK", "OK\n"),
+                ("DISABLE_NETWORK", "OK\n"),
+                ("ENABLE_NETWORK", "OK\n"),
+                ("SAVE_CONFIG", "OK\n"),
+            ],
+            vec![],
+        );
+        let c = Client::open(&f.path).unwrap();
+        let k = c.networks().unwrap();
+        assert_eq!(k.iter().map(|k| k.manual).collect::<Vec<_>>(), [false, true, false]);
+        assert!(c.keep_manual_now().unwrap());
+        let sent = f.sent.lock().unwrap().clone();
+        assert!(sent.contains(&"DISABLE_NETWORK 1".to_string()));
+        assert!(!sent.iter().any(|s| s == "DISABLE_NETWORK 0"), "the network in use is never dropped");
+        f.sent.lock().unwrap().clear();
+        // After choosing: the others come back, but not the manual one.
+        c.enable_auto().unwrap();
+        let sent = f.sent.lock().unwrap().clone();
+        assert!(sent.contains(&"ENABLE_NETWORK 2".to_string()));
+        assert!(!sent.iter().any(|s| s == "ENABLE_NETWORK 1"));
+        f.sent.lock().unwrap().clear();
+        c.set_auto(1, true).unwrap();
+        let sent = f.sent.lock().unwrap().clone();
+        assert_eq!(sent[0], "SET_NETWORK 1 id_str \"vergence-auto\"");
+        assert_eq!(sent[1], "ENABLE_NETWORK 1");
     }
 
     #[test]

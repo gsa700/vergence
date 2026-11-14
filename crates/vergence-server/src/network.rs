@@ -94,10 +94,37 @@ fn mark_note_shown() {
     }
 }
 
+/// How long Wi-Fi may be on without joining anything before it says what is in range.
+const UNJOINED: Duration = Duration::from_secs(20);
+
 /// What the thread tells the server.
 enum Said {
     /// Wi-Fi came on for want of a cable and knows no network: say so, once.
     NoCable,
+    /// Wi-Fi is on, has joined nothing, and these are in range (Dave,
+    /// 2026-11-14: "it could notify: Networks Available"): the words to say.
+    Available(String),
+}
+
+/// The note's words for the networks in range: the known ones joined only
+/// when chosen first (a phone's hotspot), then how many others.
+pub fn available_words(manual_in_range: &[String], others: usize) -> String {
+    let mut parts: Vec<String> = manual_in_range.to_vec();
+    if others > 0 {
+        let other = if parts.is_empty() { "" } else { " other" };
+        parts.push(if others == 1 { format!("one{other} network") } else { format!("{others}{other} networks") });
+    }
+    let one = parts.len() == 1 && (others <= 1 || !manual_in_range.is_empty());
+    let list = match parts.as_slice() {
+        [] => return String::new(),
+        [only] => only.clone(),
+        [first @ .., last] => format!("{} and {last}", first.join(", ")),
+    };
+    let mut text = format!("{list} {} in range.", if one { "is" } else { "are" });
+    if let Some(c) = text.get(0..1) {
+        text.replace_range(0..1, &c.to_uppercase());
+    }
+    text
 }
 
 /// The thread: watch the links, apply the setting.
@@ -105,6 +132,9 @@ fn watch(tx: Sender<Said>) {
     let mut seen: Option<(bool, Instant)> = None;
     let mut applied: Option<(bool, Vec<String>)> = None;
     let mut first = true;
+    // Wi-Fi on and joined to nothing since; said so already.
+    let mut unjoined: Option<Instant> = None;
+    let mut told = false;
     loop {
         let all = ifaces::list().unwrap_or_default();
         let cable = all.iter().any(ifaces::is_cable);
@@ -127,7 +157,12 @@ fn watch(tx: Sender<Said>) {
                 let mut none_known = true;
                 for (name, path) in &socks {
                     let done = wpa::Client::open(path).and_then(|c| {
-                        if want { c.reconnect()? } else { c.disconnect()? }
+                        if want {
+                            c.reconnect()?
+                        } else {
+                            c.disconnect()?;
+                            let _ = c.keep_manual_now();
+                        }
                         if c.networks().is_ok_and(|n| !n.is_empty()) {
                             none_known = false;
                         }
@@ -146,12 +181,46 @@ fn watch(tx: Sender<Said>) {
                     let for_want_of_cable = want && set == WifiSetting::Auto && applied.as_ref().is_none_or(|(w, _)| !w);
                     if for_want_of_cable && none_known && !note_shown() {
                         mark_note_shown();
+                        told = true;
                         if tx.send(Said::NoCable).is_err() {
                             return;
                         }
                     }
                     applied = Some((want, names));
                 }
+            }
+        }
+        // Networks joined only when chosen (a phone's hotspot) are kept from
+        // being joined by themselves once left (vergence-net's keep_manual).
+        if applied.as_ref().is_some_and(|(w, _)| *w) {
+            for (_, path) in &socks {
+                if let Ok(true) = wpa::Client::open(path).and_then(|c| c.keep_manual()) {
+                    tracing::info!("network: a network joined only when chosen was left; kept from joining by itself");
+                }
+            }
+        }
+        // On, joined to nothing for a while, networks in range: say so once.
+        let on = applied.as_ref().is_some_and(|(w, _)| *w);
+        let client = socks.first().and_then(|(_, p)| wpa::Client::open(p).ok());
+        match (&client, on) {
+            (Some(c), true) if !c.status().is_ok_and(|s| s.connected()) => {
+                let since = *unjoined.get_or_insert(now);
+                if !told && now.duration_since(since) >= UNJOINED {
+                    let nets = wpa::by_network(c.scan_results().unwrap_or_default());
+                    if !nets.is_empty() {
+                        told = true;
+                        let known = c.networks().unwrap_or_default();
+                        let manual: Vec<String> = nets.iter().filter(|b| known.iter().any(|k| k.manual && k.ssid_raw == b.ssid_raw)).map(|b| b.ssid.clone()).take(3).collect();
+                        let words = available_words(&manual, nets.len() - manual.len());
+                        if tx.send(Said::Available(words)).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+            _ => {
+                unjoined = None;
+                told = false;
             }
         }
         if socks.is_empty() {
@@ -174,8 +243,10 @@ impl Server {
         }
         let (tx, rx) = channel::<Said>();
         let _ = self.loop_handle.insert_source(rx, |event, _, state| {
-            if let Event::Msg(Said::NoCable) = event {
-                state.network_no_cable_note();
+            match event {
+                Event::Msg(Said::NoCable) => state.network_no_cable_note(),
+                Event::Msg(Said::Available(words)) => state.network_available_note(words),
+                _ => {}
             }
         });
         if let Err(e) = std::thread::Builder::new().name("network".into()).spawn(move || watch(tx)) {
@@ -199,6 +270,22 @@ impl Server {
         self.network_note = Some(id);
     }
 
+    fn network_available_note(&mut self, words: String) {
+        let id = self.notify(
+            crate::notify::Origin::Server,
+            crate::notify::Request {
+                app: "Settings".into(),
+                replaces: self.network_note.unwrap_or(0),
+                summary: "Wi-Fi networks available".into(),
+                body: words,
+                urgency: 0,
+                timeout_ms: -1,
+                actions: vec![("default".into(), String::new()), ("wifi".into(), "Choose a network".into())],
+            },
+        );
+        self.network_note = Some(id);
+    }
+
     /// A notification of the server's own was clicked (notify.rs).
     pub fn server_note_action(&mut self, id: u32, _key: &str) {
         if self.network_note == Some(id) {
@@ -213,6 +300,16 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_words_for_what_is_in_range() {
+        assert_eq!(available_words(&["OMGiphone".into()], 0), "OMGiphone is in range.");
+        assert_eq!(available_words(&["OMGiphone".into()], 3), "OMGiphone and 3 other networks are in range.");
+        assert_eq!(available_words(&["A".into(), "B".into()], 1), "A, B and one other network are in range.");
+        assert_eq!(available_words(&["A".into(), "B".into()], 0), "A and B are in range.");
+        assert_eq!(available_words(&[], 1), "One network is in range.");
+        assert_eq!(available_words(&[], 4), "4 networks are in range.");
+    }
 
     #[test]
     fn the_setting() {

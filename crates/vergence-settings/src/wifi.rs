@@ -67,6 +67,8 @@ pub enum WifiMsg {
     Join,
     Cancel,
     Forget(u32),
+    /// Join a known network by itself, or only when chosen.
+    Auto(u32, bool),
 }
 
 /// The thread: wpa_supplicant's events, and a tick every RESCAN.
@@ -230,7 +232,7 @@ impl App {
                     wpa::Event::Connected { .. } => {
                         if let Some((_, name)) = self.wifi.joining.take() {
                             if let Some(c) = self.wifi_client() {
-                                let _ = c.enable_all();
+                                let _ = c.enable_auto();
                                 let _ = c.save();
                             }
                             self.wifi.said = format!("Joined {}.", wpa::ssid_text(&name));
@@ -243,7 +245,7 @@ impl App {
                             // The failed try is forgotten; ask again.
                             if let Some(c) = self.wifi_client() {
                                 let _ = c.forget(jid);
-                                let _ = c.enable_all();
+                                let _ = c.enable_auto();
                             }
                             self.wifi.joining = None;
                             self.wifi.said = format!("Wrong password for {}.", wpa::ssid_text(&name));
@@ -299,6 +301,14 @@ impl App {
             WifiMsg::Cancel => {
                 self.wifi.asking = None;
                 self.wifi.password.clear();
+            }
+            WifiMsg::Auto(id, auto) => {
+                if let Some(c) = self.wifi_client()
+                    && let Err(e) = c.set_auto(id, auto)
+                {
+                    self.wifi.said = format!("Can't change it: {e}");
+                }
+                self.wifi_read();
             }
             WifiMsg::Forget(id) => {
                 if let Some(c) = self.wifi_client() {
@@ -415,8 +425,27 @@ impl App {
                 .known
                 .iter()
                 .map(|k| {
-                    let note = if k.current { "In use" } else if k.temp_disabled { "Turned away for now (a wrong password?)" } else { "" };
-                    setting(&k.ssid, note, button(label("Forget").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Wifi(WifiMsg::Forget(k.id))).name(&format!("Forget {}", k.ssid)))
+                    let note = if k.current {
+                        "In use."
+                    } else if k.temp_disabled {
+                        "Turned away for now (a wrong password?)."
+                    } else if k.manual {
+                        "Joined only when you choose it."
+                    } else {
+                        "Joined by itself when in range."
+                    };
+                    let id = k.id;
+                    setting(
+                        &k.ssid,
+                        note,
+                        row(vec![
+                            label("Join automatically").size(12.0).dim(),
+                            switch(!k.manual, move |on| Message::Wifi(WifiMsg::Auto(id, on))).name(&format!("Join {} automatically", k.ssid)),
+                            button(label("Forget").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Wifi(WifiMsg::Forget(k.id))).name(&format!("Forget {}", k.ssid)),
+                        ])
+                        .spacing(8.0)
+                        .align(Align::Center),
+                    )
                 })
                 .collect();
             items.push(self.group(Some("Known networks"), rows));
