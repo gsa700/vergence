@@ -149,6 +149,26 @@ sizes and two or three alternatives, in light and dark, frosted, with the
 chooses goes into vergence-look and vergence-bar; the drag model, hit
 tests and the window placement steps follow `BAR_H`.
 
+**Decided from the mock-up** (Dave, 2026-11-13; private artifact "Vergence
+Bar Proportions"):
+
+- **Tabs stay connected; the window buttons float.** The tabs (and +)
+  stand on the bar's bottom edge as now. The buttons' drawn shape is inset
+  2 pt at the sides and 3 pt at the top and bottom (28 x 24 at today's
+  sizes), centered on the tabs' line so their icons are level with the tab
+  titles; the press area stays the full 32 x 30. Dave: "a small style
+  difference to set the buttons off some from the tabs". The buttons keep
+  their size (Claude's advice, 2026-11-13: little room gained, touch
+  worse).
+- **Inactive tabs are shaded** in both styles (they disappeared into the
+  frost): a light veil in dark, a soft grey in light; the tab in front a
+  stronger veil in dark and near-white in light.
+- **The bar and the terminal may differ**: all four (dark bar on a dark or
+  light terminal, light bar on either) are looks we support, since the bar
+  follows Style and the terminal its own scheme; the contrast test covers
+  the mixed pairs (the text under the bar shows through more there).
+- **Still open**: the bar's height (32, 36, 40 or 44).
+
 ## Steps
 
 1. **The proportions**: mock-ups of bar height, buttons and tabs, light and
