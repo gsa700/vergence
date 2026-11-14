@@ -273,7 +273,7 @@ impl Client {
     /// once [`Event::Connected`] comes, [`Client::enable_auto`] lets them be
     /// joined again later, and [`Client::save`] keeps the new one. On
     /// [`Event::WrongKey`] the caller may [`Client::forget`] it.
-    pub fn join(&self, ssid: &[u8], password: Option<&str>) -> Result<u32> {
+    pub fn join(&self, ssid: &[u8], password: Option<&str>, keys: Keys) -> Result<u32> {
         let ssid_arg = ssid_arg(ssid)?;
         let psk = password.map(psk_arg).transpose()?;
         let r = self.request("ADD_NETWORK")?;
@@ -281,7 +281,13 @@ impl Client {
         let set = || -> Result<()> {
             self.ok(&format!("SET_NETWORK {id} ssid {ssid_arg}"))?;
             match &psk {
-                Some(p) => self.ok(&format!("SET_NETWORK {id} psk {p}"))?,
+                Some(p) => {
+                    self.ok(&format!("SET_NETWORK {id} psk {p}"))?;
+                    if let Some((mgmt, pmf)) = keys.settings() {
+                        self.ok(&format!("SET_NETWORK {id} key_mgmt {mgmt}"))?;
+                        self.ok(&format!("SET_NETWORK {id} ieee80211w {pmf}"))?;
+                    }
+                }
                 None => self.ok(&format!("SET_NETWORK {id} key_mgmt NONE"))?,
             }
             self.ok(&format!("ENABLE_NETWORK {id}"))?;
@@ -292,6 +298,50 @@ impl Client {
             return Err(e);
         }
         Ok(id)
+    }
+
+    /// Ready wpa_supplicant for WPA3 everywhere, and the country's radio
+    /// rules (6 GHz needs a country): both WPA3 handshakes (sae_pwe 2: 6 GHz
+    /// needs the newer, hash-to-element), and the country if one is given.
+    /// Kept in its file by the next save.
+    pub fn tune(&self, country: Option<&str>) -> Result<()> {
+        self.ok("SET sae_pwe 2")?;
+        if let Some(c) = country {
+            if !country_ok(c) {
+                return Err(Error::BadInput("a country is two capital letters, as US"));
+            }
+            self.ok(&format!("SET country {c}"))?;
+        }
+        Ok(())
+    }
+
+    /// Known networks joined as WPA2 alone whose access points in range take
+    /// WPA3 too are given it (and its management frame protection), so their
+    /// 6 GHz access points can be used. The ids changed come back (saved).
+    pub fn upgrade_known(&self, in_range: &[Bss]) -> Result<Vec<u32>> {
+        let nets = by_network(in_range.to_vec());
+        let mut changed = Vec::new();
+        for k in self.networks()? {
+            let Some(b) = nets.iter().find(|b| b.ssid_raw == k.ssid_raw) else { continue };
+            let Some((mgmt, pmf)) = b.keys.settings() else { continue };
+            let now = self.request(&format!("GET_NETWORK {} key_mgmt", k.id))?;
+            // An open network (NONE) or one already with SAE is left alone.
+            if now.contains("SAE") || now.contains("NONE") || now.starts_with("FAIL") {
+                continue;
+            }
+            self.ok(&format!("SET_NETWORK {} key_mgmt {mgmt}", k.id))?;
+            self.ok(&format!("SET_NETWORK {} ieee80211w {pmf}", k.id))?;
+            changed.push(k.id);
+        }
+        if !changed.is_empty() {
+            self.save()?;
+        }
+        Ok(changed)
+    }
+
+    /// Join the network in use again (after its settings changed).
+    pub fn reassociate(&self) -> Result<()> {
+        self.ok("REASSOCIATE")
     }
 
     /// Join a network wpa_supplicant already knows.
@@ -553,9 +603,38 @@ pub struct Bss {
     /// dBm.
     pub signal: i32,
     pub security: Security,
+    /// Which password handshakes it takes (by_network: across every access
+    /// point of the network).
+    pub keys: Keys,
     /// Its name as shown, and its bytes as sent back to join it.
     pub ssid: String,
     pub ssid_raw: Vec<u8>,
+}
+
+/// The password handshakes a network takes: WPA2's (PSK), WPA3's (SAE), or
+/// both. 6 GHz takes WPA3 only, so a network joined as WPA2 alone never
+/// uses its 6 GHz access points (found on Hubble, 2026-11-14).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Keys {
+    pub psk: bool,
+    pub sae: bool,
+}
+
+impl Keys {
+    pub fn of(flags: &str) -> Keys {
+        Keys { psk: flags.contains("PSK"), sae: flags.contains("SAE") }
+    }
+
+    /// wpa_supplicant's key_mgmt and ieee80211w (management frame
+    /// protection: optional with both, required for WPA3 alone), or None
+    /// for WPA2 alone (its defaults).
+    pub fn settings(self) -> Option<(&'static str, &'static str)> {
+        match (self.psk, self.sae) {
+            (true, true) => Some(("WPA-PSK SAE", "1")),
+            (false, true) => Some(("SAE", "2")),
+            _ => None,
+        }
+    }
 }
 
 pub fn security_of(flags: &str) -> Security {
@@ -581,7 +660,7 @@ pub fn parse_scan_results(text: &str) -> Vec<Bss> {
         if !is_mac(bssid) {
             continue;
         }
-        out.push(Bss { bssid: bssid.to_string(), freq, signal, security: security_of(flags), ssid: ssid_text(&raw), ssid_raw: raw });
+        out.push(Bss { bssid: bssid.to_string(), freq, signal, security: security_of(flags), keys: Keys::of(flags), ssid: ssid_text(&raw), ssid_raw: raw });
     }
     out
 }
@@ -592,11 +671,24 @@ pub fn by_network(mut all: Vec<Bss>) -> Vec<Bss> {
     all.sort_by(|a, b| b.signal.cmp(&a.signal));
     let mut out: Vec<Bss> = Vec::new();
     for b in all {
-        if !b.ssid_raw.is_empty() && !out.iter().any(|o| o.ssid_raw == b.ssid_raw) {
-            out.push(b);
+        if b.ssid_raw.is_empty() {
+            continue;
+        }
+        match out.iter_mut().find(|o| o.ssid_raw == b.ssid_raw) {
+            // The handshakes of every access point of it.
+            Some(o) => {
+                o.keys.psk |= b.keys.psk;
+                o.keys.sae |= b.keys.sae;
+            }
+            None => out.push(b),
         }
     }
     out
+}
+
+/// A country as wpa_supplicant takes it: two capital letters (ISO 3166).
+pub fn country_ok(c: &str) -> bool {
+    c.len() == 2 && c.bytes().all(|b| b.is_ascii_uppercase())
 }
 
 /// A network wpa_supplicant knows.
@@ -813,17 +905,17 @@ mod tests {
     fn joining_sends_checked_commands_in_order() {
         let f = fake(vec![("ADD_NETWORK", "3\n"), ("SET_NETWORK", "OK\n"), ("ENABLE_NETWORK", "OK\n"), ("SELECT_NETWORK", "OK\n")], vec![]);
         let c = Client::open(&f.path).unwrap();
-        assert_eq!(c.join(b"Home", Some("correct horse")).unwrap(), 3);
+        assert_eq!(c.join(b"Home", Some("correct horse"), Keys::default()).unwrap(), 3);
         assert_eq!(
             *f.sent.lock().unwrap(),
             ["ADD_NETWORK", "SET_NETWORK 3 ssid 486f6d65", "SET_NETWORK 3 psk \"correct horse\"", "ENABLE_NETWORK 3", "SELECT_NETWORK 3"]
         );
         f.sent.lock().unwrap().clear();
-        c.join(b"Cafe", None).unwrap();
+        c.join(b"Cafe", None, Keys::default()).unwrap();
         assert_eq!(f.sent.lock().unwrap()[2], "SET_NETWORK 3 key_mgmt NONE");
         // A bad password is refused before anything is sent.
         f.sent.lock().unwrap().clear();
-        assert!(matches!(c.join(b"Home", Some("short")), Err(Error::BadInput(_))));
+        assert!(matches!(c.join(b"Home", Some("short"), Keys::default()), Err(Error::BadInput(_))));
         assert!(f.sent.lock().unwrap().is_empty());
     }
 
@@ -831,7 +923,7 @@ mod tests {
     fn a_refused_setting_removes_the_half_made_network() {
         let f = fake(vec![("ADD_NETWORK", "5\n"), ("SET_NETWORK 5 ssid", "OK\n"), ("SET_NETWORK 5 psk", "FAIL\n"), ("REMOVE_NETWORK", "OK\n")], vec![]);
         let c = Client::open(&f.path).unwrap();
-        assert!(matches!(c.join(b"Home", Some("correct horse")), Err(Error::Failed(_))));
+        assert!(matches!(c.join(b"Home", Some("correct horse"), Keys::default()), Err(Error::Failed(_))));
         assert_eq!(f.sent.lock().unwrap().last().map(String::as_str), Some("REMOVE_NETWORK 5"));
     }
 
@@ -867,6 +959,48 @@ mod tests {
         let sent = f.sent.lock().unwrap().clone();
         assert_eq!(sent[0], "SET_NETWORK 1 id_str \"vergence-auto\"");
         assert_eq!(sent[1], "ENABLE_NETWORK 1");
+    }
+
+    #[test]
+    fn wpa3_where_the_network_takes_it() {
+        // Hubble's dNET1: WPA2+WPA3 on 2.4 and 5 GHz, WPA3 alone on 6 GHz.
+        let scan = "bssid / frequency / signal level / flags / ssid\n\
+            aa:bb:cc:dd:ee:01\t6135\t-38\t[WPA2-SAE-CCMP][SAE-H2E][ESS]\tdNET1\n\
+            aa:bb:cc:dd:ee:02\t5745\t-44\t[WPA2-PSK+SAE-CCMP][ESS]\tdNET1\n\
+            aa:bb:cc:dd:ee:03\t2437\t-60\t[WPA2-PSK-CCMP][ESS]\tOld\n";
+        let nets = by_network(parse_scan_results(scan));
+        assert_eq!(nets[0].keys, Keys { psk: true, sae: true }, "across its access points");
+        assert_eq!(nets[0].keys.settings(), Some(("WPA-PSK SAE", "1")));
+        assert_eq!(nets[1].keys.settings(), None, "WPA2 alone keeps the defaults");
+        assert_eq!(Keys { psk: false, sae: true }.settings(), Some(("SAE", "2")));
+        let f = fake(
+            vec![
+                ("LIST_NETWORKS", "network id / ssid / bssid / flags\n0\tdNET1\tany\t[CURRENT]\n1\tOld\tany\t\n"),
+                ("GET_NETWORK 0 key_mgmt", "WPA-PSK WPA-EAP\n"),
+                ("GET_NETWORK 1 key_mgmt", "WPA-PSK WPA-EAP\n"),
+                ("GET_NETWORK", "FAIL\n"),
+                ("SET", "OK\n"),
+                ("ADD_NETWORK", "2\n"),
+                ("ENABLE_NETWORK", "OK\n"),
+                ("SELECT_NETWORK", "OK\n"),
+                ("SAVE_CONFIG", "OK\n"),
+            ],
+            vec![],
+        );
+        let c = Client::open(&f.path).unwrap();
+        assert_eq!(c.upgrade_known(&parse_scan_results(scan)).unwrap(), vec![0], "only the network that takes WPA3");
+        let sent = f.sent.lock().unwrap().clone();
+        assert!(sent.contains(&"SET_NETWORK 0 key_mgmt WPA-PSK SAE".to_string()));
+        assert!(sent.contains(&"SET_NETWORK 0 ieee80211w 1".to_string()));
+        assert!(!sent.iter().any(|s| s.starts_with("SET_NETWORK 1")));
+        f.sent.lock().unwrap().clear();
+        c.tune(Some("US")).unwrap();
+        assert_eq!(*f.sent.lock().unwrap(), ["SET sae_pwe 2", "SET country US"]);
+        assert!(matches!(c.tune(Some("us; x")), Err(Error::BadInput(_))));
+        f.sent.lock().unwrap().clear();
+        c.join(b"dNET1", Some("correct horse"), nets[0].keys).unwrap();
+        let sent = f.sent.lock().unwrap().clone();
+        assert!(sent.contains(&"SET_NETWORK 2 key_mgmt WPA-PSK SAE".to_string()));
     }
 
     #[test]

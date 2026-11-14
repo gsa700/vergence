@@ -59,6 +59,14 @@ impl WifiSetting {
     }
 }
 
+/// desktop.toml `[network] country`: the radio rules wpa_supplicant follows
+/// (6 GHz needs one); none: the system's.
+fn country() -> Option<String> {
+    let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let table = text.parse::<toml::Table>().unwrap_or_default();
+    table.get("network").and_then(|n| n.get("country")).and_then(|v| v.as_str()).map(|c| c.trim().to_ascii_uppercase()).filter(|c| wpa::country_ok(c))
+}
+
 fn setting() -> WifiSetting {
     let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
     let table = text.parse::<toml::Table>().unwrap_or_default();
@@ -135,6 +143,10 @@ fn watch(tx: Sender<Said>) {
     // Wi-Fi on and joined to nothing since; said so already.
     let mut unjoined: Option<Instant> = None;
     let mut told = false;
+    // wpa_supplicant readied (WPA3, the country) per socket, and when the
+    // known networks were last looked at for WPA3.
+    let mut tuned: Vec<(String, Option<String>)> = Vec::new();
+    let mut upgraded_at: Option<Instant> = None;
     loop {
         let all = ifaces::list().unwrap_or_default();
         let cable = all.iter().any(ifaces::is_cable);
@@ -199,8 +211,44 @@ fn watch(tx: Sender<Said>) {
                 }
             }
         }
-        // On, joined to nothing for a while, networks in range: say so once.
         let on = applied.as_ref().is_some_and(|(w, _)| *w);
+        // WPA3 and the country, once per wpa_supplicant (and again if the
+        // country setting changes); the known networks every half minute.
+        let want_country = country();
+        for (name, path) in &socks {
+            if tuned.iter().any(|(n, c)| n == name && *c == want_country) {
+                continue;
+            }
+            match wpa::Client::open(path).and_then(|c| c.tune(want_country.as_deref())) {
+                Ok(()) => {
+                    tracing::info!("network: wpa_supplicant for {name}: WPA3 handshakes on, country {}", want_country.as_deref().unwrap_or("the system's"));
+                    tuned.retain(|(n, _)| n != name);
+                    tuned.push((name.clone(), want_country.clone()));
+                    upgraded_at = None;
+                }
+                Err(e) => tracing::warn!("network: wpa_supplicant for {name}: {e}"),
+            }
+        }
+        if on && upgraded_at.is_none_or(|t| now.duration_since(t) >= Duration::from_secs(30)) {
+            upgraded_at = Some(now);
+            for (name, path) in &socks {
+                let Ok(c) = wpa::Client::open(path) else { continue };
+                let scan = c.scan_results().unwrap_or_default();
+                match c.upgrade_known(&scan) {
+                    Ok(ids) if !ids.is_empty() => {
+                        tracing::info!("network: {name}: known networks {ids:?} take WPA3 too; given it (6 GHz)");
+                        if let Ok(st) = c.status()
+                            && st.id.is_some_and(|i| ids.contains(&i))
+                        {
+                            let _ = c.reassociate();
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("network: {name}: WPA3 for known networks: {e}"),
+                }
+            }
+        }
+        // On, joined to nothing for a while, networks in range: say so once.
         let client = socks.first().and_then(|(_, p)| wpa::Client::open(p).ok());
         match (&client, on) {
             (Some(c), true) if !c.status().is_ok_and(|s| s.connected()) => {
@@ -225,6 +273,7 @@ fn watch(tx: Sender<Said>) {
         }
         if socks.is_empty() {
             // wpa_supplicant gone: apply again when it comes back.
+            tuned.clear();
             applied = None;
         }
         std::thread::sleep(EVERY);

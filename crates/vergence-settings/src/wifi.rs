@@ -455,7 +455,9 @@ impl App {
 
     fn wifi_join(&mut self, name: Vec<u8>, password: Option<String>) {
         let Some(c) = self.wifi_client() else { return };
-        match c.join(&name, password.as_deref()) {
+        // WPA3 too where the network takes it (its 6 GHz access points).
+        let keys = self.wifi.nets.iter().find(|b| b.ssid_raw == name).map(|b| b.keys).unwrap_or_default();
+        match c.join(&name, password.as_deref(), keys) {
             Ok(id) => {
                 self.wifi.joining = Some((id, name.clone()));
                 self.wifi.said = format!("Joining {}\u{2026}", wpa::ssid_text(&name));

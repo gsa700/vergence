@@ -296,6 +296,17 @@ by the computer through usbmuxd before it hands out a connection (Question
    "later when we build out the dock info icons we can grab the same for
    that one": the network tile's card (live tiles, whitepaper §6.9) is to
    reuse wifi.rs's signal_chart, strength_color and rate_text. 465 tests.
+   **6 GHz** (Dave: "is it using the 6ghz at all?"): no; dNET1's strongest
+   access point was its 6 GHz one (channel 37, -38 dBm), WPA3 only, and the
+   page had joined dNET1 as WPA2 alone, with no country set (6 GHz "no IR").
+   Now (Dave: "yes go ahead, country US"): vergence-net reads each network's
+   handshakes across its access points (`Keys`), joins with WPA2+WPA3
+   (`key_mgmt WPA-PSK SAE`, `ieee80211w 1`) or WPA3 alone (`SAE`, `2`);
+   the server sets `sae_pwe 2` and desktop.toml `[network] country` in
+   wpa_supplicant (saved in its file) and gives known networks WPA3 when
+   they take it, rejoining the one in use. Hubble: country = "US"; dNET1
+   upgraded, now on 6 GHz channel 37 at 160 MHz, 1921.5 Mb/s in (was 573.5
+   on 5 GHz at 40 MHz), the page "In use. 6 GHz, channel 37.". 466 tests.
 4. The iPhone by cable: the page says what it lacks (met); a connection:
    **parked** (needs pairing).
 5. kepler says there is no Wi-Fi device (met); Techbench has no Wi-Fi card,
