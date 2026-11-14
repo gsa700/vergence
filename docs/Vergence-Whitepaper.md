@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "11 November 2026 — Draft 0.9"
+date: "13 November 2026 — Draft 0.10"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.9 · 11 November 2026
+David Erickson (AB0R), with Claude · Draft 0.10 · 13 November 2026
 
 ---
 

@@ -41,7 +41,7 @@ toolkit, vergence-ui, since 2026-11-10 (whitepaper §6.10; docs/toolkit-mileston
 Linux without systemd, Void on Hubble, for development; FreeBSD (kepler, a
 second Lenovo Tiny) and Fedora (Techbench) at every
 milestone. Install on a system with `sudo tools/install.sh` after
-`cargo build --release` (see the script's header). Whitepaper Draft 0.9.
+`cargo build --release` (see the script's header). Whitepaper Draft 0.10.
 
 ## License
 
