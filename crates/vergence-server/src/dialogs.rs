@@ -27,6 +27,9 @@ pub struct Dialogs {
     pub follow: std::collections::HashMap<Win, Follow>,
     /// A modal dialog whose border flashes, until when.
     pub flash: Option<(Win, Instant)>,
+    /// Palettes taken off the screen while another application has the
+    /// keyboard, and where each goes back (step 4).
+    pub hidden: Vec<(Win, Point<i32, Logical>)>,
 }
 
 impl Server {
@@ -100,6 +103,49 @@ impl Server {
             }
             f.parent_at = pg.loc;
             self.dialogs.follow.insert(w, f);
+        }
+    }
+
+    /// The keyboard went to `focused` (None: to no window). Palettes float
+    /// above their own application's windows and only while it is in front
+    /// (Dave, 2026-11-14: (a), as macOS's): another application's are taken
+    /// off the screen, kept with their place; this one's come back on top.
+    pub fn palettes_follow_focus(&mut self, focused: Option<&Win>) {
+        self.dialogs.hidden.retain(|(w, _)| w.alive());
+        let palettes: Vec<Win> = self.space.elements().filter(|w| self.window_style(w).kind == Kind::Palette).cloned().collect();
+        // The application in front: the focused window's (a palette's own parent's app counts too).
+        let front = focused.cloned();
+        let mut same = |s: &mut Server, p: &Win| match (&front, s.window_style(p).parent) {
+            (Some(f), Some(parent)) => *f == *p || *f == parent || s.same_program(f, &parent),
+            _ => false,
+        };
+        for p in palettes {
+            if !same(self, &p)
+                && let Some(at) = self.space.element_location(&p)
+            {
+                self.space.unmap_elem(&p);
+                self.dialogs.hidden.push((p, at));
+            }
+        }
+        let hidden = std::mem::take(&mut self.dialogs.hidden);
+        for (p, at) in hidden {
+            if same(self, &p) {
+                self.space.map_element(p.clone(), at, true);
+            } else {
+                self.dialogs.hidden.push((p, at));
+            }
+        }
+        // In front of every window of their application, but behind its dialogs
+        // (a dialog, modal above all, is what is being answered).
+        if front.is_some() {
+            let shown: Vec<Win> = self.space.elements().filter(|w| self.window_style(w).kind == Kind::Palette).cloned().collect();
+            for p in shown {
+                self.space.raise_element(&p, false);
+            }
+            let dialogs: Vec<Win> = self.space.elements().filter(|w| self.window_style(w).kind == Kind::Dialog).cloned().collect();
+            for d in dialogs {
+                self.space.raise_element(&d, false);
+            }
         }
     }
 

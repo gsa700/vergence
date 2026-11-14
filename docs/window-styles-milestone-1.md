@@ -170,6 +170,21 @@ The settings app is the first sidebar window.
   subtle), a click on the parent's Open button opened nothing; once it
   closed, the button worked again. 440 tests on Hubble, kepler and
   Techbench.
+  The flash made bolder the same morning (Dave: "make the flash bolder if
+  you think we should"): a 3-point outline in the accent just outside the
+  border for its 0.3 s, as well as the border line (seen on a nested server).
+- **Step 4 in** (2026-11-14): palettes (dialogs.rs `palettes_follow_focus`,
+  run whenever the keyboard moves): another application's palettes are
+  taken off the screen with their place kept, this application's come back
+  there; shown palettes are raised over every window, and the application's
+  dialogs over them again (a dialog is what is being answered: found when a
+  palette covered a modal dialog). The thin bar (22 of 36 points, close only)
+  came with step 3. vdialog opens a palette too. On a nested server on
+  Hubble: the palette opened on top; foot given the keyboard, the palette
+  left the screen; the window given it back, the palette returned at its
+  place, on top; a modal dialog opened over the palette, the parent dimmed,
+  a press on it flashed the bolder outline (shot). 440 tests on Hubble,
+  kepler and Techbench.
 
 ## Steps
 

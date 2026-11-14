@@ -268,6 +268,8 @@ impl Server {
         }
         let id = self.win_id(window);
         self.input.seat.focus(Some(id));
+        // Palettes: only their application's, on top (dialogs.rs).
+        self.palettes_follow_focus(Some(window));
         // It has had the keyboard: its dock icon need ask for nothing (opened.rs).
         self.shelf.attention.retain(|w| w != window);
     }
@@ -288,6 +290,7 @@ impl Server {
             self.native_keyboard_leave(&old);
         }
         self.input.seat.focus(None);
+        self.palettes_follow_focus(None);
     }
 
     /// A point kept on the screens (the pointer cannot leave the desktop).

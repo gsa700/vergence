@@ -115,6 +115,8 @@ pub struct Decor {
     mark: Id,
     /// The shade over a parent a modal dialog blocks (dialogs.rs).
     dim: Id,
+    /// The outline a modal dialog flashes when its parent is pressed.
+    flash: [Id; 4],
     /// The ghost of a tab dragged out of this bar: what it shows (title, size,
     /// scale's bits, light) and its pixels.
     ghost: Option<((String, i32, i32, u64, bool), MemoryRenderBuffer, (i32, i32))>,
@@ -155,6 +157,7 @@ impl Decor {
             round: Default::default(),
             mark: Id::new(),
             dim: Id::new(),
+            flash: std::array::from_fn(|_| Id::new()),
             ghost: None,
         }
     }
@@ -690,6 +693,21 @@ impl Server {
                     // four small arcs (drawn once per scale and color) carry the line round.
                     let s = if rounded { vergence_look::RADIUS as f64 + e } else { 0.0 };
                     let (ox, oy, ow, oh) = (r.loc.x - e, r.loc.y - e, r.size.w + 2.0 * e, r.size.h + 2.0 * e);
+                    // Its flash: a bolder outline in the accent just outside the border
+                    // (3 points), in front of everything of the window's.
+                    if let Some(fc) = flash {
+                        let k = 3.0;
+                        let (fx, fy, fw, fh) = (ox - k, oy - k, ow + 2.0 * k, oh + 2.0 * k);
+                        let sides = [
+                            Rectangle::<f64, Logical>::new((fx, fy).into(), (fw, k).into()),
+                            Rectangle::new((fx, fy + fh - k).into(), (fw, k).into()),
+                            Rectangle::new((fx, fy + k).into(), (k, fh - 2.0 * k).into()),
+                            Rectangle::new((fx + fw - k, fy + k).into(), (k, fh - 2.0 * k).into()),
+                        ];
+                        for (i, r) in sides.into_iter().enumerate() {
+                            elements.push(SceneElement::Solid(SolidColorRenderElement::new(d.flash[i].clone(), physical(r, out.loc, scale), d.commit, fc, Kind::Unspecified)));
+                        }
+                    }
                     elements.push(solid(6, Rectangle::new((ox + s, oy).into(), (ow - 2.0 * s, e).into()), c));
                     elements.push(solid(7, Rectangle::new((ox + s, oy + oh - e).into(), (ow - 2.0 * s, e).into()), c));
                     elements.push(solid(8, Rectangle::new((ox, oy + s).into(), (e, oh - 2.0 * s).into()), c));

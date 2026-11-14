@@ -53,7 +53,7 @@ impl Server {
 
     /// Two windows of one program: the same identity (class, else instance), as
     /// the dock groups them.
-    fn same_program(&mut self, a: &Win, b: &Win) -> bool {
+    pub fn same_program(&mut self, a: &Win, b: &Win) -> bool {
         let key = |id: vergence_profile::windows::WindowId| if id.class.is_empty() { id.instance } else { id.class };
         match (self.window_identity(a), self.window_identity(b)) {
             (Some(x), Some(y)) => {
