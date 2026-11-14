@@ -395,6 +395,19 @@ Bar Proportions"):
   dashboard blurred through it, the apps popup over a white window (frost
   nearly solid there, as the white labels need) and over the wallpaper.
   395 tests on all three.
+- **Acceptance, where it stands** (2026-11-13): 1 met (395 tests on
+  Hubble, kepler and Techbench, the contrast tests and the protocol fuzz
+  test among them). 2 met in screenshots on Hubble (output scrolling under
+  the frosted bar; Style switching bars, dock and menus live). 3 met for
+  Reduce transparency and High contrast (the software-driver road is in
+  the code, not run on such a machine). 4 met on Hubble (red with sudo, back
+  within a second; not yet watched on kepler's screen). 5 met for native
+  GPU windows (corners at 5 pt, square when maximized); resizing from each
+  corner by mouse and finger is Dave's to try. 6: clicks met on Hubble at
+  144 Hz with the frost and corners on (50 of 50 drawn within a frame on
+  both roads; native 2.11 ms average, 10.90 worst; Wayland road 0.04 ms);
+  kepler's full-speed scroll under the bar without dropped frames not yet
+  measured.
 
 ## Steps
 
