@@ -456,6 +456,10 @@ impl Server {
         let mut windows: Vec<Win> = Vec::new();
         let mut classes: Vec<(String, bool)> = Vec::new();
         for w in order {
+            // A dialog or palette is its parent's, not a window of its own (dialogs.rs).
+            if self.belongs_to_parent(&w) {
+                continue;
+            }
             let Some(id) = self.window_identity(&w) else { continue };
             let active = focused.as_ref() == Some(&w);
             classes.push((if id.class.is_empty() { id.instance } else { id.class }, active));
@@ -764,6 +768,10 @@ impl Server {
             return;
         }
         let Some(at) = self.space.element_location(w) else { return };
+        // Its dialogs and palettes go with it (dialogs.rs).
+        for c in self.children_of(w) {
+            self.minimize(&c);
+        }
         tracing::info!("shelf: minimized {:?}", self.window_title(w));
         self.shelf.minimized.push((w.clone(), at));
         if self.motion_wanted() {
@@ -795,6 +803,12 @@ impl Server {
     /// Bring a minimized window back to where it was, in front, with the
     /// keyboard: at once, or after its picture has come out of its icon.
     pub fn unminimize(&mut self, w: &Win) {
+        // Its dialogs and palettes come back with it (dialogs.rs).
+        for c in self.children_of(w) {
+            if self.is_minimized(&c) {
+                self.unminimize_now(&c);
+            }
+        }
         let Some(&(_, at)) = self.shelf.minimized.iter().find(|(m, _)| m == w) else { return };
         if !self.motion_wanted() || !w.alive() {
             self.shelf.motions.retain(|m| m.window != *w);

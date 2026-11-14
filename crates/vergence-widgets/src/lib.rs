@@ -297,6 +297,13 @@ impl<P: Program> Host<P> {
     }
 }
 
+/// The program as a window another window of the same program opens with
+/// `Window::open_window` (its opener is its parent: a dialog's, say).
+pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
+    let theme = program.theme();
+    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None })
+}
+
 /// Opens the program's window and runs until it is closed. `size` is the
 /// size asked for, in reference units.
 pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {

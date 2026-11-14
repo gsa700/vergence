@@ -391,6 +391,9 @@ impl Waker {
 }
 
 /// A program with one window.
+/// A window's kind, for [`Style`].
+pub use vergence_protocol::window::WinKind;
+
 /// What kind of window an app's is, and its size limits in points (0: none):
 /// told to the server on the native road (window styles milestone 1).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

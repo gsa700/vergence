@@ -27,6 +27,8 @@ impl Server {
     pub fn window_opened(&mut self, w: &Win) {
         // Window memory had it snapped: into its part first (snap.rs).
         self.snap_recalled(w);
+        // A dialog opens over its parent (dialogs.rs).
+        self.place_dialog(w);
         let typed_at = self.input.typed_at;
         let focused = self.keyboard_window();
         let same = match &focused {

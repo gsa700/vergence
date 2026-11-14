@@ -79,6 +79,8 @@ pub struct Server {
     pub restore: std::collections::HashMap<Win, smithay::utils::Rectangle<i32, Logical>>,
     /// Snapping (snap.rs): the choices, the aim of a drag, the snapped windows.
     pub snap: crate::snap::Snap,
+    /// Dialogs going with their parents, a modal one's flash (dialogs.rs).
+    pub dialogs: crate::dialogs::Dialogs,
     /// Full-screen windows and where each was before (fullscreen.rs).
     pub fullscreen: std::collections::HashMap<Win, smithay::utils::Rectangle<i32, Logical>>,
     /// The last press on a title bar, for double-click to maximize.
@@ -248,6 +250,7 @@ impl Server {
             restore: Default::default(),
             snap: Default::default(),
             fullscreen: Default::default(),
+            dialogs: Default::default(),
             shot_pending: Vec::new(),
             title_font: crate::text::TextFont::load(),
             frost: None,

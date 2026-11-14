@@ -113,6 +113,8 @@ pub struct Decor {
     round: crate::backdrop::ShadedSlot,
     /// The line showing where a dragged tab would land in this bar.
     mark: Id,
+    /// The shade over a parent a modal dialog blocks (dialogs.rs).
+    dim: Id,
     /// The ghost of a tab dragged out of this bar: what it shows (title, size,
     /// scale's bits, light) and its pixels.
     ghost: Option<((String, i32, i32, u64, bool), MemoryRenderBuffer, (i32, i32))>,
@@ -152,6 +154,7 @@ impl Decor {
             frost: Default::default(),
             round: Default::default(),
             mark: Id::new(),
+            dim: Id::new(),
             ghost: None,
         }
     }
@@ -268,6 +271,13 @@ impl Server {
 
     fn frame_of(&self, w: &Win) -> Option<Frame> {
         let mut buttons = self.button_layout();
+        // A dialog or palette has close only, on the side the controls are on, and no tabs.
+        if matches!(self.window_style(w).kind, crate::style::Kind::Dialog | crate::style::Kind::Palette) {
+            let left = buttons.0.contains(&vergence_bar::WinButton::Close) || buttons.1.is_empty();
+            buttons = if left { (vec![vergence_bar::WinButton::Close], vec![]) } else { (vec![], vec![vergence_bar::WinButton::Close]) };
+            let z = self.bar_sizes(w);
+            return self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, None, z))).flatten();
+        }
         // No maximize button where the window cannot be maximized (style.rs).
         if !self.maximizable(w) {
             buttons.0.retain(|b| *b != vergence_bar::WinButton::Maximize);
@@ -301,10 +311,18 @@ impl Server {
     /// A window's size of controls: the screen its center is on (window
     /// memory's rule).
     pub fn bar_sizes(&self, w: &Win) -> vergence_bar::Sizes {
-        match self.space.element_geometry(w) {
+        let z = match self.space.element_geometry(w) {
             Some(g) => self.bar_sizes_at((g.loc.x + g.size.w / 2, g.loc.y + g.size.h / 2).into()),
             None => self.bar_sizes_at(self.pointer_location().to_i32_round()),
-        }
+        };
+        // A dialog's bar is slim, a palette's thin (window styles milestone 1):
+        // the screen's proportions, scaled to 28 and 22 of the standard 36.
+        let k = match self.window_style(w).kind {
+            crate::style::Kind::Dialog => 28.0 / 36.0,
+            crate::style::Kind::Palette => 22.0 / 36.0,
+            _ => return z,
+        };
+        vergence_bar::Sizes { bar_h: (z.bar_h * k).round(), item_h: (z.item_h * k).round(), button_w: (z.button_w * k).round(), plus_w: 0.0, side: z.side, gap: z.gap }
     }
 
     /// A window's bar height in points.
@@ -599,6 +617,8 @@ impl Server {
         let windows: Vec<Win> = self.space.elements().rev().cloned().collect();
         // A maximize button rested on opens its layouts (snap.rs).
         self.layouts_tick();
+        // Dialogs go where their parents went (dialogs.rs).
+        self.dialogs_follow();
         // In front of everything: the desktop menu, if open (menu.rs).
         let mut elements = self.menu_elements(renderer, out, scale);
         // Then notifications, in front of every window (notify.rs).
@@ -619,6 +639,18 @@ impl Server {
         // Where a dragged window will go if let go now (snap.rs).
         elements.extend(self.snap_preview_element(renderer, out, scale, light));
         for w in windows {
+            // A parent a modal dialog blocks is dimmed, in front of its own bar
+            // and content and behind the dialog (dialogs.rs).
+            if self.modal_of(&w).is_some()
+                && let Some(r) = self.border_of(&w).or_else(|| self.space.element_bbox(&w))
+                && r.overlaps(out)
+            {
+                let top = if self.has_title(&w) { self.bar_h(&w) } else { 0 };
+                let all = Rectangle::<f64, Logical>::new((r.loc.x as f64, (r.loc.y - top) as f64).into(), (r.size.w as f64, (r.size.h + top) as f64).into());
+                let d = self.decor.entry(w.clone()).or_insert_with(Decor::new);
+                let shade = if light { [0.0, 0.0, 0.0, 0.18] } else { [0.0, 0.0, 0.0, 0.35] };
+                elements.push(SceneElement::Solid(SolidColorRenderElement::new(d.dim.clone(), physical(all, out.loc, scale), d.commit, shade, Kind::Unspecified)));
+            }
             let frame = self.frame_of(&w);
             let border = self.border_of(&w);
             let reach = border.map(|b| Rectangle::new((b.loc.x - EDGE, b.loc.y - EDGE).into(), (b.size.w + 2 * EDGE, b.size.h + 2 * EDGE).into())).or_else(|| self.space.element_bbox(&w));
@@ -639,6 +671,11 @@ impl Server {
                 // picture is on the GPU and that is not maximized; the others stay
                 // square until their pictures can be cut too.
                 let rounded = round.is_some() && frame.is_some() && !self.restore.contains_key(&w) && native_texture(renderer, &w).is_some();
+                // A modal dialog whose parent was pressed flashes its border in the accent (dialogs.rs).
+                let flash = self.flashing(&w).then(|| {
+                    let a = self.accent();
+                    [a.r as f32 / 255.0, a.g as f32 / 255.0, a.b as f32 / 255.0, 1.0]
+                });
                 let d = self.decor.get_mut(&w).unwrap();
                 let solid = |i: usize, r: Rectangle<f64, Logical>, c: [f32; 4]| {
                     SceneElement::Solid(SolidColorRenderElement::new(d.ids[i].clone(), physical(r, out.loc, scale), d.commit, c, Kind::Unspecified))
@@ -647,7 +684,8 @@ impl Server {
                 if let Some(b) = border {
                     let (r, e) = (b.to_f64(), EDGE as f64);
                     let edge = if active { style.edge } else { style.edge_off };
-                    let c = edge.floats();
+                    // A modal dialog whose parent was pressed flashes its border in the accent.
+                    let c = flash.unwrap_or_else(|| edge.floats());
                     // Rounded: the straight lines stop short of the corners, where
                     // four small arcs (drawn once per scale and color) carry the line round.
                     let s = if rounded { vergence_look::RADIUS as f64 + e } else { 0.0 };

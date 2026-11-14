@@ -223,6 +223,14 @@ impl Server {
         if self.switcher_contains(pos) {
             return Some(Target::Server(Part::Switcher));
         }
+        // Anything of a window a modal dialog blocks is the dialog's (dialogs.rs).
+        let hit_window = match self.hit(pos) {
+            Hit::Surface(w, ..) | Hit::Native(w) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Minimize(w) | Hit::Edge(w, _) | Hit::Tab(w, _) | Hit::CloseTab(w, _) | Hit::Plus(w) => Some(w),
+            _ => None,
+        };
+        if let Some(modal) = hit_window.and_then(|w| self.modal_of(&w)) {
+            return Some(Target::Server(Part::Blocked(self.win_id(&modal))));
+        }
         if self.notify_at(pos) {
             return Some(Target::Server(Part::Note));
         }
@@ -495,6 +503,11 @@ impl Server {
             Target::Server(Part::Dock) if !pressed && self.shelf.held.is_some_and(|(b, _)| b == button) => self.shelf_release(pos),
             Target::Server(Part::Desktop) if pressed && button == vergence_seat::BTN_RIGHT => self.open_menu(pos),
             Target::Server(Part::Switcher) if pressed && button == vergence_seat::BTN_LEFT => self.switch_click(pos),
+            Target::Server(Part::Blocked(id)) if pressed => {
+                if let Some(d) = self.input.wins.get(&id).cloned() {
+                    self.flash_dialog(&d);
+                }
+            }
             // A native window's tabs (bar milestone 1): the program hears what was done.
             Target::Server(Part::Tab(id, i)) if pressed && button == vergence_seat::BTN_LEFT => {
                 self.tab_event(id, i, |window, tab| WinEvent::TabChosen { window, tab });

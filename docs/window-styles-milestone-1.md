@@ -145,6 +145,31 @@ The settings app is the first sidebar window.
   points further stops at 1100; on a nested screen 1889 wide with the top
   edge set to the top half, it snapped to the top at 1100 x 480 against the
   left (the part 1833 x 473). 439 tests on Hubble, kepler and Techbench.
+- **Step 3 in** (2026-11-14): dialogs.rs. A dialog's bar is 28 of the
+  standard 36 points (a palette's 22), the screen's proportions scaled,
+  close only on the controls' side, no tabs; a dialog opens over the middle
+  of its parent, kept on the parent's screen; each frame it goes where its
+  parent went (`dialogs_follow`; a dialog the user moved keeps its new offset);
+  focusing the parent raises its dialogs and palettes; minimizing it takes
+  them, bringing it back brings them; the dock's list, and so Alt+Tab, leave
+  out a window that belongs to a parent. Modal: the parent gets a shade in
+  front of its own bar and content (18% in light style, 35% in dark), behind
+  the dialog; every part of it is the seat's `Part::Blocked(dialog)`, so a
+  press focuses the dialog and flashes its border in the accent for 0.3 s,
+  and nothing reaches the parent; focusing the parent hands the keyboard to
+  the dialog. vergence-widgets gained `window(program)` (a program as a window
+  another opens) and `Program::style`; vergence-ui re-exports `WinKind`; the
+  example `vdialog` opens a dialog and a modal one. Live on Hubble with it:
+  the dialog `kind=Dialog` with its parent, centered over it (both centers
+  960,558), the slim bar with close only (shot); the dock lists one window;
+  the parent moved by vctl, the dialog by the same amount; focusing the
+  parent raised the dialog; minimizing the parent minimized both, Alt+Tab
+  listed only the parent and brought both back; the modal one dimmed its
+  parent (shot), a click on the parent left the keyboard with the dialog and
+  flashed its border (shot: the line in the accent; a one-point line, so
+  subtle), a click on the parent's Open button opened nothing; once it
+  closed, the button worked again. 440 tests on Hubble, kepler and
+  Techbench.
 
 ## Steps
 

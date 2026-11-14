@@ -301,6 +301,18 @@ mod tests {
     }
 
     #[test]
+    fn a_press_on_a_blocked_window_goes_to_its_modal_dialog() {
+        let mut seat = Seat::new();
+        let blocked = Target::Server(Part::Blocked(W2));
+        let out = seat.button(BTN_LEFT, true, Some(blocked), Default::default(), 0);
+        // The dialog (W2) takes the keyboard; the press is the server's, never the window's.
+        assert!(out.contains(&Out::Focus(W2)));
+        assert!(out.contains(&Out::Press(blocked, BTN_LEFT)));
+        assert!(!out.iter().any(|o| matches!(o, Out::MoveBegin(_))));
+        assert_eq!(seat.keyboard_focus(), Some(W2));
+    }
+
+    #[test]
     fn a_right_click_on_the_bar_or_the_maximize_button_is_the_windows_menu() {
         let mut seat = Seat::new();
         let bar = Target::Server(Part::Title(W1));

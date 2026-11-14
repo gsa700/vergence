@@ -84,6 +84,9 @@ pub enum Part {
     Note,
     /// Alt+Tab's list of windows (windows milestone 1, step 5).
     Switcher,
+    /// A window a modal dialog blocks (window styles milestone 1): every press
+    /// on it is the dialog's (the number), which comes forward.
+    Blocked(WinId),
     /// The bare desktop.
     Desktop,
 }
@@ -104,7 +107,7 @@ impl Target {
     pub fn window(&self) -> Option<WinId> {
         match *self {
             Target::Surface(w, _) | Target::Native(w) => Some(w),
-            Target::Server(Part::Title(w) | Part::Edge(w, _) | Part::Close(w) | Part::Maximize(w) | Part::Minimize(w) | Part::Tab(w, _) | Part::CloseTab(w, _) | Part::Plus(w)) => Some(w),
+            Target::Server(Part::Title(w) | Part::Edge(w, _) | Part::Close(w) | Part::Maximize(w) | Part::Minimize(w) | Part::Tab(w, _) | Part::CloseTab(w, _) | Part::Plus(w) | Part::Blocked(w)) => Some(w),
             Target::Server(_) => None,
         }
     }

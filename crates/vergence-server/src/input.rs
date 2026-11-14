@@ -221,7 +221,20 @@ impl Server {
     /// keyboard; a native window from us (native.rs), Smithay's focus being
     /// none then. The seat is told either way.
     pub fn focus_window(&mut self, window: &crate::win::Win, serial: smithay::utils::Serial) {
+        // A parent a modal dialog blocks gives the keyboard to the dialog (dialogs.rs).
+        if let Some(modal) = self.modal_of(window)
+            && modal != *window
+        {
+            self.space.raise_element(window, true);
+            return self.focus_window(&modal, serial);
+        }
         self.space.raise_element(window, true);
+        // Its dialogs and palettes come forward with it.
+        for c in self.children_of(window) {
+            if self.space.element_geometry(&c).is_some() {
+                self.space.raise_element(&c, false);
+            }
+        }
         self.keys_ready();
         let focus = match (window.x11_surface(), window.toplevel()) {
             (Some(x), _) => {
