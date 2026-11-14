@@ -172,6 +172,18 @@ Bar Proportions"):
   sign of which window is in front.
 - **The superuser's red is deeper** (both styles, the tab and the bar's
   tint), which also gives the white title more contrast.
+- **How much shows through the frost is a setting** (Dave, 2026-11-13,
+  after the mock-up's first frost, blur 14 px and tint 72%, hid the text
+  under the bar until he "looked really hard"; at 6 px and 50% "better, I
+  see it now. let's have that a setting as well"). Settings > Appearance,
+  beside Reduce transparency: **Frost: Clear, Standard, Heavy** (blur and
+  tint in steps; Standard about the mock-up's 6 px and 50%), Reduce
+  transparency still giving the solid tint. The tint never goes below what
+  the contrast test passes (mixed pairs included), so Clear is as clear as
+  stays legible, not a free choice of zero.
+- **Still open**: the tab in front as a veil over the frost, or solid in
+  the terminal's own color (text scrolling behind everything but it); the
+  mock-up's "Front tab" switch.
 - **Size of controls** (Dave, 2026-11-13: "yes, per-monitor automatic,
   standard 36"): Compact 32, **Standard 36** (today's), Large 44 (bar
   height; tabs, buttons, margins and gaps with it, as the mock-up's
@@ -209,7 +221,7 @@ Bar Proportions"):
    vergence-bar; the per-screen Automatic (touch panel) rule in the
    server; a window's bar follows the monitor its center is on; the
    settings (Appearance and Screens).
-9. **Settings**: Reduce transparency beside High contrast and Reduce motion;
+9. **Settings**: Frost (Clear, Standard, Heavy) and Reduce transparency beside High contrast and Reduce motion;
    docs (whitepaper §6 look, this plan's notes).
 
 ## Acceptance
