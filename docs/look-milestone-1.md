@@ -406,8 +406,10 @@ Bar Proportions"):
   corner by mouse and finger is Dave's to try. 6: clicks met on Hubble at
   144 Hz with the frost and corners on (50 of 50 drawn within a frame on
   both roads; native 2.11 ms average, 10.90 worst; Wayland road 0.04 ms);
-  kepler's full-speed scroll under the bar without dropped frames not yet
-  measured.
+  kepler: a terminal filled by `yes` (full-speed scroll under its frosted
+  bar, VTERM_FRAMES) drew about 30 frames a second over 10 s, the panel's
+  30 Hz as recorded for it (the counter's step is 30 frames; the mode was
+  not read again from the log): no frames dropped that the count can see.
 
 ## Steps
 
