@@ -124,6 +124,19 @@ recovery across two GPUs, more than two GPUs, multi-card walls.
   plugged in. Frames take 20 to 40 ms (the server waits for the Intel GPU
   before the copy): to make fast next. 474 tests (kepler 470); kepler's
   one-GPU session unchanged.
+- **Frames made fast** (Dave: "go ahead and make the frames faster").
+  Timed: drawing under 1 ms, the copy about 1 ms, the server **waiting**
+  for the Intel GPU 10 to 26 ms. A GPU-side wait (Smithay's
+  `Renderer::wait`, the Intel fence imported into nouveau's EGL) fell back
+  to blocking: these drivers share no fences that way. Now pipelined: three
+  buffers; each turn the Intel GPU draws any change into the next free one
+  without waiting, and the NVIDIA GPU copies the newest buffer whose fence
+  has already signaled (`SyncPoint::is_reached`, never waited on); not yet
+  signaled, the server looks again in 3 ms instead of a frame. At most a
+  frame of extra latency on that screen; the server never blocks. Hubble:
+  100 pointer moves on each screen, **0 slow frames** (before, every frame
+  on the 14" took 20 to 40 ms). Slow-frame warnings name the screen;
+  `VERGENCE_RELAY_TIMES=1` logs every relay turn.
 
 ## Steps
 

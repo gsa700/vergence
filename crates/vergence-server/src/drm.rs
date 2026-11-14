@@ -111,17 +111,41 @@ struct Surface {
 }
 
 /// "Drawn here, shown there" (GPUs milestone 1, step 3): the primary draws
-/// the screen into one of two linear buffers in turn; the showing GPU takes
-/// that buffer in as a texture and copies it into its own scan-out buffer.
+/// the screen into one of three linear buffers in turn; the showing GPU takes
+/// the newest finished one in as a texture and copies it into its own
+/// scan-out buffer. Nothing waits: a buffer is copied once its fence has
+/// signaled (the two drivers on Hubble share no fences, so a GPU-side wait
+/// fell back to blocking the server 10 to 25 ms a frame).
 struct Relay {
-    /// The buffers, each with its texture on the showing GPU (imported once)
-    /// and the frame it was last drawn in (0: never), for damage by age.
-    bufs: Vec<(smithay::backend::allocator::dmabuf::Dmabuf, Option<smithay::backend::renderer::gles::GlesTexture>, usize)>,
+    bufs: Vec<RelayBuf>,
     next: usize,
+    /// Frames drawn so far (for damage by each buffer's age).
     frame: usize,
+    /// The newest drawn buffer not copied yet.
+    pending: Option<usize>,
     damage: smithay::backend::renderer::damage::OutputDamageTracker,
     /// The output the showing GPU's frame goes through: the screen's mode at scale 1.
     _plain: Output,
+}
+
+struct RelayBuf {
+    dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
+    /// Its texture on the showing GPU, imported once.
+    texture: Option<smithay::backend::renderer::gles::GlesTexture>,
+    /// The frame it was last drawn in (0: never).
+    drawn: usize,
+    /// Its drawing's fence, until copied.
+    sync: Option<smithay::backend::renderer::sync::SyncPoint>,
+}
+
+/// What a relay turn did.
+enum Relayed {
+    /// A frame went to the screen (a VBlank follows).
+    Shown,
+    /// Nothing changed.
+    Nothing,
+    /// A frame is drawn but its fence has not signaled: look again soon.
+    Waiting,
 }
 
 pub struct Backend {
@@ -623,7 +647,7 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
         let dev = &mut b.devices[gpu];
         let Some(copier) = dev.renderer.as_mut() else { return };
         let r = dev.manager.lock().initialize_output::<_, RelayElements>(crtc, drm_mode, &[conn.handle()], &plain, planes, copier, &DrmOutputRenderElements::default());
-        relay = Some(Relay { bufs, next: 0, frame: 0, damage, _plain: plain });
+        relay = Some(Relay { bufs, next: 0, frame: 0, pending: None, damage, _plain: plain });
         r
     };
     let drm_output = match initialized {
@@ -636,16 +660,16 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     b.surfaces.insert((gpu, crtc), Surface { output, drm_output, connector: name, last: std::time::Instant::now(), scale, id, px: (w as u32, h as u32), mm, edid: identity, global, relay });
 }
 
-/// Two linear XRGB8888 buffers in the primary GPU's memory, the size of a
+/// Three linear XRGB8888 buffers in the primary GPU's memory, the size of a
 /// screen on another GPU (the format both GPUs render and import: gpus.rs).
-fn relay_buffers(gbm: &GbmDevice<DrmDeviceFd>, w: u32, h: u32) -> Result<Vec<(smithay::backend::allocator::dmabuf::Dmabuf, Option<smithay::backend::renderer::gles::GlesTexture>, usize)>, String> {
+fn relay_buffers(gbm: &GbmDevice<DrmDeviceFd>, w: u32, h: u32) -> Result<Vec<RelayBuf>, String> {
     use smithay::backend::allocator::{Allocator, Modifier, dmabuf::AsDmabuf};
     let mut alloc = GbmAllocator::new(gbm.clone(), GbmBufferFlags::RENDERING);
-    (0..2)
+    (0..3)
         .map(|_| {
             let bo = alloc.create_buffer(w, h, Fourcc::Xrgb8888, &[Modifier::Linear]).map_err(|e| format!("{e:?}"))?;
             let dmabuf = bo.export().map_err(|e| format!("{e:?}"))?;
-            Ok((dmabuf, None, 0))
+            Ok(RelayBuf { dmabuf, texture: None, drawn: 0, sync: None })
         })
         .collect()
 }
@@ -702,7 +726,8 @@ fn render(state: &mut Server, crtc: Key) {
     render_with(state, &mut backend, crtc);
     let ms = t.elapsed().as_millis();
     if ms > 20 {
-        tracing::warn!("slow: frame {ms} ms");
+        let name = backend.surfaces.get(&crtc).map(|s| s.connector.as_str()).unwrap_or("?");
+        tracing::warn!("slow: frame {ms} ms ({name})");
     }
     // A frame that blocks for seconds was waiting on a GPU hang (the kernel resets
     // the engine after ~7 s). The reset leaves this GL context drawing nothing but
@@ -772,12 +797,19 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
 
     let clear = state.background_color(&s.connector);
     let outcome = if crtc.0 == 0 {
-        s.drm_output.render_frame(&mut b.renderer, &elements, clear, FrameFlags::DEFAULT).map(|r| !r.is_empty).map_err(|e| format!("{e:?}"))
+        s.drm_output.render_frame(&mut b.renderer, &elements, clear, FrameFlags::DEFAULT).map(|r| if r.is_empty { Relayed::Nothing } else { Relayed::Shown }).map_err(|e| format!("{e:?}"))
     } else {
         relay_frame(&mut b.renderer, b.devices[crtc.0].renderer.as_mut(), s, &elements, clear)
     };
     match outcome {
-        Ok(true) => {
+        Ok(Relayed::Waiting) => {
+            // The primary is still drawing it: look again in 3 ms, not a frame.
+            let _ = state.loop_handle.insert_source(Timer::from_duration(Duration::from_millis(3)), move |_, _, st| {
+                render(st, crtc);
+                TimeoutAction::Drop
+            });
+        }
+        Ok(Relayed::Shown) => {
             if let Err(e) = s.drm_output.queue_frame(()) {
                 tracing::warn!("queue frame: {e:?}");
                 let _ = state.loop_handle.insert_source(Timer::from_duration(Duration::from_millis(100)), move |_, _, st| {
@@ -786,7 +818,7 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
                 });
             }
         }
-        Ok(false) => {
+        Ok(Relayed::Nothing) => {
             // Nothing changed: look again in a frame's time (no VBlank comes without a frame).
             let _ = state.loop_handle.insert_source(Timer::from_duration(Duration::from_millis(16)), move |_, _, st| {
                 render(st, crtc);
@@ -839,37 +871,55 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
     let _ = state.display_handle.flush_clients();
 }
 
-/// A screen on another GPU: the primary draws `elements` into the next relay
-/// buffer (damage by the buffer's age), waits for it, and the showing GPU
-/// copies it into its scan-out buffer. Ok(true): a frame went out.
-fn relay_frame(primary: &mut GlesRenderer, copier: Option<&mut GlesRenderer>, s: &mut Surface, elements: &[OutputElements], clear: [f32; 4]) -> Result<bool, String> {
+/// A screen on another GPU, one turn: the primary draws any change into the
+/// next free buffer without waiting, and the showing GPU copies the newest
+/// buffer whose drawing has finished (checked, never waited for).
+fn relay_frame(primary: &mut GlesRenderer, copier: Option<&mut GlesRenderer>, s: &mut Surface, elements: &[OutputElements], clear: [f32; 4]) -> Result<Relayed, String> {
     use smithay::backend::renderer::{Bind, ImportDma, element::{Kind, texture::{TextureBuffer, TextureRenderElement}}};
     let copier = copier.ok_or("no renderer on the showing GPU")?;
     let relay = s.relay.as_mut().ok_or("no relay buffers")?;
+    let t0 = std::time::Instant::now();
+    // Draw: into the next buffer that is not the one waiting to be copied.
     let i = relay.next;
-    let age = if relay.bufs[i].2 == 0 { 0 } else { relay.frame + 1 - relay.bufs[i].2 };
-    let sync = {
-        let mut fb = primary.bind(&mut relay.bufs[i].0).map_err(|e| format!("bind: {e}"))?;
-        let r = relay.damage.render_output(primary, &mut fb, age, elements, clear).map_err(|e| format!("draw: {e:?}"))?;
-        if r.damage.is_none() {
-            return Ok(false);
+    if relay.pending != Some(i) {
+        let age = if relay.bufs[i].drawn == 0 { 0 } else { relay.frame + 1 - relay.bufs[i].drawn };
+        let drawn = {
+            let mut fb = primary.bind(&mut relay.bufs[i].dmabuf).map_err(|e| format!("bind: {e}"))?;
+            let r = relay.damage.render_output(primary, &mut fb, age, elements, clear).map_err(|e| format!("draw: {e:?}"))?;
+            r.damage.is_some().then(|| r.sync.clone())
+        };
+        if let Some(sync) = drawn {
+            relay.frame += 1;
+            relay.bufs[i].drawn = relay.frame;
+            relay.bufs[i].sync = Some(sync);
+            // A newer frame: the older one waiting is not copied any more.
+            if let Some(old) = relay.pending.replace(i) {
+                relay.bufs[old].sync = None;
+            }
+            relay.next = (i + 1) % relay.bufs.len();
         }
-        r.sync.clone()
-    };
-    // The showing GPU must not read the buffer before the primary is done.
-    let _ = sync.wait();
-    relay.frame += 1;
-    relay.bufs[i].2 = relay.frame;
-    relay.next = (i + 1) % relay.bufs.len();
-    if relay.bufs[i].1.is_none() {
-        relay.bufs[i].1 = Some(copier.import_dmabuf(&relay.bufs[i].0, None).map_err(|e| format!("import on the showing GPU: {e}"))?);
     }
-    let tex = relay.bufs[i].1.clone().ok_or("no texture")?;
+    let Some(p) = relay.pending else { return Ok(Relayed::Nothing) };
+    if !relay.bufs[p].sync.as_ref().is_none_or(|sy| sy.is_reached()) {
+        return Ok(Relayed::Waiting);
+    }
+    // Copy: the newest finished frame onto the showing GPU's scan-out buffer.
+    let t1 = std::time::Instant::now();
+    relay.pending = None;
+    relay.bufs[p].sync = None;
+    if relay.bufs[p].texture.is_none() {
+        relay.bufs[p].texture = Some(copier.import_dmabuf(&relay.bufs[p].dmabuf, None).map_err(|e| format!("import on the showing GPU: {e}"))?);
+    }
+    let tex = relay.bufs[p].texture.clone().ok_or("no texture")?;
     let tb = TextureBuffer::from_texture(copier, tex, 1, Transform::Normal, None);
     let el = TextureRenderElement::from_texture_buffer((0.0, 0.0), &tb, None, None, None, Kind::Unspecified);
     let els = [RelayElements::Texture(el)];
     let empty = s.drm_output.render_frame(copier, &els, clear, FrameFlags::DEFAULT).map_err(|e| format!("copy: {e:?}"))?.is_empty;
-    Ok(!empty)
+    let t2 = std::time::Instant::now();
+    if std::env::var_os("VERGENCE_RELAY_TIMES").is_some() || (t2 - t0).as_millis() > 20 {
+        tracing::info!("relay {}: draw {:.1} ms, copy {:.1} ms", s.connector, (t1 - t0).as_secs_f64() * 1e3, (t2 - t1).as_secs_f64() * 1e3);
+    }
+    Ok(if empty { Relayed::Nothing } else { Relayed::Shown })
 }
 
 /// Render `elements` into an offscreen buffer the size of the monitor and read it back
