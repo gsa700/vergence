@@ -109,3 +109,7 @@ limited size allowance to preserve the layout".
   2160").
 - **A UPS page** of its own (local UPS by USB only), and **low-battery
   actions** were offered and deferred ("not yet").
+- **Forget an app's window places** (Dave, 2026-11-14: "a reset if things get
+  messy"): in the app's dock menu ("Forget window places") and on the Windows
+  page (apps with saved places, each with Forget, and Forget all), clearing
+  its entries in window memory for every setup.
