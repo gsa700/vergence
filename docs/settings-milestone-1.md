@@ -330,8 +330,10 @@ by the computer through usbmuxd before it hands out a connection (Question
   "here I have this mac plugged into a small ups and it monitors it just
   like a laptop battery", "couldn't we add a user to the UPS group?"):
   planned, not built. A USB UPS is a HID power device (what macOS reads):
-  our own reader of its HID reports (charge, runtime, on line, load) shown
-  on the Battery page as a battery; install.sh to give UPS devices (by
+  our own reader of its HID reports (charge, runtime, on line, load) on a
+  **UPS page of its own** (Dave, 2026-11-14: "we are doing seperate tabs for
+  things, UPS should be seperate too. note for later"), shown once the
+  machine has had one, as Touchpad and Touchscreen are; install.sh to give UPS devices (by
   maker's USB vendor id, hidraw on Linux, devd on FreeBSD) to a group
   (NUT's `nut` where it exists, else `ups`) and add the user. NUT's network
   protocol for the rack UPS (pfSense) is a separate choice for Dave
