@@ -123,6 +123,12 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   `--uninstall`). An installed session has NO control socket: for `vctl`,
   create ~/.config/vergence/control-socket or start with VERGENCE_CONTROL=1. A
   checkout's tools/vergence-session is a development session (socket on).
+  **The server and the apps speak one exact bus protocol version** (the
+  server refuses any other: vergence-protocol `bus::VERSION`, 4 since
+  2026-11-14), so they are installed together (install.sh does) and, when
+  packages come (xbps template, FreeBSD port, Fedora spec), **each requires
+  the other at the same version** (Dave, 2026-11-14: "lets make sure they are
+  each others deps"), or they are one package.
 - **Xfce is only a host** (Dave, 2026-11-06): nothing new is built on
   Xfce's internals (xfconf, xfsettingsd); everything works under any EWMH
   window manager, and pieces the phase 2 server needs (e.g. the XSETTINGS
