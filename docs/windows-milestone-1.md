@@ -5,8 +5,12 @@ Drafted 2026-11-14 (Dave: "draft the windows milestone"), from whitepaper
 corner a quarter, with the shelf counting as the edge. It can be switched
 off", and "Alt+Tab steps through windows, most recently used first, in a
 small list in the middle of the screen". Shelf milestone 1 left both for "a
-windows milestone of their own". **Not accepted yet: four questions at the
-end.**
+windows milestone of their own". **Accepted 2026-11-14** with Dave's
+answers (end): snapping **off by default** ("I am really not a snap window
+person, so just go with a sane default that is off by default and add all
+the settings to the settings app"); the dock counts as the edge exactly as
+its own settings say ("honor the docks own setting whether or not it hides
+from near windows").
 
 ## Where things stand (read 2026-11-14, f700755)
 
@@ -41,14 +45,20 @@ end.**
   - the left or right edge: that half of the monitor;
   - a corner (the last 24 points of an edge, in either direction): that
     quarter;
-  - the top edge: maximized (Question 1);
+  - the top edge: maximized (a setting can make it the top half);
   - the bottom edge: nothing (it is where the dock usually is, and a window
     dragged down is usually being moved, not placed).
-  "The monitor" is its work area: the dock counts as the edge, so a window
-  snapped beside a dock on the left starts where the dock ends.
-- **Only outer edges snap** (Question 2): an edge with another monitor beyond
-  it lets the window across, as now. The keys below reach every half on
-  every monitor.
+  "The monitor" is its work area, the one maximize already uses (shelf.rs
+  `work_area` through `shelf_placement`), so the dock counts as the edge
+  just as its own settings say: a dock that never hides and keeps windows
+  clear is the edge (a window snapped beside it starts where it ends); a
+  dock that hides (when a window covers it, or always), or does not keep
+  windows clear, leaves the whole screen edge to the window, and hides
+  behind it as it would for any window.
+- **Only outer edges snap** by default: an edge with another monitor beyond
+  it lets the window across, as now (a setting can make it snap there after
+  the pointer has pressed against it for half a second). The keys below
+  reach every half on every monitor.
 - **The preview**: a rounded outline of the target area, frosted where
   there is a GPU (look milestone 1's backdrop) and a plain tint otherwise,
   drawn by the server under the moving window. It appears when the pointer
@@ -70,9 +80,30 @@ end.**
   logout or a restart the window comes back snapped, fitted to the work area
   of the monitor setup it comes back to (a new size of the setup refits the
   zone instead of scaling a stale rectangle).
-- **Switched off** in Settings > Windows ("Snap windows to the screen's
-  edges", on by default; desktop.toml `[windows] snap`). The keys still work
-  when it is off: they are asked for, never stumbled into.
+- **Off by default** (Dave, 2026-11-14): dragging a window anywhere only
+  moves it until snapping is switched on in Settings > Windows (below).
+
+### Settings > Windows
+
+Every choice in this milestone is a setting on the settings app's Windows
+page, in a "Snapping and switching" group, written to desktop.toml
+`[windows]` and applied live:
+
+| Setting | Choices | Default |
+|---|---|---|
+| Snap windows dragged to the screen's edges | on, off | **off** |
+| The top edge | Maximizes, Top half | Maximizes |
+| Edges between screens | Never snap, Snap after a short press | Never snap |
+| Show where it will go | on (the preview), off | on |
+| Window keys: Super with the arrows | on, off | on |
+| Alt+Tab | Windows on every screen, Windows on this screen | every screen |
+| Alt+` steps among one application's windows | on, off | on |
+
+The snapping rows under the first are dimmed while it is off. The window
+keys are a switch of their own: they are asked for, never stumbled into, so
+they stay on with snapping off. Alt+Tab itself has no off switch (a program
+cannot have it either way, see Security). The dock's band, and whether it
+counts as the edge, stays the Dock page's to set, as now.
 
 ### Keys for windows
 
@@ -100,7 +131,7 @@ All the server's, ahead of any program, through the seat's filter:
   the front; a closed one leaves. One list for all monitors (there are no
   workspaces). Minimized windows are in it at their place in the order, shown
   as minimized; choosing one brings it back.
-- **The list** (Question 3): in the middle of the monitor with the focused
+- **The list**: in the middle of the monitor with the focused
   window, a frosted panel of rows, each the application's icon (the dock's,
   from its desktop entry, a letter tile where there is none) and the window's
   title, cut with an ellipsis; light and dark, contrast checked by look
@@ -108,8 +139,7 @@ All the server's, ahead of any program, through the seat's filter:
   first Tab, so a quick Alt+Tab switches without a flash. At most as many rows
   as fit; it scrolls past that.
 - **Alt+`** (the key above Tab) does the same among the focused application's
-  windows only (Question 4): useful with one terminal process for all its
-  windows.
+  windows only: useful with one terminal process for all its windows.
 
 ## Steps
 
@@ -126,17 +156,22 @@ All the server's, ahead of any program, through the seat's filter:
 3. **Snapping by keys**: Super+arrows, across monitors.
 4. **Alt+Tab**: the panel, the rows, the keys, the delay, minimized windows,
    the click; Alt+`.
-5. **The switch and the docs**: Settings > Windows; whitepaper §6.9 and §9;
-   shelf milestone 1's pointer; this plan's notes.
+5. **The settings and the docs**: Settings > Windows, every row in the table
+   above; whitepaper §6.9 (snapping off by default, the top edge, the dock
+   as its settings say) and §9; shelf milestone 1's pointer; this plan's
+   notes.
 
 ## Acceptance
 
 1. Tests green on Hubble, kepler and Techbench.
-2. Dragged by the bar to the left edge, a native terminal, foot (Wayland) and
+2. With snapping switched on, dragged by the bar to the left edge, a native terminal, foot (Wayland) and
    the settings app each take the left half of the work area (beside the
    dock, not under it), with the preview before letting go; to a corner, a
    quarter; to the top, maximized. Dragged away, each comes out at its
-   earlier size under the pointer. On kepler, the same with a finger.
+   earlier size under the pointer. On kepler, the same with a finger. With
+   the dock set to hide when a window covers it, the left half reaches the
+   screen's edge and the dock hides behind it; set never to hide, the half
+   stops at the dock.
 3. On a nested server with two virtual monitors side by side (vctl), the
    shared edge lets a window across; the outer edges snap. Super+Right
    walks a window from the left monitor's left half to its right half, then
@@ -148,8 +183,9 @@ All the server's, ahead of any program, through the seat's filter:
    windows only.
 5. A snapped window comes back snapped after logging out and in, and refits
    when the setup's resolution or scale changes.
-6. With snapping switched off, dragging to an edge only moves the window;
-   Super+arrows still snap.
+6. On a fresh profile snapping is off: dragging to an edge only moves the
+   window; Super+arrows still snap. Every row of the Windows page's new group
+   changes the behavior live, and the dimmed rows follow the first.
 7. Clicks still drawn within a frame (50 of 50) on both roads with the new
    keys in the filter.
 
@@ -167,26 +203,22 @@ All the server's, ahead of any program, through the seat's filter:
 
 - Resizing two windows snapped side by side together, and offering the other
   windows for the free half after a snap (Windows' Snap Assist).
-- Live window pictures in the list (Question 3 (b)); they belong with the
+- Live window pictures in the list; they belong with the
   dock's icon cards (whitepaper §6.9, 2026-11-13).
 - Dialogs moving with their parent window (whitepaper §6.9): its own step,
   with the native protocol's parent.
 - The switcher read by a screen reader: phase 3, with the server's own parts
   in Contract 3.
 
-## Questions for Dave
+## Questions for Dave (answered 2026-11-14)
 
-1. **The top edge.** (a) Maximizes (Windows, GNOME, macOS's tiling); (b) the
-   top half, so every edge is a half as the whitepaper's sentence reads.
-   Proposed: **(a)**: a top half is rarely wanted on a wide monitor, and the
-   whitepaper's sentence gets a word changed.
-2. **Edges between monitors.** (a) Never snap there; the keys reach those
-   halves; (b) snap after the pointer has pressed against the edge for half
-   a second. Proposed: **(a)**: (b) makes every crossing hesitate.
-3. **The list.** (a) Rows of icon and title, small; (b) live pictures of the
-   windows. Proposed: **(a)** now: it is what the whitepaper describes,
-   reads at a glance with many terminal windows, and costs no window
-   pictures; (b) later, with the dock's cards.
-4. **Alt+`.** (a) Yes, among the focused application's windows; (b) not
-   now. Proposed: **(a)**: small once the list exists, and the terminal's
-   windows are all one application.
+Dave: snapping off by default, sane defaults, every choice in the settings
+app; the dock counts as the edge as its own hide setting says. So each
+question became a setting with the proposed answer as its default:
+
+1. **The top edge**: Maximizes (default) or Top half.
+2. **Edges between screens**: Never snap (default) or Snap after a short
+   press.
+3. **The list**: rows of icon and title. Live window pictures are not a
+   setting yet; they come with the dock's cards.
+4. **Alt+`**: on (default), switchable.
