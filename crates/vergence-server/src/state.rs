@@ -81,6 +81,9 @@ pub struct Server {
     pub snap: crate::snap::Snap,
     /// Dialogs going with their parents, a modal one's flash (dialogs.rs).
     pub dialogs: crate::dialogs::Dialogs,
+    /// Windows tinted with the wallpaper behind them (tint.rs): the switch, and what each was told.
+    pub tint_on: bool,
+    pub tints: crate::tint::Tints,
     /// Full-screen windows and where each was before (fullscreen.rs).
     pub fullscreen: std::collections::HashMap<Win, smithay::utils::Rectangle<i32, Logical>>,
     /// The last press on a title bar, for double-click to maximize.
@@ -251,6 +254,8 @@ impl Server {
             snap: Default::default(),
             fullscreen: Default::default(),
             dialogs: Default::default(),
+            tint_on: true,
+            tints: Default::default(),
             shot_pending: Vec::new(),
             title_font: crate::text::TextFont::load(),
             frost: None,

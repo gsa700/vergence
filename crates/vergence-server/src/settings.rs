@@ -312,6 +312,8 @@ impl Server {
                 state.shelf_reload();
                 // Snapping's choices (snap.rs).
                 state.snap_reload();
+                // Wallpaper tint's switch (tint.rs).
+                state.tint_reload();
                 // X11 applications turned on (state.rs).
                 state.x11_follow();
                 let new = load();

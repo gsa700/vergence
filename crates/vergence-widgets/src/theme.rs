@@ -107,7 +107,21 @@ impl Theme {
     pub fn ground(&self) -> Color {
         Color { a: (self.opacity.clamp(0.0, 1.0) * 255.0).round() as u8, ..self.page }
     }
+
+    /// The theme with a little of `tint` (the wallpaper's color behind the
+    /// window) in its grounds: the page, the sidebar and the cards, 8%. Text
+    /// keeps its colors; the grounds move too little to change what reads.
+    pub fn tinted(&self, tint: Color) -> Theme {
+        let mix = |c: Color| {
+            let m = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * TINT_MIX).round() as u8;
+            Color { r: m(c.r, tint.r), g: m(c.g, tint.g), b: m(c.b, tint.b), a: c.a }
+        };
+        Theme { page: mix(self.page), sidebar: mix(self.sidebar), card: mix(self.card), ..self.clone() }
+    }
 }
+
+/// How much of the wallpaper's color a tinted window's grounds take.
+pub const TINT_MIX: f32 = 0.08;
 
 impl Default for Theme {
     fn default() -> Theme {

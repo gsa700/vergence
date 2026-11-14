@@ -149,6 +149,37 @@ pub struct Wallpaper {
     pictures: HashMap<String, (u32, u32, Look, MemoryRenderBuffer)>,
     requested: HashSet<(String, u32, u32, Look)>,
     jobs: std::sync::mpsc::Sender<Job>,
+    /// Per output name: the picture's colors averaged over a 32 x 18 grid
+    /// (tint.rs: windows take a little of the wallpaper behind them), and a
+    /// number that changes whenever a grid does.
+    pub grids: HashMap<String, Vec<[u8; 3]>>,
+    pub grid_gen: u64,
+}
+
+/// The color grid's size.
+pub const GRID_W: usize = 32;
+pub const GRID_H: usize = 18;
+
+/// A picture's colors averaged over the grid, every few pixels sampled.
+fn grid_of(rgba: &[u8], w: u32, h: u32) -> Vec<[u8; 3]> {
+    let (w, h) = (w as usize, h as usize);
+    let mut sums = vec![[0u64; 4]; GRID_W * GRID_H];
+    let step = ((w * h) / 400_000).max(1).isqrt().max(1);
+    for y in (0..h).step_by(step) {
+        let gy = y * GRID_H / h.max(1);
+        for x in (0..w).step_by(step) {
+            let gx = x * GRID_W / w.max(1);
+            let i = (y * w + x) * 4;
+            if i + 2 < rgba.len() {
+                let s = &mut sums[gy * GRID_W + gx];
+                s[0] += rgba[i] as u64;
+                s[1] += rgba[i + 1] as u64;
+                s[2] += rgba[i + 2] as u64;
+                s[3] += 1;
+            }
+        }
+    }
+    sums.iter().map(|s| if s[3] == 0 { [0, 0, 0] } else { [(s[0] / s[3]) as u8, (s[1] / s[3]) as u8, (s[2] / s[3]) as u8] }).collect()
 }
 
 impl Server {
@@ -169,6 +200,8 @@ impl Server {
             pictures: HashMap::new(),
             requested: HashSet::new(),
             jobs: job_tx,
+            grids: HashMap::new(),
+            grid_gen: 0,
         };
         w.reload_if_changed();
         self.wallpaper = Some(w);
@@ -198,13 +231,19 @@ impl Server {
         }
         match d.rgba {
             Some(rgba) => {
+                w.grids.insert(d.output.clone(), grid_of(&rgba, d.w, d.h));
                 let buffer = MemoryRenderBuffer::from_slice(&rgba, Fourcc::Abgr8888, (d.w as i32, d.h as i32), 1, Transform::Normal, None);
                 w.pictures.insert(d.output, (d.w, d.h, d.look, buffer));
             }
             None => {
+                // The color alone: every cell of it.
+                let c = parse_color(&d.look.color);
+                let rgb = [(c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8];
+                w.grids.insert(d.output.clone(), vec![rgb; GRID_W * GRID_H]);
                 w.pictures.remove(&d.output);
             }
         }
+        w.grid_gen += 1;
         self.redraw_all();
     }
 

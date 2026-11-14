@@ -208,6 +208,20 @@ The settings app is the first sidebar window.
   Windows, Dock, back, back, forward, forward: the title Windows, Dock,
   Windows, Appearance, Windows, Dock, the chevrons enabled and faint to
   match. 440 tests on Hubble, kepler and Techbench.
+- **Step 6 in** (2026-11-14): wallpaper tint. wallpaper.rs keeps each
+  screen's picture averaged over a 32 x 18 grid (worked out once when the
+  picture is ready; the color alone fills it where there is no picture);
+  tint.rs averages the cells under each native window and sends `WinEvent::Tint`
+  (bus protocol v6) when the color changes by more than a little, looked at
+  each frame, at most five times a second for one window, and None when
+  tinting is off (light style, Reduce transparency, High contrast, or
+  desktop.toml `[appearance] wallpaper-tint = false`, the Appearance page's
+  new switch, on by default). The toolkit passes it in `Frame::tint`;
+  vergence-widgets' `Theme::tinted` mixes 8% of it into the page, sidebar and
+  card grounds. On Hubble in dark style, the settings sidebar at one place:
+  (41, 39, 39) tinted against (38, 38, 40) with the switch off: warmed by the
+  sunset wallpaper, slight as meant. 441 tests on Hubble, kepler and
+  Techbench.
 
 ## Steps
 

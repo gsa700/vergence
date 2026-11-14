@@ -355,6 +355,10 @@ pub enum WinEvent {
     TabMenu { window: u32, tab: u32, entry: u32 },
     /// One of the program's own bar buttons ([`Bar::Tools`]) was pressed.
     BarButton { window: u32, id: u32 },
+    /// The wallpaper's average color behind the window (0xRRGGBB), for it to
+    /// mix a little into its grounds; None: no tint (light style, the switch
+    /// off, Reduce transparency or High contrast).
+    Tint { window: u32, rgb: Option<u32> },
 }
 
 pub(crate) mod op {
@@ -405,6 +409,7 @@ pub(crate) mod op {
     pub const TAB_JOIN: u16 = 125;
     pub const TAB_MENU: u16 = 126;
     pub const BAR_BUTTON: u16 = 127;
+    pub const TINT: u16 = 128;
 
     /// Whether an opcode is a window message's (either way).
     pub fn is_window(opcode: u16) -> bool {
@@ -943,6 +948,15 @@ impl WinEvent {
                 e.u32(*window).u32(*id);
                 e
             }
+            WinEvent::Tint { window, rgb } => {
+                let mut e = Encoder::frame(op::TINT);
+                e.u32(*window);
+                match rgb {
+                    Some(c) => e.bool(true).u32(*c & 0xff_ffff),
+                    None => e.bool(false),
+                };
+                e
+            }
             WinEvent::TabMenu { window, tab, entry } => {
                 let mut e = Encoder::frame(op::TAB_MENU);
                 e.u32(*window).u32(*tab).u32(*entry);
@@ -1014,6 +1028,11 @@ impl WinEvent {
             op::TAB_JOIN => WinEvent::TabJoin { window: d.u32()?, tab: d.u32()?, into: d.u32()?, to: d.u32()? },
             op::TAB_MENU => WinEvent::TabMenu { window: d.u32()?, tab: d.u32()?, entry: d.u32()? },
             op::BAR_BUTTON => WinEvent::BarButton { window: d.u32()?, id: d.u32()? },
+            op::TINT => {
+                let window = d.u32()?;
+                let rgb = if d.bool()? { Some(d.u32()? & 0xff_ffff) } else { None };
+                WinEvent::Tint { window, rgb }
+            }
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -1203,6 +1222,8 @@ mod tests {
             WinEvent::TabJoin { window: 1, tab: 4, into: 2, to: 0 },
             WinEvent::TabMenu { window: 1, tab: 4, entry: 1 },
             WinEvent::BarButton { window: 1, id: 2 },
+            WinEvent::Tint { window: 1, rgb: Some(0x203a5c) },
+            WinEvent::Tint { window: 1, rgb: None },
         ];
         for m in all {
             let (bytes, fds) = m.encode().unwrap();

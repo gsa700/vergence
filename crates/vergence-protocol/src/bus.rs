@@ -19,12 +19,14 @@
 //! window styles milestone 1): a window says its kind, whether it is modal,
 //! and its smallest and largest size (`Style`). Version 5 (2026-11-14): a
 //! bar may carry the program's own buttons and say where its title starts
-//! (`Bar::Tools`), their presses heard as `BarButton`.
+//! (`Bar::Tools`), their presses heard as `BarButton`. Version 6
+//! (2026-11-14): the server tells a window the wallpaper's color behind it
+//! (`Tint`), for a window that mixes a little of it into its grounds.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

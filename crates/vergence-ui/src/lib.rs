@@ -130,6 +130,10 @@ pub struct Frame {
     /// takes input (the bar's presses are the server's). Input positions are
     /// in the scene's own points, the strip included.
     pub top: f32,
+    /// The wallpaper's color behind the window, for a little of it in its
+    /// grounds (window styles milestone 1: the server sends it in dark style
+    /// only); None: no tint.
+    pub tint: Option<Color>,
 }
 
 /// What the bar's description is made of ([`App::bar`]): the native
@@ -1736,7 +1740,7 @@ impl<'a> Runner<'a> {
         let t = Instant::now();
         let w = &self.windows[i];
         let bar_h = w.bar_h();
-        let frame = Frame { width: w.width as f32, height: (w.height as f32 - bar_h).max(1.0), scale: w.scale120 as f32 / 120.0, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: false, top: 0.0 };
+        let frame = Frame { width: w.width as f32, height: (w.height as f32 - bar_h).max(1.0), scale: w.scale120 as f32 / 120.0, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: false, top: 0.0 , tint: None };
         let mut scene = self.windows[i].app.get().scene(&frame, &mut self.fonts);
         if self.windows[i].frame {
             let title = self.windows[i].app.get().title();

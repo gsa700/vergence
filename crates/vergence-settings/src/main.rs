@@ -154,6 +154,8 @@ enum Message {
     Frost(usize),
     FrontTab(usize),
     Transparency(bool),
+    /// Windows tinted with the wallpaper's color (window styles milestone 1).
+    WallpaperTint(bool),
     /// The size of controls: the desktop's (Appearance), a screen's own (Screens).
     Controls(usize),
     ScreenControls(usize),
@@ -609,6 +611,9 @@ impl App {
             }),
             Message::Transparency(on) => self.save_appearance(|t| {
                 t.insert("reduce-transparency".into(), on.into());
+            }),
+            Message::WallpaperTint(on) => self.save_appearance(|t| {
+                t.insert("wallpaper-tint".into(), on.into());
             }),
             Message::Controls(i) => self.save_appearance(|t| {
                 t.insert("controls".into(), CONTROLS_VALUES[i.min(2)].into());
@@ -1155,6 +1160,11 @@ impl App {
                     setting("Frost", "How much of a window shows through its bar. Titles stay readable whatever is under them.", choice(frost_names, Some(frost), Message::Frost).width(Length::Fixed(160.0)).name("Frost")),
                     setting("Tab in front", "In the page's own color, joined to it, or frosted like the rest of the bar.", choice(front_names, Some(front), Message::FrontTab).width(Length::Fixed(160.0)).name("Tab in front")),
                     setting("Size of controls", "Window bars, tabs and buttons. A screen with a touch panel uses Large unless its own setting says otherwise (Screens).", choice(controls_names, Some(controls), Message::Controls).width(Length::Fixed(160.0)).name("Size of controls")),
+                    setting(
+                        "Tint windows with the wallpaper's color",
+                        "In dark style, a window takes a little of the color of the wallpaper behind it. Off with Reduce transparency and High contrast.",
+                        switch(self.desktop.get("appearance").and_then(|a| a.get("wallpaper-tint")).and_then(|v| v.as_bool()).unwrap_or(true), Message::WallpaperTint).name("Tint windows with the wallpaper's color"),
+                    ),
                 ]),
                 self.group(Some("Accessibility"), vec![
                     setting("High contrast", "Apps that support it draw stronger edges and text. The desktop's bars are solid.", switch(contrast, Message::Contrast).name("High contrast")),

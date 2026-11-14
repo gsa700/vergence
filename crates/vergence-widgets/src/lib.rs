@@ -155,6 +155,8 @@ struct Host<P: Program> {
     meaning_sent: Option<vergence_ui::MeaningTree>,
     /// The bar last handed to the server: sent again only when it differs.
     bar_sent: Option<vergence_ui::Bar>,
+    /// The tint the theme was last built with.
+    tint: Option<Color>,
 }
 
 /// The toolkit's own timer (the caret's blink).
@@ -319,9 +321,14 @@ impl<P: Program> Host<P> {
             self.scale = frame.scale;
             self.stale |= self.program.scale(frame.scale);
         }
-        if self.stale || self.laid_at != (frame.width, frame.height) || self.theme.top != frame.top {
+        if self.stale || self.laid_at != (frame.width, frame.height) || self.theme.top != frame.top || self.tint != frame.tint {
             self.theme = self.program.theme();
             self.theme.top = frame.top;
+            // The wallpaper's color behind the window (tint, window styles milestone 1).
+            if let Some(c) = frame.tint {
+                self.theme = self.theme.tinted(c);
+            }
+            self.tint = frame.tint;
             let root = self.program.view(&self.theme);
             let mut measure = FontsMeasure { fonts, family: &self.theme.font };
             self.ui.layout(root, frame.width, frame.height, &mut measure, self.theme.text_size);
@@ -344,14 +351,14 @@ impl<P: Program> Host<P> {
 /// `Window::open_window` (its opener is its parent: a dialog's, say).
 pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
     let theme = program.theme();
-    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None })
+    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None, tint: None })
 }
 
 /// Opens the program's window and runs until it is closed. `size` is the
 /// size asked for, in reference units.
 pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {
     let theme = program.theme();
-    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None };
+    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None, tint: None };
     vergence_ui::run(&mut host, size)
 }
 

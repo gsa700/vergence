@@ -628,6 +628,8 @@ impl Server {
         self.layouts_tick();
         // Dialogs go where their parents went (dialogs.rs).
         self.dialogs_follow();
+        // Native windows told the wallpaper's color behind them (tint.rs).
+        self.tint_tick();
         // In front of everything: the desktop menu, if open (menu.rs).
         let mut elements = self.menu_elements(renderer, out, scale);
         // Then notifications, in front of every window (notify.rs).

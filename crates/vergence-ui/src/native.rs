@@ -106,6 +106,8 @@ struct Win<'a> {
     bar_by_server: bool,
     /// The strip under the server's bar it draws (look milestone 1), points.
     inset: f32,
+    /// The wallpaper's color behind it, as the server last said (Tint).
+    tint: Option<Color>,
 }
 
 /// The connection and what a program's windows share.
@@ -277,6 +279,7 @@ impl<'a> Win<'a> {
             timers: Vec::new(),
             bar_by_server,
             inset: 0.0,
+            tint: None,
         }
     }
 }
@@ -674,6 +677,13 @@ impl<'a> Native<'a> {
             // The bar's events (bar milestone 1): what was done with the tabs the server drew.
             WinEvent::TabChosen { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::Chosen(tab), w))?,
             WinEvent::BarButton { window, id } => self.with_window(window, |app, w| app.bar_button(id, w))?,
+            WinEvent::Tint { window, rgb } => {
+                if let Some(i) = self.index(window) {
+                    let w = &mut self.windows[i];
+                    w.tint = rgb.map(|c| Color::rgb((c >> 16) as u8, (c >> 8) as u8, c as u8));
+                    w.dirty = true;
+                }
+            }
             WinEvent::TabClose { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::Close(tab), w))?,
             WinEvent::TabCloseOthers { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::CloseOthers(tab), w))?,
             WinEvent::TabNew { window } => self.with_window(window, |app, w| app.tab(TabEvent::New, w))?,
@@ -802,7 +812,7 @@ impl<'a> Native<'a> {
     fn draw(&mut self, i: usize) -> io::Result<()> {
         let t = Instant::now();
         let w = &mut self.windows[i];
-        let frame = Frame { width: w.width as f32, height: w.height as f32 + w.inset, scale: w.scale as f32, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: w.bar_by_server, top: w.inset };
+        let frame = Frame { width: w.width as f32, height: w.height as f32 + w.inset, scale: w.scale as f32, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: w.bar_by_server, top: w.inset , tint: w.tint };
         let id = w.id;
         let scene = w.app.get().scene(&frame, &mut self.fonts);
         let background = self.windows[i].app.get().background();
