@@ -29,7 +29,8 @@ const GOLDEN_ANGLE: f32 = 2.399_963_2;
 /// Its own uniforms: `texel` (vec2, one pixel of the picture in texture
 /// coordinates), `radius` (float, the spiral's reach in pixels), `tint`
 /// (vec4: the style's bar ground, sRGB, and the frost's own strength),
-/// `ink` (vec3, sRGB) and `need` (float, the contrast to keep).
+/// `ink` (vec3, sRGB), `need` (float, the contrast to keep) and `corner`
+/// (float, the bar's top corners' radius in pixels; 0 for square).
 pub const FROST_SHADER: &str = r#"#version 100
 
 //_DEFINES_
@@ -52,6 +53,7 @@ uniform float radius;
 uniform vec4 tint;
 uniform vec3 ink;
 uniform float need;
+uniform float corner;
 
 float lin(float c) {
     return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
@@ -101,7 +103,16 @@ void main() {
         }
         strength = high;
     }
-    gl_FragColor = vec4(mix(under, tint.rgb, strength), 1.0) * alpha;
+    // The bar's top corners, rounded (look milestone 1, step 7; 0: square).
+    float cover = 1.0;
+    if (corner > 0.0) {
+        vec2 p = v_coords / texel;
+        if (p.y < corner) {
+            vec2 c = vec2(clamp(p.x, corner, 1.0 / texel.x - corner), corner);
+            cover = clamp(corner - distance(p, c) + 0.5, 0.0, 1.0);
+        }
+    }
+    gl_FragColor = vec4(mix(under, tint.rgb, strength), 1.0) * (alpha * cover);
 }
 "#;
 
@@ -268,7 +279,7 @@ mod tests {
 
     #[test]
     fn the_shader_names_what_the_server_sets() {
-        for name in ["texel", "radius", "tint", "ink", "need", "//_DEFINES_", "v_coords", "alpha"] {
+        for name in ["texel", "radius", "tint", "ink", "need", "corner", "//_DEFINES_", "v_coords", "alpha"] {
             assert!(FROST_SHADER.contains(name), "{name}");
         }
         assert!(FROST_SHADER.contains(&format!("i < {TAPS}")));

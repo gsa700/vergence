@@ -310,6 +310,23 @@ Bar Proportions"):
   tab, the frosted one, and the solid bar (raw pixels: solid 56,56,56,
   frosted 51,54,55). 390 tests on all three. The settings app's new rows
   seen on Hubble (vctl tree and a shot).
+- **Step 7, the native windows done** (2026-11-13): rounded corners at
+  the one radius. vergence-render's `round` module: `ROUND_SHADER` cuts a
+  picture's bottom corners (softened over a pixel; `cover` is its
+  arithmetic, tested); the frost shader takes a `corner` uniform for the
+  bar's top corners. The server rounds a native window whose picture is on
+  the GPU and that is not maximized: its bar picture drawn clipped to the
+  radius at the top, its frost masked, its picture through the rounding
+  program, and its border's straight lines stopped short of the corners
+  where four small arcs per window (RADIUS + EDGE square, drawn per scale
+  and color: `corner_pictures`, kept in the window's Decor so each element
+  appears once a frame) carry the line round, concentric with the
+  window's corner. Seen on Hubble at 1:1 zoom: bar corner, picture corner
+  and border arc. 392 tests on all three. **Left of step 7**: windows
+  drawn in shared memory and Wayland/X11 windows stay square (their
+  pictures go through no shader of ours yet; rounding only their border
+  would leave content past the curve); the resize corners were not
+  re-checked by hand (the band is outside the curve, unchanged).
 
 ## Steps
 

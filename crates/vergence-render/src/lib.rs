@@ -23,6 +23,7 @@
 
 pub mod blur;
 pub mod cpu;
+pub mod round;
 mod gl;
 pub mod gpu;
 

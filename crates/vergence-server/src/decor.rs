@@ -102,11 +102,16 @@ pub struct Decor {
     light: bool,
     /// One bar picture per output scale (key: the scale's bits).
     bars: std::collections::HashMap<u64, BarPicture>,
+    /// The border's four rounded corners per output scale, with the color
+    /// they were drawn in (its own pictures: an element appears once a frame).
+    corners: std::collections::HashMap<u64, ([u8; 3], [MemoryRenderBuffer; 4])>,
 }
 
 /// A bar drawn for one scale: what it shows, and the pixels.
 struct BarPicture {
-    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, bool, bool, Vec<bool>, bool),
+    /// What it shows: title, width, focused, hover, button layout, tabs, the
+    /// one in front, accent; then light, frosted, alerts, frosted front tab, rounded.
+    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, (bool, bool, Vec<bool>, bool, bool)),
     buffer: MemoryRenderBuffer,
     /// Its pixels' width and height (the scale's, not the bar's points).
     px: (i32, i32),
@@ -131,6 +136,7 @@ impl Decor {
             active: false,
             light: false,
             bars: Default::default(),
+            corners: Default::default(),
         }
     }
 }
@@ -175,6 +181,24 @@ fn physical(r: Rectangle<f64, Logical>, output_loc: Point<i32, Logical>, scale: 
     let a = (r.loc - output_loc.to_f64()).to_physical(scale).to_i32_round::<i32>();
     let b = (r.loc + r.size.to_point() - output_loc.to_f64()).to_physical(scale).to_i32_round::<i32>();
     Rectangle::new(a, (b.x - a.x, b.y - a.y).into())
+}
+
+/// The border's four corner arcs (top left, top right, bottom left, bottom
+/// right) for one scale and color: each RADIUS + EDGE points square, the
+/// line EDGE wide on the circle concentric with the window's own corner.
+fn corner_pictures(fonts: &mut vergence_text::Fonts, scale: f64, rgb: [u8; 3]) -> Option<[MemoryRenderBuffer; 4]> {
+    let e = vergence_look::EDGE;
+    let s = vergence_look::RADIUS + e;
+    let color = vergence_scene::Color::rgb(rgb[0], rgb[1], rgb[2]);
+    let mut out = Vec::with_capacity(4);
+    for (right, bottom) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut scene = vergence_scene::Scene::new(s, s);
+        let at = |far: bool| if far { s - e / 2.0 - 2.0 * s } else { e / 2.0 };
+        scene.stroke(vergence_scene::Rect::new(at(right), at(bottom), 2.0 * s, 2.0 * s), vergence_look::RADIUS + e / 2.0, e, color);
+        let p = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)).ok()?;
+        out.push(MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None));
+    }
+    out.try_into().ok()
 }
 
 /// A native window's picture as a GPU texture, with its size in pixels and
@@ -245,6 +269,24 @@ impl Server {
     /// shader that would not compile. Only windows that draw under their bar
     /// are frosted (their picture's top is what lies under it); the others
     /// keep a solid bar.
+    /// The rounded corners' program, compiled on first use; None if it would
+    /// not compile (windows are then square).
+    fn round_program(&mut self, renderer: &mut GlesRenderer) -> Option<smithay::backend::renderer::gles::GlesTexProgram> {
+        self.round
+            .get_or_insert_with(|| {
+                use smithay::backend::renderer::gles::{UniformName, UniformType};
+                let uniforms = [UniformName::new("size", UniformType::_2f), UniformName::new("radius", UniformType::_1f)];
+                match renderer.compile_custom_texture_shader(vergence_render::round::ROUND_SHADER, &uniforms) {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        tracing::warn!("corners: the shader did not compile, windows stay square: {e:?}");
+                        None
+                    }
+                }
+            })
+            .clone()
+    }
+
     fn frost_program(&mut self, renderer: &mut GlesRenderer) -> Option<smithay::backend::renderer::gles::GlesTexProgram> {
         if self.reduce_transparency() {
             return None;
@@ -272,6 +314,7 @@ impl Server {
                     UniformName::new("tint", UniformType::_4f),
                     UniformName::new("ink", UniformType::_3f),
                     UniformName::new("need", UniformType::_1f),
+                    UniformName::new("corner", UniformType::_1f),
                 ];
                 match renderer.compile_custom_texture_shader(vergence_render::blur::FROST_SHADER, &uniforms) {
                     Ok(p) => {
@@ -413,6 +456,7 @@ impl Server {
         let light = self.light_style();
         let style = vergence_look::bar_look(light);
         let frost = self.frost_program(renderer);
+        let round = self.round_program(renderer);
         let strength = vergence_look::frost_strength(self.look_setting("frost"));
         let front_frosted = self.look_setting("front-tab") == 1;
         self.decor.retain(|w, _| w.alive());
@@ -446,18 +490,50 @@ impl Server {
                     d.light = light;
                     d.commit.increment();
                 }
+                // Rounded corners (look milestone 1, step 7): a native window whose
+                // picture is on the GPU and that is not maximized; the others stay
+                // square until their pictures can be cut too.
+                let rounded = round.is_some() && frame.is_some() && !self.restore.contains_key(&w) && native_texture(renderer, &w).is_some();
+                let d = self.decor.get_mut(&w).unwrap();
                 let solid = |i: usize, r: Rectangle<f64, Logical>, c: [f32; 4]| {
                     SceneElement::Solid(SolidColorRenderElement::new(d.ids[i].clone(), physical(r, out.loc, scale), d.commit, c, Kind::Unspecified))
                 };
                 // The border line, just outside the window (ids 6-9).
                 if let Some(b) = border {
                     let (r, e) = (b.to_f64(), EDGE as f64);
-                    let c = if active { style.edge.floats() } else { style.edge_off.floats() };
-                    elements.push(solid(6, Rectangle::new((r.loc.x - e, r.loc.y - e).into(), (r.size.w + 2.0 * e, e).into()), c));
-                    elements.push(solid(7, Rectangle::new((r.loc.x - e, r.loc.y + r.size.h).into(), (r.size.w + 2.0 * e, e).into()), c));
-                    elements.push(solid(8, Rectangle::new((r.loc.x - e, r.loc.y).into(), (e, r.size.h).into()), c));
-                    elements.push(solid(9, Rectangle::new((r.loc.x + r.size.w, r.loc.y).into(), (e, r.size.h).into()), c));
+                    let edge = if active { style.edge } else { style.edge_off };
+                    let c = edge.floats();
+                    // Rounded: the straight lines stop short of the corners, where
+                    // four small arcs (drawn once per scale and color) carry the line round.
+                    let s = if rounded { vergence_look::RADIUS as f64 + e } else { 0.0 };
+                    let (ox, oy, ow, oh) = (r.loc.x - e, r.loc.y - e, r.size.w + 2.0 * e, r.size.h + 2.0 * e);
+                    elements.push(solid(6, Rectangle::new((ox + s, oy).into(), (ow - 2.0 * s, e).into()), c));
+                    elements.push(solid(7, Rectangle::new((ox + s, oy + oh - e).into(), (ow - 2.0 * s, e).into()), c));
+                    elements.push(solid(8, Rectangle::new((ox, oy + s).into(), (e, oh - 2.0 * s).into()), c));
+                    elements.push(solid(9, Rectangle::new((ox + ow - e, oy + s).into(), (e, oh - 2.0 * s).into()), c));
+                    if rounded {
+                        let rgb = [edge.0, edge.1, edge.2];
+                        let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
+                        let d = self.decor.get_mut(&w).unwrap();
+                        let fresh = d.corners.get(&scale.to_bits()).is_none_or(|(c, _)| *c != rgb);
+                        if fresh && let Some(set) = corner_pictures(fonts, scale, rgb) {
+                            d.corners.insert(scale.to_bits(), (rgb, set));
+                        }
+                        if let Some((_, set)) = d.corners.get(&scale.to_bits()) {
+                            let side = s.round() as i32;
+                            let px = (side as f64 * scale).round() as i32;
+                            let whole = Rectangle::<f64, Logical>::from_size((px as f64, px as f64).into());
+                            let places = [(ox, oy), (ox + ow - s, oy), (ox, oy + oh - s), (ox + ow - s, oy + oh - s)];
+                            for (buffer, (x, y)) in set.iter().zip(places) {
+                                let at = (Point::<f64, Logical>::from((x, y)) - out.loc.to_f64()).to_physical(scale);
+                                if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(renderer, at, buffer, None, Some(whole), Some((side, side).into()), Kind::Unspecified) {
+                                    elements.push(SceneElement::Memory(e));
+                                }
+                            }
+                        }
+                    }
                 }
+                let d = self.decor.get_mut(&w).unwrap();
                 // A native window that draws under its bar, with its picture on the
                 // GPU: the strip at the picture's top is frosted into the bar.
                 let under = frost.as_ref().filter(|_| w.native().is_some_and(|n| n.inset() > 0)).and_then(|_| native_texture(renderer, &w));
@@ -485,10 +561,10 @@ impl Server {
                         alerts = order.iter().map(|&i| alerts.get(i).copied().unwrap_or(false)).collect();
                         shown = order.iter().position(|&i| i == front).unwrap_or(0);
                     }
-                    let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent, light, frosted, alerts.clone(), front_frosted);
+                    let key = (title.clone(), width, active, hover, layout_text.clone(), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded));
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
-                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, false, false, Vec::new(), false),
+                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, (false, false, Vec::new(), false, false)),
                         buffer: MemoryRenderBuffer::new(Fourcc::Abgr8888, (1, 1), 1, Transform::Normal, None),
                         px: (1, 1),
                     });
@@ -526,7 +602,14 @@ impl Server {
                             shown,
                             hover,
                         };
+                        // Rounded: the bar's top corners cut to the one radius (its bottom goes on into the window).
+                        if rounded {
+                            scene.push_clip(vergence_scene::Rect::new(0.0, 0.0, width as f32, TITLE_H as f32 + vergence_look::RADIUS), vergence_look::RADIUS);
+                        }
                         vergence_bar::draw(&mut scene, fonts, &f.layout, &look);
+                        if rounded {
+                            scene.pop_clip();
+                        }
                         match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)) {
                             Ok(p) => {
                                 picture.buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
@@ -571,6 +654,7 @@ impl Server {
                             Uniform::new("tint", UniformValue::_4f(gr, gg, gb, strength)),
                             Uniform::new("ink", UniformValue::_3f(ir, ig, ib)),
                             Uniform::new("need", UniformValue::_1f(vergence_look::frost_need(light, active))),
+                            Uniform::new("corner", UniformValue::_1f(if rounded { vergence_look::RADIUS * per_point as f32 } else { 0.0 })),
                         ];
                         elements.push(SceneElement::Frost(TextureShaderElement::new(inner, program.clone(), uniforms)));
                     }
@@ -595,7 +679,19 @@ impl Server {
                         crate::native::Content::Gpu(_) => {
                             if let Some((t, _, _)) = native_texture(renderer, &w) {
                                 let e = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at.to_f64(), &t, None, Some(whole), Some(p.logical), Kind::Unspecified);
-                                elements.push(SceneElement::Texture(e));
+                                // Its bottom corners cut to the one radius, unless maximized.
+                                match round.as_ref().filter(|_| !self.restore.contains_key(&w) && self.frame_of(&w).is_some()) {
+                                    Some(program) => {
+                                        use smithay::backend::renderer::gles::{Uniform, UniformValue, element::TextureShaderElement};
+                                        let per_point = p.px.w as f32 / p.logical.w.max(1) as f32;
+                                        let uniforms = vec![
+                                            Uniform::new("size", UniformValue::_2f(p.px.w as f32, p.px.h as f32)),
+                                            Uniform::new("radius", UniformValue::_1f(vergence_look::RADIUS * per_point)),
+                                        ];
+                                        elements.push(SceneElement::Frost(TextureShaderElement::new(e, program.clone(), uniforms)));
+                                    }
+                                    None => elements.push(SceneElement::Texture(e)),
+                                }
                             }
                         }
                     }
