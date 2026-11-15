@@ -102,11 +102,17 @@ enum Drag {
     /// A finger on a scrolling place: it scrolls once it has moved.
     Flick { id: Id, finger: i32, start: f32, last: f32, at: Instant, moved: bool, velocity: f32 },
     Drawing { id: Id, with: With },
+    /// Choosing text in a text area with the pointer.
+    AreaSelect { id: Id },
+    /// A text area's scroll bar.
+    AreaBar { id: Id, grab: f32 },
+    /// A finger on a text area: it scrolls once it has moved, else it is a tap.
+    AreaTouch { id: Id, finger: i32, start: f32, last: f32, moved: bool },
 }
 
 fn drag_id(d: &Drag) -> Id {
     match *d {
-        Drag::Slider { id, .. } | Drag::Select { id } | Drag::Bar { id, .. } | Drag::Flick { id, .. } | Drag::Drawing { id, .. } => id,
+        Drag::Slider { id, .. } | Drag::Select { id } | Drag::Bar { id, .. } | Drag::Flick { id, .. } | Drag::Drawing { id, .. } | Drag::AreaSelect { id } | Drag::AreaBar { id, .. } | Drag::AreaTouch { id, .. } => id,
     }
 }
 
@@ -161,6 +167,8 @@ pub struct Ui<M> {
     over_drawing: Option<Id>,
     /// When momentum was last moved on.
     last_tick: Option<Instant>,
+    /// Shift was held at the last press (a click in a text area extends the selection).
+    shift_press: bool,
 }
 
 impl<M> Default for Ui<M> {
@@ -185,6 +193,7 @@ impl<M> Default for Ui<M> {
             click: None,
             over_drawing: None,
             last_tick: None,
+            shift_press: false,
         }
     }
 }
@@ -507,7 +516,7 @@ impl<M: Clone> Ui<M> {
         if self.steady {
             return None;
         }
-        let focused_field = self.focus.and_then(|id| self.node(id)).is_some_and(|n| matches!(n.what, What::Field { .. }));
+        let focused_field = self.focus.and_then(|id| self.node(id)).is_some_and(|n| matches!(n.what, What::Field { .. } | What::Area { .. }));
         if !focused_field {
             return None;
         }
@@ -523,6 +532,35 @@ impl<M: Clone> Ui<M> {
 
     fn caret_moved(&mut self) {
         self.blink = Instant::now();
+    }
+
+    /// The text area `id`'s document, if it is one.
+    fn area_doc(&self, id: Id) -> Option<crate::textarea::TextDoc> {
+        match self.node(id).map(|n| &n.what) {
+            Some(What::Area { doc, .. }) => Some(doc.clone()),
+            _ => None,
+        }
+    }
+
+    /// Tells the program a text area's text or caret changed.
+    fn area_changed(&self, id: Id, r: &mut Response<M>) {
+        if let Some(What::Area { on_change: Some(m), .. }) = self.node(id).map(|n| &n.what) {
+            r.messages.push(m.clone());
+        }
+    }
+
+    /// What a key or a paste did in text area `id`, for the program and the window.
+    fn area_effect(&mut self, id: Id, e: crate::textarea::Effect, r: &mut Response<M>) {
+        if e.copy.is_some() {
+            r.copy = e.copy;
+        }
+        r.paste |= e.paste;
+        if e.text || e.moved {
+            self.caret_moved();
+            self.area_changed(id, r);
+        }
+        r.redraw = true;
+        r.used = e.used;
     }
 
     /// What pressing `id` does (a button, a switch, a choice's opening).
@@ -861,6 +899,28 @@ impl<M: Clone> Ui<M> {
                 self.drag = Some(Drag::Drawing { id, with });
                 self.tell_drawing(id, Touch::Press { x, y }, r);
             }
+            What::Area { doc, .. } => {
+                let doc = doc.clone();
+                self.focus = Some(id);
+                let grab = doc.borrow().bar_hit(x, y);
+                if let Some(grab) = grab {
+                    doc.borrow_mut().bar_to(y, grab);
+                    self.drag = Some(Drag::AreaBar { id, grab });
+                    return;
+                }
+                let now = Instant::now();
+                let count = match self.click {
+                    Some((t, cid, n)) if cid == id && now.duration_since(t) < self.double && with == With::Pointer => n % 3 + 1,
+                    _ => 1,
+                };
+                self.click = Some((now, id, count));
+                doc.borrow_mut().press(x, y, count, self.shift_press && with == With::Pointer);
+                if with == With::Pointer {
+                    self.drag = Some(Drag::AreaSelect { id });
+                }
+                self.caret_moved();
+                self.area_changed(id, r);
+            }
             // Buttons, switches and choices act when they are let go.
             _ => self.pressed = Some((id, with)),
         }
@@ -878,7 +938,8 @@ impl<M: Clone> Ui<M> {
                     self.tell_drawing(d, Touch::Leave, &mut r);
                 }
             }
-            Input::Button { button: MouseButton::Left, pressed: true, x, y, .. } => {
+            Input::Button { button: MouseButton::Left, pressed: true, x, y, modifiers } => {
+                self.shift_press = modifiers.shift;
                 // Judged where the pointer was at this press, not where it is now.
                 if self.open.is_some() {
                     self.press_with_list_open(x, y, &mut r);
@@ -899,7 +960,7 @@ impl<M: Clone> Ui<M> {
                 match self.drag.take() {
                     Some(Drag::Slider { id, with: With::Pointer, .. }) => self.slider_release(id, &mut r),
                     Some(Drag::Drawing { id, with: With::Pointer }) => self.tell_drawing(id, Touch::Release { x, y }, &mut r),
-                    Some(Drag::Select { .. } | Drag::Bar { .. }) => {
+                    Some(Drag::Select { .. } | Drag::Bar { .. } | Drag::AreaSelect { .. } | Drag::AreaBar { .. }) => {
                         r.used = true;
                         r.redraw = true;
                     }
@@ -914,8 +975,15 @@ impl<M: Clone> Ui<M> {
                     r.used = true;
                 }
             }
-            Input::Scroll { x, y, dy, .. } => {
-                if self.open.is_some() {
+            Input::Scroll { x, y, dx, dy } => {
+                let area = self.target(x, y).and_then(|id| self.area_doc(id));
+                if self.open.is_none()
+                    && let Some(doc) = area
+                {
+                    doc.borrow_mut().wheel(dx * WHEEL, dy * WHEEL);
+                    r.redraw = true;
+                    r.used = true;
+                } else if self.open.is_some() {
                     if let Some((lr, item, n)) = self.list_rect()
                         && let Some(o) = self.open.as_mut()
                     {
@@ -949,7 +1017,12 @@ impl<M: Clone> Ui<M> {
             }
             Input::Paste(ref text) => {
                 if let Some(id) = self.focus {
-                    self.field_insert(id, text, crate::edit::Kind::Other, &mut r);
+                    if let Some(doc) = self.area_doc(id) {
+                        let changed = doc.borrow_mut().insert(text);
+                        self.area_effect(id, crate::textarea::Effect { used: true, text: changed, moved: changed, ..Default::default() }, &mut r);
+                    } else {
+                        self.field_insert(id, text, crate::edit::Kind::Other, &mut r);
+                    }
                 }
             }
             Input::Focus(false) => {
@@ -1004,6 +1077,20 @@ impl<M: Clone> Ui<M> {
                 }
             }
             Some(Drag::Drawing { id, with: With::Pointer }) => self.tell_drawing(id, Touch::Move { x, y, pressed: true }, r),
+            Some(Drag::AreaSelect { id }) => {
+                if let Some(doc) = self.area_doc(id) {
+                    doc.borrow_mut().drag_to(x, y);
+                    self.caret_moved();
+                    self.area_changed(id, r);
+                    r.redraw = true;
+                }
+            }
+            Some(Drag::AreaBar { id, grab }) => {
+                if let Some(doc) = self.area_doc(id) {
+                    doc.borrow_mut().bar_to(y, grab);
+                    r.redraw = true;
+                }
+            }
             _ => {}
         }
         if self.open.is_some() {
@@ -1025,8 +1112,11 @@ impl<M: Clone> Ui<M> {
             r.redraw = true;
         }
         let what = t.and_then(|id| self.node(id)).map(|n| &n.what);
+        let on_bar = matches!(what, Some(What::Area { doc, .. }) if doc.borrow().bar_hit(x, y).is_some());
         r.cursor = Some(match (what, self.drag) {
-            (_, Some(Drag::Select { .. })) | (Some(What::Field { .. }), _) => Cursor::Text,
+            (_, Some(Drag::AreaBar { .. })) => Cursor::Default,
+            (Some(What::Area { .. }), None) if on_bar => Cursor::Default,
+            (_, Some(Drag::Select { .. } | Drag::AreaSelect { .. })) | (Some(What::Field { .. } | What::Area { .. }), _) => Cursor::Text,
             (Some(What::Drawing { .. }), _) | (None, _) => Cursor::Default,
             (Some(_), _) => Cursor::Pointer,
         });
@@ -1070,6 +1160,12 @@ impl<M: Clone> Ui<M> {
                 }
                 if self.open.is_some() {
                     self.press_with_list_open(x, y, r);
+                    return;
+                }
+                // A finger on a text area scrolls it, or taps the caret there.
+                if let Some(id) = self.target(x, y).filter(|id| self.area_doc(*id).is_some()) {
+                    self.drag = Some(Drag::AreaTouch { id, finger, start: y, last: y, moved: false });
+                    r.used = true;
                     return;
                 }
                 let grabs = self.target(x, y).and_then(|id| self.node(id)).map(|n| matches!(n.what, What::Slider { .. } | What::Drawing { .. } | What::Field { .. }));
@@ -1119,6 +1215,15 @@ impl<M: Clone> Ui<M> {
                         }
                     }
                     Some(Drag::Drawing { id, with: With::Finger(f) }) if f == finger => self.tell_drawing(id, Touch::Move { x, y, pressed: true }, r),
+                    Some(Drag::AreaTouch { id, finger: f, start, last, moved }) if f == finger => {
+                        let moved = moved || (y - start).abs() > SLOP;
+                        if moved && let Some(doc) = self.area_doc(id) {
+                            doc.borrow_mut().wheel(0.0, last - y);
+                        }
+                        self.drag = Some(Drag::AreaTouch { id, finger, start, last: if moved { y } else { last }, moved });
+                        r.redraw = true;
+                        r.used = true;
+                    }
                     _ => {
                         r.used = self.pressed.is_some_and(|p| p.1 == With::Finger(finger));
                         r.redraw = r.used;
@@ -1148,6 +1253,18 @@ impl<M: Clone> Ui<M> {
                     Some(Drag::Drawing { id, with: With::Finger(f) }) if f == finger => {
                         self.drag = None;
                         self.tell_drawing(id, if up { Touch::Release { x, y } } else { Touch::Leave }, r);
+                    }
+                    Some(Drag::AreaTouch { id, finger: f, moved, .. }) if f == finger => {
+                        self.drag = None;
+                        if up && !moved && let Some(doc) = self.area_doc(id) {
+                            self.focus = Some(id);
+                            self.ring = false;
+                            doc.borrow_mut().press(x, y, 1, false);
+                            self.caret_moved();
+                            self.area_changed(id, r);
+                        }
+                        r.used = true;
+                        r.redraw = true;
                     }
                     _ => {}
                 }
@@ -1200,6 +1317,16 @@ impl<M: Clone> Ui<M> {
             r.redraw = true;
             r.used = true;
             return;
+        }
+        // A focused text area next: every key it uses, Tab too.
+        if let Some(id) = self.focus
+            && let Some(doc) = self.area_doc(id)
+        {
+            let e = doc.borrow_mut().key(key, text, m);
+            if e.used {
+                self.area_effect(id, e, r);
+                return;
+            }
         }
         // The focused field next: everything but Tab.
         if let Some(id) = self.focus
@@ -1552,6 +1679,13 @@ impl<M: Clone> Ui<M> {
                     draw(scene, fonts, r, theme);
                     scene.pop_clip();
                 }
+                What::Area { doc, .. } => {
+                    let focused = self.focus == Some(n.id);
+                    doc.borrow_mut().draw(scene, fonts, r, theme, focused, self.caret_on());
+                    if ringed {
+                        ring(scene, r, 0.0);
+                    }
+                }
             }
             ink.push(mine);
         }
@@ -1683,6 +1817,13 @@ impl<M: Clone> Ui<M> {
                 What::Scroll { .. } => mk("scroll area", named(String::new()), None, states),
                 What::Picture { .. } => mk("picture", named(String::new()), None, states),
                 What::Drawing { .. } => mk("drawing", named(String::new()), None, states),
+                What::Area { doc, .. } => {
+                    let d = doc.borrow();
+                    if !d.options().editable {
+                        states.insert(0, "read-only");
+                    }
+                    mk("text area", named(String::new()), Some(d.meaning_value()), states)
+                }
                 _ => None,
             };
             slot.push(m.as_ref().map(|_| out.len()));
@@ -1736,6 +1877,7 @@ impl<M> Node<M> {
             What::Field { .. } => true,
             What::Choice { on_select, .. } => on_select.is_some(),
             What::Drawing { on_touch, .. } => on_touch.is_some(),
+            What::Area { .. } => true,
             _ => false,
         }
     }

@@ -634,3 +634,38 @@ fn a_wrapping_row_makes_lines() {
     assert_eq!(bounds(&ui, "t4"), Rect::new(0.0, 60.0, 40.0, 20.0));
     assert_eq!(bounds(&ui, "after").y, 80.0, "the row is as tall as its lines");
 }
+
+/// A text area drawn through the CPU renderer with the machine's fonts:
+/// the line numbers in their gutter, a wrapped line, the selection.
+/// `VERGENCE_SHOT=file.ppm` keeps the picture to look at.
+#[test]
+fn a_text_area_is_drawn() {
+    use vergence_render::Cpu;
+    let theme = Theme::default();
+    let mut fonts = Fonts::system();
+    let text: String = (1..=40).map(|i| if i == 3 { "\tA long line that has to wrap at the edge of the area, more than once, because it goes on and on.\n".to_string() } else { format!("line {i}\n") }).collect();
+    let doc = crate::TextDoc::new(&text);
+    let mut ui = laid(column(vec![crate::text_area(&doc).on_change(Msg::A)]).width(Length::FILL).height(Length::FILL), 360.0, 240.0);
+    // Drawn once to measure, then a triple click chooses the second line.
+    let mut scene = Scene::new(360.0, 240.0);
+    ui.draw(&mut scene, &mut fonts, &theme);
+    let y = 4.0 + 20.0;
+    for _ in 0..3 {
+        press(&mut ui, 100.0, y, true);
+        press(&mut ui, 100.0, y, false);
+    }
+    assert_eq!(doc.borrow().selected_text(), "line 2\n");
+    let mut scene = Scene::new(360.0, 240.0);
+    ui.draw(&mut scene, &mut fonts, &theme);
+    let p = Cpu::new().render(&scene, &mut fonts, 2.0, theme.page).expect("renders");
+    if let Some(path) = std::env::var_os("VERGENCE_SHOT") {
+        let mut out = format!("P6 {} {} 255\n", p.width, p.height).into_bytes();
+        for px in p.data.chunks_exact(4) {
+            out.extend_from_slice(&px[..3]);
+        }
+        std::fs::write(path, out).expect("writes the picture");
+    }
+    assert!(doc.borrow().selection().0 != doc.borrow().selection().1, "a line is chosen");
+    let m = ui.meaning();
+    assert!(m.iter().any(|m| m.role == "text area" && m.states.contains(&"focused")));
+}

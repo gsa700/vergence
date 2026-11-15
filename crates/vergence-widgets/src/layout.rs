@@ -51,6 +51,7 @@ pub(crate) enum What<M> {
     Scroll { content: f32 },
     Picture { image: Arc<Image>, fit: Fit, radius: f32, opacity: f32 },
     Drawing { draw: Draw, on_touch: Option<OnTouch<M>> },
+    Area { doc: crate::textarea::TextDoc, on_change: Option<M> },
 }
 
 pub(crate) struct Node<M> {
@@ -237,7 +238,7 @@ impl Layout<'_> {
                 Size { w: (widest + 2.0 * FIELD_PAD_H + CHEVRON).ceil(), h: self.field_height() }
             }
             Kind::Scroll { child } => self.measure(child, avail),
-            Kind::Picture { .. } | Kind::Drawing { .. } => Size { w: 0.0, h: 0.0 },
+            Kind::Picture { .. } | Kind::Drawing { .. } | Kind::Area { .. } => Size { w: 0.0, h: 0.0 },
         };
         Size {
             w: clamp_w(e, match e.width {
@@ -463,6 +464,7 @@ impl Layout<'_> {
             }
             Kind::Picture { image, fit, radius, opacity } => push(out, What::Picture { image, fit, radius, opacity }),
             Kind::Drawing { draw, on_touch } => push(out, What::Drawing { draw, on_touch }),
+            Kind::Area { doc, on_change } => push(out, What::Area { doc, on_change }),
             Kind::Scroll { child } => {
                 push(out, What::Scroll { content: rect.h });
                 // The child as tall as it needs (or the place, if more), at the place's width.

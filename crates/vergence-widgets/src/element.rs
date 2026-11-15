@@ -137,6 +137,7 @@ pub(crate) enum Kind<M> {
     Scroll { child: Box<Element<M>> },
     Picture { image: Arc<Image>, fit: Fit, radius: f32, opacity: f32 },
     Drawing { draw: Draw, on_touch: Option<OnTouch<M>> },
+    Area { doc: crate::textarea::TextDoc, on_change: Option<M> },
 }
 
 /// One piece of a window: built from the program's state each time it
@@ -151,7 +152,7 @@ pub struct Element<M> {
 }
 
 impl<M> Element<M> {
-    fn new(kind: Kind<M>, width: Length, height: Length) -> Element<M> {
+    pub(crate) fn new(kind: Kind<M>, width: Length, height: Length) -> Element<M> {
         Element { kind, width, height, max_width: None, key: None, name: None }
     }
 
@@ -500,6 +501,14 @@ pub fn drawing<M>(draw: impl Fn(&mut Scene, &mut Fonts, Rect, &Theme) + 'static)
 }
 
 impl<M> Element<M> {
+    /// The message a text area sends when its text or caret changed.
+    pub fn on_change(mut self, m: M) -> Self {
+        if let Kind::Area { on_change, .. } = &mut self.kind {
+            *on_change = Some(m);
+        }
+        self
+    }
+
     /// What a drawing does with the pointer and fingers.
     pub fn on_touch(mut self, f: impl Fn(Touch) -> Option<M> + 'static) -> Self {
         if let Kind::Drawing { on_touch, .. } = &mut self.kind {
