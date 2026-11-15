@@ -31,7 +31,10 @@ const GOLDEN_ANGLE: f32 = 2.399_963_2;
 /// (vec4: the style's bar ground, sRGB, and the frost's own strength),
 /// `ink` (vec3, sRGB), `need` (float, the contrast to keep) and `corner`
 /// (float, the corners' radius in pixels; 0 for square) and `bottom`
-/// (float: 1 rounds the bottom corners too, a dock's or a menu's).
+/// (float: 1 rounds the bottom corners too, a dock's or a menu's) and
+/// `invert` (float: 1 shows what is under inverted, for a bar of the other
+/// style than its window: light text under a light bar is shown dark, Dave,
+/// 2026-11-14).
 pub const FROST_SHADER: &str = r#"#version 100
 
 //_DEFINES_
@@ -56,6 +59,7 @@ uniform vec3 ink;
 uniform float need;
 uniform float corner;
 uniform float bottom;
+uniform float invert;
 
 float lin(float c) {
     return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
@@ -88,6 +92,11 @@ void main() {
         weights += w;
     }
     vec4 blurred = sum / weights;
+    // A bar of the other style than its window: what shows through, inverted
+    // (alpha multiplied in: the inverse of c is a - c).
+    if (invert > 0.5) {
+        blurred.rgb = vec3(blurred.a) - blurred.rgb;
+    }
     // A see-through picture shows the tint where it is clear (its colors
     // have their alpha multiplied in).
     vec3 under = blurred.rgb + (1.0 - blurred.a) * tint.rgb;
@@ -132,6 +141,8 @@ pub struct Frost {
     pub ink: [u8; 3],
     pub need: f32,
     pub radius: f32,
+    /// What is under shows inverted (a bar of the other style than its window).
+    pub invert: bool,
 }
 
 fn lin(c: f32) -> f32 {
@@ -199,7 +210,12 @@ pub fn frost(rgba: &[u8], width: usize, height: usize, rows: usize, f: &Frost) -
                     sum[c] += p[c] as f32 / 255.0 * w;
                 }
             }
-            let b = sum.map(|v| v / weights);
+            let mut b = sum.map(|v| v / weights);
+            if f.invert {
+                for i in 0..3 {
+                    b[i] = b[3] - b[i];
+                }
+            }
             let under = [b[0] + (1.0 - b[3]) * tint[0], b[1] + (1.0 - b[3]) * tint[1], b[2] + (1.0 - b[3]) * tint[2]];
             let c = mix(under, tint, strength_over(under, f));
             let o = &mut out[(y * width + x) * 4..][..4];
@@ -216,8 +232,8 @@ pub fn frost(rgba: &[u8], width: usize, height: usize, rows: usize, f: &Frost) -
 mod tests {
     use super::*;
 
-    const DARK: Frost = Frost { tint: [51, 61, 82], strength: 0.5, ink: [235, 235, 235], need: 7.0, radius: 14.0 };
-    const LIGHT: Frost = Frost { tint: [228, 230, 235], strength: 0.5, ink: [29, 29, 31], need: 5.85, radius: 14.0 };
+    const DARK: Frost = Frost { tint: [51, 61, 82], strength: 0.5, ink: [235, 235, 235], need: 7.0, radius: 14.0, invert: false };
+    const LIGHT: Frost = Frost { tint: [228, 230, 235], strength: 0.5, ink: [29, 29, 31], need: 5.85, radius: 14.0, invert: false };
 
     fn picture(width: usize, height: usize, at: impl Fn(usize, usize) -> [u8; 4]) -> Vec<u8> {
         let mut v = Vec::with_capacity(width * height * 4);
@@ -232,6 +248,18 @@ mod tests {
     fn worst(out: &[u8], ink: [u8; 3]) -> f32 {
         let ink = ink.map(|v| v as f32 / 255.0);
         out.chunks(4).map(|p| contrast(ink, [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0])).fold(f32::MAX, f32::min)
+    }
+
+    /// Light text on a dark window under a light bar, inverted, shows as
+    /// shadows darker than the bar, not as pale smudges on it.
+    #[test]
+    fn inverted_light_text_under_a_light_bar_shows_darker() {
+        let text = picture(32, 16, |x, _| if x % 4 == 0 { [235, 235, 235, 255] } else { [30, 30, 30, 255] });
+        let plain = frost(&text, 32, 16, 16, &LIGHT);
+        let inverted = frost(&text, 32, 16, 16, &Frost { invert: true, ..LIGHT });
+        let mean = |p: &[u8]| p.chunks(4).map(|c| c[0] as u32).sum::<u32>() / (p.len() / 4) as u32;
+        assert!(mean(&inverted) > mean(&plain), "the dark ground inverted is light: {} vs {}", mean(&inverted), mean(&plain));
+        assert!(worst(&inverted, LIGHT.ink) >= LIGHT.need - 0.1, "the ink still reads");
     }
 
     /// The rule itself: whatever is under the bar, every pixel of the frost
@@ -275,7 +303,7 @@ mod tests {
     fn a_sharp_edge_is_softened() {
         let (w, h) = (40, 30);
         let p = picture(w, h, |x, _| if x == 20 { [255, 255, 255, 255] } else { [0, 0, 0, 255] });
-        let f = Frost { tint: [0, 0, 0], strength: 0.0, ink: [255, 255, 255], need: 1.0, radius: 6.0 };
+        let f = Frost { tint: [0, 0, 0], strength: 0.0, ink: [255, 255, 255], need: 1.0, radius: 6.0, invert: false };
         let out = frost(&p, w, h, 10, &f);
         let at = |x: usize| out[(5 * w + x) * 4];
         assert!(at(20) < 200, "the line itself is spread out: {}", at(20));

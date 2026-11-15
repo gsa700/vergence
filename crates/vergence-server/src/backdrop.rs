@@ -62,6 +62,9 @@ impl Backdrop {
             Uniform::new("need", UniformValue::_1f(look.need)),
             Uniform::new("corner", UniformValue::_1f(look.corner)),
             Uniform::new("bottom", UniformValue::_1f(if look.bottom { 1.0 } else { 0.0 })),
+            // Said every time: a program's uniforms keep their last value, and a
+            // native bar may have inverted (decor.rs).
+            Uniform::new("invert", UniformValue::_1f(0.0)),
         ];
         Backdrop { id, commit, dst, texture, program, uniforms }
     }

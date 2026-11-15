@@ -474,6 +474,7 @@ impl Server {
                     UniformName::new("need", UniformType::_1f),
                     UniformName::new("corner", UniformType::_1f),
                     UniformName::new("bottom", UniformType::_1f),
+                    UniformName::new("invert", UniformType::_1f),
                 ];
                 match renderer.compile_custom_texture_shader(vergence_render::blur::FROST_SHADER, &uniforms) {
                     Ok(p) => {
@@ -943,6 +944,12 @@ impl Server {
                             Uniform::new("ink", UniformValue::_3f(ir, ig, ib)),
                             Uniform::new("need", UniformValue::_1f(vergence_look::frost_need(light, active))),
                             Uniform::new("corner", UniformValue::_1f(if rounded { vergence_look::RADIUS * per_point as f32 } else { 0.0 })),
+                            Uniform::new("bottom", UniformValue::_1f(0.0)),
+                            // A bar of the other style than its window's ground (the
+                            // terminal's page color): what shows through, inverted, so
+                            // light text under a light bar is a dark shadow on it, not a
+                            // pale smudge (Dave, 2026-11-14).
+                            Uniform::new("invert", UniformValue::_1f(if accent.is_some_and(|c| page_light(c) != light) { 1.0 } else { 0.0 })),
                         ];
                         elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(&mut d.frost, dst, strip, texture.clone(), program.clone(), uniforms)));
                     }
@@ -1175,4 +1182,14 @@ pub fn app_bars() -> std::collections::HashMap<String, bool> {
         }
     }
     out
+}
+
+/// Whether a window's ground color (0xRRGGBB) is light: its luminance above
+/// the middle one.
+fn page_light(c: u32) -> bool {
+    let ch = |v: u32| {
+        let c = (v & 0xff) as f32 / 255.0;
+        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * ch(c >> 16) + 0.7152 * ch(c >> 8) + 0.0722 * ch(c) > 0.18
 }
