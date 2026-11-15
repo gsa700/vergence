@@ -12,3 +12,4 @@ publish.workspace = true
 [dependencies]
 vergence-look.workspace = true
 vergence-protocol.workspace = true
+vergence-types.workspace = true

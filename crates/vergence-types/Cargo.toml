@@ -1,0 +1,9 @@
+[package]
+name = "vergence-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "File types: our own table, by name and by first bytes; which applications open each (desktop entries, mimeapps.list)"
+
+[dependencies]

@@ -2290,6 +2290,7 @@ dependencies = [
  "vergence-seat",
  "vergence-shell",
  "vergence-sound",
+ "vergence-sysinfo",
  "vergence-text",
  "vergence-xsettings",
  "x11rb 0.13.2",
@@ -2325,6 +2326,7 @@ version = "0.1.0"
 dependencies = [
  "vergence-look",
  "vergence-protocol",
+ "vergence-types",
 ]
 
 [[package]]
@@ -2347,6 +2349,7 @@ dependencies = [
  "vergence-look",
  "vergence-render",
  "vergence-scene",
+ "vergence-sysinfo",
  "vergence-text",
  "vergence-ui",
  "vergence-widgets",
@@ -2358,6 +2361,10 @@ version = "0.1.0"
 dependencies = [
  "ab_glyph",
 ]
+
+[[package]]
+name = "vergence-types"
+version = "0.1.0"
 
 [[package]]
 name = "vergence-ui"

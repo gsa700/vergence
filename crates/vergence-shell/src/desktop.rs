@@ -10,7 +10,7 @@
 //! Read from an entry: Type, Name, Exec, Icon, TryExec, Terminal,
 //! NoDisplay, Hidden, OnlyShowIn, NotShowIn, StartupWMClass, Keywords,
 //! GenericName, Comment, Categories (the last three for the launcher, shelf
-//! milestone 2).
+//! milestone 2), MimeType (the file types it opens, files milestone 1).
 //! Translated names
 //! (`Name[de]`) are not used yet.
 
@@ -21,6 +21,8 @@ const MAX_VALUE: usize = 4096;
 const MAX_ARGS: usize = 256;
 /// The most categories and keywords kept from one entry.
 pub const MAX_LIST: usize = 32;
+/// The most file types kept from one entry (an office suite lists ~150).
+pub const MAX_TYPES: usize = 512;
 
 /// This desktop's name, as OnlyShowIn and NotShowIn name desktops (and as
 /// the session's XDG_CURRENT_DESKTOP says it).
@@ -54,6 +56,11 @@ pub struct Entry {
     pub generic_name: String,
     pub comment: String,
     pub categories: Vec<String>,
+    /// The file types it says it opens (MimeType), as written.
+    pub mime_types: Vec<String>,
+    /// The Exec line itself, field codes kept, for opening files with it
+    /// ([`command_for`]).
+    pub exec_line: String,
 }
 
 /// A value as the file means it: `\s`, `\n`, `\t`, `\r` and `\\` are a
@@ -91,6 +98,43 @@ fn unescape(value: &str) -> String {
 /// None if a quote is left open, there is no program, or there are more
 /// arguments than any real entry has.
 pub fn split_exec(exec: &str) -> Option<Vec<String>> {
+    split_filled(exec, &[])
+}
+
+/// The commands that open `files` (paths or URLs) with an entry, by its
+/// Exec line's field codes: `%F` and `%U` take them all in one command, `%f`
+/// and `%u` one each, so a program taking one file at a time is started once
+/// per file; with no file code the files are left off (the specification's
+/// rule) and the program is started once. Files are passed as they are given
+/// (a path for %u too, which programs accept). Empty if the line cannot be
+/// split.
+pub fn command_for(entry: &Entry, files: &[String]) -> Vec<Vec<String>> {
+    let line = if entry.exec_line.is_empty() { return vec![entry.exec.clone()] } else { &entry.exec_line };
+    let codes = field_codes(line);
+    let many = codes.iter().any(|c| matches!(c, 'F' | 'U'));
+    let one = codes.iter().any(|c| matches!(c, 'f' | 'u'));
+    let runs: Vec<&[String]> = if files.is_empty() || many || !one { vec![files] } else { files.chunks(1).collect() };
+    runs.into_iter().filter_map(|f| split_filled(line, f)).collect()
+}
+
+/// The field codes an Exec line has (outside `%%`).
+fn field_codes(line: &str) -> Vec<char> {
+    let mut out = Vec::new();
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            match chars.next() {
+                Some('%') | None => {}
+                Some(code) => out.push(code),
+            }
+        }
+    }
+    out
+}
+
+/// An Exec line split as [`split_exec`] does, with `%f`/`%u` given the first
+/// of `files` and `%F`/`%U` all of them, each file its own argument.
+fn split_filled(exec: &str, files: &[String]) -> Option<Vec<String>> {
     let mut args: Vec<String> = Vec::new();
     let mut chars = exec.chars().peekable();
     loop {
@@ -127,6 +171,21 @@ pub fn split_exec(exec: &str) -> Option<Vec<String>> {
                     chars.next();
                     match chars.next() {
                         Some('%') => arg.push('%'),
+                        // A file or files: put in where the code stands.
+                        Some('f' | 'u') if !files.is_empty() => {
+                            arg.push_str(&files[0]);
+                            only_code = false;
+                        }
+                        Some('F' | 'U') if !files.is_empty() => {
+                            // All the files, each its own argument; the code stood alone (else the first file only).
+                            if arg.is_empty() && chars.peek().is_none_or(|c| *c == ' ' || *c == '\t') {
+                                args.extend(files[..files.len() - 1].iter().cloned());
+                                arg.push_str(&files[files.len() - 1]);
+                            } else {
+                                arg.push_str(&files[0]);
+                            }
+                            only_code = false;
+                        }
                         // A field code: a file, a URL, the icon, the name, the entry's own path.
                         Some(_) => only_code = arg.is_empty(),
                         None => {}
@@ -194,6 +253,7 @@ pub fn parse(id: &str, text: &str) -> Option<Entry> {
             "Keywords" => entry.keywords = unescape(value).split(';').map(str::trim).filter(|k| !k.is_empty()).take(MAX_LIST).map(str::to_string).collect(),
             "GenericName" => entry.generic_name = unescape(value),
             "Comment" => entry.comment = unescape(value),
+            "MimeType" => entry.mime_types = unescape(value).split(';').map(str::trim).filter(|k| !k.is_empty()).take(MAX_TYPES).map(str::to_string).collect(),
             "Categories" => entry.categories = unescape(value).split(';').map(str::trim).filter(|k| !k.is_empty()).take(MAX_LIST).map(str::to_string).collect(),
             _ => {}
         }
@@ -207,7 +267,9 @@ pub fn parse(id: &str, text: &str) -> Option<Entry> {
     if !application || entry.name.trim().is_empty() {
         return None;
     }
-    entry.exec = split_exec(&exec?)?;
+    let exec = exec?;
+    entry.exec = split_exec(&exec)?;
+    entry.exec_line = exec;
     Some(entry)
 }
 
@@ -251,6 +313,24 @@ mod tests {
         // Field codes go; one inside an argument leaves the rest of it; %% is a percent sign.
         assert_eq!(args("prog --file=%f %U --pct=100%% %i %c %k"), list(&["prog", "--file=", "--pct=100%"]));
         assert_eq!(args("prog %"), list(&["prog"]));
+    }
+
+    /// Opening files: %F and %U take them all, %f and %u one per command, a
+    /// line with no file code gets none; MimeType and the raw line are kept.
+    #[test]
+    fn files_are_put_where_the_exec_line_says() {
+        let entry = |exec: &str| parse("x", &format!("[Desktop Entry]\nType=Application\nName=X\nExec={exec}\nMimeType=image/png;image/jpeg;\n")).unwrap();
+        let files = vec!["/a b.png".to_string(), "/c.png".to_string()];
+        let e = entry("view %F");
+        assert_eq!(e.mime_types, vec!["image/png", "image/jpeg"]);
+        assert_eq!(e.exec_line, "view %F");
+        assert_eq!(command_for(&e, &files), vec![vec!["view", "/a b.png", "/c.png"]]);
+        assert_eq!(command_for(&entry("view --open %U --new"), &files), vec![vec!["view", "--open", "/a b.png", "/c.png", "--new"]]);
+        assert_eq!(command_for(&entry("view %f"), &files), vec![vec!["view", "/a b.png"], vec!["view", "/c.png"]]);
+        assert_eq!(command_for(&entry("view --file=%u"), &files[..1]), vec![vec!["view", "--file=/a b.png"]]);
+        assert_eq!(command_for(&entry("view"), &files), vec![vec!["view"]]);
+        assert_eq!(command_for(&entry("view %F"), &[]), vec![vec!["view"]]);
+        assert_eq!(command_for(&entry("pct --at=100%% %f"), &files[..1]), vec![vec!["pct", "--at=100%", "/a b.png"]]);
     }
 
     #[test]

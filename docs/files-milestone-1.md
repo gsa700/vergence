@@ -207,6 +207,25 @@ bar, as the terminal and the editor do).
   "Search in subfolders" walks down from here, off the thread, as results
   come. An index (as macOS Spotlight has) is not part of this milestone.
 
+## Progress
+
+- **Step 1 built** (2026-11-15): crates/vergence-types (table.rs: our own
+  ~140 types with names, generic icons, patterns and parents, and ~55
+  aliases; lib.rs: `of_name` (longest pattern), `of_bytes` (signatures,
+  RIFF and ISO-media kinds, shebangs, SVG/HTML/XML, the text test),
+  `of_file`, `ancestors`/`is_a`, `of_link` (x-scheme-handler) and
+  `path_of_link`, `MimeApps` read/write, `list_paths` (vergence-mimeapps.list
+  before mimeapps.list in each directory), `apps_for`/`default_for`,
+  `choose_default` writing only Vergence's list). vergence-shell desktop.rs
+  keeps `MimeType` and the raw Exec line, and `command_for` fills `%f %F %u
+  %U` (one command per file for %f/%u). `vergence-open` (vergence-shell
+  bin, installed): open, `--with`, `--type`, `--apps`, `--default`.
+  Checked on kepler and Hubble against real entries and files (Markdown and
+  scripts to the Text Editor through text/plain, links to Firefox by the
+  default it wrote, photos and an extensionless PNG by their bytes). Tests:
+  Hubble 584, kepler 580, Techbench 584. Opening through the server (so a
+  started app gets the session's place in the dock) is step 2.
+
 ## Steps
 
 1. **vergence-types**: the database reader (globs2, magic, subclasses,
