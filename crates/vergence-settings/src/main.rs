@@ -106,6 +106,9 @@ const FRONT_TAB_NAMES: [&str; 2] = ["Page color", "Frosted"];
 const FRONT_TAB_VALUES: [&str; 2] = ["page", "frosted"];
 /// The size of controls (Standard when unset); a screen's adds Automatic first.
 const CONTROLS_NAMES: [&str; 3] = ["Compact", "Standard", "Large"];
+/// The wallpaper tint's choices and their desktop.toml values (Off: the switch off).
+const TINT_NAMES: [&str; 4] = ["Off", "Subtle", "Standard", "Strong"];
+const TINT_VALUES: [Option<&str>; 4] = [None, Some("subtle"), Some("standard"), Some("strong")];
 const CONTROLS_VALUES: [&str; 3] = ["compact", "standard", "large"];
 const SCREEN_CONTROLS_NAMES: [&str; 4] = ["Automatic", "Compact", "Standard", "Large"];
 const FITS: [&str; 4] = ["Fill", "Fit", "Center", "Stretch"];
@@ -440,7 +443,8 @@ enum Message {
     Search(String),
     SearchGo,
     /// Windows tinted with the wallpaper's color (window styles milestone 1).
-    WallpaperTint(bool),
+    /// Off, Subtle, Standard, Strong.
+    WallpaperTint(usize),
     /// Words spelled wrong marked in every native app's text (editor milestone 1).
     Spellcheck(bool),
     /// The size of controls: the desktop's (Appearance), a screen's own (Screens).
@@ -1001,8 +1005,16 @@ impl App {
             Message::Transparency(on) => self.save_appearance(|t| {
                 t.insert("reduce-transparency".into(), on.into());
             }),
-            Message::WallpaperTint(on) => self.save_appearance(|t| {
-                t.insert("wallpaper-tint".into(), on.into());
+            Message::WallpaperTint(k) => self.save_appearance(|t| {
+                t.insert("wallpaper-tint".into(), (k > 0).into());
+                match TINT_VALUES.get(k).copied().flatten() {
+                    Some(v) if v != "standard" => {
+                        t.insert("tint-amount".into(), v.into());
+                    }
+                    _ => {
+                        t.remove("tint-amount");
+                    }
+                }
             }),
             Message::Spellcheck(on) => self.save_table("text", |t| {
                 t.insert("spellcheck".into(), on.into());
@@ -1708,8 +1720,14 @@ impl App {
                     setting("Size of controls", "Window bars, tabs and buttons. A screen with a touch panel uses Large unless its own setting says otherwise (Screens).", choice(controls_names, Some(controls), Message::Controls).width(Length::Fixed(160.0)).name("Size of controls")),
                     setting(
                         "Tint windows with the wallpaper's color",
-                        "In dark style, a window takes a little of the color of the wallpaper behind it. Off with Reduce transparency and High contrast.",
-                        switch(self.desktop.get("appearance").and_then(|a| a.get("wallpaper-tint")).and_then(|v| v.as_bool()).unwrap_or(true), Message::WallpaperTint).name("Tint windows with the wallpaper's color"),
+                        "In dark style, a window takes some of the color of the wallpaper behind it: Subtle 4%, Standard 8%, Strong 14%. Off with Reduce transparency and High contrast.",
+                        {
+                            let a = self.desktop.get("appearance");
+                            let on = a.and_then(|a| a.get("wallpaper-tint")).and_then(|v| v.as_bool()).unwrap_or(true);
+                            let amount = a.and_then(|a| a.get("tint-amount")).and_then(|v| v.as_str()).unwrap_or("standard");
+                            let k = if !on { 0 } else { TINT_VALUES.iter().position(|v| *v == Some(amount)).unwrap_or(2) };
+                            choice(TINT_NAMES.iter().map(|s| s.to_string()).collect(), Some(k), Message::WallpaperTint).width(Length::Fixed(160.0)).name("Tint windows with the wallpaper's color")
+                        },
                     ),
                 ]),
                 self.group(None, vec![setting(

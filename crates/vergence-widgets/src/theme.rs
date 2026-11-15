@@ -32,6 +32,9 @@ pub struct Theme {
     /// Words spelled wrong are marked in text fields and areas
     /// (desktop.toml `[text] spellcheck`, or the app's own `spellcheck`).
     pub spell: bool,
+    /// How much of the wallpaper's color a tinted window's grounds take
+    /// (desktop.toml `[appearance] tint-amount`: subtle, standard, strong).
+    pub tint_mix: f32,
 }
 
 fn c(rgb: Rgb) -> Color {
@@ -59,6 +62,7 @@ impl Theme {
             double_click: 400,
             top: 0.0,
             spell: true,
+            tint_mix: TINT_MIX,
         };
         if high_contrast {
             // Text on pure black or white, edges as strong as the text.
@@ -108,6 +112,7 @@ impl Theme {
         t.double_click = double_click;
         t.opacity = vergence_ui::opacity_setting(text, section);
         let on = |v: Option<String>| v.map(|v| v != "false");
+        t.tint_mix = tint_amount(vergence_ui::table_value(text, "[appearance]", "tint-amount").as_deref());
         t.spell = on(vergence_ui::table_value(text, section, "spellcheck")).or_else(|| on(vergence_ui::table_value(text, "[text]", "spellcheck"))).unwrap_or(true);
         t
     }
@@ -118,19 +123,31 @@ impl Theme {
     }
 
     /// The theme with a little of `tint` (the wallpaper's color behind the
-    /// window) in its grounds: the page, the sidebar and the cards, 8%. Text
-    /// keeps its colors; the grounds move too little to change what reads.
+    /// window) in its grounds: the page, the sidebar and the cards, by the
+    /// desktop's amount (8% unless it says otherwise). Text keeps its colors.
     pub fn tinted(&self, tint: Color) -> Theme {
+        let k = self.tint_mix.clamp(0.0, 0.3);
         let mix = |c: Color| {
-            let m = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * TINT_MIX).round() as u8;
+            let m = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * k).round() as u8;
             Color { r: m(c.r, tint.r), g: m(c.g, tint.g), b: m(c.b, tint.b), a: c.a }
         };
         Theme { page: mix(self.page), sidebar: mix(self.sidebar), card: mix(self.card), ..self.clone() }
     }
 }
 
-/// How much of the wallpaper's color a tinted window's grounds take.
+/// How much of the wallpaper's color a tinted window's grounds take: the
+/// Standard amount.
 pub const TINT_MIX: f32 = 0.08;
+
+/// The tint's amounts (Dave, 2026-11-15: "needs settings to tone it down"):
+/// subtle 4%, standard 8%, strong 14%.
+pub fn tint_amount(name: Option<&str>) -> f32 {
+    match name {
+        Some("subtle") => 0.04,
+        Some("strong") => 0.14,
+        _ => TINT_MIX,
+    }
+}
 
 impl Default for Theme {
     fn default() -> Theme {
@@ -160,6 +177,17 @@ pub fn parse_hex(s: &str) -> Option<Color> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_tint_amount_comes_from_the_desktop() {
+        let t = |text: &str| Theme::from_desktop(text, true, "[x]").tint_mix;
+        assert_eq!(t(""), TINT_MIX);
+        assert_eq!(t("[appearance]\ntint-amount = \"subtle\"\n"), 0.04);
+        assert_eq!(t("[appearance]\ntint-amount = \"strong\"\n"), 0.14);
+        let base = Theme::from_desktop("[appearance]\ntint-amount = \"strong\"\n", true, "[x]");
+        let red = base.tinted(Color::rgb(255, 0, 0));
+        assert!(red.page.r > base.page.r, "the page takes some red");
+    }
+
     use super::*;
 
     #[test]
