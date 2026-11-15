@@ -243,7 +243,18 @@ struct Host<P: Program> {
     tint: Option<Color>,
     /// The title last given to the window (at first, the one it opens with).
     title_sent: String,
+    /// A finger down and still (touch and hold, 2026-11-15, Dave: "there is
+    /// no way to get to the desktop context menu" by touch): its id and
+    /// where; held HOLD it is a right click there.
+    hold: Option<(i32, f32, f32)>,
+    /// The finger whose hold became a right click: the rest of its touch
+    /// is dropped (lifting it does not also tap).
+    held: Option<i32>,
 }
+
+/// The toolkit's timer for touch and hold, and how long a finger is held.
+const HOLD_TIMER: u64 = (1 << 63) + 1;
+const HOLD: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// The toolkit's own timer (the caret's blink).
 const TOOLKIT_TIMER: u64 = 1 << 63;
@@ -438,6 +449,39 @@ impl<P: Program> vergence_ui::App for Host<P> {
     }
 
     fn input(&mut self, input: &Input, window: &mut Window) {
+        // Touch and hold: a finger kept still for HOLD is a right click
+        // (every app's context menu by touch); the finger's touch is then
+        // taken back from the widgets, and the rest of it dropped.
+        if let Input::Touch { id, phase, x, y } = input {
+            use vergence_ui::touch::Phase;
+            if self.held == Some(*id) {
+                if matches!(phase, Phase::Up | Phase::Cancelled) {
+                    self.held = None;
+                }
+                return;
+            }
+            match phase {
+                Phase::Down => {
+                    self.hold = Some((*id, *x, *y));
+                    window.wake_after(HOLD_TIMER, HOLD);
+                }
+                Phase::Moved => {
+                    if let Some((h, hx, hy)) = self.hold
+                        && h == *id
+                        && ((x - hx).powi(2) + (y - hy).powi(2)).sqrt() > vergence_ui::touch::SLOP
+                    {
+                        self.hold = None;
+                        window.cancel_timer(HOLD_TIMER);
+                    }
+                }
+                Phase::Up | Phase::Cancelled => {
+                    if self.hold.is_some_and(|(h, ..)| h == *id) {
+                        self.hold = None;
+                        window.cancel_timer(HOLD_TIMER);
+                    }
+                }
+            }
+        }
         self.program.saw(input);
         if matches!(input, Input::Key { .. })
             && let Some(changed) = self.program.key_first(input, window)
@@ -485,6 +529,17 @@ impl<P: Program> vergence_ui::App for Host<P> {
     }
 
     fn timer(&mut self, id: u64, window: &mut Window) {
+        if id == HOLD_TIMER {
+            if let Some((finger, x, y)) = self.hold.take() {
+                use vergence_ui::touch::Phase;
+                self.input(&Input::Touch { id: finger, phase: Phase::Cancelled, x, y }, window);
+                self.held = Some(finger);
+                let modifiers = vergence_ui::Modifiers::default();
+                self.input(&Input::Button { button: vergence_ui::Button::Right, pressed: true, x, y, modifiers }, window);
+                self.input(&Input::Button { button: vergence_ui::Button::Right, pressed: false, x, y, modifiers }, window);
+            }
+            return;
+        }
         if id == TOOLKIT_TIMER {
             // The caret blinks.
             window.redraw();
@@ -537,7 +592,7 @@ impl<P: Program> Host<P> {
 pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
     let theme = program.theme();
     let title_sent = program.title();
-    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent })
+    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None })
 }
 
 /// Opens the program's window and runs until it is closed. `size` is the
@@ -545,7 +600,7 @@ pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
 pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {
     let theme = program.theme();
     let title_sent = program.title();
-    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent };
+    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None };
     vergence_ui::run(&mut host, size)
 }
 
