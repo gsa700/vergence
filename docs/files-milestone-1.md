@@ -291,7 +291,19 @@ the wallpaper, a scratch place for launchers and files.
   `of_kind`). Seen on kepler's screen. Later: two entries of one app
   (Firefox's own userapp-Firefox-*.desktop beside firefox.desktop) both
   listed.
-- **Step 3 built, not yet tried on screen** (2026-11-15, 427fc19): server
+- **Step 3 built and tried with Firefox on kepler** (2026-11-15, 427fc19 and
+  the fixes after): Firefox (a throwaway profile with
+  `widget.use-xdg-desktop-portal.file-picker = 1`) showed our dialog for
+  Open File, a modal dialog over its window (Firefox dimmed), and opened
+  the README chosen in it; Save Page As showed its suggested name and
+  filter, and Escape answered "cancelled". Fixed on the way: the server
+  turned a dialog with no parent of its own program into a normal window;
+  an adopted one now counts as owned (native.rs). Found: kepler's `gdbus
+  call` sends wrong bytes for a `b"..."` byte string (the raw body held
+  the call's interface name), while `@ay [...]` arrives right: a fault of
+  the tool, not of our edge (vergence-dbus gained a round-trip test of
+  byte arrays in options). Not yet tried: a GTK and a Qt app, Hubble and
+  Techbench. Built as: server
   portal.rs: FileChooser OpenFile (open, multiple, directory), SaveFile
   (current_name, current_file), SaveFiles (a folder chosen, the names
   joined), filters and current_filter, accept_label, current_folder; the

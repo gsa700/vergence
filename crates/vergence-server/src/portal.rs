@@ -266,7 +266,7 @@ impl Server {
             let code = child.wait().ok().and_then(|s| s.code());
             let _ = sender.send((pid, code, out));
         });
-        tracing::info!("portal: {member} for {app} (pid {pid}){}", if parent.is_some() { ", over its window" } else { "" });
+        tracing::info!("portal: {member} for {app} (pid {pid}){}: {:?}", if parent.is_some() { ", over its window" } else { "" }, opts_seen(options));
         self.portal.choosers.insert(pid, Chooser { conn, handle: handle.clone(), parent, save_files });
         Ok(handle)
     }
@@ -351,6 +351,12 @@ impl Server {
         let Some(parent) = pid.and_then(|p| self.portal.choosers.get(&p)).and_then(|c| c.parent.clone()) else { return };
         self.portal.adopted.insert(w.clone(), parent);
     }
+}
+
+/// The option names a call carried, for the log (not their values: paths).
+fn opts_seen(options: &Value) -> Vec<String> {
+    let Value::Array(_, entries) = options else { return Vec::new() };
+    entries.iter().filter_map(|e| if let Value::Entry(k, v) = e { Some(k.as_str().unwrap_or("?").to_string()) } else { None }).collect()
 }
 
 /// A process's name (its command), for the dialog's remembered folder.

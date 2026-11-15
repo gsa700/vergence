@@ -467,7 +467,9 @@ impl Server {
             WinRequest::Style { window, kind, modal, min, max } => {
                 if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
                     let parent = n.state.lock().unwrap().parent;
-                    let owned = parent != 0 && parent != window && self.natives.contains_key(&(client, parent));
+                    // A portal's dialog belongs to another program's window (portal.rs).
+                    let adopted = self.portal.adopted.contains_key(&Win::Native(n.clone()));
+                    let owned = adopted || (parent != 0 && parent != window && self.natives.contains_key(&(client, parent)));
                     let kind = match kind {
                         vergence_protocol::window::WinKind::Dialog | vergence_protocol::window::WinKind::Palette if !owned => vergence_protocol::window::WinKind::Normal,
                         k => k,

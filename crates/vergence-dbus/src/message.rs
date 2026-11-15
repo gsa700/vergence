@@ -265,6 +265,38 @@ mod tests {
         assert_eq!(Message::parse(&s.serialize()).unwrap(), s);
     }
 
+    /// A byte array in a variant in an a{sv} (the portal's current_folder):
+    /// its bytes come back, not some of the header's (2026-11-15).
+    #[test]
+    fn byte_arrays_in_options_round_trip() {
+        let folder: Vec<Value> = b"/home/u/docs\0".iter().map(|b| Value::Byte(*b)).collect();
+        let opts = Value::Array(
+            "{sv}".into(),
+            vec![
+                Value::Entry(Box::new(Value::Str("handle_token".into())), Box::new(Value::Variant(Box::new(Value::Str("t1".into()))))),
+                Value::Entry(Box::new(Value::Str("multiple".into())), Box::new(Value::Variant(Box::new(Value::Bool(true))))),
+                Value::Entry(Box::new(Value::Str("accept_label".into())), Box::new(Value::Variant(Box::new(Value::Str("_Attach".into()))))),
+                Value::Entry(
+                    Box::new(Value::Str("filters".into())),
+                    Box::new(Value::Variant(Box::new(Value::Array(
+                        "(sa(us))".into(),
+                        vec![
+                            Value::Struct(vec![Value::Str("Markdown".into()), Value::Array("(us)".into(), vec![Value::Struct(vec![Value::U32(0), Value::Str("*.md".into())])])]),
+                            Value::Struct(vec![Value::Str("Pictures".into()), Value::Array("(us)".into(), vec![Value::Struct(vec![Value::U32(1), Value::Str("image/*".into())])])]),
+                        ],
+                    )))),
+                ),
+                Value::Entry(Box::new(Value::Str("current_folder".into())), Box::new(Value::Variant(Box::new(Value::Array("y".into(), folder))))),
+            ],
+        );
+        let args = vec![Value::Str(String::new()), Value::Str("Pick".into()), opts];
+        let mut m = Message::method_call("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.FileChooser", "OpenFile", &args);
+        m.serial = 7;
+        m.sender = Some(":1.2".into());
+        let back = Message::parse(&m.serialize()).unwrap();
+        assert_eq!(back.args().unwrap(), args);
+    }
+
     #[test]
     fn bad_headers_are_rejected() {
         let mut m = Message::signal("a.b", "/", "a.b", "C", &[]);
