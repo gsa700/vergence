@@ -244,27 +244,33 @@ pub fn desktop_pick(text: &str) -> Option<bool> {
     }
 }
 
-/// Whether an app's content is light (app settings milestone 1): its own
-/// `style` if it chose one (an app's own choice wins over the desktop's
-/// Dark or Light, Dave 2026-11-14), else the desktop's Style, else under
-/// "App default" the app's built-in look.
+/// Whether an app's content is light (app settings milestone 1). The
+/// desktop's Style is the master switch (Dave, 2026-11-14): Dark or Light
+/// forces every app; under "App default" each app is as it wants, its own
+/// `style` if it chose one, else its built-in look.
 pub fn content_light(text: &str, section: &str, builtin_light: bool) -> bool {
+    if let Some(forced) = desktop_pick(text) {
+        return forced;
+    }
     match app_pick(text, section, "style") {
         Pick::Light => true,
         Pick::Dark => false,
-        Pick::Desktop => desktop_pick(text).unwrap_or(builtin_light),
+        Pick::Desktop => builtin_light,
     }
 }
 
-/// The bar style an app asks the server for: its own `bar-style` if it
-/// chose one, else under "App default" its built-in one (the settings app's
-/// light bar), else the desktop's.
+/// The bar style an app asks the server for: the desktop's while the
+/// desktop's Style forces Dark or Light; under "App default" its own
+/// `bar-style` if it chose one, else its built-in one (the settings app's
+/// light bar).
 pub fn bar_style_setting(text: &str, section: &str, builtin: BarStyle) -> BarStyle {
+    if desktop_pick(text).is_some() {
+        return BarStyle::Desktop;
+    }
     match app_pick(text, section, "bar-style") {
         Pick::Light => BarStyle::Light,
         Pick::Dark => BarStyle::Dark,
-        Pick::Desktop if desktop_pick(text).is_none() => builtin,
-        Pick::Desktop => BarStyle::Desktop,
+        Pick::Desktop => builtin,
     }
 }
 
@@ -1940,18 +1946,18 @@ impl<'a> Runner<'a> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn an_apps_own_look_wins_and_otherwise_the_desktops_or_its_builtin() {
+    fn the_desktops_dark_or_light_forces_every_app_and_app_default_lets_each_choose() {
         use super::{BarStyle, Pick, app_pick, bar_style_setting, content_light, table_value};
-        let t = "[appearance]\ncolor-scheme = \"dark\"\n[terminal]\nstyle = \"light\" # mine\nbar-style = \"dark\"\n";
-        assert!(content_light(t, "[terminal]", false), "the app's light wins over the desktop's dark");
-        assert!(!content_light(t, "[settings]", true), "no own style: the desktop's dark");
-        assert_eq!(bar_style_setting(t, "[terminal]", BarStyle::Desktop), BarStyle::Dark);
-        assert_eq!(bar_style_setting(t, "[settings]", BarStyle::Light), BarStyle::Desktop, "the desktop forces dark: the built-in light bar yields");
-        let app_default = "[appearance]\ncolor-scheme = \"default\"\n";
-        assert_eq!(bar_style_setting(app_default, "[settings]", BarStyle::Light), BarStyle::Light);
+        let forced = "[appearance]\ncolor-scheme = \"dark\"\n[terminal]\nstyle = \"light\" # mine\nbar-style = \"light\"\n";
+        assert!(!content_light(forced, "[terminal]", true), "the desktop's Dark wins over the app's light");
+        assert_eq!(bar_style_setting(forced, "[terminal]", BarStyle::Light), BarStyle::Desktop);
+        let free = "[appearance]\ncolor-scheme = \"default\"\n[terminal]\nstyle = \"light\"\nbar-style = \"dark\"\n";
+        assert!(content_light(free, "[terminal]", false), "App default: the app's own choice");
+        assert_eq!(bar_style_setting(free, "[terminal]", BarStyle::Desktop), BarStyle::Dark);
+        assert!(content_light(free, "[settings]", true), "no choice of its own: its built-in look");
+        assert!(!content_light(free, "[other]", false));
+        assert_eq!(bar_style_setting(free, "[settings]", BarStyle::Light), BarStyle::Light);
         assert_eq!(bar_style_setting("", "[terminal]", BarStyle::Desktop), BarStyle::Desktop);
-        assert!(content_light(app_default, "[settings]", true));
-        assert!(!content_light(app_default, "[terminal]", false));
         assert_eq!(app_pick("[terminal]\nstyle = default\n", "[terminal]", "style"), Pick::Desktop);
         assert_eq!(table_value("[a]\nk = \"x # y\"\n", "[a]", "k").as_deref(), Some("x # y"));
     }

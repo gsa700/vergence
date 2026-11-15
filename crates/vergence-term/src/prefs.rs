@@ -30,9 +30,11 @@ impl TermRows {
     }
 }
 
-/// What the desktop's Style makes light or dark now, as a row names it.
-fn desktop_light_word(text: &str, builtin_light: bool) -> &'static str {
-    if vergence_ui::desktop_pick(text).unwrap_or(builtin_light) { "Light" } else { "Dark" }
+/// Why the Style and Title bar rows are locked: the desktop's Style forces
+/// every app (Dave, 2026-11-14: App default lets each app choose; Dark or
+/// Light is for all).
+pub fn forced_by_desktop(text: &str) -> Option<String> {
+    vergence_ui::desktop_pick(text).map(|light| format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" }))
 }
 
 pub const FORGET: u32 = 1;
@@ -54,32 +56,34 @@ impl Rows for TermRows {
             Part {
                 title: "Terminal".into(),
                 rows: vec![
-                    Row { key: "font".into(), name: "Font".into(), help: String::new(), control: Control::Choose { choices: fonts, desktop: Some(family), app_default: 0 } },
-                    Row { key: "font-size".into(), name: "Text size".into(), help: "The text size menu's − and + change it for a while.".into(), control: Control::Choose { choices: sizes, desktop: Some(format!("{}", (size * 10.0).round() / 10.0)), app_default: 0 } },
+                    Row { key: "font".into(), name: "Font".into(), help: String::new(), control: Control::Choose { choices: fonts, desktop: Some(format!("Desktop default ({family})")), app_default: 0 } , locked: None },
+                    Row { key: "font-size".into(), name: "Text size".into(), help: "The text size menu's − and + change it for a while.".into(), control: Control::Choose { choices: sizes, desktop: Some(format!("Desktop default ({})", (size * 10.0).round() / 10.0)), app_default: 0 } , locked: None },
                     Row {
                         key: "scheme".into(),
                         name: "Colors".into(),
                         help: "Tango is the classic set mc, htop and vim were tuned for; Catppuccin is softer.".into(),
-                        control: Control::Choose { choices: vec![Choice::text("Catppuccin", "catppuccin"), Choice::text("Tango", "tango")], desktop: Some(desktop_colors.into()), app_default: 0 },
+                        control: Control::Choose { choices: vec![Choice::text("Catppuccin", "catppuccin"), Choice::text("Tango", "tango")], desktop: Some(format!("Desktop default ({desktop_colors})")), app_default: 0 },
+                        locked: None,
                     },
                     Row {
                         key: "scrollback".into(),
                         name: "Lines kept".into(),
                         help: "How far back each tab can scroll.".into(),
                         control: Control::Choose { choices: vec![Choice::number("1,000", 1000), Choice::number("5,000", 5000), Choice::number("10,000", 10000), Choice::number("50,000", 50000), Choice::number("100,000", 100000)], desktop: None, app_default: 2 },
+                        locked: None,
                     },
-                    Row { key: "cursor".into(), name: "Cursor".into(), help: String::new(), control: Control::Choose { choices: vec![Choice::text("Block", "block"), Choice::text("Bar", "bar"), Choice::text("Underline", "underline")], desktop: None, app_default: 0 } },
-                    Row { key: "blink".into(), name: "Cursor blinks".into(), help: String::new(), control: Control::Switch { default: true } },
-                    Row { key: "ask-close".into(), name: "Ask before closing".into(), help: "When a window has several tabs, or a program running in one.".into(), control: Control::Switch { default: true } },
+                    Row { key: "cursor".into(), name: "Cursor".into(), help: String::new(), control: Control::Choose { choices: vec![Choice::text("Block", "block"), Choice::text("Bar", "bar"), Choice::text("Underline", "underline")], desktop: None, app_default: 0 } , locked: None },
+                    Row { key: "blink".into(), name: "Cursor blinks".into(), help: String::new(), control: Control::Switch { default: true } , locked: None },
+                    Row { key: "ask-close".into(), name: "Ask before closing".into(), help: "When a window has several tabs, or a program running in one.".into(), control: Control::Switch { default: true } , locked: None },
                 ],
             },
             Part {
                 title: "On this desktop".into(),
                 rows: vec![
-                    Row { key: "style".into(), name: "Style".into(), help: "The terminal's own light or dark wins over the desktop's.".into(), control: Control::Choose { choices: styles.clone(), desktop: Some(desktop_light_word(text, false).into()), app_default: 0 } },
-                    Row { key: "bar-style".into(), name: "Title bar".into(), help: String::new(), control: Control::Choose { choices: styles, desktop: Some(desktop_light_word(text, false).into()), app_default: 0 } },
-                    Row { key: "opacity".into(), name: "Opacity".into(), help: String::new(), control: Control::Choose { choices: opacities, desktop: Some(format!("{:.0}%", opacity * 100.0)), app_default: 0 } },
-                    Row { key: String::new(), name: "Window places".into(), help: "Where the desktop puts the terminal's windows, for each set of screens.".into(), control: Control::Button { label: "Forget…".into(), id: FORGET } },
+                    Row::new("style", "Style", "While the desktop's Style is App default.", Control::Choose { choices: styles.clone(), desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(forced_by_desktop(text)),
+                    Row::new("bar-style", "Title bar", "", Control::Choose { choices: styles, desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(forced_by_desktop(text)),
+                    Row { key: "opacity".into(), name: "Opacity".into(), help: String::new(), control: Control::Choose { choices: opacities, desktop: Some(format!("Desktop default ({:.0}%)", opacity * 100.0)), app_default: 0 } , locked: None },
+                    Row { key: String::new(), name: "Window places".into(), help: "Where the desktop puts the terminal's windows, for each set of screens.".into(), control: Control::Button { label: "Forget…".into(), id: FORGET } , locked: None },
                 ],
             },
         ]

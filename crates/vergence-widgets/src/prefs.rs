@@ -77,9 +77,11 @@ impl Choice {
 /// What a row holds.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Control {
-    /// A choice. `desktop`: the desktop's value now, as said in "Desktop
-    /// default (…)", for a row that inherits one; else `app_default` is the
-    /// choice that holds while the key is absent.
+    /// A choice. `desktop`: the first choice's words, for a row whose
+    /// absent key means a default that is not one of the choices ("Desktop
+    /// default (Dark)", following the desktop; "Built-in (Dark)", the app's
+    /// own look); else `app_default` is the choice that holds while the key
+    /// is absent.
     Choose { choices: Vec<Choice>, desktop: Option<String>, app_default: usize },
     /// On or off; absent is `default`.
     Switch { default: bool },
@@ -88,12 +90,27 @@ pub enum Control {
 }
 
 /// One row: the key it writes, its name, a line saying what it does.
+/// `locked`: something else decides it now (the desktop's Style forcing
+/// every app): the row says what, instead of offering a choice that would
+/// not take effect.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
     pub key: String,
     pub name: String,
     pub help: String,
     pub control: Control,
+    pub locked: Option<String>,
+}
+
+impl Row {
+    pub fn new(key: &str, name: &str, help: &str, control: Control) -> Row {
+        Row { key: key.into(), name: name.into(), help: help.into(), control, locked: None }
+    }
+
+    pub fn locked(mut self, why: Option<String>) -> Row {
+        self.locked = why;
+        self
+    }
 }
 
 /// A part of the window, under its heading.
@@ -179,6 +196,9 @@ impl Prefs {
         if !r.help.is_empty() {
             left.push(label(r.help.clone()).size(11.0).dim().wrap().width(Length::FILL));
         }
+        if let Some(why) = &r.locked {
+            return panel(row(vec![column(left).spacing(2.0).width(Length::FILL), label(why.clone()).size(12.0).dim().wrap().width(Length::Fixed(230.0))]).spacing(16.0).align(Align::Center).width(Length::FILL)).padding(Padding::hv(8.0, 12.0)).width(Length::FILL);
+        }
         let control: Element<PrefsMsg> = match &r.control {
             Control::Choose { choices, desktop, app_default } => {
                 let same = |c: &Choice, v: &str| match c.value {
@@ -200,7 +220,7 @@ impl Prefs {
                 let mut names: Vec<String> = Vec::new();
                 let mut values: Vec<Option<Value>> = Vec::new();
                 if let Some(d) = desktop {
-                    names.push(format!("Desktop default ({d})"));
+                    names.push(d.clone());
                     values.push(None);
                 }
                 for (i, c) in choices.iter().enumerate() {
@@ -214,11 +234,12 @@ impl Prefs {
                     (false, None) => Some(*app_default),
                     (false, Some(i)) => Some(i),
                 };
-                if desktop.is_some() && at.is_some() {
+                if let (Some(d), Some(_)) = (desktop, at) {
                     let key = r.key.clone();
+                    let back = if d.starts_with("Built-in") { "Use the built-in" } else { "Use the desktop's" };
                     left.push(
                         row(vec![
-                            button(label("Use the desktop's").size(11.0).color(theme.accent)).look(ButtonLook::Plain).padding(Padding::hv(0.0, 0.0)).on_press(PrefsMsg::Set(key, None)).name(format!("{}: use the desktop's", r.name)),
+                            button(label(back).size(11.0).color(theme.accent)).look(ButtonLook::Plain).padding(Padding::hv(0.0, 0.0)).on_press(PrefsMsg::Set(key, None)).name(format!("{}: {}", r.name, back.to_lowercase())),
                             space().width(Length::FILL),
                         ])
                         .width(Length::FILL),
