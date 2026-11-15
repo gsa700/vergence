@@ -126,3 +126,8 @@ limited size allowance to preserve the layout".
   reference unit; the 14" at 3.28, not snapped to 300%) for every screen,
   connected or remembered, so a window keeps its size in millimeters moving
   between them; off (today): whole-number scales where close, for sharpness.
+- **Scroll bars under the title bar** (Dave, 2026-11-14 night: "next time we
+  work on Settings, we need to fix the scrollbars - they go under the
+  titlebar"): the settings app's scroll bars (sidebar and page) run up
+  under the frosted bar; they should start below it (the window draws under
+  its bar, `Theme::top`: the scroll area's bar must begin at that inset).
