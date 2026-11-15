@@ -115,6 +115,9 @@ fn real_fs(source: &str, mount: &str) -> bool {
 
 /// `df -kP`: Filesystem, 1024-blocks, Used, Available, Capacity, Mounted on.
 pub fn parse_df(text: &str) -> Vec<FileSystem> {
+    // A volume mounted in several places (btrfs subvolumes: / and /home on
+    // one device) is listed once, at its first mount.
+    let mut seen: Vec<String> = Vec::new();
     text.lines()
         .skip(1)
         .filter_map(|l| {
@@ -125,7 +128,11 @@ pub fn parse_df(text: &str) -> Vec<FileSystem> {
             let (total, free) = (f[1].parse::<u64>().ok()?, f[3].parse::<u64>().ok()?);
             // The mount point may hold spaces: everything after the fifth field.
             let mount = f[5..].join(" ");
-            (real_fs(f[0], &mount) && total > 0).then(|| FileSystem { mount, source: f[0].to_string(), total: total * 1024, free: free * 1024 })
+            if !real_fs(f[0], &mount) || total == 0 || seen.iter().any(|s| s == f[0]) {
+                return None;
+            }
+            seen.push(f[0].to_string());
+            Some(FileSystem { mount, source: f[0].to_string(), total: total * 1024, free: free * 1024 })
         })
         .collect()
 }
@@ -339,7 +346,7 @@ mod tests {
 
     #[test]
     fn file_systems_from_df_without_the_kernels_own() {
-        let df = "Filesystem     1024-blocks      Used Available Capacity Mounted on\n/dev/nvme0n1p2   471000000  97000000 350000000      22% /\ntmpfs              8000000      1000   7999000       1% /tmp\ndevtmpfs           10240         0     10240       0% /dev\n/dev/nvme0n1p1     1046508     150000    896508      15% /boot/efi\nzroot/home      400000000  10000000 390000000       3% /home\n/dev/sdb1          1000000     10     999990       1% /media/My Disk\n";
+        let df = "Filesystem     1024-blocks      Used Available Capacity Mounted on\n/dev/nvme0n1p2   471000000  97000000 350000000      22% /\ntmpfs              8000000      1000   7999000       1% /tmp\ndevtmpfs           10240         0     10240       0% /dev\n/dev/nvme0n1p1     1046508     150000    896508      15% /boot/efi\nzroot/home      400000000  10000000 390000000       3% /home\n/dev/sdb1          1000000     10     999990       1% /media/My Disk\n/dev/nvme0n1p2   471000000  97000000 350000000      22% /var\n";
         let fs = parse_df(df);
         let mounts: Vec<&str> = fs.iter().map(|f| f.mount.as_str()).collect();
         assert_eq!(mounts, ["/", "/boot/efi", "/home", "/media/My Disk"]);
