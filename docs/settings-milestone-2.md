@@ -6,6 +6,10 @@ looks good"). **Accepted 2026-11-14: "1 yes, 2 off, 3 more than one tab open
 or an active tab present, 4 agree with settings"** (the keep-or-revert dialog;
 the physical-size switch off by default; the terminal asks with several tabs
 or a tab running something; the dock's Forget opens the settings app).
+**Closed 2026-11-14**: all eight steps in, with four asks of Dave's on the
+way (the settings app's light bar and centered buttons, a scrolling
+sidebar with a scroll-bar gutter, a Notifications page with per-app
+switches); acceptance below.
 
 ## Where things stand
 
@@ -218,9 +222,20 @@ as now.
 5. **Energy on battery and on power.**
 6. **Forget window places**: Windows page, dock menu, dialogs.
 7. **The terminal's confirmation.**
-8. **Docs**: whitepaper §6.9 and §9, README, CLAUDE.md, this plan.
+8. **Docs**: whitepaper §6.9 and §9, README, CLAUDE.md, this plan. *In: Draft 0.17.*
 
 ## Acceptance
+
+Met 2026-11-14 except where said: 1 (tests green: 486 Hubble and
+Techbench, 482 kepler); 2 (kepler's 14" 2560 x 1440 at 60 kept and
+reverted, Hubble's panel 144 to 60 Hz; the 14" on Hubble's HDMI was not
+retried at 1920 x 1080); 3 (the switch on: Hubble's panel 100% to 104%;
+measuring a window across the panel and the 14" waits for both on one
+machine); 4 (kepler's em0 1 Gb/s full duplex with traffic; Hubble's cable
+waits for it to be plugged in); 5 (Hubble unplugged: the battery pair,
+screens off at once; plugged in, the power pair); 6 (Forget from the dock's
+command and Forget pressed by Dave; Forget all not pressed); 7 (Dave: three
+tabs ask, Cancel keeps, one idle tab closes; a running `sleep` asks).
 
 1. Tests green on Hubble, kepler and Techbench.
 2. On Hubble: the 14" switched to 1920 x 1080 and back, and a refresh rate
