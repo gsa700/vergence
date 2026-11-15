@@ -169,6 +169,13 @@ as now.
   the newest is nearest the corner), and a test card sent over the bus.
   desktop.toml `[notifications]` do-not-disturb, seconds, corner; the
   server's notify.rs follows it within a second.
+  Then the **apps list** (Dave: "yes, add the per-app list"): the server
+  remembers each app that sends a card (~/.local/state/vergence/
+  notify-apps.toml, 0600, written when an app is new or an hour since),
+  and the page lists them, newest first, with a switch each
+  (`[notifications] off = [...]`, any case); a switched-off app's cards
+  never show, critical ones included. Tried on Hubble with a D-Bus card
+  (gdbus): listed, then off: an urgent card from it held back.
 
 ## Steps
 

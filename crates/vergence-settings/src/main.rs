@@ -550,6 +550,8 @@ struct App {
     wifi: wifi::Wifi,
     /// The Battery page's state (battery.rs).
     battery: battery::BatteryPage,
+    /// Apps that have sent cards, newest first (notify.rs, read when the page opens).
+    notify_apps: Vec<(String, u64)>,
     /// A new mode waiting to be kept, and whether to ask about it now (modes.rs).
     mode_pending: Option<modes::Pending>,
     mode_ask: bool,
@@ -743,6 +745,7 @@ impl App {
             advanced: HashSet::new(),
             wifi: Default::default(),
             battery: Default::default(),
+            notify_apps: Vec::new(),
             mode_pending: None,
             mode_ask: false,
             accent_text: appearance_text(&desktop, "accent"),
@@ -883,6 +886,9 @@ impl App {
         }
         if matches!(p, Page::WiFi | Page::Network) {
             self.wifi_read();
+        }
+        if p == Page::Notifications {
+            self.notify_apps = notify::read_apps();
         }
         if matches!(p, Page::Battery | Page::Energy) {
             self.battery_read();

@@ -26,6 +26,13 @@
 //                            desktop (a card with buttons at least 10 s)
 //   corner = "top-right"     top-right, top-left, bottom-right or bottom-left;
 //                            at the bottom the newest card is nearest the corner
+//   off = ["Firefox"]        apps whose cards are never shown, critical ones too
+//                            (the name an app gives, any case)
+//
+// Every app that sends a card is remembered, with when it last did, in
+// ~/.local/state/vergence/notify-apps.toml (owner only), for the page's list
+// of apps; the server's own cards are not. Written when an app is new or was
+// last written down more than an hour ago, so a chatty app costs nothing.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -121,6 +128,8 @@ pub struct Notifications {
     /// The pointer is over a card: countdowns are paused.
     paused: bool,
     pub config: Config,
+    /// App names that sent cards, and when they were last written down (unix s).
+    apps: Option<HashMap<String, u64>>,
 }
 
 /// [notifications] from desktop.toml.
@@ -130,11 +139,13 @@ pub struct Config {
     pub timeout: Duration,
     /// (right, bottom).
     pub corner: (bool, bool),
+    /// Apps switched off, in lower case.
+    pub off: Vec<String>,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { do_not_disturb: false, timeout: DEFAULT_TIMEOUT, corner: (true, false) }
+        Config { do_not_disturb: false, timeout: DEFAULT_TIMEOUT, corner: (true, false), off: Vec::new() }
     }
 }
 
@@ -150,7 +161,45 @@ pub fn parse(text: &str) -> Config {
             "bottom-left" => (false, true),
             _ => (true, false),
         },
+        off: t.get("off").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str()).map(|s| s.trim().to_lowercase()).collect()).unwrap_or_default(),
     }
+}
+
+/// The longest app name kept.
+const MAX_APP: usize = 64;
+
+fn apps_path() -> Option<std::path::PathBuf> {
+    let state = std::env::var_os("XDG_STATE_HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))?;
+    Some(state.join("vergence/notify-apps.toml"))
+}
+
+/// `[apps]` name = last time (unix seconds).
+pub fn parse_apps(text: &str) -> HashMap<String, u64> {
+    text.parse::<toml::Table>()
+        .ok()
+        .and_then(|t| t.get("apps").and_then(|a| a.as_table()).cloned())
+        .map(|a| a.into_iter().filter_map(|(k, v)| v.as_integer().map(|t| (k, t.max(0) as u64))).collect())
+        .unwrap_or_default()
+}
+
+fn read_apps() -> HashMap<String, u64> {
+    apps_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse_apps(&t)).unwrap_or_default()
+}
+
+/// Written beside and moved into place, readable by its owner only.
+fn write_apps(apps: &HashMap<String, u64>) -> std::io::Result<()> {
+    use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt}};
+    let Some(path) = apps_path() else { return Ok(()) };
+    if let Some(dir) = path.parent() {
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    }
+    let mut table = toml::Table::new();
+    table.insert("apps".into(), toml::Value::Table(apps.iter().map(|(k, v)| (k.clone(), toml::Value::Integer(*v as i64))).collect()));
+    let text = toml::to_string(&table).map_err(std::io::Error::other)?;
+    let beside = path.with_extension("toml.new");
+    let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&beside)?;
+    file.write_all(text.as_bytes())?;
+    std::fs::rename(beside, path)
 }
 
 pub fn load() -> Config {
@@ -228,6 +277,17 @@ impl Server {
     pub fn notify(&mut self, origin: Origin, req: Request) -> u32 {
         let buttons = req.actions.iter().any(|(k, _)| !k.is_empty() && k != "default");
         let c = self.notes.config.clone();
+        let app: String = req.app.chars().filter(|ch| !ch.is_control()).take(MAX_APP).collect::<String>().trim().to_string();
+        if origin != Origin::Server && !app.is_empty() {
+            self.notify_remember(&app);
+        }
+        // Switched off on the page: never shown, whatever its urgency.
+        if origin != Origin::Server && c.off.contains(&app.to_lowercase()) {
+            self.notes.next_id = self.notes.next_id.wrapping_add(1).max(1);
+            let id = self.notes.next_id;
+            tracing::info!("notify: #{id} from {app} held back (switched off): {:?}", req.summary);
+            return id;
+        }
         // Do not disturb: an app's card is not shown; the app still gets an id
         // (critical cards still show). It is not told the card closed: that
         // could reach it before the id does.
@@ -393,6 +453,23 @@ impl Server {
             }
         }
         self.redraw_all();
+    }
+
+    /// An app sent a card: written down if new, or not written for an hour.
+    fn notify_remember(&mut self, app: &str) {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let apps = self.notes.apps.get_or_insert_with(read_apps);
+        if apps.get(app).is_some_and(|t| now.saturating_sub(*t) < 3600) {
+            return;
+        }
+        apps.insert(app.to_string(), now);
+        let apps = apps.clone();
+        // Off the frame: a small file, but a disk can be slow.
+        std::thread::spawn(move || {
+            if let Err(e) = write_apps(&apps) {
+                tracing::warn!("notify: can't keep the apps list: {e}");
+            }
+        });
     }
 
     /// desktop.toml changed: the new choices apply to cards from now on; the
@@ -582,6 +659,11 @@ mod tests {
         assert_eq!(c.corner, (false, true));
         assert_eq!(parse("[notifications]\nseconds = 0\ncorner = \"middle\"\n").timeout, Duration::from_secs(2));
         assert_eq!(parse("[notifications]\ncorner = \"middle\"\n").corner, (true, false));
+        assert_eq!(parse("[notifications]\noff = [\" Firefox \", \"notify-send\"]\n").off, vec!["firefox", "notify-send"]);
+        let apps = super::parse_apps("[apps]\nFirefox = 1731629000\n\"vergence-settings\" = 1731629100\n");
+        assert_eq!(apps.get("Firefox"), Some(&1731629000));
+        assert_eq!(apps.len(), 2);
+        assert!(super::parse_apps("nonsense =").is_empty());
     }
 
     fn w(s: &str) -> f32 {
