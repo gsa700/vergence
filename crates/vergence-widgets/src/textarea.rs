@@ -645,6 +645,11 @@ impl Doc {
         self.history.modified() || self.buffer.ending() != self.saved_ending
     }
 
+    /// The text is not the saved one (unsaved work put back after a restart).
+    pub fn mark_unsaved(&mut self) {
+        self.history.forget_saved();
+    }
+
     /// The text is saved as it is now.
     pub fn mark_saved(&mut self) {
         self.history.mark_saved();

@@ -16,6 +16,7 @@
 
 mod files;
 mod hand;
+mod keep;
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -55,6 +56,7 @@ mod cmd {
     pub const WRAP: u32 = 24;
     pub const NEXT_TAB: u32 = 30;
     pub const PREV_TAB: u32 = 31;
+    pub const GO_TO_LINE: u32 = 32;
     pub const SETTINGS: u32 = 40;
     pub const ABOUT: u32 = 41;
 }
@@ -71,6 +73,24 @@ struct Shared {
     listener: Arc<Mutex<Option<Waker>>>,
     /// The ids tabs are given, across windows (so a joined tab keeps its id).
     next_tab: u32,
+    /// What each window keeps (keep.rs), by its toolkit number.
+    snaps: Vec<(u32, keep::WindowSnap)>,
+    /// Windows kept from the last run still to open (the first window opens them).
+    pending: Vec<keep::WindowSnap>,
+}
+
+/// Timers of the editor's own.
+const KEEP_TIMER: u64 = 1;
+const WATCH_TIMER: u64 = 2;
+/// How long after a change what is kept is written.
+const KEEP_AFTER: std::time::Duration = std::time::Duration::from_secs(1);
+/// How often open files are looked at for changes on disk.
+const WATCH_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// A file's modification time and length: changed on disk if these differ.
+fn stamp(p: &Path) -> Option<(SystemTime, u64)> {
+    let m = std::fs::metadata(p).ok()?;
+    Some((m.modified().ok()?, m.len()))
 }
 
 type SharedRef = Rc<RefCell<Shared>>;
@@ -86,6 +106,10 @@ struct DocTab {
     bom: bool,
     /// Tab inserts spaces (from the file's own indenting, or the status line).
     spaces: Option<bool>,
+    /// The file as last read or written (step 8: changes on disk are noticed).
+    disk: Option<(SystemTime, u64)>,
+    /// The file changed on disk while this tab had changes of its own.
+    changed_on_disk: bool,
 }
 
 impl DocTab {
@@ -118,6 +142,11 @@ enum Msg {
     FindClose,
     ReplaceOne,
     ReplaceAll,
+    Reload,
+    KeepMine,
+    GotoTyped(String),
+    GotoGo,
+    GotoClose,
 }
 
 /// The most matches lit and counted.
@@ -188,6 +217,12 @@ struct EditWindow {
     notice: Option<String>,
     picking: Option<Pick>,
     find: Option<Find>,
+    /// Go to line (Ctrl+L): what is typed.
+    goto: Option<String>,
+    /// The window's persistence token (the server's; kept for next time).
+    token: String,
+    keep_pending: bool,
+    watching: bool,
     /// Bumped to give the keyboard back to the text (a new area id takes it)
     /// or to the find field.
     focus_turn: u64,
@@ -205,7 +240,7 @@ impl EditWindow {
     fn new(shared: SharedRef, tabs: Vec<DocTab>) -> EditWindow {
         let (desktop, stamp) = desktop_text();
         let front = tabs.first().map_or(0, |t| t.id);
-        let mut w = EditWindow { shared, tabs, front, me: None, waker: None, desktop, stamp, zoom: 1.0, prefs_open: Rc::new(Cell::new(false)), asking: None, closing: Vec::new(), closing_window: false, notice: None, picking: None, find: None, focus_turn: 0 };
+        let mut w = EditWindow { shared, tabs, front, me: None, waker: None, desktop, stamp, zoom: 1.0, prefs_open: Rc::new(Cell::new(false)), asking: None, closing: Vec::new(), closing_window: false, notice: None, picking: None, find: None, focus_turn: 0, goto: None, token: String::new(), keep_pending: false, watching: false };
         if w.tabs.is_empty() {
             let t = w.untitled_tab();
             w.front = t.id;
@@ -272,8 +307,10 @@ impl EditWindow {
         s.windows.push((id, w.clone()));
         let mut l = s.listener.lock().unwrap_or_else(|e| e.into_inner());
         if l.is_none() {
-            *l = Some(w);
+            *l = Some(w.clone());
         }
+        // Woken once, to start watching its files (and open the windows kept).
+        w.wake();
     }
 
     fn new_tab_id(&self) -> u32 {
@@ -285,7 +322,7 @@ impl EditWindow {
     fn untitled_tab(&self) -> DocTab {
         // The lowest number no open Untitled here has.
         let n = (1..).find(|n| !self.tabs.iter().any(|t| t.path.is_none() && t.untitled == *n)).unwrap_or(1);
-        DocTab { id: self.new_tab_id(), doc: TextDoc::new(""), path: None, untitled: n, read_only: None, bom: false, spaces: None }
+        DocTab { id: self.new_tab_id(), doc: TextDoc::new(""), path: None, untitled: n, read_only: None, bom: false, spaces: None, disk: None, changed_on_disk: false }
     }
 
     /// A tab for `path`, read in; None (and a notice) if it cannot be.
@@ -295,7 +332,7 @@ impl EditWindow {
                 let doc = TextDoc::new(&l.text);
                 doc.borrow_mut().mark_saved();
                 let spaces = doc.borrow().buffer().uses_tabs().map(|tabs| !tabs);
-                Some(DocTab { id: self.new_tab_id(), doc, path: Some(path.to_path_buf()), untitled: 0, read_only: l.read_only, bom: l.bom, spaces })
+                Some(DocTab { id: self.new_tab_id(), doc, path: Some(path.to_path_buf()), untitled: 0, read_only: l.read_only, bom: l.bom, spaces, disk: stamp(path), changed_on_disk: false })
             }
             Err(e) => {
                 self.notice = Some(e);
@@ -348,6 +385,10 @@ impl EditWindow {
         match files::save(&path, &text, t.bom) {
             Ok(()) => {
                 t.doc.borrow_mut().mark_saved();
+                if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
+                    t.disk = stamp(&path);
+                    t.changed_on_disk = false;
+                }
                 true
             }
             Err(e) => {
@@ -355,6 +396,133 @@ impl EditWindow {
                 false
             }
         }
+    }
+
+    /// What this window keeps for next time (keep.rs).
+    fn snap(&self) -> keep::WindowSnap {
+        let tabs = self
+            .tabs
+            .iter()
+            .filter(|t| t.path.is_some() || t.modified())
+            .map(|t| {
+                let d = t.doc.borrow();
+                let c = d.caret();
+                keep::TabSnap { path: t.path.clone(), untitled: t.untitled, text: t.modified().then(|| d.text()), caret: (c.line, c.col) }
+            })
+            .collect::<Vec<_>>();
+        let front = self.tabs.iter().filter(|t| t.path.is_some() || t.modified()).position(|t| t.id == self.front).unwrap_or(0);
+        keep::WindowSnap { token: self.token.clone(), front, tabs }
+    }
+
+    /// Writes what every window keeps, this one's as it is now.
+    fn keep_now(&mut self) {
+        self.keep_pending = false;
+        let Some(me) = self.me else { return };
+        let snap = self.snap();
+        let mut s = self.shared.borrow_mut();
+        match s.snaps.iter_mut().find(|(id, _)| *id == me) {
+            Some(slot) => slot.1 = snap,
+            None => s.snaps.push((me, snap)),
+        }
+        let all: Vec<keep::WindowSnap> = s.snaps.iter().map(|(_, w)| w.clone()).filter(|w| !w.tabs.is_empty() || !w.token.is_empty()).collect();
+        keep::save(&all);
+    }
+
+    /// What is kept is written a second from now (once, however many changes).
+    fn keep_soon(&mut self, window: &mut Window) {
+        if !self.keep_pending {
+            self.keep_pending = true;
+            window.wake_at(KEEP_TIMER, std::time::Instant::now() + KEEP_AFTER);
+        }
+    }
+
+    /// A window as it was kept: its token, its files, its unsaved texts.
+    fn from_snap(shared: SharedRef, snap: &keep::WindowSnap) -> EditWindow {
+        let mut w = EditWindow::new(shared, Vec::new());
+        w.tabs.clear();
+        w.token = snap.token.clone();
+        for t in &snap.tabs {
+            let tab = match (&t.text, &t.path) {
+                // Unsaved work: its text, marked as not saved.
+                (Some(text), path) => {
+                    let doc = TextDoc::new(text);
+                    doc.borrow_mut().mark_unsaved();
+                    let spaces = doc.borrow().buffer().uses_tabs().map(|tabs| !tabs);
+                    Some(DocTab { id: w.new_tab_id(), doc, path: path.clone(), untitled: t.untitled, read_only: None, bom: false, spaces, disk: path.as_deref().and_then(stamp), changed_on_disk: false })
+                }
+                (None, Some(p)) => w.file_tab(p),
+                (None, None) => None,
+            };
+            if let Some(tab) = tab {
+                let caret = vergence_widgets::edit::Pos::new(t.caret.0, t.caret.1);
+                tab.doc.borrow_mut().set_selection(caret, caret);
+                w.tabs.push(tab);
+            }
+        }
+        if w.tabs.is_empty() {
+            let t = w.untitled_tab();
+            w.tabs.push(t);
+        }
+        w.front = w.tabs.get(snap.front).or(w.tabs.first()).map_or(0, |t| t.id);
+        w.apply_options();
+        w
+    }
+
+    /// Open files changed on disk: one without changes of its own is read
+    /// again (the caret kept where it was); one with them asks (a strip).
+    fn check_disk(&mut self) -> bool {
+        let mut changed = false;
+        for i in 0..self.tabs.len() {
+            let Some(p) = self.tabs[i].path.clone() else { continue };
+            let now = stamp(&p);
+            if now.is_none() || now == self.tabs[i].disk || self.tabs[i].changed_on_disk {
+                continue;
+            }
+            if self.tabs[i].modified() {
+                self.tabs[i].changed_on_disk = true;
+            } else {
+                self.reload(i);
+            }
+            changed = true;
+        }
+        changed
+    }
+
+    /// Reads tab `i`'s file again, the caret kept on its line.
+    fn reload(&mut self, i: usize) {
+        let Some(p) = self.tabs[i].path.clone() else { return };
+        match files::load(&p) {
+            Ok(l) => {
+                let t = &mut self.tabs[i];
+                let mut d = t.doc.borrow_mut();
+                let c = d.caret();
+                d.set_text(&l.text);
+                d.mark_saved();
+                d.set_selection(c, c);
+                drop(d);
+                t.bom = l.bom;
+                t.read_only = l.read_only;
+                t.disk = stamp(&p);
+                t.changed_on_disk = false;
+            }
+            Err(e) => self.notice = Some(e),
+        }
+    }
+
+    /// Go to line: "12", or "12:5" for a column too.
+    fn go_to(&mut self, what: &str) -> bool {
+        let Some(doc) = self.doc() else { return false };
+        let mut parts = what.trim().splitn(2, [':', ',', ' ']);
+        let Some(line) = parts.next().and_then(|l| l.trim().parse::<usize>().ok()).filter(|l| *l > 0) else { return false };
+        let col = parts.next().and_then(|c| c.trim().parse::<usize>().ok()).unwrap_or(1).max(1);
+        let mut d = doc.borrow_mut();
+        let line = (line - 1).min(d.buffer().line_count() - 1);
+        // The column in characters, as the status line counts them.
+        let text = d.buffer().line(line).to_string();
+        let byte = text.char_indices().nth(col - 1).map_or(text.len(), |(b, _)| b);
+        let p = vergence_widgets::edit::Pos::new(line, byte);
+        d.set_selection(p, p);
+        true
     }
 
     /// Opens the find bar (with Replace, if `replace`): the selection, if on
@@ -691,6 +859,10 @@ impl EditWindow {
             cmd::LINE_NUMBERS => self.toggle_setting("line-numbers", true),
             cmd::WRAP => self.toggle_setting("wrap", true),
             cmd::FIND => self.open_find(false),
+            cmd::GO_TO_LINE => {
+                self.goto = Some(String::new());
+                self.focus_turn += 1;
+            }
             cmd::REPLACE => self.open_find(true),
             cmd::FIND_NEXT | cmd::FIND_PREV => {
                 if self.find.is_none() {
@@ -821,6 +993,41 @@ impl Program for EditWindow {
         if let Some(r) = &tab.read_only {
             parts.push(strip(r.clone(), false));
         }
+        // Changed on disk while it has changes here: which to keep.
+        if tab.changed_on_disk {
+            parts.push(
+                panel(
+                    row(vec![
+                        label(format!("“{}” changed on disk.", tab.name())).size(12.0).wrap().width(Length::FILL),
+                        button(label("Keep mine").size(12.0)).padding(Padding::hv(2.0, 10.0)).on_press(Msg::KeepMine).name("Keep mine"),
+                        button(label("Reload").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(2.0, 10.0)).on_press(Msg::Reload).name("Reload from disk"),
+                    ])
+                    .spacing(8.0)
+                    .align(Align::Center)
+                    .width(Length::FILL),
+                )
+                .padding(Padding::hv(6.0, 12.0))
+                .width(Length::FILL),
+            );
+        }
+        if let Some(g) = &self.goto {
+            parts.push(
+                panel(
+                    row(vec![
+                        label("Go to line").size(12.0),
+                        field(g.clone(), Msg::GotoTyped).placeholder("Line, or line:column").on_submit(Msg::GotoGo).key(self.focus_turn).autofocus().width(Length::Fixed(200.0)).name("Line"),
+                        label(format!("of {}", grouped(tab.doc.borrow().buffer().line_count()))).size(12.0).dim(),
+                        space().width(Length::FILL),
+                        button(label("×").size(12.0)).look(ButtonLook::Plain).padding(Padding::hv(2.0, 8.0)).on_press(Msg::GotoClose).name("Close"),
+                    ])
+                    .spacing(8.0)
+                    .align(Align::Center)
+                    .width(Length::FILL),
+                )
+                .padding(Padding::hv(6.0, 12.0))
+                .width(Length::FILL),
+            );
+        }
         if let Some(f) = &self.find {
             parts.push(self.find_bar(f, t));
         }
@@ -835,7 +1042,7 @@ impl Program for EditWindow {
         // The area's id changes with focus_turn, so it takes the keyboard back
         // when the find bar closes (its state is the document's, not the id's).
         let area = text_area(&tab.doc).key((self.focus_turn << 32) | tab.id as u64).on_change(Msg::Changed).name(tab.name());
-        all.push(if self.find.is_none() { area.autofocus() } else { area });
+        all.push(if self.find.is_none() && self.goto.is_none() { area.autofocus() } else { area });
         // The status line: where the caret is, how Tab indents, the line endings.
         let d = tab.doc.borrow();
         let (l, c) = d.line_column();
@@ -904,6 +1111,29 @@ impl Program for EditWindow {
                 }
             }
             Msg::FindClose => self.close_find(),
+            Msg::Reload => {
+                let i = self.front_index();
+                self.reload(i);
+            }
+            Msg::KeepMine => {
+                let i = self.front_index();
+                if let Some(t) = self.tabs.get_mut(i) {
+                    t.changed_on_disk = false;
+                    t.disk = t.path.as_deref().and_then(stamp);
+                }
+            }
+            Msg::GotoTyped(g) => self.goto = Some(g),
+            Msg::GotoGo => {
+                let g = self.goto.clone().unwrap_or_default();
+                if self.go_to(&g) {
+                    self.goto = None;
+                    self.focus_turn += 1;
+                }
+            }
+            Msg::GotoClose => {
+                self.goto = None;
+                self.focus_turn += 1;
+            }
             Msg::ReplaceOne => {
                 // The match chosen is replaced; then on to the next.
                 if self.chosen_match()
@@ -940,6 +1170,7 @@ impl Program for EditWindow {
                 }
             }
         }
+        self.keep_soon(window);
         window.redraw();
     }
 
@@ -949,6 +1180,11 @@ impl Program for EditWindow {
         const PAGE_DOWN: u32 = 0xff56;
         const ESCAPE: u32 = 0xff1b;
         let Input::Key { sym, pressed: true, modifiers: m, .. } = input else { return false };
+        if *sym == ESCAPE && self.goto.is_some() {
+            self.goto = None;
+            self.focus_turn += 1;
+            return true;
+        }
         if *sym == ESCAPE && self.find.is_some() && !self.doc().is_some_and(|d| d.borrow().completing()) {
             self.close_find();
             return true;
@@ -969,6 +1205,7 @@ impl Program for EditWindow {
             (Some('0'), _) => cmd::ZOOM_RESET,
             (Some(','), _) => cmd::SETTINGS,
             (Some('f'), _) => cmd::FIND,
+            (Some('l'), _) => cmd::GO_TO_LINE,
             (Some('h'), _) => cmd::REPLACE,
             (Some('g'), _) if m.shift => cmd::FIND_PREV,
             (Some('g'), _) => cmd::FIND_NEXT,
@@ -977,6 +1214,7 @@ impl Program for EditWindow {
             _ => return false,
         };
         self.run(id, window);
+        self.keep_soon(window);
         true
     }
 
@@ -1008,6 +1246,7 @@ impl Program for EditWindow {
                 C::role(cmd::FIND_NEXT, Role::FindNext),
                 C::own(cmd::FIND_PREV, "Edit", "Find previous", "Ctrl+Shift+G"),
                 C::role(cmd::REPLACE, Role::Replace).enabled(editable),
+                C::own(cmd::GO_TO_LINE, "Edit", "Go to line…", "Ctrl+L"),
                 C::role(cmd::ZOOM_IN, Role::ZoomIn),
                 C::role(cmd::ZOOM_OUT, Role::ZoomOut),
                 C::role(cmd::ZOOM_RESET, Role::ZoomReset),
@@ -1023,7 +1262,36 @@ impl Program for EditWindow {
 
     fn command(&mut self, id: u32, window: &mut Window) {
         self.run(id, window);
+        self.keep_soon(window);
         window.redraw();
+    }
+
+    fn timer(&mut self, id: u64, window: &mut Window) -> bool {
+        match id {
+            KEEP_TIMER => {
+                self.keep_now();
+                false
+            }
+            WATCH_TIMER => {
+                window.wake_at(WATCH_TIMER, std::time::Instant::now() + WATCH_EVERY);
+                let changed = self.check_disk();
+                if changed {
+                    self.keep_soon(window);
+                }
+                changed
+            }
+            _ => false,
+        }
+    }
+
+    /// Its token from the last run, so window memory puts it back; "new": ask for one.
+    fn token(&self) -> String {
+        if self.token.is_empty() { "new".into() } else { self.token.clone() }
+    }
+
+    fn token_given(&mut self, token: &str) {
+        self.token = token.to_string();
+        self.keep_now();
     }
 
     fn tab(&mut self, event: TabEvent, window: &mut Window) {
@@ -1077,6 +1345,7 @@ impl Program for EditWindow {
             }
             TabEvent::Menu { .. } => {}
         }
+        self.keep_soon(window);
     }
 
     fn close_asked(&mut self, window: &mut Window) -> bool {
@@ -1097,6 +1366,10 @@ impl Program for EditWindow {
     fn closed(&mut self) {
         let mut s = self.shared.borrow_mut();
         s.windows.retain(|(id, _)| Some(*id) != self.me);
+        // Closed by the user (its questions answered): it is not kept.
+        s.snaps.retain(|(id, _)| Some(*id) != self.me);
+        let all: Vec<keep::WindowSnap> = s.snaps.iter().map(|(_, w)| w.clone()).collect();
+        keep::save(&all);
         // Hand-overs go to another window now.
         let next = s.windows.first().map(|(_, w)| w.clone());
         *s.listener.lock().unwrap_or_else(|e| e.into_inner()) = next.clone();
@@ -1112,6 +1385,17 @@ impl Program for EditWindow {
 
     fn woken(&mut self, window: &mut Window) -> bool {
         let mut changed = self.reread();
+        if !self.watching {
+            self.watching = true;
+            window.wake_at(WATCH_TIMER, std::time::Instant::now() + WATCH_EVERY);
+            self.keep_soon(window);
+        }
+        // The other windows kept from the last run.
+        let pending = std::mem::take(&mut self.shared.borrow_mut().pending);
+        for snap in pending {
+            let w = EditWindow::from_snap(self.shared.clone(), &snap);
+            window.open_window(vergence_widgets::window(w));
+        }
         // The file dialog answered.
         let answer = self.picking.as_ref().and_then(|p| p.answer.borrow_mut().take());
         if let Some(paths) = answer
@@ -1386,8 +1670,17 @@ fn main() {
             w.wake();
         }
     });
-    let shared = Rc::new(RefCell::new(Shared { windows: Vec::new(), transfers: Vec::new(), inbox, listener, next_tab: 0 }));
-    let mut w = EditWindow::new(shared, Vec::new());
+    let shared = Rc::new(RefCell::new(Shared { windows: Vec::new(), transfers: Vec::new(), inbox, listener, next_tab: 0, snaps: Vec::new(), pending: Vec::new() }));
+    // The windows kept from the last run come back, the first here and the
+    // rest once it is open; files named on the command line join the first.
+    let mut kept = keep::load();
+    let mut w = if kept.is_empty() {
+        EditWindow::new(shared.clone(), Vec::new())
+    } else {
+        let first = kept.remove(0);
+        shared.borrow_mut().pending = kept;
+        EditWindow::from_snap(shared.clone(), &first)
+    };
     w.open_files(&paths);
     if let Err(e) = vergence_widgets::run(w, (760, 560)) {
         eprintln!("vergence-edit: {e}");
@@ -1400,7 +1693,7 @@ mod tests {
     use super::*;
 
     fn shared() -> SharedRef {
-        Rc::new(RefCell::new(Shared { windows: Vec::new(), transfers: Vec::new(), inbox: Arc::new(Mutex::new(Vec::new())), listener: Arc::new(Mutex::new(None)), next_tab: 0 }))
+        Rc::new(RefCell::new(Shared { windows: Vec::new(), transfers: Vec::new(), inbox: Arc::new(Mutex::new(Vec::new())), listener: Arc::new(Mutex::new(None)), next_tab: 0, snaps: Vec::new(), pending: Vec::new() }))
     }
 
     #[test]
@@ -1443,6 +1736,57 @@ mod tests {
         assert_eq!(suggested_name(t), "Untitled.txt");
         t.doc.borrow_mut().insert("\n  Shopping list: eggs/milk, and a great many other things to get\nmore");
         assert_eq!(suggested_name(t), "Shopping list eggsmilk, and a great many.txt");
+    }
+
+    #[test]
+    fn a_window_is_kept_and_put_back_with_its_unsaved_work() {
+        let dir = std::env::temp_dir().join(format!("vergence-edit-keep-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("saved.txt");
+        std::fs::write(&p, "one\ntwo\nthree\n").unwrap();
+        let mut w = EditWindow::new(shared(), Vec::new());
+        w.tabs[0].doc.borrow_mut().insert("a note not saved");
+        w.open_files(std::slice::from_ref(&p));
+        w.tabs[1].doc.borrow_mut().set_selection(vergence_widgets::edit::Pos::new(2, 1), vergence_widgets::edit::Pos::new(2, 1));
+        w.token = "tok".into();
+        let snap = w.snap();
+        assert_eq!(snap.tabs.len(), 2);
+        assert_eq!(snap.tabs[0].text.as_deref(), Some("a note not saved"));
+        assert_eq!(snap.tabs[1].text, None, "a saved file is read again, not copied");
+        let back = EditWindow::from_snap(shared(), &snap);
+        assert_eq!(back.token, "tok");
+        assert_eq!(back.tabs[0].name(), "Untitled");
+        assert!(back.tabs[0].modified(), "unsaved work stays unsaved");
+        assert_eq!(back.tabs[0].doc.borrow().text(), "a note not saved");
+        assert_eq!(back.tabs[1].doc.borrow().caret(), vergence_widgets::edit::Pos::new(2, 1));
+        assert_eq!(back.front, back.tabs[1].id, "the file was in front");
+        // An empty Untitled is not kept.
+        let empty = EditWindow::new(shared(), Vec::new());
+        assert!(empty.snap().tabs.is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_changed_on_disk_is_read_again_or_asked_about() {
+        let dir = std::env::temp_dir().join(format!("vergence-edit-disk-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("watched.txt");
+        std::fs::write(&p, "first\n").unwrap();
+        let mut w = EditWindow::new(shared(), Vec::new());
+        w.open_files(std::slice::from_ref(&p));
+        assert!(!w.check_disk(), "nothing changed");
+        std::fs::write(&p, "second, longer\n").unwrap();
+        assert!(w.check_disk());
+        assert_eq!(w.tabs[0].doc.borrow().text(), "second, longer\n", "no changes here: read again");
+        w.tabs[0].doc.borrow_mut().insert("mine ");
+        std::fs::write(&p, "third, longer still\n").unwrap();
+        assert!(w.check_disk());
+        assert!(w.tabs[0].changed_on_disk, "changes here: asked");
+        assert!(w.tabs[0].doc.borrow().text().starts_with("mine "));
+        assert!(w.go_to("1:3"));
+        assert_eq!(w.tabs[0].doc.borrow().caret(), vergence_widgets::edit::Pos::new(0, 2));
+        assert!(!w.go_to("zero"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

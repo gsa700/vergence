@@ -118,6 +118,16 @@ pub trait Program {
     /// window of the program (`TabEvent::Join`'s `into`).
     fn opened(&mut self, _id: u32) {}
 
+    /// The persistence token this window had on an earlier run, so window
+    /// memory puts it back where it was; "new" asks for one; empty: the
+    /// program keeps none.
+    fn token(&self) -> String {
+        String::new()
+    }
+
+    /// The server's token for this window, once it exists.
+    fn token_given(&mut self, _token: &str) {}
+
     /// The size to open at, in points, if the program has one in mind (a
     /// settings window's last size). None: the toolkit's choice.
     fn opening_size(&self) -> Option<(u32, u32)> {
@@ -324,6 +334,14 @@ impl<P: Program> vergence_ui::App for Host<P> {
 
     fn opened(&mut self, id: u32) {
         self.program.opened(id);
+    }
+
+    fn token(&self) -> String {
+        self.program.token()
+    }
+
+    fn token_given(&mut self, token: &str) {
+        self.program.token_given(token);
     }
 
     fn bar_button(&mut self, id: u32, window: &mut Window) {

@@ -271,6 +271,17 @@ the rest of item 5 come with the Viewer and the File Manager.
   spellcheck`), each app's own `spellcheck` over it (the editor's
   settings window). Seen on kepler in the editor and in Settings' test
   field: "recieved" offers received first.
+- **Step 8**: unsaved work kept across restarts (keep.rs): each window's
+  token (Program::token / token_given, now passed to widget programs) and
+  tabs, the caret, and the text of each document with unsaved changes, in
+  ~/.local/state/vergence/edit/ (0700, files 0600), written a second after
+  changes; a window the user closes leaves it; at the next start the
+  windows come back in their places, unsaved work still marked unsaved
+  (Doc::mark_unsaved). Seen on kepler: typed into an Untitled tab, the
+  editor killed with -9, started again: both tabs back, the text there.
+  Files changed on disk are looked at every 2 s: one without changes here
+  is read again (the caret kept); one with them gets a strip, Keep mine or
+  Reload. Go to line (Ctrl+L): "12" or "12:5".
 
 ## Steps
 

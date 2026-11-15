@@ -495,6 +495,12 @@ impl<P: Copy + Eq + Ord + std::fmt::Debug> History<P> {
         self.saved != Some(self.done.len())
     }
 
+    /// The text differs from the one saved, whatever was done (work kept
+    /// from an earlier run and put back).
+    pub fn forget_saved(&mut self) {
+        self.saved = None;
+    }
+
     /// Forgets everything (the text was replaced from outside).
     pub fn clear(&mut self) {
         *self = History::default();
