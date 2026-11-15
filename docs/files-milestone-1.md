@@ -3,12 +3,20 @@
 **Drafted 2026-11-15**, item 5 of docs/apps-roadmap.md. **Draft: the
 questions at the end are for Dave.**
 
-**Answers so far (Dave, 2026-11-15):** 1 a (the order as planned); 2 a (PDF
+**Accepted 2026-11-15** (Dave). **Answers:** 1 a (the order as planned); 2 a (PDF
 and video not now, their own milestone with the borrowing question then);
 4 b (our own file type table, not the system's database: written by us,
 since shared-mime-info's data is GPL and the workspace is Apache-2.0 OR
 GPL-2.0-or-later); 7 to revisit (only the system's mounts until then).
-3, 5 and 6 in discussion. 8: the file manager is **File Viewer** (after
+3 Claude's lean (GIF
+and WebP by the `image` crate's own features, BMP written by us, HEIC moved
+to the video milestone: libheif is LGPL and HEVC carries patents); 5
+Claude's lean (`~/.config/vergence-mimeapps.list`, the XDG spec's
+per-desktop file, read first in a Vergence session, falling back to the
+shared `mimeapps.list`; our choices never written into the shared one); 6
+Claude's lean (the session sets the portal variables for the apps it
+starts, behind a switch on the Apps page, "Use Vergence's file dialog in
+other apps", on by default once Firefox, a GTK app and a Qt app pass). 8: the file manager is **File Viewer** (after
 NeXTSTEP Workspace Manager's File Viewer window), its quick look is
 **Preview** (the space bar or a preview pane), and the full app is
 **Close-Up**, the step after Preview (`vergence-closeup`; the launcher finds
@@ -65,8 +73,13 @@ item 5" (2026-11-15).
   subclass's apps after the type's own, and the user's choices in
   `mimeapps.list` (XDG spec: `[Default Applications]`, `[Added
   Associations]`, `[Removed Associations]`; ~/.config first, then the
-  system's). Writing the choice there means xdg-open, browsers and other
-  desktops agree with ours (question 5).
+  system's). Vergence's own choices go in the spec's per-desktop file,
+  `~/.config/vergence-mimeapps.list`, read before the shared one in a
+  Vergence session (`XDG_CURRENT_DESKTOP=Vergence`), so GNOME on Techbench
+  keeps its own and a browser rewriting the shared file cannot undo a
+  choice made here (answer 5). Whether each platform's xdg-open reads
+  per-desktop files gets checked; where it does not, `vergence-open` is
+  what our session hands links and files to.
 - **Opening**: `vergence-types` gives the command line (desktop entry Exec
   with `%f %F %u %U` filled in), and the server starts it as the dock
   does, so the app gets the session's environment and a place in the dock.
@@ -107,8 +120,12 @@ choices (extra check boxes or menus, shown under the list).
   `widget.use-xdg-desktop-portal.file-picker` is 1; GTK 3 when
   `GTK_USE_PORTAL=1`; GTK 4 by `GDK_DEBUG=portals` or its own rules; Qt
   through its `xdgdesktopportal` platform theme. The session can set the
-  environment variables for every app it starts (question 6). Each app's
-  actual behavior gets checked here, not assumed from documentation.
+  environment variables for every app it starts, behind a switch on the
+  Apps page (answer 6), off while this is built and on by default once
+  Firefox, a GTK app and a Qt app pass the acceptance. Firefox's preference
+  lives in the user's profile, which we do not touch: the install notes
+  give the line. Each app's actual behavior gets checked here, not assumed
+  from documentation.
 - **Also on the edge** (small, same pattern): `org.freedesktop.portal.OpenURI`
   (`OpenURI`, `OpenFile`, `OpenDirectory`) through section 1, so "open
   file" and "show in folder" in Firefox's downloads reach our apps.
@@ -122,8 +139,11 @@ pixels over a pipe as shared memory. It runs with nothing else: Capsicum
 `cap_enter` on FreeBSD after opening the file; on Linux, closed descriptors
 and no network (Landlock and seccomp later, tracked in §8.3's list). A
 crash or a hang (5 s) in a bad file costs a "Could not be shown" in the
-app, never the app. Formats: PNG, JPEG, SVG now (what is already borrowed),
-others by question 3.
+app, never the app. Formats (answer 3): PNG, JPEG, GIF (animated too) and
+WebP by the `image` crate's own decoders (pure Rust, already borrowed; GIF
+and WebP are features turned on, listed in docs/borrowed-review.md), SVG by
+resvg, BMP by our own small decoder. HEIC (the iPhone's photos) waits for
+the video milestone.
 
 ### 4. Close-Up (`vergence-closeup`)
 
@@ -223,8 +243,8 @@ PDF and video, if question 2 brings them in, are their own steps after 5.
   Settings is what xdg-open uses too.
 - Firefox's Open and Save use our dialog over Firefox's window, and so do a
   GTK and a Qt app where installed; Cancel returns nothing; filters work.
-- Close-Up shows PNG, JPEG and SVG pictures (and the formats question 3
-  adds) at every zoom, steps through a folder, and a broken or hostile file
+- Close-Up shows PNG, JPEG, GIF (animated), WebP, BMP and SVG pictures at
+  every zoom, steps through a folder, and a broken or hostile file
   shows "Could not be shown" without harming Close-Up.
 - File Viewer copies, moves, renames, trashes and restores, with
   undo; a copy of a few GB shows progress and can be cancelled; a

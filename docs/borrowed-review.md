@@ -139,7 +139,10 @@ large), or limit what we accept and draw it with vergence-render.
 
 ### image, png, xcursor (MIT / Apache-2.0)
 
-Decoding wallpapers and pictures, reading cursor themes. Review: the image
+Decoding wallpapers and pictures, reading cursor themes. Files milestone 1
+(Dave, 2026-11-15) turns on `image`'s GIF and WebP decoders (the `gif` and
+`image-webp` crates, pure Rust, MIT / Apache-2.0) for Close-Up, run in the
+decode helper; BMP is decoded by our own code. Review: the image
 decoders read untrusted files, so they belong to the isolation work in
 whitepaper §6.10 whichever way this goes; png and xcursor are small enough
 to replace.
