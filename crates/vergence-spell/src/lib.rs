@@ -177,7 +177,12 @@ impl Speller {
         // A possessive of a known word ("Vergence's" once Vergence is the user's).
         let mut u = self.user.lock().unwrap_or_else(|e| e.into_inner());
         u.fresh();
-        u.words.iter().any(|form| Speller::allows(form, &w) || Speller::allows(&format!("{form}'s"), &w))
+        // `allows` judges case only: the word itself must be the same first
+        // (2026-11-15: any capitalized word passed once "vergence" was the user's).
+        u.words.iter().any(|form| {
+            let f = form.to_lowercase();
+            (f == key && Speller::allows(form, &w)) || (format!("{f}'s") == key && Speller::allows(&format!("{form}'s"), &w))
+        })
     }
 
     /// How common a word is: its size level (10 commonest ... 60), if listed.
@@ -440,6 +445,20 @@ mod tests {
         assert_eq!(s.complete("ho", 5), vec!["horse", "house", "houses", "hose"]);
         assert_eq!(s.complete("Ho", 1), vec!["Horse"]);
         assert_eq!(s.complete("Par", 2), vec!["Paris"]);
+    }
+
+    /// A user's lower-case word does not let other words through (it did: "Teh" passed).
+    #[test]
+    fn the_users_words_let_only_themselves_through() {
+        let dir = std::env::temp_dir().join(format!("vergence-spell-own-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("words.txt");
+        std::fs::write(&path, "vergence\nVergence\n").unwrap();
+        let s = sp(Some(path));
+        assert!(s.check("vergence") && s.check("Vergence") && s.check("VERGENCE") && s.check("Vergence's"));
+        assert!(!s.check("Teh"), "a capitalized word not listed");
+        assert!(!s.check("Xyzzy"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
