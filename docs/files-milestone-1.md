@@ -229,9 +229,19 @@ the wallpaper, a scratch place for launchers and files.
   a rubber-band selection; undo; drag and drop with File Viewer windows and
   apps (step 8).
 - **Arranged as Windows does**: icons in a grid from the top left down,
-  then across, moved freely by dragging and kept where put (positions in
-  ~/.local/state/vergence/desktop.toml, per screen layout as window memory
-  is), or "Sort by" name, kind, date; new files take the next free cell.
+  then across, moved freely by dragging and kept where put, or "Sort by"
+  name, kind, date; new files take the next free cell.
+- **Positions follow the monitor memories** (Dave, 2026-11-15: "the desktop
+  folder layout needs to track the monitor memories as well"): kept per
+  setup of screens exactly as window memory keeps window places (the same
+  setup key: which monitors, their resolutions and scales;
+  ~/.local/state/vergence/desktop.toml), so docking, undocking or changing
+  a resolution brings back that setup's own arrangement. Icons whose screen
+  is gone show on the main screen meanwhile, in free cells, without
+  changing that screen's saved layout; when the screen comes back they
+  return to their places. A file new while its setup was away takes the
+  next free cell when that setup comes back. "Forget window places" on the
+  Windows page asks whether to forget the desktop's layouts too.
 - **Launchers**: an app dragged from the launcher or the dock onto the
   desktop makes a desktop entry there, shown with its app's icon and name,
   and double click starts it. A desktop entry that arrives any other way (a
