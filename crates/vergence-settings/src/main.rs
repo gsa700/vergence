@@ -839,7 +839,7 @@ impl App {
             let a = app.desktop.get("appearance");
             let on = a.and_then(|a| a.get("wallpaper-tint")).and_then(|v| v.as_bool()).unwrap_or(true);
             let amount = a.and_then(|a| a.get("tint-amount")).map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()));
-            if on { (vergence_widgets::tint_amount(amount.as_deref()) * 100.0).round() } else { 0.0 }
+            if on { ((vergence_widgets::tint_amount(amount.as_deref()) * 200.0).round() / 2.0).min(10.0) } else { 0.0 }
         };
         app.repeat_rate = keyboard_int(&app.desktop, "repeat-rate", REPEAT_RATE) as f32;
         app.dock_from_file();
@@ -1023,12 +1023,12 @@ impl App {
             }),
             Message::TintSlide(v) => self.tint_pct = v,
             Message::TintDone => {
-                // 0 is off (the server's switch); otherwise the percentage.
-                let p = self.tint_pct.round() as i64;
+                // 0 is off (the server's switch); otherwise the percentage, in halves.
+                let p = (self.tint_pct * 2.0).round() / 2.0;
                 self.save_appearance(|t| {
-                    t.insert("wallpaper-tint".into(), (p > 0).into());
-                    if p > 0 {
-                        t.insert("tint-amount".into(), p.into());
+                    t.insert("wallpaper-tint".into(), (p > 0.0).into());
+                    if p > 0.0 {
+                        t.insert("tint-amount".into(), if p.fract() == 0.0 { toml::Value::Integer(p as i64) } else { toml::Value::Float(p as f64) });
                     } else {
                         t.remove("tint-amount");
                     }
@@ -1746,10 +1746,10 @@ impl App {
                     setting("Size of controls", "Window bars, tabs and buttons. A screen with a touch panel uses Large unless its own setting says otherwise (Screens).", choice(controls_names, Some(controls), Message::Controls).width(Length::Fixed(160.0)).name("Size of controls")),
                     setting(
                         "Tint windows with the wallpaper's color",
-                        "In dark style, a window takes some of the color of the wallpaper behind it: 0 (off) to 20%; 8% unless set. Off with Reduce transparency and High contrast.",
+                        "In dark style, a window takes some of the color of the wallpaper behind it: 0 (off) to 10%; 8% unless set. Off with Reduce transparency and High contrast.",
                         row(vec![
-                            slider(0.0, 20.0, self.tint_pct, Message::TintSlide).step(1.0).on_release(Message::TintDone).width(Length::Fixed(160.0)).name("Tint windows with the wallpaper's color"),
-                            label(if self.tint_pct.round() == 0.0 { "Off".to_string() } else { format!("{:.0}%", self.tint_pct) }).width(Length::Fixed(40.0)).align(Align::End),
+                            slider(0.0, 10.0, self.tint_pct, Message::TintSlide).step(0.5).on_release(Message::TintDone).width(Length::Fixed(160.0)).name("Tint windows with the wallpaper's color"),
+                            label(if self.tint_pct <= 0.0 { "Off".to_string() } else if self.tint_pct.fract() == 0.0 { format!("{:.0}%", self.tint_pct) } else { format!("{:.1}%", self.tint_pct) }).width(Length::Fixed(44.0)).align(Align::End),
                         ])
                         .spacing(8.0)
                         .align(Align::Center),
@@ -2880,6 +2880,11 @@ impl Program for App {
         let mut t = Theme::new(dark, self.accent(), appearance_text(&self.desktop, "contrast") == "high");
         t.reduced_motion = self.desktop.get("appearance").and_then(|a| a.get("reduced-motion")).and_then(|v| v.as_bool()).unwrap_or(false);
         t.double_click = self.desktop.get("mouse").and_then(|a| a.get("double-click")).and_then(|v| v.as_integer()).map_or(400, |v| v.clamp(100, 2000) as u32);
+        // The wallpaper tint's amount and the spelling switch, as every other
+        // app reads them (Theme::from_desktop); it tinted at 8% whatever the
+        // slider said (Dave, 2026-11-15: "even 1% is pretty aggressive").
+        t.tint_mix = vergence_widgets::tint_amount(vergence_ui::table_value(&text, "[appearance]", "tint-amount").as_deref());
+        t.spell = vergence_ui::table_value(&text, "[settings]", "spellcheck").or_else(|| vergence_ui::table_value(&text, "[text]", "spellcheck")).is_none_or(|v| v != "false");
         t.opacity = vergence_ui::opacity_setting(&text, "[settings]");
         let (family, _) = theme::split_font(&theme::get(&self.xsettings, theme::FONT));
         if !family.trim().is_empty() {

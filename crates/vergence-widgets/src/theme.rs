@@ -140,7 +140,7 @@ impl Theme {
 pub const TINT_MIX: f32 = 0.08;
 
 /// The tint's amount (Dave, 2026-11-15: "needs settings to tone it down",
-/// then a slider): a percentage 0 to 20 (Settings' slider), or a name
+/// then a slider): a percentage 0 to 10 in halves (Settings' slider), or a name
 /// (subtle 4%, standard 8%, strong 14%).
 pub fn tint_amount(value: Option<&str>) -> f32 {
     match value {
