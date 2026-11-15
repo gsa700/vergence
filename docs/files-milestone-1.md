@@ -291,6 +291,22 @@ the wallpaper, a scratch place for launchers and files.
   `of_kind`). Seen on kepler's screen. Later: two entries of one app
   (Firefox's own userapp-Firefox-*.desktop beside firefox.desktop) both
   listed.
+- **Step 3 built, not yet tried on screen** (2026-11-15, 427fc19): server
+  portal.rs: FileChooser OpenFile (open, multiple, directory), SaveFile
+  (current_name, current_file), SaveFiles (a folder chosen, the names
+  joined), filters and current_filter, accept_label, current_folder; the
+  Request's Response to the caller alone; Request.Close ends the dialog;
+  OpenURI.OpenURI by type (OpenFile/OpenDirectory by descriptor answer
+  NotAllowed: the edge takes no fds). The dialog is
+  libexec/vergence/vergence-choose (vergence-widgets bin; installed), whose
+  window the server gives the caller's window as a modal dialog
+  (`Portal::adopted`, style.rs, native.rs). FileDialog gains
+  `choose_folder`, `multiple` (Ctrl+click, Shift+click) and `accept`; the
+  toolkit's `Program::saw` sees every input before the widgets. Settings >
+  Apps: "Vergence's file dialog in other apps" (`[apps] own-file-dialog`),
+  read at the session's start (GTK_USE_PORTAL, GDK_DEBUG=portals,
+  QT_QPA_PLATFORMTHEME). Not yet: `choices`. Tests: Hubble 587, kepler
+  583, Techbench 587.
 
 ## Steps
 
