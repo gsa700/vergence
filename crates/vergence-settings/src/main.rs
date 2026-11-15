@@ -36,6 +36,8 @@ mod battery;
 mod modes;
 mod notify;
 use notify::NotifyMsg;
+mod places;
+use places::PlacesMsg;
 mod wifi;
 mod winbar;
 
@@ -383,6 +385,8 @@ enum Page {
 enum Message {
     /// The Notifications page (notify.rs).
     Notify(NotifyMsg),
+    /// Window places on the Windows page (places.rs).
+    Places(PlacesMsg),
     Go(Page),
     /// The Wi-Fi page (wifi.rs).
     Wifi(wifi::WifiMsg),
@@ -555,6 +559,12 @@ struct App {
     /// A new mode waiting to be kept, and whether to ask about it now (modes.rs).
     mode_pending: Option<modes::Pending>,
     mode_ask: bool,
+    /// Window places from the server (places.rs); None until read.
+    places: Option<Vec<(String, u32)>>,
+    /// Forget pressed: the dialog to open ("" for every app).
+    places_ask: Option<String>,
+    /// `--forget <app>` from the dock: asked once the list has come.
+    places_from_dock: Option<String>,
     page: Page,
     /// The Sound page (vergence-sound): the system, read when the page opens,
     /// and its outputs as last read.
@@ -748,6 +758,9 @@ impl App {
             notify_apps: Vec::new(),
             mode_pending: None,
             mode_ask: false,
+            places: None,
+            places_ask: None,
+            places_from_dock: None,
             accent_text: appearance_text(&desktop, "accent"),
             size: disp::size(&desktop) as f32,
             sleep_cmd: energy_cmd(&desktop),
@@ -887,6 +900,9 @@ impl App {
         if matches!(p, Page::WiFi | Page::Network) {
             self.wifi_read();
         }
+        if p == Page::Windows {
+            places::fetch(self.mail.clone());
+        }
         if p == Page::Notifications {
             self.notify_apps = notify::read_apps();
         }
@@ -908,6 +924,7 @@ impl App {
             Message::Wifi(m) => self.wifi_handle(m),
             Message::BatterySample => self.battery_sample(),
             Message::Notify(m) => self.notify_message(m),
+            Message::Places(m) => self.places_message(m),
             Message::Resolution(i) => self.pick_mode(Some(i), None),
             Message::Refresh(i) => self.pick_mode(None, Some(i)),
             Message::KeepMode(keep) => self.settle_mode(keep),
@@ -2260,6 +2277,7 @@ impl App {
                     setting("Close", "Always there.", label("On").dim()),
                 ]),
                 self.snapping(),
+                self.places_group(),
                 self.group(Some("Older applications"), vec![setting(
                     "X11 applications",
                     "Through Xwayland, for programs with no Wayland support. Turning it on starts it at once; turning it off takes effect the next time Vergence starts.",
@@ -2832,6 +2850,7 @@ impl Program for App {
             window.open_window(vergence_widgets::window(modes::KeepDialog { mail: self.mail.clone(), until, theme: Program::theme(self) }));
             window.wake_after(modes::REVERT_TIMER, modes::KEEP_FOR);
         }
+        self.places_dialog(window);
         // The window is named after its page (Alt+Tab, the dock; the bar draws no title).
         if self.page != was {
             window.set_title(&self.title());
@@ -2863,6 +2882,8 @@ impl Program for App {
             self.handle(m);
             any = true;
         }
+        // The dock's question, once the list it waited for has come.
+        self.places_dialog(window);
         any
     }
 
@@ -3122,6 +3143,13 @@ fn main() -> std::io::Result<()> {
     // Whether there is Wi-Fi, for the sidebar.
     app.read_interfaces();
     let args: Vec<String> = std::env::args().collect();
+    // `--forget <app>` (the dock's "Forget window places..."): the question,
+    // asked once the Windows page's list has come from the server.
+    if let Some(i) = args.iter().position(|a| a == "--forget")
+        && let Some(name) = args.get(i + 1)
+    {
+        app.places_from_dock = Some(name.clone());
+    }
     if let Some(i) = args.iter().position(|a| a == "--page")
         && let Some(name) = args.get(i + 1)
         && let Some(page) = app.page_named(name)

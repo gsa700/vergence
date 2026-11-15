@@ -176,6 +176,21 @@ as now.
   (`[notifications] off = [...]`, any case); a switched-off app's cards
   never show, critical ones included. Tried on Hubble with a D-Bus card
   (gdbus): listed, then off: an urgent card from it held back.
+- **Step 6 in: forget window places** (2026-11-14). The Windows page's
+  "Window places" group lists the apps window memory keeps places for,
+  read from the server over the bus (`ListPlaces`), by their application
+  entry's name where one matches, each with Forget, and "Forget all"; each
+  asks first in a modal dialog ("Forget where Terminal's windows go?",
+  Cancel and Forget), then `ForgetPlaces` and the list read again. The
+  dock's app menu has "Forget window places..." where window memory has
+  places for that app (its windows' name, else its entry's id or the id's
+  last part); it starts the settings app with `--page windows --forget
+  <app>`, which asks once the list has come. Found on the way: a modal
+  dialog's dimming of its parent sat one bar too high (a frame's whole
+  already has its bar), fixed. Hubble: the dock's command opened the
+  question over the Windows page; Dave pressed Forget, the server forgot
+  es2gears' place. The server's notifications apps list is now read again
+  before each write, so an app taken out of it by hand stays out.
 
 ## Steps
 

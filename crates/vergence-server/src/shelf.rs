@@ -202,6 +202,9 @@ pub enum Act {
     /// Start the application (again): the entry's id.
     Start(String),
     Close(Vec<Win>),
+    /// Ask about forgetting an app's window places (its name in window
+    /// memory): the settings app opens at its Windows page with the question.
+    ForgetPlaces(String),
 }
 
 /// How long a started application's icon says it is starting, if no window
@@ -1036,6 +1039,10 @@ impl Server {
             acts.push((Act::Start(item.key.clone()), if windows.is_empty() { "Open" } else { "New window" }.to_string()));
             acts.push(if item.pinned { (Act::Unpin(item.key.clone()), "Unpin".to_string()) } else { (Act::Pin(item.key.clone()), "Pin".to_string()) });
         }
+        // Only where window memory has places for it (settings milestone 2).
+        if let Some(app) = self.shelf_places_name(&item.key, windows) {
+            acts.push((Act::ForgetPlaces(app), "Forget window places...".to_string()));
+        }
         match windows.len() {
             0 => {}
             1 => acts.push((Act::Close(windows.clone()), "Close".to_string())),
@@ -1093,8 +1100,27 @@ impl Server {
                     self.close_window(w);
                 }
             }
+            Act::ForgetPlaces(app) => {
+                if let Err(e) = crate::spawn(std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", &app])) {
+                    tracing::warn!("shelf: the settings app could not be started: {e}");
+                }
+            }
         }
         self.redraw_all();
+    }
+
+    /// The name window memory keeps an icon's places under, if it keeps any:
+    /// its windows' (class, else instance), else its entry's id ("org.gnome.Foo"
+    /// tried whole and as "foo").
+    fn shelf_places_name(&mut self, key: &str, windows: &[Win]) -> Option<String> {
+        let known: Vec<String> = self.places_apps().into_iter().map(|(a, _)| a).collect();
+        let mut names: Vec<String> = windows.iter().filter_map(|w| self.window_identity(w)).map(|id| id.app_name()).collect();
+        let id = key.trim_end_matches(".desktop").to_lowercase();
+        names.push(id.clone());
+        if let Some(last) = id.rsplit('.').next() {
+            names.push(last.to_string());
+        }
+        names.into_iter().find(|n| known.contains(n))
     }
 
     fn shelf_save_pinned(&mut self) {

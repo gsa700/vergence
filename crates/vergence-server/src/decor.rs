@@ -671,7 +671,9 @@ impl Server {
                 && let Some(r) = self.border_of(&w).or_else(|| self.space.element_bbox(&w))
                 && r.overlaps(out)
             {
-                let top = if self.has_title(&w) { self.bar_h(&w) } else { 0 };
+                // A frame's whole already has its bar; a window without one
+                // (its bounding box) gets the bar added above it.
+                let top = if self.frame_of(&w).is_none() && self.has_title(&w) { self.bar_h(&w) } else { 0 };
                 let all = Rectangle::<f64, Logical>::new((r.loc.x as f64, (r.loc.y - top) as f64).into(), (r.size.w as f64, (r.size.h + top) as f64).into());
                 let d = self.decor.entry(w.clone()).or_insert_with(Decor::new);
                 let shade = if light { [0.0, 0.0, 0.0, 0.18] } else { [0.0, 0.0, 0.0, 0.35] };

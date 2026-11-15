@@ -128,7 +128,8 @@ pub struct Notifications {
     /// The pointer is over a card: countdowns are paused.
     paused: bool,
     pub config: Config,
-    /// App names that sent cards, and when they were last written down (unix s).
+    /// App names that sent cards, and when they were last written down (unix
+    /// s): only to skip writing; the file is the list.
     apps: Option<HashMap<String, u64>>,
 }
 
@@ -463,9 +464,12 @@ impl Server {
             return;
         }
         apps.insert(app.to_string(), now);
-        let apps = apps.clone();
-        // Off the frame: a small file, but a disk can be slow.
+        // Off the frame: a small file, but a disk can be slow. The file is
+        // read again first, so an app taken out of it by hand stays out.
+        let app = app.to_string();
         std::thread::spawn(move || {
+            let mut apps = read_apps();
+            apps.insert(app, now);
             if let Err(e) = write_apps(&apps) {
                 tracing::warn!("notify: can't keep the apps list: {e}");
             }
