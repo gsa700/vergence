@@ -155,20 +155,10 @@ impl Server {
         let items = self.shelf_items();
         let app = items.iter().find(|(_, ws)| ws.contains(w)).map(|(i, _)| i.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| self.window_title(w));
         let (commands, terminal) = w.native().map(|n| n.commands()).unwrap_or_default();
-        use vergence_shell::snap::Zone;
-        let mut window: Vec<(WindowAct, String)> =
-            [(Zone::Left, "Left half"), (Zone::Right, "Right half"), (Zone::TopLeft, "Top left"), (Zone::TopRight, "Top right"), (Zone::BottomLeft, "Bottom left"), (Zone::BottomRight, "Bottom right")].into_iter().map(|(z, n)| (WindowAct::Snap(z), n.to_string())).collect();
-        if self.snap.config.top_half {
-            window.push((WindowAct::Snap(Zone::Top), "Top half".into()));
-        }
-        if !self.restore.contains_key(w) && self.maximizable(w) {
-            window.push((WindowAct::Maximize, "Maximize".into()));
-        }
-        if self.restore.contains_key(w) || self.snap.snapped.contains_key(w) {
-            window.push((WindowAct::Restore, "Back to where it was".into()));
-        }
-        window.push((WindowAct::Minimize, "Minimize".into()));
-        window.push((WindowAct::Close, "Close window".into()));
+        // No Window menu (Dave, 2026-11-14): the window's layouts are on its
+        // title bar (right click, long press) and its maximize button, and
+        // Super with the arrows; the app menu is the app's.
+        let window: Vec<(WindowAct, String)> = Vec::new();
         Model { app, commands, terminal, native: w.native().is_some(), window, pins: Vec::new() }
     }
 
