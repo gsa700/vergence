@@ -124,13 +124,15 @@ pub struct Decor {
     /// The ghost of a tab dragged out of this bar: what it shows (title, size,
     /// scale's bits, light) and its pixels.
     ghost: Option<((String, i32, i32, u64, bool), MemoryRenderBuffer, (i32, i32))>,
+    /// Whether its program runs as the superuser, once asked ([`Server::runs_as_root`]).
+    root: Option<bool>,
 }
 
 /// A bar drawn for one scale: what it shows, and the pixels.
 struct BarPicture {
     /// What it shows: title, width, focused, hover, button layout, tabs, the
-    /// one in front, accent; then light, frosted, alerts, frosted front tab, rounded, edited tabs.
-    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, (bool, bool, Vec<bool>, bool, bool, Option<usize>, Vec<bool>)),
+    /// one in front, accent; then light, frosted, alerts, frosted front tab, rounded, edited tabs, root.
+    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, (bool, bool, Vec<bool>, bool, bool, Option<usize>, Vec<bool>, bool)),
     buffer: MemoryRenderBuffer,
     /// Its pixels' width and height (the scale's, not the bar's points).
     px: (i32, i32),
@@ -165,6 +167,7 @@ impl Decor {
             dim: Id::new(),
             flash: std::array::from_fn(|_| Id::new()),
             ghost: None,
+            root: None,
         }
     }
 }
@@ -734,6 +737,7 @@ impl Server {
                 let title = if self.window_style(&w).kind == crate::style::Kind::Sidebar { String::new() } else { self.window_title(&w) };
                 let active = focused.as_ref() == Some(&w);
                 let preview = self.tab_preview(&w);
+                let root = self.runs_as_root(&w);
                 let d = self.decor.entry(w.clone()).or_insert_with(Decor::new);
                 if d.active != active || d.light != light {
                     d.active = active;
@@ -833,10 +837,10 @@ impl Server {
                     let dragged = preview.map(|(from, _)| from).filter(|&i| i < titles.len());
                     // The program's own buttons (icons, pressable): part of what the picture shows.
                     let tools: Vec<(vergence_bar::ToolIcon, bool)> = tools_of(&w).map(|(_, t)| t.into_iter().map(|(i, e, _)| (i, e)).collect()).unwrap_or_default();
-                    let key = (title.clone(), width, active, hover, format!("{layout_text}{tools:?}{menu_open}{}", app_icon.is_some()), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded, dragged, edited.clone()));
+                    let key = (title.clone(), width, active, hover, format!("{layout_text}{tools:?}{menu_open}{}", app_icon.is_some()), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded, dragged, edited.clone(), root));
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
-                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, (false, false, Vec::new(), false, false, None, Vec::new())),
+                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, (false, false, Vec::new(), false, false, None, Vec::new(), false)),
                         buffer: MemoryRenderBuffer::new(Fourcc::Abgr8888, (1, 1), 1, Transform::Normal, None),
                         px: (1, 1),
                     });
@@ -878,6 +882,7 @@ impl Server {
                             tools: &tools,
                             app_icon: app_icon.as_ref().map(|i| std::sync::Arc::new(vergence_scene::Image { width: i.width, height: i.height, rgba: i.rgba.clone() })),
                             menu_open,
+                            root,
                         };
                         // Rounded: the bar's top corners cut to the one radius (its bottom goes on into the window).
                         if rounded {
@@ -909,7 +914,7 @@ impl Server {
                     // and tinted (vergence_render::blur), the tint raised where the
                     // bar's ink needs it.
                     if behind && let Some(program) = frost.clone() {
-                        let front_alert = alerts.get(shown).copied().unwrap_or(false);
+                        let front_alert = root || alerts.get(shown).copied().unwrap_or(false);
                         let (ground, ink) = match (front_alert, active) {
                             (true, true) => (style.alert_ground, style.ink),
                             (true, false) => (style.alert_ground_off, style.ink_off),
@@ -937,8 +942,9 @@ impl Server {
                         let rows = (f.title.size.h as f64 * per_point).round().min(px.h as f64);
                         let strip = Rectangle::<f64, smithay::utils::Buffer>::from_size((px.w as f64, rows).into());
                         let dst = Rectangle::<i32, Physical>::new(at, f.title.size.to_f64().to_physical(scale).to_i32_round());
-                        // The frost's tint: the bar's ground, the alarm's while a superuser's tab is in front.
-                        let front_alert = alerts.get(shown).copied().unwrap_or(false);
+                        // The frost's tint: the bar's ground, the alarm's while a superuser's tab
+                        // is in front or the window's program is the superuser's.
+                        let front_alert = root || alerts.get(shown).copied().unwrap_or(false);
                         let (ground, ink) = match (front_alert, active) {
                             (true, true) => (style.alert_ground, style.ink),
                             (true, false) => (style.alert_ground_off, style.ink_off),
@@ -1030,6 +1036,40 @@ impl Server {
     }
 
     /// A window's title, as its app set it.
+    /// Whether a window's program runs as the superuser (Dave's wish,
+    /// 2026-11-10: "a server-drawn mark on windows of root clients"): its bar
+    /// goes the alarm red. Asked once per window and kept with its decor.
+    fn runs_as_root(&mut self, w: &Win) -> bool {
+        if let Some(root) = self.decor.get(w).and_then(|d| d.root) {
+            return root;
+        }
+        let uid = self.window_uid(w);
+        let root = uid == Some(0);
+        if root {
+            tracing::info!("window {:?} runs as the superuser: its bar is marked", self.window_title(w));
+        }
+        self.decor.entry(w.clone()).or_insert_with(Decor::new).root = Some(root);
+        root
+    }
+
+    /// The effective user behind a window, if known. A native window's is the
+    /// session's own: the bus refuses every other user (bus.rs), so a program
+    /// of ours run by root opens its window over Wayland. A Wayland client's
+    /// is in its socket's credentials (the effective user when it connected);
+    /// an X11 window's is that of the process its _NET_WM_PID names, which
+    /// the program sets itself (none set, none known).
+    fn window_uid(&self, w: &Win) -> Option<u32> {
+        if w.native().is_some() {
+            return Some(crate::control::our_uid());
+        }
+        if let Some(x) = w.x11_surface() {
+            return x.pid().and_then(vergence_sysinfo::euid_of);
+        }
+        let t = w.toplevel()?;
+        let client = smithay::reexports::wayland_server::Resource::client(t.wl_surface())?;
+        client.get_credentials(&self.display_handle).ok().map(|c| c.uid)
+    }
+
     pub fn window_title(&self, w: &Win) -> String {
         if let Some(n) = w.native() {
             return n.title();

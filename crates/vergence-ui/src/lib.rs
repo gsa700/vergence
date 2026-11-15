@@ -1747,7 +1747,7 @@ impl<'a> Runner<'a> {
         let layout = self.bar_layout(i);
         let font = self.fonts.face("sans-serif", 400, false);
         let w = &self.windows[i];
-        let look = bar::Look { bar: vergence_look::bar_look(self.light), frosted: false, focused: w.active, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font, font_size: BAR_FONT_SIZE, titles: &[], alerts: &[], edited: &[], title, shown: 0, hover: w.bar_hover, dragged: None, tools: &[], app_icon: None, menu_open: false };
+        let look = bar::Look { bar: vergence_look::bar_look(self.light), frosted: false, focused: w.active, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font, font_size: BAR_FONT_SIZE, titles: &[], alerts: &[], edited: &[], title, shown: 0, hover: w.bar_hover, dragged: None, tools: &[], app_icon: None, menu_open: false, root: as_root() };
         bar::draw(scene, &mut self.fonts, &layout, &look);
     }
 
@@ -2006,4 +2006,14 @@ mod tests {
         assert_eq!(timers.len(), super::MAX_TIMERS);
         assert!(!timers.iter().any(|t| t.0 == 1000 + super::MAX_TIMERS as u64 + 9), "the latest-due goes");
     }
+}
+
+/// Whether this program runs as the superuser: the bar it draws itself
+/// (under another desktop) goes the alarm red, as the server's does.
+fn as_root() -> bool {
+    unsafe extern "C" {
+        fn geteuid() -> u32;
+    }
+    // SAFETY: geteuid(2) takes nothing and cannot fail.
+    unsafe { geteuid() == 0 }
 }

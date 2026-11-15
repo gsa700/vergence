@@ -18,6 +18,7 @@ vergence-render.workspace = true
 vergence-ui.workspace = true
 vergence-widgets.workspace = true
 vergence-look.workspace = true
+vergence-sysinfo.workspace = true
 # grid.rs decodes OSC 52 clipboard writes with this. It came into the
 # workspace with iced, which is gone (2026-11-10): now borrowed by the
 # terminal alone. To be replaced by a few lines of our own.

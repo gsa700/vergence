@@ -130,6 +130,22 @@ gains an `alert` flag (protocol version 3 again); the color is the
 server's, so no program chooses how alarming its own tab looks. A root
 shell over ssh on another machine cannot be seen and is not shown.
 
+**A superuser's window** (Dave's wish of 2026-11-10, built 2026-11-15):
+the server marks the bar of any window whose program runs as root, its
+ground the alarm red (as a terminal's while a root tab is in front) and its
+title shown as a red tab, white on red. The server asks once per window
+(decor.rs `runs_as_root`): a Wayland client's effective user is in its
+socket's credentials; an X11 window's is that of the process its
+`_NET_WM_PID` names (vergence-sysinfo `euid_of`, shared with the
+terminal), so an X11 program that sets no pid is not marked. Native
+windows are always the session user's: the bus refuses every other uid,
+so one of our apps run by root (`sudo --preserve-env=WAYLAND_DISPLAY,XDG_RUNTIME_DIR,VERGENCE_BUS vergence-calc`)
+falls back to Wayland and is marked there. A Wayland program that draws its
+own bar (client-side decorations) gets no server bar and so no mark. Under
+another desktop, the toolkit's own bar goes red the same way when the
+program runs as root. Checked on kepler (FreeBSD): the Calculator run by
+sudo beside one run by the user.
+
 ### Rounded corners
 
 The server rounds the windows it frames at the one radius (5 pt): the

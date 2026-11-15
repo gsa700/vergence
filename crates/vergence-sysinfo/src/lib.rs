@@ -323,9 +323,37 @@ mod os {
 
 pub use os::{cpu, disk_io, memory, temps};
 
+/// The effective user of process `pid`, if it can be read (the terminal's
+/// red tab and the server's mark on a superuser's windows): Linux's
+/// /proc/<pid>/status (its Uid line: real, effective, saved, filesystem);
+/// elsewhere (FreeBSD) `ps -o uid=`, which prints the effective user.
+pub fn euid_of(pid: u32) -> Option<u32> {
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+        status.lines().find_map(|l| l.strip_prefix("Uid:")).and_then(|ids| ids.split_whitespace().nth(1)?.parse().ok())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let out = std::process::Command::new("ps").args(["-o", "uid=", "-p", &pid.to_string()]).stderr(std::process::Stdio::null()).output().ok()?;
+        String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The red tab's question, answered on each platform: this test's own
+    /// process is the user running it; a process that does not exist, none.
+    #[test]
+    fn the_effective_user_of_a_process_is_read() {
+        unsafe extern "C" {
+            fn geteuid() -> u32;
+        }
+        assert_eq!(euid_of(std::process::id()), Some(unsafe { geteuid() }));
+        assert_eq!(euid_of(999_999_999), None);
+    }
 
     #[test]
     fn processors_and_their_load() {

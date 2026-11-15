@@ -500,6 +500,11 @@ pub struct Look<'a> {
     pub app_icon: Option<std::sync::Arc<vergence_scene::Image>>,
     /// The app menu is open from this bar: its button stays lit.
     pub menu_open: bool,
+    /// The window's program runs as the superuser (Dave's wish, 2026-11-10:
+    /// "a server-drawn mark on windows of root clients"): the bar's ground
+    /// goes the alarm red, as a terminal's does while a root tab is in front,
+    /// and a bar without tabs shows its title as a red tab, white on red.
+    pub root: bool,
 }
 
 /// Draws the bar across the top of the scene.
@@ -509,7 +514,7 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
     let shape_rest = shape(l.shape, l.shape_rest);
     let tab_rest = shape(l.shape, l.tab_rest);
     let shape_hover = shape(l.shape, l.shape_hover);
-    let front_alert = !layout.tabs.is_empty() && look.alerts.get(look.shown).copied().unwrap_or(false);
+    let front_alert = look.root || (!layout.tabs.is_empty() && look.alerts.get(look.shown).copied().unwrap_or(false));
     if !look.frosted {
         let ground = match (front_alert, look.focused) {
             (true, true) => l.alert_ground,
@@ -620,11 +625,23 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
     if let (Some(room), Some(face)) = (&layout.title, look.font)
         && room.w > 10.0
     {
-        // The title, on the tabs' line, cut where its room ends.
-        scene.push_clip(*room, 0.0);
+        // The title, on the tabs' line, cut where its room ends. A superuser's
+        // window wears it as a red tab does: white on the alarm red, in a tab's
+        // shape just wide enough for it.
+        let mut at = room.x;
+        let title_ink = if look.root {
+            let width = fonts.layout(face, look.font_size, look.title).1;
+            let pad = 12.0;
+            tab_shape(scene, &Rect::new(room.x, room.y, (width + 2.0 * pad).min(room.w), room.h), color(l.alert));
+            at += pad;
+            Color::rgb(255, 255, 255)
+        } else {
+            ink
+        };
+        scene.push_clip(if look.root { Rect::new(at, room.y, (room.x + room.w - at - 8.0).max(0.0), room.h) } else { *room }, 0.0);
         let m = fonts.metrics(face, look.font_size);
         let baseline = room.y + ((room.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round() - 1.0;
-        text(scene, fonts, face, look.font_size, ink, Point::new(room.x, baseline), look.title);
+        text(scene, fonts, face, look.font_size, title_ink, Point::new(at, baseline), look.title);
         scene.pop_clip();
     }
 }
@@ -898,6 +915,33 @@ mod tests {
         // Buttons on the left: the title starts after them.
         let l = Layout::plain(640.0, &LEFT, &[]);
         assert!(l.title.unwrap().x > 2.0 * BUTTON_W);
+    }
+
+    /// A superuser's window: its bar's ground is the alarm red, tabs or none,
+    /// focused or not; anyone else's, the plain ground.
+    #[test]
+    fn a_superusers_window_has_a_red_bar() {
+        let mut fonts = vergence_text::Fonts::new(vergence_text::db::FontDb::default());
+        let l = vergence_look::bar_look(false);
+        for focused in [true, false] {
+            for root in [true, false] {
+                let layout = Layout::plain(640.0, &[], &[WinButton::Close]);
+                let look = Look { bar: l, frosted: false, focused, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font: None, font_size: FONT_SIZE, titles: &[], alerts: &[], edited: &[], title: "sudo", shown: 0, hover: None, dragged: None, tools: &[], app_icon: None, menu_open: false, root };
+                let mut scene = Scene::new(640.0, 60.0);
+                draw(&mut scene, &mut fonts, &layout, &look);
+                let want = match (root, focused) {
+                    (true, true) => l.alert_ground,
+                    (true, false) => l.alert_ground_off,
+                    (false, true) => l.ground,
+                    (false, false) => l.ground_off,
+                };
+                let ground = scene.commands.iter().find_map(|c| match c {
+                    vergence_scene::Command::Fill { color, .. } => Some(*color),
+                    _ => None,
+                });
+                assert_eq!(ground, Some(color(want)), "root {root}, focused {focused}");
+            }
+        }
     }
 
     fn five() -> Layout {
