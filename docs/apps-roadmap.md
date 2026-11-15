@@ -75,7 +75,13 @@ build once than in every app:
 5. **Open/Save dialogs and file types, then the Viewer** (pictures first,
    PDF and video by the answers below) **and the File Manager** (Finder's
    space-bar preview through the Viewer; remote file systems by the
-   system's own mounts).
+   system's own mounts). The Open/Save dialog itself was built early, in
+   editor milestone 1 (vergence-widgets filedialog.rs); here it also
+   becomes **the file chooser for apps that are not ours** (Dave,
+   2026-11-15: "yes add the portal to item 5"): the server answers the
+   desktop portal's FileChooser on the session D-Bus (our own D-Bus code,
+   vergence-dbus), so Firefox, GTK and Qt apps open the same dialog, and
+   whatever it gains later reaches them too.
 6. **Backup**, then into the file manager: ZFS snapshots on FreeBSD (and
    Linux with ZFS), `zfs send` to remote hosts over SSH, rsync where there
    is no ZFS; a file's versions from its snapshots in the file manager.
