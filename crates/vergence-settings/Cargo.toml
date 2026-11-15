@@ -19,9 +19,10 @@ vergence-render.workspace = true
 vergence-look.workspace = true
 vergence-shell.workspace = true
 vergence-types.workspace = true
+vergence-decode.workspace = true
 toml = "0.8"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-resvg = "0.45"
+# Its own preview cache (PNG) and resizing; pictures are decoded by vergence-decode.
+image = { version = "0.25", default-features = false, features = ["png"] }
 vergence-protocol.workspace = true
 vergence-profile.workspace = true
 vergence-xsettings.workspace = true

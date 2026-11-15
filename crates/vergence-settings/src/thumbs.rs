@@ -1,4 +1,5 @@
-// Picture previews for the wallpaper grid and the screen tiles: drawn once,
+// Picture previews for the wallpaper grid and the screen tiles: decoded
+// apart by vergence-decode (files milestone 1, step 4), drawn once,
 // kept in ~/.cache/vergence/thumbnails (named by the picture's path, size and
 // time), so the page opens with them at once (an 8K JPEG takes a second or more
 // to decode).
@@ -69,31 +70,19 @@ pub fn get(path: &Path) -> Option<Thumb> {
     Some(t)
 }
 
-/// A W x H preview, filling (cropped), as the server draws "fill".
+/// A W x H preview, filling (cropped), as the server draws "fill". The
+/// picture is decoded apart, by the helper (vergence-decode: limited, and in
+/// Capsicum on FreeBSD; files milestone 1), shrunk there to at least W x H.
 fn draw(path: &Path) -> Option<Thumb> {
-    let is_svg = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg"));
-    if !is_svg {
-        let img = image::open(path).ok()?;
-        let filled = img.resize_to_fill(W, H, image::imageops::FilterType::Triangle).to_rgba8();
-        return Some(Thumb { w: W, h: H, rgba: filled.into_raw() });
-    }
-    let mut canvas = resvg::tiny_skia::Pixmap::new(W, H)?;
-    let data = std::fs::read(path).ok()?;
-    let opt = resvg::usvg::Options { resources_dir: path.parent().map(|p| p.to_path_buf()), ..Default::default() };
-    let tree = resvg::usvg::Tree::from_data(&data, &opt).ok()?;
-    let (sw, sh) = (tree.size().width(), tree.size().height());
-    let s = (W as f32 / sw).max(H as f32 / sh);
-    let ts = resvg::tiny_skia::Transform::from_row(s, 0.0, 0.0, s, (W as f32 - sw * s) / 2.0, (H as f32 - sh * s) / 2.0);
-    resvg::render(&tree, ts, &mut canvas.as_mut());
-    // tiny-skia is premultiplied; previews are straight alpha (opaque here anyway).
-    let mut px = canvas.take();
-    for p in px.chunks_exact_mut(4) {
-        let a = p[3] as u32;
-        if a > 0 && a < 255 {
-            for c in &mut p[..3] {
-                *c = ((*c as u32 * 255 + a / 2) / a).min(255) as u8;
-            }
+    let p = match vergence_decode::decode_file(path, Some((W, H))) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("vergence-settings: {}: {e}", path.display());
+            return None;
         }
-    }
-    Some(Thumb { w: W, h: H, rgba: px })
+    };
+    let frame = p.frames.into_iter().next()?;
+    let img = image::RgbaImage::from_raw(p.width, p.height, frame.rgba)?;
+    let filled = image::DynamicImage::ImageRgba8(img).resize_to_fill(W, H, image::imageops::FilterType::Triangle).to_rgba8();
+    Some(Thumb { w: W, h: H, rgba: filled.into_raw() })
 }

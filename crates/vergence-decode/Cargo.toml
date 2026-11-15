@@ -1,0 +1,12 @@
+[package]
+name = "vergence-decode"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Pictures decoded apart: a helper process with nothing else to do, limited and (on FreeBSD) in Capsicum"
+
+[dependencies]
+vergence-types.workspace = true
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+resvg = "0.45"

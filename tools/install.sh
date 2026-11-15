@@ -19,6 +19,7 @@
 #   share/doc/vergence/                      LICENSE-APACHE, LICENSE-GPL, THIRD-PARTY-NOTICES.md
 #   share/vergence/words/                    the spelling list (data/words/en_US.txt, from SCOWL) and its terms
 #   libexec/vergence/vergence-choose         the Open/Save dialog the portal shows for apps not ours
+#   libexec/vergence/vergence-decode         pictures decoded apart, limited (Capsicum on FreeBSD)
 #   libexec/vergence/sound-default           FreeBSD only: the root helper that sets the default
 #                                            sound output (hw.snd.default_unit) and nothing else;
 #                                            setuid root, group video, mode 4750
@@ -64,7 +65,7 @@ if [ -n "$uninstall" ]; then
     rm -f "$sessions/vergence.desktop"
     for t in $tools; do rm -f "$applications/$t.desktop" "$icons/$t.svg"; done
     for d in $docfiles; do rm -f "$docs/$d"; done
-    rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
+    rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
     rmdir "$words" "$destdir$prefix/share/vergence" 2>/dev/null || true
     rmdir "$libexec" 2>/dev/null || true
     rmdir "$docs" 2>/dev/null || true
@@ -109,6 +110,9 @@ fi
 [ -x "$release/vergence-choose" ] || { echo "install.sh: $release/vergence-choose is missing; run cargo build --release first" >&2; exit 1; }
 mkdir -p "$libexec"
 install -m 755 "$release/vergence-choose" "$libexec/vergence-choose"
+# Pictures decoded apart, limited (files milestone 1, step 4).
+[ -x "$release/vergence-decode" ] || { echo "install.sh: $release/vergence-decode is missing; run cargo build --release first" >&2; exit 1; }
+install -m 755 "$release/vergence-decode" "$libexec/vergence-decode"
 install -m 755 "$here/vergence-session" "$bin/vergence-session"
 ln -sf vergence-session "$bin/vergence"
 tmp=$(mktemp)

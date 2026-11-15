@@ -68,6 +68,7 @@ metadata` (x86_64-unknown-linux-gnu, x86_64-unknown-freebsd); do not edit by han
 | gethostname | 1.1.0 | Apache-2.0 |
 | getrandom | 0.4.3 | MIT OR Apache-2.0 |
 | gif | 0.13.3 | MIT OR Apache-2.0 |
+| gif | 0.14.2 | MIT OR Apache-2.0 |
 | glam | 0.33.12 | MIT OR Apache-2.0 |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 |
 | image | 0.25.10 | MIT OR Apache-2.0 |
@@ -3823,6 +3824,15 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+### gif 0.14.2
+
+License: MIT OR Apache-2.0
+Source: https://github.com/image-rs/image-gif
+
+`LICENSE-APACHE`: the same text as arrayvec 0.7.8's `LICENSE-APACHE`, above.
+
+`LICENSE-MIT`: the same text as gif 0.13.3's `LICENSE-MIT`, above.
 
 ### glam 0.33.12
 

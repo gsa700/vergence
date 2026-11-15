@@ -320,6 +320,20 @@ the wallpaper, a scratch place for launchers and files.
   QT_QPA_PLATFORMTHEME). Not yet: `choices`. Tests: Hubble 587, kepler
   583, Techbench 587.
 
+- **Step 4 built** (2026-11-15): crates/vergence-decode: `decode_file`
+  gives the opened file to libexec/vergence/vergence-decode as its standard
+  input (the helper needs no file system), with a 5 s watchman; the helper
+  reads it, closes every other descriptor, sets CPU 10 s, file size 0,
+  8 descriptors, 4 GiB of memory, no-new-privileges on Linux and
+  `cap_enter` on FreeBSD, then decodes by the bytes: PNG and JPEG (upright
+  by EXIF orientation), GIF and WebP with their frames (image crate,
+  `gif`/`image-webp` turned on; THIRD-PARTY-NOTICES regenerated), SVG by
+  resvg with no outside resources, BMP by our own bmp.rs (1/4/8/24/32 bits,
+  bit fields, top-down; RLE refused); `at_least` shrinks it there. The
+  settings app's wallpaper previews now come from it (resvg and JPEG gone
+  from the settings app). Checked on kepler: its 17 wallpapers, 8K
+  included, decoded in Capsicum; the Wallpaper page's previews rebuilt
+  through it. Tests: Hubble 596, kepler 592, Techbench 596.
 ## Steps
 
 1. **vergence-types**: the database reader (globs2, magic, subclasses,
