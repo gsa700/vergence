@@ -271,6 +271,8 @@ pub struct Doc {
     saved_ending: Ending,
     /// Each line's words, kept as lines change (the word count).
     words: Vec<u32>,
+    /// Places to show lit (Find's matches), in order; let go at any edit.
+    marks: Vec<(Pos, Pos)>,
 }
 
 impl Doc {
@@ -295,6 +297,7 @@ impl Doc {
             unit: (1, Pos::default(), Pos::default()),
             saved_ending: Ending::Lf,
             words: Vec::new(),
+            marks: Vec::new(),
         }
         .with_saved_ending()
     }
@@ -325,6 +328,61 @@ impl Doc {
     }
 
     // --- What a program reads and does ---
+
+    /// Lights these places (Find's matches: start and end on one line), in order.
+    pub fn set_marks(&mut self, marks: Vec<(Pos, Pos)>) {
+        self.marks = marks;
+    }
+
+    pub fn marks(&self) -> &[(Pos, Pos)] {
+        &self.marks
+    }
+
+    /// Every place `needle` is, at most `limit`, in order (editor milestone
+    /// 1, step 5). `case`: letters must match in case; `whole`: only where
+    /// it is a word of its own. Matches lie within a line.
+    pub fn find_all(&self, needle: &str, case: bool, whole: bool, limit: usize) -> Vec<(Pos, Pos)> {
+        let mut out = Vec::new();
+        if needle.is_empty() || needle.contains('\n') {
+            return out;
+        }
+        for (i, line) in self.buffer.lines().enumerate() {
+            for (a, b) in find_in(line, needle, case) {
+                if whole && !(word_edge(line, a) && word_edge(line, b)) {
+                    continue;
+                }
+                out.push((Pos::new(i, a), Pos::new(i, b)));
+                if out.len() >= limit {
+                    return out;
+                }
+            }
+        }
+        out
+    }
+
+    /// Replaces each of `places` (in order, not overlapping) with `with`, as
+    /// one step to undo. How many were replaced.
+    pub fn replace_all(&mut self, places: &[(Pos, Pos)], with: &str) -> usize {
+        if !self.options.editable || places.is_empty() {
+            return 0;
+        }
+        let sel = (self.caret, self.anchor);
+        let now = Instant::now();
+        let buffer = &mut self.buffer;
+        // From the end back, so the places before stay where they are.
+        self.history.group(|h| {
+            for &(a, b) in places.iter().rev() {
+                h.edit(buffer, a, b, with, sel, Kind::Other, now);
+            }
+        });
+        self.marks.clear();
+        self.reshape_all();
+        self.revision += 1;
+        self.caret = self.buffer.clamp(self.caret);
+        self.anchor = self.buffer.clamp(self.anchor);
+        self.history.break_group();
+        places.len()
+    }
 
     /// Writes the lines back with these endings (a change to save).
     pub fn set_ending(&mut self, e: Ending) {
@@ -461,6 +519,7 @@ impl Doc {
     // --- Editing ---
 
     fn after_history(&mut self, caret: Pos, anchor: Pos) {
+        self.marks.clear();
         self.caret = self.buffer.clamp(caret);
         self.anchor = self.buffer.clamp(anchor);
         self.goal = None;
@@ -483,6 +542,7 @@ impl Doc {
         let old = to.line - from.line + 1;
         let new = end.line - from.line + 1;
         self.shaped.splice(from.line..from.line + old, std::iter::repeat_n(None, new));
+        self.marks.clear();
         let counts: Vec<u32> = (from.line..from.line + new).map(|l| count_words(self.buffer.line(l))).collect();
         self.words.splice(from.line..from.line + old, counts);
         debug_assert_eq!(self.shaped.len(), self.buffer.line_count());
@@ -1044,8 +1104,9 @@ impl Doc {
         scene.push_clip(r, 0.0);
         let (sa, sb) = self.selection();
         let selected = sa != sb;
-        let sel_c = if focused { alpha(theme.accent, 90) } else { alpha(theme.text, 40) };
+        let sel_c = if focused { alpha(theme.accent, 90) } else { alpha(theme.accent, 60) };
         let shade = alpha(theme.text, if theme.dark { 16 } else { 10 });
+        let mark_c = if theme.dark { Color::rgba(255, 200, 60, 70) } else { Color::rgba(255, 196, 0, 110) };
         let text_c = theme.text;
         let num_c = theme.dim;
         let text_clip = Rect::new(r.x + gutter, r.y, (r.w - gutter).max(0.0), r.h);
@@ -1072,6 +1133,18 @@ impl Doc {
                     }
                     let (_, re, last) = s.row_range(k, line.len());
                     let x0 = text_x - self.xscroll - rx;
+                    // Find's matches on this row.
+                    let first = self.marks.partition_point(|m| m.0.line < i);
+                    for &(ma, mb) in self.marks[first..].iter().take_while(|m| m.0.line == i) {
+                        // The one chosen shows as the selection alone.
+                        if (ma, mb) == (sa, sb) {
+                            continue;
+                        }
+                        let (from, to) = (ma.col.max(rs), mb.col.min(re));
+                        if from < to {
+                            scene.fill(Rect::new(x0 + s.x_of(from), ry + 1.0, s.x_of(to) - s.x_of(from), line_h - 2.0), mark_c);
+                        }
+                    }
                     // The selection on this row.
                     if selected && sa.line <= i && sb.line >= i {
                         let from = if sa.line == i { sa.col.max(rs) } else { rs };
@@ -1147,6 +1220,60 @@ impl Doc {
             scene.fill_rounded(t, BAR_W / 2.0, alpha(theme.text, 80));
         }
     }
+}
+
+/// Where `needle` is in `line`, as byte ranges, not overlapping; without
+/// case unless `case`.
+fn find_in(line: &str, needle: &str, case: bool) -> Vec<(usize, usize)> {
+    if case {
+        return line.match_indices(needle).map(|(a, m)| (a, a + m.len())).collect();
+    }
+    let mut out = Vec::new();
+    if needle.is_ascii() {
+        // Bytes, at character starts.
+        let (l, n) = (line.as_bytes(), needle.as_bytes());
+        let mut i = 0;
+        while i + n.len() <= l.len() {
+            if line.is_char_boundary(i) && l[i..i + n.len()].eq_ignore_ascii_case(n) {
+                out.push((i, i + n.len()));
+                i += n.len();
+            } else {
+                i += 1;
+            }
+        }
+        return out;
+    }
+    let want: Vec<char> = needle.chars().flat_map(char::to_lowercase).collect();
+    let mut start = 0;
+    while start < line.len() {
+        // Compare character by character, folded.
+        let mut got = line[start..].char_indices().flat_map(|(k, c)| c.to_lowercase().map(move |l| (k, c, l)));
+        let mut end = None;
+        let mut ok = true;
+        for w in &want {
+            match got.next() {
+                Some((k, c, l)) if l == *w => end = Some(start + k + c.len_utf8()),
+                _ => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        match (ok, end) {
+            (true, Some(e)) => {
+                out.push((start, e));
+                start = e;
+            }
+            _ => start += line[start..].chars().next().map_or(1, char::len_utf8),
+        }
+    }
+    out
+}
+
+/// Whether byte `i` of `line` is at a word's edge (no letter, digit or _ on both sides).
+fn word_edge(line: &str, i: usize) -> bool {
+    let w = |c: char| c.is_alphanumeric() || c == '_';
+    !(line[..i].chars().next_back().is_some_and(w) && line[i..].chars().next().is_some_and(w))
 }
 
 /// Words in `s`: runs of letters and digits; an apostrophe or hyphen between
@@ -1330,6 +1457,24 @@ mod tests {
         assert_eq!(d.word_count(), 3);
         d.set_selection(Pos::new(0, 4), Pos::new(1, 2));
         assert_eq!(d.selected_words(), 2, "two, and th");
+    }
+
+    #[test]
+    fn find_and_replace_all() {
+        let mut d = doc("Cat cat CAT\ncatalog concat\nÉcole école");
+        let p = |l, a, b| (Pos::new(l, a), Pos::new(l, b));
+        assert_eq!(d.find_all("cat", true, false, 100), vec![p(0, 4, 7), p(1, 0, 3), p(1, 11, 14)]);
+        assert_eq!(d.find_all("cat", false, false, 100).len(), 5);
+        assert_eq!(d.find_all("cat", false, true, 100), vec![p(0, 0, 3), p(0, 4, 7), p(0, 8, 11)]);
+        assert_eq!(d.find_all("ÉCOLE", false, false, 100).len(), 2, "folded beyond ASCII");
+        assert_eq!(d.find_all("a", false, false, 2).len(), 2, "the limit holds");
+        let found = d.find_all("cat", false, true, 100);
+        d.set_marks(found.clone());
+        assert_eq!(d.replace_all(&found, "dog"), 3);
+        assert_eq!(d.buffer().line(0), "dog dog dog");
+        assert!(d.marks().is_empty(), "let go once changed");
+        d.undo();
+        assert_eq!(d.buffer().line(0), "Cat cat CAT", "one undo for all of them");
     }
 
     #[test]

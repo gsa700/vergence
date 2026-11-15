@@ -230,6 +230,14 @@ the rest of item 5 come with the Viewer and the File Manager.
   it went nowhere). Still to come: the Save name chosen without its
   extension (the toolkit cannot set a field's selection yet), choosing
   several files at once.
+- **Step 5**: Find and Replace. The text area finds (`Doc::find_all`: case
+  or not, folded beyond ASCII, whole words; within a line, at most 10,000),
+  lights the matches (`set_marks`, let go at any edit) and replaces them
+  all as one undo (`replace_all`). The editor's find bar under the bar:
+  Ctrl+F, Ctrl+H with Replace, searching as you type from where the caret
+  was, "3 of 30", ‹ › and Ctrl+G / Ctrl+Shift+G, Aa, Whole words, Replace
+  (the chosen match, then the next) and Replace all ("Replaced 12"),
+  Escape closes and gives the keyboard back to the text.
 
 ## Steps
 

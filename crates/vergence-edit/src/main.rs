@@ -26,7 +26,7 @@ use std::time::SystemTime;
 use vergence_ui::{AppCommand as C, Bar, BarStyle, BarTab, Role, TabEvent};
 use vergence_widgets::edit::Ending;
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
-use vergence_widgets::{Align, AreaOptions, ButtonLook, Element, Input, Length, Padding, Program, TextDoc, Theme, Waker, Window, button, column, label, panel, row, space, text_area};
+use vergence_widgets::{Align, AreaOptions, ButtonLook, Element, Input, Length, Padding, Program, TextDoc, Theme, Waker, Window, button, column, field, label, panel, row, space, text_area};
 
 const APP_ID: &str = "vergence-edit";
 const SECTION: &str = "[editor]";
@@ -44,6 +44,10 @@ mod cmd {
     pub const COPY: u32 = 13;
     pub const PASTE: u32 = 14;
     pub const SELECT_ALL: u32 = 15;
+    pub const FIND: u32 = 16;
+    pub const FIND_NEXT: u32 = 17;
+    pub const FIND_PREV: u32 = 18;
+    pub const REPLACE: u32 = 19;
     pub const ZOOM_IN: u32 = 20;
     pub const ZOOM_OUT: u32 = 21;
     pub const ZOOM_RESET: u32 = 22;
@@ -104,6 +108,37 @@ enum Msg {
     DismissNotice,
     ToggleSpaces,
     ToggleEnding,
+    FindTyped(String),
+    WithTyped(String),
+    FindNext,
+    FindPrev,
+    FindCase,
+    FindWhole,
+    FindReplace,
+    FindClose,
+    ReplaceOne,
+    ReplaceAll,
+}
+
+/// The most matches lit and counted.
+const MAX_MATCHES: usize = 10_000;
+
+/// The find bar (step 5): what is looked for, with what it is replaced,
+/// how, and what was found in the document in front.
+#[derive(Default)]
+struct Find {
+    needle: String,
+    with: String,
+    case: bool,
+    whole: bool,
+    replace: bool,
+    matches: Vec<(vergence_widgets::edit::Pos, vergence_widgets::edit::Pos)>,
+    /// The document's revision and tab the matches were found in.
+    found_in: (u32, u64),
+    /// Where the caret was when the bar opened: typing searches from there.
+    origin: vergence_widgets::edit::Pos,
+    /// After Replace all: how many.
+    replaced: Option<usize>,
 }
 
 /// An answer to "Save changes?".
@@ -152,6 +187,10 @@ struct EditWindow {
     closing_window: bool,
     notice: Option<String>,
     picking: Option<Pick>,
+    find: Option<Find>,
+    /// Bumped to give the keyboard back to the text (a new area id takes it)
+    /// or to the find field.
+    focus_turn: u64,
 }
 
 /// ~/.config/vergence/desktop.toml and when it last changed.
@@ -166,7 +205,7 @@ impl EditWindow {
     fn new(shared: SharedRef, tabs: Vec<DocTab>) -> EditWindow {
         let (desktop, stamp) = desktop_text();
         let front = tabs.first().map_or(0, |t| t.id);
-        let mut w = EditWindow { shared, tabs, front, me: None, waker: None, desktop, stamp, zoom: 1.0, prefs_open: Rc::new(Cell::new(false)), asking: None, closing: Vec::new(), closing_window: false, notice: None, picking: None };
+        let mut w = EditWindow { shared, tabs, front, me: None, waker: None, desktop, stamp, zoom: 1.0, prefs_open: Rc::new(Cell::new(false)), asking: None, closing: Vec::new(), closing_window: false, notice: None, picking: None, find: None, focus_turn: 0 };
         if w.tabs.is_empty() {
             let t = w.untitled_tab();
             w.front = t.id;
@@ -306,6 +345,85 @@ impl EditWindow {
                 false
             }
         }
+    }
+
+    /// Opens the find bar (with Replace, if `replace`): the selection, if on
+    /// one line, is what it looks for.
+    fn open_find(&mut self, replace: bool) {
+        let Some(doc) = self.doc() else { return };
+        let (sel, (a, _)) = { let d = doc.borrow(); (d.selected_text(), d.selection()) };
+        let f = self.find.get_or_insert_with(Find::default);
+        if !sel.is_empty() && !sel.contains('\n') {
+            f.needle = sel;
+        }
+        f.replace |= replace;
+        f.origin = a;
+        f.found_in = (0, u64::MAX);
+        self.focus_turn += 1;
+        self.refind();
+    }
+
+    fn close_find(&mut self) {
+        if self.find.take().is_some() {
+            for t in &self.tabs {
+                t.doc.borrow_mut().set_marks(Vec::new());
+            }
+            self.focus_turn += 1;
+        }
+    }
+
+    /// Finds again in the document in front, if it or what is looked for changed.
+    fn refind(&mut self) {
+        let Some(t) = self.front_tab() else { return };
+        let (id, doc) = (t.id, t.doc.clone());
+        let Some(f) = self.find.as_mut() else { return };
+        let rev = doc.borrow().revision();
+        if f.found_in == (id, rev) {
+            return;
+        }
+        f.matches = doc.borrow().find_all(&f.needle, f.case, f.whole, MAX_MATCHES);
+        f.found_in = (id, rev);
+        doc.borrow_mut().set_marks(f.matches.clone());
+    }
+
+    /// Chooses the next match after the selection (or before, `back`), round the ends.
+    fn find_step(&mut self, back: bool) {
+        self.refind();
+        let Some(doc) = self.doc() else { return };
+        let Some(f) = self.find.as_ref() else { return };
+        if f.matches.is_empty() {
+            return;
+        }
+        let (a, b) = doc.borrow().selection();
+        let k = if back {
+            f.matches.iter().rposition(|m| m.0 < a).unwrap_or(f.matches.len() - 1)
+        } else {
+            f.matches.iter().position(|m| m.0 >= b && (m.0, m.1) != (a, b)).unwrap_or(0)
+        };
+        let (ma, mb) = f.matches[k];
+        doc.borrow_mut().set_selection(ma, mb);
+    }
+
+    /// Typing in the find field: the first match from where the bar opened.
+    fn find_from_origin(&mut self) {
+        self.refind();
+        let Some(doc) = self.doc() else { return };
+        let Some(f) = self.find.as_ref() else { return };
+        let hit = f.matches.iter().find(|m| m.0 >= f.origin).or(f.matches.first()).copied();
+        match hit {
+            Some((a, b)) => doc.borrow_mut().set_selection(a, b),
+            None => {
+                let o = f.origin;
+                doc.borrow_mut().set_selection(o, o);
+            }
+        }
+    }
+
+    /// The match chosen, if the selection is one.
+    fn chosen_match(&self) -> bool {
+        let (Some(doc), Some(f)) = (self.doc(), self.find.as_ref()) else { return false };
+        let sel = doc.borrow().selection();
+        f.matches.iter().any(|m| (m.0, m.1) == sel)
     }
 
     /// Opens the file dialog: Open, or Save as for tab `tab`.
@@ -562,6 +680,14 @@ impl EditWindow {
             cmd::ZOOM_RESET => self.set_zoom(1.0),
             cmd::LINE_NUMBERS => self.toggle_setting("line-numbers", true),
             cmd::WRAP => self.toggle_setting("wrap", true),
+            cmd::FIND => self.open_find(false),
+            cmd::REPLACE => self.open_find(true),
+            cmd::FIND_NEXT | cmd::FIND_PREV => {
+                if self.find.is_none() {
+                    self.open_find(false);
+                }
+                self.find_step(id == cmd::FIND_PREV);
+            }
             cmd::NEXT_TAB => self.step_tab(1),
             cmd::PREV_TAB => self.step_tab(-1),
             cmd::SETTINGS => self.open_settings(window),
@@ -571,6 +697,58 @@ impl EditWindow {
             }
             _ => {}
         }
+    }
+}
+
+impl EditWindow {
+    fn find_bar(&self, f: &Find, t: &Theme) -> Element<Msg> {
+        let small = |text: &str, m: Msg, on: bool, name: &str| -> Element<Msg> {
+            button(label(text).size(12.0)).look(if on { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(3.0, 8.0)).on_press(m).name(name)
+        };
+        let count = match (f.replaced, f.needle.is_empty(), f.matches.len()) {
+            (Some(n), _, _) => format!("Replaced {}", grouped(n)),
+            (_, true, _) => String::new(),
+            (_, _, 0) => "Not found".into(),
+            (_, _, n) => {
+                let at = self.doc().and_then(|d| {
+                    let sel = d.borrow().selection();
+                    f.matches.iter().position(|m| (m.0, m.1) == sel)
+                });
+                let n = if n >= MAX_MATCHES { format!("{}+", grouped(n)) } else { grouped(n) };
+                match at {
+                    Some(k) => format!("{} of {n}", grouped(k + 1)),
+                    None => format!("{n} found"),
+                }
+            }
+        };
+        let find_field = field(f.needle.clone(), Msg::FindTyped).placeholder("Find").on_submit(Msg::FindNext).key(self.focus_turn).autofocus().width(Length::FILL).name("Find");
+        let mut rows: Vec<Element<Msg>> = vec![row(vec![
+            find_field,
+            label(count).size(12.0).dim().width(Length::Fixed(96.0)),
+            small("‹", Msg::FindPrev, false, "Previous match"),
+            small("›", Msg::FindNext, false, "Next match"),
+            small("Aa", Msg::FindCase, f.case, "Match case"),
+            small("Whole words", Msg::FindWhole, f.whole, "Whole words"),
+            small("Replace", Msg::FindReplace, f.replace, "Show Replace"),
+            small("×", Msg::FindClose, false, "Close"),
+        ])
+        .spacing(4.0)
+        .align(Align::Center)
+        .width(Length::FILL)];
+        if f.replace {
+            let editable = self.front_tab().is_some_and(|t| t.read_only.is_none());
+            rows.push(
+                row(vec![
+                    field(f.with.clone(), Msg::WithTyped).placeholder("Replace with").on_submit(Msg::ReplaceOne).width(Length::FILL).name("Replace with"),
+                    button(label("Replace").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(editable, Msg::ReplaceOne).name("Replace"),
+                    button(label("Replace all").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(editable && !f.matches.is_empty(), Msg::ReplaceAll).name("Replace all"),
+                ])
+                .spacing(6.0)
+                .align(Align::Center)
+                .width(Length::FILL),
+            );
+        }
+        panel(column(rows).spacing(6.0).width(Length::FILL)).color(t.card).radius(0.0).padding(Padding::hv(6.0, 10.0)).width(Length::FILL)
     }
 }
 
@@ -623,7 +801,13 @@ impl Program for EditWindow {
         if let Some(r) = &tab.read_only {
             parts.push(strip(r.clone(), false));
         }
-        parts.push(text_area(&tab.doc).key(tab.id as u64).autofocus().on_change(Msg::Changed).name(tab.name()));
+        if let Some(f) = &self.find {
+            parts.push(self.find_bar(f, t));
+        }
+        // The area's id changes with focus_turn, so it takes the keyboard back
+        // when the find bar closes (its state is the document's, not the id's).
+        let area = text_area(&tab.doc).key((self.focus_turn << 32) | tab.id as u64).on_change(Msg::Changed).name(tab.name());
+        parts.push(if self.find.is_none() { area.autofocus() } else { area });
         // The status line: where the caret is, how Tab indents, the line endings.
         let d = tab.doc.borrow();
         let (l, c) = d.line_column();
@@ -651,7 +835,66 @@ impl Program for EditWindow {
 
     fn update(&mut self, m: Msg, window: &mut Window) {
         match m {
-            Msg::Changed => {}
+            Msg::Changed => {
+                if self.find.is_some() {
+                    self.refind();
+                }
+            }
+            Msg::FindTyped(n) => {
+                if let Some(f) = self.find.as_mut() {
+                    f.needle = n;
+                    f.found_in = (0, u64::MAX);
+                    f.replaced = None;
+                }
+                self.find_from_origin();
+            }
+            Msg::WithTyped(w) => {
+                if let Some(f) = self.find.as_mut() {
+                    f.with = w;
+                }
+            }
+            Msg::FindNext | Msg::FindPrev => {
+                if let Some(f) = self.find.as_mut() {
+                    f.replaced = None;
+                }
+                self.find_step(matches!(m, Msg::FindPrev));
+            }
+            Msg::FindCase | Msg::FindWhole => {
+                if let Some(f) = self.find.as_mut() {
+                    if matches!(m, Msg::FindCase) {
+                        f.case = !f.case;
+                    } else {
+                        f.whole = !f.whole;
+                    }
+                    f.found_in = (0, u64::MAX);
+                }
+                self.find_from_origin();
+            }
+            Msg::FindReplace => {
+                if let Some(f) = self.find.as_mut() {
+                    f.replace = !f.replace;
+                }
+            }
+            Msg::FindClose => self.close_find(),
+            Msg::ReplaceOne => {
+                // The match chosen is replaced; then on to the next.
+                if self.chosen_match()
+                    && let (Some(doc), Some(f)) = (self.doc(), self.find.as_ref())
+                {
+                    let with = f.with.clone();
+                    doc.borrow_mut().insert(&with);
+                }
+                self.find_step(false);
+            }
+            Msg::ReplaceAll => {
+                self.refind();
+                if let (Some(doc), Some(f)) = (self.doc(), self.find.as_mut()) {
+                    let n = doc.borrow_mut().replace_all(&f.matches, &f.with.clone());
+                    f.replaced = Some(n);
+                    f.found_in = (0, u64::MAX);
+                }
+                self.refind();
+            }
             Msg::DismissNotice => self.notice = None,
             Msg::ToggleSpaces => {
                 let i = self.front_index();
@@ -676,7 +919,12 @@ impl Program for EditWindow {
     fn input(&mut self, input: &Input, window: &mut Window) -> bool {
         const PAGE_UP: u32 = 0xff55;
         const PAGE_DOWN: u32 = 0xff56;
+        const ESCAPE: u32 = 0xff1b;
         let Input::Key { sym, pressed: true, modifiers: m, .. } = input else { return false };
+        if *sym == ESCAPE && self.find.is_some() {
+            self.close_find();
+            return true;
+        }
         if !(m.ctrl || m.logo) || m.alt {
             return false;
         }
@@ -692,6 +940,10 @@ impl Program for EditWindow {
             (Some('-'), _) => cmd::ZOOM_OUT,
             (Some('0'), _) => cmd::ZOOM_RESET,
             (Some(','), _) => cmd::SETTINGS,
+            (Some('f'), _) => cmd::FIND,
+            (Some('h'), _) => cmd::REPLACE,
+            (Some('g'), _) if m.shift => cmd::FIND_PREV,
+            (Some('g'), _) => cmd::FIND_NEXT,
             (_, PAGE_DOWN) => cmd::NEXT_TAB,
             (_, PAGE_UP) => cmd::PREV_TAB,
             _ => return false,
@@ -724,6 +976,10 @@ impl Program for EditWindow {
                 C::role(cmd::COPY, Role::Copy).enabled(selected),
                 C::role(cmd::PASTE, Role::Paste).enabled(editable),
                 C::role(cmd::SELECT_ALL, Role::SelectAll),
+                C::role(cmd::FIND, Role::Find).featured(),
+                C::role(cmd::FIND_NEXT, Role::FindNext),
+                C::own(cmd::FIND_PREV, "Edit", "Find previous", "Ctrl+Shift+G"),
+                C::role(cmd::REPLACE, Role::Replace).enabled(editable),
                 C::role(cmd::ZOOM_IN, Role::ZoomIn),
                 C::role(cmd::ZOOM_OUT, Role::ZoomOut),
                 C::role(cmd::ZOOM_RESET, Role::ZoomReset),
@@ -744,7 +1000,12 @@ impl Program for EditWindow {
 
     fn tab(&mut self, event: TabEvent, window: &mut Window) {
         match event {
-            TabEvent::Chosen(id) => self.front = id,
+            TabEvent::Chosen(id) => {
+                self.front = id;
+                if self.find.is_some() {
+                    self.refind();
+                }
+            }
             TabEvent::Close(id) => self.close_tab(id, window),
             TabEvent::CloseOthers(id) => {
                 for t in self.tabs.iter().map(|t| t.id).filter(|t| *t != id).collect::<Vec<_>>() {
