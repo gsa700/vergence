@@ -153,12 +153,15 @@ pub struct Prefs {
     alive: Arc<AtomicBool>,
     /// What is typed in a percentage's field, by key, until it is a value.
     drafts: std::collections::HashMap<String, String>,
+    /// Its size now, kept when it closes (Dave, 2026-11-14: "at least
+    /// remember the size"), per app, in ~/.local/state/vergence/settings-windows.toml.
+    size: Option<(f32, f32)>,
 }
 
 impl Prefs {
     pub fn new(app: &str, app_id: &str, section: &str, default_dark: bool, rows: Box<dyn Rows>, open: Rc<Cell<bool>>) -> Prefs {
         open.set(true);
-        let mut p = Prefs { app: app.into(), app_id: app_id.into(), section: section.into(), default_dark, rows, open, on_write: None, text: String::new(), stamp: None, alive: Arc::new(AtomicBool::new(true)), drafts: Default::default() };
+        let mut p = Prefs { app: app.into(), app_id: app_id.into(), section: section.into(), default_dark, rows, open, on_write: None, text: String::new(), stamp: None, alive: Arc::new(AtomicBool::new(true)), drafts: Default::default(), size: None };
         p.reread();
         p
     }
@@ -410,11 +413,25 @@ impl Program for Prefs {
     }
 
     fn style(&self) -> vergence_ui::Style {
-        // As tall as its rows want (about), within a screen's reach.
+        // Small enough to be made short (it scrolls); it opens as tall as its rows
+        // want, or at the size it was last left at.
+        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (520.0, 260.0), max: (900.0, 0.0) }
+    }
+
+    fn opening_size(&self) -> Option<(u32, u32)> {
+        if let Some((w, h)) = kept_size(&self.app_id) {
+            return Some((w, h));
+        }
         let parts = self.rows.parts(&self.text);
         let rows: usize = parts.iter().map(|p| p.rows.len()).sum();
         let tall = (60.0 + parts.len() as f64 * 44.0 + rows as f64 * 58.0).clamp(300.0, 700.0);
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (580.0, tall), max: (760.0, 0.0) }
+        Some((580, tall.round() as u32))
+    }
+
+    fn resized(&mut self, width: f32, height: f32) {
+        if width > 0.0 && height > 0.0 {
+            self.size = Some((width, height));
+        }
     }
 }
 
@@ -422,7 +439,52 @@ impl Drop for Prefs {
     fn drop(&mut self) {
         self.open.set(false);
         self.alive.store(false, Ordering::Relaxed);
+        if let Some((w, h)) = self.size {
+            keep_size(&self.app_id, w.round() as u32, h.round() as u32);
+        }
     }
+}
+
+/// Where settings windows' last sizes are kept (owner only).
+fn sizes_path() -> Option<std::path::PathBuf> {
+    let state = std::env::var_os("XDG_STATE_HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))?;
+    Some(state.join("vergence/settings-windows.toml"))
+}
+
+/// An app's settings window's last size: a line `app-id = "580x700"`.
+fn kept_size(app: &str) -> Option<(u32, u32)> {
+    let text = std::fs::read_to_string(sizes_path()?).ok()?;
+    sizes_from(&text, app)
+}
+
+fn sizes_from(text: &str, app: &str) -> Option<(u32, u32)> {
+    text.lines().find_map(|l| {
+        let (k, v) = l.split_once('=')?;
+        if k.trim().trim_matches('"') != app {
+            return None;
+        }
+        let (w, h) = v.trim().trim_matches('"').split_once('x')?;
+        let (w, h) = (w.parse::<u32>().ok()?, h.parse::<u32>().ok()?);
+        ((200..=8000).contains(&w) && (200..=8000).contains(&h)).then_some((w, h))
+    })
+}
+
+fn keep_size(app: &str, w: u32, h: u32) {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let Some(path) = sizes_path() else { return };
+    if app.is_empty() || app.contains(['"', '\n', '=']) {
+        return;
+    }
+    let old = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut lines: Vec<String> = old.lines().filter(|l| l.split_once('=').is_none_or(|(k, _)| k.trim().trim_matches('"') != app)).map(String::from).collect();
+    lines.push(format!("\"{app}\" = \"{w}x{h}\""));
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let beside = path.with_extension("toml.new");
+    let text = lines.join("\n") + "\n";
+    let _ = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&beside).and_then(|mut f| f.write_all(text.as_bytes())).and_then(|_| std::fs::rename(&beside, &path));
 }
 
 /// What a percentage's field holds, as a fraction, if it is `min` to 100.
@@ -500,6 +562,15 @@ mod tests {
         assert!(d.ends_with("name = \"x\"\n\n[settings]\nopacity = 0.9\n"));
         assert!(d.contains("opacity = 0.97 # see-through"));
         assert_eq!(set_key("", "[terminal]", "style", Some("\"dark\"")), "[terminal]\nstyle = \"dark\"\n");
+    }
+
+    #[test]
+    fn a_kept_size_is_read_back_for_its_app_only() {
+        let t = "\"vergence-term\" = \"600x720\"\n\"vergence-settings\" = \"540x320\"\n\"odd\" = \"9x9\"\n";
+        assert_eq!(sizes_from(t, "vergence-term"), Some((600, 720)));
+        assert_eq!(sizes_from(t, "vergence-settings"), Some((540, 320)));
+        assert_eq!(sizes_from(t, "odd"), None, "too small to be real");
+        assert_eq!(sizes_from(t, "firefox"), None);
     }
 
     #[test]

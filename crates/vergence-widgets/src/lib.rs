@@ -89,6 +89,15 @@ pub trait Program {
     /// One of its own bar buttons was pressed (the id it gave it).
     fn bar_button(&mut self, _id: u32, _window: &mut Window) {}
 
+    /// The size to open at, in points, if the program has one in mind (a
+    /// settings window's last size). None: the toolkit's choice.
+    fn opening_size(&self) -> Option<(u32, u32)> {
+        None
+    }
+
+    /// The window is now this size, in points (it opened, or was resized).
+    fn resized(&mut self, _width: f32, _height: f32) {}
+
     /// Its app menu's commands (app settings milestone 1): whether it is a
     /// terminal, and the commands. Asked after each frame; sent when changed.
     fn commands(&self) -> Option<(bool, Vec<vergence_ui::AppCommand>)> {
@@ -212,6 +221,9 @@ impl<P: Program> vergence_ui::App for Host<P> {
     /// A dialog or palette opens at its own smallest size, not at the
     /// toolkit's 820 x 520 for another window.
     fn opening_size(&self) -> Option<(u32, u32)> {
+        if let Some(s) = self.program.opening_size() {
+            return Some(s);
+        }
         let st = self.program.style();
         let small = matches!(st.kind, vergence_ui::WinKind::Dialog | vergence_ui::WinKind::Palette);
         (small && st.min.0 > 0.0 && st.min.1 > 0.0).then(|| (st.min.0.ceil() as u32, st.min.1.ceil() as u32))
@@ -384,6 +396,9 @@ impl<P: Program> Host<P> {
             self.ui.set_reduced_motion(self.theme.reduced_motion);
             self.ui.set_double_click(self.theme.double_click);
             self.stale = false;
+            if self.laid_at != (frame.width, frame.height) {
+                self.program.resized(frame.width, frame.height);
+            }
             self.laid_at = (frame.width, frame.height);
             if self.print_tree {
                 eprint!("{}", self.ui.meaning_text());
