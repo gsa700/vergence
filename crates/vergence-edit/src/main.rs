@@ -783,7 +783,13 @@ impl Program for EditWindow {
 
     fn bar(&self) -> Option<Bar> {
         let tabs = self.tabs.iter().map(|t| BarTab { id: t.id, title: t.name(), closable: true, alert: false, edited: t.modified() }).collect();
-        Some(Bar::Tabs { tabs, front: self.front_tab().map_or(0, |t| t.id), plus: true, accent: None, menu: Vec::new() })
+        // The tab in front is the page's color, as the terminal's: joined to
+        // the text, and the server knows the page's style, so text scrolled
+        // under a bar of the other style shows through inverted (readable)
+        // rather than all but hidden by the frost.
+        let p = self.theme().page;
+        let page = (p.r as u32) << 16 | (p.g as u32) << 8 | p.b as u32;
+        Some(Bar::Tabs { tabs, front: self.front_tab().map_or(0, |t| t.id), plus: true, accent: Some(page), menu: Vec::new() })
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
