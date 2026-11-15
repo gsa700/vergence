@@ -370,6 +370,28 @@ fn typing_into_a_field() {
 }
 
 #[test]
+fn a_field_undoes_and_redoes() {
+    let mut ui = laid(form(""), 300.0, 100.0);
+    key(&mut ui, sym::TAB, false);
+    type_text(&mut ui, "hello");
+    key(&mut ui, sym::BACKSPACE, false);
+    key(&mut ui, sym::BACKSPACE, false);
+    assert_eq!(ui.field_text().map(|t| t.0), Some("hel".into()));
+    // The backspaces were one step, the typing another.
+    assert_eq!(chord(&mut ui, 'z', true).messages, vec![Msg::Text("hello".into())]);
+    assert_eq!(chord(&mut ui, 'z', true).messages, vec![Msg::Text(String::new())]);
+    assert!(chord(&mut ui, 'z', true).messages.is_empty(), "nothing more to undo");
+    assert_eq!(chord(&mut ui, 'y', true).messages, vec![Msg::Text("hello".into())]);
+    let shift_z = Modifiers { ctrl: true, shift: true, ..Modifiers::default() };
+    let r = ui.input(&Input::Key { sym: 'Z' as u32, text: None, pressed: true, repeat: false, composing: false, modifiers: shift_z });
+    assert_eq!(r.messages, vec![Msg::Text("hel".into())]);
+    assert_eq!(ui.field_text().map(|t| (t.1, t.2)), Some((3, 3)), "the caret comes back with the text");
+    // A paste is a step of its own.
+    ui.input(&Input::Paste("p".into()));
+    assert_eq!(chord(&mut ui, 'z', true).messages, vec![Msg::Text("hel".into())]);
+}
+
+#[test]
 fn a_field_holds_so_much_and_no_more() {
     let mut ui = laid(form(""), 300.0, 100.0);
     key(&mut ui, sym::TAB, false);

@@ -23,6 +23,7 @@
 mod element;
 pub mod about;
 pub mod chart;
+pub mod edit;
 pub mod prefs;
 mod layout;
 mod theme;

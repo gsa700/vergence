@@ -75,6 +75,9 @@ struct FieldState {
     shift: f32,
     /// Where each character boundary is drawn, from the text's start.
     stops: Vec<(usize, f32)>,
+    /// Undo and redo (editor milestone 1); forgotten when the program
+    /// gives the field a new value.
+    history: crate::edit::History<usize>,
 }
 
 #[derive(Debug, Default)]
@@ -304,6 +307,7 @@ impl<M: Clone> Ui<M> {
                     if *value != f.sent {
                         f.text = value.clone();
                         f.sent = value.clone();
+                        f.history.clear();
                     }
                     f.caret = boundary(&f.text, f.caret);
                     f.anchor = boundary(&f.text, f.anchor);
@@ -664,15 +668,15 @@ impl<M: Clone> Ui<M> {
 
     /// Types `text` into field `id` over its selection: its first line,
     /// without control characters, as much as the field has room for.
-    fn field_insert(&mut self, id: Id, text: &str, r: &mut Response<M>) {
+    fn field_insert(&mut self, id: Id, text: &str, kind: crate::edit::Kind, r: &mut Response<M>) {
         let editable = self.node(id).is_some_and(|n| matches!(n.what, What::Field { on_input: Some(_), .. }));
         let Some(f) = self.fields.get_mut(&id).filter(|_| editable) else { return };
         let clean: String = text.chars().take_while(|c| *c != '\n' && *c != '\r').filter(|c| !c.is_control()).collect();
         let (a, b) = (f.caret.min(f.anchor), f.caret.max(f.anchor));
         let room = MAX_FIELD.saturating_sub(f.text.len() - (b - a));
         let cut = boundary(&clean, room);
-        f.text.replace_range(a..b, &clean[..cut]);
-        f.caret = a + cut;
+        let sel = (f.caret, f.anchor);
+        f.caret = f.history.edit(&mut f.text, a, b, &clean[..cut], sel, kind, Instant::now());
         f.anchor = f.caret;
         self.caret_moved();
         self.field_changed(id, r);
@@ -710,6 +714,7 @@ impl<M: Clone> Ui<M> {
                 if !m.shift {
                     f.anchor = to;
                 }
+                f.history.break_group();
             }
             sym::BACKSPACE | sym::DELETE if editable => {
                 let (from, to) = if selected {
@@ -719,7 +724,9 @@ impl<M: Clone> Ui<M> {
                 } else {
                     (f.caret, if command || m.alt { next_word(&f.text, f.caret) } else { next_char(&f.text, f.caret) })
                 };
-                f.text.replace_range(from..to, "");
+                let kind = if selected { crate::edit::Kind::Other } else { crate::edit::Kind::Deleting };
+                let sel = (f.caret, f.anchor);
+                f.history.edit(&mut f.text, from, to, "", sel, kind, Instant::now());
                 f.caret = from;
                 f.anchor = from;
                 edited = from != to;
@@ -740,7 +747,8 @@ impl<M: Clone> Ui<M> {
                     if selected && !secret {
                         r.copy = Some(f.text[a..b].to_string());
                         if c == 'x' && editable {
-                            f.text.replace_range(a..b, "");
+                            let sel = (f.caret, f.anchor);
+                            f.history.edit(&mut f.text, a, b, "", sel, crate::edit::Kind::Other, Instant::now());
                             f.caret = a;
                             f.anchor = a;
                             edited = true;
@@ -751,12 +759,20 @@ impl<M: Clone> Ui<M> {
                     r.paste = editable;
                     moved = false;
                 }
+                // Undo, redo (Ctrl+Shift+Z or Ctrl+Y).
+                Some(c @ ('z' | 'y')) if editable => {
+                    let back = if c == 'z' && !m.shift { f.history.undo(&mut f.text) } else { f.history.redo(&mut f.text) };
+                    let Some((caret, anchor)) = back else { return true };
+                    f.caret = caret;
+                    f.anchor = anchor;
+                    edited = true;
+                }
                 _ => return false,
             },
             _ => match text.filter(|t| !t.is_empty() && !t.chars().any(char::is_control) && !m.alt) {
                 Some(t) => {
                     let t = t.to_string();
-                    self.field_insert(id, &t, r);
+                    self.field_insert(id, &t, crate::edit::Kind::Typing, r);
                     return true;
                 }
                 None => return false,
@@ -933,7 +949,7 @@ impl<M: Clone> Ui<M> {
             }
             Input::Paste(ref text) => {
                 if let Some(id) = self.focus {
-                    self.field_insert(id, text, &mut r);
+                    self.field_insert(id, text, crate::edit::Kind::Other, &mut r);
                 }
             }
             Input::Focus(false) => {
