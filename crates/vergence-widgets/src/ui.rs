@@ -335,6 +335,10 @@ impl<M: Clone> Ui<M> {
                 _ => {}
             }
         }
+        // A node marked to be kept in view, new since the last layout, is scrolled to.
+        if let Some(i) = self.nodes.iter().position(|n| n.reveal && !before.contains(&n.id)) {
+            self.reveal(i);
+        }
     }
 
     /// The caret is steady rather than blinking, and switches do not slide

@@ -202,6 +202,35 @@ the rest of item 5 come with the Viewer and the File Manager.
 - **Print**: left out unless Dave wants it now (there is no print path in
   Vergence yet).
 
+## Progress
+
+- **Step 1** (83144f4): vergence-widgets edit.rs, the buffer and the undo
+  history; the one-line field undoes too.
+- **Step 2** (f3adf65): textarea.rs, the text area; `--example varea`.
+- **Step 3** (cc77515): vergence-edit, the editor's window. Found on the
+  way: a column's `padding` is ignored (only panels and buttons pad); the
+  toolkit read a program's title only at open (the widgets host now sends
+  it when it changes); vergence-ui gives a window its number before its
+  waker, and one waker serves all of a process's windows.
+- **Dave's notes, 2026-11-15** (ad7081b): the line numbers on a gray of
+  their own; a word count in the status line; tabs with unsaved edits
+  colored, by the server for every app (bus v14 `Tab::edited`, an amber
+  stripe and tint). The editor's name is Dave's to give (it shows as
+  "Text Editor" until then).
+- **Step 4**: vergence-widgets filedialog.rs, the Open and Save dialog
+  (places, the path as buttons, Back and Up, sorting, hidden files,
+  typing to narrow or a path, a text file's first lines at the side, New
+  folder, the replace question, the last folder per app and the recent
+  files in ~/.local/state/vergence/file-dialog); Element::keep_in_view;
+  the editor's Open…, Save as… and Save of a new document (the name
+  suggested from its first words, as TextEdit does). Server fixes found
+  with it: a dialog of the focused window takes the keyboard (opened.rs
+  judged a dialog by an identity dialogs do not have), and the keyboard
+  goes back to a closed window's parent or the window in front (native.rs;
+  it went nowhere). Still to come: the Save name chosen without its
+  extension (the toolkit cannot set a field's selection yet), choosing
+  several files at once.
+
 ## Steps
 
 1. **Buffer and undo** in vergence-widgets, with tests (edits, the offset

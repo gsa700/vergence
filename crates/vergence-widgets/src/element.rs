@@ -149,11 +149,12 @@ pub struct Element<M> {
     pub(crate) max_width: Option<f32>,
     pub(crate) key: Option<u64>,
     pub(crate) name: Option<String>,
+    pub(crate) reveal: bool,
 }
 
 impl<M> Element<M> {
     pub(crate) fn new(kind: Kind<M>, width: Length, height: Length) -> Element<M> {
-        Element { kind, width, height, max_width: None, key: None, name: None }
+        Element { kind, width, height, max_width: None, key: None, name: None, reveal: false }
     }
 
     pub fn width(mut self, width: Length) -> Self {
@@ -163,6 +164,14 @@ impl<M> Element<M> {
 
     pub fn height(mut self, height: Length) -> Self {
         self.height = height;
+        self
+    }
+
+    /// Scrolled into view in the scrolling place it is in when it first
+    /// appears (a list's chosen row, moved with the keys): give the row a
+    /// key so it is a new one each time the choice moves.
+    pub fn keep_in_view(mut self) -> Self {
+        self.reveal = true;
         self
     }
 
@@ -300,6 +309,11 @@ impl<M> Element<M> {
             *on_press = Some(message);
         }
         self
+    }
+
+    /// What pressing it sends, if `on` (otherwise it cannot be pressed).
+    pub fn on_press_if(self, on: bool, message: M) -> Self {
+        if on { self.on_press(message) } else { self }
     }
 
     pub fn look(mut self, look: ButtonLook) -> Self {

@@ -60,6 +60,8 @@ pub(crate) struct Node<M> {
     pub parent: Option<usize>,
     pub what: What<M>,
     pub name: Option<String>,
+    /// Scrolled into view when it first appears ([`crate::Element::keep_in_view`]).
+    pub reveal: bool,
 }
 
 pub(crate) fn child_id(parent: Id, index: usize, key: Option<u64>) -> Id {
@@ -345,7 +347,8 @@ impl Layout<'_> {
     fn arrange<M>(&mut self, e: Element<M>, rect: Rect, parent: Option<usize>, id: Id, out: &mut Vec<Node<M>>) {
         let me = out.len();
         let name = e.name;
-        let push = |out: &mut Vec<Node<M>>, what: What<M>| out.push(Node { id, rect, parent, what, name: name.clone() });
+        let reveal = e.reveal;
+        let push = |out: &mut Vec<Node<M>>, what: What<M>| out.push(Node { id, rect, parent, what, name: name.clone(), reveal });
         match e.kind {
             Kind::Space => push(out, What::Space),
             Kind::Rule { color, .. } => push(out, What::Rule { color }),

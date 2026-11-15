@@ -34,6 +34,7 @@ const SECTION: &str = "[editor]";
 mod cmd {
     pub const NEW_WINDOW: u32 = 1;
     pub const NEW_TAB: u32 = 2;
+    pub const OPEN: u32 = 3;
     pub const SAVE: u32 = 4;
     pub const SAVE_AS: u32 = 5;
     pub const CLOSE_TAB: u32 = 6;
@@ -113,6 +114,20 @@ enum Answer {
     Cancel,
 }
 
+/// What a file dialog was opened for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Picking {
+    Open,
+    /// Save tab `tab` under a new name; then close it (the close question's Save).
+    SaveAs { tab: u32, then_close: bool },
+}
+
+/// A file dialog open over the window: what for, and where its answer lands.
+struct Pick {
+    what: Picking,
+    answer: Rc<RefCell<Option<Vec<PathBuf>>>>,
+}
+
 /// A question open over the window, and what it leads to.
 struct Asking {
     tab: u32,
@@ -136,6 +151,7 @@ struct EditWindow {
     closing: Vec<u32>,
     closing_window: bool,
     notice: Option<String>,
+    picking: Option<Pick>,
 }
 
 /// ~/.config/vergence/desktop.toml and when it last changed.
@@ -150,7 +166,7 @@ impl EditWindow {
     fn new(shared: SharedRef, tabs: Vec<DocTab>) -> EditWindow {
         let (desktop, stamp) = desktop_text();
         let front = tabs.first().map_or(0, |t| t.id);
-        let mut w = EditWindow { shared, tabs, front, me: None, waker: None, desktop, stamp, zoom: 1.0, prefs_open: Rc::new(Cell::new(false)), asking: None, closing: Vec::new(), closing_window: false, notice: None };
+        let mut w = EditWindow { shared, tabs, front, me: None, waker: None, desktop, stamp, zoom: 1.0, prefs_open: Rc::new(Cell::new(false)), asking: None, closing: Vec::new(), closing_window: false, notice: None, picking: None };
         if w.tabs.is_empty() {
             let t = w.untitled_tab();
             w.front = t.id;
@@ -278,10 +294,7 @@ impl EditWindow {
             self.notice = Some(format!("{} is open read-only.", t.name()));
             return false;
         }
-        let Some(path) = t.path.clone() else {
-            self.notice = Some("Saving a new document needs Save as…, which comes with the file dialog (editor milestone 1, step 4).".into());
-            return false;
-        };
+        let Some(path) = t.path.clone() else { return false };
         let text = t.doc.borrow().text();
         match files::save(&path, &text, t.bom) {
             Ok(()) => {
@@ -292,6 +305,84 @@ impl EditWindow {
                 self.notice = Some(e);
                 false
             }
+        }
+    }
+
+    /// Opens the file dialog: Open, or Save as for tab `tab`.
+    fn pick(&mut self, what: Picking, window: &mut Window) {
+        if self.picking.is_some() {
+            return;
+        }
+        let answer: Rc<RefCell<Option<Vec<PathBuf>>>> = Rc::new(RefCell::new(None));
+        let (slot, waker) = (answer.clone(), self.waker.clone());
+        let done = move |paths: Vec<PathBuf>| {
+            *slot.borrow_mut() = Some(paths);
+            if let Some(w) = &waker {
+                w.wake();
+            }
+        };
+        let theme = self.theme();
+        // The dialog starts in the document's own folder, if it has one.
+        let here = match what {
+            Picking::Open => self.front_tab(),
+            Picking::SaveAs { tab, .. } => self.tabs.iter().find(|t| t.id == tab),
+        }
+        .and_then(|t| t.path.as_ref().and_then(|p| p.parent().map(Path::to_path_buf)));
+        let dialog = match what {
+            Picking::Open => vergence_widgets::filedialog::FileDialog::open(APP_ID, "Open", theme, done).filters(vec![
+                vergence_widgets::filedialog::Filter::new("All files", &[]),
+                vergence_widgets::filedialog::Filter::new("Text files", &["*.txt", "*.md", "*.markdown", "*.rst", "*.org", "*.log", "*.csv", "*.conf", "*.ini", "*.toml", "*.json", "*.yaml", "*.yml", "*.xml", "*.sh"]),
+            ]),
+            Picking::SaveAs { tab, .. } => {
+                let name = self.tabs.iter().find(|t| t.id == tab).map_or_else(|| "Untitled.txt".into(), suggested_name);
+                vergence_widgets::filedialog::FileDialog::save(APP_ID, "Save as", &name, theme, done)
+            }
+        };
+        let dialog = match here {
+            Some(d) => dialog.folder(&d),
+            None => dialog,
+        };
+        self.picking = Some(Pick { what, answer });
+        window.open_window(vergence_widgets::window(dialog));
+    }
+
+    /// The file dialog answered (nothing: cancelled).
+    fn picked(&mut self, what: Picking, paths: Vec<PathBuf>, window: &mut Window) {
+        match what {
+            Picking::Open => self.open_files(&paths),
+            Picking::SaveAs { tab, then_close } => {
+                let Some(p) = paths.into_iter().next() else {
+                    // Cancelled: a close waiting on it stops.
+                    if then_close {
+                        self.closing.clear();
+                        self.closing_window = false;
+                    }
+                    return;
+                };
+                if let Some(t) = self.tabs.iter_mut().find(|t| t.id == tab) {
+                    t.path = Some(p);
+                    t.read_only = None;
+                }
+                if self.save(tab) && then_close {
+                    self.closing.retain(|t| *t != tab);
+                    self.remove_tab(tab);
+                    self.go_on_closing(window);
+                } else if then_close {
+                    self.closing.clear();
+                    self.closing_window = false;
+                }
+                self.apply_options();
+            }
+        }
+    }
+
+    /// Saves tab `id`, asking where first if it has never been saved.
+    fn save_or_ask(&mut self, id: u32, window: &mut Window) {
+        let untitled = self.tabs.iter().any(|t| t.id == id && t.path.is_none());
+        if untitled {
+            self.pick(Picking::SaveAs { tab: id, then_close: false }, window);
+        } else {
+            self.save(id);
         }
     }
 
@@ -350,6 +441,10 @@ impl EditWindow {
             Answer::Cancel => {
                 self.closing.clear();
                 self.closing_window = false;
+            }
+            // Never saved: where to, first; the closing goes on after.
+            Answer::Save if self.tabs.iter().any(|t| t.id == asking.tab && t.path.is_none()) => {
+                self.pick(Picking::SaveAs { tab: asking.tab, then_close: true }, window);
             }
             Answer::Save if !self.save(asking.tab) => {
                 // Not saved: stop, and say why.
@@ -431,10 +526,9 @@ impl EditWindow {
                 self.tabs.push(t);
                 self.apply_options();
             }
-            cmd::SAVE => {
-                self.save(self.front);
-            }
-            cmd::SAVE_AS => self.notice = Some("Save as… comes with the file dialog (editor milestone 1, step 4).".into()),
+            cmd::OPEN => self.pick(Picking::Open, window),
+            cmd::SAVE => self.save_or_ask(self.front, window),
+            cmd::SAVE_AS => self.pick(Picking::SaveAs { tab: self.front, then_close: false }, window),
             cmd::CLOSE_TAB => self.close_tab(self.front, window),
             cmd::UNDO => {
                 if let Some(d) = doc {
@@ -591,6 +685,7 @@ impl Program for EditWindow {
             (Some('s'), _) if m.shift => cmd::SAVE_AS,
             (Some('s'), _) => cmd::SAVE,
             (Some('n'), _) => cmd::NEW_WINDOW,
+            (Some('o'), _) => cmd::OPEN,
             (Some('t'), _) => cmd::NEW_TAB,
             (Some('w'), _) => cmd::CLOSE_TAB,
             (Some('=' | '+'), _) => cmd::ZOOM_IN,
@@ -619,6 +714,7 @@ impl Program for EditWindow {
             vec![
                 C::role(cmd::NEW_TAB, Role::NewTab).featured(),
                 C::role(cmd::NEW_WINDOW, Role::NewWindow),
+                C::role(cmd::OPEN, Role::Open).featured(),
                 C::role(cmd::SAVE, Role::Save).enabled(editable).featured(),
                 C::role(cmd::SAVE_AS, Role::SaveAs),
                 C::role(cmd::CLOSE_TAB, Role::CloseTab),
@@ -727,6 +823,14 @@ impl Program for EditWindow {
 
     fn woken(&mut self, window: &mut Window) -> bool {
         let mut changed = self.reread();
+        // The file dialog answered.
+        let answer = self.picking.as_ref().and_then(|p| p.answer.borrow_mut().take());
+        if let Some(paths) = answer
+            && let Some(p) = self.picking.take()
+        {
+            self.picked(p.what, paths, window);
+            changed = true;
+        }
         // A question answered.
         if let Some(a) = self.asking.as_ref().and_then(|q| q.answer.take()) {
             self.answered(a, window);
@@ -773,6 +877,30 @@ impl Program for EditWindow {
     fn style(&self) -> vergence_ui::Style {
         vergence_ui::Style { min: (360.0, 240.0), ..Default::default() }
     }
+}
+
+/// The name the Save dialog suggests: the file's own, or for a new
+/// document its first words (as TextEdit does), else "Untitled".
+fn suggested_name(t: &DocTab) -> String {
+    if let Some(p) = &t.path {
+        return files::name(p);
+    }
+    let doc = t.doc.borrow();
+    let first = doc.buffer().lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let clean: String = first.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') && !c.is_control()).collect();
+    let words: Vec<&str> = clean.split_whitespace().collect();
+    let mut name = String::new();
+    for w in words {
+        if name.chars().count() + w.chars().count() > 40 {
+            break;
+        }
+        if !name.is_empty() {
+            name.push(' ');
+        }
+        name.push_str(w);
+    }
+    let name = name.trim_matches(|c: char| c == '.' || c.is_whitespace()).to_string();
+    if name.is_empty() { format!("{}.txt", t.name()) } else { format!("{name}.txt") }
 }
 
 /// 1234567 as "1,234,567".
@@ -977,6 +1105,15 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "xa\n\tb\n\tc\n");
         assert!(!w.tabs[0].modified());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_new_document_is_named_by_its_first_words() {
+        let w = EditWindow::new(shared(), Vec::new());
+        let t = &w.tabs[0];
+        assert_eq!(suggested_name(t), "Untitled.txt");
+        t.doc.borrow_mut().insert("\n  Shopping list: eggs/milk, and a great many other things to get\nmore");
+        assert_eq!(suggested_name(t), "Shopping list eggsmilk, and a great many.txt");
     }
 
     #[test]

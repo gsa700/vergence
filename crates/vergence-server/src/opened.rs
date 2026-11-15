@@ -6,7 +6,7 @@
 //
 // 1. nothing has the keyboard (there is nothing to take it from);
 // 2. it is the focused program's own (a new terminal window, a dialog, a tab
-//    torn off): the person is working in that program;
+//    torn off; a dialog by its parent): the person is working in that program;
 // 3. its application was just started from the dock, the launcher or session
 //    restore (shelf.rs `launched`, the first window of each start, within 15
 //    seconds), and nothing has been typed into another
@@ -31,8 +31,13 @@ impl Server {
         self.place_dialog(w);
         let typed_at = self.input.typed_at;
         let focused = self.keyboard_window();
+        // A dialog has no identity of its own (memory.rs leaves dialogs
+        // out), so it is judged by its parent: a dialog of the focused window,
+        // or of another window of the focused program, is that program's
+        // (found 2026-11-15: the editor's Open dialog opened behind it).
+        let parent = self.window_style(w).parent;
         let same = match &focused {
-            Some(f) => self.same_program(f, w),
+            Some(f) => self.same_program(f, w) || parent.as_ref() == Some(f) || parent.as_ref().is_some_and(|p| self.same_program(f, p)),
             None => false,
         };
         let items = self.shelf_items();

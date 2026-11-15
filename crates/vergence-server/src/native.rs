@@ -713,12 +713,24 @@ impl Server {
         if n.state.lock().unwrap().shown {
             self.remember(w);
         }
+        // Its parent, while the window is still known (a dialog's).
+        let parent = self.window_style(w).parent.filter(|p| smithay::utils::IsAlive::alive(p) && p != w);
         self.space.unmap_elem(w);
         self.restore.remove(w);
-        if self.input.keyboard_native.as_ref() == Some(w) {
+        let had_keys = self.input.keyboard_native.as_ref() == Some(w);
+        if had_keys {
             self.input.keyboard_native = None;
         }
         n.kill();
+        // The keyboard goes back where the person was (found 2026-11-15: after
+        // the editor's Open dialog closed, keys went nowhere): to a dialog's
+        // parent, else the window in front.
+        if had_keys {
+            let next = parent.filter(|p| self.space.element_geometry(p).is_some()).or_else(|| self.space.elements().filter(|e| *e != w).next_back().cloned());
+            if let Some(next) = next {
+                self.focus_window(&next, smithay::utils::SERIAL_COUNTER.next_serial());
+            }
+        }
         tracing::info!("native: {:?} window {} closed", n.app_id, n.id);
     }
 
