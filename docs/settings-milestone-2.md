@@ -160,6 +160,15 @@ as now.
   choice), and the buttons of a bar without tabs (plain and sidebar bars)
   stand in the bar's middle; a bar with tabs keeps them at its bottom edge
   with the tabs.
+- **Also asked** (Dave, 2026-11-14): the settings app's sidebar scrolls
+  when the window is short, and the toolkit keeps a gutter for the scroll
+  bar when a scroll view's content overflows; and a **Notifications page**
+  (Desktop group): Do not disturb (apps' cards held back; critical ones and
+  the volume level still show), how long a card stays (5 s to 1 minute; a
+  card with buttons at least 10 s), which corner (the four; at the bottom
+  the newest is nearest the corner), and a test card sent over the bus.
+  desktop.toml `[notifications]` do-not-disturb, seconds, corner; the
+  server's notify.rs follows it within a second.
 
 ## Steps
 

@@ -256,6 +256,7 @@ impl Server {
         }
         if diff.iter().any(|s| s.namespace == KEYBOARD) {
             self.apply_key_repeat();
+        self.notes.config = crate::notify::load();
         }
         if diff.iter().any(|s| s.namespace == MOUSE || s.namespace == TOUCHPAD) {
             self.apply_pointer_settings();
@@ -312,6 +313,8 @@ impl Server {
                 state.shelf_reload();
                 // Snapping's choices (snap.rs).
                 state.snap_reload();
+                // Notifications' choices (notify.rs).
+                state.notify_reload();
                 // Wallpaper tint's switch (tint.rs).
                 state.tint_reload();
                 // X11 applications turned on (state.rs).

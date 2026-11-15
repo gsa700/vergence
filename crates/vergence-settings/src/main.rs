@@ -34,6 +34,8 @@ mod thumbs;
 mod wall;
 mod battery;
 mod modes;
+mod notify;
+use notify::NotifyMsg;
 mod wifi;
 mod winbar;
 
@@ -169,6 +171,7 @@ enum Icon {
     Energy,
     Battery,
     About,
+    Notifications,
 }
 
 impl Icon {
@@ -184,6 +187,7 @@ impl Icon {
             Icon::Accessibility => Color::rgb(0x1f, 0x6f, 0xe0),
             Icon::Energy | Icon::Battery => Color::rgb(0x3f, 0x9a, 0x3a),
             Icon::About => Color::rgb(0x70, 0x74, 0x7c),
+            Icon::Notifications => Color::rgb(0xe5, 0x48, 0x3a),
         }
     }
 }
@@ -310,6 +314,13 @@ fn icon_mark<M: 'static>(icon: Icon) -> Element<M> {
                 scene.fill(Rect::new(x + 15.2, y + 8.6, 1.6, 2.8), w);
                 scene.fill(Rect::new(x + 5.2, y + 8.2, 6.0, 3.6), w);
             }
+            // A card with a dot at its corner.
+            Icon::Notifications => {
+                scene.stroke(Rect::new(x + 4.0, y + 6.0, 11.0, 9.5), 2.0, 1.4, w);
+                scene.fill_rounded(Rect::new(x + 12.6, y + 3.4, 4.4, 4.4), 2.2, w);
+                line(scene, (6.5, 9.5), (11.0, 9.5));
+                line(scene, (6.5, 12.3), (12.5, 12.3));
+            }
             // An i.
             Icon::About => {
                 scene.fill_rounded(Rect::new(x + 9.1, y + 4.5, 1.8, 1.8), 0.9, w);
@@ -350,6 +361,8 @@ enum Page {
     Touchpad,
     Touchscreen,
     Energy,
+    /// Do not disturb, how long, which corner (notify.rs).
+    Notifications,
     /// The battery and the GPUs (battery.rs); only where there is a battery.
     Battery,
     Sound,
@@ -368,6 +381,8 @@ enum Page {
 
 #[derive(Debug, Clone)]
 enum Message {
+    /// The Notifications page (notify.rs).
+    Notify(NotifyMsg),
     Go(Page),
     /// The Wi-Fi page (wifi.rs).
     Wifi(wifi::WifiMsg),
@@ -886,6 +901,7 @@ impl App {
             Message::Go(p) => self.open(p),
             Message::Wifi(m) => self.wifi_handle(m),
             Message::BatterySample => self.battery_sample(),
+            Message::Notify(m) => self.notify_message(m),
             Message::Resolution(i) => self.pick_mode(Some(i), None),
             Message::Refresh(i) => self.pick_mode(None, Some(i)),
             Message::KeepMode(keep) => self.settle_mode(keep),
@@ -1454,6 +1470,7 @@ impl App {
             ("Desktop", vec![
                 ("Windows".into(), Page::Windows, Icon::Windows, "window title bar buttons controls minimize maximize close snap snapping alt tab keys x11"),
                 ("Dock".into(), Page::Dock, Icon::Dock, "dock shelf pin hide opacity gap edge"),
+                ("Notifications".into(), Page::Notifications, Icon::Notifications, "notifications cards alerts do not disturb quiet corner banner"),
             ]),
             ("Screens", screens),
             ("Input", vec![
@@ -2724,6 +2741,7 @@ impl Program for App {
             Page::Touchscreen => "Touchscreen".into(),
             Page::Sound => "Sound".into(),
             Page::Energy => "Energy".into(),
+            Page::Notifications => "Notifications".into(),
             Page::Accessibility => "Accessibility".into(),
             Page::Overview => "Screens".into(),
             Page::Screen(i) => self.outputs.get(i).map(screen_label).unwrap_or_else(|| "Screens".into()),
@@ -2764,6 +2782,7 @@ impl Program for App {
             Page::Touchpad => self.touchpad_page(),
             Page::Touchscreen => self.touchscreen_page(),
             Page::Energy => self.energy(),
+            Page::Notifications => self.notifications_page(),
             Page::Sound => self.sound_page(),
             Page::Accessibility => self.accessibility(),
             Page::Overview => self.overview(),

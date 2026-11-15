@@ -16,6 +16,16 @@
 // after their timeout (when the app leaves it to the server: 5 s, 10 s for a
 // card with buttons, and critical ones stay until clicked). While the pointer
 // is over any card, every countdown pauses, and resumes when it leaves.
+//
+// desktop.toml [notifications] (the settings app's Notifications page, Dave
+// 2026-11-14):
+//
+//   do-not-disturb = false   true: apps' cards are not shown (critical ones and
+//                            the server's own, the volume level, still are)
+//   seconds = 5              how long a card stays when the app leaves it to the
+//                            desktop (a card with buttons at least 10 s)
+//   corner = "top-right"     top-right, top-left, bottom-right or bottom-left;
+//                            at the bottom the newest card is nearest the corner
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -110,6 +120,41 @@ pub struct Notifications {
     timer_running: bool,
     /// The pointer is over a card: countdowns are paused.
     paused: bool,
+    pub config: Config,
+}
+
+/// [notifications] from desktop.toml.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Config {
+    pub do_not_disturb: bool,
+    pub timeout: Duration,
+    /// (right, bottom).
+    pub corner: (bool, bool),
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config { do_not_disturb: false, timeout: DEFAULT_TIMEOUT, corner: (true, false) }
+    }
+}
+
+pub fn parse(text: &str) -> Config {
+    let d = Config::default();
+    let Some(t) = text.parse::<toml::Table>().ok().and_then(|t| t.get("notifications").and_then(|n| n.as_table()).cloned()) else { return d };
+    Config {
+        do_not_disturb: t.get("do-not-disturb").and_then(|v| v.as_bool()).unwrap_or(false),
+        timeout: t.get("seconds").and_then(|v| v.as_integer()).map(|s| Duration::from_secs(s.clamp(2, 600) as u64)).unwrap_or(d.timeout),
+        corner: match t.get("corner").and_then(|v| v.as_str()).unwrap_or("") {
+            "top-left" => (false, false),
+            "bottom-right" => (true, true),
+            "bottom-left" => (false, true),
+            _ => (true, false),
+        },
+    }
+}
+
+pub fn load() -> Config {
+    crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse(&t)).unwrap_or_default()
 }
 
 struct Palette {
@@ -182,8 +227,18 @@ impl Server {
     /// A new notification (or a replacement for one this origin made); its id.
     pub fn notify(&mut self, origin: Origin, req: Request) -> u32 {
         let buttons = req.actions.iter().any(|(k, _)| !k.is_empty() && k != "default");
+        let c = self.notes.config.clone();
+        // Do not disturb: an app's card is not shown; the app still gets an id
+        // (critical cards still show). It is not told the card closed: that
+        // could reach it before the id does.
+        if c.do_not_disturb && req.urgency < 2 && origin != Origin::Server {
+            self.notes.next_id = self.notes.next_id.wrapping_add(1).max(1);
+            let id = self.notes.next_id;
+            tracing::info!("notify: #{id} from {} held back (do not disturb): {:?}", req.app, req.summary);
+            return id;
+        }
         let timeout = match req.timeout_ms {
-            t if t < 0 => (req.urgency < 2).then_some(if buttons { BUTTONS_TIMEOUT } else { DEFAULT_TIMEOUT }),
+            t if t < 0 => (req.urgency < 2).then_some(if buttons { c.timeout.max(BUTTONS_TIMEOUT) } else { c.timeout }),
             0 => None,
             t => Some(Duration::from_millis(t as u64)),
         };
@@ -281,9 +336,15 @@ impl Server {
         let line_h = font.map(|f| (f.points * 96.0 / 72.0 * 1.45).round() as i32).unwrap_or(18);
         let width = |s: &str| font.map(|f| f.width(s)).unwrap_or(s.chars().count() as f32 * 7.0);
         let text_w = (WIDTH - 2 * PAD) as f32;
-        let x = area.loc.x + area.size.w - WIDTH - MARGIN;
-        let mut y = area.loc.y + MARGIN;
-        for n in self.notes.notes.iter_mut() {
+        let (right, bottom) = self.notes.config.corner;
+        let x = if right { area.loc.x + area.size.w - WIDTH - MARGIN } else { area.loc.x + MARGIN };
+        // At the bottom: laid out from the top, oldest first, then moved down
+        // so the newest ends nearest the corner.
+        let top = area.loc.y + MARGIN;
+        let mut y = top;
+        let order: Vec<usize> = if bottom { (0..self.notes.notes.len()).rev().collect() } else { (0..self.notes.notes.len()).collect() };
+        for i in order {
+            let n = &mut self.notes.notes[i];
             let mut lines = Vec::new();
             let mut ty = y + PAD;
             let title = if n.summary.is_empty() { n.app.clone() } else { n.summary.clone() };
@@ -319,7 +380,33 @@ impl Server {
             n.commit.increment();
             y += h + GAP;
         }
+        if bottom {
+            let dy = (area.loc.y + area.size.h - MARGIN) - (y - GAP);
+            for n in self.notes.notes.iter_mut() {
+                n.rect.loc.y += dy;
+                for l in n.lines.iter_mut() {
+                    l.1.loc.y += dy;
+                }
+                for b in n.buttons.iter_mut() {
+                    b.1.loc.y += dy;
+                }
+            }
+        }
         self.redraw_all();
+    }
+
+    /// desktop.toml changed: the new choices apply to cards from now on; the
+    /// stack moves at once if its corner changed.
+    pub fn notify_reload(&mut self) {
+        let new = load();
+        if new != self.notes.config {
+            tracing::info!("notify: {new:?}");
+            let moved = new.corner != self.notes.config.corner;
+            self.notes.config = new;
+            if moved {
+                self.notify_layout();
+            }
+        }
     }
 
     fn notify_start_timer(&mut self) {
@@ -483,6 +570,19 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::wrap;
+
+    #[test]
+    fn notifications_table() {
+        use super::{Config, parse};
+        use std::time::Duration;
+        assert_eq!(parse(""), Config::default());
+        let c = parse("[notifications]\ndo-not-disturb = true\nseconds = 20\ncorner = \"bottom-left\"\n");
+        assert!(c.do_not_disturb);
+        assert_eq!(c.timeout, Duration::from_secs(20));
+        assert_eq!(c.corner, (false, true));
+        assert_eq!(parse("[notifications]\nseconds = 0\ncorner = \"middle\"\n").timeout, Duration::from_secs(2));
+        assert_eq!(parse("[notifications]\ncorner = \"middle\"\n").corner, (true, false));
+    }
 
     fn w(s: &str) -> f32 {
         s.chars().count() as f32

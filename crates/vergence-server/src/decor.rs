@@ -626,7 +626,6 @@ impl Server {
         let layout_text = self.button_layout_text();
         // Light or dark (Settings > Appearance > Style; look milestone 1).
         let light = self.light_style();
-        let style = vergence_look::bar_look(light);
         let frost = self.frost_program(renderer);
         let round = self.round_program(renderer);
         let mut reinset: Vec<Win> = Vec::new();
