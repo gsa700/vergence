@@ -313,6 +313,8 @@ pub struct MimeApps {
     pub defaults: Vec<(String, Vec<String>)>,
     pub added: Vec<(String, Vec<String>)>,
     pub removed: Vec<(String, Vec<String>)>,
+    /// Read from a vergence-mimeapps.list: choices made in Vergence.
+    pub vergence: bool,
 }
 
 /// The longest mimeapps.list read, and the most types one may give.
@@ -429,7 +431,15 @@ pub fn own_list_path() -> PathBuf {
 
 /// Every list file read, in [`list_paths`]'s order.
 pub fn lists() -> Vec<MimeApps> {
-    list_paths().iter().filter_map(|p| std::fs::read_to_string(p).ok()).map(|t| MimeApps::parse(&t)).collect()
+    let ours = format!("{DESKTOP}-mimeapps.list");
+    list_paths()
+        .iter()
+        .filter_map(|p| {
+            let mut l = MimeApps::parse(&std::fs::read_to_string(p).ok()?);
+            l.vergence = p.file_name().is_some_and(|n| n.to_string_lossy() == ours);
+            Some(l)
+        })
+        .collect()
 }
 
 /// An installed application as far as file types go: its desktop file id
@@ -440,11 +450,14 @@ pub struct App<'a> {
 }
 
 /// The applications that open `mime`, best first, by desktop file id:
-/// for the type and then each type it is a kind of, the defaults the lists
-/// give (the first list that names one wins), then those added, then those
-/// whose entries list it; minus those removed (for the type or any nearer
-/// one), and only installed ones.
-/// Each application once.
+/// first the choices made in Vergence (vergence-mimeapps.list) for the type
+/// or a type it is a kind of, then Vergence's own apps (`vergence-*`) that
+/// open it (Dave, 2026-11-15: "Vergence apps first": GNOME's choice of its
+/// text editor for Markdown does not beat ours in a Vergence session); then,
+/// for the type and each type it is a kind of, the defaults the other lists
+/// give (the first list that names one wins), those added, and those whose
+/// entries list it; minus those removed (for the type or any nearer one),
+/// and only installed ones. Each application once.
 pub fn apps_for(mime: &str, apps: &[App], lists: &[MimeApps]) -> Vec<String> {
     let installed = |id: &str| apps.iter().any(|a| a.id == id);
     let mut out: Vec<String> = Vec::new();
@@ -455,10 +468,26 @@ pub fn apps_for(mime: &str, apps: &[App], lists: &[MimeApps]) -> Vec<String> {
     };
     // An application removed for a type, in any list, is not offered for it,
     // nor through the types it is a kind of.
+    let kinds = ancestors(mime);
+    let all_removed: Vec<String> = kinds.iter().flat_map(|m| lists.iter().flat_map(move |l| MimeApps::of(&l.removed, m)).cloned()).collect();
+    for m in &kinds {
+        for l in lists.iter().filter(|l| l.vergence) {
+            for id in MimeApps::of(&l.defaults, m) {
+                push(id, &mut out, &all_removed);
+            }
+        }
+    }
+    for m in kinds.iter().filter(|m| m.as_str() != BINARY) {
+        for a in apps.iter().filter(|a| a.id.starts_with("vergence-")) {
+            if a.types.iter().any(|t| listed(t, m)) {
+                push(a.id, &mut out, &all_removed);
+            }
+        }
+    }
     let mut removed: Vec<String> = Vec::new();
-    for m in ancestors(mime) {
+    for m in kinds {
         removed.extend(lists.iter().flat_map(|l| MimeApps::of(&l.removed, &m)).cloned());
-        for l in lists {
+        for l in lists.iter().filter(|l| !l.vergence) {
             for id in MimeApps::of(&l.defaults, &m) {
                 push(id, &mut out, &removed);
             }
@@ -647,11 +676,17 @@ mod tests {
             App { id: "hex.desktop", types: &hex },
             App { id: "other.desktop", types: &gone },
         ];
-        let ours = MimeApps::parse("[Default Applications]\nimage/png=gimp.desktop;\n");
+        let ours = MimeApps { vergence: true, ..MimeApps::parse("[Default Applications]\nimage/png=gimp.desktop;\n") };
         let shared = MimeApps::parse("[Default Applications]\nimage/png=closeup.desktop;\ntext/plain=uninstalled.desktop;office.desktop;\n[Removed Associations]\napplication/x-shellscript=office.desktop;\n");
         let lists = [ours, shared];
         assert_eq!(apps_for("image/png", &apps, &lists), vec!["gimp.desktop", "closeup.desktop", "hex.desktop"], "ours first; image/* matches; binary last");
-        assert_eq!(default_for("text/plain", &apps, &lists).as_deref(), Some("office.desktop"), "an uninstalled default is passed over");
+        assert_eq!(apps_for("text/plain", &apps, &lists), vec!["vergence-edit.desktop", "office.desktop", "hex.desktop"], "Vergence's own app before another desktop's choice; an uninstalled default is passed over");
+        let gnome = MimeApps::parse("[Default Applications]\ntext/markdown=gnome-edit.desktop;\n");
+        let md = t(&["text/markdown"]);
+        let with_gnome = [App { id: "vergence-edit.desktop", types: &edit }, App { id: "gnome-edit.desktop", types: &md }];
+        assert_eq!(default_for("text/markdown", &with_gnome, std::slice::from_ref(&gnome)).as_deref(), Some("vergence-edit.desktop"), "Markdown is a kind of text: ours, not GNOME's choice");
+        let chosen = MimeApps { vergence: true, ..MimeApps::parse("[Default Applications]\ntext/markdown=gnome-edit.desktop;\n") };
+        assert_eq!(default_for("text/markdown", &with_gnome, &[chosen, gnome]).as_deref(), Some("gnome-edit.desktop"), "a choice made in Vergence beats our own apps");
         assert_eq!(apps_for("application/x-shellscript", &apps, &lists), vec!["vergence-edit.desktop", "hex.desktop"], "a script opens with text apps, less the removed");
         assert_eq!(apps_for("image/jpg", &apps, &[]), vec!["closeup.desktop", "gimp.desktop", "hex.desktop"]);
         assert_eq!(apps_for("application/x-unknown", &apps, &[]), vec!["hex.desktop"], "only apps that list binary files by name");

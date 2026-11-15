@@ -511,6 +511,16 @@ the wallpaper, a scratch place for launchers and files.
   chooses its text when it appears, so typing replaces a name offered. Seen
   on kepler: both menus, New folder, Move to the Trash, the exit asking the
   editor and stopping with its card. Tests: 71 suites green on all three.
+- **Vergence apps first, and the dev session's data** (2026-11-15, Dave on
+  Techbench: no File Viewer in the launcher, no icon, a .md opened GNOME's
+  editor; he chose "Vergence apps first"): vergence-types' `apps_for` puts
+  choices made in Vergence (any vergence-mimeapps.list, `MimeApps::vergence`)
+  first, then Vergence's own apps that open the type or a type it is a kind
+  of, then the other desktops' choices (GNOME's `text/markdown` choice no
+  longer beats the Text Editor; its choices for types none of ours opens
+  stand). tools/vergence-session links the checkout's data/ into
+  target/dev-share, first on XDG_DATA_DIRS, so a development session no
+  longer depends on the install's entries and icons.
 ## Steps
 
 1. **vergence-types**: the database reader (globs2, magic, subclasses,
