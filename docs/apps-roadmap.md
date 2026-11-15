@@ -67,7 +67,8 @@ build once than in every app:
    **Hardware** (CPU, GPU, memory, disks, network: vergence-power,
    vergence-net and the GPU probe already read much of it). Each small;
    together they settle the framework every later app uses.
-4. **Text editing in the toolkit, then the Text Editor**: line numbers,
+4. **Text editing in the toolkit, then the Text Editor** (plan:
+   docs/editor-milestone-1.md): line numbers,
    autocomplete (words of the open documents first; languages later), find
    and replace, tabs; **Spellchecking** with it, as a toolkit service every
    native text field can use.
