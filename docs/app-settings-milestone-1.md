@@ -1,5 +1,7 @@
 # App settings milestone 1: the app button, commands by role, one settings window per app
 
+**Closed 2026-11-14** (built; see "As built").
+
 Drafted 2026-11-14 from Dave's words of the afternoon ("settings per app
 (terminal and settings itself right now), and the ability to choose per app
 display settings ... dark terminal with light toolbar, light terminal with
@@ -7,6 +9,12 @@ dark titlebar, etc.") and docs/apps-roadmap.md item 2, then reshaped the
 same evening by a discussion of where an app's settings and menus belong.
 Mockup: the "Vergence app button" canvas (claude.ai artifact
 9ZQQRsjNcDuRuP76iaPMTo), drawn from a kepler screenshot.
+
+**Built 2026-11-14**, the same evening, on Hubble with Dave trying each
+step as it landed; the design changed several times on the way (below,
+"As built"), and the sections after that are the plan as accepted, kept
+for the record. Commits 586871f to 7c2ceed; tests on Hubble, kepler and
+Techbench for each.
 
 **Accepted 2026-11-14** (Dave): "1 yes" (an app's own look wins over the
 desktop's forced Dark/Light), "3 a" (the terminal's whole list, cursor and
@@ -16,6 +24,72 @@ desktop-wide setting kept in the settings app), and on where it all lives:
 "your proposal is the best I have seen, lets try it on terminal and
 settings and see". He had thought of a menu next to the new-tab button, as
 Windows Terminal has, but that "wouldn't work in other apps".
+
+## As built (2026-11-14)
+
+What changed from the plan, in the order Dave decided it:
+
+1. **The menu's shape**, tried four ways in an evening. The skeleton with
+   File/Edit/View/Tab submenus felt busy; a flat list for small apps was
+   close to the everyday few; GNOME Terminal's menu ("click opens basic
+   stuff right there, and then there is the option for everything ...
+   maybe even an option to add things you use a lot") gave the everyday
+   few plus All commands and pins; and last, Dave: the pane's and tab's
+   commands were redundant there ("the split and move to tab and such
+   really only works from the tab itself or within a split window"). The
+   rule that came out of it, for every app: **the app button is the app, a
+   right click is the thing under the pointer, the title bar is the
+   window.** The menu: the app's featured commands and the user's pins,
+   then Settings…, Keyboard shortcuts › (every command with its keys, a
+   right click adding one to the menu), About, Quit. The terminal: New
+   window, New tab, and a **Text size row** (− 100% +, staying open; a
+   while's size, the lasting one in its settings; Dave's idea).
+2. **No Window submenu** (Dave): layouts are on the title bar, the
+   maximize button and Super with the arrows.
+3. **Search field** only for apps with more than 24 commands; typing
+   searches in any menu.
+4. **Light and dark: the desktop's Style is the master switch** (Dave, at
+   22:09, replacing his "1 yes" of 20:30): App default lets each app look
+   as it chooses (its own choice, else its built-in look); Dark or Light
+   forces every app. The rows that would not take effect are locked and
+   say why.
+5. **The settings app is light always** (Dave: "so hard to read when dark
+   with the small text"), the one exception; its own window keeps Opacity
+   and window places.
+6. **Snapping on by default** (windows milestone 1's default reversed,
+   Dave: "You did such a nice job it changed my mind"), and with the Ctrl
+   setting a faint preview saying to hold Ctrl.
+7. **Scroll bars start below the title bar** (Dave's note for the next
+   settings work), done here: vergence-widgets `Ui::under_bar`.
+
+Built as planned otherwise: the app button opposite the controls (layout
+item `appmenu`, forced in), Alt+Space, commands with roles from one table
+the server enforces, terminals' Shift rule, bus v10/v11, the toolkit's
+settings window with inherit-or-override rows (the app's desktop.toml
+table edited line by line), the terminal's rows (font, text size, colors
+defaulting to the desktop's new `[appearance] terminal-colors`, lines
+kept, cursor shape, blink, ask before closing), the Apps page and
+`vergence-settings --app <id>`, foreign apps' `[app."<id>"] bar-style`
+read by the server.
+
+Known limits: Firefox and most GTK apps on Wayland draw their own bars,
+so they get no app button (Firefox does with its "Title Bar" option on);
+a foreign app's content light or dark is not the desktop's to choose; the
+dock's and the Apps page's Forget… open a second settings window when one
+is open (no single-instance hand-off yet).
+
+### Acceptance
+
+- [x] The button at the far right with controls left; at the far left
+  reversed (vergence-bar tests); always there (forced in).
+- [x] Dark terminal with a light bar and the reverse (Hubble, 20:55).
+- [x] The settings window opens by Ctrl+, and by the menu; a second
+  open does nothing while one is open.
+- [x] A row on its default follows the desktop (the window re-reads
+  desktop.toml each second).
+- [x] Firefox's page in Settings (`--app firefox`); its bar style only
+  with its own Title Bar option on (not tried live).
+- [x] Full suites: Hubble 506, kepler 502, Techbench 506 (at f598ead).
 
 ## Why (Dave, 2026-11-14)
 

@@ -46,12 +46,12 @@ build once than in every app:
 
 ## A proposed order
 
-1. **Settings milestone 2**: the afternoon's notes (Ethernet like Wi-Fi,
+1. *Done 2026-11-14.* **Settings milestone 2**: the afternoon's notes (Ethernet like Wi-Fi,
    resolution and refresh rate, "looks like" sizes, same physical size on
    every screen, energy on battery and on power, forget an app's window
    places with a confirmation, confirm closing several tabs, the UPS page,
    low-battery actions). Small, and most are asked for already.
-2. **App settings** (Dave, 2026-11-14: "settings per app (terminal and
+2. *Done 2026-11-14 (docs/app-settings-milestone-1.md).* **App settings** (Dave, 2026-11-14: "settings per app (terminal and
    settings itself right now), and the ability to choose per app display
    settings ... dark terminal with light toolbar, light terminal with dark
    titlebar, etc."): the toolkit's preferences window with inherit-or-
