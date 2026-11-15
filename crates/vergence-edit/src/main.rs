@@ -223,6 +223,9 @@ struct EditWindow {
     token: String,
     keep_pending: bool,
     watching: bool,
+    /// The page's color as last drawn (with the wallpaper's tint): the tab in
+    /// front wears it, so the two match.
+    page_drawn: Cell<Option<u32>>,
     /// Bumped to give the keyboard back to the text (a new area id takes it)
     /// or to the find field.
     focus_turn: u64,
@@ -240,7 +243,7 @@ impl EditWindow {
     fn new(shared: SharedRef, tabs: Vec<DocTab>) -> EditWindow {
         let (desktop, stamp) = desktop_text();
         let front = tabs.first().map_or(0, |t| t.id);
-        let mut w = EditWindow { shared, tabs, front, me: None, waker: None, desktop, stamp, zoom: 1.0, prefs_open: Rc::new(Cell::new(false)), asking: None, closing: Vec::new(), closing_window: false, notice: None, picking: None, find: None, focus_turn: 0, goto: None, token: String::new(), keep_pending: false, watching: false };
+        let mut w = EditWindow { shared, tabs, front, me: None, waker: None, desktop, stamp, zoom: 1.0, prefs_open: Rc::new(Cell::new(false)), asking: None, closing: Vec::new(), closing_window: false, notice: None, picking: None, find: None, focus_turn: 0, goto: None, token: String::new(), keep_pending: false, watching: false, page_drawn: Cell::new(None) };
         if w.tabs.is_empty() {
             let t = w.untitled_tab();
             w.front = t.id;
@@ -969,12 +972,16 @@ impl Program for EditWindow {
         // the text, and the server knows the page's style, so text scrolled
         // under a bar of the other style shows through inverted (readable)
         // rather than all but hidden by the frost.
-        let p = self.theme().page;
-        let page = (p.r as u32) << 16 | (p.g as u32) << 8 | p.b as u32;
+        let page = self.page_drawn.get().unwrap_or_else(|| {
+            let p = self.theme().page;
+            (p.r as u32) << 16 | (p.g as u32) << 8 | p.b as u32
+        });
         Some(Bar::Tabs { tabs, front: self.front_tab().map_or(0, |t| t.id), plus: true, accent: Some(page), menu: Vec::new() })
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
+        // The page as drawn now (tinted with the wallpaper, if it is), for the tab in front.
+        self.page_drawn.set(Some((t.page.r as u32) << 16 | (t.page.g as u32) << 8 | t.page.b as u32));
         let Some(tab) = self.front_tab() else { return space() };
         // Strips above the text (notices, the find bar), on a shade over the
         // window's ground so its opacity shows through as everywhere else.

@@ -106,9 +106,6 @@ const FRONT_TAB_NAMES: [&str; 2] = ["Page color", "Frosted"];
 const FRONT_TAB_VALUES: [&str; 2] = ["page", "frosted"];
 /// The size of controls (Standard when unset); a screen's adds Automatic first.
 const CONTROLS_NAMES: [&str; 3] = ["Compact", "Standard", "Large"];
-/// The wallpaper tint's choices and their desktop.toml values (Off: the switch off).
-const TINT_NAMES: [&str; 4] = ["Off", "Subtle", "Standard", "Strong"];
-const TINT_VALUES: [Option<&str>; 4] = [None, Some("subtle"), Some("standard"), Some("strong")];
 const CONTROLS_VALUES: [&str; 3] = ["compact", "standard", "large"];
 const SCREEN_CONTROLS_NAMES: [&str; 4] = ["Automatic", "Compact", "Standard", "Large"];
 const FITS: [&str; 4] = ["Fill", "Fit", "Center", "Stretch"];
@@ -443,8 +440,9 @@ enum Message {
     Search(String),
     SearchGo,
     /// Windows tinted with the wallpaper's color (window styles milestone 1).
-    /// Off, Subtle, Standard, Strong.
-    WallpaperTint(usize),
+    /// The tint's amount being slid (percent), then let go.
+    TintSlide(f32),
+    TintDone,
     /// Under the bar: 0 the titles' contrast first, 1 more of the window.
     UnderBar(usize),
     /// Words spelled wrong marked in every native app's text (editor milestone 1).
@@ -637,6 +635,8 @@ struct App {
     browser: Option<Browser>,
     // Keyboard: the sliders while they move (saved on release), and the test box.
     repeat_delay: f32,
+    /// The wallpaper tint's amount in percent, as the slider shows it (0: off).
+    tint_pct: f32,
     repeat_rate: f32,
     key_test: String,
     /// The mouse and touchpad sliders while they move, by (table, key).
@@ -823,6 +823,7 @@ impl App {
             bg_text: String::new(),
             browser: None,
             repeat_delay: 0.0,
+            tint_pct: 0.0,
             repeat_rate: 0.0,
             key_test: String::new(),
             sliding: HashMap::new(),
@@ -834,6 +835,12 @@ impl App {
             inbox,
         };
         app.repeat_delay = keyboard_int(&app.desktop, "repeat-delay", REPEAT_DELAY) as f32;
+        app.tint_pct = {
+            let a = app.desktop.get("appearance");
+            let on = a.and_then(|a| a.get("wallpaper-tint")).and_then(|v| v.as_bool()).unwrap_or(true);
+            let amount = a.and_then(|a| a.get("tint-amount")).map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()));
+            if on { (vergence_widgets::tint_amount(amount.as_deref()) * 100.0).round() } else { 0.0 }
+        };
         app.repeat_rate = keyboard_int(&app.desktop, "repeat-rate", REPEAT_RATE) as f32;
         app.dock_from_file();
         app.load_pictures();
@@ -1014,17 +1021,19 @@ impl App {
                     t.remove("under-bar");
                 }
             }),
-            Message::WallpaperTint(k) => self.save_appearance(|t| {
-                t.insert("wallpaper-tint".into(), (k > 0).into());
-                match TINT_VALUES.get(k).copied().flatten() {
-                    Some(v) if v != "standard" => {
-                        t.insert("tint-amount".into(), v.into());
-                    }
-                    _ => {
+            Message::TintSlide(v) => self.tint_pct = v,
+            Message::TintDone => {
+                // 0 is off (the server's switch); otherwise the percentage.
+                let p = self.tint_pct.round() as i64;
+                self.save_appearance(|t| {
+                    t.insert("wallpaper-tint".into(), (p > 0).into());
+                    if p > 0 {
+                        t.insert("tint-amount".into(), p.into());
+                    } else {
                         t.remove("tint-amount");
                     }
-                }
-            }),
+                });
+            }
             Message::Spellcheck(on) => self.save_table("text", |t| {
                 t.insert("spellcheck".into(), on.into());
             }),
@@ -1737,14 +1746,13 @@ impl App {
                     setting("Size of controls", "Window bars, tabs and buttons. A screen with a touch panel uses Large unless its own setting says otherwise (Screens).", choice(controls_names, Some(controls), Message::Controls).width(Length::Fixed(160.0)).name("Size of controls")),
                     setting(
                         "Tint windows with the wallpaper's color",
-                        "In dark style, a window takes some of the color of the wallpaper behind it: Subtle 4%, Standard 8%, Strong 14%. Off with Reduce transparency and High contrast.",
-                        {
-                            let a = self.desktop.get("appearance");
-                            let on = a.and_then(|a| a.get("wallpaper-tint")).and_then(|v| v.as_bool()).unwrap_or(true);
-                            let amount = a.and_then(|a| a.get("tint-amount")).and_then(|v| v.as_str()).unwrap_or("standard");
-                            let k = if !on { 0 } else { TINT_VALUES.iter().position(|v| *v == Some(amount)).unwrap_or(2) };
-                            choice(TINT_NAMES.iter().map(|s| s.to_string()).collect(), Some(k), Message::WallpaperTint).width(Length::Fixed(160.0)).name("Tint windows with the wallpaper's color")
-                        },
+                        "In dark style, a window takes some of the color of the wallpaper behind it: 0 (off) to 20%; 8% unless set. Off with Reduce transparency and High contrast.",
+                        row(vec![
+                            slider(0.0, 20.0, self.tint_pct, Message::TintSlide).step(1.0).on_release(Message::TintDone).width(Length::Fixed(160.0)).name("Tint windows with the wallpaper's color"),
+                            label(if self.tint_pct.round() == 0.0 { "Off".to_string() } else { format!("{:.0}%", self.tint_pct) }).width(Length::Fixed(40.0)).align(Align::End),
+                        ])
+                        .spacing(8.0)
+                        .align(Align::Center),
                     ),
                 ]),
                 self.group(None, vec![setting(

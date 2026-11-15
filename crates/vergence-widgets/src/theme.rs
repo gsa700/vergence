@@ -139,13 +139,15 @@ impl Theme {
 /// Standard amount.
 pub const TINT_MIX: f32 = 0.08;
 
-/// The tint's amounts (Dave, 2026-11-15: "needs settings to tone it down"):
-/// subtle 4%, standard 8%, strong 14%.
-pub fn tint_amount(name: Option<&str>) -> f32 {
-    match name {
+/// The tint's amount (Dave, 2026-11-15: "needs settings to tone it down",
+/// then a slider): a percentage 0 to 20 (Settings' slider), or a name
+/// (subtle 4%, standard 8%, strong 14%).
+pub fn tint_amount(value: Option<&str>) -> f32 {
+    match value {
         Some("subtle") => 0.04,
         Some("strong") => 0.14,
-        _ => TINT_MIX,
+        Some(v) => v.trim().parse::<f32>().map_or(TINT_MIX, |p| (p / 100.0).clamp(0.0, 0.2)),
+        None => TINT_MIX,
     }
 }
 
@@ -183,6 +185,8 @@ mod tests {
         assert_eq!(t(""), TINT_MIX);
         assert_eq!(t("[appearance]\ntint-amount = \"subtle\"\n"), 0.04);
         assert_eq!(t("[appearance]\ntint-amount = \"strong\"\n"), 0.14);
+        assert_eq!(t("[appearance]\ntint-amount = 5\n"), 0.05);
+        assert_eq!(t("[appearance]\ntint-amount = 90\n"), 0.2, "at most 20%");
         let base = Theme::from_desktop("[appearance]\ntint-amount = \"strong\"\n", true, "[x]");
         let red = base.tinted(Color::rgb(255, 0, 0));
         assert!(red.page.r > base.page.r, "the page takes some red");
