@@ -91,6 +91,10 @@ pub const NOTE_H: i32 = 40;
 pub const HEADER_H: i32 = 24;
 /// The submenu of every command.
 pub const ALL: &str = "All commands";
+/// An app with at most this many commands has no All commands: its first
+/// panel holds every one, under its menu's heading (Dave, 2026-11-14: the
+/// terminal's full list was "close enough to the top five").
+pub const SMALL: usize = 12;
 pub const PAD: i32 = 6;
 /// At most this many results while searching.
 pub const MAX_FOUND: usize = 12;
@@ -169,10 +173,27 @@ impl Model {
         lines
     }
 
+    /// Whether a line is one of the app's featured commands.
+    fn is_featured(&self, l: &Line) -> bool {
+        match l {
+            Line::Item { action: Action::Command(id), .. } => self.commands.iter().any(|c| c.id == *id && c.featured),
+            _ => false,
+        }
+    }
+
     /// The top level.
     pub fn top(&self) -> Vec<Line> {
         let mut lines = vec![Line::Search];
-        if self.native {
+        if self.native && self.menu_commands().count() <= SMALL {
+            // A small app: everything, each menu under its heading, its featured first.
+            for m in self.menus() {
+                let mut items = self.menu(&m);
+                items.sort_by_key(|l| !self.is_featured(l));
+                lines.push(Line::Header(m));
+                lines.extend(items);
+            }
+            lines.push(Line::Separator);
+        } else if self.native {
             lines.extend(self.everyday());
             lines.push(Line::Separator);
             if self.menu_commands().next().is_some() {
@@ -486,27 +507,46 @@ mod tests {
             .collect()
     }
 
+    /// The terminal with enough commands of its own to be a big app.
+    fn big() -> Model {
+        let mut m = terminal();
+        for i in 0..8 {
+            m.commands.push(Command::own(100 + i, "Shell", &format!("Thing {i}"), ""));
+        }
+        m
+    }
+
     #[test]
-    fn the_first_panel_has_the_everyday_few_then_everything_then_the_skeleton() {
+    fn a_small_app_shows_everything_on_the_first_panel_featured_first() {
         let m = terminal();
+        assert_eq!(
+            labels(&m.top()),
+            [
+                "[search]", "# File", "New tab (Ctrl+Shift+T)", "# Edit", "Copy (Ctrl+C)", "Paste (Ctrl+V)", "# Tab", "Split side by side (Ctrl+Shift+R)", "Next tab (Ctrl+Page Down)", "# Shell", "Clear", "---", "Window >", "---",
+                "Settings… (Ctrl+,)", "About Terminal", "Quit Terminal"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_big_app_has_the_everyday_few_then_all_commands_then_the_skeleton() {
+        let m = big();
         assert_eq!(
             labels(&m.top()),
             ["[search]", "Copy (Ctrl+C)", "Paste (Ctrl+V)", "New tab (Ctrl+Shift+T)", "Split side by side (Ctrl+Shift+R)", "---", "All commands >", "Window >", "---", "Settings… (Ctrl+,)", "About Terminal", "Quit Terminal"]
         );
-        assert_eq!(
-            labels(&m.sub(ALL)),
-            ["# File", "New tab (Ctrl+Shift+T)", "# Edit", "Copy (Ctrl+C)", "Paste (Ctrl+V)", "# Tab", "Next tab (Ctrl+Page Down)", "Split side by side (Ctrl+Shift+R)", "# Shell", "Clear"]
-        );
+        let all = labels(&m.sub(ALL));
+        assert_eq!(&all[..8], ["# File", "New tab (Ctrl+Shift+T)", "# Edit", "Copy (Ctrl+C)", "Paste (Ctrl+V)", "# Tab", "Next tab (Ctrl+Page Down)", "Split side by side (Ctrl+Shift+R)"]);
+        assert_eq!(all.len(), 8 + 1 + 9);
         assert_eq!(labels(&m.sub("Window")), ["Left half", "Minimize"]);
     }
 
     #[test]
     fn what_the_user_added_follows_the_apps_own_starred() {
-        let mut m = terminal();
+        let mut m = big();
         m.pins = vec!["Shell/Clear".into(), "role:3".into(), "gone/away".into(), "role:40".into()];
         let top = labels(&m.top());
         assert_eq!(&top[1..7], ["Copy (Ctrl+C)", "Paste (Ctrl+V)", "New tab (Ctrl+Shift+T)", "Split side by side (Ctrl+Shift+R)", "Clear *", "Next tab (Ctrl+Page Down) *"]);
-        // Starred in All commands too; a featured one is never doubled or starred.
         assert!(labels(&m.sub(ALL)).contains(&"Clear *".to_string()));
         assert!(labels(&m.sub(ALL)).contains(&"New tab (Ctrl+Shift+T)".to_string()));
         match &m.top()[5] {
@@ -547,7 +587,7 @@ mod tests {
 
     #[test]
     fn keys_move_open_submenus_and_choose() {
-        let m = terminal();
+        let m = big();
         let mut s = State::default();
         assert_eq!(s.key(&m, Key::Down), Did::Moved);
         assert_eq!(s.top, Some(2), "Paste: Copy is disabled");
@@ -571,7 +611,7 @@ mod tests {
 
     #[test]
     fn typing_searches_and_enter_takes_the_first_result() {
-        let m = terminal();
+        let m = big();
         let mut s = State::default();
         for c in "new t".chars() {
             s.key(&m, Key::Char(c));
@@ -591,7 +631,7 @@ mod tests {
 
     #[test]
     fn the_pointer_chooses_and_opens_submenus_and_headings_are_not_chosen() {
-        let m = terminal();
+        let m = big();
         let mut s = State::default();
         s.hover_top(&m, Some(6));
         assert_eq!((s.top, s.open), (Some(6), Some(6)));
