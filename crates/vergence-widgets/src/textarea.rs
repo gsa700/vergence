@@ -30,6 +30,26 @@ use crate::theme::Theme;
 
 /// The keypad's Enter.
 const KP_ENTER: u32 = 0xff8d;
+const F5: u32 = 0xffc2;
+/// The most words the completion list shows.
+const LIST_ROWS: usize = 12;
+/// How many lines each side of the caret are searched for words.
+const NEAR_LINES: usize = 3000;
+
+/// More words to complete with, from outside the document (the other open
+/// documents, a dictionary): those starting with the prefix (without case),
+/// best first, at most the limit.
+pub type Words = Rc<dyn Fn(&str, usize) -> Vec<String>>;
+
+/// The completion list, open under the caret.
+struct List {
+    words: Vec<String>,
+    chosen: usize,
+    /// Where the word being completed starts.
+    start: Pos,
+    /// The first word shown (the list scrolls to keep the chosen one in view).
+    first: usize,
+}
 /// Room around the text.
 const PAD_X: f32 = 6.0;
 const PAD_Y: f32 = 4.0;
@@ -58,11 +78,15 @@ pub struct AreaOptions {
     pub current_line: bool,
     /// Can be edited (false: read-only, still selected and copied from).
     pub editable: bool,
+    /// The likely end of a word is shown as it is typed, and Tab takes it
+    /// (step 6, the TextEdit way). The list (Alt+Escape, F5, Ctrl+Space)
+    /// works either way.
+    pub complete: bool,
 }
 
 impl Default for AreaOptions {
     fn default() -> Self {
-        AreaOptions { font: "monospace".into(), size: None, line_numbers: true, wrap: true, tab_width: 4, spaces: true, current_line: true, editable: true }
+        AreaOptions { font: "monospace".into(), size: None, line_numbers: true, wrap: true, tab_width: 4, spaces: true, current_line: true, editable: true, complete: true }
     }
 }
 
@@ -90,6 +114,22 @@ impl TextDoc {
     /// The same document (not just the same text).
     pub fn same(&self, other: &TextDoc) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
+    }
+
+    /// A handle that does not keep the document alive (for one document's
+    /// completions to look into another's).
+    pub fn downgrade(&self) -> WeakDoc {
+        WeakDoc(Rc::downgrade(&self.0))
+    }
+}
+
+/// A [`TextDoc`] that may have gone.
+#[derive(Clone)]
+pub struct WeakDoc(std::rc::Weak<RefCell<Doc>>);
+
+impl WeakDoc {
+    pub fn upgrade(&self) -> Option<TextDoc> {
+        self.0.upgrade().map(TextDoc)
     }
 }
 
@@ -237,6 +277,8 @@ struct Geom {
     wrap_w: f32,
     tab_w: f32,
     thumb: Option<Rect>,
+    /// The completion list where it was drawn, and its rows' height.
+    list: Option<(Rect, f32)>,
 }
 
 /// What a key or a click did, for the [`crate::Ui`] to tell the program.
@@ -276,6 +318,11 @@ pub struct Doc {
     words: Vec<u32>,
     /// Places to show lit (Find's matches), in order; let go at any edit.
     marks: Vec<(Pos, Pos)>,
+    /// The likely end of the word just typed, shown after the caret.
+    ghost: Option<String>,
+    list: Option<List>,
+    /// Words from outside the document ([`Doc::set_words`]).
+    words_from: Option<Words>,
 }
 
 impl Doc {
@@ -301,6 +348,9 @@ impl Doc {
             saved_ending: Ending::Lf,
             words: Vec::new(),
             marks: Vec::new(),
+            ghost: None,
+            list: None,
+            words_from: None,
         }
         .with_saved_ending()
     }
@@ -331,6 +381,121 @@ impl Doc {
     }
 
     // --- What a program reads and does ---
+
+    /// Where more words to complete with come from (other documents, a dictionary).
+    pub fn set_words(&mut self, words: Option<Words>) {
+        self.words_from = words;
+    }
+
+    /// The word before the caret, if the caret is at its end: where it starts, and it.
+    fn word_before(&self) -> Option<(Pos, String)> {
+        let c = self.caret;
+        let line = self.buffer.line(c.line);
+        let w = |ch: char| ch.is_alphanumeric() || ch == '_' || ch == '\'';
+        if line[c.col..].chars().next().is_some_and(|ch| ch.is_alphanumeric() || ch == '_') {
+            return None;
+        }
+        let mut a = c.col;
+        while let Some(ch) = line[..a].chars().next_back().filter(|ch| w(*ch)) {
+            a -= ch.len_utf8();
+        }
+        let word = line[a..c.col].trim_start_matches('\'').to_string();
+        (!word.is_empty()).then(|| (Pos::new(c.line, c.col - word.len()), word))
+    }
+
+    /// Words that complete `prefix`, best first: those of the document near
+    /// the caret (nearer and more often first), then the ones from outside.
+    pub fn completions(&self, prefix: &str, limit: usize) -> Vec<String> {
+        let want = prefix.to_lowercase();
+        let n = self.buffer.line_count();
+        let here = self.caret.line;
+        let (from, to) = (here.saturating_sub(NEAR_LINES), (here + NEAR_LINES + 1).min(n));
+        let mut score: std::collections::HashMap<&str, f32> = std::collections::HashMap::new();
+        for i in from..to {
+            let line = self.buffer.line(i);
+            let near = 40.0 / (1.0 + (i as f32 - here as f32).abs());
+            for word in line.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '\'')) {
+                let word = word.trim_matches('\'');
+                if word.chars().count() < 3 || word.len() <= prefix.len() || !word.to_lowercase().starts_with(&want) {
+                    continue;
+                }
+                // The word being typed itself does not count.
+                if i == here && self.word_before().is_some_and(|(_, w)| w == word) {
+                    continue;
+                }
+                *score.entry(word).or_insert(0.0) += 1.0 + near;
+            }
+        }
+        let mut found: Vec<(&str, f32)> = score.into_iter().collect();
+        found.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+        let mut out: Vec<String> = found.into_iter().map(|(w, _)| w.to_string()).take(limit).collect();
+        if out.len() < limit
+            && let Some(more) = &self.words_from
+        {
+            for w in more(prefix, limit) {
+                if out.len() >= limit {
+                    break;
+                }
+                if w.len() > prefix.len() && !out.iter().any(|o| o.eq_ignore_ascii_case(&w)) {
+                    out.push(w);
+                }
+            }
+        }
+        out
+    }
+
+    /// After a letter typed: the likely end of the word, if two or more of
+    /// it are typed and something completes it.
+    fn suggest(&mut self) {
+        self.ghost = None;
+        if !self.options.complete || self.caret != self.anchor {
+            return;
+        }
+        let Some((_, word)) = self.word_before() else { return };
+        if word.chars().count() < 2 {
+            return;
+        }
+        if let Some(best) = self.completions(&word, 1).into_iter().next()
+            && best.to_lowercase().starts_with(&word.to_lowercase())
+        {
+            // The rest of it, in the case it was written.
+            let rest: String = best.chars().skip(word.chars().count()).collect();
+            if !rest.is_empty() {
+                self.ghost = Some(rest);
+            }
+        }
+    }
+
+    /// Opens (or narrows) the list for the word before the caret.
+    fn open_list(&mut self) -> bool {
+        let Some((start, word)) = self.word_before() else {
+            self.list = None;
+            return false;
+        };
+        let words = self.completions(&word, 200);
+        if words.is_empty() {
+            self.list = None;
+            return false;
+        }
+        let keep = self.list.as_ref().and_then(|l| l.words.get(l.chosen).cloned());
+        let chosen = keep.and_then(|k| words.iter().position(|w| *w == k)).unwrap_or(0);
+        self.list = Some(List { words, chosen, start, first: 0 });
+        true
+    }
+
+    /// Puts `word` in place of the word being typed (from `start` to the caret).
+    fn take_word(&mut self, start: Pos, word: &str) {
+        let c = self.caret;
+        let end = self.edit(start, c, word, Kind::Other);
+        self.set_caret(end, false);
+        self.history.break_group();
+        self.reveal();
+    }
+
+    /// Whether the completion list is open (the program leaves Escape to it).
+    pub fn completing(&self) -> bool {
+        self.list.is_some()
+    }
 
     /// Lights these places (Find's matches: start and end on one line), in order.
     pub fn set_marks(&mut self, marks: Vec<(Pos, Pos)>) {
@@ -625,6 +790,34 @@ impl Doc {
 
     /// A key, while the area has the keyboard.
     pub(crate) fn key(&mut self, key: u32, typed: Option<&str>, m: Modifiers) -> Effect {
+        let ghost = self.ghost.take();
+        // The completion list has the keys it uses.
+        if self.list.is_some() {
+            if let Some(e) = self.list_key(key, typed, m) {
+                return e;
+            }
+            self.list = None;
+        }
+        // Tab takes the suggestion shown.
+        if key == sym::TAB
+            && !m.shift
+            && !(m.ctrl || m.logo || m.alt)
+            && let Some(rest) = ghost
+            && self.options.editable
+        {
+            let c = self.caret;
+            let end = self.edit(c, c, &rest, Kind::Other);
+            self.set_caret(end, false);
+            self.history.break_group();
+            self.reveal();
+            return Effect { used: true, text: true, moved: true, ..Effect::default() };
+        }
+        // The list on request: Alt+Escape, F5 (as on a Mac), Ctrl+Space.
+        let asks = (key == sym::ESCAPE && m.alt) || (key == F5 && !m.ctrl && !m.alt) || (key == ' ' as u32 && m.ctrl && !m.alt);
+        if asks {
+            self.open_list();
+            return Effect { used: true, ..Effect::default() };
+        }
         let mut e = Effect { used: true, ..Effect::default() };
         let command = m.ctrl || m.logo;
         let editable = self.options.editable;
@@ -767,12 +960,74 @@ impl Doc {
                     self.reveal();
                     e.text = true;
                     e.moved = true;
+                    // A letter typed: the word's likely end.
+                    if t.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                        self.suggest();
+                    }
                 }
                 // Read-only: typing is taken (not passed on as a command) but does nothing.
                 Some(_) => {}
                 None => e.used = false,
             },
         }
+        e
+    }
+
+    /// A key while the list is open: Some if the list used it.
+    fn list_key(&mut self, key: u32, typed: Option<&str>, m: Modifiers) -> Option<Effect> {
+        let plain = !(m.ctrl || m.logo || m.alt);
+        let n = self.list.as_ref().map_or(0, |l| l.words.len());
+        let used = Effect { used: true, ..Effect::default() };
+        match key {
+            sym::UP | sym::DOWN | sym::PAGE_UP | sym::PAGE_DOWN if plain && n > 0 => {
+                let l = self.list.as_mut()?;
+                let step: isize = match key {
+                    sym::UP => -1,
+                    sym::DOWN => 1,
+                    sym::PAGE_UP => -(LIST_ROWS as isize),
+                    _ => LIST_ROWS as isize,
+                };
+                l.chosen = (l.chosen as isize + step).clamp(0, n as isize - 1) as usize;
+                Some(used)
+            }
+            sym::RETURN | KP_ENTER | sym::TAB if plain => {
+                let l = self.list.take()?;
+                let word = l.words.get(l.chosen)?.clone();
+                if !self.options.editable {
+                    return Some(used);
+                }
+                self.take_word(l.start, &word);
+                Some(Effect { used: true, text: true, moved: true, ..Effect::default() })
+            }
+            sym::ESCAPE => {
+                self.list = None;
+                Some(used)
+            }
+            // Typing goes on, and narrows the list.
+            sym::BACKSPACE => {
+                let e = self.key_plain(key, typed, m);
+                if !self.open_list() {
+                    self.list = None;
+                }
+                Some(e)
+            }
+            _ if plain && typed.is_some_and(|t| !t.is_empty() && t.chars().all(|c| c.is_alphanumeric() || c == '_')) => {
+                let e = self.key_plain(key, typed, m);
+                self.ghost = None;
+                if !self.open_list() {
+                    self.list = None;
+                }
+                Some(e)
+            }
+            _ => None,
+        }
+    }
+
+    /// A key as if no list or suggestion were showing.
+    fn key_plain(&mut self, key: u32, typed: Option<&str>, m: Modifiers) -> Effect {
+        let list = self.list.take();
+        let e = self.key(key, typed, m);
+        self.list = list;
         e
     }
 
@@ -990,6 +1245,21 @@ impl Doc {
     /// A press: one click puts the caret there (Shift: the selection runs
     /// there), two take a word, three the line.
     pub(crate) fn press(&mut self, x: f32, y: f32, count: u8, shift: bool) {
+        self.ghost = None;
+        // A word of the list taken with the pointer.
+        if let Some((r, row_h)) = self.geom.list
+            && let Some(l) = self.list.take()
+        {
+            if x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h {
+                let k = ((y - r.y - 4.0) / row_h).floor().max(0.0) as usize + l.first;
+                if let Some(word) = l.words.get(k).cloned()
+                    && self.options.editable
+                {
+                    self.take_word(l.start, &word);
+                }
+                return;
+            }
+        }
         let p = self.pos_at(x, y);
         self.goal = None;
         self.history.break_group();
@@ -1095,7 +1365,7 @@ impl Doc {
             self.reshape_all();
         }
         let resized = self.geom.rect.h != v.h || self.geom.rect.w != v.w;
-        self.geom = Geom { rect: v, text_x, text_w, line_h, char_w, wrap_w, tab_w, thumb: self.geom.thumb };
+        self.geom = Geom { rect: v, text_x, text_w, line_h, char_w, wrap_w, tab_w, thumb: self.geom.thumb, list: None };
         self.top = self.top.min(n - 1);
         if resized {
             // The top line's rows may have changed: stay on the same row.
@@ -1211,14 +1481,52 @@ impl Doc {
         } else {
             self.xscroll = 0.0;
         }
-        // The caret.
-        if focused && caret_on && !selected {
-            let (row, x) = self.visual(self.caret);
-            let cy = v.y + PAD_Y + self.line_y(self.caret.line) + row as f32 * line_h;
-            let cx = text_x - self.xscroll + x;
-            if cy + line_h > r.y && cy < r.y + r.h && cx >= text_clip.x {
+        // The caret, the word's likely end after it, the list under it.
+        let (row, x) = self.visual(self.caret);
+        let cy = v.y + PAD_Y + self.line_y(self.caret.line) + row as f32 * line_h;
+        let cx = text_x - self.xscroll + x;
+        let caret_seen = cy + line_h > r.y && cy < r.y + r.h && cx >= text_clip.x;
+        let base = |y: f32| y + ((line_h - (m.ascent + m.descent)) / 2.0 + m.ascent).round();
+        if focused && !selected && caret_seen {
+            if let Some(g) = &self.ghost {
+                scene.push_clip(text_clip, 0.0);
+                text(scene, fonts, face, size, num_c, Point::new(cx, base(cy)), g);
+                scene.pop_clip();
+            }
+            if caret_on {
                 scene.fill(Rect::new(cx.round() - 0.5, cy + 1.0, 1.5, line_h - 2.0), text_c);
             }
+        }
+        if focused
+            && caret_seen
+            && let Some(l) = self.list.as_mut()
+        {
+            let rows = l.words.len().min(LIST_ROWS);
+            if l.chosen < l.first {
+                l.first = l.chosen;
+            } else if l.chosen >= l.first + rows {
+                l.first = l.chosen + 1 - rows;
+            }
+            let widest = l.words.iter().map(|w| fonts.layout(face, size, w).1).fold(0.0f32, f32::max);
+            let w = (widest + 24.0).clamp(140.0, (r.w - 8.0).max(140.0));
+            let h = rows as f32 * line_h + 8.0;
+            let lx = (cx - 12.0).clamp(r.x + 4.0, (r.x + r.w - w - 4.0).max(r.x + 4.0));
+            // Below the caret's row, or above it where there is no room below.
+            let ly = if cy + line_h + h <= r.y + r.h { cy + line_h } else { (cy - h).max(r.y) };
+            let lr = Rect::new(lx, ly, w, h);
+            let ground = if theme.dark { theme.card } else { Color::rgb(255, 255, 255) };
+            scene.fill_rounded(Rect::new(lx - 1.0, ly + 1.0, w + 2.0, h + 2.0), vergence_look::RADIUS + 1.0, alpha(Color::rgb(0, 0, 0), 50));
+            scene.fill_rounded(lr, vergence_look::RADIUS, ground);
+            scene.stroke(lr, vergence_look::RADIUS, 1.0, theme.line);
+            for (k, word) in l.words.iter().enumerate().skip(l.first).take(rows) {
+                let ry = ly + 4.0 + (k - l.first) as f32 * line_h;
+                let chosen = k == l.chosen;
+                if chosen {
+                    scene.fill_rounded(Rect::new(lx + 4.0, ry, w - 8.0, line_h), vergence_look::RADIUS, theme.accent);
+                }
+                text(scene, fonts, face, size, if chosen { Color::rgb(255, 255, 255) } else { text_c }, Point::new(lx + 12.0, base(ry)), word);
+            }
+            self.geom.list = Some((lr, line_h));
         }
         // The edge of the line numbers.
         if gutter > 0.0 {
@@ -1333,7 +1641,7 @@ mod tests {
     fn doc(text: &str) -> Doc {
         let mut d = Doc::new(Buffer::from_text(text), AreaOptions::default());
         // Laid out as if drawn: 10-point rows, characters 8 wide, 80 wide.
-        d.geom = Geom { rect: Rect::new(0.0, 0.0, 200.0, 2.0 * PAD_Y + 50.0), text_x: 0.0, text_w: 80.0, line_h: 10.0, char_w: 8.0, wrap_w: 80.0, tab_w: 32.0, thumb: None };
+        d.geom = Geom { rect: Rect::new(0.0, 0.0, 200.0, 2.0 * PAD_Y + 50.0), text_x: 0.0, text_w: 80.0, line_h: 10.0, char_w: 8.0, wrap_w: 80.0, tab_w: 32.0, thumb: None, list: None };
         d
     }
 
@@ -1492,6 +1800,55 @@ mod tests {
         assert!(d.marks().is_empty(), "let go once changed");
         d.undo();
         assert_eq!(d.buffer().line(0), "Cat cat CAT", "one undo for all of them");
+    }
+
+    #[test]
+    fn a_word_is_suggested_as_it_is_typed_and_tab_takes_it() {
+        let mut d = doc("vergence verge vertical\n");
+        d.set_selection(Pos::new(1, 0), Pos::new(1, 0));
+        typed(&mut d, "ve");
+        assert_eq!(d.ghost.as_deref(), Some("rge"), "verge: as near, and first by name");
+        typed(&mut d, "rt");
+        assert_eq!(d.ghost.as_deref(), Some("ical"));
+        key(&mut d, sym::TAB);
+        assert_eq!(d.buffer().line(1), "vertical");
+        assert!(d.ghost.is_none());
+        // Any other key goes on as if nothing were shown.
+        typed(&mut d, " ve");
+        key(&mut d, sym::LEFT);
+        assert!(d.ghost.is_none());
+        assert_eq!(d.buffer().line(1), "vertical ve");
+        // Off: nothing is shown.
+        let mut o = d.options().clone();
+        o.complete = false;
+        d.set_options(o);
+        d.set_selection(Pos::new(1, 11), Pos::new(1, 11));
+        typed(&mut d, "r");
+        assert!(d.ghost.is_none());
+    }
+
+    #[test]
+    fn the_list_chooses_and_narrows_and_takes_words_from_outside() {
+        let mut d = doc("apple apricot\n");
+        d.set_words(Some(Rc::new(|p: &str, _| if "april".starts_with(&p.to_lowercase()) { vec!["April".to_string()] } else { vec![] })));
+        d.set_selection(Pos::new(1, 0), Pos::new(1, 0));
+        typed(&mut d, "a");
+        d.key(F5, None, Modifiers::default());
+        assert_eq!(d.list.as_ref().map(|l| l.words.clone()), Some(vec!["apple".to_string(), "apricot".into(), "April".into()]));
+        typed(&mut d, "p");
+        assert_eq!(d.list.as_ref().map(|l| l.words.len()), Some(3), "all start with ap");
+        typed(&mut d, "r");
+        assert_eq!(d.list.as_ref().map(|l| l.words.clone()), Some(vec!["apricot".to_string(), "April".into()]), "narrowed");
+        key(&mut d, sym::DOWN);
+        key(&mut d, sym::RETURN);
+        assert_eq!(d.buffer().line(1), "April");
+        assert!(!d.completing());
+        typed(&mut d, " ap");
+        d.key(' ' as u32, None, Modifiers { ctrl: true, ..Modifiers::default() });
+        assert!(d.completing());
+        key(&mut d, sym::ESCAPE);
+        assert!(!d.completing());
+        assert_eq!(d.buffer().line(1), "April ap");
     }
 
     #[test]

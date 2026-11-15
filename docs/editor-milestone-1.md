@@ -238,6 +238,20 @@ the rest of item 5 come with the Viewer and the File Manager.
   was, "3 of 30", ‹ › and Ctrl+G / Ctrl+Shift+G, Aa, Whole words, Replace
   (the chosen match, then the next) and Replace all ("Replaced 12"),
   Escape closes and gives the keyboard back to the text.
+- **Under the bar** (c3ba4c3, f37ba17; Dave: "pick up the titlebar
+  effects ... same as terminal"): the text area keeps its first line below
+  the window's bar and lets what scrolls up go on under it, frosted; no
+  ground of its own, so the window's opacity shows; the editor's front
+  tab wears the page color, so the server inverts what shows under a bar
+  of the other style.
+- **Step 6**: completion, the TextEdit way, in the text area: the likely
+  end of a word in gray after two letters, Tab takes it, any other key
+  goes on as if it were not there; the list on Alt+Escape, F5 or
+  Ctrl+Space (Up/Down, Enter or Tab, Escape; typing narrows it; a click
+  takes a word). Words of the document near the caret first (nearer and
+  more often first), then `Doc::set_words`: in the editor, the words of
+  the window's other documents (each counted again only when it changed);
+  the dictionary joins with step 7. Settings: "Suggest words as you type".
 
 ## Steps
 

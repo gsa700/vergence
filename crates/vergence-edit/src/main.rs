@@ -240,6 +240,7 @@ impl EditWindow {
             spaces: t.spaces.unwrap_or_else(|| self.flag("spaces", true)),
             current_line: self.flag("current-line", true),
             editable: t.read_only.is_none(),
+            complete: self.flag("complete", true),
         }
     }
 
@@ -247,6 +248,9 @@ impl EditWindow {
         for i in 0..self.tabs.len() {
             let o = self.options_for(&self.tabs[i]);
             self.tabs[i].doc.borrow_mut().set_options(o);
+            // Completion also offers the words of the window's other documents.
+            let others: Vec<vergence_widgets::WeakDoc> = self.tabs.iter().enumerate().filter(|(k, _)| *k != i).map(|(_, t)| t.doc.downgrade()).collect();
+            self.tabs[i].doc.borrow_mut().set_words(Some(other_words(others)));
         }
     }
 
@@ -939,7 +943,7 @@ impl Program for EditWindow {
         const PAGE_DOWN: u32 = 0xff56;
         const ESCAPE: u32 = 0xff1b;
         let Input::Key { sym, pressed: true, modifiers: m, .. } = input else { return false };
-        if *sym == ESCAPE && self.find.is_some() {
+        if *sym == ESCAPE && self.find.is_some() && !self.doc().is_some_and(|d| d.borrow().completing()) {
             self.close_find();
             return true;
         }
@@ -1158,6 +1162,44 @@ impl Program for EditWindow {
     }
 }
 
+/// Words from other documents for completion: each document's words with
+/// how often each comes, found again only when it changed.
+fn other_words(docs: Vec<vergence_widgets::WeakDoc>) -> vergence_widgets::Words {
+    type Counted = Vec<(String, u32)>;
+    let cache: RefCell<Vec<(u64, Counted)>> = RefCell::new(vec![(u64::MAX, Vec::new()); docs.len()]);
+    Rc::new(move |prefix: &str, limit: usize| {
+        let want = prefix.to_lowercase();
+        let mut cache = cache.borrow_mut();
+        let mut found: Vec<(String, u32)> = Vec::new();
+        for (k, weak) in docs.iter().enumerate() {
+            let Some(doc) = weak.upgrade() else { continue };
+            let d = doc.borrow();
+            if cache[k].0 != d.revision() {
+                let mut counts: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+                for line in d.buffer().lines() {
+                    for w in line.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '\'')) {
+                        let w = w.trim_matches('\'');
+                        if w.chars().count() >= 3 {
+                            *counts.entry(w).or_insert(0) += 1;
+                        }
+                    }
+                }
+                cache[k] = (d.revision(), counts.into_iter().map(|(w, n)| (w.to_string(), n)).collect());
+            }
+            for (w, n) in &cache[k].1 {
+                if w.len() > prefix.len() && w.to_lowercase().starts_with(&want) {
+                    match found.iter_mut().find(|(f, _)| f == w) {
+                        Some(f) => f.1 += n,
+                        None => found.push((w.clone(), *n)),
+                    }
+                }
+            }
+        }
+        found.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        found.into_iter().take(limit).map(|(w, _)| w).collect()
+    })
+}
+
 /// The name the Save dialog suggests: the file's own, or for a new
 /// document its first words (as TextEdit does), else "Untitled".
 fn suggested_name(t: &DocTab) -> String {
@@ -1288,6 +1330,7 @@ impl Rows for EditRows {
                     Row::new("line-numbers", "Line numbers", "", Control::Switch { default: true }),
                     Row::new("wrap", "Wrap lines", "Long lines go on below at the window's edge; off, the text scrolls sideways.", Control::Switch { default: true }),
                     Row::new("current-line", "Shade the current line", "", Control::Switch { default: true }),
+                    Row::new("complete", "Suggest words as you type", "The likely rest of a word shows in gray; Tab takes it. Alt+Escape, F5 or Ctrl+Space lists them all.", Control::Switch { default: true }),
                 ],
             },
             Part {
