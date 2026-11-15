@@ -800,7 +800,7 @@ impl Program for Desktop {
                     let name = self.fixed.get(&e.name).map(|(_, n)| n.clone()).unwrap_or_default();
                     match files::eject(&e.path) {
                         Ok(()) => {
-                            self.notice = Some(format!("“{name}” can be pulled out now."));
+                            crate::notify(&format!("Safe to remove “{name}”"), "The drive can be pulled out now.");
                             self.ejected.insert(e.path.clone());
                         }
                         Err(why) => self.notice = Some(format!("“{name}” could not be ejected: {why}")),

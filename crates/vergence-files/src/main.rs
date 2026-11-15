@@ -278,6 +278,18 @@ fn desktop_text() -> (String, Option<SystemTime>) {
 }
 
 
+/// A notification card (the session's, over the bus), as File Viewer.
+/// Outside a Vergence session it is only logged.
+pub(crate) fn notify(summary: &str, body: &str) {
+    if std::env::var_os(vergence_protocol::BUS_ENV).is_some()
+        && let Ok(mut bus) = vergence_protocol::Client::connect(APP_ID)
+        && bus.request(|serial| vergence_protocol::bus::ClientMsg::Notify { serial, replaces: 0, summary: summary.into(), body: body.into(), urgency: 1, timeout_ms: -1, actions: Vec::new() }).is_ok()
+    {
+        return;
+    }
+    eprintln!("vergence-files: {summary}: {body}");
+}
+
 /// Opens files with the apps chosen for their types: the server's Open in a
 /// Vergence session (the dock shows them starting), else started here.
 pub(crate) fn open_files(paths: &[PathBuf]) -> Result<(), String> {
@@ -721,7 +733,7 @@ impl Viewer {
                     let name = here.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     match files::eject(&here) {
                         Ok(()) => {
-                            self.notice = Some(format!("“{name}” was ejected."));
+                            notify(&format!("Safe to remove “{name}”"), "The drive can be pulled out now.");
                             *self.ejectable.borrow_mut() = None;
                             if let Some(h) = files::home() {
                                 self.go(Showing::Folder(h));
