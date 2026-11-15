@@ -53,6 +53,7 @@ mod fuzz;
 #[allow(dead_code)]
 mod grid;
 mod confirm;
+mod prefs;
 mod menu;
 mod mouse;
 mod panes;
@@ -154,6 +155,14 @@ impl Settings {
             (s.left, s.right) = bar::decoration_layout(&layout);
         }
         s.light = bar::desktop_light();
+        // The terminal's own font and size, if its settings chose them (app settings milestone 1).
+        let desktop = config("desktop.toml");
+        if let Some(f) = vergence_ui::table_value(&desktop, "[terminal]", "font").filter(|f| !f.trim().is_empty()) {
+            s.mono_family = f;
+        }
+        if let Some(z) = vergence_ui::table_value(&desktop, "[terminal]", "font-size").and_then(|z| z.parse::<f32>().ok()).filter(|z| (4.0..=96.0).contains(z)) {
+            s.mono_size = z;
+        }
         s
     }
 
@@ -302,7 +311,8 @@ fn parse_rgb(s: &str) -> Option<Color> {
 /// `accent = "#rrggbb"` the color of the cursor, the selection and the
 /// highlights.
 fn palette_from(text: &str) -> Palette {
-    let (mut tango, mut high, mut accent) = (false, false, None);
+    // The terminal's own colors if its settings chose them, else the desktop's terminal colors.
+    let (mut tango, mut own, mut high, mut accent) = (false, None, false, None);
     let mut section = "";
     for line in text.lines().map(str::trim) {
         if line.starts_with('[') {
@@ -312,12 +322,14 @@ fn palette_from(text: &str) -> Palette {
         let Some((key, value)) = line.split_once('=') else { continue };
         let value = value.trim().trim_matches('"');
         match (section, key.trim()) {
-            ("[terminal]", "scheme") => tango = value.eq_ignore_ascii_case("tango"),
+            ("[terminal]", "scheme") => own = Some(value.eq_ignore_ascii_case("tango")),
+            ("[appearance]", "terminal-colors") => tango = value.eq_ignore_ascii_case("tango"),
             ("[appearance]", "contrast") => high = value == "high",
             ("[appearance]", "accent") => accent = parse_rgb(value),
             _ => {}
         }
     }
+    let tango = own.unwrap_or(tango);
     // The terminal's own style if it chose one, else the desktop's; dark under App default.
     let light = vergence_ui::content_light(text, "[terminal]", false);
     let mut p = match (tango, light) {
@@ -691,6 +703,14 @@ struct Terminal {
     bar_told: Option<(Vec<(u32, String, bool)>, u32, u32)>,
     /// The app menu's commands as last sent (app settings milestone 1).
     commands_told: Option<Vec<vergence_ui::AppCommand>>,
+    /// The settings window, if open (app settings milestone 1).
+    prefs_open: Rc<std::cell::Cell<bool>>,
+    /// Its settings: the cursor's shape, whether it blinks, the close question.
+    cursor_shape: CursorShape,
+    blink: bool,
+    ask_close: bool,
+    /// The blinking cursor shows now; since when the keys last moved it.
+    blink_on: bool,
     /// Text size for a while (app settings milestone 1): the font's size
     /// times this, from the app menu's Text size row or Ctrl+= / Ctrl+- /
     /// Ctrl+0; not kept (the lasting size is the terminal's settings').
@@ -844,6 +864,11 @@ impl Terminal {
             bar_told: None,
             commands_told: None,
             zoom: 1.0,
+            prefs_open: Rc::new(std::cell::Cell::new(false)),
+            cursor_shape: CursorShape::of(&config("desktop.toml")),
+            blink: term_flag(&config("desktop.toml"), "blink", true),
+            ask_close: term_flag(&config("desktop.toml"), "ask-close", true),
+            blink_on: true,
             bar_style: vergence_ui::bar_style_setting(&config("desktop.toml"), "[terminal]", vergence_ui::BarStyle::Desktop),
             bar_style_told: None,
 
@@ -1065,6 +1090,16 @@ impl Terminal {
                 None
             }
         }
+    }
+
+    /// The terminal's settings window (Ctrl+, or Settings… in the app menu);
+    /// one at a time.
+    fn open_settings(&mut self, window: &mut Window) {
+        if self.prefs_open.get() {
+            return;
+        }
+        let rows = Box::new(prefs::TermRows::new());
+        window.open_window(vergence_widgets::window(vergence_widgets::prefs::Prefs::new("Terminal", "vergence-term", "[terminal]", true, rows, self.prefs_open.clone())));
     }
 
     /// A new window of this terminal, with a shell of its own.
@@ -1517,6 +1552,9 @@ struct PaneLook<'a> {
     /// How much room above the pane lies under the window's bar: filled with
     /// the lines before the top row (none on the alternate screen).
     above: f32,
+    /// The cursor's shape, and whether it shows now (it blinks).
+    cursor: CursorShape,
+    cursor_on: bool,
 }
 
 /// Draws one terminal in its room.
@@ -1619,10 +1657,20 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
     let cursor_row = s.grid.cy + s.scroll;
     if s.grid.cursor_visible && cursor_row < s.grid.rows {
         let at = Rect::new(left + s.grid.cx as f32 * cw, first + cursor_row as f32 * ch, cw, ch);
+        // Its shape as the settings say: a block, a bar before the cell, a line under it.
+        let shape = match look.cursor {
+            CursorShape::Block => at,
+            CursorShape::Bar => Rect::new(at.x, at.y, 2.0, at.h),
+            CursorShape::Underline => Rect::new(at.x, at.y + at.h - 2.0, at.w, 2.0),
+        };
         if look.keyboard {
-            scene.fill(at, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 178));
-        } else {
+            if look.cursor_on {
+                scene.fill(shape, Color::rgba(p.accent.r, p.accent.g, p.accent.b, if look.cursor == CursorShape::Block { 178 } else { 230 }));
+            }
+        } else if look.cursor == CursorShape::Block {
             scene.stroke(at, 0.0, 1.0, p.accent);
+        } else {
+            scene.fill(shape, Color::rgba(p.accent.r, p.accent.g, p.accent.b, 140));
         }
     }
     // The scrollbar: faint at the live screen, clearer while scrolled back or held.
@@ -1660,7 +1708,40 @@ mod cmd {
     pub const ZOOM_IN: u32 = 12;
     pub const ZOOM_OUT: u32 = 13;
     pub const ZOOM_RESET: u32 = 14;
+    pub const SETTINGS: u32 = 15;
 }
+
+/// The cursor's shape (the settings' `cursor`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CursorShape {
+    Block,
+    Bar,
+    Underline,
+}
+
+impl CursorShape {
+    fn of(desktop: &str) -> CursorShape {
+        match vergence_ui::table_value(desktop, "[terminal]", "cursor").as_deref() {
+            Some("bar") => CursorShape::Bar,
+            Some("underline") => CursorShape::Underline,
+            _ => CursorShape::Block,
+        }
+    }
+}
+
+/// A switch of the terminal's settings (absent: `default`).
+fn term_flag(desktop: &str, key: &str, default: bool) -> bool {
+    vergence_ui::table_value(desktop, "[terminal]", key).map_or(default, |v| v == "true")
+}
+
+/// Lines each tab keeps (the settings' `scrollback`, 1,000 to 1,000,000).
+fn scrollback_of(desktop: &str) -> usize {
+    vergence_ui::table_value(desktop, "[terminal]", "scrollback").and_then(|v| v.parse::<usize>().ok()).map_or(10_000, |n| n.clamp(1_000, 1_000_000))
+}
+
+/// The cursor's blink: on and off this long.
+const BLINK: Duration = Duration::from_millis(530);
+const TIMER_BLINK: u64 = 4;
 
 /// Text size for a while: steps of a tenth, from half to three times.
 const ZOOM_STEP: f32 = 0.1;
@@ -1710,6 +1791,9 @@ impl App for Terminal {
 
     /// Several tabs, or a program running in one: ask first (confirm.rs).
     fn close_asked(&mut self, window: &mut Window) -> bool {
+        if !self.ask_close {
+            return true;
+        }
         let running: Vec<String> = self.tabs.iter().flat_map(Tab::running).collect();
         let Some((heading, detail)) = confirm::question(self.tabs.len(), &running) else { return true };
         if !self.asking.get() {
@@ -1772,6 +1856,7 @@ impl App for Terminal {
         // click); the rest are listed under Keyboard shortcuts.
         let percent = format!("{}%", (self.zoom * 100.0).round());
         let list = vec![
+            C::role(cmd::SETTINGS, Role::Settings),
             C::role(cmd::NEW_WINDOW, Role::NewWindow).featured(),
             C::role(cmd::NEW_TAB, Role::NewTab).featured(),
             C::role(cmd::ZOOM_OUT, Role::ZoomOut).enabled(self.zoom > ZOOM_MIN + 0.001).featured(),
@@ -1812,6 +1897,7 @@ impl App for Terminal {
             cmd::PANE_TO_TAB => Item::PaneToTab,
             cmd::PANE_TO_WINDOW => Item::PaneToWindow,
             cmd::NEW_WINDOW => return self.new_window(window),
+            cmd::SETTINGS => return self.open_settings(window),
             cmd::ZOOM_IN => return self.zoom_by(Some(ZOOM_STEP), window),
             cmd::ZOOM_OUT => return self.zoom_by(Some(-ZOOM_STEP), window),
             cmd::ZOOM_RESET => return self.zoom_by(None, window),
@@ -1938,6 +2024,17 @@ impl App for Terminal {
     fn timer(&mut self, id: u64, window: &mut Window) {
         let now = Instant::now();
         match id {
+            // The cursor blinks while the window has the keyboard.
+            TIMER_BLINK => {
+                if self.focused && self.blink {
+                    self.blink_on = !self.blink_on;
+                    window.redraw();
+                    window.wake_after(TIMER_BLINK, BLINK);
+                } else if !self.blink_on {
+                    self.blink_on = true;
+                    window.redraw();
+                }
+            }
             TIMER_ROOT => {
                 let now_root: Vec<bool> = self.tabs.iter().map(Tab::as_root).collect();
                 let told: Vec<bool> = self.bar_told.as_ref().map(|(tabs, ..)| tabs.iter().map(|t| t.2).collect()).unwrap_or_default();
@@ -2000,6 +2097,13 @@ impl App for Terminal {
             self.palette = palette();
             self.opacity = vergence_ui::opacity_setting(&config("desktop.toml"), "[terminal]");
             self.bar_style = vergence_ui::bar_style_setting(&config("desktop.toml"), "[terminal]", vergence_ui::BarStyle::Desktop);
+            let desktop = config("desktop.toml");
+            self.cursor_shape = CursorShape::of(&desktop);
+            (self.blink, self.ask_close) = (term_flag(&desktop, "blink", true), term_flag(&desktop, "ask-close", true));
+            grid::set_scrollback(scrollback_of(&desktop));
+            if self.blink && self.focused {
+                window.wake_after(TIMER_BLINK, BLINK);
+            }
             self.settings = Settings::load();
             self.metrics = None;
             window.redraw();
@@ -2201,8 +2305,17 @@ impl App for Terminal {
             },
             Input::Key { sym: key, text, pressed: true, composing: false, modifiers, .. } => {
                 let m = *modifiers;
+                // Typing shows the cursor at once; it blinks again from there.
+                if self.blink && !self.blink_on {
+                    self.blink_on = true;
+                    window.redraw();
+                }
                 let letter = |c: char| *key == c as u32 || *key == c.to_ascii_uppercase() as u32;
                 // The terminal's own shortcuts: with Ctrl+Shift, so the shell keeps Ctrl+T and the rest.
+                // Ctrl+, : the terminal's settings, as every app's.
+                if m.ctrl && !m.alt && !m.shift && *key == 0x2c {
+                    return self.open_settings(window);
+                }
                 // Text size for a while: Ctrl with = (or +), - and 0, as GNOME Terminal.
                 // Ctrl+_ (Shift with -) stays the shell's undo.
                 if m.ctrl && !m.alt {
@@ -2321,6 +2434,10 @@ impl App for Terminal {
             }
             Input::Focus(on) => {
                 self.focused = *on;
+                self.blink_on = true;
+                if *on && self.blink {
+                    window.wake_after(TIMER_BLINK, BLINK);
+                }
                 window.redraw();
             }
             _ => {}
@@ -2421,7 +2538,7 @@ impl App for Terminal {
             }
             // A pane along the top of a window that draws under its bar fills the strip above it.
             let above = if !self.own_bar && area.y <= self.bar_h + 0.5 { self.bar_h } else { 0.0 };
-            let look = PaneLook { palette: p, metrics: mt, size, keyboard: active && self.focused, thumb_held: active && matches!(self.held, Some(Held::Thumb(_))), above };
+            let look = PaneLook { palette: p, metrics: mt, size, keyboard: active && self.focused, thumb_held: active && matches!(self.held, Some(Held::Thumb(_))), above, cursor: self.cursor_shape, cursor_on: !self.blink || self.blink_on };
             draw_pane(&mut scene, fonts, &mut numbers, s, *area, &look);
         }
         // The lines between panes; the one held, in the accent.
@@ -2447,6 +2564,7 @@ fn main() {
         println!("vergence-term {}", env!("CARGO_PKG_VERSION"));
         return;
     }
+    grid::set_scrollback(scrollback_of(&config("desktop.toml")));
     let mut terminal = Terminal::new();
     let mut args: Vec<String> = std::env::args().collect();
     // Everything after -e is the program and its arguments, ours or not.

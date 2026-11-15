@@ -582,6 +582,8 @@ struct App {
     cursor_themes: Vec<String>,
     fonts: Vec<String>,
     monos: Vec<String>,
+    /// The settings app's own settings window, if open (app settings milestone 1).
+    prefs_open: std::rc::Rc<std::cell::Cell<bool>>,
     // Screens.
     outputs: Vec<OutputInfo>,
     /// The input devices present, and the kinds the machine has had (bus `inputs`).
@@ -631,11 +633,12 @@ fn keyboard_int(d: &toml::Table, k: &str, default: i64) -> i64 {
     d.get("keyboard").and_then(|a| a.get(k)).and_then(|v| v.as_integer()).unwrap_or(default)
 }
 
-// ---- Terminal: desktop.toml [terminal] scheme (vergence-term reads it) ----
+// ---- Terminal: desktop.toml [appearance] terminal-colors, the default each
+// terminal's own settings start from (vergence-term reads it) ----
 const TERM_SCHEMES: [&str; 2] = ["Catppuccin", "Tango"];
 
 fn term_scheme(d: &toml::Table) -> &'static str {
-    match d.get("terminal").and_then(|a| a.get("scheme")).and_then(|v| v.as_str()).map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+    match d.get("appearance").and_then(|a| a.get("terminal-colors")).and_then(|v| v.as_str()).map(|s| s.trim().to_ascii_lowercase()).as_deref() {
         Some("tango") => "Tango",
         _ => "Catppuccin",
     }
@@ -774,6 +777,7 @@ impl App {
             cursor_themes: theme::cursor_themes(),
             fonts: theme::font_families(false),
             monos: theme::font_families(true),
+            prefs_open: std::rc::Rc::new(std::cell::Cell::new(false)),
             outputs: Vec::new(),
             inputs: Vec::new(),
             inputs_seen: Vec::new(),
@@ -828,6 +832,14 @@ impl App {
             }
             Err(e) => self.status = format!("Could not save: {e}"),
         }
+    }
+
+    /// The settings app's own settings window: its look and window places.
+    fn open_own_settings(&mut self, window: &mut Window) {
+        if self.prefs_open.get() {
+            return;
+        }
+        window.open_window(vergence_widgets::window(vergence_widgets::prefs::Prefs::new("Settings", "vergence-settings", "[settings]", false, Box::new(OwnRows), self.prefs_open.clone())));
     }
 
     fn dark(&self) -> bool {
@@ -1165,10 +1177,12 @@ impl App {
                     _ => self.click_test.0 = Some(now),
                 }
             }
+            // The desktop's terminal colors (app settings milestone 1): the default
+            // a terminal's own settings start from (its [terminal] scheme overrides).
             Message::TermScheme(name) => {
                 let v = name.to_ascii_lowercase();
-                self.save_table("terminal", |t| {
-                    t.insert("scheme".into(), v.into());
+                self.save_appearance(|t| {
+                    t.insert("terminal-colors".into(), v.into());
                 })
             }
             Message::ScreensOff(label) => {
@@ -1725,7 +1739,7 @@ impl App {
                 ]),
                 self.group(Some("Terminal"), vec![setting(
                     "Colors",
-                    "The terminal's 16 colors. Tango is the classic set that mc, htop and vim were tuned for; Catppuccin is softer.",
+                    "Terminals' 16 colors, unless a terminal's own settings choose (Ctrl+, in it). Tango is the classic set that mc, htop and vim were tuned for; Catppuccin is softer.",
                     choice(schemes.clone(), term_at, move |i| Message::TermScheme(schemes[i].clone())).width(Length::Fixed(160.0)).name("Terminal colors"),
                 )]),
                 self.status_line(),
@@ -2872,13 +2886,32 @@ impl Program for App {
         waker.wake();
     }
 
-    fn input(&mut self, input: &vergence_widgets::Input, _: &mut Window) -> bool {
+    fn input(&mut self, input: &vergence_widgets::Input, window: &mut Window) -> bool {
         // Back to the window: what changed meanwhile is shown.
         if *input == vergence_widgets::Input::Focus(true) {
             self.reread();
             return true;
         }
+        // Ctrl+, : the settings app's own settings, as every app's.
+        if let vergence_widgets::Input::Key { sym: 0x2c, pressed: true, modifiers, .. } = input
+            && modifiers.ctrl
+            && !modifiers.alt
+            && !modifiers.shift
+        {
+            self.open_own_settings(window);
+        }
         false
+    }
+
+    /// Its app menu (app settings milestone 1): Settings… is its own window.
+    fn commands(&self) -> Option<(bool, Vec<vergence_ui::AppCommand>)> {
+        Some((false, vec![vergence_ui::AppCommand::role(1, vergence_ui::Role::Settings)]))
+    }
+
+    fn command(&mut self, id: u32, window: &mut Window) {
+        if id == 1 {
+            self.open_own_settings(window);
+        }
     }
 
     fn woken(&mut self, window: &mut Window) -> bool {
@@ -3188,5 +3221,38 @@ mod about_tests {
         assert!(a.iter().any(|p| p.starts_with("Apache License")));
         assert!(g.iter().any(|p| p.starts_with("GNU GENERAL PUBLIC LICENSE")));
         assert!(a.iter().chain(&g).all(|p| !p.contains('\n')));
+    }
+}
+
+/// The settings app's own settings (app settings milestone 1): only what the
+/// desktop does with it, since everything else here is the desktop's.
+struct OwnRows;
+
+impl vergence_widgets::prefs::Rows for OwnRows {
+    fn parts(&self, text: &str) -> Vec<vergence_widgets::prefs::Part> {
+        use vergence_widgets::prefs::{Choice, Control, Part, Row};
+        let desktop = vergence_ui::desktop_pick(text);
+        let word = |light: bool| if light { "Light" } else { "Dark" };
+        let opacity = vergence_ui::opacity_setting(text, "[appearance]");
+        let styles = vec![Choice::text("Dark", "dark"), Choice::text("Light", "light")];
+        let opacities: Vec<Choice> = [1.0, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7].iter().map(|o: &f32| Choice::decimal(&format!("{:.0}%", o * 100.0), *o)).collect();
+        vec![Part {
+            title: "On this desktop".into(),
+            rows: vec![
+                Row { key: "style".into(), name: "Style".into(), help: "Its own light or dark wins over the desktop's.".into(), control: Control::Choose { choices: styles.clone(), desktop: Some(word(desktop.unwrap_or(true)).into()), app_default: 0 } },
+                // Under App default its bar is light (Dave, 2026-11-14).
+                Row { key: "bar-style".into(), name: "Title bar".into(), help: String::new(), control: Control::Choose { choices: styles, desktop: Some(word(desktop.unwrap_or(true)).into()), app_default: 0 } },
+                Row { key: "opacity".into(), name: "Opacity".into(), help: String::new(), control: Control::Choose { choices: opacities, desktop: Some(format!("{:.0}%", opacity * 100.0)), app_default: 0 } },
+                Row { key: String::new(), name: "Window places".into(), help: "Where the desktop puts the settings window, for each set of screens.".into(), control: Control::Button { label: "Forget…".into(), id: 1 } },
+            ],
+        }]
+    }
+
+    fn button(&self, id: u32) {
+        if id == 1
+            && let Err(e) = std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", "vergence-settings"]).spawn()
+        {
+            eprintln!("vergence-settings: {e}");
+        }
     }
 }

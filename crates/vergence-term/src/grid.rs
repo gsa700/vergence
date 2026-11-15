@@ -77,6 +77,14 @@ impl Default for Cell {
 
 const SCROLLBACK: usize = 10_000;
 
+/// Lines each screen keeps above the rows: the terminal's setting, the same
+/// for every tab of the process (app settings milestone 1).
+static KEEP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(SCROLLBACK);
+
+pub fn set_scrollback(lines: usize) {
+    KEEP.store(lines.max(1), std::sync::atomic::Ordering::Relaxed);
+}
+
 pub struct Grid {
     pub cols: usize,
     pub rows: usize,
@@ -273,7 +281,8 @@ impl Grid {
     fn push_scrollback(&mut self, l: Vec<Cell>) {
         self.scrollback.push_back(l);
         self.pushed += 1;
-        if self.scrollback.len() > SCROLLBACK {
+        let keep = KEEP.load(std::sync::atomic::Ordering::Relaxed);
+        while self.scrollback.len() > keep {
             self.scrollback.pop_front();
         }
     }

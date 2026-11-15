@@ -140,6 +140,10 @@ pub struct Ui<M> {
     ring: bool,
     fields: HashMap<Id, FieldState>,
     scrolls: HashMap<Id, ScrollState>,
+    /// The strip at the window's top under the server's bar (look milestone
+    /// 1): scroll bars start below it (Dave, 2026-11-14: they went under the
+    /// title bar).
+    under_bar: f32,
     switches: HashMap<Id, SwitchState>,
     drag: Option<Drag>,
     open: Option<Open>,
@@ -168,6 +172,7 @@ impl<M> Default for Ui<M> {
             ring: false,
             fields: HashMap::new(),
             scrolls: HashMap::new(),
+            under_bar: 0.0,
             switches: HashMap::new(),
             drag: None,
             open: None,
@@ -260,6 +265,11 @@ impl<M: Clone> Ui<M> {
 
     /// Lays `root` out in a window `width` x `height`. What is remembered
     /// stays with the widgets whose ids are still there.
+    /// The strip at the window's top under the server's bar: scroll bars start below it.
+    pub fn set_under_bar(&mut self, top: f32) {
+        self.under_bar = top.max(0.0);
+    }
+
     pub fn layout(&mut self, root: Element<M>, width: f32, height: f32, measure: &mut dyn Measure, text_size: f32) {
         let mut nodes = Vec::new();
         Layout { measure, text_size, lines_seen: Default::default() }.run(root, Rect::new(0.0, 0.0, width, height), &mut nodes);
@@ -410,8 +420,11 @@ impl<M: Clone> Ui<M> {
             return None;
         }
         let offset = self.scrolls.get(&self.nodes[i].id).map_or(0.0, |s| s.offset);
-        let h = (r.h * r.h / content).max(24.0).min(r.h);
-        let y = r.y + (r.h - h) * offset / (content - r.h);
+        // The track: the place, less any of it under the window's bar.
+        let top = r.y.max(self.under_bar.min(r.y + r.h - 24.0));
+        let track = r.y + r.h - top;
+        let h = (track * r.h / content).max(24.0).min(track);
+        let y = top + (track - h) * offset / (content - r.h);
         Some(Rect::new(r.x + r.w - BAR_W - 2.0, y, BAR_W, h))
     }
 
@@ -942,8 +955,10 @@ impl<M: Clone> Ui<M> {
         let What::Scroll { content } = self.nodes[s].what else { return };
         let area = self.shown(s);
         let Some(t) = self.thumb(s) else { return };
-        let room = (area.h - t.h).max(1.0);
-        let f = ((y - grab - area.y) / room).clamp(0.0, 1.0);
+        // The track starts below the window's bar, as the thumb does.
+        let top = area.y.max(self.under_bar.min(area.y + area.h - 24.0));
+        let room = (area.y + area.h - top - t.h).max(1.0);
+        let f = ((y - grab - top) / room).clamp(0.0, 1.0);
         let want = f * (content - area.h);
         let have = self.scrolls.get(&self.nodes[s].id).map_or(0.0, |st| st.offset);
         self.scroll_by(s, want - have);

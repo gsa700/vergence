@@ -21,6 +21,7 @@
 //! toolkit keeps those above for its widgets.
 
 mod element;
+pub mod prefs;
 mod layout;
 mod theme;
 mod ui;
@@ -379,6 +380,7 @@ impl<P: Program> Host<P> {
             let root = self.program.view(&self.theme);
             let mut measure = FontsMeasure { fonts, family: &self.theme.font };
             self.ui.layout(root, frame.width, frame.height, &mut measure, self.theme.text_size);
+            self.ui.set_under_bar(self.theme.top);
             self.ui.set_reduced_motion(self.theme.reduced_motion);
             self.ui.set_double_click(self.theme.double_click);
             self.stale = false;
