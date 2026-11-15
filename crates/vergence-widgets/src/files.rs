@@ -84,6 +84,8 @@ pub fn sort(v: &mut [&Entry], by: SortBy, up: bool, keep: bool) {
 pub struct Place {
     pub name: String,
     pub path: Option<PathBuf>,
+    /// Mounted over the network: listed under Network.
+    pub network: bool,
 }
 
 /// The user's folders by the XDG user-dirs file
@@ -113,18 +115,22 @@ pub fn user_dirs() -> Vec<(String, PathBuf)> {
         .collect()
 }
 
-/// The places: Home, the user's folders, Recent, the computer, mounted disks.
+/// The places: Home, the user's folders, Recent, the computer, mounted
+/// disks, then what is mounted over the network.
 pub fn places() -> Vec<Place> {
     let mut out = Vec::new();
     if let Some(h) = home() {
-        out.push(Place { name: "Home".into(), path: Some(h) });
-        out.extend(user_dirs().into_iter().map(|(name, p)| Place { name, path: Some(p) }));
+        out.push(Place { name: "Home".into(), path: Some(h), network: false });
+        out.extend(user_dirs().into_iter().map(|(name, p)| Place { name, path: Some(p), network: false }));
     }
-    out.push(Place { name: "Recent".into(), path: None });
-    out.push(Place { name: "Computer".into(), path: Some(PathBuf::from("/")) });
+    out.push(Place { name: "Recent".into(), path: None, network: false });
+    out.push(Place { name: "Computer".into(), path: Some(PathBuf::from("/")), network: false });
+    let name_of = |m: &Path| m.file_name().map_or_else(|| m.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
     for m in mounted_disks() {
-        let name = m.file_name().map_or_else(|| m.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
-        out.push(Place { name, path: Some(m) });
+        out.push(Place { name: name_of(&m), path: Some(m), network: false });
+    }
+    for m in network_mounts() {
+        out.push(Place { name: name_of(&m), path: Some(m), network: true });
     }
     out
 }
@@ -132,13 +138,19 @@ pub fn places() -> Vec<Place> {
 /// The places sidebar: each a button, the one shown chosen. `here`: the
 /// folder shown (None for Recent).
 pub fn sidebar<M: Clone + 'static>(places: &[Place], here: Option<&Path>, go: impl Fn(&Place) -> M, t: &Theme) -> Element<M> {
-    let items: Vec<Element<M>> = places
-        .iter()
-        .map(|p| {
-            let chosen = p.path.as_deref() == here;
-            button(label(p.name.clone()).size(12.0).width(Length::FILL)).look(if chosen { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(5.0, 10.0)).on_press(go(p)).width(Length::FILL).name(p.name.clone())
-        })
-        .collect();
+    let mut items: Vec<Element<M>> = Vec::new();
+    let mut headed = false;
+    for p in places {
+        // The network's places under a heading of their own.
+        if p.network && !headed {
+            headed = true;
+            // (A label takes no padding: a space above, one before.)
+            items.push(space().height(Length::Fixed(8.0)));
+            items.push(row(vec![space().width(Length::Fixed(10.0)), label("Network").size(10.5).dim()]));
+        }
+        let chosen = p.path.as_deref() == here;
+        items.push(button(label(p.name.clone()).size(12.0).width(Length::FILL)).look(if chosen { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(5.0, 10.0)).on_press(go(p)).width(Length::FILL).name(p.name.clone()));
+    }
     panel(scroll(column(items).spacing(1.0).width(Length::FILL))).color(t.card).radius(8.0).padding(6.0).width(Length::Fixed(160.0)).height(Length::FILL)
 }
 
@@ -154,6 +166,9 @@ pub struct View<'a, M> {
     pub drag: Option<&'a dyn Fn(usize) -> M>,
     /// Show each file's folder under its name (the recent files).
     pub folders: bool,
+    /// A file's thumbnail, if it has one made (the icon view shows it in
+    /// place of its mark; files milestone 1, step 10).
+    pub thumb: Option<&'a dyn Fn(&Entry) -> Option<std::sync::Arc<vergence_scene::Image>>>,
 }
 
 /// The list: headings that sort (`sort`, the one now and its direction),
@@ -211,7 +226,11 @@ pub fn icons<M: Clone + 'static>(v: &View<M>) -> Element<M> {
         .enumerate()
         .map(|(k, e)| {
             // One line, cut with "…" to the cell (a name without spaces cannot wrap).
-            let mut b = button(column(vec![kind_icon_sized(e.kind(), 3.0).width(Length::Fixed(80.0)).height(Length::Fixed(52.0)), label(e.name.clone()).size(11.0).align(Align::Center).elide().width(Length::Fixed(88.0))]).spacing(4.0).align(Align::Center))
+            let mark = match v.thumb.and_then(|t| t(e)) {
+                Some(img) => crate::picture(img).width(Length::Fixed(80.0)).height(Length::Fixed(52.0)),
+                None => kind_icon_sized(e.kind(), 3.0).width(Length::Fixed(80.0)).height(Length::Fixed(52.0)),
+            };
+            let mut b = button(column(vec![mark, label(e.name.clone()).size(11.0).align(Align::Center).elide().width(Length::Fixed(88.0))]).spacing(4.0).align(Align::Center))
                 .look(if (v.chosen)(k, e) { ButtonLook::Chosen } else { ButtonLook::Plain })
                 .padding(Padding::hv(6.0, 4.0))
                 .on_press((v.click)(k))
@@ -502,23 +521,115 @@ pub fn text_start(p: &Path) -> Option<String> {
     Some(s)
 }
 
-/// Disks mounted where removable and extra disks go.
-pub fn mounted_disks() -> Vec<PathBuf> {
+/// One line of the system's mount table: what is mounted, where, and its
+/// file system's type.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Mount {
+    pub what: String,
+    pub at: PathBuf,
+    pub kind: String,
+}
+
+/// A mount table's text read: Linux /proc/self/mounts, or FreeBSD's
+/// `mount -p` (fstab's form); the same columns. Octal escapes (\040 a
+/// space) undone.
+pub fn parse_mounts(text: &str) -> Vec<Mount> {
+    let unescape = |s: &str| -> String {
+        let b = s.as_bytes();
+        let mut out = Vec::with_capacity(b.len());
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == b'\\' && i + 3 < b.len() && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c)) {
+                out.push(((b[i + 1] - b'0') << 6) | ((b[i + 2] - b'0') << 3) | (b[i + 3] - b'0'));
+                i += 4;
+            } else {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    };
+    text.lines()
+        .filter_map(|l| {
+            let mut f = l.split_whitespace();
+            let (what, at, kind) = (f.next()?, f.next()?, f.next()?);
+            (!what.starts_with('#')).then(|| Mount { what: unescape(what), at: PathBuf::from(unescape(at)), kind: kind.to_string() })
+        })
+        .collect()
+}
+
+/// The system's mounts now.
+pub fn mounts() -> Vec<Mount> {
     let text = fs::read_to_string("/proc/self/mounts").ok().or_else(|| {
         // FreeBSD: mount -p prints the table in fstab's form.
         std::process::Command::new("mount").arg("-p").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
     });
-    let mut out: Vec<PathBuf> = text
-        .unwrap_or_default()
-        .lines()
-        .filter_map(|l| l.split_whitespace().nth(1))
-        .map(|m| m.replace("\\040", " "))
-        .filter(|m| ["/media/", "/mnt/", "/run/media/"].iter().any(|p| m.starts_with(p)) || m == "/mnt")
-        .map(PathBuf::from)
+    parse_mounts(&text.unwrap_or_default())
+}
+
+/// Whether a file system type is one reached over the network (NFS, SMB,
+/// sshfs and other FUSE network file systems, WebDAV).
+pub fn network_kind(kind: &str) -> bool {
+    matches!(kind, "nfs" | "nfs4" | "cifs" | "smb3" | "smbfs" | "davfs" | "9p" | "afs") || ["fuse.sshfs", "fusefs.sshfs", "fuse.rclone", "fusefs.rclone", "fuse.gvfsd-fuse"].contains(&kind)
+}
+
+/// Disks mounted where removable and extra disks go (network mounts aside).
+pub fn mounted_disks() -> Vec<PathBuf> {
+    disks_of(&mounts())
+}
+
+fn disks_of(table: &[Mount]) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = table
+        .iter()
+        .filter(|m| !network_kind(&m.kind))
+        .map(|m| m.at.clone())
+        .filter(|m| {
+            let s = m.to_string_lossy();
+            ["/media/", "/mnt/", "/run/media/"].iter().any(|p| s.starts_with(p)) || s == "/mnt"
+        })
         .collect();
     out.sort();
     out.dedup();
     out
+}
+
+/// What the system has mounted over the network, anywhere (files
+/// milestone 1, step 10: shown under Network in the sidebar).
+pub fn network_mounts() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = mounts().into_iter().filter(|m| network_kind(&m.kind)).map(|m| m.at).collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Whether a folder is a disk or network mount that Eject can let go of.
+pub fn ejectable(path: &Path) -> bool {
+    let table = mounts();
+    table.iter().any(|m| m.at == path && network_kind(&m.kind)) || disks_of(&table).iter().any(|d| d == path)
+}
+
+/// Unmounts a disk or a network mount: sshfs and other FUSE mounts by
+/// `fusermount3 -u` / `fusermount -u` on Linux, everything else (and
+/// everything on FreeBSD) by `umount`. The system decides whether the user
+/// may: the error says why not.
+pub fn eject(path: &Path) -> Result<(), String> {
+    let kind = mounts().into_iter().find(|m| m.at == path).map(|m| m.kind).unwrap_or_default();
+    let mut tries: Vec<(&str, Vec<&str>)> = Vec::new();
+    if kind.starts_with("fuse.") && cfg!(target_os = "linux") {
+        tries.push(("fusermount3", vec!["-u"]));
+        tries.push(("fusermount", vec!["-u"]));
+    }
+    tries.push(("umount", vec![]));
+    let mut why = String::new();
+    for (program, args) in tries {
+        match std::process::Command::new(program).args(&args).arg(path).stdin(std::process::Stdio::null()).output() {
+            Ok(o) if o.status.success() => return Ok(()),
+            Ok(o) => why = String::from_utf8_lossy(&o.stderr).trim().to_string(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => why = e.to_string(),
+        }
+    }
+    Err(if why.is_empty() { "it could not be unmounted.".into() } else { why })
 }
 
 pub fn plain(e: &std::io::Error) -> String {
@@ -590,6 +701,21 @@ pub fn remember(app: &str, dir: &Path, file: &Path) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_mount_table_tells_disks_from_the_network() {
+        let linux = "/dev/sda1 / ext4 rw 0 0\n/dev/sdb1 /run/media/u/My\\040Disk vfat rw 0 0\nhost:/srv /mnt/srv nfs4 rw 0 0\nu@box:/home /home/u/box fuse.sshfs rw 0 0\n//nas/share /mnt/nas cifs rw 0 0\n";
+        let t = super::parse_mounts(linux);
+        assert_eq!(t[1].at, std::path::PathBuf::from("/run/media/u/My Disk"));
+        assert_eq!(super::disks_of(&t), vec![std::path::PathBuf::from("/run/media/u/My Disk")], "the network's mounts under /mnt are not disks");
+        let net: Vec<_> = t.iter().filter(|m| super::network_kind(&m.kind)).map(|m| m.at.to_string_lossy().into_owned()).collect();
+        assert_eq!(net, vec!["/mnt/srv", "/home/u/box", "/mnt/nas"]);
+        // FreeBSD's mount -p.
+        let bsd = "zroot/ROOT/default\t/\tzfs\trw\t0 0\nbox:/home\t/mnt/box\tfusefs.sshfs\trw\t0 0\n/dev/da0s1\t/media/usb\tmsdosfs\trw\t0 0\n";
+        let t = super::parse_mounts(bsd);
+        assert_eq!(super::disks_of(&t), vec![std::path::PathBuf::from("/media/usb")]);
+        assert!(super::network_kind(&t[1].kind));
+    }
+
     use super::*;
 
     #[test]

@@ -521,6 +521,33 @@ the wallpaper, a scratch place for launchers and files.
   stand). tools/vergence-session links the checkout's data/ into
   target/dev-share, first on XDG_DATA_DIRS, so a development session no
   longer depends on the install's entries and icons.
+- **Step 10: thumbnails, network mounts, search in subfolders** (2026-11-15).
+  crates/vergence-thumbs: the freedesktop thumbnail spec, shared with other
+  desktops (`$XDG_CACHE_HOME/thumbnails/large/<md5 of the URI>.png`, 256
+  pixels, `Thumb::URI` and `Thumb::MTime`, failures marked in
+  `fail/vergence/`, 0600 files in 0700 folders); our own MD5 (the RFC's test
+  suite and the spec's example) and URI escaping as GLib's; a cached
+  thumbnail's text read by walking its chunks (nothing inflated), its pixels
+  and the picture's decoded apart by vergence-decode; written with the png
+  crate already in the workspace; `Thumbnailer`: two workers, a queue keyed by
+  path and modification time. File Viewer's icon view shows them (the
+  folder's pictures asked for in order, other folders' waiting asks
+  dropped); the desktop's picture icons use the cache too. vergence-widgets
+  files.rs reads the mount table with its types (`mounts`, `parse_mounts`,
+  `network_kind`): disks and the network told apart, NFS, SMB, sshfs and
+  other FUSE network file systems under a "Network" heading in the sidebar
+  (Trash above it), `eject` (`fusermount3 -u`/`fusermount -u` for FUSE on
+  Linux, else `umount`; the system's refusal shown), File > Eject in File
+  Viewer when the folder shown is a disk or share, the desktop's Eject the
+  same. Search: with words in the narrowing field, "In subfolders" walks
+  down from the folder on a worker (search.rs: breadth first, the folder's
+  own disk only, links to folders not followed, hidden names only when
+  shown, 5000 at most), results as they come with their folders under
+  them, the search following the words as they change; leaving the folder
+  ends it. Seen on kepler: the 17 pictures of ~/Pictures/Wallpaper (8K ones
+  among them) as thumbnails within seconds; a loopback NFS mount (made with
+  onestart, removed after) under Network; 24 milestone files found below
+  ~/src/vergence. Tests: 73 suites on kepler and Techbench (Hubble off).
 ## Steps
 
 1. **vergence-types**: the database reader (globs2, magic, subclasses,
@@ -548,7 +575,7 @@ the wallpaper, a scratch place for launchers and files.
 9. **The desktop**: the Desktop window kind in the server, File Viewer's
    desktop windows, positions, launchers and their question, Super+D,
    Settings > Desktop.
-10. **Thumbnails, mounts, search in subfolders.**
+10. **Thumbnails, mounts, search in subfolders.** Done 2026-11-15.
 11. **Docs**: whitepaper (§6.10 and §9), README, the Map, CLAUDE.md.
 
 PDF and video, if question 2 brings them in, are their own steps after 5.

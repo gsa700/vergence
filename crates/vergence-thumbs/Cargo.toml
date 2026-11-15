@@ -1,0 +1,15 @@
+[package]
+name = "vergence-thumbs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Thumbnails by the freedesktop thumbnail spec, shared with other desktops: decoded apart by vergence-decode"
+
+# The pixels are decoded apart (vergence-decode's helper); a cached
+# thumbnail's text is read by walking its chunks here, never inflated;
+# png writes only pictures we made.
+[dependencies]
+vergence-decode.workspace = true
+vergence-scene.workspace = true
+png = "0.18"

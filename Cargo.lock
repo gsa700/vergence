@@ -2232,6 +2232,7 @@ dependencies = [
  "vergence-render",
  "vergence-scene",
  "vergence-shell",
+ "vergence-thumbs",
  "vergence-types",
  "vergence-ui",
  "vergence-widgets",
@@ -2410,6 +2411,15 @@ name = "vergence-text"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
+]
+
+[[package]]
+name = "vergence-thumbs"
+version = "0.1.0"
+dependencies = [
+ "png 0.18.1",
+ "vergence-decode",
+ "vergence-scene",
 ]
 
 [[package]]

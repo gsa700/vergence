@@ -26,6 +26,7 @@
 mod desktop;
 mod hand;
 mod ops;
+mod search;
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -77,6 +78,7 @@ mod cmd {
     pub const UNDO: u32 = 28;
     pub const RESTORE: u32 = 29;
     pub const EMPTY_TRASH: u32 = 30;
+    pub const EJECT: u32 = 31;
     pub const SETTINGS: u32 = 40;
     pub const ABOUT: u32 = 41;
 }
@@ -229,6 +231,18 @@ struct Viewer {
     ask: Option<Ask>,
     naming: Option<Naming>,
     job: Option<Job>,
+    /// Pictures' thumbnails for the icon view, made in the background
+    /// (vergence-thumbs; the freedesktop cache other desktops share).
+    thumbs: vergence_thumbs::Thumbnailer,
+    thumb_waker: Arc<std::sync::Mutex<Option<Waker>>>,
+    thumbs_made: usize,
+    /// Whether the folder shown is a disk or network mount (Eject), by folder.
+    ejectable: RefCell<Option<(PathBuf, bool)>>,
+    /// Searching below the folder for the narrowing words (search.rs), and
+    /// what it has found, copied when it says more came.
+    search: Option<search::Search>,
+    search_entries: Vec<Entry>,
+    search_done: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -247,6 +261,8 @@ enum Msg {
     Click(usize),
     Sort(SortBy),
     Narrow(String),
+    /// Search below the folder for the narrowing words, or stop.
+    SearchBelow,
     OpenChosen,
     OpenInCloseUp,
     DismissNotice,
@@ -293,6 +309,13 @@ impl Viewer {
         let view = if vergence_ui::table_value(&desktop, SECTION, "view").as_deref() == Some("icons") { ViewKind::Icons } else { ViewKind::List };
         let pane = vergence_ui::table_value(&desktop, SECTION, "preview-pane").as_deref() == Some("true");
         let hidden = vergence_ui::table_value(&desktop, SECTION, "hidden").as_deref() == Some("true");
+        let thumb_waker: Arc<std::sync::Mutex<Option<Waker>>> = Arc::default();
+        let w = thumb_waker.clone();
+        let thumbs = vergence_thumbs::Thumbnailer::new(move || {
+            if let Some(w) = w.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                w.wake();
+            }
+        });
         Viewer {
             shared,
             tabs: Vec::new(),
@@ -316,6 +339,13 @@ impl Viewer {
             ask: None,
             naming: None,
             job: None,
+            thumbs,
+            thumb_waker,
+            thumbs_made: 0,
+            ejectable: RefCell::new(None),
+            search: None,
+            search_entries: Vec::new(),
+            search_done: false,
         }
     }
 
@@ -327,7 +357,7 @@ impl Viewer {
         };
         self.tabs.push(Tab::new(id, showing));
         self.front = id;
-        self.narrow.clear();
+        self.clear_narrow();
     }
 
     /// Paths handed over or given at the start: a folder opens in a tab; a
@@ -365,8 +395,9 @@ impl Viewer {
     fn visible(&self) -> Vec<&Entry> {
         let Some(t) = self.front_tab() else { return Vec::new() };
         let n = self.narrow.to_lowercase();
-        let mut v: Vec<&Entry> = t.entries.iter().filter(|e| self.hidden || !e.name.starts_with('.')).filter(|e| n.is_empty() || e.name.to_lowercase().contains(&n)).collect();
-        files::sort(&mut v, self.sort.0, self.sort.1, t.showing == Showing::Recent);
+        let source = if self.search.is_some() { &self.search_entries } else { &t.entries };
+        let mut v: Vec<&Entry> = source.iter().filter(|e| self.hidden || !e.name.starts_with('.')).filter(|e| n.is_empty() || e.name.to_lowercase().contains(&n)).collect();
+        files::sort(&mut v, self.sort.0, self.sort.1, t.showing == Showing::Recent && self.search.is_none());
         v.truncate(files::MAX_ROWS);
         v
     }
@@ -377,8 +408,30 @@ impl Viewer {
         t.entries.iter().find(|e| &e.path == c).cloned()
     }
 
-    fn go(&mut self, to: Showing) {
+    /// The narrowing words gone, and any search below with them.
+    fn clear_narrow(&mut self) {
         self.narrow.clear();
+        self.search = None;
+        self.search_entries.clear();
+    }
+
+    /// Searches below the folder shown for the narrowing words (again, when
+    /// they change); off when they are emptied.
+    fn search_below(&mut self) {
+        self.search = None;
+        self.search_entries.clear();
+        self.search_done = false;
+        let (Some(here), false) = (self.here(), self.narrow.trim().is_empty()) else { return };
+        let w = self.thumb_waker.clone();
+        self.search = Some(search::Search::start(&here, self.narrow.trim(), self.hidden, move || {
+            if let Some(w) = w.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                w.wake();
+            }
+        }));
+    }
+
+    fn go(&mut self, to: Showing) {
+        self.clear_narrow();
         if let Some(t) = self.front_mut() {
             t.go(to);
         }
@@ -391,7 +444,7 @@ impl Viewer {
             t.forward.push(std::mem::replace(&mut t.showing, s));
             t.read();
         }
-        self.narrow.clear();
+        self.clear_narrow();
     }
 
     fn forward(&mut self) {
@@ -401,7 +454,7 @@ impl Viewer {
             t.back.push(std::mem::replace(&mut t.showing, s));
             t.read();
         }
-        self.narrow.clear();
+        self.clear_narrow();
     }
 
     fn up(&mut self) {
@@ -597,7 +650,7 @@ impl Viewer {
                 if n > 1 {
                     let i = self.tabs.iter().position(|t| t.id == self.front).unwrap_or(0) as isize;
                     self.front = self.tabs[(i + if id == cmd::NEXT_TAB { 1 } else { -1 }).rem_euclid(n) as usize].id;
-                    self.narrow.clear();
+                    self.clear_narrow();
                 }
             }
             cmd::RELOAD => {
@@ -663,6 +716,21 @@ impl Viewer {
                 self.read_all();
             }
             cmd::EMPTY_TRASH => self.ask = Some(Ask::EmptyTrash),
+            cmd::EJECT => {
+                if let Some(here) = self.here().filter(|_| self.here_ejectable()) {
+                    let name = here.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    match files::eject(&here) {
+                        Ok(()) => {
+                            self.notice = Some(format!("“{name}” was ejected."));
+                            *self.ejectable.borrow_mut() = None;
+                            if let Some(h) = files::home() {
+                                self.go(Showing::Folder(h));
+                            }
+                        }
+                        Err(why) => self.notice = Some(format!("“{name}” could not be ejected: {why}")),
+                    }
+                }
+            }
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
                 let about = vergence_widgets::about::About::new(APP_ID, "File Viewer", env!("CARGO_PKG_VERSION"), "Vergence's file manager: your folders as a list or icons, Preview on the space bar, files opened with the apps chosen for them.", self.theme());
@@ -689,6 +757,20 @@ impl Viewer {
     /// The folder shown, if it is one (not Recent).
     fn here(&self) -> Option<PathBuf> {
         self.front_tab().and_then(|t| t.dir().map(Path::to_path_buf))
+    }
+
+    /// Whether the folder shown can be ejected (asked of the mount table
+    /// once per folder).
+    fn here_ejectable(&self) -> bool {
+        let Some(here) = self.here() else { return false };
+        if let Some((p, e)) = self.ejectable.borrow().as_ref()
+            && *p == here
+        {
+            return *e;
+        }
+        let e = files::ejectable(&here);
+        *self.ejectable.borrow_mut() = Some((here, e));
+        e
     }
 
     fn chosen_paths(&self) -> Vec<PathBuf> {
@@ -985,6 +1067,11 @@ impl Viewer {
             ]));
         }
         items.push(field(self.narrow.clone(), Msg::Narrow).placeholder("Narrow this folder").width(Length::Fixed(200.0)).name("Narrow this folder"));
+        // With words typed: search the folders below too.
+        if !self.narrow.trim().is_empty() && self.here().is_some() {
+            let on = self.search.is_some();
+            items.push(button(label("In subfolders").size(11.5)).look(if on { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(4.0, 8.0)).on_press(Msg::SearchBelow).name("Search in subfolders"));
+        }
         items.push(group(vec![
             toggle(Icon::List, "As a list", self.view == ViewKind::List, Msg::Run(cmd::LIST)),
             toggle(Icon::Grid, "As icons", self.view == ViewKind::Icons, Msg::Run(cmd::ICONS)),
@@ -996,8 +1083,9 @@ impl Viewer {
     fn places(&self) -> Vec<Place> {
         let mut p = files::places();
         if let Some(trash) = ops::trash_dir().map(|d| d.join("files")) {
-            // After the computer and its disks.
-            p.push(Place { name: "Trash".into(), path: Some(trash) });
+            // After the computer and its disks, before the network's places.
+            let at = p.iter().position(|x| x.network).unwrap_or(p.len());
+            p.insert(at, Place { name: "Trash".into(), path: Some(trash), network: false });
         }
         p
     }
@@ -1009,13 +1097,22 @@ impl Viewer {
         let click = |k: usize| Msg::Click(k);
         let in_view = tab.cursor.as_ref().and_then(|c| visible.iter().position(|e| &e.path == c)).map(|k| (k, tab.turn << 32 | k as u64));
         let drag = |k: usize| Msg::DragRow(k);
-        let v = files::View { entries: &visible, chosen: &chosen, in_view, click: &click, drag: Some(&drag), folders: tab.showing == Showing::Recent };
+        // The icon view's thumbnails: this folder's pictures asked for, in
+        // their order; what other folders asked and has not begun is dropped.
+        if self.view == ViewKind::Icons {
+            self.thumbs.forget_waiting();
+            for e in visible.iter().filter(|e| e.kind() == Kind::Picture) {
+                self.thumbs.want(&e.path, e.changed);
+            }
+        }
+        let thumb = |e: &Entry| self.thumbs.get(&e.path, e.changed).flatten();
+        let v = files::View { entries: &visible, chosen: &chosen, in_view, click: &click, drag: Some(&drag), folders: tab.showing == Showing::Recent || self.search.is_some(), thumb: if self.view == ViewKind::Icons { Some(&thumb) } else { None } };
         let mut body: Vec<Element<Msg>> = Vec::new();
         if let Some(p) = &tab.problem {
             body.push(label(p.clone()).size(12.0).wrap().width(Length::FILL));
         }
         if visible.is_empty() && tab.problem.is_none() {
-            let why = if !self.narrow.is_empty() { "Nothing here has that in its name." } else if tab.showing == Showing::Recent { "Nothing opened or saved yet." } else { "This folder is empty." };
+            let why = if self.search.is_some() && !self.search_done { "Searching…" } else if self.search.is_some() { "Nothing here or below has that in its name." } else if !self.narrow.is_empty() { "Nothing here has that in its name." } else if tab.showing == Showing::Recent { "Nothing opened or saved yet." } else { "This folder is empty." };
             body.push(panel(label(why).size(12.0).dim()).padding(12.0));
         }
         let list = match self.view {
@@ -1185,7 +1282,10 @@ impl Program for Viewer {
         // The foot: how many, how many chosen.
         let n = self.visible().len();
         let chosen = self.front_tab().map_or(0, |t| t.chosen.len());
-        let foot = if chosen > 1 { format!("{chosen} of {n} chosen") } else { format!("{n} item{}", if n == 1 { "" } else { "s" }) };
+        let mut foot = if chosen > 1 { format!("{chosen} of {n} chosen") } else { format!("{n} item{}", if n == 1 { "" } else { "s" }) };
+        if self.search.is_some() {
+            foot = format!("{foot} {} subfolders{}", if self.search_done { "found in" } else { "found so far in" }, if self.search_entries.len() >= search::MAX { " (the first 5000)" } else { "" });
+        }
         all.push(rule());
         all.push(panel(row(vec![space().width(Length::FILL), label(foot).size(12.0).dim()]).width(Length::FILL)).radius(0.0).padding(Padding { top: 3.0, bottom: 3.0, left: 12.0, right: 12.0 }).width(Length::FILL));
         column(all).width(Length::FILL).height(Length::FILL)
@@ -1198,7 +1298,21 @@ impl Program for Viewer {
             Msg::Crumb(p) => self.go(Showing::Folder(p)),
             Msg::Click(k) => self.click(k),
             Msg::Sort(by) => self.sort = if self.sort.0 == by { (by, !self.sort.1) } else { (by, by == SortBy::Name) },
-            Msg::Narrow(s) => self.narrow = s,
+            Msg::Narrow(s) => {
+                self.narrow = s;
+                // While searching below, the search follows the words.
+                if self.search.is_some() {
+                    self.search_below();
+                }
+            }
+            Msg::SearchBelow => {
+                if self.search.is_some() {
+                    self.search = None;
+                    self.search_entries.clear();
+                } else {
+                    self.search_below();
+                }
+            }
             Msg::OpenChosen => self.open_chosen(),
             Msg::OpenInCloseUp => {
                 if let Some(e) = self.cursor_entry() {
@@ -1377,6 +1491,7 @@ impl Program for Viewer {
     fn waker(&mut self, waker: Waker) {
         let first = self.waker.is_none();
         self.waker = Some(waker.clone());
+        *self.thumb_waker.lock().unwrap_or_else(|e| e.into_inner()) = Some(waker.clone());
         if first {
             let inbox = self.shared.borrow().inbox.clone();
             let w = waker.clone();
@@ -1390,6 +1505,18 @@ impl Program for Viewer {
 
     fn woken(&mut self, window: &mut Window) -> bool {
         let mut changed = false;
+        if let Some(s) = &self.search
+            && (s.count() != self.search_entries.len() || s.done() != self.search_done)
+        {
+            self.search_entries = s.found();
+            self.search_done = s.done();
+            changed = true;
+        }
+        let made = self.thumbs.made();
+        if made != self.thumbs_made {
+            self.thumbs_made = made;
+            changed = true;
+        }
         let (text, stamp) = desktop_text();
         if stamp != self.stamp {
             (self.desktop, self.stamp) = (text, stamp);
@@ -1450,6 +1577,7 @@ impl Program for Viewer {
                 C::own(cmd::TRASH, "File", "Move to the Trash", "Delete"),
                 C::own(cmd::DELETE, "File", "Delete for good…", "Shift+Delete"),
                 C::own(cmd::EMPTY_TRASH, "File", "Empty Trash…", ""),
+                C::own(cmd::EJECT, "File", "Eject", "").enabled(self.here_ejectable()),
                 C::own(cmd::LIST, "View", "As a list", "Ctrl+1").checked(self.view == ViewKind::List),
                 C::own(cmd::ICONS, "View", "As icons", "Ctrl+2").checked(self.view == ViewKind::Icons),
                 C::own(cmd::PANE, "View", "Preview pane", "").checked(self.pane).featured(),
@@ -1474,7 +1602,7 @@ impl Program for Viewer {
         match event {
             TabEvent::Chosen(id) => {
                 self.front = id;
-                self.narrow.clear();
+                self.clear_narrow();
             }
             TabEvent::Close(id) => self.close_tab(id, window),
             TabEvent::CloseOthers(id) => self.tabs.retain(|t| t.id == id),

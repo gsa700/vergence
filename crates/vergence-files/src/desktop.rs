@@ -339,11 +339,18 @@ impl Desktop {
             let Some(source) = source else { continue };
             self.asked.borrow_mut().insert(e.path.clone());
             let (out, waker, key) = (self.marks.clone(), self.waker.clone(), e.path.clone());
+            let picture = !Desktop::launcher(e);
             std::thread::spawn(move || {
-                let img = vergence_decode::decode_file(&source, Some((128, 128))).ok().and_then(|p| {
-                    let f = p.frames.into_iter().next()?;
-                    Some(Arc::new(Image { width: p.width, height: p.height, rgba: f.rgba }))
-                });
+                // A picture's thumbnail comes from the shared cache (made once);
+                // a launcher's icon is decoded small.
+                let img = if picture {
+                    vergence_thumbs::get(&source).map(Arc::new)
+                } else {
+                    vergence_decode::decode_file(&source, Some((128, 128))).ok().and_then(|p| {
+                        let f = p.frames.into_iter().next()?;
+                        Some(Arc::new(Image { width: p.width, height: p.height, rgba: f.rgba }))
+                    })
+                };
                 out.lock().unwrap_or_else(|e| e.into_inner()).insert(key, img);
                 if let Some(w) = waker {
                     w.wake();
@@ -785,9 +792,8 @@ impl Program for Desktop {
             cmd::EJECT => {
                 let disks: Vec<Entry> = chosen.iter().filter(|e| self.fixed_of(e) == Some(Fixed::Volume)).cloned().collect();
                 for e in disks {
-                    let ok = std::process::Command::new("umount").arg(&e.path).status().is_ok_and(|s| s.success());
-                    if !ok {
-                        self.notice = Some(format!("“{}” could not be ejected: it may be in use, or need its owner to unmount it.", e.path.display()));
+                    if let Err(why) = files::eject(&e.path) {
+                        self.notice = Some(format!("“{}” could not be ejected: {why}", e.path.display()));
                     }
                 }
                 self.read();

@@ -14,6 +14,7 @@ vergence-render.workspace = true
 vergence-shell.workspace = true
 vergence-types.workspace = true
 vergence-decode.workspace = true
+vergence-thumbs.workspace = true
 vergence-protocol.workspace = true
 
 [[bin]]
