@@ -302,7 +302,7 @@ fn parse_rgb(s: &str) -> Option<Color> {
 /// `accent = "#rrggbb"` the color of the cursor, the selection and the
 /// highlights.
 fn palette_from(text: &str) -> Palette {
-    let (mut tango, mut light, mut high, mut accent) = (false, false, false, None);
+    let (mut tango, mut high, mut accent) = (false, false, None);
     let mut section = "";
     for line in text.lines().map(str::trim) {
         if line.starts_with('[') {
@@ -313,12 +313,13 @@ fn palette_from(text: &str) -> Palette {
         let value = value.trim().trim_matches('"');
         match (section, key.trim()) {
             ("[terminal]", "scheme") => tango = value.eq_ignore_ascii_case("tango"),
-            ("[appearance]", "color-scheme") => light = value == "light",
             ("[appearance]", "contrast") => high = value == "high",
             ("[appearance]", "accent") => accent = parse_rgb(value),
             _ => {}
         }
     }
+    // The terminal's own style if it chose one, else the desktop's; dark under App default.
+    let light = vergence_ui::content_light(text, "[terminal]", false);
     let mut p = match (tango, light) {
         (true, false) => TANGO,
         (true, true) => TANGO_LIGHT,
@@ -688,6 +689,11 @@ struct Terminal {
     root_timer: bool,
     /// The bar as last described to the server: each tab's id and title, the front one.
     bar_told: Option<(Vec<(u32, String, bool)>, u32, u32)>,
+    /// The app menu's commands as last sent (app settings milestone 1).
+    commands_told: Option<Vec<vergence_ui::AppCommand>>,
+    /// The bar style it asks for, and the one last told the server.
+    bar_style: vergence_ui::BarStyle,
+    bar_style_told: Option<vergence_ui::BarStyle>,
     waker: Option<Waker>,
     /// The close question's answer (confirm.rs): close on the next wake.
     close_now: Rc<std::cell::Cell<bool>>,
@@ -832,6 +838,9 @@ impl Terminal {
             own_bar: true,
             root_timer: false,
             bar_told: None,
+            commands_told: None,
+            bar_style: vergence_ui::bar_style_setting(&config("desktop.toml"), "[terminal]", vergence_ui::BarStyle::Desktop),
+            bar_style_told: None,
 
             waker: None,
             close_now: Rc::new(std::cell::Cell::new(false)),
@@ -1065,6 +1074,42 @@ impl Terminal {
 
     /// Divides the active pane's room in two, with a new terminal in the
     /// second half, which the keys then go to.
+    /// What a line of the right-click menu, or the same command from the app
+    /// menu, does.
+    fn do_item(&mut self, item: Item, window: &mut Window) {
+        match item {
+            Item::Copy => {
+                self.copy(window);
+            }
+            Item::Paste => window.paste(),
+            Item::SplitSide => self.split(Axis::Side, window),
+            Item::SplitStack => self.split(Axis::Stack, window),
+            Item::NewTab => self.new_tab(window),
+            Item::ClosePane => self.close_active(window),
+            Item::PaneToTab => {
+                if let Some(t) = self.take_pane(window) {
+                    self.tabs.push(t);
+                    self.shown = self.tabs.len() - 1;
+                    self.fitted = (0.0, 0.0, 0.0, 0.0);
+                    self.retitle(window);
+                    self.keep();
+                }
+            }
+            Item::PaneToWindow => {
+                // A section of a tab with others; a tab of its own otherwise.
+                let moved = match self.take_pane(window) {
+                    Some(t) => Some(t),
+                    None => self.tabs.get(self.shown).map(|t| t.id).and_then(|id| self.take_tab(id, window)),
+                };
+                if let Some(t) = moved {
+                    // A bar's height down and right of this window, as large.
+                    let step = vergence_ui::bar::BAR_H as f64;
+                    self.tab_to_window(t, Some(vergence_ui::BarPlace::Parent { x: step, y: step }), window);
+                }
+            }
+        }
+    }
+
     fn split(&mut self, axis: Axis, window: &mut Window) {
         self.split_active(axis);
         self.retitle(window);
@@ -1219,37 +1264,8 @@ impl Terminal {
                 self.menu = None;
                 self.menu_hover = None;
                 window.redraw();
-                match chosen {
-                    Some(Item::Copy) => {
-                        self.copy(window);
-                    }
-                    Some(Item::Paste) => window.paste(),
-                    Some(Item::SplitSide) => self.split(Axis::Side, window),
-                    Some(Item::SplitStack) => self.split(Axis::Stack, window),
-                    Some(Item::NewTab) => self.new_tab(window),
-                    Some(Item::ClosePane) => self.close_active(window),
-                    Some(Item::PaneToTab) => {
-                        if let Some(t) = self.take_pane(window) {
-                            self.tabs.push(t);
-                            self.shown = self.tabs.len() - 1;
-                            self.fitted = (0.0, 0.0, 0.0, 0.0);
-                            self.retitle(window);
-                            self.keep();
-                        }
-                    }
-                    Some(Item::PaneToWindow) => {
-                        // A section of a tab with others; a tab of its own otherwise.
-                        let moved = match self.take_pane(window) {
-                            Some(t) => Some(t),
-                            None => self.tabs.get(self.shown).map(|t| t.id).and_then(|id| self.take_tab(id, window)),
-                        };
-                        if let Some(t) = moved {
-                            // A bar's height down and right of this window, as large.
-                            let step = vergence_ui::bar::BAR_H as f64;
-                            self.tab_to_window(t, Some(vergence_ui::BarPlace::Parent { x: step, y: step }), window);
-                        }
-                    }
-                    None => {}
+                if let Some(item) = chosen {
+                    self.do_item(item, window);
                 }
                 true
             }
@@ -1604,6 +1620,20 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
     scene.pop_clip();
 }
 
+/// The app menu's command ids (app settings milestone 1).
+mod cmd {
+    pub const COPY: u32 = 1;
+    pub const PASTE: u32 = 2;
+    pub const NEW_TAB: u32 = 3;
+    pub const CLOSE_TAB: u32 = 4;
+    pub const NEXT_TAB: u32 = 5;
+    pub const PREVIOUS_TAB: u32 = 6;
+    pub const SPLIT_SIDE: u32 = 7;
+    pub const SPLIT_STACK: u32 = 8;
+    pub const PANE_TO_TAB: u32 = 9;
+    pub const PANE_TO_WINDOW: u32 = 10;
+}
+
 impl App for Terminal {
     fn title(&self) -> String {
         "Terminal".into()
@@ -1693,6 +1723,60 @@ impl App for Terminal {
         };
         self.bar_told = Some((tabs, front, page));
         Some(bar)
+    }
+
+    /// The app menu (app settings milestone 1): Edit's Copy and Paste, File's
+    /// New tab and Close tab, Tab's next and previous, and the terminal's own
+    /// splitting and moving in Tab. A terminal: roles' Ctrl+letter keys take
+    /// Shift (Ctrl+Shift+T), as its shortcuts always have.
+    fn commands(&mut self) -> Option<(bool, Vec<vergence_ui::AppCommand>)> {
+        use vergence_ui::{AppCommand as C, Role};
+        let selected = self.front().is_some_and(|s| lock(&s.screen).selection.is_some());
+        let several = self.tabs.len() > 1;
+        let list = vec![
+            C::role(cmd::COPY, Role::Copy).enabled(selected),
+            C::role(cmd::PASTE, Role::Paste),
+            C::role(cmd::NEW_TAB, Role::NewTab),
+            C::role(cmd::CLOSE_TAB, Role::CloseTab),
+            C::role(cmd::NEXT_TAB, Role::NextTab).enabled(several),
+            C::role(cmd::PREVIOUS_TAB, Role::PreviousTab).enabled(several),
+            C::own(cmd::SPLIT_SIDE, "Tab", "Split side by side", "Ctrl+Shift+R"),
+            C::own(cmd::SPLIT_STACK, "Tab", "Split top and bottom", "Ctrl+Shift+D"),
+            C::own(cmd::PANE_TO_TAB, "Tab", "Move section to a new tab", ""),
+            C::own(cmd::PANE_TO_WINDOW, "Tab", "Move to a new window", ""),
+        ];
+        if self.commands_told.as_ref() == Some(&list) {
+            return None;
+        }
+        self.commands_told = Some(list.clone());
+        Some((true, list))
+    }
+
+    fn bar_style(&mut self) -> Option<vergence_ui::BarStyle> {
+        (self.bar_style_told != Some(self.bar_style)).then(|| {
+            self.bar_style_told = Some(self.bar_style);
+            self.bar_style
+        })
+    }
+
+    fn command(&mut self, id: u32, window: &mut Window) {
+        let item = match id {
+            cmd::COPY => Item::Copy,
+            cmd::PASTE => Item::Paste,
+            cmd::NEW_TAB => Item::NewTab,
+            cmd::CLOSE_TAB => Item::ClosePane,
+            cmd::SPLIT_SIDE => Item::SplitSide,
+            cmd::SPLIT_STACK => Item::SplitStack,
+            cmd::PANE_TO_TAB => Item::PaneToTab,
+            cmd::PANE_TO_WINDOW => Item::PaneToWindow,
+            cmd::NEXT_TAB | cmd::PREVIOUS_TAB => {
+                let n = self.tabs.len().max(1);
+                let to = if id == cmd::NEXT_TAB { (self.shown + 1) % n } else { (self.shown + n - 1) % n };
+                return self.show_tab(to, window);
+            }
+            _ => return,
+        };
+        self.do_item(item, window);
     }
 
     fn tab(&mut self, event: vergence_ui::TabEvent, window: &mut Window) {
@@ -1869,6 +1953,7 @@ impl App for Terminal {
             // worked out again at the next frame, and the grids follow it.
             self.palette = palette();
             self.opacity = vergence_ui::opacity_setting(&config("desktop.toml"), "[terminal]");
+            self.bar_style = vergence_ui::bar_style_setting(&config("desktop.toml"), "[terminal]", vergence_ui::BarStyle::Desktop);
             self.settings = Settings::load();
             self.metrics = None;
             window.redraw();

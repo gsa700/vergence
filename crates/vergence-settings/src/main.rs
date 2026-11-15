@@ -2780,7 +2780,9 @@ impl Program for App {
 
     fn theme(&self) -> Theme {
         let text = toml::to_string(&self.desktop).unwrap_or_default();
-        let mut t = Theme::new(self.dark(), self.accent(), appearance_text(&self.desktop, "contrast") == "high");
+        // Its own style if chosen (app settings milestone 1), else the desktop's; light under App default.
+        let dark = !vergence_ui::content_light(&text, "[settings]", true);
+        let mut t = Theme::new(dark, self.accent(), appearance_text(&self.desktop, "contrast") == "high");
         t.reduced_motion = self.desktop.get("appearance").and_then(|a| a.get("reduced-motion")).and_then(|v| v.as_bool()).unwrap_or(false);
         t.double_click = self.desktop.get("mouse").and_then(|a| a.get("double-click")).and_then(|v| v.as_integer()).map_or(400, |v| v.clamp(100, 2000) as u32);
         t.opacity = vergence_ui::opacity_setting(&text, "[settings]");
@@ -2789,6 +2791,13 @@ impl Program for App {
             t.font = family.trim().to_string();
         }
         t
+    }
+
+    /// Its bar: its own choice, else light under App default (Dave,
+    /// 2026-11-14), else the desktop's.
+    fn bar_style(&self) -> Option<vergence_ui::BarStyle> {
+        let text = toml::to_string(&self.desktop).unwrap_or_default();
+        Some(vergence_ui::bar_style_setting(&text, "[settings]", vergence_ui::BarStyle::Light))
     }
 
     fn view(&self, t: &Theme) -> Element<Message> {

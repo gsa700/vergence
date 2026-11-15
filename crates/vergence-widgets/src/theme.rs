@@ -65,7 +65,8 @@ impl Theme {
         t
     }
 
-    /// From desktop.toml's text: `[appearance]` color-scheme ("dark" or
+    /// From desktop.toml's text: the program's own `style` in its `section`
+    /// if it chose one, else `[appearance]` color-scheme ("dark" or
     /// "light"; anything else leaves the program's own choice,
     /// `default_dark`), accent ("#rrggbb"), contrast ("high"),
     /// reduced-motion; `opacity` in the program's `section` (as
@@ -96,6 +97,8 @@ impl Theme {
                 _ => {}
             }
         }
+        // The app's own style, if it chose one, wins (app settings milestone 1).
+        let dark = !vergence_ui::content_light(text, section, !dark);
         let mut t = Theme::new(dark, accent.unwrap_or(c(vergence_look::ACCENT)), high);
         t.reduced_motion = motion;
         t.double_click = double_click;

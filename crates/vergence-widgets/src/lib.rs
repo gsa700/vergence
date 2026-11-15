@@ -88,6 +88,21 @@ pub trait Program {
     /// One of its own bar buttons was pressed (the id it gave it).
     fn bar_button(&mut self, _id: u32, _window: &mut Window) {}
 
+    /// Its app menu's commands (app settings milestone 1): whether it is a
+    /// terminal, and the commands. Asked after each frame; sent when changed.
+    fn commands(&self) -> Option<(bool, Vec<vergence_ui::AppCommand>)> {
+        None
+    }
+
+    /// A command of its app menu was chosen (its id).
+    fn command(&mut self, _id: u32, _window: &mut Window) {}
+
+    /// The style its bar is to be drawn in (app settings milestone 1).
+    /// Asked after each frame; sent when changed.
+    fn bar_style(&self) -> Option<vergence_ui::BarStyle> {
+        None
+    }
+
     /// Another thread used the [`Waker`]. True if the state changed.
     fn woken(&mut self, _window: &mut Window) -> bool {
         false
@@ -155,6 +170,9 @@ struct Host<P: Program> {
     meaning_sent: Option<vergence_ui::MeaningTree>,
     /// The bar last handed to the server: sent again only when it differs.
     bar_sent: Option<vergence_ui::Bar>,
+    /// The app menu and bar style last handed to the server.
+    commands_sent: Option<(bool, Vec<vergence_ui::AppCommand>)>,
+    bar_style_sent: Option<vergence_ui::BarStyle>,
     /// The tint the theme was last built with.
     tint: Option<Color>,
 }
@@ -214,6 +232,27 @@ impl<P: Program> vergence_ui::App for Host<P> {
         } else {
             None
         }
+    }
+
+    fn commands(&mut self) -> Option<(bool, Vec<vergence_ui::AppCommand>)> {
+        let c = self.program.commands();
+        (c.is_some() && c != self.commands_sent).then(|| {
+            self.commands_sent = c.clone();
+            c
+        })?
+    }
+
+    fn command(&mut self, id: u32, window: &mut Window) {
+        self.program.command(id, window);
+        self.changed(window);
+    }
+
+    fn bar_style(&mut self) -> Option<vergence_ui::BarStyle> {
+        let s = self.program.bar_style();
+        (s.is_some() && s != self.bar_style_sent).then(|| {
+            self.bar_style_sent = s;
+            s
+        })?
     }
 
     fn bar_button(&mut self, id: u32, window: &mut Window) {
@@ -359,14 +398,14 @@ impl<P: Program> Host<P> {
 /// `Window::open_window` (its opener is its parent: a dialog's, say).
 pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
     let theme = program.theme();
-    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None, tint: None })
+    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None })
 }
 
 /// Opens the program's window and runs until it is closed. `size` is the
 /// size asked for, in reference units.
 pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {
     let theme = program.theme();
-    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None, tint: None };
+    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None };
     vergence_ui::run(&mut host, size)
 }
 

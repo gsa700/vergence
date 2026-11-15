@@ -192,6 +192,82 @@ pub enum Input {
     Paste(String),
 }
 
+/// A choice of light or dark as an app's table holds it (app settings
+/// milestone 1): absent or "default" is the desktop's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pick {
+    Desktop,
+    Dark,
+    Light,
+}
+
+/// A value of desktop.toml's text: `key` in table `section` (as
+/// "[terminal]"), quotes and a trailing comment taken off.
+pub fn table_value(text: &str, section: &str, key: &str) -> Option<String> {
+    let mut within = "";
+    let mut found = None;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            within = line;
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else { continue };
+        if within == section && k.trim() == key {
+            let v = v.trim();
+            let v = match v.strip_prefix('"') {
+                Some(rest) => rest.split('"').next().unwrap_or(""),
+                None => v.split('#').next().unwrap_or("").trim(),
+            };
+            found = Some(v.to_string());
+        }
+    }
+    found
+}
+
+/// The app's own light or dark for `key` ("style" for its content,
+/// "bar-style" for its window bar) in its table.
+pub fn app_pick(text: &str, section: &str, key: &str) -> Pick {
+    match table_value(text, section, key).as_deref().map(str::to_ascii_lowercase).as_deref() {
+        Some("dark") => Pick::Dark,
+        Some("light") => Pick::Light,
+        _ => Pick::Desktop,
+    }
+}
+
+/// The desktop's Style (`[appearance] color-scheme`): Some(true) light,
+/// Some(false) dark, None "App default" (each app its own).
+pub fn desktop_pick(text: &str) -> Option<bool> {
+    match table_value(text, "[appearance]", "color-scheme").as_deref() {
+        Some("light") => Some(true),
+        Some("dark") => Some(false),
+        _ => None,
+    }
+}
+
+/// Whether an app's content is light (app settings milestone 1): its own
+/// `style` if it chose one (an app's own choice wins over the desktop's
+/// Dark or Light, Dave 2026-11-14), else the desktop's Style, else under
+/// "App default" the app's built-in look.
+pub fn content_light(text: &str, section: &str, builtin_light: bool) -> bool {
+    match app_pick(text, section, "style") {
+        Pick::Light => true,
+        Pick::Dark => false,
+        Pick::Desktop => desktop_pick(text).unwrap_or(builtin_light),
+    }
+}
+
+/// The bar style an app asks the server for: its own `bar-style` if it
+/// chose one, else under "App default" its built-in one (the settings app's
+/// light bar), else the desktop's.
+pub fn bar_style_setting(text: &str, section: &str, builtin: BarStyle) -> BarStyle {
+    match app_pick(text, section, "bar-style") {
+        Pick::Light => BarStyle::Light,
+        Pick::Dark => BarStyle::Dark,
+        Pick::Desktop if desktop_pick(text).is_none() => builtin,
+        Pick::Desktop => BarStyle::Desktop,
+    }
+}
+
 /// How opaque a program's window ground is to be, from desktop.toml's text:
 /// `opacity` in the program's own table (`section`, as "[terminal]") if it
 /// is there, else `window-opacity` under `[appearance]`, the desktop's word
@@ -1863,6 +1939,23 @@ impl<'a> Runner<'a> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_apps_own_look_wins_and_otherwise_the_desktops_or_its_builtin() {
+        use super::{BarStyle, Pick, app_pick, bar_style_setting, content_light, table_value};
+        let t = "[appearance]\ncolor-scheme = \"dark\"\n[terminal]\nstyle = \"light\" # mine\nbar-style = \"dark\"\n";
+        assert!(content_light(t, "[terminal]", false), "the app's light wins over the desktop's dark");
+        assert!(!content_light(t, "[settings]", true), "no own style: the desktop's dark");
+        assert_eq!(bar_style_setting(t, "[terminal]", BarStyle::Desktop), BarStyle::Dark);
+        assert_eq!(bar_style_setting(t, "[settings]", BarStyle::Light), BarStyle::Desktop, "the desktop forces dark: the built-in light bar yields");
+        let app_default = "[appearance]\ncolor-scheme = \"default\"\n";
+        assert_eq!(bar_style_setting(app_default, "[settings]", BarStyle::Light), BarStyle::Light);
+        assert_eq!(bar_style_setting("", "[terminal]", BarStyle::Desktop), BarStyle::Desktop);
+        assert!(content_light(app_default, "[settings]", true));
+        assert!(!content_light(app_default, "[terminal]", false));
+        assert_eq!(app_pick("[terminal]\nstyle = default\n", "[terminal]", "style"), Pick::Desktop);
+        assert_eq!(table_value("[a]\nk = \"x # y\"\n", "[a]", "k").as_deref(), Some("x # y"));
+    }
+
     #[test]
     fn a_program_s_opacity_is_its_own_word_or_the_desktop_s() {
         use super::opacity_setting as o;
