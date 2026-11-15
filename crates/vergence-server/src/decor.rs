@@ -429,7 +429,7 @@ impl Server {
         self.round
             .get_or_insert_with(|| {
                 use smithay::backend::renderer::gles::{UniformName, UniformType};
-                let uniforms = [UniformName::new("size", UniformType::_2f), UniformName::new("radius", UniformType::_1f)];
+                let uniforms = [UniformName::new("size", UniformType::_2f), UniformName::new("radius", UniformType::_1f), UniformName::new("top", UniformType::_1f)];
                 match renderer.compile_custom_texture_shader(vergence_render::round::ROUND_SHADER, &uniforms) {
                     Ok(p) => Some(p),
                     Err(e) => {
@@ -985,6 +985,8 @@ impl Server {
                                         let uniforms = vec![
                                             Uniform::new("size", UniformValue::_2f(p.px.w as f32, p.px.h as f32)),
                                             Uniform::new("radius", UniformValue::_1f(vergence_look::RADIUS * per_point)),
+                                            // Drawn under its bar: its own top corners are there too.
+                                            Uniform::new("top", UniformValue::_1f(if n.inset() > 0 { 1.0 } else { 0.0 })),
                                         ];
                                         let dst = Rectangle::<i32, Physical>::new(at, p.logical.to_f64().to_physical(scale).to_i32_round());
                                         let src = Rectangle::<f64, smithay::utils::Buffer>::from_size((p.px.w as f64, p.px.h as f64).into());

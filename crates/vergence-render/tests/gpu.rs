@@ -439,12 +439,15 @@ fn the_round_shader_on_the_gpu_matches_its_arithmetic() {
     let Some(mut g) = gpu() else { return };
     let (w, h, r) = (64u32, 40u32, 9.0f32);
     let rgba = vec![200u8; (w * h * 4) as usize];
-    let out = g.shader_pass(ROUND_SHADER, &rgba, w, h, &[("size", &[w as f32, h as f32]), ("radius", &[r])]).expect("the round shader on this GPU");
-    for y in 0..h {
-        for x in 0..w {
-            let want = (200.0 * cover(x as f32 + 0.5, y as f32 + 0.5, w as f32, h as f32, r)).round() as i32;
-            let got = out.data[((y * w + x) * 4 + 3) as usize] as i32;
-            assert!((want - got).abs() <= 2, "({x}, {y}): alpha {got}, want {want}");
+    // Bottom corners only, then the top ones too (a window drawn under its bar).
+    for top in [false, true] {
+        let out = g.shader_pass(ROUND_SHADER, &rgba, w, h, &[("size", &[w as f32, h as f32]), ("radius", &[r]), ("top", &[if top { 1.0 } else { 0.0 }])]).expect("the round shader on this GPU");
+        for y in 0..h {
+            for x in 0..w {
+                let want = (200.0 * cover(x as f32 + 0.5, y as f32 + 0.5, w as f32, h as f32, r, top)).round() as i32;
+                let got = out.data[((y * w + x) * 4 + 3) as usize] as i32;
+                assert!((want - got).abs() <= 2, "top {top} ({x}, {y}): alpha {got}, want {want}");
+            }
         }
     }
 }
