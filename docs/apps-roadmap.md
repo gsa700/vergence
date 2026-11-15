@@ -120,6 +120,21 @@ the order when its turn is near:
   a fixed 8%, theme.rs `TINT_MIX`): an amount to choose, and the text
   scrolled under the frosted bar kept readable with it on.
 
+- **Screenshots and screen recording built in, with macOS's keys**
+  (2026-11-15: "a built in for screen shots and video capture that mimics
+  the macos keyboard shortcuts, I love that so much more than diving into a
+  menu or print screen copy paste"; "when we get to the right spot"). As on
+  the Mac, with Super for Command: Super+Shift+3 the whole screen (each
+  screen its own file), Super+Shift+4 an area dragged out (Space turns it
+  into a window picker: the window alone, with its shadow), Super+Shift+5
+  a small bar for both, with screen and area recording; Ctrl added sends
+  the picture to the clipboard instead of a file. The capture's thumbnail
+  floats in a corner for a few seconds (click to open it in Close-Up, drag
+  it into an app). Files to ~/Pictures/Screenshots by default, named by
+  date and time. The server does the capturing (it has every pixel; vctl
+  shot already captures a screen); recording needs a video encoder, which
+  is the video milestone's question.
+
 ## Questions for Dave (when each app's turn comes)
 
 1. **Spellchecking**: dictionaries are data from other projects (Hunspell's
