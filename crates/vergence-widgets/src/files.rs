@@ -426,18 +426,29 @@ pub fn when(t: SystemTime) -> String {
     }
 }
 
-struct Local {
-    year: i32,
-    month: i32,
-    mday: i32,
-    yday: i32,
-    hour: i32,
-    min: i32,
+pub struct Local {
+    pub year: i32,
+    /// 0 for January.
+    pub month: i32,
+    pub mday: i32,
+    pub yday: i32,
+    pub hour: i32,
+    pub min: i32,
+    pub sec: i32,
+}
+
+/// A moment as local "YYYY-MM-DDThh:mm:ss" (the freedesktop Trash's DeletionDate).
+pub fn local_stamp(t: SystemTime) -> String {
+    let secs = t.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    match local(secs) {
+        Some(l) => format!("{}-{:02}-{:02}T{:02}:{:02}:{:02}", l.year, l.month + 1, l.mday, l.hour, l.min, l.sec),
+        None => String::new(),
+    }
 }
 
 /// The local time of `secs` since 1970, by localtime_r(3) (glibc's and
 /// FreeBSD's struct tm agree on these fields and their order).
-fn local(secs: i64) -> Option<Local> {
+pub fn local(secs: i64) -> Option<Local> {
     #[repr(C)]
     struct Tm {
         sec: i32,
@@ -458,7 +469,7 @@ fn local(secs: i64) -> Option<Local> {
     let mut tm = Tm { sec: 0, min: 0, hour: 0, mday: 0, mon: 0, year: 0, wday: 0, yday: 0, isdst: 0, gmtoff: 0, zone: std::ptr::null() };
     // SAFETY: localtime_r reads the time and fills the struct we own.
     let r = unsafe { localtime_r(&secs, &mut tm) };
-    (!r.is_null()).then_some(Local { year: tm.year + 1900, month: tm.mon, mday: tm.mday, yday: tm.yday, hour: tm.hour, min: tm.min })
+    (!r.is_null()).then_some(Local { year: tm.year + 1900, month: tm.mon, mday: tm.mday, yday: tm.yday, hour: tm.hour, min: tm.min, sec: tm.sec })
 }
 
 /// The start of a file, if it is text.

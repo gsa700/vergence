@@ -15,8 +15,16 @@
 //!   with the app chosen for its type (the server's Open, as the dock does).
 //! - **Choosing**: a click chooses one, Ctrl+click adds or takes away,
 //!   Shift+click a run; the arrows move the choice.
+//! - **File operations** (ops.rs): New Folder (Ctrl+Shift+N), Rename (F2),
+//!   Cut, Copy, Paste (Ctrl+X, C, V; a clash asks: Replace, Keep both,
+//!   Skip), Duplicate (Ctrl+D), Move to Trash (Delete), Delete for good
+//!   (Shift+Delete, after a question); long copies and moves on a worker
+//!   with a progress strip and Stop; Undo (Ctrl+Z) for each. The freedesktop
+//!   Trash, shared with other desktops: Restore puts a file back where it
+//!   was; Empty Trash asks first.
 
 mod hand;
+mod ops;
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -57,8 +65,43 @@ mod cmd {
     pub const NEXT_TAB: u32 = 14;
     pub const PREV_TAB: u32 = 15;
     pub const RELOAD: u32 = 16;
+    pub const CUT: u32 = 20;
+    pub const COPY: u32 = 21;
+    pub const PASTE: u32 = 22;
+    pub const DUPLICATE: u32 = 23;
+    pub const RENAME: u32 = 24;
+    pub const TRASH: u32 = 25;
+    pub const DELETE: u32 = 26;
+    pub const NEW_FOLDER: u32 = 27;
+    pub const UNDO: u32 = 28;
+    pub const RESTORE: u32 = 29;
+    pub const EMPTY_TRASH: u32 = 30;
     pub const SETTINGS: u32 = 40;
     pub const ABOUT: u32 = 41;
+}
+
+/// A question in the strip above the folder.
+#[derive(Clone, Debug)]
+enum Ask {
+    /// A paste would replace these names.
+    Clash { sources: Vec<PathBuf>, dir: PathBuf, cut: bool, names: Vec<String> },
+    /// Delete these for good.
+    Forever(Vec<PathBuf>),
+    EmptyTrash,
+}
+
+/// A name being typed: a new folder's, or a new name for a file.
+#[derive(Clone, Debug)]
+struct Naming {
+    rename: Option<PathBuf>,
+    text: String,
+}
+
+/// A long copy or move on a worker.
+struct Job {
+    words: String,
+    progress: Arc<ops::Progress>,
+    result: Arc<Mutex<Option<(ops::Done, Option<String>)>>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -151,6 +194,10 @@ type Shown = Arc<Mutex<Option<(PathBuf, Option<Arc<Image>>)>>>;
 struct Shared {
     inbox: Arc<Mutex<Vec<Vec<PathBuf>>>>,
     next_tab: u32,
+    /// What Cut or Copy took, and whether it was a cut.
+    clip: Option<(Vec<PathBuf>, bool)>,
+    /// What can be undone, the newest last.
+    undo: Vec<ops::Done>,
 }
 
 type SharedRef = Rc<RefCell<Shared>>;
@@ -178,10 +225,19 @@ struct Viewer {
     last_click: Option<(Instant, PathBuf)>,
     width: f32,
     prefs_open: Rc<Cell<bool>>,
+    ask: Option<Ask>,
+    naming: Option<Naming>,
+    job: Option<Job>,
 }
 
 #[derive(Debug, Clone)]
 enum Msg {
+    Answer(Option<ops::Clash>),
+    Confirm(bool),
+    NameTyped(String),
+    NameDone,
+    NameCancel,
+    StopJob,
     Run(u32),
     Go(Place),
     Crumb(PathBuf),
@@ -202,11 +258,6 @@ fn desktop_text() -> (String, Option<SystemTime>) {
     }
 }
 
-/// The freedesktop Trash in the user's data folder (its files).
-fn trash_files() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| files::home().map(|h| h.join(".local/share")))?;
-    Some(base.join("Trash/files"))
-}
 
 /// Opens files with the apps chosen for their types: the server's Open in a
 /// Vergence session (the dock shows them starting), else started here.
@@ -259,6 +310,9 @@ impl Viewer {
             last_click: None,
             width: 900.0,
             prefs_open: Rc::new(Cell::new(false)),
+            ask: None,
+            naming: None,
+            job: None,
         }
     }
 
@@ -548,6 +602,64 @@ impl Viewer {
                     t.read();
                 }
             }
+            cmd::CUT | cmd::COPY => {
+                let paths = self.chosen_paths();
+                if !paths.is_empty() {
+                    window.copy(&paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join("\n"));
+                    self.shared.borrow_mut().clip = Some((paths, id == cmd::CUT));
+                }
+            }
+            cmd::PASTE => self.paste(),
+            cmd::DUPLICATE => {
+                let paths = self.chosen_paths();
+                if let Some(dir) = paths.first().and_then(|p| p.parent()).map(Path::to_path_buf) {
+                    self.start_paste(paths, dir, false, ops::Clash::KeepBoth);
+                }
+            }
+            cmd::RENAME => {
+                if let [one] = self.chosen_paths().as_slice() {
+                    let name = one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    self.naming = Some(Naming { rename: Some(one.clone()), text: name });
+                }
+            }
+            cmd::NEW_FOLDER => {
+                if self.here().is_some() {
+                    self.naming = Some(Naming { rename: None, text: "New folder".into() });
+                }
+            }
+            cmd::TRASH => self.trash_chosen(),
+            cmd::DELETE => {
+                let paths = self.chosen_paths();
+                if !paths.is_empty() {
+                    self.ask = Some(Ask::Forever(paths));
+                }
+            }
+            cmd::UNDO => {
+                let last = self.shared.borrow_mut().undo.pop();
+                if let Some(d) = last {
+                    self.notice = Some(match ops::undo(&d) {
+                        Ok(words) => words,
+                        Err(why) => format!("It could not be undone: {why}"),
+                    });
+                    self.read_all();
+                }
+            }
+            cmd::RESTORE => {
+                self.notice = None;
+                let names: Vec<String> = self.chosen_paths().iter().filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).collect();
+                let mut back = 0;
+                for n in &names {
+                    match ops::restore(n) {
+                        Ok(_) => back += 1,
+                        Err(e) => self.notice = Some(format!("“{n}” could not be put back: {e}")),
+                    }
+                }
+                if back > 0 && self.notice.is_none() {
+                    self.notice = Some(format!("Put back where {} came from.", if back == 1 { "it" } else { "they" }));
+                }
+                self.read_all();
+            }
+            cmd::EMPTY_TRASH => self.ask = Some(Ask::EmptyTrash),
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
                 let about = vergence_widgets::about::About::new(APP_ID, "File Viewer", env!("CARGO_PKG_VERSION"), "Vergence's file manager: your folders as a list or icons, Preview on the space bar, files opened with the apps chosen for them.", self.theme());
@@ -569,6 +681,226 @@ impl Viewer {
         if self.tabs.is_empty() {
             window.close();
         }
+    }
+
+    /// The folder shown, if it is one (not Recent).
+    fn here(&self) -> Option<PathBuf> {
+        self.front_tab().and_then(|t| t.dir().map(Path::to_path_buf))
+    }
+
+    fn chosen_paths(&self) -> Vec<PathBuf> {
+        self.front_tab().map(|t| t.chosen.clone()).unwrap_or_default()
+    }
+
+    /// Whether the folder shown is the Trash's.
+    fn in_trash(&self) -> bool {
+        let trash = ops::trash_dir().map(|d| d.join("files"));
+        trash.is_some() && self.here() == trash
+    }
+
+    /// Every tab read again (after an operation).
+    fn read_all(&mut self) {
+        for t in &mut self.tabs {
+            t.read();
+        }
+    }
+
+    fn paste(&mut self) {
+        let Some(dir) = self.here() else { return };
+        let Some((sources, cut)) = self.shared.borrow().clip.clone() else { return };
+        let names = ops::clashes(&sources, &dir);
+        if names.is_empty() {
+            self.start_paste(sources, dir, cut, ops::Clash::KeepBoth);
+        } else {
+            self.ask = Some(Ask::Clash { sources, dir, cut, names });
+        }
+    }
+
+    /// A paste (or Duplicate) on a worker, its progress in the strip.
+    fn start_paste(&mut self, sources: Vec<PathBuf>, dir: PathBuf, cut: bool, clash: ops::Clash) {
+        if self.job.is_some() {
+            self.notice = Some("A copy is still going on.".into());
+            return;
+        }
+        let plan = ops::plan_paste(&sources, &dir, cut, clash);
+        if plan.is_empty() {
+            return;
+        }
+        if cut {
+            // A cut is used once.
+            self.shared.borrow_mut().clip = None;
+        }
+        let words = format!("{} {} item{}", if cut { "Moving" } else { "Copying" }, plan.len(), if plan.len() == 1 { "" } else { "s" });
+        let progress = Arc::new(ops::Progress::default());
+        let result: Arc<Mutex<Option<(ops::Done, Option<String>)>>> = Arc::default();
+        let (p, r, waker) = (progress.clone(), result.clone(), self.waker.clone());
+        std::thread::spawn(move || {
+            // The window looks again while it runs, and when it ends.
+            let ticking = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let (t, w) = (ticking.clone(), waker.clone());
+            std::thread::spawn(move || {
+                while t.load(std::sync::atomic::Ordering::Relaxed) {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    if let Some(w) = &w {
+                        w.wake();
+                    }
+                }
+            });
+            let out = ops::run_paste(&plan, cut, &p);
+            *r.lock().unwrap_or_else(|e| e.into_inner()) = Some(out);
+            ticking.store(false, std::sync::atomic::Ordering::Relaxed);
+            if let Some(w) = waker {
+                w.wake();
+            }
+        });
+        self.job = Some(Job { words, progress, result });
+    }
+
+    /// A finished job: what it did goes on the undo stack; its error is said.
+    fn job_ended(&mut self) -> bool {
+        let Some(job) = &self.job else { return false };
+        let Some((done, error)) = job.result.lock().unwrap_or_else(|e| e.into_inner()).take() else { return true };
+        let made = !matches!(&done, ops::Done::Copied(v) if v.is_empty()) && !matches!(&done, ops::Done::Moved(v) if v.is_empty());
+        if made {
+            self.shared.borrow_mut().undo.push(done);
+        }
+        if let Some(e) = error {
+            self.notice = Some(e);
+        }
+        self.job = None;
+        self.read_all();
+        true
+    }
+
+    fn trash_chosen(&mut self) {
+        let paths = self.chosen_paths();
+        if paths.is_empty() {
+            return;
+        }
+        // This operation's words replace the last one's.
+        self.notice = None;
+        if self.in_trash() {
+            // In the Trash itself, Delete means for good.
+            self.ask = Some(Ask::Forever(paths));
+            return;
+        }
+        let mut done = Vec::new();
+        for p in &paths {
+            match ops::trash(p) {
+                Ok(name) => done.push((p.clone(), name)),
+                Err(e) => {
+                    self.notice = Some(format!("“{}” could not be moved to the Trash: {e}", p.file_name().unwrap_or_default().to_string_lossy()));
+                    break;
+                }
+            }
+        }
+        if !done.is_empty() {
+            if self.notice.is_none() {
+                self.notice = Some(format!("{} moved to the Trash. Ctrl+Z puts {} back.", if done.len() == 1 { "1 item".to_string() } else { format!("{} items", done.len()) }, if done.len() == 1 { "it" } else { "them" }));
+            }
+            self.shared.borrow_mut().undo.push(ops::Done::Trashed(done));
+        }
+        self.read_all();
+    }
+
+    /// The name strip's Enter: the folder made, or the file renamed.
+    fn name_done(&mut self) {
+        let Some(n) = self.naming.take() else { return };
+        let name = n.text.trim().to_string();
+        if name.is_empty() || name == "." || name == ".." {
+            return;
+        }
+        if name.contains('/') {
+            self.notice = Some("A name cannot have / in it.".into());
+            self.naming = Some(n);
+            return;
+        }
+        let done = match &n.rename {
+            Some(from) => {
+                let to = from.with_file_name(&name);
+                if to == *from {
+                    return;
+                }
+                if to.symlink_metadata().is_ok() {
+                    self.notice = Some(format!("Something named “{name}” is already here."));
+                    self.naming = Some(n);
+                    return;
+                }
+                std::fs::rename(from, &to).map(|_| (ops::Done::Renamed(from.clone(), to.clone()), to))
+            }
+            None => {
+                let Some(dir) = self.here() else { return };
+                let to = dir.join(ops::free_name(&name, |x| dir.join(x).symlink_metadata().is_ok()));
+                std::fs::create_dir(&to).map(|_| (ops::Done::NewFolder(to.clone()), to))
+            }
+        };
+        match done {
+            Ok((d, to)) => {
+                self.shared.borrow_mut().undo.push(d);
+                self.read_all();
+                if let Some(t) = self.front_mut() {
+                    t.chosen = vec![to.clone()];
+                    t.cursor = Some(to);
+                    t.turn += 1;
+                }
+            }
+            Err(e) => self.notice = Some(format!("It could not be done: {}", files::plain(&e))),
+        }
+    }
+
+    /// The strips above the folder: a question, a name being typed, a job's progress.
+    fn strips(&self, t: &Theme) -> Vec<Element<Msg>> {
+        let strip = |items: Vec<Element<Msg>>| -> Element<Msg> { panel(row(items).spacing(8.0).align(Align::Center).width(Length::FILL)).color(t.card).radius(8.0).padding(Padding::hv(6.0, 10.0)).width(Length::FILL) };
+        let b = |text: &str, m: Msg, accent: bool| -> Element<Msg> { button(label(text).size(12.0)).look(if accent { ButtonLook::Accent } else { ButtonLook::Plain }).padding(Padding::hv(3.0, 10.0)).on_press(m).name(text) };
+        let mut out = Vec::new();
+        match &self.ask {
+            Some(Ask::Clash { names, .. }) => {
+                let what = if names.len() == 1 { format!("“{}” is already here.", names[0]) } else { format!("{} items of these names are already here.", names.len()) };
+                out.push(strip(vec![
+                    label(what).size(12.0).weight(600).wrap().width(Length::FILL),
+                    b("Cancel", Msg::Answer(None), false),
+                    b("Skip", Msg::Answer(Some(ops::Clash::Skip)), false),
+                    b("Keep both", Msg::Answer(Some(ops::Clash::KeepBoth)), false),
+                    b("Replace", Msg::Answer(Some(ops::Clash::Replace)), true),
+                ]));
+            }
+            Some(Ask::Forever(paths)) => {
+                let what = if paths.len() == 1 { format!("Delete “{}” for good? It cannot be undone.", paths[0].file_name().unwrap_or_default().to_string_lossy()) } else { format!("Delete {} items for good? They cannot be undone.", paths.len()) };
+                out.push(strip(vec![label(what).size(12.0).weight(600).wrap().width(Length::FILL), b("Cancel", Msg::Confirm(false), false), b("Delete", Msg::Confirm(true), true)]));
+            }
+            Some(Ask::EmptyTrash) => {
+                out.push(strip(vec![label("Empty the Trash? What is in it cannot be got back.").size(12.0).weight(600).wrap().width(Length::FILL), b("Cancel", Msg::Confirm(false), false), b("Empty Trash", Msg::Confirm(true), true)]));
+            }
+            None => {}
+        }
+        if let Some(n) = &self.naming {
+            out.push(strip(vec![
+                label(if n.rename.is_some() { "New name" } else { "New folder" }).size(12.0),
+                field(n.text.clone(), Msg::NameTyped).on_submit(Msg::NameDone).autofocus().width(Length::FILL).name("Name"),
+                b("Cancel", Msg::NameCancel, false),
+                b(if n.rename.is_some() { "Rename" } else { "Make" }, Msg::NameDone, true),
+            ]));
+        }
+        if let Some(job) = &self.job {
+            use std::sync::atomic::Ordering::Relaxed;
+            let (done, total) = (job.progress.done.load(Relaxed), job.progress.total.load(Relaxed).max(1));
+            let part = (done as f32 / total as f32).clamp(0.0, 1.0);
+            let now = job.progress.now.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let bar = drawing(move |scene, _, r: Rect, t: &Theme| {
+                let r = Rect::new(r.x, r.y + (r.h - 6.0) / 2.0, r.w, 6.0);
+                scene.fill_rounded(r, 3.0, t.line);
+                scene.fill_rounded(Rect::new(r.x, r.y, r.w * part, r.h), 3.0, t.accent);
+            })
+            .width(Length::Fixed(160.0))
+            .height(Length::Fixed(16.0));
+            out.push(strip(vec![
+                label(format!("{} · {:.0}% · {} of {}", job.words, part * 100.0, files::size_words(done), files::size_words(total))).size(12.0),
+                bar,
+                label(now).size(11.0).dim().elide().width(Length::FILL),
+                b("Stop", Msg::StopJob, false),
+            ]));
+        }
+        out
     }
 
     // --- Views ---
@@ -615,6 +947,16 @@ impl Viewer {
         }
         items.push(row(crumbs).spacing(2.0).align(Align::Center));
         items.push(flexible());
+        let any = tab.is_some_and(|t| !t.chosen.is_empty());
+        if self.in_trash() {
+            items.push(button(label("Put back").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(any, Msg::Run(cmd::RESTORE)).name("Put back"));
+            items.push(button(label("Empty Trash").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press(Msg::Run(cmd::EMPTY_TRASH)).name("Empty Trash"));
+        } else {
+            items.push(group(vec![
+                tool(Icon::NewFolder, "New folder", self.here().is_some().then_some(Msg::Run(cmd::NEW_FOLDER))),
+                tool(Icon::Trash, "Move to the Trash", any.then_some(Msg::Run(cmd::TRASH))),
+            ]));
+        }
         items.push(field(self.narrow.clone(), Msg::Narrow).placeholder("Narrow this folder").width(Length::Fixed(200.0)).name("Narrow this folder"));
         items.push(group(vec![
             toggle(Icon::List, "As a list", self.view == ViewKind::List, Msg::Run(cmd::LIST)),
@@ -626,7 +968,7 @@ impl Viewer {
 
     fn places(&self) -> Vec<Place> {
         let mut p = files::places();
-        if let Some(trash) = trash_files() {
+        if let Some(trash) = ops::trash_dir().map(|d| d.join("files")) {
             // After the computer and its disks.
             p.push(Place { name: "Trash".into(), path: Some(trash) });
         }
@@ -807,6 +1149,10 @@ impl Program for Viewer {
                     .width(Length::FILL),
             );
         }
+        let strips = self.strips(t);
+        if !strips.is_empty() {
+            all.push(panel(column(strips).spacing(4.0).width(Length::FILL)).padding(Padding { top: 8.0, bottom: 0.0, left: 8.0, right: 8.0 }).radius(0.0).width(Length::FILL));
+        }
         all.push(panel(middle).padding(Padding { top: 8.0, bottom: 8.0, left: 8.0, right: 8.0 }).radius(0.0).width(Length::FILL).height(Length::FILL));
         // The foot: how many, how many chosen.
         let n = self.visible().len();
@@ -833,6 +1179,47 @@ impl Program for Viewer {
             }
             Msg::DismissNotice => self.notice = None,
             Msg::ClosePreview => self.preview = false,
+            Msg::Answer(a) => {
+                if let (Some(Ask::Clash { sources, dir, cut, .. }), Some(clash)) = (self.ask.take(), a) {
+                    self.start_paste(sources, dir, cut, clash);
+                }
+            }
+            Msg::Confirm(yes) => match self.ask.take() {
+                Some(Ask::Forever(paths)) if yes => {
+                    for p in &paths {
+                        if let Err(e) = ops::remove_tree(p) {
+                            self.notice = Some(format!("“{}” could not be deleted: {}", p.file_name().unwrap_or_default().to_string_lossy(), files::plain(&e)));
+                            break;
+                        }
+                        // Deleted out of the Trash: its info goes too.
+                        if self.in_trash()
+                            && let (Some(dir), Some(n)) = (ops::trash_dir(), p.file_name())
+                        {
+                            let _ = std::fs::remove_file(dir.join("info").join(format!("{}.trashinfo", n.to_string_lossy())));
+                        }
+                    }
+                    self.read_all();
+                }
+                Some(Ask::EmptyTrash) if yes => {
+                    if let Err(e) = ops::empty_trash() {
+                        self.notice = Some(format!("The Trash could not be emptied: {}", files::plain(&e)));
+                    }
+                    self.read_all();
+                }
+                _ => {}
+            },
+            Msg::NameTyped(s) => {
+                if let Some(n) = &mut self.naming {
+                    n.text = s;
+                }
+            }
+            Msg::NameDone => self.name_done(),
+            Msg::NameCancel => self.naming = None,
+            Msg::StopJob => {
+                if let Some(j) = &self.job {
+                    j.progress.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
         }
         self.want_picture();
         window.redraw();
@@ -856,10 +1243,31 @@ impl Program for Viewer {
         const ESCAPE: u32 = 0xff1b;
         const BACKSPACE: u32 = 0xff08;
         const SPACE: u32 = 0x20;
+        const DELETE: u32 = 0xffff;
+        const F2: u32 = 0xffbf;
         let Input::Key { sym, pressed: true, modifiers: m, .. } = input else { return None };
         self.mods = *m;
+        // A name being typed: its field has the keys (Escape cancels it).
+        if self.naming.is_some() {
+            if *sym == ESCAPE {
+                self.naming = None;
+                window.redraw();
+                return Some(true);
+            }
+            return None;
+        }
         let typing = !self.narrow.is_empty();
         match *sym {
+            ESCAPE if self.ask.is_some() => self.ask = None,
+            DELETE if m.shift && !typing => self.run(cmd::DELETE, window),
+            DELETE if !typing => self.run(cmd::TRASH, window),
+            F2 => self.run(cmd::RENAME, window),
+            s if m.ctrl && m.shift && (s == 0x6e || s == 0x4e) => self.run(cmd::NEW_FOLDER, window),
+            s if m.ctrl && (s == 0x78 || s == 0x58) && !typing => self.run(cmd::CUT, window),
+            s if m.ctrl && (s == 0x63 || s == 0x43) && !typing => self.run(cmd::COPY, window),
+            s if m.ctrl && (s == 0x76 || s == 0x56) && !typing => self.run(cmd::PASTE, window),
+            s if m.ctrl && (s == 0x64 || s == 0x44) => self.run(cmd::DUPLICATE, window),
+            s if m.ctrl && (s == 0x7a || s == 0x5a) && !typing => self.run(cmd::UNDO, window),
             UP if m.alt => self.run(cmd::UP, window),
             LEFT if m.alt => self.run(cmd::BACK, window),
             RIGHT if m.alt => self.run(cmd::FORWARD, window),
@@ -932,6 +1340,11 @@ impl Program for Viewer {
             self.open_paths(&paths);
             changed = true;
         }
+        // A copy or move running (its ticks) or ended.
+        if self.job.is_some() {
+            self.job_ended();
+            changed = true;
+        }
         // A picture decoded: drawn if it is the cursor's.
         if self.cursor_entry().is_some_and(|e| self.picture_of(&e.path).is_some()) {
             changed = true;
@@ -965,6 +1378,16 @@ impl Program for Viewer {
                 C::own(cmd::OPEN, "File", "Open", "Enter").featured(),
                 C::own(cmd::PREVIEW, "File", "Preview", "Space").checked(self.preview),
                 C::role(cmd::SELECT_ALL, Role::SelectAll),
+                C::role(cmd::UNDO, Role::Undo),
+                C::role(cmd::CUT, Role::Cut),
+                C::role(cmd::COPY, Role::Copy),
+                C::role(cmd::PASTE, Role::Paste),
+                C::own(cmd::DUPLICATE, "Edit", "Duplicate", "Ctrl+D"),
+                C::own(cmd::RENAME, "Edit", "Rename…", "F2"),
+                C::own(cmd::NEW_FOLDER, "File", "New folder", "Ctrl+Shift+N").featured(),
+                C::own(cmd::TRASH, "File", "Move to the Trash", "Delete"),
+                C::own(cmd::DELETE, "File", "Delete for good…", "Shift+Delete"),
+                C::own(cmd::EMPTY_TRASH, "File", "Empty Trash…", ""),
                 C::own(cmd::LIST, "View", "As a list", "Ctrl+1").checked(self.view == ViewKind::List),
                 C::own(cmd::ICONS, "View", "As icons", "Ctrl+2").checked(self.view == ViewKind::Icons),
                 C::own(cmd::PANE, "View", "Preview pane", "").checked(self.pane).featured(),
@@ -1069,7 +1492,7 @@ fn main() {
     if hand::hand_over(&paths) {
         return;
     }
-    let shared = Rc::new(RefCell::new(Shared { inbox: Arc::default(), next_tab: 0 }));
+    let shared = Rc::new(RefCell::new(Shared { inbox: Arc::default(), next_tab: 0, clip: None, undo: Vec::new() }));
     let mut v = Viewer::new(shared);
     v.open_paths(&paths);
     if let Err(e) = vergence_widgets::run(v, (1040, 680)) {
@@ -1083,7 +1506,7 @@ mod tests {
     use super::*;
 
     fn shared() -> SharedRef {
-        Rc::new(RefCell::new(Shared { inbox: Arc::default(), next_tab: 0 }))
+        Rc::new(RefCell::new(Shared { inbox: Arc::default(), next_tab: 0, clip: None, undo: Vec::new() }))
     }
 
     #[test]

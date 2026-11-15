@@ -388,7 +388,27 @@ the wallpaper, a scratch place for launchers and files.
   with Open and Open in Close-Up; the folder read again when it changes
   (every 2 s); settings `[files]` (view, pane, hidden; the usual look
   rows). Seen on kepler's screen. Tests: Hubble 607, kepler 603,
-  Techbench 607. Next: file operations, Trash, undo.
+  Techbench 607.
+- **Step 7, second part** (2026-11-15): vergence-files ops.rs: the
+  freedesktop Trash in the user's data folder (an info file made new
+  first, then the file renamed in; copied in across file systems;
+  `trashed`, `restore` to where it came from under a free name,
+  `empty_trash`), `free_name` ("name 2.ext") and `copy_name` ("name
+  copy.ext"), `copy_tree` (links as links, permissions and times kept,
+  progress by bytes, stopping between pieces), `move_item` (a rename, else
+  copy and remove), `plan_paste`/`clashes`/`run_paste` (a replaced target
+  goes to the Trash first, so Replace can be undone), `Done` and `undo`.
+  In the window: New folder (Ctrl+Shift+N), Rename (F2) in a name strip;
+  Cut, Copy, Paste (paths also on the clipboard as text), a clash asking
+  Replace / Keep both / Skip; Duplicate (Ctrl+D); Move to the Trash
+  (Delete, the toolbar; in the Trash itself it means for good); Delete for
+  good (Shift+Delete, after a question); copies and moves on a worker
+  with a progress strip and Stop; Undo (Ctrl+Z) for each; in the Trash,
+  "Put back" and "Empty Trash" (after a question). Tried on kepler in a
+  scratch folder: new folder, copy into the same folder ("b copy.txt"),
+  undo of the copy (to the Trash), Move to the Trash by the toolbar and
+  its undo. Not yet seen on screen: the progress strip on a large copy;
+  drag and drop is step 8. Tests: Hubble 611, kepler 607, Techbench 611.
 ## Steps
 
 1. **vergence-types**: the database reader (globs2, magic, subclasses,
