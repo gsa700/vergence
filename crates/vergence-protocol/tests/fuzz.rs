@@ -267,7 +267,7 @@ fn window_messages_with_descriptors() {
         WinRequest::Style { window: 1, kind: vergence_protocol::window::WinKind::Dialog, modal: true, min: (320.0, 200.0), max: (1100.0, 0.0) },
         WinRequest::Bar {
             window: 1,
-            bar: Bar::Tabs { tabs: vec![Tab { id: 1, title: "a".into(), closable: true, alert: false }, Tab { id: 2, title: "b".into(), closable: false, alert: true }], front: 2, plus: true, accent: Some(0xff0000), menu: vec![MenuEntry { id: 7, label: "m".into() }] },
+            bar: Bar::Tabs { tabs: vec![Tab { id: 1, title: "a".into(), closable: true, alert: false, edited: true }, Tab { id: 2, title: "b".into(), closable: false, alert: true, edited: false }], front: 2, plus: true, accent: Some(0xff0000), menu: vec![MenuEntry { id: 7, label: "m".into() }] },
         },
     ];
     let encoded: Vec<Vec<u8>> = seeds.iter().map(|m| m.encode().unwrap().0).collect();

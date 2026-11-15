@@ -129,8 +129,8 @@ pub struct Decor {
 /// A bar drawn for one scale: what it shows, and the pixels.
 struct BarPicture {
     /// What it shows: title, width, focused, hover, button layout, tabs, the
-    /// one in front, accent; then light, frosted, alerts, frosted front tab, rounded.
-    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, (bool, bool, Vec<bool>, bool, bool, Option<usize>)),
+    /// one in front, accent; then light, frosted, alerts, frosted front tab, rounded, edited tabs.
+    key: (String, i32, bool, Option<vergence_bar::Part>, String, Vec<String>, usize, Option<u32>, (bool, bool, Vec<bool>, bool, bool, Option<usize>, Vec<bool>)),
     buffer: MemoryRenderBuffer,
     /// Its pixels' width and height (the scale's, not the bar's points).
     px: (i32, i32),
@@ -142,6 +142,8 @@ struct Tabs {
     titles: Vec<String>,
     /// Which tabs run as the superuser (look milestone 1).
     alerts: Vec<bool>,
+    /// Which tabs have edits not saved (bus v14).
+    edited: Vec<bool>,
     shown: usize,
     accent: Option<u32>,
     ids: Vec<u32>,
@@ -816,6 +818,7 @@ impl Server {
                     let width = f.title.size.w;
                     let (titles, shown, accent) = f.tabs.as_ref().map(|t| (t.titles.clone(), t.shown, t.accent)).unwrap_or_default();
                     let alerts = f.tabs.as_ref().map(|t| t.alerts.clone()).unwrap_or_default();
+                    let edited = f.tabs.as_ref().map(|t| t.edited.clone()).unwrap_or_default();
                     // A tab being dragged (dispatch.rs): left in its place, faint; its
                     // ghost follows the pointer and a line shows where it would land
                     // (Dave, 2026-11-12). The row is not reordered under the drag: a
@@ -823,10 +826,10 @@ impl Server {
                     let dragged = preview.map(|(from, _)| from).filter(|&i| i < titles.len());
                     // The program's own buttons (icons, pressable): part of what the picture shows.
                     let tools: Vec<(vergence_bar::ToolIcon, bool)> = tools_of(&w).map(|(_, t)| t.into_iter().map(|(i, e, _)| (i, e)).collect()).unwrap_or_default();
-                    let key = (title.clone(), width, active, hover, format!("{layout_text}{tools:?}{menu_open}{}", app_icon.is_some()), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded, dragged));
+                    let key = (title.clone(), width, active, hover, format!("{layout_text}{tools:?}{menu_open}{}", app_icon.is_some()), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded, dragged, edited.clone()));
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
-                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, (false, false, Vec::new(), false, false, None)),
+                        key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, (false, false, Vec::new(), false, false, None, Vec::new())),
                         buffer: MemoryRenderBuffer::new(Fourcc::Abgr8888, (1, 1), 1, Transform::Normal, None),
                         px: (1, 1),
                     });
@@ -860,6 +863,7 @@ impl Server {
                             font_size: vergence_bar::FONT_SIZE,
                             titles: &titles,
                             alerts: &alerts,
+                            edited: &edited,
                             title: &title,
                             shown,
                             hover,
@@ -1127,6 +1131,7 @@ fn tabs_of(w: &Win) -> Option<Tabs> {
             shown: tabs.iter().position(|t| t.id == front).unwrap_or(0),
             titles: tabs.iter().map(|t| t.title.clone()).collect(),
             alerts: tabs.iter().map(|t| t.alert).collect(),
+            edited: tabs.iter().map(|t| t.edited).collect(),
             ids: tabs.iter().map(|t| t.id).collect(),
             accent,
         }),

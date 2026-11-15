@@ -64,8 +64,6 @@ struct Shared {
     inbox: Arc<Mutex<Vec<Vec<PathBuf>>>>,
     /// The waker the hand-over thread calls: the first window's.
     listener: Arc<Mutex<Option<Waker>>>,
-    /// The number the next untitled document gets.
-    untitled: u32,
     /// The ids tabs are given, across windows (so a joined tab keeps its id).
     next_tab: u32,
 }
@@ -220,11 +218,8 @@ impl EditWindow {
     }
 
     fn untitled_tab(&self) -> DocTab {
-        let n = {
-            let mut s = self.shared.borrow_mut();
-            s.untitled += 1;
-            s.untitled
-        };
+        // The lowest number no open Untitled here has.
+        let n = (1..).find(|n| !self.tabs.iter().any(|t| t.path.is_none() && t.untitled == *n)).unwrap_or(1);
         DocTab { id: self.new_tab_id(), doc: TextDoc::new(""), path: None, untitled: n, read_only: None, bom: false, spaces: None }
     }
 
@@ -514,7 +509,7 @@ impl Program for EditWindow {
     }
 
     fn bar(&self) -> Option<Bar> {
-        let tabs = self.tabs.iter().map(|t| BarTab { id: t.id, title: if t.modified() { format!("• {}", t.name()) } else { t.name() }, closable: true, alert: false }).collect();
+        let tabs = self.tabs.iter().map(|t| BarTab { id: t.id, title: t.name(), closable: true, alert: false, edited: t.modified() }).collect();
         Some(Bar::Tabs { tabs, front: self.front_tab().map_or(0, |t| t.id), plus: true, accent: None, menu: Vec::new() })
     }
 
@@ -540,9 +535,12 @@ impl Program for EditWindow {
         let (l, c) = d.line_column();
         let (a, b) = d.selection();
         let mut status: Vec<Element<Msg>> = vec![space().width(Length::FILL)];
+        // Words (Dave, 2026-11-15: "a word counter in there somewhere").
+        let words = grouped(d.word_count());
+        status.push(label(if a != b { format!("{} of {words} words", grouped(d.selected_words())) } else { format!("{words} words") }).size(12.0).dim());
         if a != b {
             let n = d.selected_text().chars().count();
-            status.push(label(format!("{n} selected")).size(12.0).dim());
+            status.push(label(format!("{} characters selected", grouped(n))).size(12.0).dim());
         }
         status.push(label(format!("Line {l}, Column {c}")).size(12.0).dim());
         let o = d.options();
@@ -777,6 +775,19 @@ impl Program for EditWindow {
     }
 }
 
+/// 1234567 as "1,234,567".
+fn grouped(n: usize) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// "Save changes?", a modal dialog over the window. The answer goes back
 /// through `answer` and a wake of the window.
 struct SaveQuestion {
@@ -918,7 +929,7 @@ fn main() {
             w.wake();
         }
     });
-    let shared = Rc::new(RefCell::new(Shared { windows: Vec::new(), transfers: Vec::new(), inbox, listener, untitled: 0, next_tab: 0 }));
+    let shared = Rc::new(RefCell::new(Shared { windows: Vec::new(), transfers: Vec::new(), inbox, listener, next_tab: 0 }));
     let mut w = EditWindow::new(shared, Vec::new());
     w.open_files(&paths);
     if let Err(e) = vergence_widgets::run(w, (760, 560)) {
@@ -932,7 +943,7 @@ mod tests {
     use super::*;
 
     fn shared() -> SharedRef {
-        Rc::new(RefCell::new(Shared { windows: Vec::new(), transfers: Vec::new(), inbox: Arc::new(Mutex::new(Vec::new())), listener: Arc::new(Mutex::new(None)), untitled: 0, next_tab: 0 }))
+        Rc::new(RefCell::new(Shared { windows: Vec::new(), transfers: Vec::new(), inbox: Arc::new(Mutex::new(Vec::new())), listener: Arc::new(Mutex::new(None)), next_tab: 0 }))
     }
 
     #[test]
@@ -942,6 +953,12 @@ mod tests {
         assert_eq!(w.tabs[0].name(), "Untitled");
         let t = w.untitled_tab();
         assert_eq!(t.name(), "Untitled 2");
+        w.tabs.push(t);
+        w.tabs.remove(0);
+        assert_eq!(w.untitled_tab().name(), "Untitled", "a number given back is used again");
+        w.tabs.clear();
+        let fresh = w.untitled_tab();
+        w.tabs.push(fresh);
         let dir = std::env::temp_dir().join(format!("vergence-edit-main-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("tabbed.txt");

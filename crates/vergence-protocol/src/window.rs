@@ -130,6 +130,10 @@ pub struct Tab {
     /// draws the tab in the desktop's alarm red; the color is never the
     /// program's to choose.
     pub alert: bool,
+    /// It has edits not saved (bus v14; Dave, 2026-11-15: "coloring a tab
+    /// for unsaved edits"): the server marks it in the desktop's color for
+    /// that, the same in every app.
+    pub edited: bool,
 }
 
 /// An entry of a tab's menu that the program adds: an id it chose and a label.
@@ -504,7 +508,7 @@ fn put_bar(e: &mut Encoder, bar: &Bar) {
         Bar::Tabs { tabs, front, plus, accent, menu } => {
             e.u8(1).count(tabs.len());
             for t in tabs {
-                e.u32(t.id).str(&t.title).bool(t.closable).bool(t.alert);
+                e.u32(t.id).str(&t.title).bool(t.closable).bool(t.alert).bool(t.edited);
             }
             e.u32(*front).bool(*plus);
             match accent {
@@ -547,11 +551,11 @@ fn get_bar(d: &mut Decoder) -> Result<Bar, WireError> {
             }
             let mut tabs: Vec<Tab> = Vec::with_capacity(n);
             for _ in 0..n {
-                let (id, t, closable, alert) = (d.u32()?, title(d)?, d.bool()?, d.bool()?);
+                let (id, t, closable, alert, edited) = (d.u32()?, title(d)?, d.bool()?, d.bool()?, d.bool()?);
                 if id == 0 || tabs.iter().any(|x| x.id == id) {
                     return Err(WireError::BadValue("tab id"));
                 }
-                tabs.push(Tab { id, title: t, closable, alert });
+                tabs.push(Tab { id, title: t, closable, alert, edited });
             }
             let (front, plus) = (d.u32()?, d.bool()?);
             if (tabs.is_empty() && front != 0) || (!tabs.is_empty() && !tabs.iter().any(|t| t.id == front)) {
@@ -1220,7 +1224,7 @@ mod tests {
     fn a_bad_bar_is_refused() {
         let tabs = |ids: &[u32], front: u32| WinRequest::Bar {
             window: 1,
-            bar: Bar::Tabs { tabs: ids.iter().map(|&id| Tab { id, title: "t".into(), closable: true, alert: false }).collect(), front, plus: true, accent: None, menu: vec![] },
+            bar: Bar::Tabs { tabs: ids.iter().map(|&id| Tab { id, title: "t".into(), closable: true, alert: false, edited: false }).collect(), front, plus: true, accent: None, menu: vec![] },
         };
         let decode = |m: WinRequest| {
             let (bytes, _) = m.encode().unwrap();
@@ -1234,7 +1238,7 @@ mod tests {
         assert!(decode(tabs(&[], 5)).is_err(), "front with no tabs");
         let many: Vec<u32> = (1..=MAX_TABS as u32 + 1).collect();
         assert!(decode(tabs(&many, 1)).is_err(), "too many tabs");
-        let long = WinRequest::Bar { window: 1, bar: Bar::Tabs { tabs: vec![Tab { id: 1, title: "x".repeat(MAX_TAB_TITLE + 1), closable: true, alert: false }], front: 1, plus: false, accent: None, menu: vec![] } };
+        let long = WinRequest::Bar { window: 1, bar: Bar::Tabs { tabs: vec![Tab { id: 1, title: "x".repeat(MAX_TAB_TITLE + 1), closable: true, alert: false, edited: false }], front: 1, plus: false, accent: None, menu: vec![] } };
         assert!(decode(long).is_err(), "title too long");
     }
 
@@ -1290,7 +1294,7 @@ mod tests {
             WinRequest::Bar {
                 window: 1,
                 bar: Bar::Tabs {
-                    tabs: vec![Tab { id: 4, title: "~/src".into(), closable: true, alert: false }, Tab { id: 9, title: "htop".into(), closable: false, alert: true }],
+                    tabs: vec![Tab { id: 4, title: "~/src".into(), closable: true, alert: false, edited: true }, Tab { id: 9, title: "htop".into(), closable: false, alert: true, edited: false }],
                     front: 9,
                     plus: true,
                     accent: Some(0x3b82f6),

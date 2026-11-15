@@ -481,6 +481,8 @@ pub struct Look<'a> {
     /// Which tabs' programs run as the superuser: drawn in the alarm red,
     /// and the bar's ground goes red while one of them is in front.
     pub alerts: &'a [bool],
+    /// Which tabs have edits not saved: marked in the look's `edited` color.
+    pub edited: &'a [bool],
     /// The window's title, for a bar without tabs ([`Layout::plain`]).
     pub title: &'a str,
     pub shown: usize,
@@ -569,6 +571,13 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
         tab_shape(scene, tab, if alert { color(l.alert) } else if shown { look.pane } else if hovered { shape_hover } else { tab_rest });
         if alert && hovered {
             tab_shape(scene, tab, shape_hover);
+        }
+        if !alert && look.edited.get(i).copied().unwrap_or(false) {
+            let e = l.edited;
+            if !shown {
+                tab_shape(scene, tab, Color::rgba(e.0, e.1, e.2, 56));
+            }
+            scene.fill_rounded(Rect::new(tab.x + 6.0, tab.y + 1.0, (tab.w - 12.0).max(0.0), 3.0), 1.5, color(e));
         }
         let mut text_from = tab.x + 12.0;
         let mut text_to = tab.x + tab.w - 8.0;

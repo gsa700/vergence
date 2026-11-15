@@ -269,6 +269,8 @@ pub struct Doc {
     unit: (u8, Pos, Pos),
     /// The line endings when last saved (changing them is a change to save).
     saved_ending: Ending,
+    /// Each line's words, kept as lines change (the word count).
+    words: Vec<u32>,
 }
 
 impl Doc {
@@ -292,12 +294,34 @@ impl Doc {
             geom: Geom::default(),
             unit: (1, Pos::default(), Pos::default()),
             saved_ending: Ending::Lf,
-        }.with_saved_ending()
+            words: Vec::new(),
+        }
+        .with_saved_ending()
     }
 
     fn with_saved_ending(mut self) -> Doc {
         self.saved_ending = self.buffer.ending();
+        self.recount();
         self
+    }
+
+    fn recount(&mut self) {
+        self.words = self.buffer.lines().map(count_words).collect();
+    }
+
+    /// How many words the text has (runs of letters and digits, with ' and
+    /// - inside a word: "don't", "well-known" are one each).
+    pub fn word_count(&self) -> usize {
+        self.words.iter().map(|w| *w as usize).sum()
+    }
+
+    /// How many words the selection has.
+    pub fn selected_words(&self) -> usize {
+        let (a, b) = self.selection();
+        if a == b {
+            return 0;
+        }
+        count_words(&self.buffer.slice(a, b)) as usize
     }
 
     // --- What a program reads and does ---
@@ -447,6 +471,7 @@ impl Doc {
 
     fn reshape_all(&mut self) {
         self.shaped = vec![None; self.buffer.line_count()];
+        self.recount();
     }
 
     /// Replaces `from..to` with `with` through the history; the layouts of
@@ -458,6 +483,8 @@ impl Doc {
         let old = to.line - from.line + 1;
         let new = end.line - from.line + 1;
         self.shaped.splice(from.line..from.line + old, std::iter::repeat_n(None, new));
+        let counts: Vec<u32> = (from.line..from.line + new).map(|l| count_words(self.buffer.line(l))).collect();
+        self.words.splice(from.line..from.line + old, counts);
         debug_assert_eq!(self.shaped.len(), self.buffer.line_count());
         self.revision += 1;
         end
@@ -1009,6 +1036,11 @@ impl Doc {
         }
 
         scene.fill(r, theme.page);
+        // The line numbers on a gray of their own (Dave, 2026-11-15: "to set
+        // it apart from the rest").
+        if gutter > 0.0 {
+            scene.fill(Rect::new(r.x, r.y, gutter, r.h), theme.card);
+        }
         scene.push_clip(r, 0.0);
         let (sa, sb) = self.selection();
         let selected = sa != sb;
@@ -1115,6 +1147,29 @@ impl Doc {
             scene.fill_rounded(t, BAR_W / 2.0, alpha(theme.text, 80));
         }
     }
+}
+
+/// Words in `s`: runs of letters and digits; an apostrophe or hyphen between
+/// two letters keeps the word going.
+fn count_words(s: &str) -> u32 {
+    let mut n = 0;
+    let mut in_word = false;
+    let mut prev_join = false;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c.is_alphanumeric() {
+            if !in_word {
+                n += 1;
+                in_word = true;
+            }
+            prev_join = false;
+        } else if in_word && !prev_join && matches!(c, '\'' | '’' | '-') && chars.peek().is_some_and(|d| d.is_alphanumeric()) {
+            prev_join = true;
+        } else {
+            in_word = false;
+        }
+    }
+    n
 }
 
 fn alpha(c: Color, a: u8) -> Color {
@@ -1260,6 +1315,21 @@ mod tests {
         d.press(8.0 * 2.0, PAD_Y + 2.0, 1, false);
         d.press(8.0 * 2.0, PAD_Y + 12.0, 1, true);
         assert_eq!(d.selected_text(), "e two three\nfo");
+    }
+
+    #[test]
+    fn words_are_counted_and_kept_as_lines_change() {
+        assert_eq!(count_words("don't stop, well-known 42 -- x"), 5);
+        assert_eq!(count_words("  "), 0);
+        let mut d = doc("one two\nthree");
+        assert_eq!(d.word_count(), 3);
+        d.set_selection(Pos::new(1, 5), Pos::new(1, 5));
+        typed(&mut d, " four\nfive six");
+        assert_eq!(d.word_count(), 6);
+        d.undo();
+        assert_eq!(d.word_count(), 3);
+        d.set_selection(Pos::new(0, 4), Pos::new(1, 2));
+        assert_eq!(d.selected_words(), 2, "two, and th");
     }
 
     #[test]

@@ -73,6 +73,9 @@ pub struct BarLook {
     pub alert: Rgb,
     pub alert_ground: Rgb,
     pub alert_ground_off: Rgb,
+    /// A tab with edits not saved: a stripe along its top, and a tint on
+    /// it when it is not the one in front (editor milestone 1).
+    pub edited: Rgb,
 }
 
 /// The dark style (the desktop's first look), and the light one. Their
@@ -95,6 +98,7 @@ pub const BAR_DARK: BarLook = BarLook {
     alert: Rgb(128, 26, 26),
     alert_ground: Rgb(56, 12, 14),
     alert_ground_off: Rgb(60, 32, 34),
+    edited: Rgb(232, 168, 56),
 };
 
 pub const BAR_LIGHT: BarLook = BarLook {
@@ -113,6 +117,7 @@ pub const BAR_LIGHT: BarLook = BarLook {
     alert: Rgb(148, 30, 28),
     alert_ground: Rgb(244, 212, 208),
     alert_ground_off: Rgb(246, 234, 232),
+    edited: Rgb(214, 140, 20),
 };
 
 /// The bar look for light or dark.

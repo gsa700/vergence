@@ -1832,7 +1832,7 @@ impl App for Terminal {
             return None;
         }
         let bar = vergence_ui::Bar::Tabs {
-            tabs: tabs.iter().map(|(id, title, root)| vergence_ui::BarTab { id: *id, title: title.chars().take(200).collect(), closable: true, alert: *root }).collect(),
+            tabs: tabs.iter().map(|(id, title, root)| vergence_ui::BarTab { id: *id, title: title.chars().take(200).collect(), closable: true, alert: *root, edited: false }).collect(),
             front,
             plus: true,
             accent: Some(page),
@@ -2515,7 +2515,7 @@ impl App for Terminal {
             let titles: Vec<String> = self.tabs.iter().map(Tab::label).collect();
             let alerts: Vec<bool> = self.tabs.iter().map(Tab::as_root).collect();
             let layout = Layout::new(frame.width, self.tabs.len(), self.shown, &self.settings.left, &self.settings.right);
-            bar::draw(&mut scene, fonts, &layout, &bar::Look { bar: vergence_look::bar_look(self.settings.light), frosted: false, focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, alerts: &alerts, title: "", shown: self.shown, hover: self.hover, dragged: None, tools: &[], app_icon: None, menu_open: false });
+            bar::draw(&mut scene, fonts, &layout, &bar::Look { bar: vergence_look::bar_look(self.settings.light), frosted: false, focused: self.focused, pane: p.bg, pane_ink: p.fg, font: mt.ui, font_size: self.settings.ui_size, titles: &titles, alerts: &alerts, edited: &[], title: "", shown: self.shown, hover: self.hover, dragged: None, tools: &[], app_icon: None, menu_open: false });
         }
 
         let Some(tab) = self.tabs.get(self.shown) else { return scene };
