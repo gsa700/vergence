@@ -73,7 +73,7 @@ build once than in every app:
    autocomplete (words of the open documents first; languages later), find
    and replace, tabs; **Spellchecking** with it, as a toolkit service every
    native text field can use.
-5. *Accepted 2026-11-15 (docs/files-milestone-1.md); names (Dave): File Viewer, its Preview, Close-Up.* **Open/Save dialogs and file types, then the Viewer** (pictures first,
+5. *Built 2026-11-15 (docs/files-milestone-1.md, steps 1-11): File Viewer, its Preview, Close-Up, the portal's file chooser, thumbnails, network mounts and removable drives, a Windows-style desktop. Not in it: PDF and video (question 2), connecting to servers (question 7), drags with Wayland programs.* *Accepted 2026-11-15; names (Dave): File Viewer, its Preview, Close-Up.* **Open/Save dialogs and file types, then the Viewer** (pictures first,
    PDF and video by the answers below) **and the File Manager** (Finder's
    space-bar preview through the Viewer; remote file systems by the
    system's own mounts). The Open/Save dialog itself was built early, in

@@ -601,7 +601,7 @@ the wallpaper, a scratch place for launchers and files.
    desktop windows, positions, launchers and their question, Super+D,
    Settings > Desktop.
 10. **Thumbnails, mounts, search in subfolders.** Done 2026-11-15.
-11. **Docs**: whitepaper (§6.10 and §9), README, the Map, CLAUDE.md.
+11. **Docs**: whitepaper (§6.10 and §9), README, the Map, CLAUDE.md. Done 2026-11-15 (whitepaper Draft 0.21; "the Map" is docs/apps-roadmap.md).
 
 PDF and video, if question 2 brings them in, are their own steps after 5.
 
