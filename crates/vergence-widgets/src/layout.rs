@@ -40,7 +40,7 @@ pub(crate) enum What<M> {
     Rule { color: Option<Color> },
     Label { lines: Vec<Line>, size: f32, weight: Weight, color: Option<Color>, dim: bool },
     Panel { fill: Option<Color>, edge: Option<(Color, f32)>, radius: f32 },
-    Button { on_press: Option<M>, look: ButtonLook },
+    Button { on_press: Option<M>, look: ButtonLook, on_drag: Option<M> },
     Group,
     Switch { on: bool, on_toggle: Option<Box<dyn Fn(bool) -> M>> },
     Slider { min: f32, max: f32, step: f32, value: f32, marks: Vec<f32>, on_change: Option<Box<dyn Fn(f32) -> M>>, on_release: Option<M> },
@@ -383,8 +383,8 @@ impl Layout<'_> {
                 let inner = Rect::new(rect.x + padding.left, rect.y + padding.top, (rect.w - padding.width()).max(0.0), (rect.h - padding.height()).max(0.0));
                 self.place_one(*child, inner, align_x, align_y, me, id, out);
             }
-            Kind::Button { child, padding, on_press, look } => {
-                push(out, What::Button { on_press, look });
+            Kind::Button { child, padding, on_press, look, on_drag } => {
+                push(out, What::Button { on_press, look, on_drag });
                 let inner = Rect::new(rect.x + padding.left, rect.y + padding.top, (rect.w - padding.width()).max(0.0), (rect.h - padding.height()).max(0.0));
                 self.place_one(*child, inner, Align::Center, Align::Center, me, id, out);
             }

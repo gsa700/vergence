@@ -2218,6 +2218,7 @@ name = "vergence-edit"
 version = "0.1.0"
 dependencies = [
  "vergence-scene",
+ "vergence-types",
  "vergence-ui",
  "vergence-widgets",
 ]

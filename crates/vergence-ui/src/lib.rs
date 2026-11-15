@@ -138,7 +138,7 @@ pub struct Frame {
 
 /// What the bar's description is made of ([`App::bar`]): the native
 /// protocol's own types.
-pub use vergence_protocol::window::{Bar, BarButton, BarIcon, MenuEntry as BarMenuEntry, Place as BarPlace, Tab as BarTab};
+pub use vergence_protocol::window::{Bar, BarButton, BarIcon, DROP_COPY, DROP_MOVE, DROP_NONE, MenuEntry as BarMenuEntry, Place as BarPlace, Tab as BarTab};
 
 /// What the user did with the tabs the server drew ([`App::tab`]); each
 /// tab named by the id the program gave it in [`App::bar`].
@@ -368,6 +368,8 @@ enum Command {
     Open(Box<dyn App>),
     /// A size the window would like (the server decides).
     Size(u32, u32),
+    /// Start dragging (the native road; files milestone 1, step 8).
+    Drag(String, Vec<(String, Vec<u8>)>),
 }
 
 /// What a program may ask of its window while it handles input.
@@ -391,6 +393,13 @@ impl Window {
     /// bar; elsewhere nothing happens.
     pub fn request_size(&mut self, width: u32, height: u32) {
         self.commands.push(Command::Size(width, height));
+    }
+
+    /// Starts dragging, while the pointer's button is held (a row pulled
+    /// away): each kind with its data, and the words the ghost shows. On the
+    /// native road; elsewhere nothing happens yet.
+    pub fn start_drag(&mut self, label: &str, items: Vec<(String, Vec<u8>)>) {
+        self.commands.push(Command::Drag(label.to_string(), items));
     }
 
     /// Lets the user move the window with the button that was just pressed.
@@ -638,6 +647,21 @@ pub trait App {
 
     /// One of the window's commands was chosen in its app menu: its id.
     fn command(&mut self, _id: u32, _window: &mut Window) {}
+
+    /// A drag is over the window at (x, y) with these kinds: what a drop
+    /// would do ([`DROP_NONE`], [`DROP_COPY`], [`DROP_MOVE`]).
+    fn drag_over(&mut self, _x: f32, _y: f32, _kinds: &[String], _ctrl: bool) -> u8 {
+        DROP_NONE
+    }
+
+    /// The drag left the window.
+    fn drag_left(&mut self) {}
+
+    /// Dropped here, as this window said it would take it: the data.
+    fn dropped(&mut self, _x: f32, _y: f32, _action: u8, _items: &[(String, Vec<u8>)], _window: &mut Window) {}
+
+    /// A drag this window started ended: with what action ([`DROP_NONE`]: nowhere took it).
+    fn drag_ended(&mut self, _action: u8, _window: &mut Window) {}
 
     /// The style the window's bar is to be drawn in, when it has changed
     /// since it was last asked (app settings milestone 1).
@@ -1267,6 +1291,8 @@ impl<'a> Runner<'a> {
                 Command::Maximize(on) => self.client.set_maximized(toplevel, on)?,
                 // Wayland has no size request; the user resizes.
                 Command::Size(..) => {}
+                // Drags under other desktops: Wayland drag and drop, later.
+                Command::Drag(..) => {}
                 Command::Minimize => self.client.set_minimized(toplevel)?,
                 Command::Copy(text) => {
                     if let (Some(manager), Some(device)) = (self.data_manager, self.data_device) {

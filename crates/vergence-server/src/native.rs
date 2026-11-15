@@ -496,6 +496,17 @@ impl Server {
             // A size asked for (bus v12): within its limits and its screen's work
             // area, kept where it is unless its right or bottom edge would leave the
             // screen; not while maximized, snapped or full screen.
+            // Drag and drop (drag.rs, bus v16).
+            WinRequest::DragStart { window, label, items } => {
+                if let Some(w) = self.natives.get(&(client, window)).cloned() {
+                    self.native_drag_start(w, label, items);
+                }
+            }
+            WinRequest::DragAccept { window, action } => {
+                if let Some(w) = self.natives.get(&(client, window)).cloned() {
+                    self.native_drag_accept(&w, action);
+                }
+            }
             WinRequest::Size { window, width, height } => {
                 let Some(w) = self.natives.get(&(client, window)).cloned() else { return };
                 let Win::Native(n) = &w else { return };

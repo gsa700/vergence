@@ -232,6 +232,8 @@ struct Viewer {
 
 #[derive(Debug, Clone)]
 enum Msg {
+    /// A row pulled away: a drag starts.
+    DragRow(usize),
     Answer(Option<ops::Clash>),
     Confirm(bool),
     NameTyped(String),
@@ -848,6 +850,30 @@ impl Viewer {
         }
     }
 
+    /// A row pulled away: what is chosen goes (this row alone if it is not
+    /// among them), as file links and as paths.
+    fn drag_row(&mut self, k: usize, window: &mut Window) {
+        let visible: Vec<PathBuf> = self.visible().iter().map(|e| e.path.clone()).collect();
+        let Some(p) = visible.get(k).cloned() else { return };
+        let Some(t) = self.front_mut() else { return };
+        if !t.chosen.contains(&p) {
+            t.chosen = vec![p.clone()];
+            t.cursor = Some(p);
+        }
+        let paths = t.chosen.clone();
+        let uris: String = paths.iter().map(|p| format!("file://{}\r\n", ops::escape(p))).collect();
+        let plain = paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join("\n");
+        if uris.len() + plain.len() > vergence_protocol::window::MAX_DRAG_BYTES {
+            self.notice = Some("Too many files to drag at once: Cut and Paste them.".into());
+            return;
+        }
+        let label = match paths.as_slice() {
+            [one] => one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            many => format!("{} items", many.len()),
+        };
+        window.start_drag(&label, vec![("text/uri-list".into(), uris.into_bytes()), ("text/plain".into(), plain.into_bytes())]);
+    }
+
     /// The strips above the folder: a question, a name being typed, a job's progress.
     fn strips(&self, t: &Theme) -> Vec<Element<Msg>> {
         let strip = |items: Vec<Element<Msg>>| -> Element<Msg> { panel(row(items).spacing(8.0).align(Align::Center).width(Length::FILL)).color(t.card).radius(8.0).padding(Padding::hv(6.0, 10.0)).width(Length::FILL) };
@@ -981,7 +1007,8 @@ impl Viewer {
         let chosen = |_: usize, e: &Entry| tab.chosen.contains(&e.path);
         let click = |k: usize| Msg::Click(k);
         let in_view = tab.cursor.as_ref().and_then(|c| visible.iter().position(|e| &e.path == c)).map(|k| (k, tab.turn << 32 | k as u64));
-        let v = files::View { entries: &visible, chosen: &chosen, in_view, click: &click, folders: tab.showing == Showing::Recent };
+        let drag = |k: usize| Msg::DragRow(k);
+        let v = files::View { entries: &visible, chosen: &chosen, in_view, click: &click, drag: Some(&drag), folders: tab.showing == Showing::Recent };
         let mut body: Vec<Element<Msg>> = Vec::new();
         if let Some(p) = &tab.problem {
             body.push(label(p.clone()).size(12.0).wrap().width(Length::FILL));
@@ -1179,6 +1206,7 @@ impl Program for Viewer {
             }
             Msg::DismissNotice => self.notice = None,
             Msg::ClosePreview => self.preview = false,
+            Msg::DragRow(k) => self.drag_row(k, window),
             Msg::Answer(a) => {
                 if let (Some(Ask::Clash { sources, dir, cut, .. }), Some(clash)) = (self.ask.take(), a) {
                     self.start_paste(sources, dir, cut, clash);
@@ -1297,6 +1325,7 @@ impl Program for Viewer {
             SPACE if !typing => self.run(cmd::PREVIEW, window),
             BACKSPACE if !typing => self.run(cmd::UP, window),
             s if m.ctrl && (s == 0x61 || s == 0x41) && !typing => self.run(cmd::SELECT_ALL, window),
+            s if m.ctrl && !m.shift && (s == 0x6e || s == 0x4e) => self.run(cmd::NEW_WINDOW, window),
             s if m.ctrl && (s == 0x74 || s == 0x54) => self.run(cmd::NEW_TAB, window),
             s if m.ctrl && (s == 0x77 || s == 0x57) => self.run(cmd::CLOSE_TAB, window),
             s if m.ctrl && (s == 0x68 || s == 0x48) => self.run(cmd::HIDDEN, window),
@@ -1308,6 +1337,36 @@ impl Program for Viewer {
         }
         window.redraw();
         Some(true)
+    }
+
+    /// Files dragged here go into the folder shown: moved, or copied with Ctrl.
+    fn drag_over(&mut self, _x: f32, _y: f32, kinds: &[String], ctrl: bool) -> u8 {
+        if !kinds.iter().any(|k| k == "text/uri-list") || self.here().is_none() || self.in_trash() || self.job.is_some() {
+            return vergence_ui::DROP_NONE;
+        }
+        if ctrl { vergence_ui::DROP_COPY } else { vergence_ui::DROP_MOVE }
+    }
+
+    fn dropped(&mut self, _x: f32, _y: f32, action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
+        let Some(dir) = self.here() else { return };
+        let paths: Vec<PathBuf> = items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default();
+        if paths.is_empty() {
+            return;
+        }
+        let cut = action == vergence_ui::DROP_MOVE;
+        let names = ops::clashes(&paths, &dir);
+        if names.is_empty() {
+            self.start_paste(paths, dir, cut, ops::Clash::KeepBoth);
+        } else {
+            self.ask = Some(Ask::Clash { sources: paths, dir, cut, names });
+        }
+        window.redraw();
+    }
+
+    /// A drag from here ended: what moved away is read again.
+    fn drag_ended(&mut self, _action: u8, window: &mut Window) {
+        self.read_all();
+        window.redraw();
     }
 
     fn resized(&mut self, width: f32, _height: f32) {

@@ -167,6 +167,8 @@ pub struct Ui<M> {
     size: (f32, f32),
     hover: Option<Id>,
     pressed: Option<(Id, With)>,
+    /// Where the pointer pressed it (a button pulled away starts a drag).
+    pressed_at: (f32, f32),
     /// Where a finger is, by its id.
     fingers: Vec<(i32, f32, f32)>,
     focus: Option<Id>,
@@ -207,6 +209,7 @@ impl<M> Default for Ui<M> {
             size: (0.0, 0.0),
             hover: None,
             pressed: None,
+            pressed_at: (0.0, 0.0),
             fingers: Vec::new(),
             focus: None,
             ring: false,
@@ -1063,7 +1066,10 @@ impl<M: Clone> Ui<M> {
                 self.area_changed(id, r);
             }
             // Buttons, switches and choices act when they are let go.
-            _ => self.pressed = Some((id, with)),
+            _ => {
+                self.pressed = Some((id, with));
+                self.pressed_at = (x, y);
+            }
         }
     }
 
@@ -1263,6 +1269,20 @@ impl<M: Clone> Ui<M> {
     }
 
     fn pointer_moved(&mut self, x: f32, y: f32, r: &mut Response<M>) {
+        // A button held and pulled away: its drag message, and no press.
+        if let Some((id, With::Pointer)) = self.pressed
+            && ((x - self.pressed_at.0).powi(2) + (y - self.pressed_at.1).powi(2)) > 36.0
+            && let Some(m) = self.node(id).and_then(|n| match &n.what {
+                What::Button { on_drag: Some(m), .. } => Some(m.clone()),
+                _ => None,
+            })
+        {
+            self.pressed = None;
+            r.messages.push(m);
+            r.used = true;
+            r.redraw = true;
+            return;
+        }
         match self.drag {
             Some(Drag::Slider { id, with: With::Pointer, .. }) => {
                 if let Some(v) = self.index(id).and_then(|i| self.slider_at(i, x)) {
@@ -1708,7 +1728,7 @@ impl<M: Clone> Ui<M> {
                         scene.stroke(r, *radius, *w, *c);
                     }
                 }
-                What::Button { on_press, look } => {
+                What::Button { on_press, look, .. } => {
                     let on = on_press.is_some();
                     let hot = on && self.hover == Some(n.id);
                     let down = on && self.held(n.id, &r);
@@ -2042,7 +2062,7 @@ impl<M: Clone> Ui<M> {
                     let text = lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join(" ");
                     mk("label", named(text), None, states)
                 }
-                What::Button { on_press, look } => {
+                What::Button { on_press, look, .. } => {
                     off(on_press.is_some(), &mut states);
                     // The chosen one of several (a page, a side).
                     if *look == ButtonLook::Chosen {

@@ -699,6 +699,7 @@ impl Server {
         // Then windows on their way into the dock or out of it.
         elements.extend(self.shelf_motion_elements(renderer, out, scale));
         // Then a dragged tab's ghost, over every window (dispatch.rs, tab_ghost).
+        elements.extend(self.native_drag_ghost(renderer, out, scale, light));
         elements.extend(self.tab_ghost_element(renderer, out, scale, light));
         // And the line showing where it would land: over every window too, since
         // a window moved by its only tab covers the bar it is let go on.

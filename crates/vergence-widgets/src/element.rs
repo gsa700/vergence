@@ -128,7 +128,7 @@ pub(crate) enum Kind<M> {
     Rule { color: Option<Color>, thickness: f32 },
     Label(Label),
     Panel { child: Box<Element<M>>, padding: Padding, fill: Option<Color>, edge: Option<(Color, f32)>, radius: f32, align_x: Align, align_y: Align },
-    Button { child: Box<Element<M>>, padding: Padding, on_press: Option<M>, look: ButtonLook },
+    Button { child: Box<Element<M>>, padding: Padding, on_press: Option<M>, look: ButtonLook, on_drag: Option<M> },
     Row { children: Vec<Element<M>>, spacing: f32, align: Align, wrap: bool },
     Column { children: Vec<Element<M>>, spacing: f32, align: Align },
     Stack { children: Vec<Element<M>> },
@@ -314,6 +314,15 @@ impl<M> Element<M> {
     }
 
     /// What a button sends when it is pressed. A button without one is off.
+    /// What pulling it away sends (the pointer moved a few points with the
+    /// button held on it): the start of a drag; it is then not pressed.
+    pub fn on_drag(mut self, message: M) -> Self {
+        if let Kind::Button { on_drag, .. } = &mut self.kind {
+            *on_drag = Some(message);
+        }
+        self
+    }
+
     pub fn on_press(mut self, message: M) -> Self {
         if let Kind::Button { on_press, .. } = &mut self.kind {
             *on_press = Some(message);
@@ -449,7 +458,7 @@ pub fn panel<M>(child: Element<M>) -> Element<M> {
 
 /// Something to press, around any child (usually a label).
 pub fn button<M>(child: Element<M>) -> Element<M> {
-    Element::new(Kind::Button { child: Box::new(child), padding: Padding::hv(5.0, 14.0), on_press: None, look: ButtonLook::Normal }, Length::Shrink, Length::Shrink)
+    Element::new(Kind::Button { child: Box::new(child), padding: Padding::hv(5.0, 14.0), on_press: None, look: ButtonLook::Normal, on_drag: None }, Length::Shrink, Length::Shrink)
 }
 
 /// Children side by side.

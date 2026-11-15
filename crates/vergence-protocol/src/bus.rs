@@ -39,11 +39,14 @@
 //! Quit's `ListApps`, `Apps` and `ForceQuit`. Version 14 (editor milestone
 //! 1): `Tab::edited`. Version 15 (files milestone 1): `Open`, files and
 //! links opened by the server with the applications chosen for their types.
+//! Version 16 (files milestone 1, step 8): drag and drop between native
+//! windows (`WinRequest::DragStart`/`DragAccept`, `WinEvent::DragOver`/
+//! `DragLeave`/`DragDrop`/`DragEnded`).
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 15;
+pub const VERSION: u32 = 16;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

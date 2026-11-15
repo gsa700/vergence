@@ -153,6 +153,16 @@ pub trait Program {
     /// A command of its app menu was chosen (its id).
     fn command(&mut self, _id: u32, _window: &mut Window) {}
 
+    /// Drag and drop (files milestone 1, step 8; vergence_ui::App's):
+    /// what a drop at (x, y) would do, the drag leaving, the drop with its
+    /// data, and the end of a drag this window started.
+    fn drag_over(&mut self, _x: f32, _y: f32, _kinds: &[String], _ctrl: bool) -> u8 {
+        vergence_ui::DROP_NONE
+    }
+    fn drag_left(&mut self) {}
+    fn dropped(&mut self, _x: f32, _y: f32, _action: u8, _items: &[(String, Vec<u8>)], _window: &mut Window) {}
+    fn drag_ended(&mut self, _action: u8, _window: &mut Window) {}
+
     /// The style its bar is to be drawn in (app settings milestone 1).
     /// Asked after each frame; sent when changed.
     fn bar_style(&self) -> Option<vergence_ui::BarStyle> {
@@ -311,6 +321,24 @@ impl<P: Program> vergence_ui::App for Host<P> {
 
     fn command(&mut self, id: u32, window: &mut Window) {
         self.program.command(id, window);
+        self.changed(window);
+    }
+
+    fn drag_over(&mut self, x: f32, y: f32, kinds: &[String], ctrl: bool) -> u8 {
+        self.program.drag_over(x, y, kinds, ctrl)
+    }
+
+    fn drag_left(&mut self) {
+        self.program.drag_left();
+    }
+
+    fn dropped(&mut self, x: f32, y: f32, action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
+        self.program.dropped(x, y, action, items, window);
+        self.changed(window);
+    }
+
+    fn drag_ended(&mut self, action: u8, window: &mut Window) {
+        self.program.drag_ended(action, window);
         self.changed(window);
     }
 

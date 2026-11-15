@@ -105,7 +105,7 @@ pub enum Came {
 pub struct Dispatch {
     pub seat: vergence_seat::Seat,
     next: u64,
-    wins: HashMap<WinId, Win>,
+    pub(crate) wins: HashMap<WinId, Win>,
     ids: HashMap<Win, WinId>,
     /// Surfaces by number: the surface and where its origin was when last hit.
     surfaces: HashMap<u64, (WlSurface, Point<f64, Logical>)>,
@@ -279,11 +279,16 @@ impl Server {
     pub fn pointer_to(&mut self, pos: Point<f64, Logical>, time: InputTime) {
         self.dispatch_sync();
         self.tab_hold_check();
+        self.native_drag_check();
         self.pointer_hover(pos);
         let under = self.target_at(pos);
         self.pointer_follow(pos, time, under);
         let out = self.input.seat.motion(under);
         self.apply(out, pos, time, &Came::Motion);
+        // A native drag follows the pointer beside the seat (drag.rs).
+        if self.native_drag.is_some() {
+            self.native_drag_motion(pos);
+        }
     }
 
     /// Hover: each of the server's parts looks for itself.
@@ -322,6 +327,11 @@ impl Server {
         self.dispatch_sync();
         self.tab_hold_check();
         let pos = self.pointer_location();
+        // The left button let go during a native drag: dropped (drag.rs); the
+        // seat still hears the release, so the source's press ends too.
+        if state == ButtonState::Released && button == vergence_seat::BTN_LEFT && self.native_drag.is_some() {
+            self.native_drag_drop(pos);
+        }
         let under = self.target_at(pos);
         let mods = self.seat.get_keyboard().map(|k| k.modifier_state()).map(|m| vergence_seat::keyboard::Mods { ctrl: m.ctrl, alt: m.alt, shift: m.shift, logo: m.logo }).unwrap_or_default();
         let now = self.start_time.elapsed().as_millis() as u64;

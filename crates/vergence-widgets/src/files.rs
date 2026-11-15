@@ -150,6 +150,8 @@ pub struct View<'a, M> {
     /// The row to keep in view (the one the choice just moved to), and a key that changes with it.
     pub in_view: Option<(usize, u64)>,
     pub click: &'a dyn Fn(usize) -> M,
+    /// What pulling a row away sends (the start of a drag), if rows can be dragged.
+    pub drag: Option<&'a dyn Fn(usize) -> M>,
     /// Show each file's folder under its name (the recent files).
     pub folders: bool,
 }
@@ -186,6 +188,9 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
         .on_press((v.click)(k))
         .width(Length::FILL)
         .name(e.name.clone());
+        if let Some(d) = v.drag {
+            b = b.on_drag(d(k));
+        }
         if let Some((i, key)) = v.in_view
             && i == k
         {
@@ -212,6 +217,9 @@ pub fn icons<M: Clone + 'static>(v: &View<M>) -> Element<M> {
                 .on_press((v.click)(k))
                 .width(Length::Fixed(100.0))
                 .name(e.name.clone());
+            if let Some(d) = v.drag {
+                b = b.on_drag(d(k));
+            }
             if let Some((i, key)) = v.in_view
                 && i == k
             {

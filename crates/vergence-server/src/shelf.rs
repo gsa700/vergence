@@ -1444,3 +1444,12 @@ impl Server {
         if failed.is_empty() { Ok(()) } else { Err(failed.join("; ")) }
     }
 }
+
+impl Server {
+    /// The dock's item under `at`, if any (a drop onto an app's icon; drag.rs).
+    pub fn dock_item_at(&mut self, at: Point<f64, Logical>) -> Option<running::Item> {
+        let upright = self.shelf.config.placement().upright();
+        let i = self.shelf.dock.and_then(|d| running::item_at(rect(d), self.shelf.names.len(), upright, at.x.floor() as i32, at.y.floor() as i32))?;
+        self.shelf_items().into_iter().nth(i).map(|(item, _)| item)
+    }
+}

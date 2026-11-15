@@ -1274,6 +1274,19 @@ impl Program for EditWindow {
         window.redraw();
     }
 
+    /// Files dropped here open in tabs (files milestone 1, step 8).
+    fn drag_over(&mut self, _x: f32, _y: f32, kinds: &[String], _ctrl: bool) -> u8 {
+        if kinds.iter().any(|k| k == "text/uri-list") { vergence_ui::DROP_COPY } else { vergence_ui::DROP_NONE }
+    }
+
+    fn dropped(&mut self, _x: f32, _y: f32, _action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
+        let paths: Vec<PathBuf> = items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default();
+        if !paths.is_empty() {
+            self.open_files(&paths);
+            window.redraw();
+        }
+    }
+
     fn timer(&mut self, id: u64, window: &mut Window) -> bool {
         match id {
             KEEP_TIMER => {

@@ -144,6 +144,8 @@ pub struct Server {
     pub alive_asked: std::collections::HashMap<u32, std::time::Instant>,
     /// The portal's open file dialogs and the windows they belong to (portal.rs).
     pub portal: crate::portal::Portal,
+    /// A drag between native windows (drag.rs).
+    pub native_drag: Option<crate::drag::NativeDrag>,
     pub pinged: std::collections::HashMap<smithay::reexports::wayland_server::backend::ClientId, std::time::Instant>,
     /// Touch panels and the fingers on them (touch.rs).
     pub touch: crate::touch::Touch,
@@ -301,6 +303,7 @@ impl Server {
             quitting: Default::default(),
             alive_asked: Default::default(),
             portal: Default::default(),
+            native_drag: None,
             pinged: Default::default(),
             pointer_devices: Vec::new(),
             touch_panels: Vec::new(),

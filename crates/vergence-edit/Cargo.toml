@@ -13,6 +13,7 @@ description = "Vergence's text editor: plain text, tabs, line numbers, on the to
 vergence-ui.workspace = true
 vergence-widgets.workspace = true
 vergence-scene.workspace = true
+vergence-types.workspace = true
 
 [[bin]]
 name = "vergence-edit"

@@ -722,6 +722,7 @@ impl Program for Viewer {
                 if m.ctrl {
                     match *sym {
                         0x6f | 0x4f => self.run(cmd::OPEN, window),
+                        0x6e | 0x4e => self.run(cmd::NEW_WINDOW, window),
                         0x77 | 0x57 => self.run(cmd::CLOSE_TAB, window),
                         0x2c => self.run(cmd::SETTINGS, window),
                         0x3d | 0x2b | KP_ADD => self.run(cmd::ZOOM_IN, window),
@@ -842,6 +843,17 @@ impl Program for Viewer {
         }
         self.arm_animation(window);
         true
+    }
+
+    /// Files dropped here open as tabs.
+    fn drag_over(&mut self, _x: f32, _y: f32, kinds: &[String], _ctrl: bool) -> u8 {
+        if !self.preview && kinds.iter().any(|k| k == "text/uri-list") { vergence_ui::DROP_COPY } else { vergence_ui::DROP_NONE }
+    }
+
+    fn dropped(&mut self, _x: f32, _y: f32, _action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
+        let paths: Vec<PathBuf> = items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default();
+        self.open_paths(&paths);
+        window.redraw();
     }
 
     fn scale(&mut self, scale: f32) -> bool {

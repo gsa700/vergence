@@ -356,7 +356,7 @@ impl Server {
 /// The option names a call carried, for the log (not their values: paths).
 fn opts_seen(options: &Value) -> Vec<String> {
     let Value::Array(_, entries) = options else { return Vec::new() };
-    entries.iter().filter_map(|e| if let Value::Entry(k, v) = e { Some(k.as_str().unwrap_or("?").to_string()) } else { None }).collect()
+    entries.iter().filter_map(|e| if let Value::Entry(k, _) = e { Some(k.as_str().unwrap_or("?").to_string()) } else { None }).collect()
 }
 
 /// A process's name (its command), for the dialog's remembered folder.

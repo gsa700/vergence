@@ -5,6 +5,7 @@ mod handlers;
 
 mod dispatch;
 mod portal;
+mod drag;
 mod keys;
 mod input;
 mod state;

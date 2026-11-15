@@ -264,6 +264,50 @@ pub enum WinRequest {
     /// its scientific keys; tools milestone 1). The server decides: within
     /// the window's limits and its screen, not while maximized or snapped.
     Size { window: u32, width: f64, height: f64 },
+    /// Start dragging (files milestone 1, step 8), while the pointer's left
+    /// button is held on this window: what is dragged, each kind with its
+    /// data (file drags are a few paths, so the data goes with the drag:
+    /// [`MAX_DRAG_BYTES`] in all), and the words the server's ghost shows.
+    DragStart { window: u32, label: String, items: Vec<(String, Vec<u8>)> },
+    /// The answer to [`WinEvent::DragOver`]: what a drop here would do
+    /// ([`DROP_NONE`], [`DROP_COPY`], [`DROP_MOVE`]).
+    DragAccept { window: u32, action: u8 },
+}
+
+/// A drag's data, all kinds together, at the most (a frame is 64 KB).
+pub const MAX_DRAG_BYTES: usize = 48 * 1024;
+/// What a drop does.
+pub const DROP_NONE: u8 = 0;
+pub const DROP_COPY: u8 = 1;
+pub const DROP_MOVE: u8 = 2;
+/// Modifier bits a drag's events carry.
+pub const DRAG_CTRL: u8 = 1;
+pub const DRAG_SHIFT: u8 = 2;
+
+fn put_items(e: &mut Encoder, items: &[(String, Vec<u8>)]) {
+    e.count(items.len());
+    for (k, v) in items {
+        e.str(k).bytes(v);
+    }
+}
+
+fn get_items(d: &mut Decoder) -> Result<Vec<(String, Vec<u8>)>, WireError> {
+    let n = d.count(8)?;
+    if n > MAX_KINDS {
+        return Err(WireError::TooLong(n));
+    }
+    let mut total = 0usize;
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        let k = d.str()?;
+        let v = d.bytes()?.to_vec();
+        total += v.len();
+        if total > MAX_DRAG_BYTES {
+            return Err(WireError::TooLong(total));
+        }
+        out.push((k, v));
+    }
+    Ok(out)
 }
 
 /// A window's bar style: the desktop's, or the app's own.
@@ -388,6 +432,16 @@ pub enum WinEvent {
     /// A command of the window's app menu was chosen (its id), from the menu
     /// or its search.
     Command { window: u32, id: u32 },
+    /// A drag is over this window at (x, y), with these kinds; `mods`: the
+    /// keys held ([`DRAG_CTRL`], [`DRAG_SHIFT`]). Answer with DragAccept.
+    DragOver { window: u32, x: f64, y: f64, kinds: Vec<String>, mods: u8 },
+    /// The drag left this window (or ended elsewhere).
+    DragLeave { window: u32 },
+    /// Dropped here: what to do (as this window accepted it) and the data.
+    DragDrop { window: u32, x: f64, y: f64, action: u8, items: Vec<(String, Vec<u8>)> },
+    /// To the window the drag started from: it ended, with this action
+    /// ([`DROP_NONE`]: nowhere took it).
+    DragEnded { window: u32, action: u8 },
 }
 
 pub(crate) mod op {
@@ -412,6 +466,8 @@ pub(crate) mod op {
     pub const COMMANDS: u16 = 117;
     pub const BAR_STYLE: u16 = 118;
     pub const SIZE: u16 = 119;
+    pub const DRAG_START: u16 = 120;
+    pub const DRAG_ACCEPT: u16 = 121;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -443,6 +499,10 @@ pub(crate) mod op {
     pub const BAR_BUTTON: u16 = 127;
     pub const TINT: u16 = 128;
     pub const COMMAND: u16 = 129;
+    pub const DRAG_OVER: u16 = 130;
+    pub const DRAG_LEAVE: u16 = 131;
+    pub const DRAG_DROP: u16 = 132;
+    pub const DRAG_ENDED: u16 = 133;
 
     /// Whether an opcode is a window message's (either way).
     pub fn is_window(opcode: u16) -> bool {
@@ -746,6 +806,17 @@ impl WinRequest {
                 e.u32(*window).f64(*width).f64(*height);
                 e
             }
+            WinRequest::DragStart { window, label, items } => {
+                let mut e = Encoder::frame(op::DRAG_START);
+                e.u32(*window).str(label);
+                put_items(&mut e, items);
+                e
+            }
+            WinRequest::DragAccept { window, action } => {
+                let mut e = Encoder::frame(op::DRAG_ACCEPT);
+                e.u32(*window).u8(*action);
+                e
+            }
             WinRequest::BarStyle { window, style } => {
                 let mut e = Encoder::frame(op::BAR_STYLE);
                 e.u32(*window).u8(match style {
@@ -909,6 +980,15 @@ impl WinRequest {
                 };
                 WinRequest::BarStyle { window, style }
             }
+            op::DRAG_START => WinRequest::DragStart { window: d.u32()?, label: d.str()?, items: get_items(&mut d)? },
+            op::DRAG_ACCEPT => {
+                let window = d.u32()?;
+                let action = d.u8()?;
+                if action > DROP_MOVE {
+                    return Err(WireError::BadValue("drop action"));
+                }
+                WinRequest::DragAccept { window, action }
+            }
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -1070,6 +1150,28 @@ impl WinEvent {
                 e.u32(*window).u32(*id);
                 e
             }
+            WinEvent::DragOver { window, x, y, kinds, mods } => {
+                let mut e = Encoder::frame(op::DRAG_OVER);
+                e.u32(*window).f64(*x).f64(*y).u8(*mods);
+                put_kinds(&mut e, kinds);
+                e
+            }
+            WinEvent::DragLeave { window } => {
+                let mut e = Encoder::frame(op::DRAG_LEAVE);
+                e.u32(*window);
+                e
+            }
+            WinEvent::DragDrop { window, x, y, action, items } => {
+                let mut e = Encoder::frame(op::DRAG_DROP);
+                e.u32(*window).f64(*x).f64(*y).u8(*action);
+                put_items(&mut e, items);
+                e
+            }
+            WinEvent::DragEnded { window, action } => {
+                let mut e = Encoder::frame(op::DRAG_ENDED);
+                e.u32(*window).u8(*action);
+                e
+            }
             WinEvent::Tint { window, rgb } => {
                 let mut e = Encoder::frame(op::TINT);
                 e.u32(*window);
@@ -1156,6 +1258,16 @@ impl WinEvent {
                 WinEvent::Tint { window, rgb }
             }
             op::COMMAND => WinEvent::Command { window: d.u32()?, id: d.u32()? },
+            op::DRAG_OVER => {
+                let (window, x, y, mods) = (d.u32()?, finite(d.f64()?, "x")?, finite(d.f64()?, "y")?, d.u8()?);
+                WinEvent::DragOver { window, x, y, kinds: get_kinds(&mut d)?, mods }
+            }
+            op::DRAG_LEAVE => WinEvent::DragLeave { window: d.u32()? },
+            op::DRAG_DROP => {
+                let (window, x, y, action) = (d.u32()?, finite(d.f64()?, "x")?, finite(d.f64()?, "y")?, d.u8()?);
+                WinEvent::DragDrop { window, x, y, action, items: get_items(&mut d)? }
+            }
+            op::DRAG_ENDED => WinEvent::DragEnded { window: d.u32()?, action: d.u8()? },
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -1290,6 +1402,8 @@ mod tests {
             },
             WinRequest::BarStyle { window: 1, style: BarStyle::Light },
             WinRequest::Size { window: 1, width: 680.0, height: 560.0 },
+            WinRequest::DragStart { window: 1, label: "2 items".into(), items: vec![("text/uri-list".into(), b"file:///a\r\nfile:///b\r\n".to_vec()), ("text/plain".into(), b"/a\n/b".to_vec())] },
+            WinRequest::DragAccept { window: 1, action: DROP_MOVE },
             WinRequest::BarStyle { window: 2, style: BarStyle::Desktop },
             WinRequest::Bar {
                 window: 1,
@@ -1360,6 +1474,10 @@ mod tests {
             WinEvent::Tint { window: 1, rgb: Some(0x203a5c) },
             WinEvent::Tint { window: 1, rgb: None },
             WinEvent::Command { window: 1, id: 7 },
+            WinEvent::DragOver { window: 1, x: 10.5, y: 20.0, kinds: vec!["text/uri-list".into()], mods: DRAG_CTRL },
+            WinEvent::DragLeave { window: 1 },
+            WinEvent::DragDrop { window: 1, x: 3.0, y: 4.0, action: DROP_COPY, items: vec![("text/uri-list".into(), b"file:///a\r\n".to_vec())] },
+            WinEvent::DragEnded { window: 1, action: DROP_NONE },
         ];
         for m in all {
             let (bytes, fds) = m.encode().unwrap();

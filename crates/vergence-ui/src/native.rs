@@ -396,6 +396,7 @@ impl<'a> Native<'a> {
                 Command::Title(title) => self.send(WinRequest::Title { window: id, title })?,
                 Command::Maximize(on) => self.send(WinRequest::Maximize { window: id, on })?,
                 Command::Size(w, h) => self.send(WinRequest::Size { window: id, width: w as f64, height: h as f64 })?,
+                Command::Drag(label, items) => self.send(WinRequest::DragStart { window: id, label, items })?,
                 Command::Minimize => self.send(WinRequest::Minimize { window: id })?,
                 Command::Copy(text) => {
                     self.send(WinRequest::Copy { input_serial: self.input_serial, kinds: TEXT_KINDS.iter().map(|k| k.to_string()).collect() })?;
@@ -696,6 +697,15 @@ impl<'a> Native<'a> {
             WinEvent::TabChosen { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::Chosen(tab), w))?,
             WinEvent::BarButton { window, id } => self.with_window(window, |app, w| app.bar_button(id, w))?,
             WinEvent::Command { window, id } => self.with_window(window, |app, w| app.command(id, w))?,
+            // Drag and drop (files milestone 1, step 8).
+            WinEvent::DragOver { window, x, y, kinds, mods } => {
+                let mut action = crate::DROP_NONE;
+                self.with_window(window, |app, _| action = app.drag_over(x as f32, y as f32, &kinds, mods & vergence_protocol::window::DRAG_CTRL != 0))?;
+                self.send(WinRequest::DragAccept { window, action })?;
+            }
+            WinEvent::DragLeave { window } => self.with_window(window, |app, _| app.drag_left())?,
+            WinEvent::DragDrop { window, x, y, action, items } => self.with_window(window, |app, w| app.dropped(x as f32, y as f32, action, &items, w))?,
+            WinEvent::DragEnded { window, action } => self.with_window(window, |app, w| app.drag_ended(action, w))?,
             WinEvent::Tint { window, rgb } => {
                 if let Some(i) = self.index(window) {
                     let w = &mut self.windows[i];

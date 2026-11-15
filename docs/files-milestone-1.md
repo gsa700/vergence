@@ -409,6 +409,29 @@ the wallpaper, a scratch place for launchers and files.
   undo of the copy (to the Trash), Move to the Trash by the toolbar and
   its undo. Not yet seen on screen: the progress strip on a large copy;
   drag and drop is step 8. Tests: Hubble 611, kepler 607, Techbench 611.
+- **Step 8, native drags** (2026-11-15): bus **v16**: `WinRequest::DragStart`
+  (the data travels with it, `MAX_DRAG_BYTES` 48 KB: file drags are a
+  few paths, so no pipes, and no deadlock when a program drops on its own
+  other window) and `DragAccept`; `WinEvent::DragOver` (with Ctrl and
+  Shift), `DragLeave`, `DragDrop` (with the data), `DragEnded`. The server
+  (drag.rs) takes a drag only while the left button is held on the window,
+  follows the pointer beside the seat, tells the native window under it,
+  takes drops on the dock's app icons itself (`dock_item_at`; the files
+  opened with that app), drops on the release, and draws a ghost of the
+  drag's words, in the accent while a drop would do something. Toolkit:
+  `Window::start_drag`, `App`/`Program` `drag_over`, `drag_left`,
+  `dropped`, `drag_ended`; buttons gain `.on_drag(...)` (pulled 6 points
+  away); `files::View::drag`. File Viewer drags its chosen files (or the
+  row pulled) as text/uri-list and text/plain, and takes drops into the
+  folder shown (moved, Ctrl copies; clashes ask; undo); Close-Up and the
+  Text Editor open dropped files; Ctrl+N in File Viewer and Close-Up
+  (role keys are each app's to catch). Tried on kepler in a scratch folder:
+  File Viewer to the Text Editor (opened), between two File Viewer windows
+  (moved; the source saw it at its next folder watch, about 2 s), onto the
+  dock's Text Editor (opened in the running one). Not yet: drags to and
+  from Wayland and X11 programs (Smithay's drag grab knows only Wayland
+  surfaces), drops on a folder row or a sidebar place. Tests: Hubble 612,
+  kepler 608, Techbench 612.
 ## Steps
 
 1. **vergence-types**: the database reader (globs2, magic, subclasses,
