@@ -262,6 +262,24 @@ mod tests {
         assert!(worst(&inverted, LIGHT.ink) >= LIGHT.need - 0.1, "the ink still reads");
     }
 
+    /// A light bar over a dark terminal, inverted: the focused bar is a shade
+    /// darker than the unfocused one, as everywhere in the light style (228
+    /// and 240), not the mid grey against white it was before (focus looked
+    /// reversed: Dave, 2026-11-14); and the text under it still shows.
+    #[test]
+    fn over_a_dark_window_inverted_the_focused_light_bar_is_not_the_dimmer() {
+        let text = picture(32, 16, |x, y| if (x + y) % 5 == 0 { [235, 235, 235, 255] } else { [46, 52, 54, 255] });
+        let focused = frost(&text, 32, 16, 16, &Frost { invert: true, ..LIGHT });
+        let unfocused = frost(&text, 32, 16, 16, &Frost { tint: [240, 240, 241], ink: [112, 112, 116], need: 4.05, invert: true, ..LIGHT });
+        let mean = |p: &[u8]| p.chunks(4).map(|c| c[0] as f32).sum::<f32>() / (p.len() / 4) as f32;
+        assert!(mean(&focused) >= 185.0 && mean(&unfocused) - mean(&focused) <= 40.0, "focused {} unfocused {}", mean(&focused), mean(&unfocused));
+        // Not inverted, the focused bar was far dimmer: the gap this fixes.
+        let before = frost(&text, 32, 16, 16, &LIGHT);
+        assert!(mean(&before) < mean(&focused) - 20.0, "before {} after {}", mean(&before), mean(&focused));
+        let spread = |p: &[u8]| { let v: Vec<u8> = p.chunks(4).map(|c| c[0]).collect(); v.iter().max().unwrap() - v.iter().min().unwrap() };
+        assert!(spread(&focused) >= 8, "the text under it still shows: spread {}", spread(&focused));
+    }
+
     /// The rule itself: whatever is under the bar, every pixel of the frost
     /// keeps the ink's contrast (allowing for the result being stored in 8 bits).
     #[test]
