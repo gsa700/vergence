@@ -1,8 +1,8 @@
 # Tools milestone 1: Calculator, Force Quit, Hardware
 
-**Built 2026-11-14/15**, all three tools; open: Hardware's pages looked at
-on screen (only This computer so far), and the installs on kepler and
-Techbench (bus v13 needs the server and apps installed together). Running
+**Built 2026-11-14/15**, all three tools; installed on Hubble and kepler
+and in Techbench's dev session (2026-11-15; Techbench's installed
+"Vergence" needs Dave's sudo for tools/install.sh). Running
 Applications became **Force Quit** (Dave: "they call it force quit on the
 mac"). Progress and acceptance below.
 
@@ -186,8 +186,10 @@ Quit Applications); anything more is the terminal's.
 - [x] Force Quit: an app stopped with `kill -STOP` shows "Not
   responding", Force Quit ends it after 2 s; a running one ends when asked.
   (End and Pick a window dropped: "very simple".)
-- [ ] Hardware: every reading on Hubble, kepler and Techbench. The readers'
-  tests pass on Hubble and kepler; on screen only This computer, on Hubble.
+- [x] Hardware: every page on screen on Techbench (Fedora; a btrfs volume
+  mounted twice now listed once), This computer on Hubble; the readers'
+  tests pass on Hubble and kepler (FreeBSD's pages not looked at on its
+  screen yet).
 - [x] Each app: app button with its commands, About; the calculator's
   settings window; windows remembered (the session brought the calculator
   back).
