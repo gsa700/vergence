@@ -82,7 +82,8 @@ impl Server {
     pub fn window_style(&self, w: &Win) -> WinStyle {
         if let Some(n) = w.native() {
             let (parent, style) = n.style();
-            let parent = (parent != 0).then(|| self.natives.get(&(n.client, parent)).cloned()).flatten();
+            // A portal dialog's parent is another program's window (portal.rs).
+            let parent = (parent != 0).then(|| self.natives.get(&(n.client, parent)).cloned()).flatten().or_else(|| self.portal.adopted.get(w).cloned());
             let Some(s) = style else { return WinStyle { parent, ..Default::default() } };
             use vergence_protocol::window::WinKind;
             let kind = match s.kind {

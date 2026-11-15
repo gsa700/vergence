@@ -142,6 +142,8 @@ pub struct Server {
     /// Asked whether they are alive and not answered yet, since when: native
     /// clients by bus id, Wayland clients by their id (forcequit.rs).
     pub alive_asked: std::collections::HashMap<u32, std::time::Instant>,
+    /// The portal's open file dialogs and the windows they belong to (portal.rs).
+    pub portal: crate::portal::Portal,
     pub pinged: std::collections::HashMap<smithay::reexports::wayland_server::backend::ClientId, std::time::Instant>,
     /// Touch panels and the fingers on them (touch.rs).
     pub touch: crate::touch::Touch,
@@ -298,6 +300,7 @@ impl Server {
             app_bars: crate::decor::app_bars(),
             quitting: Default::default(),
             alive_asked: Default::default(),
+            portal: Default::default(),
             pinged: Default::default(),
             pointer_devices: Vec::new(),
             touch_panels: Vec::new(),

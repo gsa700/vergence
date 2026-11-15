@@ -95,7 +95,7 @@ impl Server {
     }
 
     /// The process behind a window, if known.
-    fn window_pid(&self, w: &Win) -> Option<u32> {
+    pub(crate) fn window_pid(&self, w: &Win) -> Option<u32> {
         if let Some(n) = w.native() {
             return self.bus_pid(n.client);
         }

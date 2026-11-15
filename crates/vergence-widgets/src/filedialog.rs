@@ -90,6 +90,9 @@ fn glob(p: &str, s: &str) -> bool {
 enum Mode {
     Open,
     Save,
+    /// Choose a folder (the portal's `directory`, files milestone 1): only
+    /// folders are listed; the one chosen, or the one shown, is the answer.
+    Folder,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,6 +160,14 @@ pub struct FileDialog {
     replace: Option<PathBuf>,
     new_folder: Option<String>,
     done: Option<Box<dyn FnOnce(Vec<PathBuf>)>>,
+    /// Several files may be chosen (Ctrl+click adds or takes one away,
+    /// Shift+click a run of them): those marked so far.
+    multiple: bool,
+    marked: Vec<PathBuf>,
+    /// The modifiers of the last press, for a row's click.
+    mods: vergence_ui::Modifiers,
+    /// The Open/Save button's word, if not "Open"/"Save"/"Choose".
+    accept: Option<String>,
     /// Bumped when the choice moves, so the chosen row is a new one and is scrolled to.
     turn: Rc<Cell<u64>>,
 }
@@ -193,10 +204,32 @@ impl FileDialog {
             replace: None,
             new_folder: None,
             done: Some(done),
+            multiple: false,
+            marked: Vec::new(),
+            mods: vergence_ui::Modifiers::default(),
+            accept: None,
             turn: Rc::new(Cell::new(0)),
         };
         d.read();
         d
+    }
+
+    /// A dialog that chooses a folder.
+    pub fn choose_folder(app_id: &str, title: &str, theme: Theme, done: impl FnOnce(Vec<PathBuf>) + 'static) -> FileDialog {
+        FileDialog::new(Mode::Folder, app_id, title, String::new(), theme, Box::new(done))
+    }
+
+    /// In Open, several files may be chosen (Ctrl+click, Shift+click).
+    pub fn multiple(mut self, yes: bool) -> FileDialog {
+        self.multiple = yes && self.mode == Mode::Open;
+        self
+    }
+
+    /// The word on the button that answers ("Attach", "Upload").
+    pub fn accept(mut self, word: &str) -> FileDialog {
+        let w = word.trim().replace('_', "");
+        self.accept = (!w.is_empty()).then(|| w.chars().take(24).collect());
+        self
     }
 
     /// Opens in `dir` (the document's own folder, say) rather than the last one.
@@ -268,7 +301,7 @@ impl FileDialog {
             .entries
             .iter()
             .filter(|e| self.hidden || !e.name.starts_with('.'))
-            .filter(|e| e.dir || filter.is_none_or(|f| f.admits(&e.name, e.mime)))
+            .filter(|e| e.dir || (self.mode != Mode::Folder && filter.is_none_or(|f| f.admits(&e.name, e.mime))))
             .filter(|e| narrow.is_empty() || e.name.to_lowercase().contains(&narrow))
             .collect();
         let (by, up) = self.sort;
@@ -294,6 +327,7 @@ impl FileDialog {
         if self.mode == Mode::Open {
             self.typed.clear();
         }
+        self.marked.clear();
         self.replace = None;
         self.read();
     }
@@ -328,6 +362,25 @@ impl FileDialog {
         }
         let chosen = self.selected.and_then(|k| self.visible().get(k).map(|e| (e.path.clone(), e.dir)));
         match self.mode {
+            Mode::Folder => {
+                // The folder chosen in the list, else the one shown.
+                let p = chosen.filter(|(_, dir)| *dir).map(|(p, _)| p).or_else(|| self.dir().map(Path::to_path_buf));
+                if let Some(p) = p {
+                    if let Some(parent) = p.parent() {
+                        remember(&self.app_id, parent, &p);
+                    }
+                    if let Some(done) = self.done.take() {
+                        done(vec![p]);
+                    }
+                    window.close();
+                }
+            }
+            Mode::Open if self.marked.len() > 1 => {
+                let files: Vec<PathBuf> = self.marked.iter().filter(|p| p.is_file()).cloned().collect();
+                if !files.is_empty() {
+                    self.answer_all(files, window);
+                }
+            }
             Mode::Open => {
                 let chosen = chosen.or_else(|| {
                     let v = self.visible();
@@ -368,6 +421,19 @@ impl FileDialog {
     }
 
     /// The chosen file: asked first if Save would replace one.
+    /// Several files at once (Open with `multiple`).
+    fn answer_all(&mut self, files: Vec<PathBuf>, window: &mut Window) {
+        if let Some(last) = files.last()
+            && let Some(dir) = last.parent()
+        {
+            remember(&self.app_id, dir, last);
+        }
+        if let Some(done) = self.done.take() {
+            done(files);
+        }
+        window.close();
+    }
+
     fn answer(&mut self, p: PathBuf, window: &mut Window) {
         if self.mode == Mode::Save && p.exists() && self.replace.as_ref() != Some(&p) {
             self.replace = Some(p);
@@ -533,7 +599,7 @@ impl Program for FileDialog {
         let visible = self.visible();
         let mut rows: Vec<Element<FileMsg>> = Vec::with_capacity(visible.len());
         for (k, e) in visible.iter().enumerate() {
-            let chosen = self.selected == Some(k);
+            let chosen = self.selected == Some(k) || self.marked.contains(&e.path);
             let mut name_col: Vec<Element<FileMsg>> = vec![label(e.name.clone()).size(12.0).width(Length::FILL)];
             if recent && let Some(p) = e.path.parent() {
                 name_col.push(label(tilde(p)).size(10.0).dim().width(Length::FILL));
@@ -584,7 +650,16 @@ impl Program for FileDialog {
                 foot.push(label("Name").size(12.0));
                 foot.push(field(self.typed.clone(), FileMsg::Typed).on_submit(FileMsg::Submit).autofocus().width(Length::FILL).name("Name"));
             }
-            Mode::Open => foot.push(field(self.typed.clone(), FileMsg::Typed).placeholder("Type to narrow the list, or a path").on_submit(FileMsg::Submit).autofocus().width(Length::FILL).name("Find or go to")),
+            Mode::Open | Mode::Folder => {
+                let hint = if self.marked.len() > 1 {
+                    format!("{} files chosen", self.marked.len())
+                } else if self.mode == Mode::Folder {
+                    "Type a path to go there".to_string()
+                } else {
+                    "Type to narrow the list, or a path".to_string()
+                };
+                foot.push(field(self.typed.clone(), FileMsg::Typed).placeholder(&hint).on_submit(FileMsg::Submit).autofocus().width(Length::FILL).name("Find or go to"))
+            }
         }
         if self.filters.len() > 1 {
             let names: Vec<String> = self.filters.iter().map(|f| f.name.clone()).collect();
@@ -594,7 +669,12 @@ impl Program for FileDialog {
             foot.push(button(label("New folder").size(12.0)).padding(Padding::hv(4.0, 10.0)).on_press(FileMsg::NewFolder).name("New folder"));
         }
         foot.push(button(label("Cancel").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(FileMsg::Cancel).name("Cancel"));
-        let go = if self.mode == Mode::Save { "Save" } else { "Open" };
+        let word = match self.mode {
+            Mode::Save => "Save",
+            Mode::Open => "Open",
+            Mode::Folder => "Choose",
+        };
+        let go = self.accept.as_deref().unwrap_or(word);
         foot.push(button(label(go).size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 14.0)).on_press(FileMsg::Submit).name(go));
         let mut all = vec![path, middle];
         // A question or a name, in a strip above the foot.
@@ -650,7 +730,36 @@ impl Program for FileDialog {
                 }
             }
             FileMsg::Submit => self.submit(window),
+            FileMsg::Click(k) if self.multiple && (self.mods.ctrl || self.mods.shift) => {
+                // Ctrl+click: this file in or out of the marked ones; Shift+click:
+                // the files from the last chosen to this one.
+                let visible: Vec<(PathBuf, bool)> = self.visible().iter().map(|e| (e.path.clone(), e.dir)).collect();
+                if self.marked.is_empty()
+                    && let Some((p, false)) = self.selected.and_then(|j| visible.get(j).cloned())
+                {
+                    self.marked.push(p);
+                }
+                if self.mods.shift {
+                    let from = self.selected.unwrap_or(k);
+                    let (a, b) = (from.min(k), from.max(k));
+                    for (p, dir) in &visible[a..=b.min(visible.len().saturating_sub(1))] {
+                        if !dir && !self.marked.contains(p) {
+                            self.marked.push(p.clone());
+                        }
+                    }
+                } else if let Some((p, false)) = visible.get(k).cloned() {
+                    match self.marked.iter().position(|m| *m == p) {
+                        Some(i) => {
+                            self.marked.remove(i);
+                        }
+                        None => self.marked.push(p),
+                    }
+                }
+                self.selected = Some(k);
+                self.turn.set(self.turn.get() + 1);
+            }
             FileMsg::Click(k) => {
+                self.marked.clear();
                 let now = Instant::now();
                 let double = self.last_click.is_some_and(|(t, j)| j == k && now.duration_since(t) < DOUBLE);
                 self.last_click = Some((now, k));
@@ -706,6 +815,13 @@ impl Program for FileDialog {
             FileMsg::Cancel => window.close(),
         }
         window.redraw();
+    }
+
+    /// The modifiers of each press, for the row it clicks (Ctrl+click, Shift+click).
+    fn saw(&mut self, input: &Input) {
+        if let Input::Button { pressed: true, modifiers, .. } = input {
+            self.mods = *modifiers;
+        }
     }
 
     /// The list's keys, before the field: Up and Down choose, Escape cancels.

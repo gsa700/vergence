@@ -4,6 +4,7 @@
 mod handlers;
 
 mod dispatch;
+mod portal;
 mod keys;
 mod input;
 mod state;
@@ -80,6 +81,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // than the host compositor
     unsafe { std::env::set_var("WAYLAND_DISPLAY", &state.socket_name) };
 
+    // Our file dialog for apps not ours, if asked for (portal.rs): the
+    // environment that makes GTK and Qt ask the portal.
+    crate::portal::export_env();
     // The development control socket (owner-only; control.rs).
     crate::control::listen(&mut state);
     // The session bus (bus.rs); sets VERGENCE_BUS for everything started after it.

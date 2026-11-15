@@ -70,6 +70,11 @@ pub trait Program {
         false
     }
 
+    /// Every input, seen before the widgets get it, for what a widget's
+    /// message does not carry (the Open dialog's Ctrl+click: the modifiers
+    /// of the press that clicked a row). Nothing is taken.
+    fn saw(&mut self, _input: &Input) {}
+
     /// A key before any widget sees it (a calculator's keys, which must not
     /// press the button last clicked): Some(changed) if the program took it.
     fn key_first(&mut self, _input: &Input, _window: &mut Window) -> Option<bool> {
@@ -403,6 +408,7 @@ impl<P: Program> vergence_ui::App for Host<P> {
     }
 
     fn input(&mut self, input: &Input, window: &mut Window) {
+        self.program.saw(input);
         if matches!(input, Input::Key { .. })
             && let Some(changed) = self.program.key_first(input, window)
         {

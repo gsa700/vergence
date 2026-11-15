@@ -362,6 +362,9 @@ impl Server {
                     user_data: UserDataMap::new(),
                 });
                 let w = Win::Native(n.clone());
+                // A portal's file dialog: another program's window is its parent.
+                let pid = self.bus_pid(client);
+                self.portal_adopt(&w, pid);
                 // Where it goes: memory first (by identity, memory.rs), then where it
                 // asked to be if that is allowed, else fitted and centered on the
                 // monitor under the pointer (place.rs).

@@ -17,7 +17,8 @@
 // Step 2c: the edge itself provides org.freedesktop.portal.Desktop's Settings
 // interface (ReadAll, Read, ReadOne, SettingChanged, version 2) from the
 // server's settings service (settings.rs), as the pseudo-connection ":1.0".
-// Other portal interfaces answer UnknownMethod, so apps fall back as before.
+// FileChooser and OpenURI (files milestone 1) are in portal.rs. Other
+// portal interfaces answer UnknownMethod, so apps fall back as before.
 //
 // Step 3: org.freedesktop.Notifications (same pseudo-connection) translated
 // into the server's own notifications (notify.rs). NotificationClosed and
@@ -840,7 +841,27 @@ impl Server {
             ("org.freedesktop.DBus.Introspectable", "Introspect") => {
                 ok(&[Value::Str(if on_portal { PORTAL_INTROSPECTION } else { EMPTY_INTROSPECTION }.into())])
             }
+            // A portal Request object (portal.rs): the caller gives up.
+            (crate::portal::REQUEST, "Close") if m.path.as_deref().is_some_and(|p| p.starts_with(crate::portal::REQUEST_PREFIX)) => {
+                self.portal_close(m.path.as_deref().unwrap_or_default());
+                ok(&[])
+            }
             (_, _) if !on_portal => err(E_UNKNOWN_METHOD, "no such object"),
+            (crate::portal::FILE_CHOOSER, "OpenFile" | "SaveFile" | "SaveFiles") => {
+                let unique = self.dbus.conns.get(&id).and_then(|c| c.unique.clone()).unwrap_or_default();
+                match self.portal_choose(id, &unique, member, &args) {
+                    Ok(handle) => ok(&[Value::Path(handle)]),
+                    Err(e) => err("org.freedesktop.portal.Error.Failed", &e),
+                }
+            }
+            (crate::portal::OPEN_URI, "OpenURI") => {
+                let unique = self.dbus.conns.get(&id).and_then(|c| c.unique.clone()).unwrap_or_default();
+                match self.portal_open_uri(id, &unique, &args) {
+                    Ok(handle) => ok(&[Value::Path(handle)]),
+                    Err(e) => err(E_INVALID_ARGS, &e),
+                }
+            }
+            (crate::portal::OPEN_URI, "OpenFile" | "OpenDirectory") => err("org.freedesktop.portal.Error.NotAllowed", "files passed by descriptor are not taken by Vergence's bus yet; use OpenURI"),
             (PORTAL_SETTINGS, "ReadOne") | (PORTAL_SETTINGS, "Read") => match (s(0), s(1)) {
                 (Some(ns), Some(key)) => {
                     self.dbus_log_read(id, &ns, &key);
@@ -873,10 +894,13 @@ impl Server {
             }
             ("org.freedesktop.DBus.Properties", "Get") => match (s(0).as_deref(), s(1).as_deref()) {
                 (Some(PORTAL_SETTINGS), Some("version")) => ok(&[Value::Variant(Box::new(Value::U32(2)))]),
+                (Some(crate::portal::FILE_CHOOSER), Some("version")) => ok(&[Value::Variant(Box::new(Value::U32(3)))]),
+                (Some(crate::portal::OPEN_URI), Some("version")) => ok(&[Value::Variant(Box::new(Value::U32(3)))]),
                 _ => err(E_INVALID_ARGS, "no such interface or property"),
             },
             ("org.freedesktop.DBus.Properties", "GetAll") => match s(0).as_deref() {
                 Some(PORTAL_SETTINGS) => ok(&[Value::Array("{sv}".into(), vec![entry("version", Value::U32(2))])]),
+                Some(crate::portal::FILE_CHOOSER) | Some(crate::portal::OPEN_URI) => ok(&[Value::Array("{sv}".into(), vec![entry("version", Value::U32(3))])]),
                 _ => err(E_INVALID_ARGS, "no such interface"),
             },
             _ => err(E_UNKNOWN_METHOD, &format!("{iface}.{member} is not provided (yet) by Vergence")),
@@ -925,6 +949,21 @@ impl Server {
         if m.flags & NO_REPLY_EXPECTED == 0 {
             self.dbus_reply(id, reply);
         }
+    }
+
+    /// A connection's process, if its credentials gave one.
+    pub fn dbus_conn_pid(&self, conn: u32) -> Option<u32> {
+        self.dbus.conns.get(&conn).and_then(|c| c.pid)
+    }
+
+    /// A portal Request's Response signal, to the connection that made it only.
+    pub fn dbus_request_response(&mut self, conn: u32, handle: &str, response: u32, results: Value) {
+        let Some(dest) = self.dbus.conns.get(&conn).and_then(|c| c.unique.clone()) else { return };
+        let mut sig = Message::signal(EDGE_UNIQUE, handle, crate::portal::REQUEST, "Response", &[Value::U32(response), results]);
+        sig.destination = Some(dest);
+        sig.serial = self.dbus_next_serial();
+        let bytes = sig.serialize();
+        self.dbus_send_raw(conn, &bytes);
     }
 
     /// A signal from the notification service to one connection only.
@@ -1051,6 +1090,16 @@ const PORTAL_INTROSPECTION: &str = r#"<!DOCTYPE node PUBLIC "-//freedesktop//DTD
     <method name="Read"><arg type="s" name="namespace" direction="in"/><arg type="s" name="key" direction="in"/><arg type="v" name="value" direction="out"/></method>
     <method name="ReadOne"><arg type="s" name="namespace" direction="in"/><arg type="s" name="key" direction="in"/><arg type="v" name="value" direction="out"/></method>
     <signal name="SettingChanged"><arg type="s" name="namespace"/><arg type="s" name="key"/><arg type="v" name="value"/></signal>
+    <property name="version" type="u" access="read"/>
+  </interface>
+  <interface name="org.freedesktop.portal.FileChooser">
+    <method name="OpenFile"><arg type="s" name="parent_window" direction="in"/><arg type="s" name="title" direction="in"/><arg type="a{sv}" name="options" direction="in"/><arg type="o" name="handle" direction="out"/></method>
+    <method name="SaveFile"><arg type="s" name="parent_window" direction="in"/><arg type="s" name="title" direction="in"/><arg type="a{sv}" name="options" direction="in"/><arg type="o" name="handle" direction="out"/></method>
+    <method name="SaveFiles"><arg type="s" name="parent_window" direction="in"/><arg type="s" name="title" direction="in"/><arg type="a{sv}" name="options" direction="in"/><arg type="o" name="handle" direction="out"/></method>
+    <property name="version" type="u" access="read"/>
+  </interface>
+  <interface name="org.freedesktop.portal.OpenURI">
+    <method name="OpenURI"><arg type="s" name="parent_window" direction="in"/><arg type="s" name="uri" direction="in"/><arg type="a{sv}" name="options" direction="in"/><arg type="o" name="handle" direction="out"/></method>
     <property name="version" type="u" access="read"/>
   </interface>
 </node>

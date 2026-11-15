@@ -18,6 +18,9 @@ pub enum AppsMsg {
     Open(String),
     /// An app's title bar: Some("dark"/"light"), or None for the desktop's.
     Bar(String, Option<String>),
+    /// Our Open/Save dialog for apps not ours (desktop.toml `[apps]
+    /// own-file-dialog`, read by the server at the start of a session).
+    OwnDialog(bool),
     Back,
 }
 
@@ -58,6 +61,12 @@ impl App {
                 self.open(Page::AppPage);
             }
             AppsMsg::Back => self.open(Page::Apps),
+            AppsMsg::OwnDialog(on) => self.save(|d| {
+                let apps = d.entry("apps").or_insert_with(|| toml::Value::Table(toml::Table::new()));
+                if let Some(t) = apps.as_table_mut() {
+                    t.insert("own-file-dialog".into(), on.into());
+                }
+            }),
             AppsMsg::Bar(id, value) => self.save(|d| {
                 let apps = d.entry("app").or_insert_with(|| toml::Value::Table(toml::Table::new()));
                 if let Some(apps) = apps.as_table_mut() {
@@ -95,7 +104,16 @@ impl App {
                 setting(&name, what, button(label("Open").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Apps(AppsMsg::Open(id.clone()))).name(format!("Open {name}")))
             })
             .collect();
-        self.page_layout("Apps", "What the desktop does with each app: its title bar and where its windows go. An app's own settings are in the app.", vec![self.group(None, rows)])
+        let own = self.desktop.get("apps").and_then(|a| a.get("own-file-dialog")).and_then(|v| v.as_bool()).unwrap_or(false);
+        let all = self.group(
+            Some("Every app"),
+            vec![setting(
+                "Vergence's file dialog in other apps",
+                "Firefox, GTK and Qt apps open and save files with the desktop's dialog. From the next login; Firefox also needs widget.use-xdg-desktop-portal.file-picker = 1 in about:config.",
+                switch(own, |on| Message::Apps(AppsMsg::OwnDialog(on))).name("Vergence's file dialog in other apps"),
+            )],
+        );
+        self.page_layout("Apps", "What the desktop does with each app: its title bar and where its windows go. An app's own settings are in the app.", vec![all, self.group(Some("Apps"), rows)])
     }
 
     pub fn app_page(&self) -> Element<Message> {
