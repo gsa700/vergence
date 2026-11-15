@@ -232,6 +232,20 @@ pub fn cwd_of(pid: u32) -> Option<String> {
     }
 }
 
+/// The command name of process `pid` ("ssh", "make"), if it can be read:
+/// Linux's /proc/<pid>/comm; elsewhere (FreeBSD) `ps -o comm=`.
+pub fn name_of(pid: u32) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    let name = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    #[cfg(not(target_os = "linux"))]
+    let name = {
+        let out = std::process::Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).stderr(std::process::Stdio::null()).output().ok()?;
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.chars().take(40).collect())
+}
+
 /// The effective user of process `pid`, if it can be read: Linux's
 /// /proc/<pid>/status (its Uid line: real, effective, saved, filesystem);
 /// elsewhere (FreeBSD) `ps -o uid=`, which prints the effective user.
@@ -286,6 +300,8 @@ mod tests {
         }
         assert_eq!(euid_of(std::process::id()), Some(unsafe { geteuid() }));
         assert_eq!(euid_of(999_999_999), None);
+        assert!(name_of(std::process::id()).is_some_and(|n| !n.is_empty()));
+        assert_eq!(name_of(999_999_999), None);
     }
 
     /// This test's own process group has a superuser in it only if the

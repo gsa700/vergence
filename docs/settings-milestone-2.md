@@ -191,6 +191,22 @@ as now.
   question over the Windows page; Dave pressed Forget, the server forgot
   es2gears' place. The server's notifications apps list is now read again
   before each write, so an app taken out of it by hand stays out.
+- **Step 7 in: the terminal's question** (2026-11-14). The toolkit's
+  `App::close_asked` (vergence-ui, both roads): a close the user asks for
+  (the bar's button, the server's close) closes only if the program
+  agrees; a close the program makes itself does not ask. The terminal
+  (confirm.rs) asks with more than one tab, or with a tab whose shell is
+  running a program (the pty's foreground process group is not the
+  shell's; a `-e` command counts while it lives), its name from /proc or
+  `ps` ("A program is running in this tab (sleep). Close it?", "Close 3
+  tabs?"), in a modal dialog on vergence-widgets (now a dependency of
+  vergence-term), dark by default like the terminal. Found on the way:
+  since step 2, a native window another window opened (a terminal's
+  torn-off tab or second window, which carry their opener as parent) had
+  no window memory; now such a window is remembered once its style says
+  it is normal, and the toolkit always sends a style for it. Hubble: a
+  `vergence-term -e sleep 300` window's close button asked; Close ended
+  the window and sleep.
 
 ## Steps
 

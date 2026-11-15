@@ -81,6 +81,8 @@ struct Win<'a> {
     /// Created by the server (the first is before the loop; the others when
     /// their `Created` comes).
     created: bool,
+    /// The window that opened it (its parent to the server); 0 for none.
+    opened_by: u32,
     slots: Vec<Slot>,
     /// The slot attached last: the one the server shows until the next.
     showing: Option<usize>,
@@ -260,6 +262,7 @@ impl<'a> Win<'a> {
             id,
             app,
             created: false,
+            opened_by: 0,
             slots: Vec::new(),
             showing: None,
             drawn_by: "",
@@ -423,7 +426,9 @@ impl<'a> Native<'a> {
         app.waker(self.waker.clone());
         self.send(request)?;
         self.creating.push((serial, id));
-        self.windows.push(Win::new(id, Run::Owned(app), size, bar_by_server));
+        let mut win = Win::new(id, Run::Owned(app), size, bar_by_server);
+        win.opened_by = opener;
+        self.windows.push(win);
         Ok(())
     }
 
@@ -498,7 +503,11 @@ impl<'a> Native<'a> {
                         if self.windows[i].app.get().under_bar() {
                             self.send(WinRequest::UnderBar { window })?;
                         }
-                        if let Some(r) = style_request(self.windows[i].app.get().style(), window) {
+                        // A window another opened always says its kind: until it
+                        // does, the server takes it for a dialog (no window memory).
+                        let style = self.windows[i].app.get().style();
+                        let opened = self.windows[i].opened_by != 0;
+                        if let Some(r) = style_request(style, window).or_else(|| opened.then_some(WinRequest::Style { window, kind: style.kind, modal: style.modal, min: style.min, max: style.max })) {
                             self.send(r)?;
                         }
                     }
@@ -519,7 +528,10 @@ impl<'a> Native<'a> {
                 w.dirty = true;
             }
             WinEvent::Close { window } => {
-                if let Some(i) = self.index(window) {
+                // Closed if its program agrees (App::close_asked).
+                let mut yes = false;
+                self.with_window(window, |app, w| yes = app.close_asked(w))?;
+                if yes && let Some(i) = self.index(window) {
                     self.windows[i].closing = true;
                 }
             }

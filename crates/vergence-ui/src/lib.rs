@@ -470,6 +470,15 @@ pub trait App {
     /// road only: called before the window's first frame.
     fn opened(&mut self, _id: u32) {}
 
+    /// The user asked to close the window (its bar's close button, the
+    /// server's close). True closes it; false keeps it, and the program may
+    /// ask first and close it later with [`Window::close`] (the terminal with
+    /// several tabs, settings milestone 2). A close the program makes itself
+    /// does not come here.
+    fn close_asked(&mut self, _window: &mut Window) -> bool {
+        true
+    }
+
     /// The window has closed (the user closed it, or the program did) while
     /// the program runs on. Not called when the program is ended from outside
     /// (a logout): what it keeps of its windows then stays for next time.
@@ -1101,6 +1110,17 @@ impl<'a> Runner<'a> {
     }
 
     /// Calls window `id`'s program with a handle on its window, then does what it asked.
+    /// The user asked to close a window: closed if its program agrees
+    /// ([`App::close_asked`]).
+    fn ask_close(&mut self, id: u32) -> io::Result<()> {
+        let mut yes = false;
+        self.with_window(id, |app, w| yes = app.close_asked(w))?;
+        if yes && let Some(i) = self.index(id) {
+            self.windows[i].closing = true;
+        }
+        Ok(())
+    }
+
     fn with_window(&mut self, id: u32, call: impl FnOnce(&mut dyn App, &mut Window)) -> io::Result<()> {
         let Some(i) = self.index(id) else { return Ok(()) };
         let mut window = Window::default();
@@ -1287,7 +1307,7 @@ impl<'a> Runner<'a> {
             }
             Event::Close { toplevel } => {
                 if let Some(i) = self.by_object(toplevel) {
-                    self.windows[i].closing = true;
+                    self.ask_close(self.windows[i].id)?;
                 }
             }
             Event::Error { object, code, message } => return Err(other(format!("the display server refused: {message} (object {object}, code {code})"))),
@@ -1596,7 +1616,7 @@ impl<'a> Runner<'a> {
         }
         if self.windows[i].bar_pressed.take().is_some_and(|p| Some(p) == part) {
             match part {
-                Some(bar::Part::Button(bar::WinButton::Close)) => self.windows[i].closing = true,
+                Some(bar::Part::Button(bar::WinButton::Close)) => self.ask_close(self.windows[i].id)?,
                 Some(bar::Part::Button(bar::WinButton::Minimize)) => self.client.set_minimized(toplevel)?,
                 Some(bar::Part::Button(bar::WinButton::Maximize)) => self.client.set_maximized(toplevel, !self.windows[i].maximized)?,
                 _ => {}

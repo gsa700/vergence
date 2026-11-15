@@ -52,6 +52,7 @@
 mod fuzz;
 #[allow(dead_code)]
 mod grid;
+mod confirm;
 mod menu;
 mod mouse;
 mod panes;
@@ -462,6 +463,9 @@ struct Session {
     /// The foreground process group last looked at, whether it runs as the
     /// superuser, and when that was asked (look milestone 1: the red tab).
     root_seen: std::cell::Cell<Option<(u32, bool, Instant)>>,
+    /// Started with a command (`-e`), not the shell: the program is the
+    /// pty's own process, and running while it lives.
+    command: bool,
 }
 
 /// The screen changed: a frame is wanted if this terminal is in front. Up
@@ -475,6 +479,7 @@ impl Session {
     /// cols x rows. Its output is read and parsed on a thread of its own,
     /// which wakes the window.
     fn start(cols: usize, rows: usize, waker: Waker, command: Option<Vec<String>>, cwd: Option<&str>) -> std::io::Result<Session> {
+        let is_command = matches!(command.as_deref(), Some([_, ..]));
         let pty = match command.as_deref() {
             Some([program, args @ ..]) => pty::Pty::spawn(program, args, cols as u16, rows as u16, cwd)?,
             _ => pty::Pty::spawn(&std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()), &[], cols as u16, rows as u16, cwd)?,
@@ -532,11 +537,23 @@ impl Session {
             said.fetch_or(NEWS_STATE, Ordering::SeqCst);
             waker.wake();
         })?;
-        Ok(Session { screen, pty, title: String::new(), news, root_seen: std::cell::Cell::new(None) })
+        Ok(Session { screen, pty, title: String::new(), news, root_seen: std::cell::Cell::new(None), command: is_command })
     }
 
     fn label(&self) -> String {
         if self.title.is_empty() { "Terminal".into() } else { self.title.clone() }
+    }
+
+    /// The program the shell is running, if it is running one: the
+    /// terminal's foreground process group is then not the shell's own
+    /// (settings milestone 2: closing asks first). Its name, or "a program".
+    fn running(&self) -> Option<String> {
+        if lock(&self.screen).exited {
+            return None;
+        }
+        let group = self.pty.foreground()?;
+        // A command's own process counts; a shell's, only another group.
+        (self.command || group != self.pty.pid()).then(|| program::name_of(group).unwrap_or_else(|| "a program".into()))
     }
 
     /// Whether the program the user is typing to runs as the superuser
@@ -605,6 +622,11 @@ impl Tab {
     fn label(&self) -> String {
         self.session(self.active).map_or_else(|| "Terminal".into(), Session::label)
     }
+
+    /// The programs its panes' shells are running.
+    fn running(&self) -> Vec<String> {
+        self.panes.iter().filter_map(|(_, s)| s.running()).collect()
+    }
 }
 
 /// What the pointer has hold of, from a press to its release.
@@ -667,6 +689,10 @@ struct Terminal {
     /// The bar as last described to the server: each tab's id and title, the front one.
     bar_told: Option<(Vec<(u32, String, bool)>, u32, u32)>,
     waker: Option<Waker>,
+    /// The close question's answer (confirm.rs): close on the next wake.
+    close_now: Rc<std::cell::Cell<bool>>,
+    /// The close question is showing.
+    asking: Rc<std::cell::Cell<bool>>,
     palette: Palette,
     /// How opaque the ground is (vergence_ui::opacity_setting): less than 1,
     /// the desktop shows through behind the text.
@@ -808,6 +834,8 @@ impl Terminal {
             bar_told: None,
 
             waker: None,
+            close_now: Rc::new(std::cell::Cell::new(false)),
+            asking: Rc::new(std::cell::Cell::new(false)),
             palette: palette(),
             opacity: vergence_ui::opacity_setting(&config("desktop.toml"), "[terminal]"),
             settings: Settings::load(),
@@ -1617,6 +1645,18 @@ impl App for Terminal {
         self.keep();
     }
 
+    /// Several tabs, or a program running in one: ask first (confirm.rs).
+    fn close_asked(&mut self, window: &mut Window) -> bool {
+        let running: Vec<String> = self.tabs.iter().flat_map(Tab::running).collect();
+        let Some((heading, detail)) = confirm::question(self.tabs.len(), &running) else { return true };
+        if !self.asking.get() {
+            self.asking.set(true);
+            let theme = vergence_widgets::Theme::from_desktop(&config("desktop.toml"), true, "[terminal]");
+            window.open_window(vergence_widgets::window(confirm::CloseDialog { heading, detail, close: self.close_now.clone(), open: self.asking.clone(), waker: self.waker.clone(), theme }));
+        }
+        false
+    }
+
     fn closed(&mut self) {
         self.program.borrow_mut().remove(self.key);
         self.wids.borrow_mut().retain(|(_, k)| *k != self.key);
@@ -1805,6 +1845,11 @@ impl App for Terminal {
     }
 
     fn woken(&mut self, window: &mut Window) {
+        // The close question answered Close.
+        if self.close_now.replace(false) {
+            window.close();
+            return;
+        }
         // The superuser check's timer, armed at the first wake (output, settings).
         if !self.root_timer {
             self.root_timer = true;

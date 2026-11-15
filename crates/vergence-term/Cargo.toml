@@ -16,6 +16,7 @@ vergence-scene.workspace = true
 vergence-text.workspace = true
 vergence-render.workspace = true
 vergence-ui.workspace = true
+vergence-widgets.workspace = true
 vergence-look.workspace = true
 # grid.rs decodes OSC 52 clipboard writes with this. It came into the
 # workspace with iced, which is gone (2026-11-10): now borrowed by the

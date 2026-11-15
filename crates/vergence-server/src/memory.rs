@@ -120,7 +120,13 @@ impl Server {
         // the server first places it.
         use crate::style::Kind;
         let style = self.window_style(w);
-        if style.parent.is_some() || matches!(style.kind, Kind::Dialog | Kind::Palette | Kind::Splash) {
+        if matches!(style.kind, Kind::Dialog | Kind::Palette | Kind::Splash) {
+            return None;
+        }
+        // A native window with a parent may be one of those until its style
+        // arrives (the toolkit always sends one for such a window); a normal
+        // window another opened (a terminal's torn-off tab) is remembered then.
+        if style.parent.is_some() && w.native().is_none_or(|n| n.style().1.is_none()) {
             return None;
         }
         if let Some(id) = self.memory.ids.get(w) {
