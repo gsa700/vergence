@@ -3,6 +3,13 @@
 **Drafted 2026-11-15**, item 5 of docs/apps-roadmap.md. **Draft: the
 questions at the end are for Dave.**
 
+**Answers so far (Dave, 2026-11-15):** 1 a (the order as planned); 2 a (PDF
+and video not now, their own milestone with the borrowing question then);
+4 b (our own file type table, not the system's database: written by us,
+since shared-mime-info's data is GPL and the workspace is Apache-2.0 OR
+GPL-2.0-or-later); 7 to revisit (only the system's mounts until then).
+3, 5, 6 and 8 in discussion.
+
 Dave's words: File manager "with space bar preview ala macOS finder ...
 remote file system support as well (using native OS tools?)". Viewer:
 "picture, video, and pdf viewer. Connected to file manager by file type
