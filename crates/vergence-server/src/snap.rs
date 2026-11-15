@@ -2,12 +2,15 @@
 //
 // While a window is moved by the pointer, the pointer at a screen's edge aims
 // it at a part of that screen (vergence-shell snap.rs decides which); letting
-// go there puts it there. Not by default (Dave, 2026-11-14: "I am really not a
-// snap window person"): by default only while Ctrl is held at some time during
-// the drag ("maybe drag with a modifier like control+drag"); desktop.toml
-// `[windows] snap = "ctrl" | "always" | "off"` (true and false read as always
-// and off), and the other choices sit beside it there (the settings app's
-// Windows page, step 6). The maximize button and the title bar carry the same
+// go there puts it there. On by default since the evening of 2026-11-14
+// (Dave, who had started with "I am really not a snap window person" and
+// Ctrl-only snapping: "You did such a nice job it changed my mind");
+// desktop.toml `[windows] snap = "always" | "ctrl" | "off"` (true and false
+// read as always and off), and the other choices sit beside it there (the
+// settings app's Windows page, step 6). With "ctrl" the preview still shows
+// where the window would go, faint and saying to hold Ctrl, and only a drag
+// that has had Ctrl held snaps (Dave: "there was no feedback what was going
+// to happen"). The maximize button and the title bar carry the same
 // layouts in a menu (menu.rs, `open_window_menu`), opened by a right click, a
 // long press on the bar, or the pointer resting 0.7 s on the button
 // (`layouts-hover`). The screen's part is taken from its work area, the one maximize
@@ -52,8 +55,9 @@ const PRESS: Duration = Duration::from_millis(500);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapMode {
     Off,
-    /// Only if Ctrl is held at some time during the drag (the default).
+    /// Only if Ctrl is held at some time during the drag.
     Ctrl,
+    /// The default.
     Always,
 }
 
@@ -63,7 +67,7 @@ const HOVER: Duration = Duration::from_millis(700);
 /// desktop.toml `[windows]`: the choices, with their defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SnapConfig {
-    /// `snap`: when dragging to an edge snaps (default "ctrl").
+    /// `snap`: when dragging to an edge snaps (default "always").
     pub mode: SnapMode,
     /// `top-edge = "half"`: the top edge gives the top half (default "maximize").
     pub top_half: bool,
@@ -95,7 +99,7 @@ impl SnapConfig {
 
 impl Default for SnapConfig {
     fn default() -> SnapConfig {
-        SnapConfig { mode: SnapMode::Ctrl, top_half: false, between: false, preview: true, layouts_hover: true, gaps: true, window_keys: true, app_switch: true, alt_tab_screen: false }
+        SnapConfig { mode: SnapMode::Always, top_half: false, between: false, preview: true, layouts_hover: true, gaps: true, window_keys: true, app_switch: true, alt_tab_screen: false }
     }
 }
 
@@ -110,6 +114,7 @@ pub fn config_from(text: &str) -> SnapConfig {
         Some(toml::Value::Boolean(false)) => SnapMode::Off,
         Some(toml::Value::String(s)) if s == "always" => SnapMode::Always,
         Some(toml::Value::String(s)) if s == "off" => SnapMode::Off,
+        Some(toml::Value::String(s)) if s == "ctrl" => SnapMode::Ctrl,
         _ => d.mode,
     };
     SnapConfig { mode, top_half: word("top-edge") == "half", between: word("between-screens") == "press", preview: flag("preview", d.preview), layouts_hover: flag("layouts-hover", d.layouts_hover), gaps: flag("gaps", d.gaps), window_keys: flag("window-keys", d.window_keys), app_switch: flag("app-switch", d.app_switch), alt_tab_screen: word("alt-tab") == "screen" }
@@ -159,7 +164,7 @@ pub struct Snap {
     pub snapped: std::collections::HashMap<Win, Snapped>,
     /// Parts window memory had for windows not yet shown (opened.rs applies them).
     pub recalled: std::collections::HashMap<Win, Zone>,
-    picture: Option<((i32, i32, u64, bool, (u8, u8, u8)), MemoryRenderBuffer, (i32, i32))>,
+    picture: Option<((i32, i32, u64, (bool, bool), (u8, u8, u8)), MemoryRenderBuffer, (i32, i32))>,
 }
 
 impl Default for Snap {
@@ -191,15 +196,15 @@ impl Server {
     /// The pointer moved while a window is moved by it: aim, or stop aiming.
     pub fn snap_track(&mut self, pos: Point<f64, Logical>) {
         let c = self.snap.config;
+        let armed_before = self.snap_armed();
         if self.input.keys.as_ref().is_some_and(|k| k.mods().ctrl) {
             self.snap.ctrl_seen = true;
         }
-        let on = match c.mode {
-            SnapMode::Off => false,
-            SnapMode::Ctrl => self.snap.ctrl_seen,
-            SnapMode::Always => true,
-        };
-        let aim = if on { self.snap_aim(pos, c) } else { None };
+        // With "ctrl" it aims (and the preview shows) before Ctrl is held; letting go snaps only once it has been.
+        let aim = if c.mode != SnapMode::Off { self.snap_aim(pos, c) } else { None };
+        if armed_before != self.snap_armed() && self.snap.aim.is_some_and(|a| a.shown()) {
+            self.redraw_all();
+        }
         let was = self.snap.aim.map(|a| (a.zone, a.screen, a.shown()));
         match (self.snap.aim, aim) {
             // Still the same part of the same screen: it keeps its time.
@@ -209,6 +214,15 @@ impl Server {
         }
         if was.is_some_and(|(.., shown)| shown) && self.snap.aim.map(|a| (a.zone, a.screen)) != was.map(|(z, s, _)| (z, s)) {
             self.redraw_all();
+        }
+    }
+
+    /// Letting go now would snap: always, or with "ctrl" once Ctrl has been held.
+    fn snap_armed(&self) -> bool {
+        match self.snap.config.mode {
+            SnapMode::Off => false,
+            SnapMode::Ctrl => self.snap.ctrl_seen,
+            SnapMode::Always => true,
         }
     }
 
@@ -231,7 +245,7 @@ impl Server {
         if aim.shown() {
             self.redraw_all();
         }
-        if aim.ready() && w.alive() {
+        if aim.ready() && self.snap_armed() && w.alive() {
             if !self.snap.snapped.contains_key(w)
                 && let Some(geo) = self.space.element_geometry(w)
             {
@@ -354,14 +368,34 @@ impl Server {
             return None;
         }
         let a = self.accent();
-        let key = (r.size.w, r.size.h, scale.to_bits(), light, (a.r, a.g, a.b));
+        // Not armed yet ("ctrl", Ctrl not held): faint, saying how.
+        let armed = self.snap_armed();
+        let key = (r.size.w, r.size.h, scale.to_bits(), (light, armed), (a.r, a.g, a.b));
         if self.snap.picture.as_ref().is_none_or(|(k, ..)| *k != key) {
             let (w, h) = (r.size.w as f32, r.size.h as f32);
             let mut scene = vergence_scene::Scene::new(w, h);
             let rect = vergence_scene::Rect::new(0.0, 0.0, w, h);
-            scene.fill_rounded(rect, vergence_look::RADIUS, vergence_scene::Color::rgba(a.r, a.g, a.b, if light { 48 } else { 64 }));
-            scene.stroke(rect, vergence_look::RADIUS, 2.0, vergence_scene::Color::rgba(a.r, a.g, a.b, 220));
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
+            if armed {
+                scene.fill_rounded(rect, vergence_look::RADIUS, vergence_scene::Color::rgba(a.r, a.g, a.b, if light { 48 } else { 64 }));
+                scene.stroke(rect, vergence_look::RADIUS, 2.0, vergence_scene::Color::rgba(a.r, a.g, a.b, 220));
+            } else {
+                scene.fill_rounded(rect, vergence_look::RADIUS, vergence_scene::Color::rgba(a.r, a.g, a.b, 18));
+                scene.stroke(rect, vergence_look::RADIUS, 1.5, vergence_scene::Color::rgba(a.r, a.g, a.b, 130));
+                // "Hold Ctrl to snap here" on a small card in the middle.
+                if let Some(face) = fonts.face("sans-serif", 500, false) {
+                    let (text, size) = ("Hold Ctrl to snap here", 14.0);
+                    let (_, tw) = fonts.layout(face, size, text);
+                    let m = fonts.metrics(face, size);
+                    let (cw, ch) = (tw + 28.0, m.ascent + m.descent + 16.0);
+                    if cw < w && ch < h {
+                        let card = vergence_scene::Rect::new(((w - cw) / 2.0).round(), ((h - ch) / 2.0).round(), cw, ch);
+                        let s = vergence_look::shelf_look(light);
+                        scene.fill_rounded(card, vergence_look::RADIUS, vergence_scene::Color::rgba(s.menu.0, s.menu.1, s.menu.2, 235));
+                        vergence_render::text(&mut scene, fonts, face, size, vergence_scene::Color::rgb(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2), vergence_scene::Point::new(card.x + 14.0, (card.y + 8.0 + m.ascent).round()), text);
+                    }
+                }
+            }
             match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)) {
                 Ok(p) => {
                     let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
@@ -512,10 +546,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn snapping_is_off_unless_desktop_toml_says_so() {
+    fn snapping_is_on_unless_desktop_toml_says_otherwise() {
         assert_eq!(config_from(""), SnapConfig::default());
-        assert_eq!(SnapConfig::default().mode, SnapMode::Ctrl, "only with Ctrl held unless the settings say otherwise");
-        assert_eq!(config_from("[windows]\npreview = false\n").mode, SnapMode::Ctrl);
+        assert_eq!(SnapConfig::default().mode, SnapMode::Always, "on unless the settings say otherwise");
+        assert_eq!(config_from("[windows]\npreview = false\n").mode, SnapMode::Always);
+        assert_eq!(config_from("[windows]\nsnap = \"ctrl\"\n").mode, SnapMode::Ctrl);
         let c = config_from("[windows]\nsnap = true\ntop-edge = \"half\"\nbetween-screens = \"press\"\npreview = false\nlayouts-hover = false\n");
         assert_eq!(c, SnapConfig { mode: SnapMode::Always, top_half: true, between: true, preview: false, layouts_hover: false, gaps: true, window_keys: true, app_switch: true, alt_tab_screen: false });
         let c = config_from("[windows]\nwindow-keys = false\napp-switch = false\nalt-tab = \"screen\"\n");
@@ -526,6 +561,6 @@ mod tests {
         assert_eq!(config_from("[windows]\nsnap = \"always\"\n").mode, SnapMode::Always);
         // Words it does not know leave the defaults.
         let c = config_from("[windows]\nsnap = \"sometimes\"\ntop-edge = \"sideways\"\n");
-        assert!(c.mode == SnapMode::Ctrl && !c.top_half && !c.between && c.preview && c.layouts_hover);
+        assert!(c.mode == SnapMode::Always && !c.top_half && !c.between && c.preview && c.layouts_hover);
     }
 }

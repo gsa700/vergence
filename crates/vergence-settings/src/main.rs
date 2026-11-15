@@ -2299,12 +2299,12 @@ impl App {
             let s = switch(self.win_flag(key, default), move |on| Message::WinFlag(key, on)).name(name);
             if enabled { s } else { s.disabled() }
         };
-        let snapping = self.win_word("snap", &SNAP_MODES, 1) != 0;
+        let snapping = self.win_word("snap", &SNAP_MODES, 2) != 0;
         self.group(Some("Snapping and switching"), vec![
             setting(
                 "Snap a window dragged to an edge",
                 "Left or right: half the screen. A corner: a quarter. The top: all of it. With Ctrl, only when Ctrl is held during the drag.",
-                pick("snap", &SNAP_MODES, 1, 180.0, "Snap a window dragged to an edge", true),
+                pick("snap", &SNAP_MODES, 2, 180.0, "Snap a window dragged to an edge", true),
             ),
             setting("The top edge", "What dragging a window to the top of the screen does.", pick("top-edge", &TOP_EDGE, 0, 180.0, "The top edge", snapping)),
             setting(
