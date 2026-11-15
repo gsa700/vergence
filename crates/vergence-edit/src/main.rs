@@ -241,6 +241,12 @@ impl EditWindow {
             current_line: self.flag("current-line", true),
             editable: t.read_only.is_none(),
             complete: self.flag("complete", true),
+            // Its own choice, else the desktop's ([text] spellcheck), on by default.
+            spell: match self.setting("spellcheck").as_deref() {
+                Some("true") => true,
+                Some("false") => false,
+                _ => vergence_ui::table_value(&self.desktop, "[text]", "spellcheck").as_deref() != Some("false"),
+            },
         }
     }
 
@@ -1330,6 +1336,7 @@ impl Rows for EditRows {
                     Row::new("line-numbers", "Line numbers", "", Control::Switch { default: true }),
                     Row::new("wrap", "Wrap lines", "Long lines go on below at the window's edge; off, the text scrolls sideways.", Control::Switch { default: true }),
                     Row::new("current-line", "Shade the current line", "", Control::Switch { default: true }),
+                    Row::new("spellcheck", "Check spelling", "Words spelled wrong are underlined in red; a right click on one gives suggestions.", Control::Choose { choices: vec![Choice::text("On", "true"), Choice::text("Off", "false")], desktop: Some(format!("Desktop default ({})", if vergence_ui::table_value(text, "[text]", "spellcheck").as_deref() == Some("false") { "Off" } else { "On" })), app_default: 0 }),
                     Row::new("complete", "Suggest words as you type", "The likely rest of a word shows in gray; Tab takes it. Alt+Escape, F5 or Ctrl+Space lists them all.", Control::Switch { default: true }),
                 ],
             },

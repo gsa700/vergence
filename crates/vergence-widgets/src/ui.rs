@@ -116,6 +116,31 @@ fn drag_id(d: &Drag) -> Id {
     }
 }
 
+/// What a line of a field's right-click menu does.
+#[derive(Debug, Clone, PartialEq)]
+enum FieldAct {
+    /// A spelling suggestion: this text in place of bytes `a..b`.
+    Replace(usize, usize, String),
+    /// The word goes in the user's dictionary.
+    Add(String),
+    Cut,
+    Copy,
+    Paste,
+    /// A line that does nothing ("No suggestions").
+    Nothing,
+}
+
+/// A field's right-click menu (editor milestone 1, step 7): spelling
+/// suggestions, then the clipboard's commands.
+#[derive(Debug, Clone)]
+struct FieldMenu {
+    id: Id,
+    items: Vec<(String, FieldAct)>,
+    hl: usize,
+    rect: Rect,
+    row: f32,
+}
+
 /// An open choice list.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Open {
@@ -169,6 +194,10 @@ pub struct Ui<M> {
     last_tick: Option<Instant>,
     /// Shift was held at the last press (a click in a text area extends the selection).
     shift_press: bool,
+    /// A field's right-click menu, open.
+    field_menu: Option<FieldMenu>,
+    /// Words spelled wrong are marked (the theme's, as last drawn).
+    spell: bool,
 }
 
 impl<M> Default for Ui<M> {
@@ -194,6 +223,8 @@ impl<M> Default for Ui<M> {
             over_drawing: None,
             last_tick: None,
             shift_press: false,
+            field_menu: None,
+            spell: true,
         }
     }
 }
@@ -483,6 +514,12 @@ impl<M: Clone> Ui<M> {
         self.scrolls.values().map(|s| s.offset).sum()
     }
 
+    /// The open field menu's lines (for tests).
+    #[cfg(test)]
+    pub(crate) fn field_menu_labels(&self) -> Option<Vec<String>> {
+        self.field_menu.as_ref().map(|m| m.items.iter().map(|(l, _)| l.clone()).collect())
+    }
+
     #[cfg(test)]
     pub(crate) fn field_text(&self) -> Option<(String, usize, usize)> {
         let f = self.fields.get(&self.focus?)?;
@@ -695,6 +732,100 @@ impl<M: Clone> Ui<M> {
         let Some(f) = self.fields.get(&self.nodes[i].id) else { return 0 };
         let local = x - (self.shown(i).x + FIELD_PAD_H) + f.shift;
         f.stops.iter().min_by(|a, b| (a.1 - local).abs().total_cmp(&(b.1 - local).abs())).map_or(f.text.len(), |s| s.0)
+    }
+
+    /// A right click on field `id` at `x`, `y`: suggestions for the word
+    /// there if it is spelled wrong, then Cut, Copy and Paste.
+    fn open_field_menu(&mut self, id: Id, x: f32, y: f32) {
+        let Some(i) = self.index(id) else { return };
+        let (secret, editable) = match &self.nodes[i].what {
+            What::Field { secret, on_input, .. } => (*secret, on_input.is_some()),
+            _ => return,
+        };
+        let at = self.field_offset(i, x);
+        let Some(f) = self.fields.get_mut(&id) else { return };
+        let (a, b) = (f.caret.min(f.anchor), f.caret.max(f.anchor));
+        if !(a != b && at >= a && at <= b) {
+            f.caret = at;
+            f.anchor = at;
+        }
+        let mut items: Vec<(String, FieldAct)> = Vec::new();
+        if self.spell
+            && !secret
+            && let Some(sp) = vergence_spell::speller()
+            && let Some((wa, wb)) = vergence_spell::words_to_check(&f.text).into_iter().find(|(wa, wb)| *wa <= at && at <= *wb)
+        {
+            let w = f.text[wa..wb].to_string();
+            if !sp.check(&w) {
+                let sug = sp.suggest(&w, 5);
+                if sug.is_empty() {
+                    items.push(("No suggestions".into(), FieldAct::Nothing));
+                }
+                for s in sug {
+                    items.push((s.clone(), FieldAct::Replace(wa, wb, s)));
+                }
+                items.push((format!("Add “{w}” to the dictionary"), FieldAct::Add(w)));
+            }
+        }
+        let selected = f.caret != f.anchor;
+        if selected && editable && !secret {
+            items.push(("Cut".into(), FieldAct::Cut));
+        }
+        if selected && !secret {
+            items.push(("Copy".into(), FieldAct::Copy));
+        }
+        if editable {
+            items.push(("Paste".into(), FieldAct::Paste));
+        }
+        if items.is_empty() {
+            return;
+        }
+        self.focus = Some(id);
+        // Its size from its words (measured again when drawn), kept on the window.
+        let row = 24.0;
+        let w = items.iter().map(|(l, _)| l.chars().count()).max().unwrap_or(4) as f32 * 7.5 + 28.0;
+        let h = items.len() as f32 * row + 8.0;
+        let rx = x.min(self.size.0 - w - 4.0).max(4.0);
+        let ry = if y + h <= self.size.1 - 4.0 { y } else { (y - h).max(4.0) };
+        self.field_menu = Some(FieldMenu { id, items, hl: 0, rect: Rect::new(rx, ry, w, h), row });
+    }
+
+    /// Does line `k` of the field's menu.
+    fn field_menu_choose(&mut self, k: usize, r: &mut Response<M>) {
+        let Some(menu) = self.field_menu.take() else { return };
+        let Some((_, act)) = menu.items.get(k).cloned() else { return };
+        let id = menu.id;
+        let Some(f) = self.fields.get_mut(&id) else { return };
+        let (a, b) = (f.caret.min(f.anchor), f.caret.max(f.anchor));
+        match act {
+            FieldAct::Replace(wa, wb, with) => {
+                let sel = (f.caret, f.anchor);
+                if wb <= f.text.len() {
+                    f.caret = f.history.edit(&mut f.text, wa, wb, &with, sel, crate::edit::Kind::Other, Instant::now());
+                    f.anchor = f.caret;
+                    self.field_changed(id, r);
+                }
+            }
+            FieldAct::Add(w) => {
+                if let Some(sp) = vergence_spell::speller() {
+                    let _ = sp.add(&w);
+                }
+            }
+            FieldAct::Cut | FieldAct::Copy => {
+                r.copy = Some(f.text[a..b].to_string());
+                if act == FieldAct::Cut {
+                    let sel = (f.caret, f.anchor);
+                    f.history.edit(&mut f.text, a, b, "", sel, crate::edit::Kind::Other, Instant::now());
+                    f.caret = a;
+                    f.anchor = a;
+                    self.field_changed(id, r);
+                }
+            }
+            FieldAct::Paste => r.paste = true,
+            FieldAct::Nothing => {}
+        }
+        r.redraw = true;
+        r.used = true;
     }
 
     /// Sends field `id`'s text if it changed.
@@ -918,7 +1049,13 @@ impl<M: Clone> Ui<M> {
                     _ => 1,
                 };
                 self.click = Some((now, id, count));
-                doc.borrow_mut().press(x, y, count, self.shift_press && with == With::Pointer);
+                let e = doc.borrow_mut().press(x, y, count, self.shift_press && with == With::Pointer);
+                // A line of its popup chosen: done, no dragging.
+                if e.used {
+                    self.area_effect(id, e, r);
+                    r.used = true;
+                    return;
+                }
                 if with == With::Pointer {
                     self.drag = Some(Drag::AreaSelect { id });
                 }
@@ -932,6 +1069,51 @@ impl<M: Clone> Ui<M> {
 
     pub fn input(&mut self, input: &Input) -> Response<M> {
         let mut r = Response::default();
+        // A field's menu, open, has the pointer and the keys it uses.
+        if let Some(menu) = self.field_menu.clone() {
+            let row_at = |x: f32, y: f32| -> Option<usize> {
+                let m = &menu;
+                (inside(&m.rect, x, y) && y >= m.rect.y + 4.0).then(|| (((y - m.rect.y - 4.0) / m.row) as usize).min(m.items.len() - 1))
+            };
+            match *input {
+                Input::PointerMoved { x, y } => {
+                    if let Some(k) = row_at(x, y)
+                        && let Some(m) = self.field_menu.as_mut()
+                    {
+                        m.hl = k;
+                    }
+                    r.cursor = Some(Cursor::Default);
+                    r.redraw = true;
+                    r.used = true;
+                    return r;
+                }
+                Input::Button { pressed: true, x, y, .. } => {
+                    match row_at(x, y) {
+                        Some(k) => self.field_menu_choose(k, &mut r),
+                        None => self.field_menu = None,
+                    }
+                    r.redraw = true;
+                    r.used = true;
+                    return r;
+                }
+                Input::Key { sym: key, pressed: true, .. } => {
+                    let n = menu.items.len();
+                    match key {
+                        sym::UP => self.field_menu.as_mut().map_or((), |m| m.hl = m.hl.saturating_sub(1)),
+                        sym::DOWN => self.field_menu.as_mut().map_or((), |m| m.hl = (m.hl + 1).min(n - 1)),
+                        sym::RETURN => self.field_menu_choose(menu.hl, &mut r),
+                        _ => self.field_menu = None,
+                    }
+                    if self.field_menu.is_some() || key == sym::RETURN {
+                        r.redraw = true;
+                        r.used = true;
+                        return r;
+                    }
+                }
+                Input::Focus(false) => self.field_menu = None,
+                _ => {}
+            }
+        }
         match *input {
             Input::PointerMoved { x, y } => self.pointer_moved(x, y, &mut r),
             Input::PointerLeft => {
@@ -958,6 +1140,29 @@ impl<M: Clone> Ui<M> {
                     r.used = true;
                 } else {
                     self.press_at(x, y, With::Pointer, &mut r);
+                }
+            }
+            // A right click on a field: its menu (spelling, the clipboard).
+            Input::Button { button: MouseButton::Right, pressed: true, x, y, .. } if self.open.is_none() && self.target(x, y).and_then(|id| self.node(id)).is_some_and(|n| matches!(n.what, What::Field { .. })) => {
+                if let Some(id) = self.target(x, y) {
+                    self.open_field_menu(id, x, y);
+                    self.caret_moved();
+                    r.redraw = true;
+                    r.used = true;
+                }
+            }
+            // A right click on a text area: its menu (spelling, the clipboard).
+            Input::Button { button: MouseButton::Right, pressed: true, x, y, .. } if self.open.is_none() && self.target(x, y).and_then(|id| self.area_doc(id)).is_some() => {
+                if let Some(id) = self.target(x, y)
+                    && let Some(doc) = self.area_doc(id)
+                {
+                    self.focus = Some(id);
+                    self.ring = false;
+                    doc.borrow_mut().context(x, y);
+                    self.caret_moved();
+                    self.area_changed(id, &mut r);
+                    r.redraw = true;
+                    r.used = true;
                 }
             }
             Input::Button { button: MouseButton::Left, pressed: false, x, y, .. } => {
@@ -1437,6 +1642,7 @@ impl<M: Clone> Ui<M> {
     /// Draws the widgets into `scene`.
     pub fn draw(&mut self, scene: &mut Scene, fonts: &mut Fonts, theme: &Theme) {
         let now = Instant::now();
+        self.spell = theme.spell;
         let face = |fonts: &mut Fonts, weight: u16| fonts.face(&theme.font, weight, false).or_else(|| fonts.face("sans-serif", weight, false));
         let mut ink: Vec<Color> = Vec::with_capacity(self.nodes.len());
         // The scrolling places being drawn into, the innermost last.
@@ -1630,6 +1836,31 @@ impl<M: Clone> Ui<M> {
                         } else {
                             text(scene, fonts, f, *size, if usable { theme.text } else { theme.dim }, Point::new(inner.x - shift, r.y + baseline), &shown_text);
                         }
+                        // Words spelled wrong, a red wave under each (not the one being typed).
+                        if theme.spell
+                            && !*secret
+                            && usable
+                            && let Some(sp) = vergence_spell::speller()
+                        {
+                            let wave = if theme.dark { Color::rgb(255, 99, 92) } else { Color::rgb(214, 40, 40) };
+                            let wy = (r.y + baseline + 3.0).min(r.y + r.h - 3.0);
+                            for (wa, wb) in vergence_spell::words_to_check(now_text) {
+                                let typing = focused && caret == anchor && caret == wb;
+                                if typing || sp.check(&now_text[wa..wb]) {
+                                    continue;
+                                }
+                                let (x1, x2) = (inner.x + at(wa) - shift, inner.x + at(wb) - shift);
+                                let mut x = x1;
+                                let mut up = true;
+                                while x < x2 {
+                                    let nx = (x + 2.0).min(x2);
+                                    let (a, b) = if up { (wy + 1.0, wy - 1.0) } else { (wy - 1.0, wy + 1.0) };
+                                    scene.line(Point::new(x, a), Point::new(nx, b), 1.0, wave);
+                                    x = nx;
+                                    up = !up;
+                                }
+                            }
+                        }
                         if focused && caret == anchor && self.caret_on() {
                             scene.fill(Rect::new((inner.x + cx - shift).round() - 0.5, r.y + 4.0, 1.5, r.h - 8.0), theme.text);
                         }
@@ -1706,6 +1937,29 @@ impl<M: Clone> Ui<M> {
             }
         }
         self.draw_list(scene, fonts, theme);
+        self.draw_field_menu(scene, fonts, theme);
+    }
+
+    /// A field's right-click menu, in front of everything.
+    fn draw_field_menu(&self, scene: &mut Scene, fonts: &mut Fonts, theme: &Theme) {
+        let Some(m) = &self.field_menu else { return };
+        let r = m.rect;
+        let ground = if theme.dark { over(theme.card, alpha(Color::rgb(255, 255, 255), 10)) } else { Color::rgb(255, 255, 255) };
+        scene.fill_rounded(Rect::new(r.x - 1.0, r.y + 1.0, r.w + 2.0, r.h + 2.0), vergence_look::RADIUS + 1.0, alpha(Color::rgb(0, 0, 0), 50));
+        scene.fill_rounded(r, vergence_look::RADIUS, ground);
+        scene.stroke(r, vergence_look::RADIUS, 1.0, if theme.high_contrast { theme.text } else { theme.line });
+        let Some(face) = fonts.face(&theme.font, 400, false).or_else(|| fonts.face("sans-serif", 400, false)) else { return };
+        let size = theme.text_size;
+        let ascent = fonts.metrics(face, size).ascent;
+        for (k, (label, act)) in m.items.iter().enumerate() {
+            let row = Rect::new(r.x + 4.0, r.y + 4.0 + k as f32 * m.row, r.w - 8.0, m.row);
+            let hl = k == m.hl && *act != FieldAct::Nothing;
+            if hl {
+                scene.fill_rounded(row, vergence_look::RADIUS, theme.accent);
+            }
+            let col = if hl { Color::rgb(255, 255, 255) } else if *act == FieldAct::Nothing { theme.dim } else { theme.text };
+            text(scene, fonts, face, size, col, Point::new(row.x + 8.0, (row.y + (m.row - size * 1.2) / 2.0 + ascent).round()), label);
+        }
     }
 
     fn draw_bar(&self, scene: &mut Scene, i: usize, theme: &Theme) {

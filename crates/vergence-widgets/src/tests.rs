@@ -392,6 +392,27 @@ fn a_field_undoes_and_redoes() {
 }
 
 #[test]
+fn a_field_offers_spelling_and_the_clipboard_on_a_right_click() {
+    let mut ui = laid(form("teh"), 300.0, 100.0);
+    let r = bounds(&ui, "Accent");
+    let right = |ui: &mut Ui<Msg>, x: f32, y: f32| ui.input(&Input::Button { button: MouseButton::Right, pressed: true, x, y, modifiers: Modifiers::default() });
+    assert!(right(&mut ui, r.x + r.w - 4.0, r.y + r.h / 2.0).used);
+    let m = ui.field_menu_labels().expect("a menu");
+    assert_eq!(m[0], "the");
+    assert!(m.iter().any(|l| l == "Paste"));
+    // Enter takes the first suggestion.
+    assert_eq!(key(&mut ui, sym::RETURN, false), vec![Msg::Text("the".into())]);
+    assert!(ui.field_menu_labels().is_none());
+    // A secret field offers no suggestions and no copying.
+    let p = bounds(&ui, "Password");
+    right(&mut ui, p.x + 4.0, p.y + p.h / 2.0);
+    assert_eq!(ui.field_menu_labels(), Some(vec!["Paste".to_string()]));
+    // Escape closes it.
+    key(&mut ui, sym::ESCAPE, false);
+    assert!(ui.field_menu_labels().is_none());
+}
+
+#[test]
 fn a_field_holds_so_much_and_no_more() {
     let mut ui = laid(form(""), 300.0, 100.0);
     key(&mut ui, sym::TAB, false);

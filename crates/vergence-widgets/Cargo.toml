@@ -12,3 +12,4 @@ vergence-text.workspace = true
 vergence-render.workspace = true
 vergence-ui.workspace = true
 vergence-look.workspace = true
+vergence-spell.workspace = true

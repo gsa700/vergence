@@ -17,6 +17,7 @@
 #   share/applications/vergence-*.desktop    the terminal, the settings app, the calculator, Force Quit, Hardware and the text editor, for the shelf and any launcher
 #   share/icons/hicolor/scalable/apps/       their icons (data/icons, drawn by the project)
 #   share/doc/vergence/                      LICENSE-APACHE, LICENSE-GPL, THIRD-PARTY-NOTICES.md
+#   share/vergence/words/                    the spelling list (data/words/en_US.txt, from SCOWL) and its terms
 #   libexec/vergence/sound-default           FreeBSD only: the root helper that sets the default
 #                                            sound output (hw.snd.default_unit) and nothing else;
 #                                            setuid root, group video, mode 4750
@@ -55,13 +56,15 @@ docfiles="LICENSE-APACHE LICENSE-GPL THIRD-PARTY-NOTICES.md"
 programs="vergence-server vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit vbus vnative vsound vshell"
 tools="vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit"
 libexec=$destdir$prefix/libexec/vergence
+words=$destdir$prefix/share/vergence/words
 
 if [ -n "$uninstall" ]; then
     for p in $programs vctl vergence-session vergence; do rm -f "$bin/$p"; done
     rm -f "$sessions/vergence.desktop"
     for t in $tools; do rm -f "$applications/$t.desktop" "$icons/$t.svg"; done
     for d in $docfiles; do rm -f "$docs/$d"; done
-    rm -f "$libexec/sound-default"
+    rm -f "$libexec/sound-default" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
+    rmdir "$words" "$destdir$prefix/share/vergence" 2>/dev/null || true
     rmdir "$libexec" 2>/dev/null || true
     rmdir "$docs" 2>/dev/null || true
     echo "removed Vergence from $destdir$prefix (user settings and logs kept)"
@@ -84,6 +87,10 @@ for t in $tools; do
     install -m 644 "$root/data/icons/$t.svg" "$icons/$t.svg"
 done
 for p in $programs; do install -m 755 "$release/$p" "$bin/$p"; done
+# The spelling list every native app checks with (vergence-spell finds it beside bin/).
+install -d -m 755 "$words"
+install -m 644 "$root/data/words/en_US.txt" "$words/en_US.txt"
+install -m 644 "$root/data/words/SCOWL-COPYRIGHT.txt" "$words/SCOWL-COPYRIGHT.txt"
 install -m 755 "$here/vctl" "$bin/vctl"
 if [ "$(uname -s)" = FreeBSD ]; then
     # The sound helper: setuid root, run only by the video group (the seat's,

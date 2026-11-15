@@ -441,6 +441,8 @@ enum Message {
     SearchGo,
     /// Windows tinted with the wallpaper's color (window styles milestone 1).
     WallpaperTint(bool),
+    /// Words spelled wrong marked in every native app's text (editor milestone 1).
+    Spellcheck(bool),
     /// The size of controls: the desktop's (Appearance), a screen's own (Screens).
     Controls(usize),
     ScreenControls(usize),
@@ -1002,6 +1004,9 @@ impl App {
             Message::WallpaperTint(on) => self.save_appearance(|t| {
                 t.insert("wallpaper-tint".into(), on.into());
             }),
+            Message::Spellcheck(on) => self.save_table("text", |t| {
+                t.insert("spellcheck".into(), on.into());
+            }),
             Message::Controls(i) => self.save_appearance(|t| {
                 t.insert("controls".into(), CONTROLS_VALUES[i.min(2)].into());
             }),
@@ -1535,7 +1540,7 @@ impl App {
             ]),
             ("Screens", screens),
             ("Input", vec![
-                ("Keyboard".into(), Page::Keyboard, Icon::Keyboard, "keyboard repeat delay layout keys"),
+                ("Keyboard".into(), Page::Keyboard, Icon::Keyboard, "keyboard repeat delay layout keys spelling spellcheck dictionary"),
                 ("Mouse".into(), Page::Mouse, Icon::Pointer, "mouse pointer speed acceleration scroll wheel natural button left handed middle click double"),
             ]
             .into_iter()
@@ -1993,10 +1998,15 @@ impl App {
         }
         self.page_layout(
             "Keyboard",
-            "Key repeat for every app. Changes apply at once.",
+            "Key repeat and spelling for every app. Changes apply at once.",
             vec![
                 self.group(Some("Key repeat"), rows),
                 self.group(Some("Try it"), vec![setting("Test", "Hold a key down here.", field(&self.key_test, Message::KeyTest).placeholder("Type here").width(Length::Fixed(260.0)).name("Test"))]),
+                self.group(Some("Spelling"), vec![setting(
+                    "Check spelling",
+                    "In every Vergence app: words spelled wrong are underlined in red, and a right click on one gives suggestions. Each app's settings can choose otherwise. American English.",
+                    switch(self.desktop.get("text").and_then(|a| a.get("spellcheck")).and_then(|v| v.as_bool()).unwrap_or(true), Message::Spellcheck).name("Check spelling"),
+                )]),
                 self.advanced("keyboard", self.devices_of(InputKind::Keyboard)),
                 self.status_line(),
             ],

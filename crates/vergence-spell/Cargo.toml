@@ -1,0 +1,11 @@
+[package]
+name = "vergence-spell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Vergence's spelling checker: our own, reading the word list Vergence ships (from SCOWL)"
+
+# Our own code throughout; the word list it reads is data (data/words,
+# SCOWL's terms in data/words/SCOWL-COPYRIGHT.txt).
+[dependencies]

@@ -252,6 +252,25 @@ the rest of item 5 come with the Viewer and the File Manager.
   more often first), then `Doc::set_words`: in the editor, the words of
   the window's other documents (each counted again only when it changed);
   the dictionary joins with step 7. Settings: "Suggest words as you type".
+- **Step 7**: spelling. The list: data/words/en_US.txt (123,679 words, 1.2
+  MB) made by tools/make-words.py from SCOWL 2020.12.07 (sizes 10-60,
+  American, every form written out; its terms in
+  data/words/SCOWL-COPYRIGHT.txt, THIRD-PARTY-NOTICES.md and
+  docs/borrowed-review.md), installed by install.sh in
+  share/vergence/words. crates/vergence-spell, our own: checking with
+  case rules (sentence capitals, all capitals, names kept), suggestions
+  one or two edits away (swapped letters, then neighboring keys, then the
+  commoner word first, in the case typed), completions by prefix
+  (commoner first; the text area offers them after the documents'
+  words), the user's own words in ~/.local/share/vergence/words.txt
+  (0600, shared by every app), words of code and addresses passed over.
+  The text area and every one-line field: a red wave under words spelled
+  wrong (not the one being typed), and a right click with suggestions,
+  Add to the dictionary, Ignore it here (the area), Cut, Copy, Paste.
+  Settings > Keyboard > Spelling, "Check spelling" (desktop.toml `[text]
+  spellcheck`), each app's own `spellcheck` over it (the editor's
+  settings window). Seen on kepler in the editor and in Settings' test
+  field: "recieved" offers received first.
 
 ## Steps
 

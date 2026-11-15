@@ -31,6 +31,8 @@ OUT = "THIRD-PARTY-NOTICES.md"
 VENDORED = [
     ("Smithay's smallvil example", "crates/vergence-server/LICENSE-smithay.txt",
      "crates/vergence-server started from it on 2026-11-07 (per-file attribution in the source)."),
+    ("SCOWL (Spell Checker Oriented Word Lists), the spelling list", "data/words/SCOWL-COPYRIGHT.txt",
+     "data/words/en_US.txt is made from SCOWL 2020.12.07 by tools/make-words.py (editor milestone 1); data, not code."),
 ]
 
 

@@ -2332,6 +2332,10 @@ name = "vergence-sound"
 version = "0.1.0"
 
 [[package]]
+name = "vergence-spell"
+version = "0.1.0"
+
+[[package]]
 name = "vergence-sysinfo"
 version = "0.1.0"
 
@@ -2375,6 +2379,7 @@ dependencies = [
  "vergence-look",
  "vergence-render",
  "vergence-scene",
+ "vergence-spell",
  "vergence-text",
  "vergence-ui",
 ]

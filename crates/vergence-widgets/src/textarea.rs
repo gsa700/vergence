@@ -15,6 +15,7 @@
 
 use std::{
     cell::{Ref, RefCell, RefMut},
+    collections::HashSet,
     rc::Rc,
     time::Instant,
 };
@@ -41,9 +42,29 @@ const NEAR_LINES: usize = 3000;
 /// best first, at most the limit.
 pub type Words = Rc<dyn Fn(&str, usize) -> Vec<String>>;
 
-/// The completion list, open under the caret.
+/// What choosing a line of the popup does.
+#[derive(Clone, Debug, PartialEq)]
+enum Action {
+    /// A completion: the word in place of the one being typed.
+    Word,
+    /// A spelling suggestion: this text in place of `from..to`.
+    Replace(Pos, Pos, String),
+    /// The word goes in the user's dictionary.
+    AddWord(String),
+    /// The word is let be in this document.
+    Ignore(String),
+    Cut,
+    Copy,
+    Paste,
+}
+
+/// The popup under the caret or the pointer: completions, spelling
+/// suggestions, or the clipboard's commands. `words` are its lines' labels.
 struct List {
     words: Vec<String>,
+    actions: Vec<Action>,
+    /// Where it opens (the right click's point); None: under the caret.
+    at: Option<(f32, f32)>,
     chosen: usize,
     /// Where the word being completed starts.
     start: Pos,
@@ -82,11 +103,14 @@ pub struct AreaOptions {
     /// (step 6, the TextEdit way). The list (Alt+Escape, F5, Ctrl+Space)
     /// works either way.
     pub complete: bool,
+    /// Words spelled wrong are underlined (step 7); a right click on one
+    /// gives suggestions.
+    pub spell: bool,
 }
 
 impl Default for AreaOptions {
     fn default() -> Self {
-        AreaOptions { font: "monospace".into(), size: None, line_numbers: true, wrap: true, tab_width: 4, spaces: true, current_line: true, editable: true, complete: true }
+        AreaOptions { font: "monospace".into(), size: None, line_numbers: true, wrap: true, tab_width: 4, spaces: true, current_line: true, editable: true, complete: true, spell: true }
     }
 }
 
@@ -323,6 +347,12 @@ pub struct Doc {
     list: Option<List>,
     /// Words from outside the document ([`Doc::set_words`]).
     words_from: Option<Words>,
+    /// Each line's words spelled wrong, once worked out; None until then.
+    spelled: Vec<Option<Rc<[(usize, usize)]>>>,
+    /// Words let be in this document ("Ignore it here").
+    ignored: HashSet<String>,
+    /// A word is being typed at the caret: not marked until it is left.
+    typing_word: bool,
 }
 
 impl Doc {
@@ -351,12 +381,16 @@ impl Doc {
             ghost: None,
             list: None,
             words_from: None,
+            spelled: Vec::new(),
+            ignored: HashSet::new(),
+            typing_word: false,
         }
         .with_saved_ending()
     }
 
     fn with_saved_ending(mut self) -> Doc {
         self.saved_ending = self.buffer.ending();
+        self.spelled = vec![None; self.buffer.line_count()];
         self.recount();
         self
     }
@@ -429,10 +463,16 @@ impl Doc {
         let mut found: Vec<(&str, f32)> = score.into_iter().collect();
         found.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(b.0)));
         let mut out: Vec<String> = found.into_iter().map(|(w, _)| w.to_string()).take(limit).collect();
-        if out.len() < limit
-            && let Some(more) = &self.words_from
-        {
-            for w in more(prefix, limit) {
+        let mut sources: Vec<Vec<String>> = Vec::new();
+        if let Some(more) = &self.words_from {
+            sources.push(more(prefix, limit));
+        }
+        // The dictionary's words last (step 7), as TextEdit offers them.
+        if let Some(sp) = vergence_spell::speller() {
+            sources.push(sp.complete(prefix, limit));
+        }
+        for more in sources {
+            for w in more {
                 if out.len() >= limit {
                     break;
                 }
@@ -479,7 +519,8 @@ impl Doc {
         }
         let keep = self.list.as_ref().and_then(|l| l.words.get(l.chosen).cloned());
         let chosen = keep.and_then(|k| words.iter().position(|w| *w == k)).unwrap_or(0);
-        self.list = Some(List { words, chosen, start, first: 0 });
+        let actions = vec![Action::Word; words.len()];
+        self.list = Some(List { words, actions, at: None, chosen, start, first: 0 });
         true
     }
 
@@ -698,6 +739,7 @@ impl Doc {
 
     fn reshape_all(&mut self) {
         self.shaped = vec![None; self.buffer.line_count()];
+        self.spelled = vec![None; self.buffer.line_count()];
         self.recount();
     }
 
@@ -710,6 +752,12 @@ impl Doc {
         let old = to.line - from.line + 1;
         let new = end.line - from.line + 1;
         self.shaped.splice(from.line..from.line + old, std::iter::repeat_n(None, new));
+        let spelled_lines = self.spelled.len();
+        if spelled_lines == self.shaped.len() + old - new {
+            self.spelled.splice(from.line..from.line + old, std::iter::repeat_n(None, new));
+        } else {
+            self.spelled = vec![None; self.shaped.len()];
+        }
         self.marks.clear();
         let counts: Vec<u32> = (from.line..from.line + new).map(|l| count_words(self.buffer.line(l))).collect();
         self.words.splice(from.line..from.line + old, counts);
@@ -791,6 +839,8 @@ impl Doc {
     /// A key, while the area has the keyboard.
     pub(crate) fn key(&mut self, key: u32, typed: Option<&str>, m: Modifiers) -> Effect {
         let ghost = self.ghost.take();
+        // A word being typed is marked only once it is left.
+        let was_typing = std::mem::take(&mut self.typing_word);
         // The completion list has the keys it uses.
         if self.list.is_some() {
             if let Some(e) = self.list_key(key, typed, m) {
@@ -901,6 +951,7 @@ impl Doc {
                     self.edit(from, to, "", kind);
                     self.set_caret(from, false);
                     e.text = true;
+                    self.typing_word = was_typing && key == sym::BACKSPACE;
                 }
                 self.reveal();
                 e.moved = true;
@@ -961,7 +1012,8 @@ impl Doc {
                     e.text = true;
                     e.moved = true;
                     // A letter typed: the word's likely end.
-                    if t.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    if t.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '\'') {
+                        self.typing_word = true;
                         self.suggest();
                     }
                 }
@@ -992,17 +1044,15 @@ impl Doc {
             }
             sym::RETURN | KP_ENTER | sym::TAB if plain => {
                 let l = self.list.take()?;
-                let word = l.words.get(l.chosen)?.clone();
-                if !self.options.editable {
-                    return Some(used);
-                }
-                self.take_word(l.start, &word);
-                Some(Effect { used: true, text: true, moved: true, ..Effect::default() })
+                let k = l.chosen;
+                Some(self.take_item(l, k))
             }
             sym::ESCAPE => {
                 self.list = None;
                 Some(used)
             }
+            // The other popups take no typing: it closes them.
+            _ if self.list.as_ref().is_some_and(|l| l.actions.first() != Some(&Action::Word)) => None,
             // Typing goes on, and narrows the list.
             sym::BACKSPACE => {
                 let e = self.key_plain(key, typed, m);
@@ -1021,6 +1071,119 @@ impl Doc {
             }
             _ => None,
         }
+    }
+
+    /// Does what line `k` of the popup says.
+    fn take_item(&mut self, l: List, k: usize) -> Effect {
+        let mut e = Effect { used: true, ..Effect::default() };
+        let (Some(word), Some(action)) = (l.words.get(k).cloned(), l.actions.get(k).cloned()) else { return e };
+        let editable = self.options.editable;
+        match action {
+            Action::Word if editable => {
+                self.take_word(l.start, &word);
+                e.text = true;
+                e.moved = true;
+            }
+            Action::Replace(a, b, with) if editable => {
+                let end = self.edit(a, b, &with, Kind::Other);
+                self.set_caret(end, false);
+                self.history.break_group();
+                self.reveal();
+                e.text = true;
+                e.moved = true;
+            }
+            Action::AddWord(w) => {
+                if let Some(sp) = vergence_spell::speller() {
+                    let _ = sp.add(&w);
+                }
+                self.spelled.iter_mut().for_each(|s| *s = None);
+            }
+            Action::Ignore(w) => {
+                self.ignored.insert(w);
+            }
+            Action::Cut | Action::Copy => {
+                let (a, b) = self.selection();
+                if a != b {
+                    e.copy = Some(self.buffer.slice(a, b));
+                    if action == Action::Cut && editable {
+                        self.edit(a, b, "", Kind::Other);
+                        self.set_caret(a, false);
+                        e.text = true;
+                        e.moved = true;
+                    }
+                }
+            }
+            Action::Paste if editable => e.paste = true,
+            _ => {}
+        }
+        e
+    }
+
+    /// A right click at `x`, `y`: on a word spelled wrong, its suggestions
+    /// (and Add to dictionary, Ignore); elsewhere Cut, Copy and Paste. The
+    /// caret goes there unless the click is inside the selection.
+    pub(crate) fn context(&mut self, x: f32, y: f32) {
+        self.ghost = None;
+        let p = self.pos_at(x, y);
+        let (a, b) = self.selection();
+        let inside = a != b && p >= a && p <= b;
+        if !inside {
+            self.set_caret(p, false);
+        }
+        let mut words = Vec::new();
+        let mut actions = Vec::new();
+        if let Some((wa, wb, w)) = self.misspelled_at(p) {
+            let sp = vergence_spell::speller();
+            for s in sp.map(|sp| sp.suggest(&w, 5)).unwrap_or_default() {
+                words.push(s.clone());
+                actions.push(Action::Replace(wa, wb, s));
+            }
+            if words.is_empty() {
+                words.push("No suggestions".into());
+                actions.push(Action::Ignore(String::new()));
+            }
+            words.push(format!("Add “{w}” to the dictionary"));
+            actions.push(Action::AddWord(w.clone()));
+            words.push("Ignore it here".into());
+            actions.push(Action::Ignore(w));
+        }
+        let selected = self.caret != self.anchor;
+        let editable = self.options.editable;
+        for (label, act, on) in [("Cut", Action::Cut, selected && editable), ("Copy", Action::Copy, selected), ("Paste", Action::Paste, editable)] {
+            if on {
+                words.push(label.into());
+                actions.push(act);
+            }
+        }
+        self.list = (!words.is_empty()).then(|| List { words, actions, at: Some((x, y)), chosen: 0, start: p, first: 0 });
+    }
+
+    /// The word spelled wrong at `p`, if any: where it starts and ends, and it.
+    fn misspelled_at(&self, p: Pos) -> Option<(Pos, Pos, String)> {
+        if !self.options.spell {
+            return None;
+        }
+        let sp = vergence_spell::speller()?;
+        let line = self.buffer.line(p.line);
+        let (a, b) = vergence_spell::words_to_check(line).into_iter().find(|(a, b)| *a <= p.col && p.col <= *b)?;
+        let w = &line[a..b];
+        (!sp.check(w) && !self.ignored.contains(w)).then(|| (Pos::new(p.line, a), Pos::new(p.line, b), w.to_string()))
+    }
+
+    /// Line `i`'s words spelled wrong (worked out once until the line changes).
+    fn spelled_wrong(&mut self, i: usize) -> Rc<[(usize, usize)]> {
+        if let Some(Some(s)) = self.spelled.get(i) {
+            return s.clone();
+        }
+        let line = self.buffer.line(i);
+        let bad: Rc<[(usize, usize)]> = match vergence_spell::speller() {
+            Some(sp) => vergence_spell::words_to_check(line).into_iter().filter(|(a, b)| !sp.check(&line[*a..*b])).collect(),
+            None => Rc::from(Vec::new()),
+        };
+        if let Some(slot) = self.spelled.get_mut(i) {
+            *slot = Some(bad.clone());
+        }
+        bad
     }
 
     /// A key as if no list or suggestion were showing.
@@ -1244,22 +1407,22 @@ impl Doc {
 
     /// A press: one click puts the caret there (Shift: the selection runs
     /// there), two take a word, three the line.
-    pub(crate) fn press(&mut self, x: f32, y: f32, count: u8, shift: bool) {
+    /// A press on the popup does what its line says (`used` set); elsewhere
+    /// it closes it and the press is the text's.
+    pub(crate) fn press(&mut self, x: f32, y: f32, count: u8, shift: bool) -> Effect {
         self.ghost = None;
-        // A word of the list taken with the pointer.
+        self.typing_word = false;
         if let Some((r, row_h)) = self.geom.list
             && let Some(l) = self.list.take()
+            && x >= r.x
+            && x < r.x + r.w
+            && y >= r.y
+            && y < r.y + r.h
         {
-            if x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h {
-                let k = ((y - r.y - 4.0) / row_h).floor().max(0.0) as usize + l.first;
-                if let Some(word) = l.words.get(k).cloned()
-                    && self.options.editable
-                {
-                    self.take_word(l.start, &word);
-                }
-                return;
-            }
+            let k = ((y - r.y - 4.0) / row_h).floor().max(0.0) as usize + l.first;
+            return self.take_item(l, k);
         }
+        self.list = None;
         let p = self.pos_at(x, y);
         self.goal = None;
         self.history.break_group();
@@ -1282,6 +1445,7 @@ impl Doc {
                 self.unit = (1, p, p);
             }
         }
+        Effect::default()
     }
 
     /// The pointer dragged while pressed: the selection follows it, by words
@@ -1384,6 +1548,7 @@ impl Doc {
         let selected = sa != sb;
         let sel_c = if focused { alpha(theme.accent, 90) } else { alpha(theme.accent, 60) };
         let shade = alpha(theme.text, if theme.dark { 16 } else { 10 });
+        let wave_c = if theme.dark { Color::rgb(255, 99, 92) } else { Color::rgb(214, 40, 40) };
         let mark_c = if theme.dark { Color::rgba(255, 200, 60, 70) } else { Color::rgba(255, 196, 0, 110) };
         let text_c = theme.text;
         let num_c = theme.dim;
@@ -1407,6 +1572,16 @@ impl Doc {
             let h = s.rows.len() as f32 * line_h;
             widest = widest.max(s.width);
             if y + h > r.y {
+                // The words spelled wrong, less those let be and the one being typed.
+                let mut bad: Vec<(usize, usize)> = if self.options.spell { self.spelled_wrong(i).to_vec() } else { Vec::new() };
+                if !self.ignored.is_empty() {
+                    let line = self.buffer.line(i);
+                    bad.retain(|(a, b)| !self.ignored.contains(&line[*a..*b]));
+                }
+                if self.typing_word && i == self.caret.line {
+                    let c = self.caret.col;
+                    bad.retain(|(a, b)| !(*a <= c && c <= *b));
+                }
                 let line = self.buffer.line(i);
                 if self.options.current_line && i == self.caret.line && !selected {
                     scene.fill(Rect::new(r.x, y, r.w, h), shade);
@@ -1448,6 +1623,24 @@ impl Doc {
                     }
                     // The text, a piece between tabs at a time.
                     let base = ry + ((line_h - (m.ascent + m.descent)) / 2.0 + m.ascent).round();
+                    // A red wave under each word spelled wrong on this row.
+                    for &(wa, wb) in &bad {
+                        let (from, to) = (wa.max(rs), wb.min(re));
+                        if from >= to {
+                            continue;
+                        }
+                        let (x1, x2) = (x0 + s.x_of(from), x0 + s.x_of(to));
+                        let wy = (base + (m.descent * 0.5).max(2.0)).min(ry + line_h - 2.0);
+                        let mut x = x1;
+                        let mut up = true;
+                        while x < x2 {
+                            let nx = (x + 2.0).min(x2);
+                            let (a, b) = if up { (wy + 1.0, wy - 1.0) } else { (wy - 1.0, wy + 1.0) };
+                            scene.line(Point::new(x, a), Point::new(nx, b), 1.0, wave_c);
+                            x = nx;
+                            up = !up;
+                        }
+                    }
                     let mut p = rs;
                     while p < re {
                         let q = line[p..re].find('\t').map_or(re, |k| p + k);
@@ -1498,7 +1691,7 @@ impl Doc {
             }
         }
         if focused
-            && caret_seen
+            && (caret_seen || self.list.as_ref().is_some_and(|l| l.at.is_some()))
             && let Some(l) = self.list.as_mut()
         {
             let rows = l.words.len().min(LIST_ROWS);
@@ -1510,9 +1703,13 @@ impl Doc {
             let widest = l.words.iter().map(|w| fonts.layout(face, size, w).1).fold(0.0f32, f32::max);
             let w = (widest + 24.0).clamp(140.0, (r.w - 8.0).max(140.0));
             let h = rows as f32 * line_h + 8.0;
-            let lx = (cx - 12.0).clamp(r.x + 4.0, (r.x + r.w - w - 4.0).max(r.x + 4.0));
-            // Below the caret's row, or above it where there is no room below.
-            let ly = if cy + line_h + h <= r.y + r.h { cy + line_h } else { (cy - h).max(r.y) };
+            // Under the caret's row (above it where there is no room), or at the right click.
+            let (ax, ay, below) = match l.at {
+                Some((px, py)) => (px, py, py),
+                None => (cx - 12.0, cy, cy + line_h),
+            };
+            let lx = ax.clamp(r.x + 4.0, (r.x + r.w - w - 4.0).max(r.x + 4.0));
+            let ly = if below + h <= r.y + r.h { below } else { (ay - h).max(r.y) };
             let lr = Rect::new(lx, ly, w, h);
             let ground = if theme.dark { theme.card } else { Color::rgb(255, 255, 255) };
             scene.fill_rounded(Rect::new(lx - 1.0, ly + 1.0, w + 2.0, h + 2.0), vergence_look::RADIUS + 1.0, alpha(Color::rgb(0, 0, 0), 50));
@@ -1834,11 +2031,14 @@ mod tests {
         d.set_selection(Pos::new(1, 0), Pos::new(1, 0));
         typed(&mut d, "a");
         d.key(F5, None, Modifiers::default());
-        assert_eq!(d.list.as_ref().map(|l| l.words.clone()), Some(vec!["apple".to_string(), "apricot".into(), "April".into()]));
+        // The document's words, then the program's, then the dictionary's.
+        let first3 = |d: &Doc| d.list.as_ref().map(|l| l.words.iter().take(3).cloned().collect::<Vec<_>>());
+        assert_eq!(first3(&d), Some(vec!["apple".to_string(), "apricot".into(), "April".into()]));
         typed(&mut d, "p");
-        assert_eq!(d.list.as_ref().map(|l| l.words.len()), Some(3), "all start with ap");
+        assert_eq!(first3(&d), Some(vec!["apple".to_string(), "apricot".into(), "April".into()]), "all start with ap");
         typed(&mut d, "r");
-        assert_eq!(d.list.as_ref().map(|l| l.words.clone()), Some(vec!["apricot".to_string(), "April".into()]), "narrowed");
+        assert_eq!(first3(&d).map(|v| v[..2].to_vec()), Some(vec!["apricot".to_string(), "April".into()]), "narrowed");
+        assert!(d.list.as_ref().is_some_and(|l| l.words.iter().all(|w| w.to_lowercase().starts_with("apr"))));
         key(&mut d, sym::DOWN);
         key(&mut d, sym::RETURN);
         assert_eq!(d.buffer().line(1), "April");
@@ -1849,6 +2049,43 @@ mod tests {
         key(&mut d, sym::ESCAPE);
         assert!(!d.completing());
         assert_eq!(d.buffer().line(1), "April ap");
+    }
+
+    #[test]
+    fn words_spelled_wrong_are_found_and_fixed_from_a_right_click() {
+        let mut d = doc("Teh colour of the hosue\n");
+        d.geom.wrap_w = 0.0;
+        d.geom.text_w = 400.0;
+        let bad = d.spelled_wrong(0).to_vec();
+        let line = d.buffer().line(0).to_string();
+        let words: Vec<&str> = bad.iter().map(|(a, b)| &line[*a..*b]).collect();
+        assert_eq!(words, vec!["Teh", "colour", "hosue"]);
+        // A right click on "hosue": suggestions first, house among them.
+        d.context(8.0 * 20.0 + 1.0, PAD_Y + 2.0);
+        let l = d.list.as_ref().expect("a menu");
+        assert_eq!(l.words[0], "house");
+        assert!(l.words.iter().any(|w| w.starts_with("Add “hosue”")));
+        let e = d.key(sym::RETURN, None, Modifiers::default());
+        assert!(e.text);
+        assert_eq!(d.buffer().line(0), "Teh colour of the house");
+        // Ignored here, it is no longer marked.
+        d.context(1.0, PAD_Y + 2.0);
+        let k = d.list.as_ref().unwrap().words.iter().position(|w| w == "Ignore it here").unwrap();
+        for _ in 0..k {
+            key(&mut d, sym::DOWN);
+        }
+        key(&mut d, sym::RETURN);
+        assert!(d.misspelled_at(Pos::new(0, 1)).is_none());
+        // A word still being typed is not marked yet.
+        d.set_selection(Pos::new(1, 0), Pos::new(1, 0));
+        typed(&mut d, "wrng");
+        assert!(d.typing_word);
+        key(&mut d, sym::LEFT);
+        assert!(!d.typing_word);
+        // Elsewhere, the clipboard's commands.
+        d.set_selection(Pos::new(0, 0), Pos::new(0, 3));
+        d.context(8.0 + 1.0, PAD_Y + 2.0);
+        assert!(d.list.as_ref().unwrap().words.iter().any(|w| w == "Copy"));
     }
 
     #[test]

@@ -29,6 +29,9 @@ pub struct Theme {
     /// otherwise): what is laid out there shows through the frost and takes
     /// no presses.
     pub top: f32,
+    /// Words spelled wrong are marked in text fields and areas
+    /// (desktop.toml `[text] spellcheck`, or the app's own `spellcheck`).
+    pub spell: bool,
 }
 
 fn c(rgb: Rgb) -> Color {
@@ -55,6 +58,7 @@ impl Theme {
             opacity: 1.0,
             double_click: 400,
             top: 0.0,
+            spell: true,
         };
         if high_contrast {
             // Text on pure black or white, edges as strong as the text.
@@ -103,6 +107,8 @@ impl Theme {
         t.reduced_motion = motion;
         t.double_click = double_click;
         t.opacity = vergence_ui::opacity_setting(text, section);
+        let on = |v: Option<String>| v.map(|v| v != "false");
+        t.spell = on(vergence_ui::table_value(text, section, "spellcheck")).or_else(|| on(vergence_ui::table_value(text, "[text]", "spellcheck"))).unwrap_or(true);
         t
     }
 

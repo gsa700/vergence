@@ -35,6 +35,20 @@ our own words, so the attribution can go and the files read as one design.
 Natural moment: native milestone 1 steps 3 to 5, which touch `state.rs`,
 `input.rs`, the grabs and `xdg_shell.rs` anyway.
 
+### SCOWL word lists (permissive, MIT-like), as data
+
+Where: `data/words/en_US.txt` (123,679 words, about 1.2 MB), made by
+`tools/make-words.py` from SCOWL 2020.12.07 (Kevin Atkinson's Spell
+Checker Oriented Word Lists; sizes 10 to 60, American spelling, as
+Hunspell's en_US); its terms in `data/words/SCOWL-COPYRIGHT.txt`, installed
+beside it and printed in THIRD-PARTY-NOTICES.md. Dave, 2026-11-15: "ship
+our own" (editor milestone 1, question 3). The checker reading it is ours
+(crates/vergence-spell); only the words are borrowed.
+
+Review: none needed for the code. Writing our own list of English words is
+not a sensible project; other languages would come the same way, from
+lists under terms like these.
+
 ### drm-rs 0.14.1 (MIT), patched
 
 Where: `third_party/drm-rs` (about 4,700 lines of Rust), our patch in
