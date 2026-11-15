@@ -128,9 +128,13 @@ the order when its turn is near:
   screen its own file), Super+Shift+4 an area dragged out (Space turns it
   into a window picker: the window alone, with its shadow), Super+Shift+5
   a small bar for both, with screen and area recording; Ctrl added sends
-  the picture to the clipboard instead of a file. The capture's thumbnail
-  floats in a corner for a few seconds (click to open it in Close-Up, drag
-  it into an app). Files to ~/Pictures/Screenshots by default, named by
+  the picture to the clipboard instead of a file. The capture shows as a
+  **notification card holding the picture** (Dave, 2026-11-15: "that
+  floating image could just be a notification containing the picture and
+  clicking opens it in Close-up for viewing and minor edits"): the
+  server's own cards (notify.rs) gain a picture; a click opens it in
+  Close-Up, whose **minor edits** (crop, rotate, simple markup, as macOS
+  Preview's) come with this or before it. Files to ~/Pictures/Screenshots by default, named by
   date and time. The server does the capturing (it has every pixel; vctl
   shot already captures a screen); recording needs a video encoder, which
   is the video milestone's question.
