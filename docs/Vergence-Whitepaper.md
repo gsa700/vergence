@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "15 November 2026 — Draft 0.19"
+date: "15 November 2026 — Draft 0.20"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.19 · 15 November 2026
+David Erickson (AB0R), with Claude · Draft 0.20 · 15 November 2026
 
 ---
 
@@ -398,6 +398,8 @@ The app button's menu holds the application's few everyday commands (the termina
 
 **Light and dark.** The desktop's Style is the master switch. Under "App default" each application looks as it chooses: its own choice in its settings, else the look it was built with (the terminal dark). Dark or Light makes every application follow, setting their own choices aside without erasing them; the rows that would not take effect say so. The bar's light or dark is the one piece of window furniture an application may choose; which side the buttons are on, the bar's layout, the corners and the app button stay the desktop's, so every window keeps one shape. The settings app is the exception: light always, because small grey text on dark is hard to read.
 
+**Text, files and spelling are the toolkit's** (editor milestone 1, 15 November 2026), so every tool has them alike. A **text area** edits text of any length: only the lines in view are laid out, so a file of 200,000 lines types as quickly as a note; it has line numbers, wrapping, indenting, undo in sensible steps (the one-line field undoes too), find and replace, and completion the way TextEdit does it (the likely end of a word in gray, Tab takes it; a list on request), from the words of the open documents and the dictionary. **Spelling** is checked by the project's own checker against a word list it ships (made from SCOWL, under its permissive terms), in every text area and field: a red wave under a word spelled wrong, suggestions on a right click, the user's own words shared by every application, one switch for the desktop and each application's choice over it. The **Open and Save dialog** is one dialog for every tool: places, the folder's path as buttons, sorting, typing to narrow the list or a path to go to, a text file's first lines at the side, the last folder and the recent files remembered; later it is also the file chooser that other programs ask the desktop for. The first tool on all of it is the **Text Editor**.
+
 **What it stands on.** For now the toolkit talks to the server as a Wayland client, in code written by the project as the D-Bus edge was (§6.8), with the native window protocol (§6.3 to §6.5) taking its place behind the same interface when that exists. Font files are read and keyboards mapped with the parts already in use (§8) until each is decided on. **Text is the hard part** of any toolkit: shaping for scripts that need it, right-to-left text, fonts that fall back per character, input methods. Plain text comes first; the rest is named in §10 rather than assumed.
 
 **The order.** The drawing and text core comes first, with the **terminal** as its first user: a terminal is a grid of cells, needs the fewest widgets, and is where the borrowed toolkit hurt most. The **shelf** (§6.9) is then built in the server on the same drawing code. Widgets follow (label, button, switch, slider, list, text field, scrolling), and the **settings app** moves when they can carry it. The borrowed toolkit is removed when the second tool has moved.
@@ -573,6 +575,7 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
 
   - **App settings** (14 November, §6.10): the app button in every window's bar (Alt+Space), its menu from commands with roles whose names and keys the desktop fixes (bus protocol version 11), Keyboard shortcuts, each application's settings window with inherit-or-override rows, an Apps page in the settings app for the programs that are not the project's, the desktop's Style as the master switch for light and dark, and the settings app light always. Snapping became on by default the same evening, the author having used it.
   - **The first tools** (14 and 15 November): a **Calculator** with exact decimal arithmetic of the project's own (34 significant digits, so 0.1 + 0.2 is 0.3 and sin 30° is exactly 0.5), a keypad, a live answer, the session's calculations, and a scientific mode for which the window asks the server for more room (bus protocol version 12: a window may ask for a size, the server decides); **Force Quit**, as on the Mac: the user's running applications, those that have stopped answering marked (the server asks each app's loop whether it runs), one ended at once after a question, gently first (SIGTERM, then SIGKILL after two seconds), opened anywhere by Ctrl+Alt+Escape (bus protocol version 13); and **Hardware**: processors, memory, storage, network, graphics and power, what they are and what they are doing, the last minute charted, read by the project's own code on Linux and FreeBSD. They brought the toolkit an About window, a chart, and a way for an application to see its keys before its buttons do.
+  - **The Text Editor** (15 November, §6.10): plain text in tabs, one process for all its windows, files saved whole or not at all (written beside and renamed over), line numbers, word count, find and replace, completion the TextEdit way, spelling, the Open and Save dialog, a tab with unsaved changes marked by the desktop (bus protocol version 14), unsaved work kept across a restart, files changed on disk read again, its text under the frosted bar as the terminal's.
   - **A second GPU** (14 November): screens on another GPU, drawn by the main one and copied over (§8.3, "A screen on a second GPU, as built"): Hubble's 14-inch 4K monitor on the NVIDIA card's HDMI, smooth, paced to its own refresh, its touch panel tied to it, the NVIDIA card asleep when unplugged; the Screens page says which GPU shows and draws each screen; bus protocol version 8. Carried over: the copy by the CPU for GPUs that share no format.
 
   Still open within phase 2: checks by hand left in the seat, shelf and look milestones; docks on more than one screen; live tiles; the rest of Smithay's replacement (the window space and the renderer next, then the DRM/KMS and input back ends); explicit sync and NVIDIA's own driver (§8.3); and packages for Void, FreeBSD and Fedora (today `tools/install.sh` installs under a prefix).

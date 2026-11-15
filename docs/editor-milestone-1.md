@@ -1,5 +1,10 @@
 # Editor milestone 1: text editing in the toolkit, the Text Editor, spellchecking
 
+**Built 2026-11-15**, steps 1 to 8; tested on Hubble, kepler and
+Techbench, seen on kepler's screen (Dave watching), installed on kepler.
+Hubble's and Techbench's installed sessions wait for Dave (bus v14).
+Progress below; the acceptance's checks by hand are Dave's.
+
 **Drafted 2026-11-14**, item 4 of docs/apps-roadmap.md.
 
 **Accepted 2026-11-15** (Dave): "1 plain text now - other formats later md
