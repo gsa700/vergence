@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- File Viewer: a folder with a page in it, after NeXTSTEP's File Viewer. Drawn by the project. -->
+  <path d="M6 14 Q6 10 10 10 L24 10 L29 15 L54 15 Q58 15 58 19 L58 50 Q58 54 54 54 L10 54 Q6 54 6 50 Z" fill="#2f6fd6"/>
+  <rect x="16" y="8" width="30" height="34" rx="3" fill="#fbfbfc" stroke="#6b7a9e" stroke-width="1.5"/>
+  <g fill="#9aa3b5"><rect x="21" y="15" width="20" height="2.5" rx="1.2"/><rect x="21" y="21" width="16" height="2.5" rx="1.2"/><rect x="21" y="27" width="18" height="2.5" rx="1.2"/></g>
+  <path d="M6 24 Q6 21 9 21 L55 21 Q58 21 58 24 L58 50 Q58 54 54 54 L10 54 Q6 54 6 50 Z" fill="#5a93ea"/>
+</svg>

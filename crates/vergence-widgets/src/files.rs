@@ -205,8 +205,8 @@ pub fn icons<M: Clone + 'static>(v: &View<M>) -> Element<M> {
         .iter()
         .enumerate()
         .map(|(k, e)| {
-            let name: String = if e.name.chars().count() > 26 { format!("{}…", e.name.chars().take(25).collect::<String>()) } else { e.name.clone() };
-            let mut b = button(column(vec![kind_icon_sized(e.kind(), 3.0).width(Length::Fixed(80.0)).height(Length::Fixed(52.0)), label(name).size(11.0).align(Align::Center).wrap().width(Length::Fixed(88.0))]).spacing(4.0).align(Align::Center))
+            // One line, cut with "…" to the cell (a name without spaces cannot wrap).
+            let mut b = button(column(vec![kind_icon_sized(e.kind(), 3.0).width(Length::Fixed(80.0)).height(Length::Fixed(52.0)), label(e.name.clone()).size(11.0).align(Align::Center).elide().width(Length::Fixed(88.0))]).spacing(4.0).align(Align::Center))
                 .look(if (v.chosen)(k, e) { ButtonLook::Chosen } else { ButtonLook::Plain })
                 .padding(Padding::hv(6.0, 4.0))
                 .on_press((v.click)(k))

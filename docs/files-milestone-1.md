@@ -175,9 +175,12 @@ bar, as the terminal and the editor do).
 - **Preview**, the first look, two ways. **The preview pane**: a column at
   the window's right (View > Show Preview, remembered per window) showing
   the selected file small, its kind, size and dates, with "Open in
-  Close-Up". **The space bar**, Finder style: Space shows the selected file in the
-  Close-Up's preview window; arrow keys move the selection and the preview
-  follows; Space again closes it.
+  Close-Up". **The space bar**, Finder style: Space shows the selected file
+  large, over File Viewer's own list (drawn in its window, decoded by
+  vergence-decode: a window of Close-Up's own would take the keyboard, and
+  the arrows must go on moving through the files; 2026-11-15); arrow keys
+  move the selection and the preview follows; Space or Escape closes it,
+  Enter opens the file (in Close-Up for a picture).
 - **Opening**: Enter or a double click opens with the default app; "Open
   with" lists the others and "Other..." chooses any app (section 1).
 - **File operations**: new folder, rename (in place), copy, cut, paste,
@@ -368,6 +371,24 @@ the wallpaper, a scratch place for launchers and files.
   dialog uses them. New in the toolkit: `label(...).elide()`, one line cut
   with "…" where its place ends (long names in the list no longer run into
   the Size column). Tests: Hubble 603, kepler 599, Techbench 603.
+- **The toolbar** (2026-11-15, Dave: "b"): vergence-widgets toolbar.rs, a
+  strip under the title bar reaching up under it (one band), with its own
+  line icons; Close-Up has one (previous/next, zoom, fit, 1:1, turns,
+  Open).
+- **Step 7, first part** (2026-11-15): crates/vergence-files, **File
+  Viewer** (desktop entry for inode/directory, icon, install.sh): toolbar
+  (Back, Forward, Up, the path, "Narrow this folder", list or icons, the
+  preview pane, hidden files), sidebar (places and Trash), list or icon
+  view, foot ("17 items", "3 of 17 chosen"); tabs, one process (hand.rs;
+  a file given opens its folder with it chosen); click, Ctrl+click,
+  Shift+click, the arrows (rows in the icon view by its width), Enter and
+  double click open (folders here, files by the server's Open); Space's
+  Preview over the list (pictures decoded apart at up to 1600 x 1200, the
+  start of text, else the mark), the arrows following; the preview pane
+  with Open and Open in Close-Up; the folder read again when it changes
+  (every 2 s); settings `[files]` (view, pane, hidden; the usual look
+  rows). Seen on kepler's screen. Tests: Hubble 607, kepler 603,
+  Techbench 607. Next: file operations, Trash, undo.
 ## Steps
 
 1. **vergence-types**: the database reader (globs2, magic, subclasses,

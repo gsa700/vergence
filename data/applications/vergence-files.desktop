@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=File Viewer
+GenericName=File Manager
+Comment=Your folders and files, with Preview on the space bar
+Exec=vergence-files %U
+Icon=vergence-files
+Terminal=false
+Categories=System;FileManager;Utility;
+MimeType=inode/directory;
+Keywords=files;folders;file manager;finder;browse;explorer;
+StartupWMClass=vergence-files

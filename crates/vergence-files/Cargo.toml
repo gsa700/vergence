@@ -1,0 +1,20 @@
+[package]
+name = "vergence-files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "File Viewer: Vergence's file manager, with Preview on the space bar"
+
+[dependencies]
+vergence-ui.workspace = true
+vergence-widgets.workspace = true
+vergence-scene.workspace = true
+vergence-shell.workspace = true
+vergence-types.workspace = true
+vergence-decode.workspace = true
+vergence-protocol.workspace = true
+
+[[bin]]
+name = "vergence-files"
+path = "src/main.rs"

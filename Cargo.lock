@@ -2223,6 +2223,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vergence-files"
+version = "0.1.0"
+dependencies = [
+ "vergence-decode",
+ "vergence-protocol",
+ "vergence-scene",
+ "vergence-shell",
+ "vergence-types",
+ "vergence-ui",
+ "vergence-widgets",
+]
+
+[[package]]
 name = "vergence-harness"
 version = "0.1.0"
 dependencies = [
