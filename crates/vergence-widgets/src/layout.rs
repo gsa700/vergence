@@ -5,6 +5,10 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
+/// Room kept on the right of a scrolled child for the scroll bar (ui.rs
+/// draws it 6 wide, 2 in from the edge).
+pub(crate) const SCROLL_GUTTER: f32 = 10.0;
+
 use vergence_scene::{Color, Image, Rect};
 
 use crate::element::{Align, ButtonLook, Draw, Element, FIELD_PAD_H, FIELD_PAD_V, Fit, Kind, Label, Length, OnTouch, Weight};
@@ -467,10 +471,20 @@ impl Layout<'_> {
                     Length::Shrink => self.measure(&child, rect.w).w.min(rect.w),
                     Length::Fill(_) => rect.w,
                 });
-                let natural = match child.height {
+                let mut natural = match child.height {
                     Length::Fixed(h) => h,
                     _ => self.measure(&child, w).h,
                 };
+                // Taller than its place: the scroll bar shows, and a child as
+                // wide as the place leaves it a gutter on the right, so nothing
+                // sits under the bar (Dave, 2026-11-14).
+                let mut w = w;
+                if natural > rect.h && matches!(child.width, Length::Fill(_)) {
+                    w = (w - SCROLL_GUTTER).max(0.0);
+                    if !matches!(child.height, Length::Fixed(_)) {
+                        natural = self.measure(&child, w).h;
+                    }
+                }
                 let h = natural.max(rect.h);
                 let cid = child_id(id, 0, child.key);
                 self.arrange(*child, Rect::new(rect.x, rect.y, w, h), Some(me), cid, out);
