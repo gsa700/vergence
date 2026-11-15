@@ -207,6 +207,42 @@ bar, as the terminal and the editor do).
   "Search in subfolders" walks down from here, off the thread, as results
   come. An index (as macOS Spotlight has) is not part of this milestone.
 
+### 6. The desktop (`~/Desktop` on the wallpaper)
+
+Dave, 2026-11-15: "on many systems but especially windows i use it like a
+scratch folder: app launchers and random files ... Let's include it as
+windows does and make it suit our setup." So the files in `~/Desktop` (the
+XDG desktop folder, wherever user-dirs.dirs puts it) are shown as icons on
+the wallpaper, a scratch place for launchers and files.
+
+- **Drawn by File Viewer**, as Windows draws its desktop with Explorer: a
+  borderless window of a new kind, **Desktop** (bus window `Style` kind),
+  one per screen with icons (the main screen by default; Settings says
+  which), which the server keeps under every other window, over the
+  wallpaper, sized to the screen less the dock, never in the dock or Alt+Tab,
+  and never given the keyboard but by a click on it. Its ground is clear, so
+  the wallpaper and its tint show; icon labels carry a shadow that reads on
+  any picture.
+- **What it does is File Viewer's**: its icon view, so double click opens
+  (by type, section 1), right click has Open with, Rename, Move to Trash,
+  Copy, Paste, New Folder, Sort by and "Show the desktop in File Viewer";
+  a rubber-band selection; undo; drag and drop with File Viewer windows and
+  apps (step 8).
+- **Arranged as Windows does**: icons in a grid from the top left down,
+  then across, moved freely by dragging and kept where put (positions in
+  ~/.local/state/vergence/desktop.toml, per screen layout as window memory
+  is), or "Sort by" name, kind, date; new files take the next free cell.
+- **Launchers**: an app dragged from the launcher or the dock onto the
+  desktop makes a desktop entry there, shown with its app's icon and name,
+  and double click starts it. A desktop entry that arrives any other way (a
+  download, a copy) runs only after a question, once ("Allow this
+  launcher to start a program?"), marked by its execute bit, as GNOME does:
+  a file from the web must not start a program by a double click.
+- **Show desktop**: Super+D (and a corner of the dock, later) minimizes
+  every window to show the desktop, and again brings them back.
+- **Settings > Desktop**: Show icons on the desktop (on by default), which
+  screens, icon size, sort.
+
 ## Progress
 
 - **Step 1 built** (2026-11-15): crates/vergence-types (table.rs: our own
@@ -250,8 +286,11 @@ bar, as the terminal and the editor do).
    preview, file operations with progress and undo, Trash.
 8. **Drag and drop**: on the native protocol (bus version bump), the
    server's bridge to Wayland, used by File Viewer and the dock.
-9. **Thumbnails, mounts, search in subfolders.**
-10. **Docs**: whitepaper (§6.10 and §9), README, the Map, CLAUDE.md.
+9. **The desktop**: the Desktop window kind in the server, File Viewer's
+   desktop windows, positions, launchers and their question, Super+D,
+   Settings > Desktop.
+10. **Thumbnails, mounts, search in subfolders.**
+11. **Docs**: whitepaper (§6.10 and §9), README, the Map, CLAUDE.md.
 
 PDF and video, if question 2 brings them in, are their own steps after 5.
 
@@ -271,6 +310,10 @@ PDF and video, if question 2 brings them in, are their own steps after 5.
   with GNOME's Files).
 - Space previews the selection and follows the arrow keys.
 - Files drag between File Viewer windows and onto another app.
+- `~/Desktop`'s files show on the wallpaper, open, rename and move to the
+  Trash there; an app dragged from the launcher becomes a launcher that
+  starts it; a downloaded launcher asks before it runs; Super+D shows the
+  desktop and brings the windows back.
 - Builds and passes its tests on Hubble, kepler and Techbench; run on
   kepler (FreeBSD) and Techbench (Fedora).
 
