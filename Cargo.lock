@@ -2186,6 +2186,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vergence-closeup"
+version = "0.1.0"
+dependencies = [
+ "vergence-decode",
+ "vergence-scene",
+ "vergence-types",
+ "vergence-ui",
+ "vergence-widgets",
+]
+
+[[package]]
 name = "vergence-dbus"
 version = "0.1.0"
 
