@@ -300,8 +300,9 @@ pub enum ClientMsg {
 }
 
 /// A running application, as Force Quit lists it: its key (the dock's),
-/// name, icon (`icon_side` square, RGBA; empty if none) and whether it is
-/// answering.
+/// name, icon (`icon_side` square, RGBA; empty if none), whether it is
+/// answering, and whether it is being force-quit now (asked to end, killed
+/// in a moment if it does not).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppInfo {
     pub key: String,
@@ -309,6 +310,7 @@ pub struct AppInfo {
     pub icon_side: u16,
     pub icon: Vec<u8>,
     pub responding: bool,
+    pub quitting: bool,
 }
 
 /// The icon side Apps carries (points; drawn sharp at scale 1, smooth above).
@@ -640,7 +642,7 @@ impl ServerMsg {
                 let mut e = Encoder::frame(op::APPS);
                 e.u32(*serial).count(apps.len());
                 for a in apps {
-                    e.str(&a.key).str(&a.name).u16(a.icon_side).bytes(&a.icon).bool(a.responding);
+                    e.str(&a.key).str(&a.name).u16(a.icon_side).bytes(&a.icon).bool(a.responding).bool(a.quitting);
                 }
                 e
             }
@@ -746,7 +748,7 @@ impl ServerMsg {
             op::ACTION_INVOKED => ServerMsg::ActionInvoked { id: d.u32()?, key: d.str()? },
             op::APPS => {
                 let serial = d.u32()?;
-                let n = d.count(12)?;
+                let n = d.count(14)?;
                 let mut apps = Vec::with_capacity(n);
                 for _ in 0..n {
                     let (key, name, icon_side) = (d.str()?, d.str()?, d.u16()?);
@@ -754,7 +756,8 @@ impl ServerMsg {
                     if !icon.is_empty() && icon.len() != icon_side as usize * icon_side as usize * 4 {
                         return Err(WireError::BadValue("app icon"));
                     }
-                    apps.push(AppInfo { key, name, icon_side, icon, responding: d.bool()? });
+                    let responding = d.bool()?;
+                    apps.push(AppInfo { key, name, icon_side, icon, responding, quitting: d.bool()? });
                 }
                 ServerMsg::Apps { serial, apps }
             }
@@ -863,8 +866,8 @@ mod tests {
             ServerMsg::Apps {
                 serial: 24,
                 apps: vec![
-                    AppInfo { key: "vergence-calc".into(), name: "Calculator".into(), icon_side: 2, icon: vec![9; 16], responding: true },
-                    AppInfo { key: "firefox".into(), name: "Firefox".into(), icon_side: 0, icon: Vec::new(), responding: false },
+                    AppInfo { key: "vergence-calc".into(), name: "Calculator".into(), icon_side: 2, icon: vec![9; 16], responding: true, quitting: false },
+                    AppInfo { key: "firefox".into(), name: "Firefox".into(), icon_side: 0, icon: Vec::new(), responding: false, quitting: true },
                 ],
             },
             ServerMsg::Settings {

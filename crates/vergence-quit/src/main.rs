@@ -154,7 +154,9 @@ impl Program for ForceQuit {
                 None => panel(label(a.name.chars().next().unwrap_or('?').to_uppercase().to_string()).weight(700).align(Align::Center).width(Length::FILL)).color(t.card).radius(6.0).width(Length::Fixed(32.0)).height(Length::Fixed(32.0)),
             };
             let mut words = vec![label(a.name.clone())];
-            if !a.responding {
+            if a.quitting {
+                words.push(label("Quitting…").size(11.0).dim());
+            } else if !a.responding {
                 words.push(label("Not responding").size(11.0).color(vergence_scene::Color::rgb(0xc7, 0x4d, 0x47)));
             }
             let picked = self.picked.as_deref() == Some(a.key.as_str());

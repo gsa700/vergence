@@ -131,7 +131,11 @@ Quit Applications); anything more is the terminal's.
   `ListApps`/`Apps`/`ForceQuit` (the server lists from the dock's items
   and ends an app by SIGKILL to the processes behind its windows: native
   bus peer, Wayland credentials, X11 _NET_WM_PID; never itself or pid 1);
-  Ctrl+Alt+Escape opens it (a seat key, whatever has the keyboard).
+  Ctrl+Alt+Escape opens it (a seat key, whatever has the keyboard). Then
+  gently first (Dave: "try a normal quit just before killing"): SIGTERM,
+  two seconds with the app shown "Quitting…", SIGKILL to what is left (a
+  real close would bring up the app's own questions, which Force Quit's
+  question has already answered).
   Dropped as too much for "very simple": End and Pick a window. Not yet:
   "not responding" (every app shows as answering until the server pings
   its clients).

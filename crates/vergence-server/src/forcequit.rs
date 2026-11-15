@@ -1,9 +1,11 @@
 // Force Quit (tools milestone 1; Dave: "they call it force quit on the mac
 // ... very simple as we said, term for the hard stuff"): the server lists
 // the user's running applications as the dock knows them, with their icons,
-// and ends one at once on request, by SIGKILL to every process behind its
-// windows (a native window's bus connection, a Wayland client's
-// credentials, an X11 window's _NET_WM_PID). Only the user's own clients
+// and ends one on request: SIGTERM to every process behind its windows (a
+// native window's bus connection, a Wayland client's credentials, an X11
+// window's _NET_WM_PID), so a program that still can flushes its files and
+// lets its children go, then two seconds later SIGKILL to any of them still
+// there (Dave, 2026-11-14: try gently "just before killing"). Only the user's own clients
 // reach the server, so only the user's own processes are ever named; the
 // server itself and process 1 are never sent anything. The Force Quit app
 // (vergence-quit) is only the window; Ctrl+Alt+Escape opens it.
@@ -20,6 +22,15 @@ unsafe extern "C" {
 }
 
 const SIGKILL: i32 = 9;
+const SIGTERM: i32 = 15;
+/// How long a program asked to end has before it is killed.
+const GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Whether a process is still there (kill with signal 0 asks only that).
+fn alive(pid: u32) -> bool {
+    // SAFETY: kill(2) with signal 0 sends nothing; no memory is passed.
+    unsafe { kill(pid as i32, 0) == 0 }
+}
 
 impl Server {
     /// The user's running applications: those of the dock's items that have windows.
@@ -40,6 +51,7 @@ impl Server {
                 icon_side: if icon.is_some() { APP_ICON } else { 0 },
                 icon: icon.map(|i| i.rgba.clone()).unwrap_or_default(),
                 responding: true,
+                quitting: self.quitting.contains_key(&item.key),
             });
         }
         out
@@ -72,9 +84,35 @@ impl Server {
         }
         for p in &pids {
             // SAFETY: kill(2) with a pid and a signal number; no memory is passed.
-            let r = unsafe { kill(*p as i32, SIGKILL) };
-            tracing::info!("force quit: {} pid {p} {}", item.name, if r == 0 { "killed" } else { "could not be killed" });
+            let r = unsafe { kill(*p as i32, SIGTERM) };
+            tracing::info!("force quit: {} pid {p} {}", item.name, if r == 0 { "asked to end" } else { "could not be signalled" });
         }
-        Ok(pids.len())
+        let pids: Vec<u32> = pids.into_iter().collect();
+        self.quitting.insert(key.to_string(), pids.clone());
+        let (key, name) = (key.to_string(), item.name.clone());
+        let (fallback, fallback_key) = (pids.clone(), key.clone());
+        let timer = smithay::reexports::calloop::timer::Timer::from_duration(GRACE);
+        let inserted = self.loop_handle.insert_source(timer, move |_, _, state| {
+            for p in &pids {
+                if alive(*p) {
+                    // SAFETY: as above.
+                    let r = unsafe { kill(*p as i32, SIGKILL) };
+                    tracing::info!("force quit: {name} pid {p} still there after {GRACE:?}: {}", if r == 0 { "killed" } else { "could not be killed" });
+                } else {
+                    tracing::info!("force quit: {name} pid {p} ended when asked");
+                }
+            }
+            state.quitting.remove(&key);
+            smithay::reexports::calloop::timer::TimeoutAction::Drop
+        });
+        if let Err(e) = inserted {
+            tracing::warn!("force quit: no timer ({e:?}); killing at once");
+            for p in &fallback {
+                // SAFETY: as above.
+                unsafe { kill(*p as i32, SIGKILL) };
+            }
+            self.quitting.remove(&fallback_key);
+        }
+        Ok(self.quitting.values().map(Vec::len).sum())
     }
 }
