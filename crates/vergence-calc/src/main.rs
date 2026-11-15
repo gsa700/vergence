@@ -359,7 +359,15 @@ impl Program for Calc {
             },
         };
         let big = label(big).size(if matches!(self.shown, Shown::Error(_)) { 20.0 } else { 34.0 }).weight(500).align(Align::End).width(Length::FILL);
-        lines.push(if dim { big.dim() } else { big });
+        // The answer in green once = is pressed (Dave, 2026-11-14: "a little
+        // color"), plain again as soon as more is typed; a green that keeps
+        // 4.5:1 on the light card and on the dark one.
+        let green = if !t.dark { vergence_scene::Color::rgb(0x1a, 0x7f, 0x37) } else { vergence_scene::Color::rgb(0x56, 0xd3, 0x64) };
+        lines.push(match (&self.shown, dim) {
+            (Shown::Answer(_), _) => big.color(green),
+            (_, true) => big.dim(),
+            _ => big,
+        });
         let display = panel(column(lines).spacing(2.0).width(Length::FILL)).color(t.card).radius(10.0).padding(Padding::hv(10.0, 14.0)).width(Length::FILL);
 
         let n = ButtonLook::Normal;
