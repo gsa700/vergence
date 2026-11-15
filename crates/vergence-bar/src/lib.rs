@@ -80,6 +80,43 @@ pub enum WinButton {
     Close,
     Minimize,
     Maximize,
+    /// The app button (app settings milestone 1): the app's icon and a
+    /// chevron; it opens the app menu. GNOME's layout calls it `appmenu`.
+    AppMenu,
+}
+
+impl WinButton {
+    /// Its width at a size of controls: the app button holds an icon and a chevron.
+    pub fn width(self, z: &Sizes) -> f32 {
+        match self {
+            WinButton::AppMenu => z.button_w + 14.0,
+            _ => z.button_w,
+        }
+    }
+}
+
+/// The layout with the app button in it (app settings milestone 1): where
+/// the layout puts `appmenu`, else at the end opposite the window controls
+/// (controls on the left: far right; on the right: far left, as Windows 95
+/// had its system menu; on both sides or none: far right). Every window has
+/// one: it is not optional, or the uniformity is gone.
+pub fn with_app_menu((mut left, mut right): (Vec<WinButton>, Vec<WinButton>)) -> (Vec<WinButton>, Vec<WinButton>) {
+    if !left.contains(&WinButton::AppMenu) && !right.contains(&WinButton::AppMenu) {
+        if right.is_empty() || !left.is_empty() {
+            right.push(WinButton::AppMenu);
+        } else {
+            left.insert(0, WinButton::AppMenu);
+        }
+    }
+    (left, right)
+}
+
+/// The layout without the app button: for bars whose program has no app
+/// menu to open yet (the toolkit's own bar under other desktops).
+pub fn without_app_menu((mut left, mut right): (Vec<WinButton>, Vec<WinButton>)) -> (Vec<WinButton>, Vec<WinButton>) {
+    left.retain(|b| *b != WinButton::AppMenu);
+    right.retain(|b| *b != WinButton::AppMenu);
+    (left, right)
 }
 
 /// The button layout when none has been chosen: close, minimize, maximize
@@ -94,7 +131,8 @@ pub const DEFAULT_LAYOUT: &str = "close,minimize,maximize:";
 /// bar where the server draws none.
 pub fn desktop_layout() -> (Vec<WinButton>, Vec<WinButton>) {
     let text = settings_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
-    decoration_layout(&host_layout().or_else(|| layout_setting(&text)).unwrap_or_else(|| DEFAULT_LAYOUT.into()))
+    // No app button where the toolkit draws its own bar: its menu is the server's.
+    without_app_menu(decoration_layout(&host_layout().or_else(|| layout_setting(&text)).unwrap_or_else(|| DEFAULT_LAYOUT.into())))
 }
 
 /// Whether the desktop is in its light style: under GNOME, GNOME's own
@@ -200,6 +238,7 @@ pub fn decoration_layout(layout: &str) -> (Vec<WinButton>, Vec<WinButton>) {
                 "close" => Some(WinButton::Close),
                 "minimize" => Some(WinButton::Minimize),
                 "maximize" => Some(WinButton::Maximize),
+                "appmenu" => Some(WinButton::AppMenu),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -329,13 +368,14 @@ impl Layout {
         let mut buttons = Vec::new();
         let mut x = z.side;
         for b in left {
-            buttons.push((*b, Rect::new(x, button_y, z.button_w, z.item_h)));
-            x += z.button_w + z.gap;
+            let w = b.width(z);
+            buttons.push((*b, Rect::new(x, button_y, w, z.item_h)));
+            x += w + z.gap;
         }
         let mut end = width - z.side;
         for b in right.iter().rev() {
-            end -= z.button_w;
-            buttons.push((*b, Rect::new(end, button_y, z.button_w, z.item_h)));
+            end -= b.width(z);
+            buttons.push((*b, Rect::new(end, button_y, b.width(z), z.item_h)));
             end -= z.gap;
         }
         (buttons, x + if left.is_empty() { 0.0 } else { z.gap }, end)
@@ -377,6 +417,24 @@ fn tool_icon(scene: &mut Scene, r: &Rect, what: ToolIcon, size: f32, ink: Color)
     let w = h * 0.6;
     scene.line(Point::new(cx + s * w, cy - h), Point::new(cx - s * w, cy), 1.5, ink);
     scene.line(Point::new(cx - s * w, cy), Point::new(cx + s * w, cy + h), 1.5, ink);
+}
+
+/// The app button's face: the app's icon on the left, a chevron on the right.
+fn app_button(scene: &mut Scene, r: &Rect, picture: Option<&std::sync::Arc<vergence_scene::Image>>, ink: Color) {
+    let side = (r.h - 4.0).clamp(12.0, 24.0);
+    let at = Rect::new(r.x + 4.0, r.y + (r.h - side) / 2.0, side, side);
+    match picture {
+        Some(p) => {
+            let id = scene.image(p.clone());
+            scene.draw_image(id, at, 1.0);
+        }
+        None => {
+            scene.stroke(Rect::new(at.x + 1.0, at.y + 1.0, at.w - 2.0, at.h - 2.0), RADIUS, 1.25, ink);
+        }
+    }
+    let (cx, cy, h) = (r.x + r.w - 9.0, r.y + r.h / 2.0, 2.5);
+    scene.line(Point::new(cx - h * 1.4, cy - h * 0.6), Point::new(cx, cy + h * 0.8), 1.25, ink);
+    scene.line(Point::new(cx, cy + h * 0.8), Point::new(cx + h * 1.4, cy - h * 0.6), 1.25, ink);
 }
 
 /// An icon's lines, centered in a box.
@@ -435,6 +493,11 @@ pub struct Look<'a> {
     /// The program's own buttons' icons and whether each can be pressed
     /// ([`Layout::tools`] gives where).
     pub tools: &'a [(ToolIcon, bool)],
+    /// The app's icon for the app button (the one the dock shows), drawn
+    /// for this scale; None: a plain square in its place.
+    pub app_icon: Option<std::sync::Arc<vergence_scene::Image>>,
+    /// The app menu is open from this bar: its button stays lit.
+    pub menu_open: bool,
 }
 
 /// Draws the bar across the top of the scene.
@@ -461,7 +524,7 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
         // under the pointer lighter (darker in light), the close button red
         // with a white mark.
         let drawn = Rect::new(r.x + vergence_look::BUTTON_INSET_X, r.y + vergence_look::BUTTON_INSET_Y, r.w - 2.0 * vergence_look::BUTTON_INSET_X, r.h - 2.0 * vergence_look::BUTTON_INSET_Y);
-        let hovered = look.hover == Some(part);
+        let hovered = look.hover == Some(part) || (*b == WinButton::AppMenu && look.menu_open);
         let fill = match (hovered, *b) {
             (true, WinButton::Close) => Some(CLOSE_HOVER),
             (true, _) => Some(shape_hover),
@@ -469,6 +532,10 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
         };
         if let Some(fill) = fill {
             scene.fill_rounded(drawn, RADIUS, fill);
+        }
+        if *b == WinButton::AppMenu {
+            app_button(scene, &drawn, look.app_icon.as_ref(), ink);
+            continue;
         }
         let mark = if hovered && *b == WinButton::Close { Color::rgb(255, 255, 255) } else { ink };
         icon(scene, r, part, 10.0, mark);
@@ -734,6 +801,28 @@ mod tests {
         assert_eq!(decoration_layout(":minimize,maximize,close"), (vec![], vec![WinButton::Minimize, WinButton::Maximize, WinButton::Close]));
         assert_eq!(decoration_layout("menu:close"), (vec![], vec![WinButton::Close]));
         assert_eq!(decoration_layout("close"), (vec![], vec![WinButton::Close]));
+        assert_eq!(decoration_layout("appmenu:close"), (vec![WinButton::AppMenu], vec![WinButton::Close]));
+    }
+
+    #[test]
+    fn the_app_button_goes_opposite_the_controls_unless_the_layout_places_it() {
+        use WinButton::*;
+        // Controls on the left: far right. On the right: far left (Windows 95's place).
+        assert_eq!(with_app_menu(decoration_layout("close,minimize,maximize:")), (vec![Close, Minimize, Maximize], vec![AppMenu]));
+        assert_eq!(with_app_menu(decoration_layout(":minimize,maximize,close")), (vec![AppMenu], vec![Minimize, Maximize, Close]));
+        // Both sides, or none: far right.
+        assert_eq!(with_app_menu(decoration_layout("close:minimize")), (vec![Close], vec![Minimize, AppMenu]));
+        assert_eq!(with_app_menu((vec![], vec![])), (vec![], vec![AppMenu]));
+        // Where the layout says, once.
+        assert_eq!(with_app_menu(decoration_layout("close,appmenu:")), (vec![Close, AppMenu], vec![]));
+        assert_eq!(without_app_menu(decoration_layout("appmenu:close")), (vec![], vec![Close]));
+        // It is wider than a button, and the room for tabs shrinks by it.
+        let (l, r) = with_app_menu(decoration_layout("close,minimize,maximize:"));
+        let lay = Layout::new(800.0, 1, 0, &l, &r);
+        let (_, app) = lay.buttons.iter().find(|(b, _)| *b == AppMenu).unwrap();
+        assert_eq!(app.w, BUTTON_W + 14.0);
+        assert_eq!(app.x + app.w, 800.0 - SIDE);
+        assert_eq!(lay.at(app.x + 5.0, 20.0), Some(Part::Button(AppMenu)));
         assert_eq!(decoration_layout(""), (vec![], vec![]));
         assert_eq!(layout_setting("[settings]\n\"Gtk/DecorationLayout\" = \"close,minimize:\"\n").as_deref(), Some("close,minimize:"));
         assert_eq!(layout_setting("[settings]\n\"Gtk/FontName\" = \"Sans 10\"\n"), None);

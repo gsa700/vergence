@@ -137,6 +137,12 @@ struct State {
     parent: u32,
     /// What it said of itself with `Style` (window styles milestone 1).
     style: Option<NativeStyle>,
+    /// Its app menu's commands as last sent, and whether it is a terminal
+    /// (app settings milestone 1).
+    commands: Vec<vergence_protocol::commands::Command>,
+    terminal: bool,
+    /// Its bar's style, as it asked (app settings milestone 1).
+    bar_style: vergence_protocol::window::BarStyle,
 }
 
 /// Native windows' share of the pointer and the keyboard (step 4).
@@ -224,6 +230,17 @@ impl NativeWindow {
     /// What its bar shows, as last sent (none: its title).
     pub fn bar(&self) -> Option<vergence_protocol::window::Bar> {
         self.state.lock().unwrap().bar.clone()
+    }
+
+    /// Its app menu's commands, and whether it is a terminal.
+    pub fn commands(&self) -> (Vec<vergence_protocol::commands::Command>, bool) {
+        let s = self.state.lock().unwrap();
+        (s.commands.clone(), s.terminal)
+    }
+
+    /// The style it asked its bar to be drawn in.
+    pub fn bar_style(&self) -> vergence_protocol::window::BarStyle {
+        self.state.lock().unwrap().bar_style
     }
 
     /// Its parent's id on its connection (0: none) and what it said of itself.
@@ -338,6 +355,9 @@ impl Server {
                         inset: 0,
                         parent,
                         style: None,
+                        commands: Vec::new(),
+                        terminal: false,
+                        bar_style: Default::default(),
                     }),
                     user_data: UserDataMap::new(),
                 });
@@ -453,6 +473,22 @@ impl Server {
                     tracing::info!("native: window {window} of {:?} is {style:?}", n.app_id);
                     n.state.lock().unwrap().style = Some(style);
                     self.redraw_all();
+                }
+            }
+            // Its app menu (app settings milestone 1): kept; the menu reads it when it opens.
+            WinRequest::Commands { window, terminal, commands } => {
+                if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
+                    let mut s = n.state.lock().unwrap();
+                    s.commands = commands;
+                    s.terminal = terminal;
+                }
+            }
+            WinRequest::BarStyle { window, style } => {
+                if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
+                    let was = std::mem::replace(&mut n.state.lock().unwrap().bar_style, style);
+                    if was != style {
+                        self.redraw_all();
+                    }
                 }
             }
             WinRequest::UnderBar { window } => {

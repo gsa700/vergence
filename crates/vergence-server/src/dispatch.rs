@@ -175,7 +175,9 @@ impl Server {
     pub fn dispatch_sync(&mut self) {
         // A menu open over the launcher (an application's menu there) comes
         // first: a press on it is the menu's, not one outside the launcher.
-        let menu = if self.menu_is_open() {
+        let menu = if self.app_menu_is_open() {
+            Some(vergence_seat::Menu::AppMenu)
+        } else if self.menu_is_open() {
             Some(vergence_seat::Menu::Menu)
         } else if self.launcher_is_open() {
             Some(vergence_seat::Menu::Popup)
@@ -214,6 +216,9 @@ impl Server {
 
     /// What is under `pos`, for the seat; and the pointer's picture there.
     pub fn target_at(&mut self, pos: Point<f64, Logical>) -> Option<Target> {
+        if self.app_menu_contains(pos) {
+            return Some(Target::Server(Part::AppList));
+        }
         if self.menu_contains(pos) {
             return Some(Target::Server(Part::Menu));
         }
@@ -225,7 +230,7 @@ impl Server {
         }
         // Anything of a window a modal dialog blocks is the dialog's (dialogs.rs).
         let hit_window = match self.hit(pos) {
-            Hit::Surface(w, ..) | Hit::Native(w) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Minimize(w) | Hit::Edge(w, _) | Hit::Tab(w, _) | Hit::CloseTab(w, _) | Hit::Plus(w) | Hit::Tool(w, _) => Some(w),
+            Hit::Surface(w, ..) | Hit::Native(w) | Hit::Title(w) | Hit::Close(w) | Hit::Maximize(w) | Hit::Minimize(w) | Hit::Edge(w, _) | Hit::Tab(w, _) | Hit::CloseTab(w, _) | Hit::Plus(w) | Hit::Tool(w, _) | Hit::AppMenu(w) => Some(w),
             _ => None,
         };
         if let Some(modal) = hit_window.and_then(|w| self.modal_of(&w)) {
@@ -246,6 +251,7 @@ impl Server {
             Hit::CloseTab(w, i) => Target::Server(Part::CloseTab(self.win_id(&w), i as u32)),
             Hit::Plus(w) => Target::Server(Part::Plus(self.win_id(&w))),
             Hit::Tool(w, i) => Target::Server(Part::Tool(self.win_id(&w), i as u32)),
+            Hit::AppMenu(w) => Target::Server(Part::AppMenu(self.win_id(&w))),
             Hit::Shelf => Target::Server(Part::Dock),
             Hit::Nothing => Target::Server(Part::Desktop),
         })
@@ -283,6 +289,7 @@ impl Server {
     /// Hover: each of the server's parts looks for itself.
     pub(crate) fn pointer_hover(&mut self, pos: Point<f64, Logical>) {
         self.menu_hover(pos);
+        self.app_menu_hover(pos);
         self.notify_hover(pos);
         self.shelf_hover(pos);
         self.launcher_hover(pos);
@@ -455,7 +462,13 @@ impl Server {
                 }
                 Out::GrabMotion => self.grab_motion(pos),
                 Out::GrabEnd(_) => self.grab_end(time),
+                Out::AppMenu(id) => {
+                    if let Some(w) = self.input.wins.get(&id).cloned() {
+                        self.app_menu_toggle(&w, false);
+                    }
+                }
                 Out::CloseMenu => {
+                    self.app_menu_close();
                     self.close_menu();
                     self.launcher_close();
                 }
@@ -493,6 +506,7 @@ impl Server {
                 }
             }
             Target::Server(Part::Menu) if pressed => self.menu_press(pos),
+            Target::Server(Part::AppList) if pressed => self.app_menu_press(pos),
             Target::Server(Part::Popup) if pressed && button == vergence_seat::BTN_RIGHT => self.launcher_menu(pos),
             Target::Server(Part::Popup) if pressed => self.launcher_press(pos),
             Target::Server(Part::Popup) => self.launcher_release(pos),

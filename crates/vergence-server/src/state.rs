@@ -132,6 +132,8 @@ pub struct Server {
     pub resume: crate::session::Session,
     /// The applications popup (launcher.rs).
     pub launcher: crate::launcher::Launcher,
+    /// A window's app menu, if open (app settings milestone 1).
+    pub app_menu: crate::appmenu::AppMenu,
     /// Touch panels and the fingers on them (touch.rs).
     pub touch: crate::touch::Touch,
     /// Mice and touchpads, kept to be given the settings again when they change (pointer.rs).
@@ -283,6 +285,7 @@ impl Server {
             shelf: crate::shelf::Shelf::load(),
             resume: Default::default(),
             launcher: Default::default(),
+            app_menu: Default::default(),
             pointer_devices: Vec::new(),
             touch_panels: Vec::new(),
             inputs: Default::default(),

@@ -247,6 +247,24 @@ pub enum WinRequest {
     /// milestone 1). The server keeps every size within the limits and draws
     /// the bar the kind has.
     Style { window: u32, kind: WinKind, modal: bool, min: (f64, f64), max: (f64, f64) },
+    /// The window's commands now (app settings milestone 1): what its app
+    /// menu holds (crate::commands). `terminal`: its Ctrl+letter keys belong
+    /// to the programs it runs, so roles' keys take Shift. After Create, and
+    /// again whenever they change (a command enabled, a switch flipped).
+    Commands { window: u32, terminal: bool, commands: Vec<crate::commands::Command> },
+    /// The style its bar is drawn in (app settings milestone 1): the
+    /// desktop's, or the app's own light or dark. After Create, and again
+    /// whenever the app's setting changes.
+    BarStyle { window: u32, style: BarStyle },
+}
+
+/// A window's bar style: the desktop's, or the app's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum BarStyle {
+    #[default]
+    Desktop,
+    Dark,
+    Light,
 }
 
 /// A window's kind (window styles milestone 1).
@@ -359,6 +377,9 @@ pub enum WinEvent {
     /// mix a little into its grounds; None: no tint (light style, the switch
     /// off, Reduce transparency or High contrast).
     Tint { window: u32, rgb: Option<u32> },
+    /// A command of the window's app menu was chosen (its id), from the menu
+    /// or its search.
+    Command { window: u32, id: u32 },
 }
 
 pub(crate) mod op {
@@ -380,6 +401,8 @@ pub(crate) mod op {
     pub const BAR: u16 = 114;
     pub const UNDER_BAR: u16 = 115;
     pub const STYLE: u16 = 116;
+    pub const COMMANDS: u16 = 117;
+    pub const BAR_STYLE: u16 = 118;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -410,6 +433,7 @@ pub(crate) mod op {
     pub const TAB_MENU: u16 = 126;
     pub const BAR_BUTTON: u16 = 127;
     pub const TINT: u16 = 128;
+    pub const COMMAND: u16 = 129;
 
     /// Whether an opcode is a window message's (either way).
     pub fn is_window(opcode: u16) -> bool {
@@ -694,6 +718,28 @@ impl WinRequest {
                 e.u32(*window).u8(kind.byte()).u8(*modal as u8).f64(min.0).f64(min.1).f64(max.0).f64(max.1);
                 e
             }
+            WinRequest::Commands { window, terminal, commands } => {
+                let mut e = Encoder::frame(op::COMMANDS);
+                e.u32(*window).bool(*terminal).count(commands.len());
+                for c in commands {
+                    e.u32(c.id).u16(c.role.code()).str(&c.menu).str(&c.label).str(&c.keys).bool(c.enabled);
+                    match c.checked {
+                        None => e.u8(0),
+                        Some(false) => e.u8(1),
+                        Some(true) => e.u8(2),
+                    };
+                }
+                e
+            }
+            WinRequest::BarStyle { window, style } => {
+                let mut e = Encoder::frame(op::BAR_STYLE);
+                e.u32(*window).u8(match style {
+                    BarStyle::Desktop => 0,
+                    BarStyle::Dark => 1,
+                    BarStyle::Light => 2,
+                });
+                e
+            }
         };
         Ok((e.finish()?, fds))
     }
@@ -791,6 +837,49 @@ impl WinRequest {
                     return Err(WireError::BadValue("largest size below the smallest"));
                 }
                 WinRequest::Style { window, kind, modal: modal && kind == WinKind::Dialog, min, max }
+            }
+            op::COMMANDS => {
+                use crate::commands::{Command, MAX_COMMANDS, MAX_LABEL, Role};
+                let window = d.u32()?;
+                let terminal = d.bool()?;
+                let n = d.count(15)?;
+                if n > MAX_COMMANDS {
+                    return Err(WireError::TooLong(n));
+                }
+                let text = |d: &mut Decoder| -> Result<String, WireError> {
+                    let t = d.str()?;
+                    if t.len() > MAX_LABEL || t.chars().any(char::is_control) { Err(WireError::BadValue("command text")) } else { Ok(t) }
+                };
+                let mut commands: Vec<Command> = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let id = d.u32()?;
+                    let role = Role::from_code(d.u16()?).ok_or(WireError::BadValue("command role"))?;
+                    let (menu, label, keys, enabled) = (text(&mut d)?, text(&mut d)?, text(&mut d)?, d.bool()?);
+                    let checked = match d.u8()? {
+                        0 => None,
+                        1 => Some(false),
+                        2 => Some(true),
+                        _ => return Err(WireError::BadValue("command switch")),
+                    };
+                    if id == 0 || commands.iter().any(|c| c.id == id) {
+                        return Err(WireError::BadValue("command id"));
+                    }
+                    if role == Role::Own && label.is_empty() {
+                        return Err(WireError::BadValue("command label"));
+                    }
+                    commands.push(Command { id, role, menu, label, keys, enabled, checked });
+                }
+                WinRequest::Commands { window, terminal, commands }
+            }
+            op::BAR_STYLE => {
+                let window = d.u32()?;
+                let style = match d.u8()? {
+                    0 => BarStyle::Desktop,
+                    1 => BarStyle::Dark,
+                    2 => BarStyle::Light,
+                    _ => return Err(WireError::BadValue("bar style")),
+                };
+                WinRequest::BarStyle { window, style }
             }
             other => return Err(WireError::UnknownOpcode(other)),
         })
@@ -948,6 +1037,11 @@ impl WinEvent {
                 e.u32(*window).u32(*id);
                 e
             }
+            WinEvent::Command { window, id } => {
+                let mut e = Encoder::frame(op::COMMAND);
+                e.u32(*window).u32(*id);
+                e
+            }
             WinEvent::Tint { window, rgb } => {
                 let mut e = Encoder::frame(op::TINT);
                 e.u32(*window);
@@ -1033,6 +1127,7 @@ impl WinEvent {
                 let rgb = if d.bool()? { Some(d.u32()? & 0xff_ffff) } else { None };
                 WinEvent::Tint { window, rgb }
             }
+            op::COMMAND => WinEvent::Command { window: d.u32()?, id: d.u32()? },
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -1156,6 +1251,17 @@ mod tests {
             WinRequest::UnderBar { window: 1 },
             WinRequest::Style { window: 1, kind: WinKind::Dialog, modal: true, min: (320.0, 200.0), max: (0.0, 0.0) },
             WinRequest::Style { window: 2, kind: WinKind::Sidebar, modal: false, min: (760.0, 480.0), max: (1100.0, 0.0) },
+            WinRequest::Commands {
+                window: 1,
+                terminal: true,
+                commands: vec![
+                    crate::commands::Command::role(1, crate::commands::Role::Copy).enabled(false),
+                    crate::commands::Command::own(2, "Tab", "Split side by side", "Ctrl+Shift+R"),
+                    crate::commands::Command::own(3, "View", "Show scroll bar", "").checked(true),
+                ],
+            },
+            WinRequest::BarStyle { window: 1, style: BarStyle::Light },
+            WinRequest::BarStyle { window: 2, style: BarStyle::Desktop },
             WinRequest::Bar {
                 window: 1,
                 bar: Bar::Tabs {
@@ -1224,6 +1330,7 @@ mod tests {
             WinEvent::BarButton { window: 1, id: 2 },
             WinEvent::Tint { window: 1, rgb: Some(0x203a5c) },
             WinEvent::Tint { window: 1, rgb: None },
+            WinEvent::Command { window: 1, id: 7 },
         ];
         for m in all {
             let (bytes, fds) = m.encode().unwrap();

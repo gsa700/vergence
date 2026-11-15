@@ -19,6 +19,7 @@ mod place;
 mod memory;
 mod wallpaper;
 mod menu;
+mod appmenu;
 mod backdrop;
 mod bus;
 mod dbus;

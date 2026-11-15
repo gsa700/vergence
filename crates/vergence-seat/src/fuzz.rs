@@ -38,7 +38,7 @@ fn target(rng: &mut Rng) -> Option<Target> {
         4..=5 => Target::Native(w),
         6 => Target::Server(Part::Title(w)),
         7 => Target::Server(Part::Edge(w, Edges::RIGHT)),
-        8 => Target::Server([Part::Close(w), Part::Maximize(w), Part::Minimize(w), Part::Tab(w, 1), Part::CloseTab(w, 0), Part::Plus(w)][rng.below(6)]),
+        8 => Target::Server([Part::Close(w), Part::Maximize(w), Part::Minimize(w), Part::Tab(w, 1), Part::CloseTab(w, 0), Part::Plus(w), Part::AppMenu(w), Part::AppList][rng.below(8)]),
         9 => Target::Server(Part::Dock),
         10 => Target::Server(Part::Menu),
         11 => Target::Server(Part::Popup),
@@ -108,7 +108,7 @@ fn fuzz_the_seat() {
     let mut keys_seen = [0usize; 3];
     // The last long-press timer the seat asked for: firing it is the case that matters.
     let mut timer = 0u64;
-    let keys = [Key::BackSpace, Key::Escape, Key::Super, Key::VolumeUp, Key::Mute, Key::Vt(2), Key::Vt(0), Key::Tab, Key::Grave, Key::Alt, Key::Left, Key::Up, Key::Other];
+    let keys = [Key::BackSpace, Key::Escape, Key::Super, Key::VolumeUp, Key::Mute, Key::Vt(2), Key::Vt(0), Key::Tab, Key::Grave, Key::Alt, Key::Left, Key::Up, Key::Space, Key::Other];
     for step in 0..iters() {
         now += rng.below(500) as u64;
         let mods = Mods { ctrl: rng.below(8) == 0, alt: rng.below(3) == 0, shift: rng.below(6) == 0, logo: rng.below(8) == 0 };
@@ -137,7 +137,7 @@ fn fuzz_the_seat() {
             }
             11 => {
                 if rng.below(2) == 0 {
-                    seat.menu_opened([Menu::Menu, Menu::Popup][rng.below(2)]);
+                    seat.menu_opened([Menu::Menu, Menu::Popup, Menu::AppMenu][rng.below(3)]);
                 } else {
                     seat.menu_closed();
                 }

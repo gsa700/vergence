@@ -1,0 +1,436 @@
+// The app menu (app settings milestone 1): what a window's app button opens,
+// for every app, native or not. Its lines and their behavior are
+// vergence-shell's appmenu (plain data, tested there); here it is opened
+// under the button, drawn, given the pointer and the keys, and what is
+// chosen is carried out: an app's command goes to the app, the skeleton's
+// own lines (About, Settings…, Quit for an app that sent none) and the
+// Window menu are the desktop's.
+
+use std::hash::{Hash, Hasher};
+
+use smithay::{
+    backend::{
+        allocator::Fourcc,
+        renderer::{
+            element::{Kind, memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement}},
+            gles::GlesRenderer,
+        },
+    },
+    input::keyboard::keysyms as key,
+    utils::{Logical, Point, Rectangle, Transform},
+};
+use vergence_scene::{Color, Point as ScenePoint, Rect as SceneRect, Scene};
+use vergence_shell::appmenu::{self, Action, Did, Line, Model, State, WindowAct};
+
+use crate::{Server, decor::SceneElement, win::Win};
+
+#[derive(Default)]
+pub struct AppMenu {
+    open: Option<Open>,
+    /// The two panels' pictures (top, submenu), each with what it was drawn from.
+    pictures: [Option<(u64, MemoryRenderBuffer)>; 2],
+}
+
+struct Open {
+    win: Win,
+    model: Model,
+    state: State,
+    /// The top panel's top left corner, and whether submenus open to its left
+    /// (the button was in the window's right half: the menu opens toward the
+    /// middle).
+    at: Point<i32, Logical>,
+    leftward: bool,
+    /// The screen it is on: panels are kept inside it.
+    screen: Rectangle<i32, Logical>,
+}
+
+impl Open {
+    fn top_lines(&self) -> Vec<Line> {
+        self.state.shown(&self.model)
+    }
+
+    fn top_rect(&self) -> Rectangle<i32, Logical> {
+        Rectangle::new(self.at, (appmenu::WIDTH, appmenu::height(&self.top_lines())).into())
+    }
+
+    /// The open submenu's panel, beside the line it hangs from, kept on the screen.
+    fn sub_rect(&self) -> Option<Rectangle<i32, Logical>> {
+        let i = self.state.open?;
+        let lines = self.top_lines();
+        let row = *appmenu::rows((self.at.x, self.at.y), &lines).get(i)?;
+        let sub = self.state.sub_lines(&self.model);
+        if sub.is_empty() {
+            return None;
+        }
+        let h = appmenu::height(&sub);
+        let mut x = if self.leftward { self.at.x - appmenu::WIDTH + 4 } else { self.at.x + appmenu::WIDTH - 4 };
+        if x < self.screen.loc.x || x + appmenu::WIDTH > self.screen.loc.x + self.screen.size.w {
+            x = if self.leftward { self.at.x + appmenu::WIDTH - 4 } else { self.at.x - appmenu::WIDTH + 4 };
+        }
+        let y = (row.y - appmenu::PAD).min(self.screen.loc.y + self.screen.size.h - h).max(self.screen.loc.y);
+        Some(Rectangle::new((x, y).into(), (appmenu::WIDTH, h).into()))
+    }
+
+    /// Which line of which panel is under `pos`: (submenu?, line).
+    fn line_at(&self, pos: Point<f64, Logical>) -> Option<(bool, Option<usize>)> {
+        let find = |at: Point<i32, Logical>, lines: &[Line]| appmenu::rows((at.x, at.y), lines).iter().position(|r| (r.x as f64..(r.x + r.w) as f64).contains(&pos.x) && (r.y as f64..(r.y + r.h) as f64).contains(&pos.y));
+        if let Some(s) = self.sub_rect()
+            && s.to_f64().contains(pos)
+        {
+            return Some((true, find(s.loc, &self.state.sub_lines(&self.model))));
+        }
+        self.top_rect().to_f64().contains(pos).then(|| (false, find(self.at, &self.top_lines())))
+    }
+}
+
+impl Server {
+    pub fn app_menu_is_open(&self) -> bool {
+        self.app_menu.open.is_some()
+    }
+
+    /// The window whose app menu is open (its button stays lit).
+    pub fn app_menu_window(&self) -> Option<&Win> {
+        self.app_menu.open.as_ref().map(|o| &o.win)
+    }
+
+    pub fn app_menu_contains(&self, pos: Point<f64, Logical>) -> bool {
+        self.app_menu.open.as_ref().is_some_and(|o| o.line_at(pos).is_some())
+    }
+
+    pub fn app_menu_close(&mut self) {
+        if self.app_menu.open.take().is_some() {
+            self.app_menu.pictures = [None, None];
+            self.redraw_all();
+        }
+    }
+
+    /// The app button was pressed, or Alt+Space: open the window's app menu
+    /// under its button (closed if it was already open).
+    pub fn app_menu_toggle(&mut self, w: &Win, by_key: bool) {
+        if self.app_menu.open.as_ref().is_some_and(|o| o.win == *w) {
+            return self.app_menu_close();
+        }
+        self.close_menu();
+        self.launcher_close();
+        let model = self.app_model(w);
+        let Some((bar, layout)) = self.bar_of(w) else { return };
+        let button = layout.buttons.iter().find(|(b, _)| *b == vergence_bar::WinButton::AppMenu).map(|(_, r)| *r);
+        let (bx, bw, by) = match button {
+            Some(r) => (bar.loc.x + r.x as i32, r.w as i32, bar.loc.y + bar.size.h),
+            None => (bar.loc.x, 0, bar.loc.y + bar.size.h),
+        };
+        let leftward = bx + bw / 2 > bar.loc.x + bar.size.w / 2;
+        let screen = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|g| g.contains((bx, by))).or_else(|| self.output_at_pointer()).unwrap_or(bar);
+        let mut state = State::default();
+        let lines = state.shown(&model);
+        let h = appmenu::height(&lines);
+        let mut x = if leftward { bx + bw - appmenu::WIDTH } else { bx };
+        x = x.min(screen.loc.x + screen.size.w - appmenu::WIDTH).max(screen.loc.x);
+        let y = (by + 2).min(screen.loc.y + screen.size.h - h).max(screen.loc.y);
+        // Opened by the keyboard, the first line is chosen, so Enter and the arrows work at once.
+        if by_key {
+            state.key(&model, appmenu::Key::Down);
+        }
+        tracing::info!("app menu: opened for {:?} ({} commands)", model.app, model.commands.len());
+        self.app_menu.open = Some(Open { win: w.clone(), model, state, at: (x, y).into(), leftward, screen });
+        self.app_menu.pictures = [None, None];
+        self.redraw_all();
+    }
+
+    /// What a window's app menu is made from: its app's name (the dock's),
+    /// its commands, and the Window menu's lines for it now.
+    fn app_model(&mut self, w: &Win) -> Model {
+        let items = self.shelf_items();
+        let app = items.iter().find(|(_, ws)| ws.contains(w)).map(|(i, _)| i.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| self.window_title(w));
+        let (commands, terminal) = w.native().map(|n| n.commands()).unwrap_or_default();
+        use vergence_shell::snap::Zone;
+        let mut window: Vec<(WindowAct, String)> =
+            [(Zone::Left, "Left half"), (Zone::Right, "Right half"), (Zone::TopLeft, "Top left"), (Zone::TopRight, "Top right"), (Zone::BottomLeft, "Bottom left"), (Zone::BottomRight, "Bottom right")].into_iter().map(|(z, n)| (WindowAct::Snap(z), n.to_string())).collect();
+        if self.snap.config.top_half {
+            window.push((WindowAct::Snap(Zone::Top), "Top half".into()));
+        }
+        if !self.restore.contains_key(w) && self.maximizable(w) {
+            window.push((WindowAct::Maximize, "Maximize".into()));
+        }
+        if self.restore.contains_key(w) || self.snap.snapped.contains_key(w) {
+            window.push((WindowAct::Restore, "Back to where it was".into()));
+        }
+        window.push((WindowAct::Minimize, "Minimize".into()));
+        window.push((WindowAct::Close, "Close window".into()));
+        Model { app, commands, terminal, native: w.native().is_some(), window }
+    }
+
+    /// The pointer moved: the line under it is chosen, a submenu there opens.
+    pub fn app_menu_hover(&mut self, pos: Point<f64, Logical>) {
+        let Some(o) = self.app_menu.open.as_mut() else { return };
+        let before = o.state.clone();
+        match o.line_at(pos) {
+            Some((true, i)) => o.state.hover_sub(&o.model, i),
+            Some((false, i)) => o.state.hover_top(&o.model, i),
+            None => {}
+        }
+        if o.state != before {
+            self.redraw_all();
+        }
+    }
+
+    pub fn app_menu_press(&mut self, pos: Point<f64, Logical>) {
+        self.app_menu_hover(pos);
+        let Some(o) = self.app_menu.open.as_ref() else { return };
+        let action = match o.line_at(pos) {
+            Some((true, Some(i))) => match o.state.sub_lines(&o.model).get(i) {
+                Some(Line::Item { action, enabled: true, .. }) => Some(*action),
+                _ => None,
+            },
+            Some((false, Some(i))) => match o.top_lines().get(i) {
+                Some(Line::Item { action, enabled: true, .. }) => Some(*action),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(a) = action {
+            self.app_menu_do(a);
+        }
+    }
+
+    /// A key while the menu is open (the seat gives it every key).
+    pub fn app_menu_key(&mut self, sym: u32, typed: Option<char>) {
+        let Some(o) = self.app_menu.open.as_mut() else { return };
+        let k = match sym {
+            key::KEY_Up => appmenu::Key::Up,
+            key::KEY_Down => appmenu::Key::Down,
+            key::KEY_Left => appmenu::Key::Left,
+            key::KEY_Right => appmenu::Key::Right,
+            key::KEY_Return | key::KEY_KP_Enter => appmenu::Key::Enter,
+            key::KEY_Escape => appmenu::Key::Escape,
+            key::KEY_BackSpace => appmenu::Key::Back,
+            _ => match typed {
+                Some(c) if !c.is_control() => appmenu::Key::Char(c),
+                _ => return,
+            },
+        };
+        match o.state.key(&o.model, k) {
+            Did::Nothing => {}
+            Did::Moved => self.redraw_all(),
+            Did::Close => self.app_menu_close(),
+            Did::Chosen(a) => self.app_menu_do(a),
+        }
+    }
+
+    /// Carry out what was chosen; the menu closes first.
+    fn app_menu_do(&mut self, action: Action) {
+        let Some(o) = self.app_menu.open.take() else { return };
+        self.app_menu.pictures = [None, None];
+        self.redraw_all();
+        let w = o.win;
+        if !smithay::utils::IsAlive::alive(&w) {
+            return;
+        }
+        tracing::info!("app menu: {action:?} for {:?}", o.model.app);
+        match action {
+            Action::Command(id) => {
+                if let Some(n) = w.native() {
+                    self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::Command { window: n.id, id }));
+                }
+            }
+            Action::About => self.app_about(&w, &o.model.app),
+            Action::Settings => {
+                // The desktop's part of the app's settings, in the settings app
+                // (app settings milestone 1, step 6).
+                let id = self.window_identity(&w).map(|i| if i.class.is_empty() { i.instance } else { i.class }).unwrap_or_default();
+                if let Err(e) = crate::spawn(std::process::Command::new("vergence-settings").args(["--app", &id])) {
+                    tracing::warn!("app menu: vergence-settings --app {id}: {e}");
+                }
+            }
+            Action::Quit => {
+                // Every window of the app, asked politely as its close button asks.
+                let items = self.shelf_items();
+                let theirs = items.into_iter().find(|(_, ws)| ws.contains(&w)).map(|(_, ws)| ws).unwrap_or_else(|| vec![w.clone()]);
+                for t in theirs {
+                    self.close_window(&t);
+                }
+            }
+            Action::Window(a) => {
+                let act = match a {
+                    WindowAct::Snap(z) => crate::menu::LayoutAct::Snap(z),
+                    WindowAct::Maximize => crate::menu::LayoutAct::Maximize,
+                    WindowAct::Restore => crate::menu::LayoutAct::Restore,
+                    WindowAct::Minimize => crate::menu::LayoutAct::Minimize,
+                    WindowAct::Close => crate::menu::LayoutAct::Close,
+                };
+                self.layout_act(&w, act);
+            }
+        }
+    }
+
+    /// About an app that has no About of its own: a card with what its
+    /// desktop entry says of it.
+    fn app_about(&mut self, w: &Win, name: &str) {
+        let items = self.shelf_items();
+        let key = items.iter().find(|(_, ws)| ws.contains(w)).map(|(i, _)| i.key.clone()).unwrap_or_default();
+        let entry = self.shelf.apps.iter().find(|a| a.id == key).cloned();
+        let body = match &entry {
+            Some(e) => [e.generic_name.as_str(), e.comment.as_str()].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(". "),
+            None => String::new(),
+        };
+        let req = crate::notify::Request { app: String::new(), replaces: 0, summary: name.to_string(), body, urgency: 1, timeout_ms: -1, actions: Vec::new() };
+        self.notify(crate::notify::Origin::Server, req);
+    }
+
+    /// The open menu's panels on `out`, front to back: the submenu over the top panel.
+    pub fn app_menu_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+        let Some(o) = self.app_menu.open.as_ref() else { return Vec::new() };
+        let light = self.light_style();
+        let mut panels: Vec<(usize, Rectangle<i32, Logical>, Vec<Line>, Option<usize>, String, bool)> = Vec::new();
+        if let Some(r) = o.sub_rect() {
+            panels.push((1, r, o.state.sub_lines(&o.model), o.state.sub, String::new(), true));
+        }
+        let top = o.top_lines();
+        let found_menus: Vec<String> = if o.state.typed.trim().is_empty() { Vec::new() } else { o.model.search(&o.state.typed).into_iter().map(|(_, m)| m).collect() };
+        panels.push((0, o.top_rect(), top, o.state.top, o.state.typed.clone(), o.state.sub.is_none()));
+        let open_sub = o.state.open;
+        let mut elements = Vec::new();
+        for (slot, rect, lines, chosen, typed, keyboard_here) in panels {
+            if !rect.overlaps(out) {
+                continue;
+            }
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (format!("{lines:?}"), chosen, &typed, keyboard_here, open_sub, scale.to_bits(), light, rect.size.w, rect.size.h).hash(&mut hasher);
+            let stamp = hasher.finish();
+            if self.app_menu.pictures[slot].as_ref().map(|(k, _)| *k) != Some(stamp) {
+                let menus = if slot == 0 { found_menus.clone() } else { Vec::new() };
+                match self.app_menu_draw(rect, &lines, chosen, &typed, slot == 0 && !typed.trim().is_empty(), &menus, open_sub.filter(|_| slot == 0), light, scale) {
+                    Some(b) => self.app_menu.pictures[slot] = Some((stamp, b)),
+                    None => continue,
+                }
+            }
+            let Some((_, buffer)) = &self.app_menu.pictures[slot] else { continue };
+            let a = (rect.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+            let b = (rect.loc + rect.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+            let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
+            if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(rect.size), Kind::Unspecified) {
+                elements.push(SceneElement::Memory(el));
+            }
+        }
+        elements
+    }
+
+    /// One panel's picture.
+    #[allow(clippy::too_many_arguments)]
+    fn app_menu_draw(&mut self, rect: Rectangle<i32, Logical>, lines: &[Line], chosen: Option<usize>, typed: &str, results: bool, menus: &[String], open_sub: Option<usize>, light: bool, scale: f64) -> Option<MemoryRenderBuffer> {
+        let s = vergence_look::shelf_look(light);
+        let color = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
+        let (w, h) = (rect.size.w as f32, rect.size.h as f32);
+        let mut scene = Scene::new(w, h);
+        scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, color(s.menu));
+        scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, color(s.edge));
+        let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
+        let face = fonts.face("sans-serif", 400, false);
+        let rows = appmenu::rows((0, 0), lines);
+        let gutter = if lines.iter().any(|l| matches!(l, Line::Item { checked: Some(_), .. })) { 18.0 } else { 0.0 };
+        for (i, (line, r)) in lines.iter().zip(&rows).enumerate() {
+            let r = SceneRect::new(r.x as f32, r.y as f32, r.w as f32, r.h as f32);
+            let lit = chosen == Some(i) || (open_sub == Some(i) && matches!(line, Line::Sub(_)));
+            match line {
+                Line::Separator => {
+                    scene.fill(SceneRect::new(r.x + 6.0, r.y + (r.h / 2.0).floor(), r.w - 12.0, 1.0), color(s.separator));
+                }
+                Line::Search => {
+                    let f = SceneRect::new(r.x, r.y + 2.0, r.w, r.h - 6.0);
+                    scene.fill_rounded(f, vergence_look::RADIUS, color(s.field));
+                    // A magnifier.
+                    let (cx, cy) = (f.x + 14.0, f.y + f.h / 2.0 - 1.0);
+                    scene.stroke(SceneRect::new(cx - 4.5, cy - 4.5, 9.0, 9.0), 4.5, 1.25, color(s.menu_ink_off));
+                    scene.line(ScenePoint::new(cx + 3.2, cy + 3.2), ScenePoint::new(cx + 7.0, cy + 7.0), 1.25, color(s.menu_ink_off));
+                    if let Some(face) = face {
+                        let size = 13.0;
+                        let m = fonts.metrics(face, size);
+                        let base = (f.y + (f.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round();
+                        scene.push_clip(SceneRect::new(f.x + 26.0, f.y, f.w - 34.0, f.h), 0.0);
+                        if typed.is_empty() {
+                            vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink_off), ScenePoint::new(f.x + 28.0, base), "Search commands…");
+                        } else {
+                            let (_, width) = fonts.layout(face, size, typed);
+                            vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink), ScenePoint::new(f.x + 28.0, base), typed);
+                            scene.fill(SceneRect::new(f.x + 29.0 + width, f.y + 7.0, 1.0, f.h - 14.0), color(s.menu_ink));
+                        }
+                        scene.pop_clip();
+                    }
+                }
+                Line::Note(text) => {
+                    if let Some(face) = face {
+                        let size = 12.0;
+                        let m = fonts.metrics(face, size);
+                        let room = r.w - 24.0;
+                        let mut out: Vec<String> = Vec::new();
+                        let mut cur = String::new();
+                        for word in text.split_whitespace() {
+                            let tried = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
+                            if fonts.layout(face, size, &tried).1 <= room || cur.is_empty() {
+                                cur = tried;
+                            } else {
+                                out.push(std::mem::take(&mut cur));
+                                cur = word.to_string();
+                            }
+                        }
+                        out.push(cur);
+                        let line_h = (m.ascent + m.descent + m.line_gap).ceil();
+                        for (k, l) in out.iter().take(2).enumerate() {
+                            vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink_off), ScenePoint::new(r.x + 12.0, (r.y + 6.0 + m.ascent + k as f32 * line_h).round()), l);
+                        }
+                    }
+                }
+                Line::Item { label, keys, enabled, checked, .. } => {
+                    if lit && *enabled {
+                        scene.fill_rounded(r, vergence_look::RADIUS, color(s.hover));
+                    }
+                    let ink = if *enabled { s.menu_ink } else { s.menu_ink_off };
+                    if let Some(face) = face {
+                        let size = 13.0;
+                        let m = fonts.metrics(face, size);
+                        let base = (r.y + (r.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round();
+                        if *checked == Some(true) {
+                            let (cx, cy) = (r.x + 12.0, r.y + r.h / 2.0);
+                            scene.line(ScenePoint::new(cx - 3.5, cy), ScenePoint::new(cx - 1.0, cy + 3.0), 1.5, color(ink));
+                            scene.line(ScenePoint::new(cx - 1.0, cy + 3.0), ScenePoint::new(cx + 4.5, cy - 4.0), 1.5, color(ink));
+                        }
+                        let (_, kw) = if keys.is_empty() { (Vec::new(), 0.0) } else { fonts.layout(face, 12.0, keys) };
+                        let left = r.x + 12.0 + gutter;
+                        scene.push_clip(SceneRect::new(left, r.y, (r.w - 24.0 - gutter - kw - 8.0).max(0.0), r.h), 0.0);
+                        let (_, lw) = fonts.layout(face, size, label);
+                        vergence_render::text(&mut scene, fonts, face, size, color(ink), ScenePoint::new(left, base), label);
+                        // While searching, each result says which menu it is in.
+                        if results && let Some(menu) = menus.get(i.wrapping_sub(1)).filter(|m| !m.is_empty()) {
+                            vergence_render::text(&mut scene, fonts, face, 11.5, color(s.menu_ink_off), ScenePoint::new(left + lw + 8.0, base), menu);
+                        }
+                        scene.pop_clip();
+                        if !keys.is_empty() {
+                            vergence_render::text(&mut scene, fonts, face, 12.0, color(s.menu_ink_off), ScenePoint::new(r.x + r.w - 12.0 - kw, base), keys);
+                        }
+                    }
+                }
+                Line::Sub(name) => {
+                    if lit {
+                        scene.fill_rounded(r, vergence_look::RADIUS, color(s.hover));
+                    }
+                    if let Some(face) = face {
+                        let size = 13.0;
+                        let m = fonts.metrics(face, size);
+                        let base = (r.y + (r.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round();
+                        vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink), ScenePoint::new(r.x + 12.0 + gutter, base), name);
+                    }
+                    let (cx, cy) = (r.x + r.w - 14.0, r.y + r.h / 2.0);
+                    scene.line(ScenePoint::new(cx - 2.0, cy - 4.0), ScenePoint::new(cx + 2.0, cy), 1.25, color(s.menu_ink));
+                    scene.line(ScenePoint::new(cx + 2.0, cy), ScenePoint::new(cx - 2.0, cy + 4.0), 1.25, color(s.menu_ink));
+                }
+            }
+        }
+        match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) {
+            Ok(p) => Some(MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None)),
+            Err(e) => {
+                tracing::warn!("app menu: could not be drawn: {e}");
+                None
+            }
+        }
+    }
+}

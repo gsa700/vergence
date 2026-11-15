@@ -76,6 +76,10 @@ pub enum Part {
     Plus(WinId),
     /// One of a window's own bar buttons (window styles milestone 1), by its place.
     Tool(WinId, u32),
+    /// A window's app button (app settings milestone 1): it opens the app menu.
+    AppMenu(WinId),
+    /// The open app menu.
+    AppList,
     /// The dock (the shelf).
     Dock,
     /// The applications popup.
@@ -109,7 +113,7 @@ impl Target {
     pub fn window(&self) -> Option<WinId> {
         match *self {
             Target::Surface(w, _) | Target::Native(w) => Some(w),
-            Target::Server(Part::Title(w) | Part::Edge(w, _) | Part::Close(w) | Part::Maximize(w) | Part::Minimize(w) | Part::Tab(w, _) | Part::CloseTab(w, _) | Part::Plus(w) | Part::Blocked(w) | Part::Tool(w, _)) => Some(w),
+            Target::Server(Part::Title(w) | Part::Edge(w, _) | Part::Close(w) | Part::Maximize(w) | Part::Minimize(w) | Part::Tab(w, _) | Part::CloseTab(w, _) | Part::Plus(w) | Part::Blocked(w) | Part::Tool(w, _) | Part::AppMenu(w)) => Some(w),
             Target::Server(_) => None,
         }
     }
@@ -127,6 +131,9 @@ pub enum Menu {
     Menu,
     /// The applications popup.
     Popup,
+    /// A window's app menu (app settings milestone 1): it takes every key
+    /// while open, to search and to move through it.
+    AppMenu,
 }
 
 /// A grab: for as long as it lasts, the pointer is its.
@@ -199,6 +206,8 @@ pub enum Out {
     /// click on its title bar or maximize button (`on_button`), or a long
     /// press on its title bar.
     WindowMenu { window: WinId, on_button: bool },
+    /// A window's app button was pressed: open (or close) its app menu.
+    AppMenu(WinId),
     // ---- switching ----
     /// Alt+Tab's switching ended without a choice (the screens went off).
     SwitchCancel,

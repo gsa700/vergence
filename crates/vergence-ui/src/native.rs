@@ -689,6 +689,7 @@ impl<'a> Native<'a> {
             // The bar's events (bar milestone 1): what was done with the tabs the server drew.
             WinEvent::TabChosen { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::Chosen(tab), w))?,
             WinEvent::BarButton { window, id } => self.with_window(window, |app, w| app.bar_button(id, w))?,
+            WinEvent::Command { window, id } => self.with_window(window, |app, w| app.command(id, w))?,
             WinEvent::Tint { window, rgb } => {
                 if let Some(i) = self.index(window) {
                     let w = &mut self.windows[i];
@@ -865,6 +866,13 @@ impl<'a> Native<'a> {
         // The window's meaning, when it has changed (Contract 3).
         if let Some(tree) = self.windows[i].app.get().meaning() {
             self.send(meaning_request(id, &tree))?;
+        }
+        // Its app menu and bar style, when they have changed (app settings milestone 1).
+        if let Some((terminal, commands)) = self.windows[i].app.get().commands() {
+            self.send(WinRequest::Commands { window: id, terminal, commands })?;
+        }
+        if let Some(style) = self.windows[i].app.get().bar_style() {
+            self.send(WinRequest::BarStyle { window: id, style })?;
         }
         Ok(())
     }

@@ -135,6 +135,7 @@ impl Seat {
             let own = Target::Server(match menu {
                 Menu::Menu => Part::Menu,
                 Menu::Popup => Part::Popup,
+                Menu::AppMenu => Part::AppList,
             });
             if under == Some(own) {
                 p.refocus(under, out);
@@ -190,13 +191,17 @@ impl Seat {
                 out.push(Out::Minimize(w));
                 p.swallow(button);
             }
+            Target::Server(Part::AppMenu(w)) if left => {
+                out.push(Out::AppMenu(w));
+                p.swallow(button);
+            }
             // A right click on the bar or the maximize button: the window's menu.
             Target::Server(Part::Title(w) | Part::Maximize(w)) if button == BTN_RIGHT => {
                 out.push(Out::WindowMenu { window: w, on_button: matches!(t, Target::Server(Part::Maximize(_))) });
                 p.swallow(button);
             }
             // The frame's other buttons do nothing.
-            Target::Server(Part::Title(_) | Part::Edge(..) | Part::Close(_) | Part::Maximize(_) | Part::Minimize(_)) => p.swallow(button),
+            Target::Server(Part::Title(_) | Part::Edge(..) | Part::Close(_) | Part::Maximize(_) | Part::Minimize(_) | Part::AppMenu(_)) => p.swallow(button),
             Target::Server(Part::Desktop) => {
                 if left {
                     out.push(Out::Unfocus);
@@ -310,6 +315,24 @@ mod tests {
         assert!(out.contains(&Out::Press(blocked, BTN_LEFT)));
         assert!(!out.iter().any(|o| matches!(o, Out::MoveBegin(_))));
         assert_eq!(seat.keyboard_focus(), Some(W2));
+    }
+
+    #[test]
+    fn the_app_button_opens_the_app_menu_and_a_click_elsewhere_closes_it() {
+        let mut seat = Seat::new();
+        let button = Target::Server(Part::AppMenu(W1));
+        let out = seat.button(BTN_LEFT, true, Some(button), Default::default(), 0);
+        assert!(out.contains(&Out::AppMenu(W1)));
+        assert!(out.contains(&Out::Focus(W1)));
+        assert!(seat.button(BTN_LEFT, false, Some(button), Default::default(), 5).iter().all(|o| !matches!(o, Out::Release(..))));
+        seat.menu_opened(Menu::AppMenu);
+        let list = Target::Server(Part::AppList);
+        assert!(seat.button(BTN_LEFT, true, Some(list), Default::default(), 10).contains(&Out::Press(list, BTN_LEFT)));
+        seat.button(BTN_LEFT, false, Some(list), Default::default(), 15);
+        // The button again (or anywhere else): the menu closes, nothing else happens.
+        let out = seat.button(BTN_LEFT, true, Some(button), Default::default(), 20);
+        assert!(out.contains(&Out::CloseMenu) && !out.contains(&Out::AppMenu(W1)));
+        assert_eq!(seat.menu(), None);
     }
 
     #[test]

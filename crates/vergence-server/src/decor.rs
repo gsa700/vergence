@@ -89,6 +89,8 @@ pub enum Hit {
     Plus(Win),
     /// One of a native window's own bar buttons, by its place.
     Tool(Win, usize),
+    /// A window's app button (app settings milestone 1).
+    AppMenu(Win),
     /// The body of a native window (native.rs): its input comes in step 4.
     Native(Win),
     /// The shelf's strip (shelf.rs): in front of every window.
@@ -284,6 +286,8 @@ impl Server {
             let z = self.bar_sizes(w);
             return self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, None, None, z))).flatten();
         }
+        // Every other window has the app button (app settings milestone 1).
+        buttons = vergence_bar::with_app_menu(buttons);
         // No maximize button where the window cannot be maximized (style.rs).
         if !self.maximizable(w) {
             buttons.0.retain(|b| *b != vergence_bar::WinButton::Maximize);
@@ -507,17 +511,17 @@ impl Server {
         self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "color-scheme".to_string())) == Some(&vergence_protocol::bus::SettingValue::U32(2))
     }
 
-    /// The style a window's bar is drawn in: the desktop's, except that with
-    /// Style "App default" an app may have a bar of its own style. Built in
-    /// for now (Dave, 2026-11-14: the settings app's bar light by default);
-    /// the app settings milestone makes it each app's choice.
+    /// The style a window's bar is drawn in (app settings milestone 1): the
+    /// one its app asked for (`BarStyle`: its own setting, or under "App
+    /// default" its built-in choice, which the toolkit works out), else the
+    /// desktop's. An app's own choice wins over the desktop's Dark or Light
+    /// (Dave, 2026-11-14: "1 yes").
     pub fn bar_light(&self, w: &Win, desktop_light: bool) -> bool {
-        if desktop_light {
-            return true;
+        match w.native().map(|n| n.bar_style()) {
+            Some(vergence_protocol::window::BarStyle::Light) => true,
+            Some(vergence_protocol::window::BarStyle::Dark) => false,
+            _ => desktop_light,
         }
-        let scheme = self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "color-scheme".to_string()));
-        let app_default = matches!(scheme, None | Some(vergence_protocol::bus::SettingValue::U32(0)));
-        app_default && w.native().is_some_and(|n| LIGHT_BAR_APPS.contains(&n.app_id.as_str()))
     }
 
     fn button_layout_text(&self) -> String {
@@ -560,6 +564,7 @@ impl Server {
                     Some(Part::Button(WinButton::Close)) => return Hit::Close(w.clone()),
                     Some(Part::Button(WinButton::Maximize)) => return Hit::Maximize(w.clone()),
                     Some(Part::Button(WinButton::Minimize)) => return Hit::Minimize(w.clone()),
+                    Some(Part::Button(WinButton::AppMenu)) => return Hit::AppMenu(w.clone()),
                     Some(Part::Tab(i)) => return Hit::Tab(w.clone(), i),
                     Some(Part::CloseTab(i)) => return Hit::CloseTab(w.clone(), i),
                     Some(Part::Plus) => return Hit::Plus(w.clone()),
@@ -620,6 +625,7 @@ impl Server {
                 Hit::CloseTab(w, i) => Some((w, Part::CloseTab(i))),
                 Hit::Plus(w) => Some((w, Part::Plus)),
                 Hit::Tool(w, i) => Some((w, Part::Tool(i))),
+                Hit::AppMenu(w) => Some((w, Part::Button(WinButton::AppMenu))),
                 _ => None,
             }
         };
@@ -636,14 +642,19 @@ impl Server {
         // A window on its way back from the dock is put in its place when it arrives.
         self.shelf_motions_end();
         let windows: Vec<Win> = self.space.elements().rev().cloned().collect();
+        // Each window's app icon, for its app button (app settings milestone 1): the dock's.
+        let icon_names: Vec<(Win, String)> = self.shelf_items().into_iter().flat_map(|(item, ws)| ws.into_iter().map(move |w| (w, item.icon.clone()))).collect();
+        let menu_win = self.app_menu_window().cloned();
         // A maximize button rested on opens its layouts (snap.rs).
         self.layouts_tick();
         // Dialogs go where their parents went (dialogs.rs).
         self.dialogs_follow();
         // Native windows told the wallpaper's color behind them (tint.rs).
         self.tint_tick();
-        // In front of everything: the desktop menu, if open (menu.rs).
-        let mut elements = self.menu_elements(renderer, out, scale);
+        // In front of everything: a window's app menu (appmenu.rs), then the
+        // desktop menu, if open (menu.rs).
+        let mut elements = self.app_menu_elements(renderer, out, scale);
+        elements.extend(self.menu_elements(renderer, out, scale));
         // Then notifications, in front of every window (notify.rs).
         elements.extend(self.notify_elements(renderer, out, scale));
         // Then the applications popup, if open (launcher.rs).
@@ -680,6 +691,8 @@ impl Server {
                 elements.push(SceneElement::Solid(SolidColorRenderElement::new(d.dim.clone(), physical(all, out.loc, scale), d.commit, shade, Kind::Unspecified)));
             }
             let frame = self.frame_of(&w);
+            let app_icon = icon_names.iter().find(|(iw, _)| *iw == w).map(|(_, n)| n.clone()).filter(|n| !n.is_empty()).and_then(|n| self.shelf_icon(&n, (20.0 * scale).round() as u32));
+            let menu_open = menu_win.as_ref() == Some(&w);
             let border = self.border_of(&w);
             let reach = border.map(|b| Rectangle::new((b.loc.x - EDGE, b.loc.y - EDGE).into(), (b.size.w + 2 * EDGE, b.size.h + 2 * EDGE).into())).or_else(|| self.space.element_bbox(&w));
             if !reach.is_some_and(|r| r.overlaps(out)) {
@@ -789,7 +802,7 @@ impl Server {
                     let dragged = preview.map(|(from, _)| from).filter(|&i| i < titles.len());
                     // The program's own buttons (icons, pressable): part of what the picture shows.
                     let tools: Vec<(vergence_bar::ToolIcon, bool)> = tools_of(&w).map(|(_, t)| t.into_iter().map(|(i, e, _)| (i, e)).collect()).unwrap_or_default();
-                    let key = (title.clone(), width, active, hover, format!("{layout_text}{tools:?}"), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded, dragged));
+                    let key = (title.clone(), width, active, hover, format!("{layout_text}{tools:?}{menu_open}{}", app_icon.is_some()), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded, dragged));
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
                         key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, (false, false, Vec::new(), false, false, None)),
@@ -831,6 +844,8 @@ impl Server {
                             hover,
                             dragged,
                             tools: &tools,
+                            app_icon: app_icon.as_ref().map(|i| std::sync::Arc::new(vergence_scene::Image { width: i.width, height: i.height, rgba: i.rgba.clone() })),
+                            menu_open,
                         };
                         // Rounded: the bar's top corners cut to the one radius (its bottom goes on into the window).
                         if rounded {
@@ -1091,9 +1106,6 @@ fn tabs_of(w: &Win) -> Option<Tabs> {
         _ => None,
     }
 }
-
-/// Apps whose bar is light under Style "App default" (bar_light).
-const LIGHT_BAR_APPS: &[&str] = &["vergence-settings"];
 
 /// A native window's own bar buttons (window styles milestone 1): where the
 /// title starts, and each button's icon, whether it can be pressed, and id.

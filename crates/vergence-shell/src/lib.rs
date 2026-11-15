@@ -11,6 +11,7 @@
 //! desktop's own space (a screen's rectangle is where the arrangement put
 //! it).
 
+pub mod appmenu;
 pub mod apps;
 pub mod desktop;
 pub mod icons;

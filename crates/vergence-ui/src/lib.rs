@@ -397,6 +397,10 @@ impl Waker {
 /// A program with one window.
 /// A window's kind, for [`Style`].
 pub use vergence_protocol::window::WinKind;
+/// An app menu's commands and their roles (app settings milestone 1), and
+/// the bar style an app asks for.
+pub use vergence_protocol::commands::{Command as AppCommand, Role};
+pub use vergence_protocol::window::BarStyle;
 
 /// What kind of window an app's is, and its size limits in points (0: none):
 /// told to the server on the native road (window styles milestone 1).
@@ -531,6 +535,24 @@ pub trait App {
     /// One of the window's own bar buttons ([`Bar::Tools`], the server draws
     /// them) was pressed: the id the window gave it.
     fn bar_button(&mut self, _id: u32, _window: &mut Window) {}
+
+    /// The window's app menu (app settings milestone 1), when it has changed
+    /// since it was last asked: whether the app is a terminal (its
+    /// Ctrl+letter keys are its programs', so roles' keys take Shift), and
+    /// its commands. Asked after each frame on the native road; the server
+    /// draws the menu from its app button.
+    fn commands(&mut self) -> Option<(bool, Vec<AppCommand>)> {
+        None
+    }
+
+    /// One of the window's commands was chosen in its app menu: its id.
+    fn command(&mut self, _id: u32, _window: &mut Window) {}
+
+    /// The style the window's bar is to be drawn in, when it has changed
+    /// since it was last asked (app settings milestone 1).
+    fn bar_style(&mut self) -> Option<BarStyle> {
+        None
+    }
 
     /// The window's meaning (Contract 3), when it has changed since it was
     /// last asked: asked after each frame on the native road. None: as before.
@@ -1632,7 +1654,7 @@ impl<'a> Runner<'a> {
         let layout = self.bar_layout(i);
         let font = self.fonts.face("sans-serif", 400, false);
         let w = &self.windows[i];
-        let look = bar::Look { bar: vergence_look::bar_look(self.light), frosted: false, focused: w.active, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font, font_size: BAR_FONT_SIZE, titles: &[], alerts: &[], title, shown: 0, hover: w.bar_hover, dragged: None, tools: &[] };
+        let look = bar::Look { bar: vergence_look::bar_look(self.light), frosted: false, focused: w.active, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font, font_size: BAR_FONT_SIZE, titles: &[], alerts: &[], title, shown: 0, hover: w.bar_hover, dragged: None, tools: &[], app_icon: None, menu_open: false };
         bar::draw(scene, &mut self.fonts, &layout, &look);
     }
 

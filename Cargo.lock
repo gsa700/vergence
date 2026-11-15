@@ -2282,6 +2282,7 @@ name = "vergence-shell"
 version = "0.1.0"
 dependencies = [
  "vergence-look",
+ "vergence-protocol",
 ]
 
 [[package]]

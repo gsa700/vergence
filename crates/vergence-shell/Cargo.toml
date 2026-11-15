@@ -11,3 +11,4 @@ publish.workspace = true
 # worked out here, and tested on every platform.
 [dependencies]
 vergence-look.workspace = true
+vergence-protocol.workspace = true

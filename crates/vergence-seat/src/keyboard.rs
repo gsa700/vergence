@@ -47,6 +47,7 @@ pub enum Key {
     Right,
     Up,
     Down,
+    Space,
     Other,
 }
 
@@ -95,6 +96,10 @@ pub enum KeyOut {
     Apps,
     /// The popup's: the server gives it the key's symbol and character.
     Popup,
+    /// The open app menu's (app settings milestone 1), as the popup's.
+    AppMenu,
+    /// Alt+Space: open the app menu of the window with the keyboard.
+    OpenAppMenu(WinId),
     /// The default output's volume: +5, -5, or 0 to mute or unmute.
     Volume(i8),
     /// Alt+Tab's switching.
@@ -171,6 +176,19 @@ impl Seat {
         }
         if self.menu == Some(Menu::Popup) {
             return if pressed && !is_super { KeyOut::Popup } else { KeyOut::Swallow };
+        }
+        if self.menu == Some(Menu::AppMenu) {
+            return if pressed { KeyOut::AppMenu } else { KeyOut::Swallow };
+        }
+        // Alt+Space: the app menu, as Windows' system menu (app settings milestone 1).
+        if pressed
+            && key == Key::Space
+            && mods.alt
+            && !mods.ctrl
+            && !mods.logo
+            && let Some(w) = self.keyboard.focus
+        {
+            return KeyOut::OpenAppMenu(w);
         }
         if pressed && mods.alt && !mods.ctrl && !mods.logo {
             let app = match key {
@@ -325,6 +343,23 @@ mod tests {
         // Super tapped again closes it.
         seat.key(Key::Super, true, none());
         assert_eq!(seat.key(Key::Super, false, none()), KeyOut::Apps);
+    }
+
+    #[test]
+    fn alt_space_opens_the_app_menu_which_then_takes_every_key() {
+        let mut seat = Seat::new();
+        assert_eq!(seat.key(Key::Space, true, alt()), KeyOut::Forward(None), "no window: nothing to open");
+        seat.focus(Some(W1));
+        assert_eq!(seat.key(Key::Space, true, none()), KeyOut::Forward(Some(W1)));
+        assert_eq!(seat.key(Key::Space, true, alt()), KeyOut::OpenAppMenu(W1));
+        assert_eq!(seat.key(Key::Space, true, Mods { ctrl: true, alt: true, ..none() }), KeyOut::Forward(Some(W1)));
+        seat.menu_opened(Menu::AppMenu);
+        assert_eq!(seat.key(Key::Other, true, none()), KeyOut::AppMenu);
+        assert_eq!(seat.key(Key::Escape, true, none()), KeyOut::AppMenu, "the menu closes itself");
+        assert_eq!(seat.key(Key::Other, false, none()), KeyOut::Swallow);
+        assert_eq!(seat.key(Key::BackSpace, true, Mods { ctrl: true, alt: true, ..none() }), KeyOut::Quit);
+        seat.menu_closed();
+        assert_eq!(seat.key(Key::Other, true, none()), KeyOut::Forward(Some(W1)));
     }
 
     #[test]

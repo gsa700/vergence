@@ -6,6 +6,7 @@
 //! Our own code, with no dependencies (§8, "Our own parts").
 
 pub mod bus;
+pub mod commands;
 pub mod sock;
 pub mod window;
 pub mod wire;
