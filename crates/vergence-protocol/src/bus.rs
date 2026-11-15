@@ -42,11 +42,12 @@
 //! Version 16 (files milestone 1, step 8): drag and drop between native
 //! windows (`WinRequest::DragStart`/`DragAccept`, `WinEvent::DragOver`/
 //! `DragLeave`/`DragDrop`/`DragEnded`), and `WinRequest::Activate`.
+//! Version 17 (step 9): `WinKind::Desktop`, the desktop's icons.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 16;
+pub const VERSION: u32 = 17;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

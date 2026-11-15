@@ -23,6 +23,7 @@
 //!   Trash, shared with other desktops: Restore puts a file back where it
 //!   was; Empty Trash asks first.
 
+mod desktop;
 mod hand;
 mod ops;
 
@@ -263,7 +264,7 @@ fn desktop_text() -> (String, Option<SystemTime>) {
 
 /// Opens files with the apps chosen for their types: the server's Open in a
 /// Vergence session (the dock shows them starting), else started here.
-fn open_files(paths: &[PathBuf]) -> Result<(), String> {
+pub(crate) fn open_files(paths: &[PathBuf]) -> Result<(), String> {
     let items: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
     if std::env::var_os(vergence_protocol::BUS_ENV).is_some()
         && let Ok(mut bus) = vergence_protocol::Client::connect(APP_ID)
@@ -1548,6 +1549,10 @@ fn main() {
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("vergence-files {}", env!("CARGO_PKG_VERSION"));
         return;
+    }
+    // The desktop's icons (desktop.rs): a process of their own, started by the session.
+    if args.iter().any(|a| a == "--desktop") {
+        return desktop::run();
     }
     let paths: Vec<PathBuf> = args.iter().filter(|a| !a.starts_with("--")).map(|a| vergence_types::path_of_link(a).unwrap_or_else(|| PathBuf::from(a))).map(|p| std::path::absolute(&p).unwrap_or(p)).collect();
     if hand::hand_over(&paths) {

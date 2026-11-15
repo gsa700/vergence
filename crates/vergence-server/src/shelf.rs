@@ -205,6 +205,8 @@ pub enum Act {
     /// Ask about forgetting an app's window places (its name in window
     /// memory): the settings app opens at its Windows page with the question.
     ForgetPlaces(String),
+    /// A launcher for the application in ~/Desktop (desktop.rs).
+    AddToDesktop(String),
 }
 
 /// How long a started application's icon says it is starting, if no window
@@ -459,8 +461,9 @@ impl Server {
         let mut windows: Vec<Win> = Vec::new();
         let mut classes: Vec<(String, bool)> = Vec::new();
         for w in order {
-            // A dialog or palette is its parent's, not a window of its own (dialogs.rs).
-            if self.belongs_to_parent(&w) {
+            // A dialog or palette is its parent's, not a window of its own
+            // (dialogs.rs); the desktop's icons are nobody's (desktop.rs).
+            if self.belongs_to_parent(&w) || self.is_desktop(&w) {
                 continue;
             }
             let Some(id) = self.window_identity(&w) else { continue };
@@ -613,7 +616,8 @@ impl Server {
             Hide::Never => true,
             Hide::Always => false,
             // Out unless a window on the desktop overlaps where it stands.
-            Hide::Windows => !self.space.elements().any(|w| self.space.element_geometry(w).is_some_and(|g| g.overlaps(full))),
+            // The desktop's icons are no window to make way for (desktop.rs).
+            Hide::Windows => !self.space.elements().any(|w| !self.is_desktop(w) && self.space.element_geometry(w).is_some_and(|g| g.overlaps(full))),
         }
     }
 
@@ -1038,6 +1042,7 @@ impl Server {
         if known {
             acts.push((Act::Start(item.key.clone()), if windows.is_empty() { "Open" } else { "New window" }.to_string()));
             acts.push(if item.pinned { (Act::Unpin(item.key.clone()), "Unpin".to_string()) } else { (Act::Pin(item.key.clone()), "Pin".to_string()) });
+            acts.push((Act::AddToDesktop(item.key.clone()), "Add to desktop".to_string()));
         }
         // Only where window memory has places for it (settings milestone 2).
         if let Some(app) = self.shelf_places_name(&item.key, windows) {
@@ -1078,6 +1083,7 @@ impl Server {
                     self.close_window(w);
                 }
             }
+            Act::AddToDesktop(id) => self.add_to_desktop(&id),
             Act::ForgetPlaces(app) => {
                 if let Err(e) = crate::spawn(std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", &app])) {
                     tracing::warn!("shelf: the settings app could not be started: {e}");
@@ -1130,6 +1136,8 @@ impl Server {
             return;
         }
         self.shelf.said = now;
+        // The desktop's icons fill the work area (desktop.rs).
+        self.desktops_replace();
         match now {
             Some(r) => tracing::info!("shelf: {:?}; its screen's work area {},{} {}x{} points", self.shelf.config.placement().place, r.loc.x, r.loc.y, r.size.w, r.size.h),
             None => tracing::info!("shelf: no screen for it"),

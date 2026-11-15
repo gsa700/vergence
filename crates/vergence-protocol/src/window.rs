@@ -339,6 +339,10 @@ pub enum WinKind {
     /// Content running up under the frosted bar, the program's own buttons
     /// and the title in it (the settings app).
     Sidebar,
+    /// The desktop's icons (files milestone 1, step 9): the server sizes it
+    /// to the main screen's work area and keeps it under every window, with
+    /// no bar, out of the dock and Alt+Tab.
+    Desktop,
 }
 
 impl WinKind {
@@ -348,6 +352,7 @@ impl WinKind {
             WinKind::Dialog => 1,
             WinKind::Palette => 2,
             WinKind::Sidebar => 3,
+            WinKind::Desktop => 4,
         }
     }
 
@@ -357,6 +362,7 @@ impl WinKind {
             1 => WinKind::Dialog,
             2 => WinKind::Palette,
             3 => WinKind::Sidebar,
+            4 => WinKind::Desktop,
             _ => return Err(WireError::BadValue("window kind")),
         })
     }

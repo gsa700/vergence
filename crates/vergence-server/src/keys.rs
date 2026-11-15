@@ -95,6 +95,7 @@ pub fn seat_key(sym: u32, code: u32) -> vergence_seat::keyboard::Key {
         k::KEY_Up => Key::Up,
         k::KEY_Down => Key::Down,
         k::KEY_space => Key::Space,
+        k::KEY_d | k::KEY_D => Key::D,
         s if (k::KEY_XF86Switch_VT_1..k::KEY_XF86Switch_VT_1 + 12).contains(&s) => Key::Vt((s - k::KEY_XF86Switch_VT_1 + 1) as u8),
         _ => Key::Other,
     }

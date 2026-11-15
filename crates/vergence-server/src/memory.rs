@@ -120,7 +120,7 @@ impl Server {
         // the server first places it.
         use crate::style::Kind;
         let style = self.window_style(w);
-        if matches!(style.kind, Kind::Dialog | Kind::Palette | Kind::Splash) {
+        if matches!(style.kind, Kind::Dialog | Kind::Palette | Kind::Splash | Kind::Desktop) {
             return None;
         }
         // A native window with a parent may be one of those until its style

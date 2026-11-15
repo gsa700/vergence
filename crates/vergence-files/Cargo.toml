@@ -10,6 +10,7 @@ description = "File Viewer: Vergence's file manager, with Preview on the space b
 vergence-ui.workspace = true
 vergence-widgets.workspace = true
 vergence-scene.workspace = true
+vergence-render.workspace = true
 vergence-shell.workspace = true
 vergence-types.workspace = true
 vergence-decode.workspace = true

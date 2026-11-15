@@ -94,6 +94,7 @@ impl Server {
             KeyOut::Switch(s) => self.switch_key(s),
             // Super with an arrow (snap.rs).
             KeyOut::Window(k) => self.window_key(k),
+            KeyOut::ShowDesktop => self.show_desktop(),
             KeyOut::Swallow => {}
         }
     }
@@ -246,7 +247,10 @@ impl Server {
             self.space.raise_element(window, true);
             return self.focus_window(&modal, serial);
         }
-        self.space.raise_element(window, true);
+        // The desktop's icons have the keyboard but stay under every window (desktop.rs).
+        if !self.is_desktop(window) {
+            self.space.raise_element(window, true);
+        }
         // Its dialogs and palettes come forward with it.
         for c in self.children_of(window) {
             if self.space.element_geometry(&c).is_some() {

@@ -445,6 +445,31 @@ the wallpaper, a scratch place for launchers and files.
   click in File Viewer sent the file to the running Text Editor, which came
   forward with the keyboard. Wayland programs ask by xdg-activation, which
   the server does not offer yet.
+- **Step 9 built** (2026-11-15): the desktop. Bus **v17** `WinKind::Desktop`.
+  Server desktop.rs: a Desktop window is placed on the main screen's work
+  area (at its kind and again at its first showing, and whenever the work
+  area changes: `shelf_moved`), kept under every window (never raised;
+  `desktop_to_bottom`), without bar or border, left out of the dock,
+  Alt+Tab, window memory and the session's list; the dock does not hide
+  for it; a right press on it is the desktop's menu. The session starts
+  `vergence-files --desktop` unless `[desktop] icons = false` (Settings >
+  Dock > Desktop). Super+D (the seat's ShowDesktop) minimizes every window
+  and brings the same back. The dock's menu has "Add to desktop" (the
+  entry copied in, executable). File Viewer's desktop mode (desktop.rs, app
+  id vergence-desktop): ~/Desktop's icons on a clear ground, a grid down
+  then across, pictures' and launchers' own marks (decoded apart), names
+  with a shadow; click, Ctrl+click, double click to open (folders in File
+  Viewer, files by type, launchers start; an untrusted launcher asks once
+  and is made executable); drags out, drops in (moved, Ctrl copies), the
+  desktop's own icons placed where let go; Delete to the Trash, F2 to
+  rename, the arrows; cells kept per desktop size in
+  ~/.local/state/vergence/desktop-places (a size stands for the set of
+  screens: the full window-memory key later). Seen on kepler at 1920 x
+  1080: the icons over the wallpaper after Super+D, a picture's own mark,
+  launchers' application icons, the question for an untrusted launcher,
+  the trusted Calculator starting. Not yet: a rubber-band choice, desktops
+  on other screens, rename in place, thumbnails of other kinds. Tests:
+  Hubble 614, kepler 610, Techbench 614.
 ## Steps
 
 1. **vergence-types**: the database reader (globs2, magic, subclasses,

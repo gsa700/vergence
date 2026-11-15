@@ -146,6 +146,8 @@ pub struct Server {
     pub portal: crate::portal::Portal,
     /// A drag between native windows (drag.rs).
     pub native_drag: Option<crate::drag::NativeDrag>,
+    /// The windows Super+D put out of the way (desktop.rs).
+    pub desktop_hidden: Vec<crate::win::Win>,
     pub pinged: std::collections::HashMap<smithay::reexports::wayland_server::backend::ClientId, std::time::Instant>,
     /// Touch panels and the fingers on them (touch.rs).
     pub touch: crate::touch::Touch,
@@ -304,6 +306,7 @@ impl Server {
             alive_asked: Default::default(),
             portal: Default::default(),
             native_drag: None,
+            desktop_hidden: Vec::new(),
             pinged: Default::default(),
             pointer_devices: Vec::new(),
             touch_panels: Vec::new(),

@@ -28,6 +28,8 @@ pub enum Kind {
     Sidebar,
     /// A splash screen: no bar.
     Splash,
+    /// The desktop's icons (desktop.rs).
+    Desktop,
 }
 
 /// What the server goes by for a window.
@@ -91,6 +93,7 @@ impl Server {
                 WinKind::Dialog => Kind::Dialog,
                 WinKind::Palette => Kind::Palette,
                 WinKind::Sidebar => Kind::Sidebar,
+                WinKind::Desktop => Kind::Desktop,
             };
             let (min, max) = limits((s.min.0.round() as i32, s.min.1.round() as i32), (s.max.0.round() as i32, s.max.1.round() as i32));
             return WinStyle { kind, modal: s.modal, min, max, parent };

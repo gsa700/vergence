@@ -278,7 +278,12 @@ pub fn kind_icon<M: 'static>(kind: Kind) -> Element<M> {
 
 /// The same mark drawn `k` times as large (the icon view's), centered in its place.
 pub fn kind_icon_sized<M: 'static>(kind: Kind, k: f32) -> Element<M> {
-    let el = drawing(move |scene, _, r: Rect, t: &Theme| {
+    drawing(move |scene, _, r: Rect, t: &Theme| draw_kind(scene, r, k, kind, t))
+}
+
+/// A family's mark drawn into a scene, `k` times its small size, centered in `r`.
+pub fn draw_kind(scene: &mut vergence_scene::Scene, r: Rect, k: f32, kind: Kind, t: &Theme) {
+    {
         // Drawn in a box 18 x 15 points at scale 1, every length times k.
         let (bw, bh) = (18.0 * k, 15.0 * k);
         let (ox, oy) = (r.x + (r.w - bw) / 2.0 + k, r.y + (r.h - bh) / 2.0);
@@ -337,8 +342,7 @@ pub fn kind_icon_sized<M: 'static>(kind: Kind, k: f32) -> Element<M> {
                 }
             }
         }
-    });
-    el
+    }
 }
 
 pub fn home() -> Option<PathBuf> {

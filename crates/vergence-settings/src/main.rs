@@ -469,6 +469,8 @@ enum Message {
     WinFlag(&'static str, bool),
     // The dock (desktop.toml [shelf]; the server reads it within a second).
     DockEdge(usize),
+    /// Icons on the desktop (files milestone 1, step 9): desktop.toml `[desktop] icons`.
+    DesktopIcons(bool),
     DockScreen(usize),
     DockGap(f32),
     DockOpacity(f32),
@@ -1006,6 +1008,12 @@ impl App {
             }
             Message::AccentText(t) => self.accent_text = t,
             Message::AccentSubmit => self.save_accent(),
+            Message::DesktopIcons(on) => self.save(|d| {
+                let t = d.entry("desktop").or_insert_with(|| toml::Value::Table(toml::Table::new()));
+                if let Some(t) = t.as_table_mut() {
+                    t.insert("icons".into(), on.into());
+                }
+            }),
             Message::Contrast(on) => self.save_appearance(|t| {
                 t.insert("contrast".into(), if on { "high" } else { "normal" }.into());
             }),
@@ -1577,7 +1585,7 @@ impl App {
             ]),
             ("Desktop", vec![
                 ("Windows".into(), Page::Windows, Icon::Windows, "window title bar buttons controls minimize maximize close snap snapping alt tab keys x11"),
-                ("Dock".into(), Page::Dock, Icon::Dock, "dock shelf pin hide opacity gap edge"),
+                ("Dock".into(), Page::Dock, Icon::Dock, "dock shelf pin hide opacity gap edge desktop icons super d"),
                 ("Notifications".into(), Page::Notifications, Icon::Notifications, "notifications cards alerts do not disturb quiet corner banner"),
                 ("Apps".into(), Page::Apps, Icon::Apps, "apps applications title bar light dark firefox per app own settings"),
                 ("Default apps".into(), Page::DefaultApps, Icon::Apps, "default apps applications open with browser mail text pictures pdf music video folders file types"),
@@ -2360,7 +2368,20 @@ impl App {
         self.page_layout(
             "Dock",
             "Where the dock sits and how it looks, and the applications pinned to it. It follows at once.",
-            vec![self.group(Some("Place"), place), self.group(Some("Look"), look), self.group(Some("Pinned"), pins), self.status_line()],
+            vec![self.group(Some("Place"), place), self.group(Some("Look"), look), self.group(Some("Pinned"), pins), self.desktop_group(), self.status_line()],
+        )
+    }
+
+    /// The desktop's icons: on or off (from the next login), and what they are.
+    fn desktop_group(&self) -> Element<Message> {
+        let on = self.desktop.get("desktop").and_then(|d| d.get("icons")).and_then(|v| v.as_bool()).unwrap_or(true);
+        self.group(
+            Some("Desktop"),
+            vec![setting(
+                "Icons on the desktop",
+                "The files in your Desktop folder, over the wallpaper. Super+D shows the desktop. From the next login.",
+                switch(on, Message::DesktopIcons).name("Icons on the desktop"),
+            )],
         )
     }
 

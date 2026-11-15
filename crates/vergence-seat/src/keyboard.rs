@@ -18,7 +18,9 @@
 //! 7. While the popup is open, every key is its.
 //! 8. Alt+Tab (Alt+Shift+Tab backwards) begins switching among every
 //!    window; Alt+` (the key above Tab) among the focused application's.
-//! 9. Super with an arrow is a window key (snap, maximize, restore).
+//! 9. Super with an arrow is a window key (snap, maximize, restore);
+//!    Super+D shows the desktop (files milestone 1), and again brings the
+//!    windows back.
 //! 10. Otherwise the window with the keyboard has it.
 //!
 //! The seat also keeps the order in which windows last had the keyboard
@@ -48,6 +50,8 @@ pub enum Key {
     Up,
     Down,
     Space,
+    /// The D key (Super+D: show the desktop).
+    D,
     Other,
 }
 
@@ -108,6 +112,8 @@ pub enum KeyOut {
     Switch(Switch),
     /// Super with an arrow.
     Window(WindowKey),
+    /// Super+D: every window out of the way, or back.
+    ShowDesktop,
     /// Kept from every program, with nothing else to do.
     Swallow,
     /// To the window with the keyboard (None: no window has it; the key is
@@ -207,6 +213,9 @@ impl Seat {
                 self.keyboard.switching = Some(app);
                 return KeyOut::Switch(Switch::Begin { app, back: mods.shift });
             }
+        }
+        if pressed && mods.logo && !mods.alt && !mods.ctrl && !mods.shift && key == Key::D {
+            return KeyOut::ShowDesktop;
         }
         if pressed && mods.logo && !mods.alt && !mods.ctrl && self.keyboard.window_keys {
             let w = match key {

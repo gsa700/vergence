@@ -6,6 +6,7 @@ mod handlers;
 mod dispatch;
 mod portal;
 mod drag;
+mod desktop;
 mod keys;
 mod input;
 mod state;

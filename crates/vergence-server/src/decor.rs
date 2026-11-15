@@ -266,9 +266,10 @@ fn native_texture(renderer: &mut GlesRenderer, w: &Win) -> Option<(smithay::back
 impl Server {
     /// Does the server draw this window's title bar?
     pub fn has_title(&self, w: &Win) -> bool {
-        // Every native window's bar is the server's (bar milestone 1, step 8).
+        // Every native window's bar is the server's (bar milestone 1, step 8),
+        // but the desktop's icons have none (desktop.rs).
         if w.native().is_some() {
-            return true;
+            return !self.is_desktop(w);
         }
         if let Some(x) = w.x11_surface() {
             return !x.is_override_redirect() && !x.is_decorated() && !x.is_fullscreen();
@@ -562,6 +563,9 @@ impl Server {
     /// no frame of its own. None for fullscreen, override-redirect and
     /// client-decorated windows.
     pub fn border_of(&self, w: &Win) -> Option<Rectangle<i32, Logical>> {
+        if self.is_desktop(w) {
+            return None;
+        }
         if let Some(f) = self.frame_of(w) {
             return Some(f.whole());
         }

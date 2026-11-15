@@ -450,6 +450,10 @@ impl Server {
                     if maximized {
                         self.toggle_maximize(&w);
                     }
+                    // The desktop's icons: their place is the work area, not where it was asked (desktop.rs).
+                    if self.is_desktop(&w) {
+                        self.desktop_place(&w);
+                    }
                     tracing::info!("native: {:?} window {window} shown at {},{}", n.app_id, place.x, place.y);
                     self.window_opened(&w);
                 }
@@ -477,6 +481,11 @@ impl Server {
                     let style = NativeStyle { kind, modal: modal && kind == vergence_protocol::window::WinKind::Dialog, min, max };
                     tracing::info!("native: window {window} of {:?} is {style:?}", n.app_id);
                     n.state.lock().unwrap().style = Some(style);
+                    // The desktop's icons: in their place, under every window (desktop.rs).
+                    if kind == vergence_protocol::window::WinKind::Desktop {
+                        let w = Win::Native(n.clone());
+                        self.desktop_place(&w);
+                    }
                     self.redraw_all();
                 }
             }

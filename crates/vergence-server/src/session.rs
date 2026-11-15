@@ -131,6 +131,8 @@ impl Server {
     }
 
     fn session_begin(&mut self) {
+        // The desktop's icons (desktop.rs) first, under whatever is restored.
+        self.desktop_start();
         let last = read();
         let (restore, strikes) = vergence_shell::session::at_start(last.pending, last.strikes);
         let clean = std::env::var_os("VERGENCE_CLEAN").is_some_and(|v| !v.is_empty());

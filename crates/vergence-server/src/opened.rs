@@ -78,7 +78,9 @@ impl Server {
         if self.shelf.minimized.iter().any(|(m, _)| m == w) {
             self.unminimize(w);
         }
-        self.space.raise_element(w, true);
+        if !self.is_desktop(w) {
+            self.space.raise_element(w, true);
+        }
         self.focus_window(w, smithay::utils::SERIAL_COUNTER.next_serial());
         tracing::info!("activate: {:?} forward", self.window_title(w));
         self.redraw_all();
