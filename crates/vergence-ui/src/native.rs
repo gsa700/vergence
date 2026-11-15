@@ -398,6 +398,13 @@ impl<'a> Native<'a> {
                 Command::Size(w, h) => self.send(WinRequest::Size { window: id, width: w as f64, height: h as f64 })?,
                 Command::Drag(label, items) => self.send(WinRequest::DragStart { window: id, label, items })?,
                 Command::Activate => self.send(WinRequest::Activate { window: id })?,
+                Command::ContextMenu(x, y) => {
+                    // The menu shows the commands as they are now.
+                    if let Some((terminal, commands)) = self.windows[i].app.get().commands() {
+                        self.send(WinRequest::Commands { window: id, terminal, commands })?;
+                    }
+                    self.send(WinRequest::ContextMenu { window: id, x: x as f64, y: y as f64 })?;
+                }
                 Command::Minimize => self.send(WinRequest::Minimize { window: id })?,
                 Command::Copy(text) => {
                     self.send(WinRequest::Copy { input_serial: self.input_serial, kinds: TEXT_KINDS.iter().map(|k| k.to_string()).collect() })?;

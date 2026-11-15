@@ -277,6 +277,10 @@ pub enum WinRequest {
     /// File Viewer going to the running Text Editor). The server grants it
     /// by the rule a new window takes the keyboard by (opened.rs).
     Activate { window: u32 },
+    /// Open the server's menu for this window at (x, y) in it, with the
+    /// window's commands (as last sent): a right click the program wants
+    /// answered in the desktop's own menu style (the desktop's icons; step 9).
+    ContextMenu { window: u32, x: f64, y: f64 },
 }
 
 /// A drag's data, all kinds together, at the most (a frame is 64 KB).
@@ -480,6 +484,7 @@ pub(crate) mod op {
     pub const DRAG_START: u16 = 120;
     pub const DRAG_ACCEPT: u16 = 121;
     pub const ACTIVATE: u16 = 122;
+    pub const CONTEXT_MENU: u16 = 123;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -834,6 +839,11 @@ impl WinRequest {
                 e.u32(*window);
                 e
             }
+            WinRequest::ContextMenu { window, x, y } => {
+                let mut e = Encoder::frame(op::CONTEXT_MENU);
+                e.u32(*window).f64(*x).f64(*y);
+                e
+            }
             WinRequest::BarStyle { window, style } => {
                 let mut e = Encoder::frame(op::BAR_STYLE);
                 e.u32(*window).u8(match style {
@@ -1007,6 +1017,7 @@ impl WinRequest {
                 WinRequest::DragAccept { window, action }
             }
             op::ACTIVATE => WinRequest::Activate { window: d.u32()? },
+            op::CONTEXT_MENU => WinRequest::ContextMenu { window: d.u32()?, x: finite(d.f64()?, "x")?, y: finite(d.f64()?, "y")? },
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -1423,6 +1434,7 @@ mod tests {
             WinRequest::DragStart { window: 1, label: "2 items".into(), items: vec![("text/uri-list".into(), b"file:///a\r\nfile:///b\r\n".to_vec()), ("text/plain".into(), b"/a\n/b".to_vec())] },
             WinRequest::DragAccept { window: 1, action: DROP_MOVE },
             WinRequest::Activate { window: 1 },
+            WinRequest::ContextMenu { window: 1, x: 40.0, y: 60.5 },
             WinRequest::BarStyle { window: 2, style: BarStyle::Desktop },
             WinRequest::Bar {
                 window: 1,

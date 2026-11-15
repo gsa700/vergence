@@ -52,6 +52,9 @@ pub struct Session {
     restored: Option<(Instant, Vec<String>)>,
     /// What the start came to, for `vctl session`.
     said: String,
+    /// An exit is closing the apps (exit.rs): the list stays as it was, so
+    /// they are started again at the next session's start.
+    pub exiting: bool,
 }
 
 fn path() -> Option<PathBuf> {
@@ -91,7 +94,7 @@ impl Server {
     /// Once a second: at the session's start, the applications of the last
     /// one are started; after that, the list of what is running is kept.
     pub fn session_tick(&mut self) {
-        if self.resume.off {
+        if self.resume.off || self.resume.exiting {
             return;
         }
         if !self.resume.begun {

@@ -133,6 +133,38 @@ enum Ask {
     Trust(PathBuf),
     /// A new name for a file.
     Rename(PathBuf, String),
+    /// A new folder's name.
+    NewFolder(String),
+    /// Empty the Trash for good?
+    EmptyTrash,
+}
+
+/// The right-click menu's commands (the server draws the menu; bus v18).
+mod cmd {
+    pub const OPEN: u32 = 1;
+    pub const CLOSE_UP: u32 = 2;
+    pub const RENAME: u32 = 3;
+    pub const DUPLICATE: u32 = 4;
+    pub const COPY: u32 = 5;
+    pub const TRASH: u32 = 6;
+    pub const SHOW: u32 = 7;
+    pub const EMPTY_TRASH: u32 = 8;
+    pub const EJECT: u32 = 9;
+    pub const NEW_FOLDER: u32 = 20;
+    pub const PASTE: u32 = 21;
+    pub const BY_NAME: u32 = 22;
+    pub const BY_KIND: u32 = 23;
+    pub const BY_DATE: u32 = 24;
+    pub const OPEN_FOLDER: u32 = 25;
+    pub const TERMINAL: u32 = 26;
+}
+
+/// The order icons not placed by hand take.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Order {
+    Name,
+    Kind,
+    Date,
 }
 
 #[derive(Clone, Debug)]
@@ -141,6 +173,7 @@ pub enum Msg {
     Allow,
     NameTyped(String),
     NameDone,
+    EmptyTrash,
     Cancel,
 }
 
@@ -166,6 +199,9 @@ pub struct Desktop {
     ask: Option<Ask>,
     notice: Option<String>,
     desktop_text: String,
+    order: Order,
+    /// The cell of the last right click (a new folder or a paste goes there).
+    menu_cell: Option<(i32, i32)>,
 }
 
 impl Desktop {
@@ -189,6 +225,8 @@ impl Desktop {
             ask: None,
             notice: None,
             desktop_text,
+            order: Order::Name,
+            menu_cell: None,
         };
         let _ = std::fs::create_dir_all(&d.dir);
         d.read();
@@ -203,7 +241,11 @@ impl Desktop {
     fn read(&mut self) {
         self.stamp = std::fs::metadata(&self.dir).and_then(|m| m.modified()).ok();
         let mut e: Vec<Entry> = files::read_folder(&self.dir).unwrap_or_default().into_iter().filter(|e| !e.name.starts_with('.')).collect();
-        e.sort_by(|a, b| files::natural(&a.name, &b.name));
+        match self.order {
+            Order::Name => e.sort_by(|a, b| files::natural(&a.name, &b.name)),
+            Order::Kind => e.sort_by(|a, b| b.dir.cmp(&a.dir).then_with(|| a.mime.map(|m| m.to_string()).cmp(&b.mime.map(|m| m.to_string()))).then_with(|| files::natural(&a.name, &b.name))),
+            Order::Date => e.sort_by(|a, b| b.changed.cmp(&a.changed)),
+        }
         // The fixed icons first: Home, the disks mounted, the Trash.
         let wants = |k: &str| vergence_ui::table_value(&self.desktop_text, "[desktop]", k).as_deref() != Some("false");
         let mut fixed: Vec<(String, Fixed, String, PathBuf)> = Vec::new();
@@ -337,6 +379,29 @@ impl Desktop {
         }
     }
 
+    /// These names to a cell or the next free ones down from it (none: they
+    /// take free cells as new icons do), then the folder read again.
+    fn place_at(&mut self, names: Vec<String>, at: Option<(i32, i32)>) {
+        if let Some(mut cell) = at {
+            let (cols, rows) = self.grid();
+            let next = |c: (i32, i32)| if c.1 + 1 >= rows { ((c.0 + 1) % cols.max(1), 0) } else { (c.0, c.1 + 1) };
+            for n in names {
+                self.placed.remove(&n);
+                let taken: HashSet<(i32, i32)> = self.placed.values().copied().collect();
+                let mut guard = 0;
+                while taken.contains(&cell) && guard < cols * rows {
+                    cell = next(cell);
+                    guard += 1;
+                }
+                self.placed.insert(n, cell);
+                cell = next(cell);
+            }
+            self.save_places();
+        }
+        self.read();
+        self.want_marks();
+    }
+
     fn start_launcher(&mut self, e: &Entry) {
         let Some(entry) = Desktop::entry_of(e) else {
             self.notice = Some(format!("“{}” is not a launcher this can start.", e.name));
@@ -422,6 +487,8 @@ impl Desktop {
                 b("Cancel", Msg::Cancel, false),
                 b("Allow and start", Msg::Allow, true),
             ],
+            (Some(Ask::NewFolder(text)), _) => vec![label("New folder").size(12.0), field(text.clone(), Msg::NameTyped).on_submit(Msg::NameDone).autofocus().width(Length::Fixed(260.0)).name("Name"), b("Cancel", Msg::Cancel, false), b("Make", Msg::NameDone, true)],
+            (Some(Ask::EmptyTrash), _) => vec![label("Empty the Trash? Its files are deleted for good.").size(12.0), b("Cancel", Msg::Cancel, false), b("Empty Trash", Msg::EmptyTrash, true)],
             (Some(Ask::Rename(_, text)), _) => vec![label("New name").size(12.0), field(text.clone(), Msg::NameTyped).on_submit(Msg::NameDone).autofocus().width(Length::Fixed(260.0)).name("Name"), b("Cancel", Msg::Cancel, false), b("Rename", Msg::NameDone, true)],
             (None, Some(n)) => vec![label(n.clone()).size(12.0).wrap().width(Length::Fixed(380.0)), b("OK", Msg::Cancel, false)],
             (None, None) => return None,
@@ -533,8 +600,30 @@ impl Program for Desktop {
                 }
             }
             Msg::NameTyped(s) => {
-                if let Some(Ask::Rename(_, t)) = &mut self.ask {
+                if let Some(Ask::Rename(_, t) | Ask::NewFolder(t)) = &mut self.ask {
                     *t = s;
+                }
+            }
+            Msg::NameDone if matches!(self.ask, Some(Ask::NewFolder(_))) => {
+                if let Some(Ask::NewFolder(name)) = self.ask.take() {
+                    let name = name.trim().to_string();
+                    if !name.is_empty() && !name.contains('/') {
+                        let to = self.dir.join(&name);
+                        if to.symlink_metadata().is_ok() {
+                            self.notice = Some(format!("Something named “{name}” is already here."));
+                        } else if let Err(e) = std::fs::create_dir(&to) {
+                            self.notice = Some(format!("The folder could not be made: {}", files::plain(&e)));
+                        } else {
+                            self.place_at(vec![name], self.menu_cell);
+                            self.chosen = vec![to];
+                        }
+                    }
+                }
+            }
+            Msg::EmptyTrash => {
+                self.ask = None;
+                if let Err(e) = ops::empty_trash() {
+                    self.notice = Some(format!("The Trash could not be emptied: {}", files::plain(&e)));
                 }
             }
             Msg::NameDone => {
@@ -562,6 +651,167 @@ impl Program for Desktop {
                 self.ask = None;
                 self.notice = None;
             }
+        }
+        self.want_marks();
+        window.redraw();
+    }
+
+    /// A right press: the icon under it chosen (or none), then the server's
+    /// menu with the commands for what is chosen. The clipboard's text, asked
+    /// for by Paste: its files copied here.
+    fn input(&mut self, input: &Input, window: &mut Window) -> bool {
+        match input {
+            Input::Button { button: vergence_ui::Button::Right, pressed: true, x, y, .. } => {
+                match self.icon_at(*x, *y) {
+                    Some(i) => {
+                        let p = self.entries[i].path.clone();
+                        if !self.chosen.contains(&p) {
+                            self.chosen = vec![p];
+                        }
+                    }
+                    None => self.chosen.clear(),
+                }
+                self.menu_cell = Some(self.cell_at(*x, *y));
+                window.redraw();
+                window.context_menu(*x, *y);
+                true
+            }
+            Input::Paste(text) => {
+                let paths: Vec<PathBuf> = text.lines().map(str::trim).filter(|l| !l.is_empty()).filter_map(|l| vergence_types::path_of_link(l).or_else(|| l.starts_with('/').then(|| PathBuf::from(l)))).filter(|p| p.symlink_metadata().is_ok()).collect();
+                if paths.is_empty() {
+                    return false;
+                }
+                let plan = ops::plan_paste(&paths, &self.dir, false, ops::Clash::KeepBoth);
+                let (_, error) = ops::run_paste(&plan, false, &Arc::new(ops::Progress::default()));
+                if let Some(e) = error {
+                    self.notice = Some(e);
+                }
+                let names = plan.iter().filter_map(|(_, to)| to.file_name().map(|n| n.to_string_lossy().into_owned())).collect();
+                self.place_at(names, self.menu_cell);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The commands for what is chosen: an icon's, or the bare desktop's.
+    fn commands(&self) -> Option<(bool, Vec<vergence_ui::AppCommand>)> {
+        use vergence_ui::AppCommand as C;
+        let chosen: Vec<&Entry> = self.entries.iter().filter(|e| self.chosen.contains(&e.path)).collect();
+        if chosen.is_empty() {
+            return Some((
+                false,
+                vec![
+                    C::own(cmd::NEW_FOLDER, "Desktop", "New folder", ""),
+                    C::own(cmd::PASTE, "Desktop", "Paste", ""),
+                    C::own(cmd::BY_NAME, "Desktop arrange", "Arrange by name", "").checked(self.order == Order::Name),
+                    C::own(cmd::BY_KIND, "Desktop arrange", "Arrange by kind", "").checked(self.order == Order::Kind),
+                    C::own(cmd::BY_DATE, "Desktop arrange", "Arrange by date", "").checked(self.order == Order::Date),
+                    C::own(cmd::OPEN_FOLDER, "Desktop open", "Open Desktop in File Viewer", ""),
+                    C::own(cmd::TERMINAL, "Desktop open", "Open Terminal here", ""),
+                ],
+            ));
+        }
+        let fixed: Vec<Fixed> = chosen.iter().filter_map(|e| self.fixed_of(e)).collect();
+        let files = chosen.len() - fixed.len();
+        let mut c = vec![C::own(cmd::OPEN, "Open", "Open", "Enter")];
+        if let [one] = chosen.as_slice()
+            && !one.dir
+            && !Desktop::launcher(one)
+        {
+            c.push(C::own(cmd::CLOSE_UP, "Open", "Open in Close-Up", ""));
+        }
+        if files > 0 {
+            if files == 1 && fixed.is_empty() {
+                c.push(C::own(cmd::RENAME, "Edit", "Rename…", "F2"));
+            }
+            c.push(C::own(cmd::DUPLICATE, "Edit", "Duplicate", ""));
+            c.push(C::own(cmd::COPY, "Edit", "Copy", ""));
+            c.push(C::own(cmd::TRASH, "Trash", "Move to the Trash", "Delete"));
+            c.push(C::own(cmd::SHOW, "Show", "Show in File Viewer", ""));
+        }
+        if fixed.contains(&Fixed::Trash) {
+            c.push(C::own(cmd::EMPTY_TRASH, "Trash", "Empty Trash…", ""));
+        }
+        if fixed.contains(&Fixed::Volume) {
+            c.push(C::own(cmd::EJECT, "Disk", "Eject", ""));
+        }
+        Some((false, c))
+    }
+
+    fn command(&mut self, id: u32, window: &mut Window) {
+        let chosen: Vec<Entry> = self.entries.iter().filter(|e| self.chosen.contains(&e.path)).cloned().collect();
+        let paths = self.chosen_files();
+        match id {
+            cmd::OPEN => {
+                let idx: Vec<usize> = self.entries.iter().enumerate().filter(|(_, e)| self.chosen.contains(&e.path)).map(|(i, _)| i).collect();
+                for i in idx {
+                    self.open(i);
+                }
+            }
+            cmd::CLOSE_UP => {
+                if let [one] = paths.as_slice() {
+                    let _ = std::process::Command::new("vergence-closeup").arg(one).spawn();
+                }
+            }
+            cmd::RENAME => {
+                if let [one] = paths.as_slice() {
+                    let name = one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    self.ask = Some(Ask::Rename(one.clone(), name));
+                }
+            }
+            cmd::DUPLICATE => {
+                let plan = ops::plan_paste(&paths, &self.dir, false, ops::Clash::KeepBoth);
+                let (_, error) = ops::run_paste(&plan, false, &Arc::new(ops::Progress::default()));
+                if let Some(e) = error {
+                    self.notice = Some(e);
+                }
+                self.read();
+            }
+            cmd::COPY => window.copy(&paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join("\n")),
+            cmd::TRASH => {
+                for p in &paths {
+                    if let Err(e) = ops::trash(p) {
+                        self.notice = Some(format!("“{}” could not be moved to the Trash: {e}", p.file_name().unwrap_or_default().to_string_lossy()));
+                        break;
+                    }
+                }
+                self.read();
+            }
+            cmd::SHOW => {
+                let _ = std::process::Command::new("vergence-files").arg(&self.dir).spawn();
+            }
+            cmd::EMPTY_TRASH => self.ask = Some(Ask::EmptyTrash),
+            cmd::EJECT => {
+                let disks: Vec<Entry> = chosen.iter().filter(|e| self.fixed_of(e) == Some(Fixed::Volume)).cloned().collect();
+                for e in disks {
+                    let ok = std::process::Command::new("umount").arg(&e.path).status().is_ok_and(|s| s.success());
+                    if !ok {
+                        self.notice = Some(format!("“{}” could not be ejected: it may be in use, or need its owner to unmount it.", e.path.display()));
+                    }
+                }
+                self.read();
+            }
+            cmd::NEW_FOLDER => self.ask = Some(Ask::NewFolder("New folder".into())),
+            cmd::PASTE => window.paste(),
+            cmd::BY_NAME | cmd::BY_KIND | cmd::BY_DATE => {
+                self.order = match id {
+                    cmd::BY_KIND => Order::Kind,
+                    cmd::BY_DATE => Order::Date,
+                    _ => Order::Name,
+                };
+                // Arranged afresh: the cells placed by hand let go.
+                self.placed.clear();
+                self.save_places();
+                self.read();
+            }
+            cmd::OPEN_FOLDER => {
+                let _ = std::process::Command::new("vergence-files").arg(&self.dir).spawn();
+            }
+            cmd::TERMINAL => {
+                let _ = std::process::Command::new("vergence-term").current_dir(&self.dir).spawn();
+            }
+            _ => {}
         }
         self.want_marks();
         window.redraw();
@@ -688,7 +938,6 @@ impl Program for Desktop {
     }
 
     fn dropped(&mut self, x: f32, y: f32, action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
-        let (cols, rows) = self.grid();
         let (c0, r0) = self.cell_at(x, y);
         // The fixed icons, moved on the desktop.
         let fixed_keys: Vec<String> = items.iter().find(|(k, _)| k == FIXED_KIND).map(|(_, v)| String::from_utf8_lossy(v).lines().map(str::to_string).filter(|k| self.fixed.contains_key(k)).collect()).unwrap_or_default();
@@ -735,22 +984,7 @@ impl Program for Desktop {
             }
             plan.iter().filter_map(|(_, to)| to.file_name().map(|n| n.to_string_lossy().into_owned())).collect()
         };
-        // Each to the drop's cell or the next free one down from it.
-        let mut cell = (c0, r0);
-        for n in names {
-            self.placed.remove(&n);
-            let taken: HashSet<(i32, i32)> = self.placed.values().copied().collect();
-            let mut guard = 0;
-            while taken.contains(&cell) && guard < cols * rows {
-                cell = if cell.1 + 1 >= rows { ((cell.0 + 1) % cols.max(1), 0) } else { (cell.0, cell.1 + 1) };
-                guard += 1;
-            }
-            self.placed.insert(n, cell);
-            cell = if cell.1 + 1 >= rows { ((cell.0 + 1) % cols.max(1), 0) } else { (cell.0, cell.1 + 1) };
-        }
-        self.save_places();
-        self.read();
-        self.want_marks();
+        self.place_at(names, Some((c0, r0)));
         window.redraw();
     }
 

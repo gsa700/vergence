@@ -471,6 +471,7 @@ enum Message {
     DockEdge(usize),
     /// Icons on the desktop (files milestone 1, step 9): desktop.toml `[desktop] icons`.
     DesktopIcons(bool),
+    Restore(usize),
     DockScreen(usize),
     DockGap(f32),
     DockOpacity(f32),
@@ -1012,6 +1013,12 @@ impl App {
                 let t = d.entry("desktop").or_insert_with(|| toml::Value::Table(toml::Table::new()));
                 if let Some(t) = t.as_table_mut() {
                     t.insert("icons".into(), on.into());
+                }
+            }),
+            Message::Restore(i) => self.save(|d| {
+                let t = d.entry("session").or_insert_with(|| toml::Value::Table(toml::Table::new()));
+                if let Some(t) = t.as_table_mut() {
+                    t.insert("restore".into(), (i == 0).into());
                 }
             }),
             Message::Contrast(on) => self.save_appearance(|t| {
@@ -2368,7 +2375,7 @@ impl App {
         self.page_layout(
             "Dock",
             "Where the dock sits and how it looks, and the applications pinned to it. It follows at once.",
-            vec![self.group(Some("Place"), place), self.group(Some("Look"), look), self.group(Some("Pinned"), pins), self.desktop_group(), self.status_line()],
+            vec![self.group(Some("Place"), place), self.group(Some("Look"), look), self.group(Some("Pinned"), pins), self.desktop_group(), self.session_group(), self.status_line()],
         )
     }
 
@@ -2381,6 +2388,20 @@ impl App {
                 "Icons on the desktop",
                 "The files in your Desktop folder, over the wallpaper. Super+D shows the desktop. From the next login.",
                 switch(on, Message::DesktopIcons).name("Icons on the desktop"),
+            )],
+        )
+    }
+
+    /// Session restore (desktop.toml `[session] restore`): the apps open at
+    /// the end of a session started again at the next, or none.
+    fn session_group(&self) -> Element<Message> {
+        let on = self.desktop.get("session").and_then(|d| d.get("restore")).and_then(|v| v.as_bool()).unwrap_or(true);
+        self.group(
+            Some("Session"),
+            vec![setting(
+                "When Vergence starts",
+                "Reopen the applications that were open when you last exited (their windows go back where they were), or start with none open.",
+                choice(vec!["Reopen the apps that were open".into(), "Start with no apps open".into()], Some(if on { 0 } else { 1 }), Message::Restore).width(Length::Fixed(260.0)).name("When Vergence starts"),
             )],
         )
     }

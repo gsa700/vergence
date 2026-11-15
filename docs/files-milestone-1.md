@@ -485,6 +485,32 @@ the wallpaper, a scratch place for launchers and files.
   right, the desktop's menu colors; the arrows step over faint lines. Seen
   on kepler: Home and the Trash on the desktop; the menu in Close-Up's text
   view. Tests: Hubble 614, kepler 610, Techbench 614.
+- **The desktop's right-click menu and Exit Vergence** (2026-11-15, Dave:
+  "Yes to the rest as you see fit", "We might want to confirm on logout
+  though?", "we could make that a system setting: Session Restore"): bus
+  v18 `WinRequest::ContextMenu { window, x, y }` (toolkit
+  `Window::context_menu`; the commands as they are now are sent first): the
+  server draws a native window's right-click menu from its enabled commands
+  grouped by menu, in the desktop menu's style. File Viewer's desktop
+  answers its own right presses: on an icon, Open, Open in Close-Up,
+  Rename…, Duplicate, Copy, Move to the Trash, Show in File Viewer (Empty
+  Trash… on the Trash, Eject on a disk, by `umount`); on the bare desktop,
+  New folder (at the cell clicked), Paste (the clipboard's paths copied
+  in), Arrange by name/kind/date (the hand-placed cells let go), Open
+  Desktop in File Viewer, Open Terminal here, then the server's own entries
+  (Change wallpaper…, Display settings…, Settings…, Exit Vergence…). The
+  server's bare-desktop menu dropped its hard-coded app list (the dock and
+  launcher have the apps; desktop.toml `[[menu.item]]` still adds some).
+  Exit Vergence… asks (Exit: close all apps / Cancel), then the server's
+  exit.rs asks every window to close as its close button would, holds the
+  session's list of running apps (so the next start reopens them), and ends
+  once none is left; an app still open after 8 s (asking about unsaved
+  work) stops the exit with a card that says which. Settings > Dock >
+  Session: "When Vergence starts" reopen the apps that were open, or start
+  with none (`[session] restore`). The toolkit: an autofocused field
+  chooses its text when it appears, so typing replaces a name offered. Seen
+  on kepler: both menus, New folder, Move to the Trash, the exit asking the
+  editor and stopping with its card. Tests: 71 suites green on all three.
 ## Steps
 
 1. **vergence-types**: the database reader (globs2, magic, subclasses,

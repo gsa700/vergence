@@ -333,15 +333,6 @@ impl Server {
             self.native_drag_drop(pos);
         }
         let under = self.target_at(pos);
-        // A right press on the desktop's icons' window is the desktop's menu, as on the wallpaper.
-        if state == ButtonState::Pressed
-            && button == vergence_seat::BTN_RIGHT
-            && let Some(Target::Native(id)) = under
-            && self.input.wins.get(&id).is_some_and(|w| self.is_desktop(w))
-        {
-            self.open_menu(pos);
-            return;
-        }
         let mods = self.seat.get_keyboard().map(|k| k.modifier_state()).map(|m| vergence_seat::keyboard::Mods { ctrl: m.ctrl, alt: m.alt, shift: m.shift, logo: m.logo }).unwrap_or_default();
         let now = self.start_time.elapsed().as_millis() as u64;
         let out = self.input.seat.button(button, state == ButtonState::Pressed, under, mods, now);

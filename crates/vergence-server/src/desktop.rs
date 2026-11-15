@@ -5,8 +5,9 @@
 // sizes to the main screen's work area and keeps under every other window:
 // never raised, no bar or border, out of the dock, Alt+Tab, window memory
 // and the session's list; a click on it gives it the keyboard as any
-// window. A right press on it is the desktop's menu (the server's), as on
-// the bare wallpaper.
+// window. A right press on it File Viewer answers: it asks the server for
+// its menu (bus v18 WinRequest::ContextMenu), the icon's commands or, on the
+// bare desktop, New folder, Paste... with the desktop menu's own entries.
 //
 // The session starts it (session.rs, at the session's start) unless
 // desktop.toml `[desktop] icons = false` (Settings > Desktop).

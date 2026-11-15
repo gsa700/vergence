@@ -7,6 +7,7 @@ mod dispatch;
 mod portal;
 mod drag;
 mod desktop;
+mod exit;
 mod keys;
 mod input;
 mod state;

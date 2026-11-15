@@ -1,16 +1,20 @@
-// The desktop menu (server milestone 1, 2026-11-07): right-click on the bare
-// desktop for a list of apps and "Exit Vergence". Drawn by the server like the
+// The desktop menu (server milestone 1, 2026-11-07; reshaped 2026-11-15,
+// files milestone 1): right-click on the bare desktop, or on the desktop's
+// icons, for Open Terminal, the settings' pages, and "Exit Vergence…", which
+// asks first and closes the apps before ending (exit.rs); a window's right
+// click it asks the server to answer (WinRequest::ContextMenu) shows the
+// window's commands first (the desktop's icons: New folder, Open, Rename...). Drawn by the server like the
 // title bars (solid colors, text rasterized per monitor at its own pixels), sized
 // in points so it is the same physical size on every monitor.
 //
-// The apps: [[menu.item]] entries in ~/.config/vergence/desktop.toml
+// Apps of one's own on it: [[menu.item]] entries in ~/.config/vergence/desktop.toml
 //
 //     [[menu.item]]
 //     name = "Terminal"
 //     exec = "foot"
 //
-// or, without any, the usual apps that are installed (Vergence's terminal,
-// settings, browser, files, AlbumWall). Re-read each time the menu opens.
+// (none by default: applications are the dock's and the launcher's). Re-read
+// each time the menu opens.
 
 use std::collections::HashMap;
 
@@ -60,7 +64,16 @@ enum Entry {
     /// calls it. Layouts have a small picture before their name.
     Layout(crate::win::Win, LayoutAct, String),
     Separator,
+    /// A command of a window's (its context menu, WinRequest::ContextMenu):
+    /// the window, the command's id, what the menu calls it.
+    Command(crate::win::Win, u32, String),
+    /// A program to start (Settings at a page, the Terminal), and its name.
+    Run(String, Vec<String>),
+    /// "Exit Vergence…": asks first (Dave, 2026-11-15: "confirm on logout").
     Exit,
+    /// The answer: every app asked to close, then the session ends (exit.rs).
+    ExitNow,
+    Cancel,
 }
 
 /// What a window's menu does.
@@ -121,44 +134,24 @@ pub struct OpenMenu {
 }
 
 /// The apps for the menu: desktop.toml's, else the usual ones that are installed.
-fn apps() -> Vec<Item> {
-    let configured = crate::wallpaper::desktop_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|t| toml::from_str::<MenuFile>(&t).ok())
-        .map(|f| f.menu.item)
-        .unwrap_or_default();
-    if !configured.is_empty() {
-        return configured;
-    }
-    let here = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()));
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
-    let mut out = Vec::new();
-    let mut add = |name: &str, exec: Option<String>| {
-        if let Some(exec) = exec {
-            out.push(Item { name: name.into(), exec });
+/// The desktop's own entries, after a window's or the Terminal: settings, then Exit.
+fn desktop_entries() -> Vec<Entry> {
+    let settings = |label: &str, page: Option<&str>| {
+        let mut argv = vec!["vergence-settings".to_string()];
+        if let Some(p) = page {
+            argv.extend(["--page".to_string(), p.to_string()]);
         }
+        Entry::Run(label.into(), argv)
     };
-    // Our own terminal and settings app, beside the server (a checkout's
-    // target/release, or the installed bin directory), else on PATH; foot only if
-    // the terminal isn't there at all (Dave, 2026-11-08: "no more dirty foot").
-    let beside = |name: &str| here.as_ref().map(|d| d.join(name)).filter(|p| p.exists()).map(|p| p.display().to_string()).or_else(|| on_path(name));
-    add("Terminal", beside("vergence-term").or_else(|| on_path("foot")));
-    add("Settings", beside("vergence-settings"));
-    add("Firefox", on_path("firefox"));
-    add("Files", on_path("thunar"));
-    let albumwall = home.join(".local/share/albumwall/AlbumWall");
-    add("AlbumWall", albumwall.exists().then(|| albumwall.display().to_string()));
-    out
+    vec![Entry::Separator, settings("Change wallpaper…", Some("wallpaper")), settings("Display settings…", Some("screens")), settings("Settings…", None), Entry::Separator, Entry::Exit]
 }
 
-/// A command's name if it is on PATH.
-fn on_path(cmd: &str) -> Option<String> {
-    std::env::var_os("PATH")?
-        .to_str()?
-        .split(':')
-        .any(|d| std::path::Path::new(d).join(cmd).is_file())
-        .then(|| cmd.to_string())
+/// Applications desktop.toml's [[menu.item]] puts on the desktop menu (none by default).
+fn configured_apps() -> Vec<Item> {
+    crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| toml::from_str::<MenuFile>(&t).ok()).map(|f| f.menu.item).unwrap_or_default()
 }
+
+
 
 impl OpenMenu {
     fn height(&self) -> i32 {
@@ -203,11 +196,46 @@ impl Server {
 
     /// Open the desktop menu at the pointer, kept on its monitor.
     pub fn open_menu(&mut self, pos: Point<f64, Logical>) {
-        let mut entries: Vec<Entry> = apps().into_iter().map(Entry::App).collect();
+        // Applications are the dock's and the launcher's now; the desktop's own
+        // things here (2026-11-15). Apps a desktop.toml names still come first.
+        let mut entries: Vec<Entry> = configured_apps().into_iter().map(Entry::App).collect();
         if !entries.is_empty() {
             entries.push(Entry::Separator);
         }
-        entries.push(Entry::Exit);
+        entries.push(Entry::Run("Open Terminal".into(), vec!["vergence-term".into()]));
+        entries.extend(desktop_entries());
+        self.open_entries(pos, entries);
+    }
+
+    /// The menu for a window's right click (WinRequest::ContextMenu): its
+    /// commands, grouped by their menus; for the desktop's icons, the
+    /// desktop's own things after them.
+    pub fn open_context_menu(&mut self, w: &crate::win::Win, pos: Point<f64, Logical>) {
+        let (commands, _) = w.native().map(|n| n.commands()).unwrap_or_default();
+        let mut entries = Vec::new();
+        let mut group: Option<String> = None;
+        for c in commands.iter().filter(|c| c.enabled) {
+            if group.as_ref().is_some_and(|g| *g != c.menu) {
+                entries.push(Entry::Separator);
+            }
+            group = Some(c.menu.clone());
+            // A command that is on says so (Arrange by name).
+            let label = c.label_shown("");
+            entries.push(Entry::Command(w.clone(), c.id, if c.checked == Some(true) { format!("{label}  •") } else { label }));
+        }
+        // The desktop's own entries on the bare desktop (its commands all in
+        // groups named "Desktop..."), not on its icons' menu.
+        if self.is_desktop(w) && commands.iter().all(|c| c.menu.starts_with("Desktop")) {
+            entries.extend(desktop_entries());
+        }
+        if entries.is_empty() {
+            return;
+        }
+        self.open_entries(pos, entries);
+    }
+
+    /// A menu of these entries at `pos`, kept on its screen.
+    fn open_entries(&mut self, pos: Point<f64, Logical>, entries: Vec<Entry>) {
         let ids = (0..6 + entries.len()).map(|_| Id::new()).collect();
         let icons = (0..5 * entries.len()).map(|_| Id::new()).collect();
         let mut m = OpenMenu {
@@ -397,11 +425,36 @@ impl Server {
                     self.layout_act(&w, act);
                 }
             }
-            Entry::Exit => {
-                tracing::info!("menu: exit");
-                self.loop_signal.stop();
+            Entry::Command(w, id, label) => {
+                tracing::info!("context menu: {label}");
+                if let crate::win::Win::Native(n) = w {
+                    self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::Command { window: n.id, id: *id }));
+                }
             }
-            Entry::Separator => {}
+            Entry::Run(label, argv) => {
+                tracing::info!("menu: {label}");
+                if let Some((p, rest)) = argv.split_first() {
+                    let mut c = std::process::Command::new(p);
+                    c.args(rest);
+                    // The Terminal opens in the Desktop folder.
+                    if p == "vergence-term" && let Some(d) = crate::desktop::desktop_dir().filter(|d| d.is_dir()) {
+                        c.current_dir(d);
+                    }
+                    if let Err(e) = crate::spawn(&mut c) {
+                        tracing::warn!("menu: {p}: {e}");
+                    }
+                }
+            }
+            Entry::Exit => {
+                // Asked first: the same place, the answer.
+                let at = m.at.to_f64();
+                self.open_entries(at, vec![Entry::ExitNow, Entry::Cancel]);
+            }
+            Entry::ExitNow => {
+                tracing::info!("menu: exit, the apps asked to close first");
+                self.begin_exit();
+            }
+            Entry::Separator | Entry::Cancel => {}
         }
     }
 
@@ -441,7 +494,11 @@ impl Server {
                 Entry::Shelf(_, label) => label.clone(),
                 Entry::Tab(_, _, _, label) => label.clone(),
                 Entry::Layout(_, _, label) => label.clone(),
-                Entry::Exit => "Exit Vergence".into(),
+                Entry::Command(_, _, label) => label.clone(),
+                Entry::Run(label, _) => label.clone(),
+                Entry::Exit => "Exit Vergence…".into(),
+                Entry::ExitNow => "Exit: close all apps".into(),
+                Entry::Cancel => "Cancel".into(),
                 Entry::Separator => continue,
             };
             let Some(font) = font else { continue };

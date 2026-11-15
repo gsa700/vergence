@@ -201,6 +201,13 @@ fn a_field_that_asks_for_the_keyboard_gets_it_when_it_appears() {
 }
 
 #[test]
+fn a_name_offered_in_a_field_that_asks_for_the_keyboard_is_replaced_by_typing() {
+    let mut ui = laid(column(vec![two_buttons()]), 300.0, 100.0);
+    ui.layout(column(vec![two_buttons(), field("New folder", Msg::Text).autofocus().name("Name")]), 300.0, 100.0, &mut Fixed, 13.0);
+    assert_eq!(type_text(&mut ui, "x"), vec![Msg::Text("x".into())]);
+}
+
+#[test]
 fn tab_walks_the_controls_and_enter_presses() {
     let mut ui = laid(column(vec![two_buttons(), button(label("C")).on_press(Msg::C)]), 300.0, 100.0);
     assert_eq!(ui.focused(), None);

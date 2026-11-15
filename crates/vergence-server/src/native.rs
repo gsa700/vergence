@@ -505,6 +505,14 @@ impl Server {
             // A size asked for (bus v12): within its limits and its screen's work
             // area, kept where it is unless its right or bottom edge would leave the
             // screen; not while maximized, snapped or full screen.
+            // Its right click, answered by the server's menu (bus v18; menu.rs).
+            WinRequest::ContextMenu { window, x, y } => {
+                if let Some(w) = self.natives.get(&(client, window)).cloned() {
+                    let loc = self.space.element_location(&w).unwrap_or_default();
+                    let at = smithay::utils::Point::<f64, smithay::utils::Logical>::from((loc.x as f64 + x, loc.y as f64 + y));
+                    self.open_context_menu(&w, at);
+                }
+            }
             // Come forward (bus v16): by the rule new windows take the keyboard by.
             WinRequest::Activate { window } => {
                 if let Some(w) = self.natives.get(&(client, window)).cloned() {

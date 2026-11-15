@@ -326,8 +326,13 @@ impl<M: Clone> Ui<M> {
         self.hover = alive(self.hover, &self.nodes);
         self.focus = alive(self.focus, &self.nodes).filter(|id| self.nodes.iter().any(|n| n.id == *id && n.focusable()));
         // A field that asks for the keyboard gets it when it first appears.
+        // A field's text is chosen then, so typing replaces it (a name offered).
+        let mut choose_all = None;
         if let Some(n) = self.nodes.iter().find(|n| matches!(n.what, What::Field { autofocus: true, .. } | What::Area { autofocus: true, .. }) && !before.contains(&n.id)) {
             self.focus = Some(n.id);
+            if matches!(n.what, What::Field { .. }) {
+                choose_all = Some(n.id);
+            }
         }
         if self.pressed.is_some_and(|(id, _)| alive(Some(id), &self.nodes).is_none()) {
             self.pressed = None;
@@ -354,6 +359,9 @@ impl<M: Clone> Ui<M> {
                     }
                     f.caret = boundary(&f.text, f.caret);
                     f.anchor = boundary(&f.text, f.anchor);
+                    if choose_all == Some(n.id) {
+                        (f.anchor, f.caret) = (0, f.text.len());
+                    }
                 }
                 What::Scroll { content } => {
                     let s = self.scrolls.entry(n.id).or_default();

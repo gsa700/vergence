@@ -372,6 +372,8 @@ enum Command {
     Drag(String, Vec<(String, Vec<u8>)>),
     /// Forward with the keyboard, if the server agrees.
     Activate,
+    /// The server's menu with the window's commands, at this point in it.
+    ContextMenu(f32, f32),
 }
 
 /// What a program may ask of its window while it handles input.
@@ -410,6 +412,13 @@ impl Window {
     /// keyboard anyway: no stealing focus.
     pub fn activate(&mut self) {
         self.commands.push(Command::Activate);
+    }
+
+    /// Asks the server to open its menu here (window points) with the
+    /// window's commands: a right click answered in the desktop's menu style.
+    /// The commands are sent first if they changed. The native road only.
+    pub fn context_menu(&mut self, x: f32, y: f32) {
+        self.commands.push(Command::ContextMenu(x, y));
     }
 
     /// Lets the user move the window with the button that was just pressed.
@@ -1303,7 +1312,7 @@ impl<'a> Runner<'a> {
                 Command::Size(..) => {}
                 // Drags under other desktops: Wayland drag and drop, later;
                 // activation: xdg-activation, later.
-                Command::Drag(..) | Command::Activate => {}
+                Command::Drag(..) | Command::Activate | Command::ContextMenu(..) => {}
                 Command::Minimize => self.client.set_minimized(toplevel)?,
                 Command::Copy(text) => {
                     if let (Some(manager), Some(device)) = (self.data_manager, self.data_device) {
