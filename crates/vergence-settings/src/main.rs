@@ -445,6 +445,8 @@ enum Message {
     /// Windows tinted with the wallpaper's color (window styles milestone 1).
     /// Off, Subtle, Standard, Strong.
     WallpaperTint(usize),
+    /// Under the bar: 0 the titles' contrast first, 1 more of the window.
+    UnderBar(usize),
     /// Words spelled wrong marked in every native app's text (editor milestone 1).
     Spellcheck(bool),
     /// The size of controls: the desktop's (Appearance), a screen's own (Screens).
@@ -1004,6 +1006,13 @@ impl App {
             }
             Message::Transparency(on) => self.save_appearance(|t| {
                 t.insert("reduce-transparency".into(), on.into());
+            }),
+            Message::UnderBar(k) => self.save_appearance(|t| {
+                if k == 1 {
+                    t.insert("under-bar".into(), "more".into());
+                } else {
+                    t.remove("under-bar");
+                }
             }),
             Message::WallpaperTint(k) => self.save_appearance(|t| {
                 t.insert("wallpaper-tint".into(), (k > 0).into());
@@ -1716,6 +1725,14 @@ impl App {
                 ]),
                 self.group(Some("Desktop look"), vec![
                     setting("Frost", "How much of a window shows through its bar. Titles stay readable whatever is under them.", choice(frost_names, Some(frost), Message::Frost).width(Length::Fixed(160.0)).name("Frost")),
+                    setting(
+                        "Under the bar",
+                        "What scrolls up under a window's bar: kept faint so the bar's titles are crisp over anything, or shown more, the titles still readable.",
+                        {
+                            let more = self.desktop.get("appearance").and_then(|a| a.get("under-bar")).and_then(|v| v.as_str()) == Some("more");
+                            choice(vec!["Titles first".to_string(), "Show more".to_string()], Some(more as usize), Message::UnderBar).width(Length::Fixed(160.0)).name("Under the bar")
+                        },
+                    ),
                     setting("Tab in front", "In the page's own color, joined to it, or frosted like the rest of the bar.", choice(front_names, Some(front), Message::FrontTab).width(Length::Fixed(160.0)).name("Tab in front")),
                     setting("Size of controls", "Window bars, tabs and buttons. A screen with a touch panel uses Large unless its own setting says otherwise (Screens).", choice(controls_names, Some(controls), Message::Controls).width(Length::Fixed(160.0)).name("Size of controls")),
                     setting(

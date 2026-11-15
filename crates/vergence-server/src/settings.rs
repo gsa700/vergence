@@ -122,6 +122,8 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
     };
     put(LOOK, "frost", SettingValue::U32(frost));
     put(LOOK, "front-tab", SettingValue::U32((text("front-tab").as_deref() == Some("frosted")) as u32));
+    // Under the bar: the titles' contrast first (0), or more of the window shown (1).
+    put(LOOK, "under-bar", SettingValue::U32((text("under-bar").as_deref() == Some("more")) as u32));
     put(LOOK, "reduce-transparency", SettingValue::Bool(appearance.get("reduce-transparency").and_then(|v| v.as_bool()).unwrap_or(false)));
     // Size of controls (look milestone 1, step 8): the desktop's, and each
     // screen's own ("size:<monitor id>", 3 for Automatic: Large where a touch
@@ -252,6 +254,12 @@ impl Server {
         if changed("font-name") {
             self.title_font = crate::text::TextFont::load();
             // Title rasters are drawn again in the new font.
+            self.decor.clear();
+        }
+        // The look (frost, under the bar, front tab, sizes): every bar and its
+        // frost built again, or damage tracking would keep the old ones on
+        // screen until something else moved (found 2026-11-15).
+        if diff.iter().any(|s| s.namespace == LOOK) {
             self.decor.clear();
         }
         if diff.iter().any(|s| s.namespace == KEYBOARD) {

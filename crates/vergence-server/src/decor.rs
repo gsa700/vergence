@@ -658,8 +658,15 @@ impl Server {
         let frost = self.frost_program(renderer);
         let round = self.round_program(renderer);
         let mut reinset: Vec<Win> = Vec::new();
-        let strength = vergence_look::frost_strength(self.look_setting("frost"));
-        let frost_r = vergence_look::frost_radius(self.look_setting("frost"));
+        // The frost's contrast floor: the titles first, or more of the window
+        // shown: then also half the base tint and the Clear step's shorter blur
+        // (the floor alone changes nothing over dark text, which the blur and
+        // the base tint hide before the floor ever adds any; kepler,
+        // 2026-11-15). The floor still adds tint wherever the titles need it.
+        let show_more = self.look_setting("under-bar") == 1;
+        let strength = vergence_look::frost_strength(self.look_setting("frost")) * if show_more { 0.5 } else { 1.0 };
+        let frost_r = if show_more { vergence_look::frost_radius(self.look_setting("frost")).min(vergence_look::frost_radius(0)) } else { vergence_look::frost_radius(self.look_setting("frost")) };
+        let need_of = |light: bool, active: bool| if show_more { vergence_look::frost_need_more(active) } else { vergence_look::frost_need(light, active) };
         let front_frosted = self.look_setting("front-tab") == 1;
         self.decor.retain(|w, _| w.alive());
         // A window on its way back from the dock is put in its place when it arrives.
@@ -913,7 +920,7 @@ impl Server {
                             tint: crate::backdrop::unit(ground),
                             strength,
                             ink: crate::backdrop::unit(ink),
-                            need: vergence_look::frost_need(light, active),
+                            need: need_of(light, active),
                             radius: frost_r * scale as f32,
                             corner: 0.0,
                             bottom: false,
@@ -946,7 +953,7 @@ impl Server {
                             Uniform::new("radius", UniformValue::_1f(frost_r * per_point as f32)),
                             Uniform::new("tint", UniformValue::_4f(gr, gg, gb, strength)),
                             Uniform::new("ink", UniformValue::_3f(ir, ig, ib)),
-                            Uniform::new("need", UniformValue::_1f(vergence_look::frost_need(light, active))),
+                            Uniform::new("need", UniformValue::_1f(need_of(light, active))),
                             Uniform::new("corner", UniformValue::_1f(if rounded { vergence_look::RADIUS * per_point as f32 } else { 0.0 })),
                             Uniform::new("bottom", UniformValue::_1f(0.0)),
                             // A bar of the other style than its window's ground (the

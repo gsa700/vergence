@@ -219,6 +219,16 @@ pub const fn frost_radius(step: u32) -> f32 {
 /// that made the focused bar look dimmer than the unfocused one: Dave,
 /// 2026-11-14; 14:1 for the focused bar fixed that but washed out
 /// everything under the bar.)
+/// The gentler floor the desktop may choose instead (Settings > Appearance,
+/// "Under the bar: show more of the window"; Dave, 2026-11-15, after the
+/// frost all but hid a terminal's text under a dark bar): the bare frost
+/// keeps the bar's ink at the usual minimum, 4.5:1 focused and 3:1 not, so
+/// more of what is under the bar shows; a shape laid on the frost may then
+/// read a little below it.
+pub const fn frost_need_more(focused: bool) -> f32 {
+    if focused { 4.5 } else { 3.0 }
+}
+
 pub const fn frost_need(light: bool, focused: bool) -> f32 {
     match (light, focused) {
         (false, true) => 7.0,
