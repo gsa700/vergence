@@ -1,4 +1,4 @@
-# Files milestone 1: file types, the file chooser for every app, the Viewer, the File Manager
+# Files milestone 1: file types, the file chooser for every app, Close-Up, File Viewer
 
 **Drafted 2026-11-15**, item 5 of docs/apps-roadmap.md. **Draft: the
 questions at the end are for Dave.**
@@ -8,9 +8,11 @@ and video not now, their own milestone with the borrowing question then);
 4 b (our own file type table, not the system's database: written by us,
 since shared-mime-info's data is GPL and the workspace is Apache-2.0 OR
 GPL-2.0-or-later); 7 to revisit (only the system's mounts until then).
-3, 5 and 6 in discussion. 8: the file manager is named **File Viewer**
-(after NeXTSTEP Workspace Manager's File Viewer window); the viewer's name
-in discussion.
+3, 5 and 6 in discussion. 8: the file manager is **File Viewer** (after
+NeXTSTEP Workspace Manager's File Viewer window), its quick look is
+**Preview** (the space bar or a preview pane), and the full app is
+**Close-Up**, the step after Preview (`vergence-closeup`; the launcher finds
+it as "closeup" and "close up" too).
 
 Dave's words: File manager "with space bar preview ala macOS finder ...
 remote file system support as well (using native OS tools?)". Viewer:
@@ -46,7 +48,7 @@ item 5" (2026-11-15).
   the platform allows.
 - **Native windows have a clipboard (bus window protocol
   `ClipboardOffer`/`ClipboardSend`) but no drag and drop.** Dragging files
-  out of the File Manager needs it.
+  out of File Viewer needs it.
 
 ## Design
 
@@ -113,8 +115,8 @@ choices (extra check boxes or menus, shown under the list).
 
 ### 3. Decoding, kept apart (`vergence-decode`)
 
-Pictures from anywhere are untrusted input (§6.10, §7.3). The Viewer, the
-File Manager's previews and thumbnails, and the file chooser all decode
+Pictures from anywhere are untrusted input (§6.10, §7.3). Close-Up, the
+File Viewer's previews and thumbnails, and the file chooser all decode
 through one helper process: it reads one file, decodes it, and returns the
 pixels over a pipe as shared memory. It runs with nothing else: Capsicum
 `cap_enter` on FreeBSD after opening the file; on Linux, closed descriptors
@@ -123,7 +125,7 @@ crash or a hang (5 s) in a bad file costs a "Could not be shown" in the
 app, never the app. Formats: PNG, JPEG, SVG now (what is already borrowed),
 others by question 3.
 
-### 4. The Viewer (`vergence-view`)
+### 4. Close-Up (`vergence-closeup`)
 
 A standalone app, one process for all its windows (tabs in the server's
 bar, as the terminal and the editor do).
@@ -135,14 +137,14 @@ bar, as the terminal and the editor do).
   Manager sorts). Transparency on a checkerboard.
 - **Text**: shown read-only in the toolkit's text area, with "Open in Text
   Editor".
-- **PDF and video**: by question 2. Without them, the Viewer says it cannot
+- **PDF and video**: by question 2. Without them, Close-Up says it cannot
   show this type and offers the app that can (section 1).
-- **Preview mode** (`vergence-view --preview`): the same viewer in a
-  borderless palette window, for the File Manager's space bar. It follows
-  the File Manager's selection over the bus. Space or Escape closes it;
-  "Open with Viewer" makes it a full window.
+- **Preview mode** (`vergence-closeup --preview`): the same viewer in a
+  borderless palette window, for File Viewer's space bar. It follows
+  File Viewer's selection over the bus. Space or Escape closes it;
+  "Open in Close-Up" makes it a full window.
 
-### 5. The File Manager (`vergence-files`)
+### 5. File Viewer (`vergence-files`)
 
 - **The window**: a sidebar (the dialog's places, now shared: Home and its
   folders, Recent, the computer, disks and network mounts, Trash, and
@@ -150,8 +152,11 @@ bar, as the terminal and the editor do).
   modified; sorted by any) or **icons**, the path as buttons in the
   toolbar, Back, Forward, Up. Tabs in the server's bar; one process for all
   windows; each window's folder and view remembered.
-- **Space bar preview**, Finder style: Space shows the selected file in the
-  Viewer's preview window; arrow keys move the selection and the preview
+- **Preview**, the first look, two ways. **The preview pane**: a column at
+  the window's right (View > Show Preview, remembered per window) showing
+  the selected file small, its kind, size and dates, with "Open in
+  Close-Up". **The space bar**, Finder style: Space shows the selected file in the
+  Close-Up's preview window; arrow keys move the selection and the preview
   follows; Space again closes it.
 - **Opening**: Enter or a double click opens with the default app; "Open
   with" lists the others and "Other..." chooses any app (section 1).
@@ -164,7 +169,7 @@ bar, as the terminal and the editor do).
   `.Trash-<uid>` on other disks), so files trashed here show in other
   desktops' trash and back. Restore puts a file back where it came from.
   Empty Trash asks first. Shift+Delete deletes for good after a question.
-- **Drag and drop**: within and between File Manager windows (move on the
+- **Drag and drop**: within and between File Viewer windows (move on the
   same disk, copy across disks, Ctrl to copy, as other desktops), onto the
   dock's apps, into other apps. That needs **drag and drop on the native
   protocol** (a new bus version: start, offer kinds, enter, motion, drop,
@@ -197,15 +202,15 @@ bar, as the terminal and the editor do).
    machine that has them.
 4. **vergence-decode**: the helper, its limits per platform, timeouts;
    the settings app's wallpaper previews move onto it.
-5. **The Viewer**: pictures and text, the folder's next and previous,
+5. **Close-Up**: pictures and text, the folder's next and previous,
    preview mode.
 6. **Shared file widgets**: the places sidebar and the file list come out
    of filedialog.rs into vergence-widgets parts the dialog and the File
    Manager share; the list gains an icon view.
-7. **The File Manager**: the window, tabs, opening, Open with, space bar
+7. **File Viewer**: the window, tabs, opening, Open with, space bar
    preview, file operations with progress and undo, Trash.
 8. **Drag and drop**: on the native protocol (bus version bump), the
-   server's bridge to Wayland, used by the File Manager and the dock.
+   server's bridge to Wayland, used by File Viewer and the dock.
 9. **Thumbnails, mounts, search in subfolders.**
 10. **Docs**: whitepaper (§6.10 and §9), README, the Map, CLAUDE.md.
 
@@ -213,28 +218,28 @@ PDF and video, if question 2 brings them in, are their own steps after 5.
 
 ## Acceptance
 
-- A file opens in the right app by its type from the File Manager, the
+- A file opens in the right app by its type from File Viewer, the
   dialog, `vergence-open` and Firefox's downloads; a changed default in
   Settings is what xdg-open uses too.
 - Firefox's Open and Save use our dialog over Firefox's window, and so do a
   GTK and a Qt app where installed; Cancel returns nothing; filters work.
-- The Viewer shows PNG, JPEG and SVG pictures (and the formats question 3
+- Close-Up shows PNG, JPEG and SVG pictures (and the formats question 3
   adds) at every zoom, steps through a folder, and a broken or hostile file
-  shows "Could not be shown" without harming the Viewer.
-- The File Manager copies, moves, renames, trashes and restores, with
+  shows "Could not be shown" without harming Close-Up.
+- File Viewer copies, moves, renames, trashes and restores, with
   undo; a copy of a few GB shows progress and can be cancelled; a
   conflict asks; Trash agrees with another desktop's (checked on Techbench
   with GNOME's Files).
 - Space previews the selection and follows the arrow keys.
-- Files drag between File Manager windows and onto another app.
+- Files drag between File Viewer windows and onto another app.
 - Builds and passes its tests on Hubble, kepler and Techbench; run on
   kepler (FreeBSD) and Techbench (Fedora).
 
 ## Questions for Dave
 
-1. **Order**: (a) as above: types, portal, decoding, Viewer, File Manager,
-   drag and drop; (b) the File Manager first (with types), the portal and
-   Viewer after.
+1. **Order**: (a) as above: types, portal, decoding, Close-Up, File Viewer,
+   drag and drop; (b) File Viewer first (with types), the portal and
+   Close-Up after.
 2. **PDF and video in this milestone?** (a) not now: pictures and text only;
    PDF and video get their own milestone with the borrowing question then
    (PDF: our own renderer, a long project, or Poppler (GPL) / PDFium (BSD);
@@ -254,8 +259,8 @@ PDF and video, if question 2 brings them in, are their own steps after 5.
    our install notes say how to set Firefox's preference; (b) leave each
    app as it is, so only apps that already ask the portal get it.
 7. **Remote file systems**: (a) only what the system mounts (sshfs, NFS,
-   SMB), shown and ejected in the File Manager; (b) also "Connect to
+   SMB), shown and ejected in File Viewer; (b) also "Connect to
    server..." that runs the system's mount tools (sshfs) for you; (c) our
    own SFTP client (a long project, later).
-8. **Names**: "File Manager" and "Viewer", plain as "Text Editor"? Or other
-   names you'd rather have.
+8. **Names**: *answered 2026-11-15:* **File Viewer** (the file manager),
+   **Preview** (its quick look), **Close-Up** (the full app).
