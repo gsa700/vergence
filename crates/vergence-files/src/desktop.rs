@@ -202,6 +202,10 @@ pub struct Desktop {
     order: Order,
     /// The cell of the last right click (a new folder or a paste goes there).
     menu_cell: Option<(i32, i32)>,
+    /// Drives ejected but not yet pulled out: their icons are hidden (the
+    /// system still offers a drive that is plugged in; Dave, 2026-11-15:
+    /// "cannot eject?" when the icon stayed).
+    ejected: HashSet<PathBuf>,
 }
 
 impl Desktop {
@@ -227,6 +231,7 @@ impl Desktop {
             desktop_text,
             order: Order::Name,
             menu_cell: None,
+            ejected: HashSet::new(),
         };
         let _ = std::fs::create_dir_all(&d.dir);
         d.read();
@@ -253,7 +258,7 @@ impl Desktop {
             fixed.push(("::home".into(), Fixed::Home, "Home".into(), h));
         }
         if wants("volumes") {
-            for m in files::mounted_disks() {
+            for m in files::mounted_disks().into_iter().filter(|m| !self.ejected.contains(m)) {
                 let name = m.file_name().map_or_else(|| m.display().to_string(), |n| n.to_string_lossy().into_owned());
                 fixed.push((format!("::volume:{}", m.display()), Fixed::Volume, name, m));
             }
@@ -792,8 +797,13 @@ impl Program for Desktop {
             cmd::EJECT => {
                 let disks: Vec<Entry> = chosen.iter().filter(|e| self.fixed_of(e) == Some(Fixed::Volume)).cloned().collect();
                 for e in disks {
-                    if let Err(why) = files::eject(&e.path) {
-                        self.notice = Some(format!("“{}” could not be ejected: {why}", e.path.display()));
+                    let name = self.fixed.get(&e.name).map(|(_, n)| n.clone()).unwrap_or_default();
+                    match files::eject(&e.path) {
+                        Ok(()) => {
+                            self.notice = Some(format!("“{name}” can be pulled out now."));
+                            self.ejected.insert(e.path.clone());
+                        }
+                        Err(why) => self.notice = Some(format!("“{name}” could not be ejected: {why}")),
                     }
                 }
                 self.read();
@@ -921,7 +931,10 @@ impl Program for Desktop {
         window.wake_after(WATCH_TIMER, WATCH_EVERY);
         let now = std::fs::metadata(&self.dir).and_then(|m| m.modified()).ok();
         // A drive plugged in or ejected: its icon comes or goes.
-        let disks: Vec<String> = files::mounted_disks().iter().map(|m| format!("::volume:{}", m.display())).collect();
+        let all = files::mounted_disks();
+        // A drive ejected and then pulled out is forgotten (plugged in again, it shows).
+        self.ejected.retain(|p| all.contains(p));
+        let disks: Vec<String> = all.iter().filter(|m| !self.ejected.contains(*m)).map(|m| format!("::volume:{}", m.display())).collect();
         let shown: Vec<String> = self.entries.iter().filter(|e| self.fixed_of(e) == Some(Fixed::Volume)).map(|e| e.name.clone()).collect();
         let wants_volumes = vergence_ui::table_value(&self.desktop_text, "[desktop]", "volumes").as_deref() != Some("false");
         if now != self.stamp || (wants_volumes && disks != shown) {
