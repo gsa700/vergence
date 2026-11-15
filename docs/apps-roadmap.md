@@ -73,7 +73,7 @@ build once than in every app:
    autocomplete (words of the open documents first; languages later), find
    and replace, tabs; **Spellchecking** with it, as a toolkit service every
    native text field can use.
-5. **Open/Save dialogs and file types, then the Viewer** (pictures first,
+5. *Drafted 2026-11-15 (docs/files-milestone-1.md).* **Open/Save dialogs and file types, then the Viewer** (pictures first,
    PDF and video by the answers below) **and the File Manager** (Finder's
    space-bar preview through the Viewer; remote file systems by the
    system's own mounts). The Open/Save dialog itself was built early, in
