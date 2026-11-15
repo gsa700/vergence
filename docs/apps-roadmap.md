@@ -112,6 +112,12 @@ the order when its turn is near:
   "with its menu or a modifier and drag".
 - **The dark title bar's color chosen**, "maybe something like the accent
   color picker".
+- **The wallpaper tint toned down** (2026-11-15): "the option to shade the
+  window with the desktop background needs settings to tone it down. I
+  have it turned off on hubble and just now kepler. it covers the frosted
+  text in dark mode." Today it is on or off only (Settings > Appearance;
+  a fixed 8%, theme.rs `TINT_MIX`): an amount to choose, and the text
+  scrolled under the frosted bar kept readable with it on.
 
 ## Questions for Dave (when each app's turn comes)
 
