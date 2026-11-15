@@ -8,7 +8,9 @@ and video not now, their own milestone with the borrowing question then);
 4 b (our own file type table, not the system's database: written by us,
 since shared-mime-info's data is GPL and the workspace is Apache-2.0 OR
 GPL-2.0-or-later); 7 to revisit (only the system's mounts until then).
-3, 5, 6 and 8 in discussion.
+3, 5 and 6 in discussion. 8: the file manager is named **File Viewer**
+(after NeXTSTEP Workspace Manager's File Viewer window); the viewer's name
+in discussion.
 
 Dave's words: File manager "with space bar preview ala macOS finder ...
 remote file system support as well (using native OS tools?)". Viewer:
