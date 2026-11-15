@@ -691,6 +691,10 @@ struct Terminal {
     bar_told: Option<(Vec<(u32, String, bool)>, u32, u32)>,
     /// The app menu's commands as last sent (app settings milestone 1).
     commands_told: Option<Vec<vergence_ui::AppCommand>>,
+    /// Text size for a while (app settings milestone 1): the font's size
+    /// times this, from the app menu's Text size row or Ctrl+= / Ctrl+- /
+    /// Ctrl+0; not kept (the lasting size is the terminal's settings').
+    zoom: f32,
     /// The bar style it asks for, and the one last told the server.
     bar_style: vergence_ui::BarStyle,
     bar_style_told: Option<vergence_ui::BarStyle>,
@@ -839,6 +843,7 @@ impl Terminal {
             root_timer: false,
             bar_told: None,
             commands_told: None,
+            zoom: 1.0,
             bar_style: vergence_ui::bar_style_setting(&config("desktop.toml"), "[terminal]", vergence_ui::BarStyle::Desktop),
             bar_style_told: None,
 
@@ -1059,6 +1064,25 @@ impl Terminal {
                 eprintln!("vergence-term: could not start the program: {e}");
                 None
             }
+        }
+    }
+
+    /// A new window of this terminal, with a shell of its own.
+    fn new_window(&mut self, window: &mut Window) {
+        window.open_window(Box::new(self.window_for(String::new(), Vec::new(), None, None)));
+    }
+
+    /// Text size for a while: a step larger or smaller, or (None) as the settings say.
+    fn zoom_by(&mut self, step: Option<f32>, window: &mut Window) {
+        let z = match step {
+            Some(s) => ((self.zoom + s) * 10.0).round() / 10.0,
+            None => 1.0,
+        };
+        let z = z.clamp(ZOOM_MIN, ZOOM_MAX);
+        if (z - self.zoom).abs() > 0.001 {
+            self.zoom = z;
+            self.metrics = None;
+            window.redraw();
         }
     }
 
@@ -1632,7 +1656,16 @@ mod cmd {
     pub const SPLIT_STACK: u32 = 8;
     pub const PANE_TO_TAB: u32 = 9;
     pub const PANE_TO_WINDOW: u32 = 10;
+    pub const NEW_WINDOW: u32 = 11;
+    pub const ZOOM_IN: u32 = 12;
+    pub const ZOOM_OUT: u32 = 13;
+    pub const ZOOM_RESET: u32 = 14;
 }
+
+/// Text size for a while: steps of a tenth, from half to three times.
+const ZOOM_STEP: f32 = 0.1;
+const ZOOM_MIN: f32 = 0.5;
+const ZOOM_MAX: f32 = 3.0;
 
 impl App for Terminal {
     fn title(&self) -> String {
@@ -1734,15 +1767,23 @@ impl App for Terminal {
         use vergence_ui::{AppCommand as C, Role};
         let selected = self.front().is_some_and(|s| lock(&s.screen).selection.is_some());
         let several = self.tabs.len() > 1;
+        // The app menu holds the terminal's own few (Dave, 2026-11-14: the app
+        // button is the app; a pane's and a tab's commands are on their right
+        // click); the rest are listed under Keyboard shortcuts.
+        let percent = format!("{}%", (self.zoom * 100.0).round());
         let list = vec![
-            C::role(cmd::COPY, Role::Copy).enabled(selected).featured(),
-            C::role(cmd::PASTE, Role::Paste).featured(),
+            C::role(cmd::NEW_WINDOW, Role::NewWindow).featured(),
             C::role(cmd::NEW_TAB, Role::NewTab).featured(),
+            C::role(cmd::ZOOM_OUT, Role::ZoomOut).enabled(self.zoom > ZOOM_MIN + 0.001).featured(),
+            C { label: percent, ..C::role(cmd::ZOOM_RESET, Role::ZoomReset).featured() },
+            C::role(cmd::ZOOM_IN, Role::ZoomIn).enabled(self.zoom < ZOOM_MAX - 0.001).featured(),
+            C::role(cmd::COPY, Role::Copy).enabled(selected),
+            C::role(cmd::PASTE, Role::Paste),
             C::role(cmd::CLOSE_TAB, Role::CloseTab),
             C::role(cmd::NEXT_TAB, Role::NextTab).enabled(several),
             C::role(cmd::PREVIOUS_TAB, Role::PreviousTab).enabled(several),
-            C::own(cmd::SPLIT_SIDE, "Tab", "Split side by side", "Ctrl+Shift+R").featured(),
-            C::own(cmd::SPLIT_STACK, "Tab", "Split top and bottom", "Ctrl+Shift+D").featured(),
+            C::own(cmd::SPLIT_SIDE, "Tab", "Split side by side", "Ctrl+Shift+R"),
+            C::own(cmd::SPLIT_STACK, "Tab", "Split top and bottom", "Ctrl+Shift+D"),
             C::own(cmd::PANE_TO_TAB, "Tab", "Move section to a new tab", ""),
             C::own(cmd::PANE_TO_WINDOW, "Tab", "Move to a new window", ""),
         ];
@@ -1770,6 +1811,10 @@ impl App for Terminal {
             cmd::SPLIT_STACK => Item::SplitStack,
             cmd::PANE_TO_TAB => Item::PaneToTab,
             cmd::PANE_TO_WINDOW => Item::PaneToWindow,
+            cmd::NEW_WINDOW => return self.new_window(window),
+            cmd::ZOOM_IN => return self.zoom_by(Some(ZOOM_STEP), window),
+            cmd::ZOOM_OUT => return self.zoom_by(Some(-ZOOM_STEP), window),
+            cmd::ZOOM_RESET => return self.zoom_by(None, window),
             cmd::NEXT_TAB | cmd::PREVIOUS_TAB => {
                 let n = self.tabs.len().max(1);
                 let to = if id == cmd::NEXT_TAB { (self.shown + 1) % n } else { (self.shown + n - 1) % n };
@@ -2158,7 +2203,20 @@ impl App for Terminal {
                 let m = *modifiers;
                 let letter = |c: char| *key == c as u32 || *key == c.to_ascii_uppercase() as u32;
                 // The terminal's own shortcuts: with Ctrl+Shift, so the shell keeps Ctrl+T and the rest.
+                // Text size for a while: Ctrl with = (or +), - and 0, as GNOME Terminal.
+                // Ctrl+_ (Shift with -) stays the shell's undo.
+                if m.ctrl && !m.alt {
+                    match *key {
+                        0x3d | 0x2b | 0xffab => return self.zoom_by(Some(ZOOM_STEP), window),
+                        0x2d | 0xffad if !m.shift => return self.zoom_by(Some(-ZOOM_STEP), window),
+                        0x30 | 0xffb0 if !m.shift => return self.zoom_by(None, window),
+                        _ => {}
+                    }
+                }
                 if m.ctrl && m.shift {
+                    if letter('n') {
+                        return self.new_window(window);
+                    }
                     if letter('t') {
                         return self.new_tab(window);
                     }
@@ -2290,7 +2348,7 @@ impl App for Terminal {
         if self.opacity >= 1.0 {
             scene.fill(Rect::new(0.0, 0.0, frame.width, frame.height), self.palette.bg);
         }
-        let size = self.settings.mono_size;
+        let size = self.settings.mono_size * self.zoom;
         if self.metrics.is_none() {
             // The settings' fonts, or the machine's own if it does not have them.
             let mono = &self.settings.mono_family;

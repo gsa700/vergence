@@ -162,6 +162,16 @@ impl Server {
         Model { app, commands, terminal, native: w.native().is_some(), window, pins: Vec::new() }
     }
 
+    /// A window sent new commands: an open menu of it shows them (the Text
+    /// size row's percentage after a press).
+    pub fn app_menu_refresh(&mut self, w: &Win) {
+        let Some(o) = self.app_menu.open.as_mut().filter(|o| o.win == *w) else { return };
+        if let Some(n) = w.native() {
+            (o.model.commands, o.model.terminal) = n.commands();
+            self.redraw_all();
+        }
+    }
+
     /// The pointer moved: the line under it is chosen, a submenu there opens.
     pub fn app_menu_hover(&mut self, pos: Point<f64, Logical>) {
         let Some(o) = self.app_menu.open.as_mut() else { return };
@@ -189,6 +199,13 @@ impl Server {
             },
             Some((false, Some(i))) => match o.top_lines().get(i) {
                 Some(Line::Item { action, enabled: true, .. }) => Some(*action),
+                // The Text size row: whichever of its buttons is under the pointer.
+                Some(Line::Zoom { out, reset, grow, .. }) => {
+                    let row = appmenu::rows((o.at.x, o.at.y), &o.top_lines())[i];
+                    let inside = |r: vergence_shell::Rect| (r.x as f64..(r.x + r.w) as f64).contains(&pos.x);
+                    let [a, b, c] = appmenu::zoom_parts(row);
+                    [(a, *out), (b, *reset), (c, *grow)].into_iter().find(|(r, id)| *id != 0 && inside(*r)).map(|(_, id)| Action::Command(id))
+                }
                 _ => None,
             },
             _ => None,
@@ -251,8 +268,17 @@ impl Server {
         }
     }
 
-    /// Carry out what was chosen; the menu closes first.
+    /// Carry out what was chosen; the menu closes first, except for the Text
+    /// size row's buttons, which may be pressed again and again.
     fn app_menu_do(&mut self, action: Action) {
+        if let (Action::Command(id), Some(o)) = (action, self.app_menu.open.as_ref())
+            && o.model.commands.iter().any(|c| c.id == id && matches!(c.role, vergence_protocol::commands::Role::ZoomIn | vergence_protocol::commands::Role::ZoomOut | vergence_protocol::commands::Role::ZoomReset))
+        {
+            if let Some(n) = o.win.native() {
+                self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::Command { window: n.id, id }));
+            }
+            return;
+        }
         let Some(o) = self.app_menu.open.take() else { return };
         self.app_menu.pictures = [None, None];
         self.redraw_all();
@@ -412,6 +438,32 @@ impl Server {
                         for (k, l) in out.iter().take(2).enumerate() {
                             vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink_off), ScenePoint::new(r.x + 12.0, (r.y + 6.0 + m.ascent + k as f32 * line_h).round()), l);
                         }
+                    }
+                }
+                Line::Zoom { now, .. } => {
+                    if lit {
+                        scene.fill_rounded(r, vergence_look::RADIUS, color(s.hover));
+                    }
+                    let parts = appmenu::zoom_parts(vergence_shell::Rect::new(r.x as i32, r.y as i32, r.w as i32, r.h as i32));
+                    for (k, p) in parts.iter().enumerate() {
+                        let p = SceneRect::new(p.x as f32, p.y as f32, p.w as f32, p.h as f32);
+                        if k != 1 {
+                            scene.fill_rounded(p, vergence_look::RADIUS, color(s.field));
+                            let (cx, cy) = (p.x + p.w / 2.0, p.y + p.h / 2.0);
+                            scene.line(ScenePoint::new(cx - 4.5, cy), ScenePoint::new(cx + 4.5, cy), 1.5, color(s.menu_ink));
+                            if k == 2 {
+                                scene.line(ScenePoint::new(cx, cy - 4.5), ScenePoint::new(cx, cy + 4.5), 1.5, color(s.menu_ink));
+                            }
+                        }
+                    }
+                    if let Some(face) = face {
+                        let size = 13.0;
+                        let m = fonts.metrics(face, size);
+                        let base = (r.y + (r.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round();
+                        vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink), ScenePoint::new(r.x + 12.0 + gutter, base), "Text size");
+                        let mid = parts[1];
+                        let (_, nw) = fonts.layout(face, 12.0, now);
+                        vergence_render::text(&mut scene, fonts, face, 12.0, color(s.menu_ink), ScenePoint::new(mid.x as f32 + (mid.w as f32 - nw) / 2.0, base), now);
                     }
                 }
                 Line::Header(name) => {

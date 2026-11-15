@@ -477,10 +477,15 @@ impl Server {
             }
             // Its app menu (app settings milestone 1): kept; the menu reads it when it opens.
             WinRequest::Commands { window, terminal, commands } => {
-                if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
-                    let mut s = n.state.lock().unwrap();
-                    s.commands = commands;
-                    s.terminal = terminal;
+                if let Some(w) = self.natives.get(&(client, window)).cloned()
+                    && let Win::Native(n) = &w
+                {
+                    {
+                        let mut s = n.state.lock().unwrap();
+                        s.commands = commands;
+                        s.terminal = terminal;
+                    }
+                    self.app_menu_refresh(&w);
                 }
             }
             WinRequest::BarStyle { window, style } => {

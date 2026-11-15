@@ -1,21 +1,21 @@
 //! The app menu (app settings milestone 1): what opens from a window's app
-//! button, for every app. Its skeleton is fixed and the app fills in only
-//! the middle, from its commands (vergence_protocol::commands). After GNOME
-//! Terminal's menu (Dave, 2026-11-14: "click opens basic stuff right there.
-//! and then there is the option for everything ... maybe even an option to
-//! add things you use a lot to the flat menu"):
+//! button, for every app. One rule for every app (Dave, 2026-11-14): the
+//! app button is the app, a right click is the thing under the pointer (a
+//! pane, a tab, a selection), the title bar is the window. So the menu holds
+//! only what an app puts in it (its `featured` commands: New window, New
+//! tab, Text size), the ones the user added, then the skeleton:
 //!
-//! 1. Search commands… (typing filters every command, everywhere);
-//! 2. the app's everyday few (its `featured` commands) and those the user
-//!    added (pins, kept by the desktop per app), starred;
-//! 3. All commands ›: every command under its menu's heading, File, Edit,
-//!    View, Tab, then the app's own; Window ›, the desktop's;
-//! 4. Settings…, About <App>, Quit <App>, always last.
+//! 1. Search commands… (only for an app with many commands);
+//! 2. the app's commands and the user's (starred); Zoom in, Zoom out and
+//!    Actual size together as one Text size row, − 100% +, that leaves the
+//!    menu open (a while's size; the lasting one is in the app's settings);
+//! 3. Settings…, Keyboard shortcuts › (every command of the app under its
+//!    menu's heading with its keys, chosen from there too, a right click
+//!    adding one to the menu), About <App>, Quit <App>.
 //!
-//! A part with nothing in it is left out. An app that is not ours (no
-//! commands) gets the skeleton with a line saying its own menu holds the
-//! rest. Everything here is plain data: the server draws it and carries out
-//! what is chosen ([`Action`]).
+//! An app that is not ours (no commands) gets the skeleton with a line saying
+//! its own menu holds the rest. Everything here is plain data: the server
+//! draws it and carries out what is chosen ([`Action`]).
 
 use vergence_protocol::commands::{Command, MENUS, ROLES, Role};
 
@@ -58,8 +58,11 @@ pub enum Line {
     Item { action: Action, label: String, keys: String, enabled: bool, checked: Option<bool>, pin: Option<String>, pinned: bool },
     /// A submenu, by its name.
     Sub(String),
-    /// A menu's name over its commands, in All commands.
+    /// A menu's name over its commands, in Keyboard shortcuts.
     Header(String),
+    /// Text size: its three commands (smaller, as it was, larger) and what
+    /// it is now ("110%", the Actual size command's label as the app sent it).
+    Zoom { out: u32, reset: u32, grow: u32, now: String },
     /// A line of words, not chosen (a foreign app's note).
     Note(String),
     Separator,
@@ -68,7 +71,7 @@ pub enum Line {
 impl Line {
     /// Whether the keyboard and the pointer can rest on it.
     pub fn selectable(&self) -> bool {
-        matches!(self, Line::Item { enabled: true, .. } | Line::Sub(_))
+        matches!(self, Line::Item { enabled: true, .. } | Line::Sub(_) | Line::Zoom { .. })
     }
 
     pub fn height(&self) -> i32 {
@@ -89,12 +92,11 @@ pub const SEARCH_H: i32 = 36;
 pub const SEP_H: i32 = 9;
 pub const NOTE_H: i32 = 40;
 pub const HEADER_H: i32 = 24;
-/// The submenu of every command.
-pub const ALL: &str = "All commands";
-/// An app with at most this many commands has no All commands: its first
-/// panel holds every one, under its menu's heading (Dave, 2026-11-14: the
-/// terminal's full list was "close enough to the top five").
-pub const SMALL: usize = 12;
+/// The submenu of every command, with its keys.
+pub const ALL: &str = "Keyboard shortcuts";
+/// An app with more commands than this has a search field at the top (the
+/// terminal's 14 do not need one; typing searches anyway).
+pub const SMALL: usize = 24;
 pub const PAD: i32 = 6;
 /// At most this many results while searching.
 pub const MAX_FOUND: usize = 12;
@@ -173,41 +175,40 @@ impl Model {
         lines
     }
 
-    /// Whether a line is one of the app's featured commands.
-    fn is_featured(&self, l: &Line) -> bool {
-        match l {
-            Line::Item { action: Action::Command(id), .. } => self.commands.iter().any(|c| c.id == *id && c.featured),
-            _ => false,
+    /// The Text size row, if the app put Zoom in and Zoom out in its menu.
+    fn zoom(&self) -> Option<Line> {
+        let find = |r: Role| self.commands.iter().find(|c| c.role == r);
+        let (out, grow) = (find(Role::ZoomOut)?, find(Role::ZoomIn)?);
+        if !(out.featured || grow.featured) {
+            return None;
         }
+        let reset = find(Role::ZoomReset);
+        Some(Line::Zoom { out: out.id, reset: reset.map_or(0, |c| c.id), grow: grow.id, now: reset.map(|c| c.label.clone()).filter(|l| !l.is_empty()).unwrap_or_else(|| "Text size".into()) })
     }
 
     /// The top level.
     pub fn top(&self) -> Vec<Line> {
-        let mut lines = vec![Line::Search];
-        if self.native && self.menu_commands().count() <= SMALL {
-            // A small app: everything, each menu under its heading, its featured first.
-            for m in self.menus() {
-                let mut items = self.menu(&m);
-                items.sort_by_key(|l| !self.is_featured(l));
-                lines.push(Line::Header(m));
-                lines.extend(items);
-            }
-            lines.push(Line::Separator);
-        } else if self.native {
-            lines.extend(self.everyday());
-            lines.push(Line::Separator);
-            if self.menu_commands().next().is_some() {
-                lines.push(Line::Sub(ALL.into()));
-            }
+        let mut lines = Vec::new();
+        if self.native && self.menu_commands().count() > SMALL {
+            lines.push(Line::Search);
+        }
+        if self.native {
+            let zoom = self.zoom();
+            let zooming = |l: &Line| zoom.is_some() && matches!(l, Line::Item { action: Action::Command(id), .. } if self.commands.iter().any(|c| c.id == *id && matches!(c.role, Role::ZoomIn | Role::ZoomOut | Role::ZoomReset)));
+            lines.extend(self.everyday().into_iter().filter(|l| !zooming(l)));
+            lines.extend(zoom);
         } else {
             lines.push(Line::Note(format!("{} keeps its own settings and commands in its own menu.", self.app)));
-            lines.push(Line::Separator);
         }
         if !self.window.is_empty() {
+            lines.push(Line::Separator);
             lines.push(Line::Sub("Window".into()));
         }
         lines.push(Line::Separator);
         lines.push(self.skeleton(Role::Settings, Action::Settings));
+        if self.native && self.menu_commands().next().is_some() {
+            lines.push(Line::Sub(ALL.into()));
+        }
         lines.push(self.skeleton(Role::About, Action::About));
         lines.push(self.skeleton(Role::Quit, Action::Quit));
         tidy(lines)
@@ -291,6 +292,17 @@ pub fn rows(at: (i32, i32), lines: &[Line]) -> Vec<Rect> {
             r
         })
         .collect()
+}
+
+/// The Text size row's three buttons (smaller, the size now, larger) in a
+/// row's rectangle, at its right end; its name is written at its left.
+pub fn zoom_parts(r: Rect) -> [Rect; 3] {
+    let (b, mid, gap) = (30, 58, 2);
+    let right = r.x + r.w - 4;
+    let grow = Rect::new(right - b, r.y + 2, b, r.h - 4);
+    let now = Rect::new(grow.x - gap - mid, r.y + 2, mid, r.h - 4);
+    let out = Rect::new(now.x - gap - b, r.y + 2, b, r.h - 4);
+    [out, now, grow]
 }
 
 /// A panel's height for its lines.
@@ -383,6 +395,12 @@ impl State {
                 self.open = self.top.filter(|i| matches!(lines.get(*i), Some(Line::Sub(_))));
                 Did::Moved
             }
+            Key::Left | Key::Right | Key::Enter if matches!(self.top.and_then(|i| lines.get(i)), Some(Line::Zoom { .. })) => match (key, self.top.and_then(|i| lines.get(i))) {
+                (Key::Left, Some(Line::Zoom { out, .. })) => Did::Chosen(Action::Command(*out)),
+                (Key::Right, Some(Line::Zoom { grow, .. })) => Did::Chosen(Action::Command(*grow)),
+                (Key::Enter, Some(Line::Zoom { reset, .. })) if *reset != 0 => Did::Chosen(Action::Command(*reset)),
+                _ => Did::Nothing,
+            },
             Key::Right | Key::Enter => match self.top.and_then(|i| lines.get(i)) {
                 Some(Line::Sub(_)) => {
                     self.open = self.top;
@@ -475,17 +493,21 @@ mod tests {
         Model {
             app: "Terminal".into(),
             commands: vec![
-                Command::role(1, Role::Copy).enabled(false).featured(),
-                Command::role(2, Role::Paste).featured(),
+                Command::role(1, Role::Copy).enabled(false),
+                Command::role(2, Role::Paste),
                 Command::role(3, Role::NewTab).featured(),
-                Command::own(4, "Tab", "Split side by side", "Ctrl+Shift+R").featured(),
+                Command::own(4, "Tab", "Split side by side", "Ctrl+Shift+R"),
                 Command::role(5, Role::Settings),
                 Command::role(6, Role::NextTab),
                 Command::own(7, "Shell", "Clear", ""),
+                Command::role(8, Role::NewWindow).featured(),
+                Command::role(9, Role::ZoomOut).featured(),
+                Command { label: "110%".into(), ..Command::role(10, Role::ZoomReset).featured() },
+                Command::role(11, Role::ZoomIn).featured(),
             ],
             terminal: true,
             native: true,
-            window: vec![(WindowAct::Snap(Zone::Left), "Left half".into()), (WindowAct::Minimize, "Minimize".into())],
+            window: Vec::new(),
             pins: Vec::new(),
         }
     }
@@ -502,54 +524,52 @@ mod tests {
                 Line::Sub(n) => format!("{n} >"),
                 Line::Header(n) => format!("# {n}"),
                 Line::Note(_) => "[note]".into(),
+                Line::Zoom { now, .. } => format!("[- {now} +]"),
                 Line::Separator => "---".into(),
             })
             .collect()
     }
 
-    /// The terminal with enough commands of its own to be a big app.
+    /// The terminal with enough commands of its own to have a search field.
     fn big() -> Model {
         let mut m = terminal();
-        for i in 0..8 {
+        for i in 0..20 {
             m.commands.push(Command::own(100 + i, "Shell", &format!("Thing {i}"), ""));
         }
         m
     }
 
     #[test]
-    fn a_small_app_shows_everything_on_the_first_panel_featured_first() {
+    fn the_menu_is_the_apps_own_few_then_the_skeleton() {
         let m = terminal();
+        assert_eq!(labels(&m.top()), ["New tab (Ctrl+Shift+T)", "New window (Ctrl+Shift+N)", "[- 110% +]", "---", "Settings… (Ctrl+,)", "Keyboard shortcuts >", "About Terminal", "Quit Terminal"]);
         assert_eq!(
-            labels(&m.top()),
+            labels(&m.sub(ALL)),
             [
-                "[search]", "# File", "New tab (Ctrl+Shift+T)", "# Edit", "Copy (Ctrl+C)", "Paste (Ctrl+V)", "# Tab", "Split side by side (Ctrl+Shift+R)", "Next tab (Ctrl+Page Down)", "# Shell", "Clear", "---", "Window >", "---",
-                "Settings… (Ctrl+,)", "About Terminal", "Quit Terminal"
+                "# File", "New window (Ctrl+Shift+N)", "New tab (Ctrl+Shift+T)", "# Edit", "Copy (Ctrl+C)", "Paste (Ctrl+V)", "# View", "Zoom in (Ctrl+=)", "Zoom out (Ctrl+-)", "Actual size (Ctrl+0)", "# Tab", "Next tab (Ctrl+Page Down)", "Split side by side (Ctrl+Shift+R)", "# Shell", "Clear"
             ]
         );
+        assert!(matches!(&big().top()[0], Line::Search), "many commands: a search field");
     }
 
     #[test]
-    fn a_big_app_has_the_everyday_few_then_all_commands_then_the_skeleton() {
-        let m = big();
-        assert_eq!(
-            labels(&m.top()),
-            ["[search]", "Copy (Ctrl+C)", "Paste (Ctrl+V)", "New tab (Ctrl+Shift+T)", "Split side by side (Ctrl+Shift+R)", "---", "All commands >", "Window >", "---", "Settings… (Ctrl+,)", "About Terminal", "Quit Terminal"]
-        );
-        let all = labels(&m.sub(ALL));
-        assert_eq!(&all[..8], ["# File", "New tab (Ctrl+Shift+T)", "# Edit", "Copy (Ctrl+C)", "Paste (Ctrl+V)", "# Tab", "Next tab (Ctrl+Page Down)", "Split side by side (Ctrl+Shift+R)"]);
-        assert_eq!(all.len(), 8 + 1 + 9);
-        assert_eq!(labels(&m.sub("Window")), ["Left half", "Minimize"]);
+    fn the_text_size_row_takes_left_right_and_enter() {
+        let m = terminal();
+        let mut s = State::default();
+        s.hover_top(&m, Some(2));
+        assert_eq!(s.key(&m, Key::Left), Did::Chosen(Action::Command(9)));
+        assert_eq!(s.key(&m, Key::Right), Did::Chosen(Action::Command(11)));
+        assert_eq!(s.key(&m, Key::Enter), Did::Chosen(Action::Command(10)));
     }
 
     #[test]
     fn what_the_user_added_follows_the_apps_own_starred() {
-        let mut m = big();
-        m.pins = vec!["Shell/Clear".into(), "role:3".into(), "gone/away".into(), "role:40".into()];
+        let mut m = terminal();
+        m.pins = vec!["Shell/Clear".into(), "role:11".into(), "gone/away".into(), "Tab/Split side by side".into()];
         let top = labels(&m.top());
-        assert_eq!(&top[1..7], ["Copy (Ctrl+C)", "Paste (Ctrl+V)", "New tab (Ctrl+Shift+T)", "Split side by side (Ctrl+Shift+R)", "Clear *", "Next tab (Ctrl+Page Down) *"]);
+        assert_eq!(&top[..5], ["New tab (Ctrl+Shift+T)", "New window (Ctrl+Shift+N)", "Clear *", "Split side by side (Ctrl+Shift+R) *", "[- 110% +]"]);
         assert!(labels(&m.sub(ALL)).contains(&"Clear *".to_string()));
-        assert!(labels(&m.sub(ALL)).contains(&"New tab (Ctrl+Shift+T)".to_string()));
-        match &m.top()[5] {
+        match &m.top()[2] {
             Line::Item { pin, pinned: true, .. } => assert_eq!(pin.as_deref(), Some("Shell/Clear")),
             l => panic!("{l:?}"),
         }
@@ -560,15 +580,15 @@ mod tests {
         let m = terminal();
         let top = m.top();
         let n = top.len();
-        assert!(matches!(&top[n - 3], Line::Item { action: Action::Command(5), pin: None, .. }));
+        assert!(matches!(&top[n - 4], Line::Item { action: Action::Command(5), pin: None, .. }));
         assert!(matches!(&top[n - 2], Line::Item { action: Action::About, .. }));
         assert!(matches!(&top[n - 1], Line::Item { action: Action::Quit, .. }));
     }
 
     #[test]
     fn a_foreign_app_gets_the_skeleton_and_a_note() {
-        let m = Model { app: "Firefox".into(), commands: vec![], terminal: false, native: false, window: vec![(WindowAct::Minimize, "Minimize".into())], pins: Vec::new() };
-        assert_eq!(labels(&m.top()), ["[search]", "[note]", "---", "Window >", "---", "Settings…", "About Firefox", "Quit Firefox"]);
+        let m = Model { app: "Firefox".into(), commands: vec![], terminal: false, native: false, window: Vec::new(), pins: Vec::new() };
+        assert_eq!(labels(&m.top()), ["[note]", "---", "Settings…", "About Firefox", "Quit Firefox"]);
     }
 
     #[test]
@@ -580,29 +600,27 @@ mod tests {
         assert_eq!(found[0].1, "Tab");
         assert!(m.search("copy").is_empty(), "Copy is disabled");
         assert_eq!(m.search("TAB").len(), 2, "New tab and Next tab, case aside");
-        assert_eq!(m.search("left").len(), 1);
         assert_eq!(m.search("quit").len(), 1);
         assert!(m.search("   ").is_empty());
     }
 
     #[test]
-    fn keys_move_open_submenus_and_choose() {
-        let m = big();
+    fn keys_move_open_the_shortcuts_and_choose() {
+        let m = terminal();
         let mut s = State::default();
         assert_eq!(s.key(&m, Key::Down), Did::Moved);
-        assert_eq!(s.top, Some(2), "Paste: Copy is disabled");
-        assert_eq!(s.key(&m, Key::Enter), Did::Chosen(Action::Command(2)));
-        // Down to All commands: it opens; Right goes in, past its heading.
-        s.key(&m, Key::Down);
-        s.key(&m, Key::Down);
-        s.key(&m, Key::Down);
-        assert_eq!(s.open, Some(6));
-        s.key(&m, Key::Right);
-        assert_eq!(s.sub, Some(1), "New tab, under File");
+        assert_eq!(s.top, Some(0));
         assert_eq!(s.key(&m, Key::Enter), Did::Chosen(Action::Command(3)));
+        // Down to Keyboard shortcuts: it opens; Right goes in, past its heading.
+        for _ in 0..4 {
+            s.key(&m, Key::Down);
+        }
+        assert_eq!(s.open, Some(5));
+        s.key(&m, Key::Right);
+        assert_eq!(s.sub, Some(1), "New window, under File");
+        assert_eq!(s.key(&m, Key::Enter), Did::Chosen(Action::Command(8)));
         assert_eq!(s.key(&m, Key::Left), Did::Moved);
         assert_eq!(s.sub, None);
-        // Up from the top wraps to Quit.
         let mut s = State::default();
         s.key(&m, Key::Up);
         assert_eq!(s.key(&m, Key::Enter), Did::Chosen(Action::Quit));
@@ -610,8 +628,8 @@ mod tests {
     }
 
     #[test]
-    fn typing_searches_and_enter_takes_the_first_result() {
-        let m = big();
+    fn typing_searches_even_without_the_field_and_enter_takes_the_first_result() {
+        let m = terminal();
         let mut s = State::default();
         for c in "new t".chars() {
             s.key(&m, Key::Char(c));
@@ -621,29 +639,21 @@ mod tests {
         assert_eq!(s.key(&m, Key::Escape), Did::Moved);
         assert_eq!(s.typed, "");
         assert_eq!(s.key(&m, Key::Escape), Did::Close);
-        let mut s = State::default();
-        s.hover_top(&m, Some(6));
-        s.key(&m, Key::Right);
-        assert!(s.sub.is_some());
-        s.key(&m, Key::Char('q'));
-        assert_eq!((s.sub, s.open, s.typed.as_str()), (None, None, "q"));
     }
 
     #[test]
-    fn the_pointer_chooses_and_opens_submenus_and_headings_are_not_chosen() {
-        let m = big();
+    fn the_pointer_chooses_and_opens_the_shortcuts_and_headings_are_not_chosen() {
+        let m = terminal();
         let mut s = State::default();
-        s.hover_top(&m, Some(6));
-        assert_eq!((s.top, s.open), (Some(6), Some(6)));
+        s.hover_top(&m, Some(5));
+        assert_eq!((s.top, s.open), (Some(5), Some(5)));
         assert_eq!(labels(&s.sub_lines(&m)), labels(&m.sub(ALL)));
         s.hover_sub(&m, Some(1));
         assert_eq!(s.sub, Some(1));
         s.hover_sub(&m, Some(0));
         assert_eq!(s.sub, None, "a heading is not chosen");
-        s.hover_top(&m, None);
-        assert_eq!(s.open, Some(6));
-        s.hover_top(&m, Some(5));
-        assert_eq!(s.top, Some(6), "a separator is not chosen");
+        s.hover_top(&m, Some(3));
+        assert_eq!(s.top, Some(5), "a separator is not chosen");
     }
 
     #[test]
@@ -651,8 +661,8 @@ mod tests {
         let m = terminal();
         let top = m.top();
         let r = rows((100, 50), &top);
-        assert_eq!(r[0], Rect::new(106, 56, WIDTH - 12, SEARCH_H));
-        assert_eq!(r[1].y, 56 + SEARCH_H);
+        assert_eq!(r[0], Rect::new(106, 56, WIDTH - 12, ITEM_H));
+        assert_eq!(r[1].y, 56 + ITEM_H);
         assert_eq!(height(&top), top.iter().map(Line::height).sum::<i32>() + 12);
     }
 }
