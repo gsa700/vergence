@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Text Editor
+Comment=Plain text, with tabs, line numbers and undo
+Exec=vergence-edit %F
+Icon=vergence-edit
+Terminal=false
+Categories=Utility;TextEditor;
+MimeType=text/plain;
+Keywords=text;editor;notes;plain;txt;
+StartupWMClass=vergence-edit

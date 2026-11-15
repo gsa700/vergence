@@ -1,0 +1,19 @@
+[package]
+name = "vergence-edit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Vergence's text editor: plain text, tabs, line numbers, on the toolkit's text area"
+
+# The editor is the project's own throughout: its window on the toolkit, its
+# text area (vergence-widgets textarea.rs), its reading and writing of files
+# (files.rs), editor milestone 1.
+[dependencies]
+vergence-ui.workspace = true
+vergence-widgets.workspace = true
+vergence-scene.workspace = true
+
+[[bin]]
+name = "vergence-edit"
+path = "src/main.rs"

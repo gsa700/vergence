@@ -24,7 +24,7 @@ use vergence_scene::{Color, Point, Rect, Scene};
 use vergence_text::{FaceId, Fonts};
 use vergence_ui::{Modifiers, sym};
 
-use crate::edit::{Buffer, Editable, History, Kind, Pos};
+use crate::edit::{Buffer, Editable, Ending, History, Kind, Pos};
 use crate::element::{Element, Kind as EKind, Length};
 use crate::theme::Theme;
 
@@ -267,6 +267,8 @@ pub struct Doc {
     geom: Geom,
     /// A double or triple click's word or line, kept while dragging.
     unit: (u8, Pos, Pos),
+    /// The line endings when last saved (changing them is a change to save).
+    saved_ending: Ending,
 }
 
 impl Doc {
@@ -289,10 +291,22 @@ impl Doc {
             shaped_for: (0, 0, 0, String::new()),
             geom: Geom::default(),
             unit: (1, Pos::default(), Pos::default()),
-        }
+            saved_ending: Ending::Lf,
+        }.with_saved_ending()
+    }
+
+    fn with_saved_ending(mut self) -> Doc {
+        self.saved_ending = self.buffer.ending();
+        self
     }
 
     // --- What a program reads and does ---
+
+    /// Writes the lines back with these endings (a change to save).
+    pub fn set_ending(&mut self, e: Ending) {
+        self.buffer.set_ending(e);
+        self.revision += 1;
+    }
 
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
@@ -306,6 +320,7 @@ impl Doc {
     /// Puts in a new text: the history is forgotten, the caret goes to the start.
     pub fn set_text(&mut self, text: &str) {
         self.buffer = Buffer::from_text(text);
+        self.saved_ending = self.buffer.ending();
         self.history.clear();
         self.caret = Pos::default();
         self.anchor = Pos::default();
@@ -336,12 +351,13 @@ impl Doc {
 
     /// Changed since it was last saved (or loaded).
     pub fn modified(&self) -> bool {
-        self.history.modified()
+        self.history.modified() || self.buffer.ending() != self.saved_ending
     }
 
     /// The text is saved as it is now.
     pub fn mark_saved(&mut self) {
         self.history.mark_saved();
+        self.saved_ending = self.buffer.ending();
     }
 
     pub fn can_undo(&self) -> bool {
@@ -530,6 +546,8 @@ impl Doc {
             self.goal = None;
         }
         match key {
+            // Ctrl+Page Up/Down are the program's (the tab before, the tab after).
+            sym::PAGE_UP | sym::PAGE_DOWN if m.ctrl => e.used = false,
             sym::LEFT | sym::RIGHT | sym::UP | sym::DOWN | sym::HOME | sym::END | sym::PAGE_UP | sym::PAGE_DOWN => {
                 // Ctrl+Up/Down scroll by a line, the caret staying.
                 if m.ctrl && !m.shift && matches!(key, sym::UP | sym::DOWN) {
@@ -1106,7 +1124,7 @@ fn alpha(c: Color, a: u8) -> Color {
 /// A text area showing and editing `doc` (editor milestone 1). It fills
 /// the room it is given.
 pub fn text_area<M>(doc: &TextDoc) -> Element<M> {
-    Element::new(EKind::Area { doc: doc.clone(), on_change: None }, Length::FILL, Length::FILL)
+    Element::new(EKind::Area { doc: doc.clone(), on_change: None, autofocus: false }, Length::FILL, Length::FILL)
 }
 
 #[cfg(test)]

@@ -2181,6 +2181,15 @@ name = "vergence-edid"
 version = "0.1.0"
 
 [[package]]
+name = "vergence-edit"
+version = "0.1.0"
+dependencies = [
+ "vergence-scene",
+ "vergence-ui",
+ "vergence-widgets",
+]
+
+[[package]]
 name = "vergence-harness"
 version = "0.1.0"
 dependencies = [

@@ -137,7 +137,7 @@ pub(crate) enum Kind<M> {
     Scroll { child: Box<Element<M>> },
     Picture { image: Arc<Image>, fit: Fit, radius: f32, opacity: f32 },
     Drawing { draw: Draw, on_touch: Option<OnTouch<M>> },
-    Area { doc: crate::textarea::TextDoc, on_change: Option<M> },
+    Area { doc: crate::textarea::TextDoc, on_change: Option<M>, autofocus: bool },
 }
 
 /// One piece of a window: built from the program's state each time it
@@ -362,8 +362,9 @@ impl<M> Element<M> {
     /// A field that takes the keyboard when it first appears (a password
     /// asked for in a page): typing goes there without a click first.
     pub fn autofocus(mut self) -> Self {
-        if let Kind::Field { autofocus, .. } = &mut self.kind {
-            *autofocus = true;
+        match &mut self.kind {
+            Kind::Field { autofocus, .. } | Kind::Area { autofocus, .. } => *autofocus = true,
+            _ => {}
         }
         self
     }

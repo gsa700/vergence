@@ -100,6 +100,23 @@ pub trait Program {
     /// One of its own bar buttons was pressed (the id it gave it).
     fn bar_button(&mut self, _id: u32, _window: &mut Window) {}
 
+    /// Something was done with a tab the server drew ([`Program::bar`]
+    /// gave `Bar::Tabs`): chosen, closed, moved, torn off, joined.
+    fn tab(&mut self, _event: vergence_ui::TabEvent, _window: &mut Window) {}
+
+    /// The user asked to close the window. True closes it; false keeps it
+    /// (the program may ask first and close it later with `Window::close`).
+    fn close_asked(&mut self, _window: &mut Window) -> bool {
+        true
+    }
+
+    /// The window has closed while the program runs on.
+    fn closed(&mut self) {}
+
+    /// The toolkit's number for this window, as tab events name another
+    /// window of the program (`TabEvent::Join`'s `into`).
+    fn opened(&mut self, _id: u32) {}
+
     /// The size to open at, in points, if the program has one in mind (a
     /// settings window's last size). None: the toolkit's choice.
     fn opening_size(&self) -> Option<(u32, u32)> {
@@ -196,6 +213,8 @@ struct Host<P: Program> {
     bar_style_sent: Option<vergence_ui::BarStyle>,
     /// The tint the theme was last built with.
     tint: Option<Color>,
+    /// The title last given to the window (at first, the one it opens with).
+    title_sent: String,
 }
 
 /// The toolkit's own timer (the caret's blink).
@@ -205,6 +224,12 @@ impl<P: Program> Host<P> {
     fn changed(&mut self, window: &mut Window) {
         self.stale = true;
         window.redraw();
+        // The title follows the program's state (a document's name, a dot for changes).
+        let title = self.program.title();
+        if title != self.title_sent {
+            window.set_title(&title);
+            self.title_sent = title;
+        }
     }
 
     /// Asks for the toolkit's next wake, or forgets it.
@@ -277,6 +302,27 @@ impl<P: Program> vergence_ui::App for Host<P> {
             self.bar_style_sent = s;
             s
         })?
+    }
+
+    fn tab(&mut self, event: vergence_ui::TabEvent, window: &mut Window) {
+        self.program.tab(event, window);
+        self.changed(window);
+    }
+
+    fn close_asked(&mut self, window: &mut Window) -> bool {
+        let close = self.program.close_asked(window);
+        if !close {
+            self.changed(window);
+        }
+        close
+    }
+
+    fn closed(&mut self) {
+        self.program.closed();
+    }
+
+    fn opened(&mut self, id: u32) {
+        self.program.opened(id);
     }
 
     fn bar_button(&mut self, id: u32, window: &mut Window) {
@@ -435,14 +481,16 @@ impl<P: Program> Host<P> {
 /// `Window::open_window` (its opener is its parent: a dialog's, say).
 pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
     let theme = program.theme();
-    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None })
+    let title_sent = program.title();
+    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent })
 }
 
 /// Opens the program's window and runs until it is closed. `size` is the
 /// size asked for, in reference units.
 pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {
     let theme = program.theme();
-    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None };
+    let title_sent = program.title();
+    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent };
     vergence_ui::run(&mut host, size)
 }
 

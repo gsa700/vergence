@@ -10,11 +10,11 @@
 #   cargo build --release
 #
 # What goes where (PREFIX=/usr/local):
-#   bin/vergence-server, vergence-term, vergence-settings, vergence-calc, vergence-quit, vergence-hw, vbus, vnative, vsound, vshell, vctl   the programs
+#   bin/vergence-server, vergence-term, vergence-settings, vergence-calc, vergence-quit, vergence-hw, vergence-edit, vbus, vnative, vsound, vshell, vctl   the programs
 #   bin/vergence-session                     the session launcher (tools/vergence-session)
 #   bin/vergence -> vergence-session         start the session from a text console
 #   share/wayland-sessions/vergence.desktop  "Vergence" at a display manager's login screen
-#   share/applications/vergence-*.desktop    the terminal, the settings app, the calculator, Force Quit and Hardware, for the shelf and any launcher
+#   share/applications/vergence-*.desktop    the terminal, the settings app, the calculator, Force Quit, Hardware and the text editor, for the shelf and any launcher
 #   share/icons/hicolor/scalable/apps/       their icons (data/icons, drawn by the project)
 #   share/doc/vergence/                      LICENSE-APACHE, LICENSE-GPL, THIRD-PARTY-NOTICES.md
 #   libexec/vergence/sound-default           FreeBSD only: the root helper that sets the default
@@ -52,8 +52,8 @@ applications=$destdir$prefix/share/applications
 icons=$destdir$prefix/share/icons/hicolor/scalable/apps
 docs=$destdir$prefix/share/doc/vergence       # license and notices (the settings app's About page names it)
 docfiles="LICENSE-APACHE LICENSE-GPL THIRD-PARTY-NOTICES.md"
-programs="vergence-server vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vbus vnative vsound vshell"
-tools="vergence-term vergence-settings vergence-calc vergence-quit vergence-hw"
+programs="vergence-server vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit vbus vnative vsound vshell"
+tools="vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit"
 libexec=$destdir$prefix/libexec/vergence
 
 if [ -n "$uninstall" ]; then

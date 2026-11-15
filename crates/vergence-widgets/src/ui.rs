@@ -292,7 +292,7 @@ impl<M: Clone> Ui<M> {
         self.hover = alive(self.hover, &self.nodes);
         self.focus = alive(self.focus, &self.nodes).filter(|id| self.nodes.iter().any(|n| n.id == *id && n.focusable()));
         // A field that asks for the keyboard gets it when it first appears.
-        if let Some(n) = self.nodes.iter().find(|n| matches!(n.what, What::Field { autofocus: true, .. }) && !before.contains(&n.id)) {
+        if let Some(n) = self.nodes.iter().find(|n| matches!(n.what, What::Field { autofocus: true, .. } | What::Area { autofocus: true, .. }) && !before.contains(&n.id)) {
             self.focus = Some(n.id);
         }
         if self.pressed.is_some_and(|(id, _)| alive(Some(id), &self.nodes).is_none()) {
