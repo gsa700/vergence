@@ -61,7 +61,7 @@ build once than in every app:
    decision**: §6.10 says window furniture "is the desktop's alone and has
    no per-application override"; the bar's light/dark becomes a per-app
    override (the bar's layout, buttons and corners stay the desktop's).
-3. *Planned 2026-11-14 (docs/tools-milestone-1.md, accepted).* **Three small native tools that make the app framework**: **Calculator**
+3. *Built 2026-11-14/15 (docs/tools-milestone-1.md): Calculator, Force Quit, Hardware.* **Three small native tools that make the app framework**: **Calculator**
    (basic, with a scientific mode), **Running Applications** (processes:
    Linux /proc, FreeBSD's kern.proc sysctls; end, kill, by window too),
    **Hardware** (CPU, GPU, memory, disks, network: vergence-power,

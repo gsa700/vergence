@@ -1,4 +1,10 @@
-# Tools milestone 1: Calculator, Running Applications, Hardware
+# Tools milestone 1: Calculator, Force Quit, Hardware
+
+**Built 2026-11-14/15**, all three tools; open: Hardware's pages looked at
+on screen (only This computer so far), and the installs on kepler and
+Techbench (bus v13 needs the server and apps installed together). Running
+Applications became **Force Quit** (Dave: "they call it force quit on the
+mac"). Progress and acceptance below.
 
 Drafted 2026-11-14, item 3 of docs/apps-roadmap.md: three small native
 tools from Dave's list, each small, together settling the app framework
@@ -174,12 +180,15 @@ Quit Applications); anything more is the terminal's.
 
 ## Acceptance
 
-- Calculator: 0.1 + 0.2 = 0.3; 1 ÷ 3 × 3 = 1; sin 30° = 0.5 exactly;
-  the number pad and Enter work; the tape copies a line.
-- Running Applications: an app stopped with `kill -STOP` shows as not
-  responding and Force Quit ends it; End closes an app's windows as their
-  close buttons do; "Pick a window" selects the window's application.
-- Hardware: every reading on Hubble (Void, two GPUs, a battery), kepler
-  (FreeBSD) and Techbench (Fedora); charts move only while shown.
-- Each app: app button with its commands, its settings window, About, its
-  windows remembered; full suites on all three machines.
+- [x] Calculator: 0.1 + 0.2 = 0.3; 1 ÷ 3 × 3 = 1; sin 30° = 0.5 exactly
+  (tests and on screen); the number pad and Enter work; the tape takes an
+  answer back (a click; copying is Ctrl+C on the answer).
+- [x] Force Quit: an app stopped with `kill -STOP` shows "Not
+  responding", Force Quit ends it after 2 s; a running one ends when asked.
+  (End and Pick a window dropped: "very simple".)
+- [ ] Hardware: every reading on Hubble, kepler and Techbench. The readers'
+  tests pass on Hubble and kepler; on screen only This computer, on Hubble.
+- [x] Each app: app button with its commands, About; the calculator's
+  settings window; windows remembered (the session brought the calculator
+  back).
+- [x] Full suites: Hubble 529; kepler and Techbench at each step.

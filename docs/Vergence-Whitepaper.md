@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "14 November 2026 — Draft 0.18"
+date: "15 November 2026 — Draft 0.19"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.18 · 14 November 2026
+David Erickson (AB0R), with Claude · Draft 0.19 · 15 November 2026
 
 ---
 
@@ -572,6 +572,7 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
   - **The look** (13 November): the frost (what is under a bar, the dock, a menu or the launcher blurred and tinted on the GPU, with a plain tint where Reduce transparency asks for it or there is no GPU), light and dark versions of everything with contrast checked in both, a native window's content running under its frosted bar, a terminal tab turning red while a program in it runs as root, rounded window corners at the one radius, and the size of controls settled together.
 
   - **App settings** (14 November, §6.10): the app button in every window's bar (Alt+Space), its menu from commands with roles whose names and keys the desktop fixes (bus protocol version 11), Keyboard shortcuts, each application's settings window with inherit-or-override rows, an Apps page in the settings app for the programs that are not the project's, the desktop's Style as the master switch for light and dark, and the settings app light always. Snapping became on by default the same evening, the author having used it.
+  - **The first tools** (14 and 15 November): a **Calculator** with exact decimal arithmetic of the project's own (34 significant digits, so 0.1 + 0.2 is 0.3 and sin 30° is exactly 0.5), a keypad, a live answer, the session's calculations, and a scientific mode for which the window asks the server for more room (bus protocol version 12: a window may ask for a size, the server decides); **Force Quit**, as on the Mac: the user's running applications, those that have stopped answering marked (the server asks each app's loop whether it runs), one ended at once after a question, gently first (SIGTERM, then SIGKILL after two seconds), opened anywhere by Ctrl+Alt+Escape (bus protocol version 13); and **Hardware**: processors, memory, storage, network, graphics and power, what they are and what they are doing, the last minute charted, read by the project's own code on Linux and FreeBSD. They brought the toolkit an About window, a chart, and a way for an application to see its keys before its buttons do.
   - **A second GPU** (14 November): screens on another GPU, drawn by the main one and copied over (§8.3, "A screen on a second GPU, as built"): Hubble's 14-inch 4K monitor on the NVIDIA card's HDMI, smooth, paced to its own refresh, its touch panel tied to it, the NVIDIA card asleep when unplugged; the Screens page says which GPU shows and draws each screen; bus protocol version 8. Carried over: the copy by the CPU for GPUs that share no format.
 
   Still open within phase 2: checks by hand left in the seat, shelf and look milestones; docks on more than one screen; live tiles; the rest of Smithay's replacement (the window space and the renderer next, then the DRM/KMS and input back ends); explicit sync and NVIDIA's own driver (§8.3); and packages for Void, FreeBSD and Fedora (today `tools/install.sh` installs under a prefix).
