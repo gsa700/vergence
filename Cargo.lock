@@ -2292,6 +2292,7 @@ dependencies = [
  "vergence-sound",
  "vergence-sysinfo",
  "vergence-text",
+ "vergence-types",
  "vergence-xsettings",
  "x11rb 0.13.2",
  "xcursor",
@@ -2388,6 +2389,7 @@ dependencies = [
  "vergence-scene",
  "vergence-spell",
  "vergence-text",
+ "vergence-types",
  "vergence-ui",
 ]
 

@@ -36,12 +36,14 @@
 //! a command can be `featured`, one of the app's everyday few on the
 //! menu's first panel. Version 12 (tools milestone 1): a window may ask for
 //! a size (`WinRequest::Size`); the server decides. Version 13: Force
-//! Quit's `ListApps`, `Apps` and `ForceQuit`.
+//! Quit's `ListApps`, `Apps` and `ForceQuit`. Version 14 (editor milestone
+//! 1): `Tab::edited`. Version 15 (files milestone 1): `Open`, files and
+//! links opened by the server with the applications chosen for their types.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 14;
+pub const VERSION: u32 = 15;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -186,6 +188,9 @@ pub enum ErrorCode {
     /// Understood, but this server does not do it yet (native windows,
     /// before native milestone 1's step 3).
     NotYet,
+    /// Understood and allowed, but it could not be done (a file no
+    /// application opens, a program that would not start); the message says.
+    Failed,
     /// A code from a newer server.
     Other(u16),
 }
@@ -199,6 +204,7 @@ impl ErrorCode {
             ErrorCode::BadMessage => 4,
             ErrorCode::Denied => 5,
             ErrorCode::NotYet => 6,
+            ErrorCode::Failed => 7,
             ErrorCode::Other(v) => v,
         }
     }
@@ -211,6 +217,7 @@ impl ErrorCode {
             4 => ErrorCode::BadMessage,
             5 => ErrorCode::Denied,
             6 => ErrorCode::NotYet,
+            7 => ErrorCode::Failed,
             v => ErrorCode::Other(v),
         }
     }
@@ -297,6 +304,11 @@ pub enum ClientMsg {
     ForceQuit { serial: u32, app: String },
     /// The answer to [`ServerMsg::Alive`]: this client's loop is running.
     Alive { serial: u32 },
+    /// Open files (absolute paths) and links with an application: `app`, a
+    /// desktop entry id ("firefox.desktop"), or, empty, each one's default
+    /// for its type (files milestone 1). The server starts them as the dock
+    /// does. Reply: Done, or an error naming what could not be opened.
+    Open { serial: u32, items: Vec<String>, app: String },
     /// Windows (window.rs).
     Window(crate::window::WinRequest),
 }
@@ -317,6 +329,8 @@ pub struct AppInfo {
 
 /// The icon side Apps carries (points; drawn sharp at scale 1, smooth above).
 pub const APP_ICON: u16 = 32;
+/// The most files or links one Open asks for (more are refused by the server).
+pub const MAX_OPEN: usize = 256;
 /// The most applications one Apps message lists with icons (a frame is 64 KB).
 pub const MAX_APP_ICONS: usize = 12;
 
@@ -373,6 +387,7 @@ mod op {
     pub const LIST_APPS: u16 = 11;
     pub const FORCE_QUIT: u16 = 12;
     pub const ALIVE_REPLY: u16 = 13;
+    pub const OPEN: u16 = 14;
     // Server to client.
     pub const WELCOME: u16 = 1;
     pub const PONG: u16 = 2;
@@ -490,6 +505,14 @@ impl ClientMsg {
                 e.u32(*serial).str(app);
                 e
             }
+            ClientMsg::Open { serial, items, app } => {
+                let mut e = Encoder::frame(op::OPEN);
+                e.u32(*serial).str(app).count(items.len());
+                for i in items {
+                    e.str(i);
+                }
+                e
+            }
             ClientMsg::Alive { serial } => {
                 let mut e = Encoder::frame(op::ALIVE_REPLY);
                 e.u32(*serial);
@@ -583,6 +606,19 @@ impl ClientMsg {
                 Ok(ClientMsg::ForceQuit { serial, app })
             }
             op::ALIVE_REPLY => Ok(ClientMsg::Alive { serial: d.u32().map_err(|e| bad(0, e))? }),
+            op::OPEN => {
+                let serial = d.u32().map_err(|e| bad(0, e))?;
+                let rest = (|| -> Result<ClientMsg, WireError> {
+                    let app = d.str()?;
+                    let n = d.count(4)?;
+                    let mut items = Vec::with_capacity(n.min(MAX_OPEN));
+                    for _ in 0..n {
+                        items.push(d.str()?);
+                    }
+                    Ok(ClientMsg::Open { serial, items, app })
+                })();
+                rest.map_err(|e| bad(serial, e))
+            }
             other => {
                 // Every request starts with its serial; answer with it if present.
                 let serial = d.u32().unwrap_or(0);
@@ -854,6 +890,8 @@ mod tests {
             ClientMsg::ListApps { serial: 22 },
             ClientMsg::ForceQuit { serial: 23, app: "firefox".into() },
             ClientMsg::Alive { serial: 25 },
+            ClientMsg::Open { serial: 26, items: vec!["/home/u/a b.png".into(), "https://example.org".into()], app: String::new() },
+            ClientMsg::Open { serial: 27, items: vec![], app: "firefox.desktop".into() },
         ] {
             assert_eq!(ClientMsg::decode(&frame(&m.encode().unwrap())).unwrap(), m);
         }

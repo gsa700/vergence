@@ -630,7 +630,8 @@ impl EditWindow {
         let dialog = match what {
             Picking::Open => vergence_widgets::filedialog::FileDialog::open(APP_ID, "Open", theme, done).filters(vec![
                 vergence_widgets::filedialog::Filter::new("All files", &[]),
-                vergence_widgets::filedialog::Filter::new("Text files", &["*.txt", "*.md", "*.markdown", "*.rst", "*.org", "*.log", "*.csv", "*.conf", "*.ini", "*.toml", "*.json", "*.yaml", "*.yml", "*.xml", "*.sh"]),
+                // Every kind of text: scripts, Markdown, TOML, source code (files milestone 1).
+                vergence_widgets::filedialog::Filter::of_types("Text files", &["text/plain"]),
             ]),
             Picking::SaveAs { tab, .. } => {
                 let name = self.tabs.iter().find(|t| t.id == tab).map_or_else(|| "Untitled.txt".into(), suggested_name);

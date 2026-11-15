@@ -280,6 +280,14 @@ impl Server {
                 Ok(_) => self.bus_send(id, ServerMsg::Done { serial }),
                 Err(message) => self.bus_send(id, ServerMsg::Error { serial, code: vergence_protocol::bus::ErrorCode::Denied, message }),
             },
+            // Files and links opened by type (files milestone 1; shelf.rs).
+            ClientMsg::Open { serial, items, app } => match self.open_items(&items, &app) {
+                Ok(()) => self.bus_send(id, ServerMsg::Done { serial }),
+                Err(message) => {
+                    tracing::info!("open: {message}");
+                    self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Failed, message })
+                }
+            },
             ClientMsg::GetSettings { serial } => {
                 let settings = crate::settings::all(&self.settings.current);
                 self.bus_send(id, ServerMsg::Settings { serial, complete: true, settings });

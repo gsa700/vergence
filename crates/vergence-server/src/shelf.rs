@@ -1069,30 +1069,8 @@ impl Server {
             }
             Act::Start(key) => {
                 let Some(entry) = self.shelf.apps.iter().find(|e| e.id == key).cloned() else { return };
-                if entry.exec.is_empty() {
-                    return;
-                }
-                // The entry's own arguments, with no shell between; one that
-                // wants a terminal runs in ours (`vergence-term -e`).
-                let mut command = if entry.terminal {
-                    let mut c = std::process::Command::new("vergence-term");
-                    c.arg("-e").args(&entry.exec);
-                    c
-                } else {
-                    let mut c = std::process::Command::new(&entry.exec[0]);
-                    c.args(&entry.exec[1..]);
-                    c
-                };
-                match crate::spawn(&mut command) {
-                    Ok(pid) => {
-                        tracing::info!("shelf: started {} (pid {pid})", entry.name);
-                        let had = self.shelf_items().iter().find(|(i, _)| i.key == key).map_or(0, |(_, w)| w.len());
-                        self.shelf.starting.retain(|(k, ..)| *k != key);
-                        self.shelf.launched.retain(|(k, since)| *k != key && since.elapsed() < STARTING);
-                        self.shelf.launched.push((key.clone(), std::time::Instant::now()));
-                        self.shelf.starting.push((key, std::time::Instant::now(), had));
-                    }
-                    Err(e) => tracing::warn!("shelf: {} could not be started: {e}", entry.name),
+                if let Err(e) = self.start_entry(&entry, &[]) {
+                    tracing::warn!("shelf: {e}");
                 }
             }
             Act::Close(windows) => {
@@ -1416,5 +1394,53 @@ impl Server {
             self.shelf.backdrop = slot;
         }
         elements
+    }
+}
+
+impl Server {
+    /// Starts an application from its desktop entry, with files or links
+    /// for it (files milestone 1: opened by type) or none (the dock, the
+    /// launcher): its own arguments, with no shell between; one that wants
+    /// a terminal runs in ours (`vergence-term -e`). The dock shows it
+    /// starting.
+    pub fn start_entry(&mut self, entry: &Entry, files: &[String]) -> Result<(), String> {
+        let commands = vergence_shell::open::commands(entry, files);
+        if commands.is_empty() {
+            return Err(format!("{} has no command to start", entry.name));
+        }
+        let key = entry.id.clone();
+        for argv in commands {
+            let Some((program, rest)) = argv.split_first() else { continue };
+            let pid = crate::spawn(std::process::Command::new(program).args(rest)).map_err(|e| format!("{} could not be started: {e}", entry.name))?;
+            tracing::info!("shelf: started {} (pid {pid}){}", entry.name, if files.is_empty() { String::new() } else { format!(" with {} file(s)", files.len()) });
+        }
+        let had = self.shelf_items().iter().find(|(i, _)| i.key == key).map_or(0, |(_, w)| w.len());
+        self.shelf.starting.retain(|(k, ..)| *k != key);
+        self.shelf.launched.retain(|(k, since)| *k != key && since.elapsed() < STARTING);
+        self.shelf.launched.push((key.clone(), std::time::Instant::now()));
+        self.shelf.starting.push((key, std::time::Instant::now(), had));
+        Ok(())
+    }
+
+    /// Opens files (absolute paths) and links with the applications chosen
+    /// for their types, or all with `app` (a desktop id); the bus's `Open`.
+    /// Err names what could not be opened (the rest are still opened).
+    pub fn open_items(&mut self, items: &[String], app: &str) -> Result<(), String> {
+        if items.len() > vergence_protocol::bus::MAX_OPEN {
+            return Err(format!("more than {} items", vergence_protocol::bus::MAX_OPEN));
+        }
+        // Only whole paths and links: a relative path would be the server's own directory's.
+        if let Some(bad) = items.iter().find(|i| !i.starts_with('/') && vergence_types::of_link(i).is_none() && vergence_types::path_of_link(i).is_none()) {
+            return Err(format!("{bad}: not a whole path or a link"));
+        }
+        let parsed: Vec<vergence_shell::open::Item> = items.iter().map(|i| vergence_shell::open::item(i)).collect();
+        let lists = vergence_types::lists();
+        let (groups, mut failed) = vergence_shell::open::plan(&parsed, (!app.is_empty()).then_some(app), &self.shelf.apps, &lists);
+        for (entry, files) in groups {
+            if let Err(e) = self.start_entry(&entry, &files) {
+                failed.push(e);
+            }
+        }
+        if failed.is_empty() { Ok(()) } else { Err(failed.join("; ")) }
     }
 }

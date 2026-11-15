@@ -261,6 +261,18 @@ the wallpaper, a scratch place for launchers and files.
   default it wrote, photos and an extensionless PNG by their bytes). Tests:
   Hubble 584, kepler 580, Techbench 584. Opening through the server (so a
   started app gets the session's place in the dock) is step 2.
+- **Step 2, first parts** (2026-11-15): the Open/Save dialog's filters take
+  types (`Filter::of_types`, `image/*`; the Text Editor's "Text files" is
+  now every kind of text) and its rows draw a mark per family of types
+  (`Kind`: folder, text, picture, sound, video, archive, document,
+  program). Bus **v15** `ClientMsg::Open { items, app }` and
+  `ErrorCode::Failed`: the server opens files and links by type
+  (shelf.rs `open_items`, `start_entry` shared with the dock's start, so the
+  dock shows the app starting); vergence-shell open.rs (`item`, `plan`,
+  `commands`) is shared by the server and `vergence-open`, which asks the
+  server in a session. Checked on kepler: two Markdown files opened as two
+  tabs of one Text Editor through the server; `/bin/ls` refused with its
+  reason. Tests: Hubble 586, kepler 582, Techbench 586.
 
 ## Steps
 

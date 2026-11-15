@@ -20,6 +20,7 @@ xkbcommon = { version = "0.9", default-features = false }
 vergence-profile.workspace = true
 vergence-look.workspace = true
 vergence-sysinfo.workspace = true
+vergence-types.workspace = true
 vergence-shell.workspace = true
 vergence-seat.workspace = true
 vergence-bar.workspace = true

@@ -246,7 +246,8 @@ pub fn name_of(pid: u32) -> Option<String> {
     (!name.is_empty()).then(|| name.chars().take(40).collect())
 }
 
-pub use vergence_sysinfo::euid_of;
+#[cfg(target_os = "linux")]
+use vergence_sysinfo::euid_of;
 
 /// Whether any process of process group `group` runs as the superuser (a
 /// script's group holds the sudo it runs, though the script leads it):

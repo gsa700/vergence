@@ -37,21 +37,37 @@ const PREVIEW_BYTES: usize = 8 * 1024;
 const PREVIEW_LINES: usize = 40;
 const DOUBLE: Duration = Duration::from_millis(450);
 
-/// Which files a dialog shows: a name ("Text files") and patterns
-/// ("*.txt"); a filter with no patterns shows everything.
+/// Which files a dialog shows: a name ("Text files"), patterns ("*.txt")
+/// and file types ("text/plain", which takes in every kind of text: a
+/// script, TOML, Markdown; files milestone 1). A file is shown if a pattern
+/// or a type admits it; a filter with neither shows everything.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Filter {
     pub name: String,
     pub patterns: Vec<String>,
+    pub types: Vec<String>,
 }
 
 impl Filter {
     pub fn new(name: &str, patterns: &[&str]) -> Filter {
-        Filter { name: name.into(), patterns: patterns.iter().map(|p| p.to_string()).collect() }
+        Filter { name: name.into(), patterns: patterns.iter().map(|p| p.to_string()).collect(), types: Vec::new() }
     }
 
-    fn admits(&self, name: &str) -> bool {
-        self.patterns.is_empty() || self.patterns.iter().any(|p| glob(p, name))
+    /// A filter by file types (vergence-types names; `image/*` for every picture).
+    pub fn of_types(name: &str, types: &[&str]) -> Filter {
+        Filter { name: name.into(), patterns: Vec::new(), types: types.iter().map(|t| t.to_string()).collect() }
+    }
+
+    /// Whether a file of this name (and type, by its name) is shown.
+    fn admits(&self, name: &str, mime: Option<&str>) -> bool {
+        (self.patterns.is_empty() && self.types.is_empty())
+            || self.patterns.iter().any(|p| glob(p, name))
+            || mime.is_some_and(|m| {
+                self.types.iter().any(|t| match t.strip_suffix("/*") {
+                    Some(top) => m.split('/').next() == Some(top),
+                    None => vergence_types::is_a(m, t),
+                })
+            })
     }
 }
 
@@ -88,6 +104,8 @@ struct Entry {
     name: String,
     path: PathBuf,
     dir: bool,
+    /// Its type by its name (a folder's is a folder), if the name says.
+    mime: Option<&'static str>,
     size: u64,
     changed: Option<SystemTime>,
 }
@@ -217,7 +235,10 @@ impl FileDialog {
                         let path = e.path();
                         // Follow links: a link to a folder is a folder.
                         let m = fs::metadata(&path).ok();
-                        Some(Entry { dir: m.as_ref().is_some_and(|m| m.is_dir()), size: m.as_ref().map_or(0, |m| m.len()), changed: m.and_then(|m| m.modified().ok()), name, path })
+                        {
+                            let dir = m.as_ref().is_some_and(|m| m.is_dir());
+                            Some(Entry { dir, mime: kind_of(dir, &name), size: m.as_ref().map_or(0, |m| m.len()), changed: m.and_then(|m| m.modified().ok()), name, path })
+                        }
                     })
                     .collect(),
                 Err(e) => {
@@ -229,7 +250,10 @@ impl FileDialog {
                 .into_iter()
                 .filter_map(|p| {
                     let m = fs::metadata(&p).ok()?;
-                    Some(Entry { name: p.file_name()?.to_string_lossy().into_owned(), dir: m.is_dir(), size: m.len(), changed: m.modified().ok(), path: p })
+                    {
+                        let name = p.file_name()?.to_string_lossy().into_owned();
+                        Some(Entry { mime: kind_of(m.is_dir(), &name), name, dir: m.is_dir(), size: m.len(), changed: m.modified().ok(), path: p })
+                    }
                 })
                 .collect(),
         };
@@ -244,7 +268,7 @@ impl FileDialog {
             .entries
             .iter()
             .filter(|e| self.hidden || !e.name.starts_with('.'))
-            .filter(|e| e.dir || filter.is_none_or(|f| f.admits(&e.name)))
+            .filter(|e| e.dir || filter.is_none_or(|f| f.admits(&e.name, e.mime)))
             .filter(|e| narrow.is_empty() || e.name.to_lowercase().contains(&narrow))
             .collect();
         let (by, up) = self.sort;
@@ -516,7 +540,7 @@ impl Program for FileDialog {
             }
             let mut b = button(
                 row(vec![
-                    kind_icon(e.dir),
+                    kind_icon(Kind::of(e.mime)),
                     column(name_col).width(Length::FILL),
                     label(if e.dir { String::new() } else { size_words(e.size) }).size(11.0).dim().align(Align::End).width(size_w),
                     label(e.changed.map(when).unwrap_or_default()).size(11.0).dim().width(when_w),
@@ -731,19 +755,101 @@ impl Drop for FileDialog {
     }
 }
 
-/// A small folder or page, drawn.
-fn kind_icon<M: 'static>(dir: bool) -> Element<M> {
+/// A list entry's type by its name: a folder, or what the name says.
+fn kind_of(dir: bool, name: &str) -> Option<&'static str> {
+    if dir { Some(vergence_types::FOLDER) } else { vergence_types::of_name(name) }
+}
+
+/// The families of file types the list draws a mark for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Folder,
+    Text,
+    Picture,
+    Sound,
+    Video,
+    Archive,
+    Document,
+    Program,
+    Other,
+}
+
+impl Kind {
+    /// The family of a type, by its generic icon (vergence-types).
+    pub fn of(mime: Option<&str>) -> Kind {
+        let Some(m) = mime else { return Kind::Other };
+        match vergence_types::icons(m)[1].as_str() {
+            "folder" => Kind::Folder,
+            "text-x-generic" | "text-x-script" | "text-html" => Kind::Text,
+            "image-x-generic" => Kind::Picture,
+            "audio-x-generic" => Kind::Sound,
+            "video-x-generic" => Kind::Video,
+            "package-x-generic" | "media-optical" | "drive-harddisk" => Kind::Archive,
+            "x-office-document" | "x-office-spreadsheet" | "x-office-presentation" | "x-office-calendar" | "x-office-address-book" => Kind::Document,
+            "application-x-executable" if m != vergence_types::BINARY => Kind::Program,
+            _ => Kind::Other,
+        }
+    }
+}
+
+/// A small mark for a family of files, drawn: a folder in the accent
+/// color; a page, with lines for text, a hill and sun for a picture, a note
+/// for sound, a play mark for video, a band for an archive, a heading for a
+/// document; a window for a program.
+pub fn kind_icon<M: 'static>(kind: Kind) -> Element<M> {
     drawing(move |scene, _, r: Rect, t: &Theme| {
         let (x, y) = (r.x + 2.0, r.y + (r.h - 14.0) / 2.0);
-        if dir {
-            let c = t.accent;
-            scene.fill_rounded(Rect::new(x, y + 1.0, 7.0, 4.0), 1.5, c);
-            scene.fill_rounded(Rect::new(x, y + 3.0, 16.0, 11.0), 2.0, c);
-        } else {
-            scene.fill_rounded(Rect::new(x + 2.0, y, 12.0, 15.0), 2.0, t.dim);
-            scene.fill_rounded(Rect::new(x + 3.0, y + 1.0, 10.0, 13.0), 1.5, t.page);
-            for k in 0..3 {
-                scene.fill(Rect::new(x + 5.0, y + 4.0 + k as f32 * 3.0, 6.0, 1.0), Color { a: 160, ..t.dim });
+        let mark = Color { a: 170, ..t.dim };
+        match kind {
+            Kind::Folder => {
+                let c = t.accent;
+                scene.fill_rounded(Rect::new(x, y + 1.0, 7.0, 4.0), 1.5, c);
+                scene.fill_rounded(Rect::new(x, y + 3.0, 16.0, 11.0), 2.0, c);
+            }
+            Kind::Program => {
+                scene.fill_rounded(Rect::new(x, y + 1.0, 16.0, 13.0), 2.0, t.dim);
+                scene.fill_rounded(Rect::new(x + 1.0, y + 4.0, 14.0, 9.0), 1.0, t.page);
+                scene.fill(Rect::new(x + 3.0, y + 6.0, 4.0, 1.0), mark);
+                scene.fill(Rect::new(x + 3.0, y + 9.0, 7.0, 1.0), mark);
+            }
+            _ => {
+                scene.fill_rounded(Rect::new(x + 2.0, y, 12.0, 15.0), 2.0, t.dim);
+                scene.fill_rounded(Rect::new(x + 3.0, y + 1.0, 10.0, 13.0), 1.5, t.page);
+                let (cx, cy) = (x + 8.0, y + 7.5);
+                match kind {
+                    Kind::Text | Kind::Other => {
+                        let lines = if kind == Kind::Text { 3 } else { 0 };
+                        for k in 0..lines {
+                            scene.fill(Rect::new(x + 5.0, y + 4.0 + k as f32 * 3.0, 6.0, 1.0), mark);
+                        }
+                    }
+                    Kind::Picture => {
+                        scene.fill_rounded(Rect::new(x + 9.0, y + 3.0, 3.0, 3.0), 1.5, t.accent);
+                        scene.fill_rounded(Rect::new(x + 4.0, y + 8.0, 8.0, 4.0), 1.0, Color { a: 200, ..t.accent });
+                    }
+                    Kind::Sound => {
+                        scene.fill_rounded(Rect::new(cx - 3.0, cy + 1.0, 4.0, 3.0), 1.5, mark);
+                        scene.fill(Rect::new(cx, cy - 4.0, 1.2, 6.0), mark);
+                        scene.fill(Rect::new(cx, cy - 4.0, 3.0, 1.2), mark);
+                    }
+                    Kind::Video => {
+                        for k in 0..4 {
+                            let h = 6.0 - k as f32 * 1.5;
+                            scene.fill(Rect::new(cx - 2.0 + k as f32, cy - h / 2.0, 1.0, h), mark);
+                        }
+                    }
+                    Kind::Archive => {
+                        scene.fill(Rect::new(cx - 1.0, y + 1.0, 2.0, 13.0), mark);
+                        scene.fill(Rect::new(cx - 2.0, y + 9.0, 4.0, 3.0), mark);
+                    }
+                    Kind::Document => {
+                        scene.fill(Rect::new(x + 5.0, y + 3.5, 6.0, 2.0), mark);
+                        for k in 0..2 {
+                            scene.fill(Rect::new(x + 5.0, y + 7.5 + k as f32 * 2.5, 6.0, 1.0), mark);
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
     })
@@ -994,7 +1100,16 @@ mod tests {
         assert!(glob("*.txt", "Notes.TXT"));
         assert!(glob("read?e", "readme"));
         assert!(!glob("*.md", "notes.txt"));
-        assert!(Filter::new("All files", &[]).admits("anything"));
+        assert!(Filter::new("All files", &[]).admits("anything", None));
+        let text = Filter::of_types("Text files", &["text/plain"]);
+        assert!(text.admits("notes.md", vergence_types::of_name("notes.md")), "Markdown is text");
+        assert!(text.admits("run.sh", vergence_types::of_name("run.sh")), "a script is text");
+        assert!(!text.admits("photo.jpg", vergence_types::of_name("photo.jpg")));
+        assert!(Filter::of_types("Pictures", &["image/*"]).admits("photo.jpg", vergence_types::of_name("photo.jpg")));
+        assert_eq!(Kind::of(vergence_types::of_name("photo.jpg")), Kind::Picture);
+        assert_eq!(Kind::of(Some(vergence_types::FOLDER)), Kind::Folder);
+        assert_eq!(Kind::of(vergence_types::of_name("a.tar.gz")), Kind::Archive);
+        assert_eq!(Kind::of(None), Kind::Other);
     }
 
     #[test]

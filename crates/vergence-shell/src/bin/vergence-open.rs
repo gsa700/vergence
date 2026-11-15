@@ -1,6 +1,6 @@
 //! `vergence-open`: opens files and links with the applications chosen for
-//! their types (files milestone 1, step 1), as File Viewer and the dock
-//! will. Also says what a file is and which applications could open it.
+//! their types (files milestone 1), as File Viewer and the dock do. Also
+//! says what a file is and which applications could open it.
 //!
 //!     vergence-open FILE|LINK...          open each with its default application
 //!     vergence-open --with APP FILE...    open with that application (desktop id)
@@ -8,35 +8,15 @@
 //!     vergence-open --apps FILE...        print the applications that open each, best first
 //!     vergence-open --default TYPE APP    make APP the default for TYPE (Vergence's list)
 //!
-//! Applications are desktop entries ("org.example.App" or with ".desktop");
-//! choices come from the mimeapps.list files, Vergence's own first. An
-//! application that wants a terminal runs in ours (`vergence-term -e`).
+//! In a Vergence session the server opens them (the bus's `Open`), so the
+//! dock shows each application starting; elsewhere this starts them
+//! itself. Applications are desktop entries ("org.example.App" or with
+//! ".desktop"); choices come from the mimeapps.list files, Vergence's own
+//! first. An application that wants a terminal runs in ours.
 
-use std::path::PathBuf;
 use std::process::ExitCode;
 
-use vergence_shell::{apps, desktop};
-
-/// One thing to open: as given, what to pass the application, and its type.
-struct Item {
-    given: String,
-    arg: String,
-    mime: String,
-}
-
-fn item(given: &str) -> Item {
-    if let Some(mime) = vergence_types::of_link(given) {
-        return Item { given: given.into(), arg: given.into(), mime };
-    }
-    let path = vergence_types::path_of_link(given).unwrap_or_else(|| PathBuf::from(given));
-    let path = std::path::absolute(&path).unwrap_or(path);
-    let mime = vergence_types::of_file(&path).to_string();
-    Item { given: given.into(), arg: path.to_string_lossy().into_owned(), mime }
-}
-
-fn desktop_id(id: &str) -> String {
-    if id.ends_with(".desktop") { id.to_string() } else { format!("{id}.desktop") }
-}
+use vergence_shell::{apps, open};
 
 fn usage() -> ExitCode {
     eprintln!("usage: vergence-open [--with APP] FILE|LINK...\n       vergence-open --type|--apps FILE|LINK...\n       vergence-open --default TYPE APP");
@@ -49,14 +29,23 @@ fn main() -> ExitCode {
     match first.as_str() {
         "--type" => {
             for given in &args[1..] {
-                let i = item(given);
+                let i = open::item(given);
                 println!("{}\t{}\t{}", i.given, i.mime, vergence_types::describe(&i.mime));
+            }
+            ExitCode::SUCCESS
+        }
+        "--apps" => {
+            let (entries, lists) = (apps::installed(), vergence_types::lists());
+            for given in &args[1..] {
+                let i = open::item(given);
+                let found = open::apps_for(&i.mime, &entries, &lists);
+                println!("{} ({}): {}", i.given, i.mime, if found.is_empty() { "none".into() } else { found.join(", ") });
             }
             ExitCode::SUCCESS
         }
         "--default" => {
             let [_, mime, app] = &args[..] else { return usage() };
-            match vergence_types::choose_default(mime, &desktop_id(app)) {
+            match vergence_types::choose_default(mime, &open::desktop_id(app)) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("vergence-open: {}: {e}", vergence_types::own_list_path().display());
@@ -64,77 +53,48 @@ fn main() -> ExitCode {
                 }
             }
         }
-        "--apps" | "--with" => {
-            let installed = apps::installed();
-            let ids: Vec<String> = installed.iter().map(|e| desktop_id(&e.id)).collect();
-            let known: Vec<vergence_types::App> = installed.iter().zip(&ids).map(|(e, id)| vergence_types::App { id, types: &e.mime_types }).collect();
-            let lists = vergence_types::lists();
-            if first == "--apps" {
-                for given in &args[1..] {
-                    let i = item(given);
-                    let found = vergence_types::apps_for(&i.mime, &known, &lists);
-                    println!("{} ({}): {}", i.given, i.mime, if found.is_empty() { "none".into() } else { found.join(", ") });
-                }
-                return ExitCode::SUCCESS;
-            }
-            let Some(app) = args.get(1) else { return usage() };
-            let Some(entry) = installed.iter().find(|e| desktop_id(&e.id) == desktop_id(app)) else {
-                eprintln!("vergence-open: no application {app}");
-                return ExitCode::FAILURE;
-            };
-            let files: Vec<String> = args[2..].iter().map(|g| item(g).arg).collect();
-            if start(entry, &files) { ExitCode::SUCCESS } else { ExitCode::FAILURE }
-        }
+        "--with" => match args.get(1) {
+            Some(app) => run(&args[2..], Some(&open::desktop_id(app))),
+            None => usage(),
+        },
         _ if first.starts_with("--") => usage(),
-        _ => {
-            let installed = apps::installed();
-            let ids: Vec<String> = installed.iter().map(|e| desktop_id(&e.id)).collect();
-            let known: Vec<vergence_types::App> = installed.iter().zip(&ids).map(|(e, id)| vergence_types::App { id, types: &e.mime_types }).collect();
-            let lists = vergence_types::lists();
-            // Files of one type go to one application together, in the order given.
-            let mut groups: Vec<(String, Vec<String>)> = Vec::new();
-            let mut ok = true;
-            for given in &args {
-                let i = item(given);
-                match vergence_types::default_for(&i.mime, &known, &lists) {
-                    Some(app) => match groups.iter_mut().find(|(a, _)| *a == app) {
-                        Some((_, files)) => files.push(i.arg),
-                        None => groups.push((app, vec![i.arg])),
-                    },
-                    None => {
-                        eprintln!("vergence-open: {}: no application opens {} ({})", i.given, vergence_types::describe(&i.mime), i.mime);
-                        ok = false;
-                    }
-                }
-            }
-            for (app, files) in groups {
-                let Some(entry) = installed.iter().find(|e| desktop_id(&e.id) == app) else { continue };
-                ok &= start(entry, &files);
-            }
-            if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
-        }
+        _ => run(&args, None),
     }
 }
 
-/// Starts an application with files, as its Exec line says; not waited for.
-fn start(entry: &desktop::Entry, files: &[String]) -> bool {
-    let mut ok = true;
-    for argv in desktop::command_for(entry, files) {
-        let Some((program, rest)) = argv.split_first() else { continue };
-        let mut command = if entry.terminal {
-            let mut c = std::process::Command::new("vergence-term");
-            c.arg("-e").args(&argv);
-            c
-        } else {
-            let mut c = std::process::Command::new(program);
-            c.args(rest);
-            c
+/// Opens the items: through the server in a Vergence session, else here.
+fn run(given: &[String], app: Option<&str>) -> ExitCode {
+    let items: Vec<open::Item> = given.iter().map(|g| open::item(g)).collect();
+    if std::env::var_os(vergence_protocol::BUS_ENV).is_some()
+        && let Ok(mut bus) = vergence_protocol::Client::connect("vergence-open")
+    {
+        let all: Vec<String> = items.iter().map(|i| i.arg.clone()).collect();
+        let reply = bus.request(|serial| vergence_protocol::bus::ClientMsg::Open { serial, items: all, app: app.unwrap_or_default().to_string() });
+        return match reply {
+            Ok(vergence_protocol::bus::ServerMsg::Done { .. }) => ExitCode::SUCCESS,
+            Err(vergence_protocol::ClientError::Refused(_, message)) | Ok(vergence_protocol::bus::ServerMsg::Error { message, .. }) => {
+                eprintln!("vergence-open: {message}");
+                ExitCode::FAILURE
+            }
+            other => {
+                eprintln!("vergence-open: the server did not answer as expected: {other:?}");
+                ExitCode::FAILURE
+            }
         };
-        command.stdin(std::process::Stdio::null());
-        if let Err(e) = command.spawn() {
-            eprintln!("vergence-open: {}: {e}", entry.name);
-            ok = false;
+    }
+    let (groups, failed) = open::plan(&items, app, &apps::installed(), &vergence_types::lists());
+    for f in &failed {
+        eprintln!("vergence-open: {f}");
+    }
+    let mut ok = failed.is_empty();
+    for (entry, files) in groups {
+        for argv in open::commands(&entry, &files) {
+            let Some((program, rest)) = argv.split_first() else { continue };
+            if let Err(e) = std::process::Command::new(program).args(rest).stdin(std::process::Stdio::null()).spawn() {
+                eprintln!("vergence-open: {}: {e}", entry.name);
+                ok = false;
+            }
         }
     }
-    ok
+    if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
