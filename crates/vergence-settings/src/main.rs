@@ -40,6 +40,8 @@ mod places;
 use places::PlacesMsg;
 mod apps;
 use apps::AppsMsg;
+mod defaults;
+use defaults::DefaultsMsg;
 mod wifi;
 mod winbar;
 
@@ -389,6 +391,8 @@ enum Page {
     /// apps.rs, app settings milestone 1).
     Apps,
     AppPage,
+    /// Which app opens each kind of file (defaults.rs, files milestone 1).
+    DefaultApps,
     /// About's sub-pages: the license texts, and the code Vergence is built with.
     LicenseText,
     Notices,
@@ -402,6 +406,8 @@ enum Message {
     Places(PlacesMsg),
     /// The Apps page (apps.rs).
     Apps(AppsMsg),
+    /// The Default apps page (defaults.rs).
+    Defaults(DefaultsMsg),
     /// desktop.toml changed under the app (its own settings window wrote it).
     Reread,
     Go(Page),
@@ -648,6 +654,8 @@ struct App {
     dock_opacity: f32,
     /// What can be pinned: the installed applications, by name.
     apps: Vec<vergence_shell::desktop::Entry>,
+    /// The mimeapps.list files, read when Default apps opens (defaults.rs).
+    default_lists: Vec<vergence_types::MimeApps>,
     mail: Mail,
     inbox: Receiver<Message>,
 }
@@ -831,6 +839,7 @@ impl App {
             dock_gap: 0.0,
             dock_opacity: 1.0,
             apps: vergence_shell::apps::installed(),
+            default_lists: Vec::new(),
             mail,
             inbox,
         };
@@ -954,6 +963,9 @@ impl App {
         if p == Page::Notifications {
             self.notify_apps = notify::read_apps();
         }
+        if p == Page::DefaultApps {
+            self.defaults_read();
+        }
         if matches!(p, Page::Battery | Page::Energy) {
             self.battery_read();
         }
@@ -974,6 +986,7 @@ impl App {
             Message::Notify(m) => self.notify_message(m),
             Message::Places(m) => self.places_message(m),
             Message::Apps(m) => self.apps_message(m),
+            Message::Defaults(m) => self.defaults_message(m),
             Message::Reread => self.reread(),
             Message::Resolution(i) => self.pick_mode(Some(i), None),
             Message::Refresh(i) => self.pick_mode(None, Some(i)),
@@ -1567,6 +1580,7 @@ impl App {
                 ("Dock".into(), Page::Dock, Icon::Dock, "dock shelf pin hide opacity gap edge"),
                 ("Notifications".into(), Page::Notifications, Icon::Notifications, "notifications cards alerts do not disturb quiet corner banner"),
                 ("Apps".into(), Page::Apps, Icon::Apps, "apps applications title bar light dark firefox per app own settings"),
+                ("Default apps".into(), Page::DefaultApps, Icon::Apps, "default apps applications open with browser mail text pictures pdf music video folders file types"),
             ]),
             ("Screens", screens),
             ("Input", vec![
@@ -2858,6 +2872,7 @@ impl Program for App {
             Page::Energy => "Energy".into(),
             Page::Notifications => "Notifications".into(),
             Page::Apps => "Apps".into(),
+            Page::DefaultApps => "Default apps".into(),
             Page::AppPage => self.app_open.as_deref().map(|a| self.known_app_name(a)).unwrap_or_else(|| "Apps".into()),
             Page::Accessibility => "Accessibility".into(),
             Page::Overview => "Screens".into(),
@@ -2916,6 +2931,7 @@ impl Program for App {
             Page::Energy => self.energy(),
             Page::Notifications => self.notifications_page(),
             Page::Apps => self.apps_page(),
+            Page::DefaultApps => self.defaults_page(),
             Page::AppPage => self.app_page(),
             Page::Sound => self.sound_page(),
             Page::Accessibility => self.accessibility(),

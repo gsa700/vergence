@@ -273,6 +273,14 @@ the wallpaper, a scratch place for launchers and files.
   server in a session. Checked on kepler: two Markdown files opened as two
   tabs of one Text Editor through the server; `/bin/ls` refused with its
   reason. Tests: Hubble 586, kepler 582, Techbench 586.
+- **Step 2 built** (2026-11-15): Settings > **Default apps** (settings
+  defaults.rs, in the Desktop group after Apps): Web browser, Mail, Text,
+  Pictures, PDF, Music, Video, Folders, each a menu of the apps that open
+  it (today's first) with "Not chosen here" once Vergence's list chooses;
+  a kind sets all its types at once (vergence-types `choose_defaults`,
+  `of_kind`). Seen on kepler's screen. Later: two entries of one app
+  (Firefox's own userapp-Firefox-*.desktop beside firefox.desktop) both
+  listed.
 
 ## Steps
 

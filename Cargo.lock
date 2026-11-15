@@ -2316,6 +2316,7 @@ dependencies = [
  "vergence-shell",
  "vergence-sound",
  "vergence-text",
+ "vergence-types",
  "vergence-ui",
  "vergence-widgets",
  "vergence-xsettings",

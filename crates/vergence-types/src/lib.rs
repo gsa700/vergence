@@ -485,12 +485,27 @@ pub fn default_for(mime: &str, apps: &[App], lists: &[MimeApps]) -> Option<Strin
     apps_for(mime, apps, lists).into_iter().next()
 }
 
-/// Makes `app` the default for `mime` in Vergence's own list file, written
-/// whole (a temporary file renamed over it, owner only).
+/// Makes `app` the default for `mime` in Vergence's own list file.
 pub fn choose_default(mime: &str, app: &str) -> std::io::Result<()> {
+    choose_defaults(&[mime], Some(app))
+}
+
+/// Makes `app` the default for each of `mimes` in Vergence's own list file,
+/// or with None forgets Vergence's choice for them (the shared lists'
+/// then count). The file is written whole: a temporary file renamed over
+/// it, owner only.
+pub fn choose_defaults(mimes: &[&str], app: Option<&str>) -> std::io::Result<()> {
     let path = own_list_path();
     let mut list = std::fs::read_to_string(&path).map(|t| MimeApps::parse(&t)).unwrap_or_default();
-    list.set_default(mime, app);
+    for m in mimes {
+        match app {
+            Some(a) => list.set_default(m, a),
+            None => {
+                let m = canonical(m);
+                list.defaults.retain(|(d, _)| *d != m);
+            }
+        }
+    }
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -503,6 +518,11 @@ pub fn choose_default(mime: &str, app: &str) -> std::io::Result<()> {
         f.sync_all()?;
     }
     std::fs::rename(&tmp, &path)
+}
+
+/// Every type in the table under a top-level kind ("image": every picture type).
+pub fn of_kind(top: &str) -> Vec<&'static str> {
+    table::ROWS.iter().filter(|r| r.mime.split('/').next() == Some(top)).map(|r| r.mime).collect()
 }
 
 #[cfg(test)]
