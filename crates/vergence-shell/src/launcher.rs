@@ -27,6 +27,25 @@ pub fn tab_of(e: &Entry) -> Option<usize> {
     })
 }
 
+/// The order of Vergence's own applications in the launcher's top row
+/// (Dave, 2026-11-15: "a section at the top that holds the native apps");
+/// any other `vergence-*` application comes after these, by name.
+const OWN_ORDER: [&str; 8] = ["vergence-files", "vergence-edit", "vergence-term", "vergence-settings", "vergence-closeup", "vergence-calc", "vergence-hw", "vergence-quit"];
+
+/// Vergence's own applications to show in the top row, as places in
+/// `entries`: those whose desktop entry is ours (`vergence-*`), not hidden.
+/// They stay in the grid and in search as well: the row is a shortcut.
+pub fn own(entries: &[Entry]) -> Vec<usize> {
+    let mut found: Vec<(usize, String, usize)> = entries
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| !e.hidden && !e.no_display && e.id.starts_with("vergence-"))
+        .map(|(i, e)| (OWN_ORDER.iter().position(|o| *o == e.id).unwrap_or(OWN_ORDER.len()), e.name.to_lowercase(), i))
+        .collect();
+    found.sort();
+    found.into_iter().map(|(.., i)| i).collect()
+}
+
 /// The applications to show for what has been typed, as places in
 /// `entries`. Nothing typed: every one that is to be shown (not hidden,
 /// not NoDisplay), by name. Something typed: those whose name has a word
@@ -197,6 +216,22 @@ mod tests {
             app("htop", "Process Viewer", "System;Monitor;ConsoleOnly;", &["cpu"], "Show what runs"),
             app("Notes", "", "", &[], "Jot things down"),
         ]
+    }
+
+    #[test]
+    fn our_own_apps_head_the_launcher_in_their_order() {
+        let mut list = apps();
+        let mut ours = |id: &str, name: &str| {
+            let mut e = app(name, "", "Utility;", &[], "");
+            e.id = id.into();
+            list.push(e);
+        };
+        ours("vergence-calc", "Calculator");
+        ours("vergence-files", "File Viewer");
+        ours("vergence-zz", "Another");
+        ours("vergence-edit", "Text Editor");
+        let names: Vec<&str> = own(&list).into_iter().map(|i| list[i].name.as_str()).collect();
+        assert_eq!(names, vec!["File Viewer", "Text Editor", "Calculator", "Another"]);
     }
 
     #[test]

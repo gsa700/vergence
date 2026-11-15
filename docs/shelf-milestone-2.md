@@ -190,3 +190,15 @@ shows changes), the frost under it by the server.
 4. **Super.** (a) Super tapped alone opens and closes it, as now; (b) also
    Super+Space. Proposed: **(a)**, with (b) only if a program you use takes
    Super for itself.
+
+## After the milestone
+
+- **Vergence's own apps at the top** (2026-11-15, Dave: "a section at the
+  top that holds the native apps", "do it first"): while nothing is typed,
+  a compact row headed "Vergence" sits under the search field with our own
+  applications (desktop entries `vergence-*`; File Viewer, Text Editor,
+  Terminal, Settings, Close-Up, Calculator, Hardware, Force Quit, then any
+  other of ours by name; vergence-shell `launcher::own`). They stay in the
+  grid and in search: the row is a shortcut. A click starts one, a right
+  click gives the dock's menu, the pointer shades it; typing hides the row.
+

@@ -42,6 +42,12 @@ const CELL_W: i32 = 132;
 const CELL_H: i32 = 120;
 /// An application's icon in the grid, in points.
 const ICON: i32 = 64;
+/// The row of Vergence's own applications at the top (2026-11-15): its
+/// height (a heading, small icons, a name), a cell's widest, an icon.
+const OWN_H: i32 = 96;
+const OWN_CELL: i32 = 96;
+const OWN_ICON: i32 = 40;
+const OWN_HEAD: i32 = 20;
 
 #[derive(Default)]
 pub struct Launcher {
@@ -60,6 +66,10 @@ struct Open {
     tab: Option<usize>,
     /// The tabs shown, after All: those that have an application.
     tabs: Vec<usize>,
+    /// Vergence's own applications, for the row at the top (places in the shelf's list).
+    own: Vec<usize>,
+    /// The row's application under the pointer.
+    own_hover: Option<usize>,
     /// A finger down on it: where it came down, the scroll then, and
     /// whether it has moved far enough to be a drag (a tap starts or
     /// chooses when the finger lifts; a drag scrolls).
@@ -71,16 +81,43 @@ impl Open {
         Rect::new(self.at.loc.x + PAD, self.at.loc.y + PAD, self.at.size.w - 2 * PAD, FIELD_H)
     }
 
+    /// Whether the row of Vergence's apps shows: while nothing is typed.
+    fn own_shown(&self) -> bool {
+        self.typed.is_empty() && !self.own.is_empty()
+    }
+
+    /// The room the row takes, if it shows.
+    fn own_room(&self) -> i32 {
+        if self.own_shown() { OWN_H + 8 } else { 0 }
+    }
+
+    /// The row's cells: (place in `own`, rectangle), as many as fit.
+    fn own_rects(&self) -> Vec<(usize, Rect)> {
+        if !self.own_shown() {
+            return Vec::new();
+        }
+        let width = self.at.size.w - 2 * PAD;
+        let w = (width / self.own.len() as i32).min(OWN_CELL).max(60);
+        let fit = (width / w) as usize;
+        let y = self.at.loc.y + PAD + FIELD_H + 10 + OWN_HEAD;
+        (0..self.own.len().min(fit)).map(|i| (i, Rect::new(self.at.loc.x + PAD + i as i32 * w, y, w, OWN_H - OWN_HEAD))).collect()
+    }
+
+    /// The row's application at a point.
+    fn own_at(&self, x: i32, y: i32) -> Option<usize> {
+        self.own_rects().into_iter().find(|(_, r)| x >= r.x && x < r.right() && y >= r.y && y < r.bottom()).map(|(i, _)| self.own[i])
+    }
+
     /// The tabs' row: All, then each of `tabs`, as (tab, rectangle).
     fn tab_rects(&self) -> Vec<(Option<usize>, Rect)> {
-        let y = self.at.loc.y + PAD + FIELD_H + 10;
+        let y = self.at.loc.y + PAD + FIELD_H + 10 + self.own_room();
         let n = (self.tabs.len() + 1) as i32;
         let w = ((self.at.size.w - 2 * PAD) / n.max(1)).min(TAB_W);
         std::iter::once(None).chain(self.tabs.iter().map(|t| Some(*t))).enumerate().map(|(i, t)| (t, Rect::new(self.at.loc.x + PAD + i as i32 * w, y, w - 4, TABS_H))).collect()
     }
 
     fn grid(&self) -> Grid {
-        let top = PAD + FIELD_H + 10 + TABS_H + 12;
+        let top = PAD + FIELD_H + 10 + self.own_room() + TABS_H + 12;
         let mut g = Grid::new(Rect::new(self.at.loc.x + PAD, self.at.loc.y + top, self.at.size.w - 2 * PAD, self.at.size.h - top - PAD), CELL_W, CELL_H);
         g.scroll = self.scroll;
         g
@@ -110,9 +147,10 @@ impl Server {
         let (x, y) = (area.loc.x + (area.size.w - w) / 2, area.loc.y + (area.size.h - h) / 2);
         let all = vergence_shell::launcher::search(&self.shelf.apps, "");
         let tabs = vergence_shell::launcher::tabs(&self.shelf.apps, &all).into_iter().map(|(t, _)| t).collect();
+        let own = vergence_shell::launcher::own(&self.shelf.apps);
         tracing::info!("apps: opened");
         self.close_menu();
-        self.launcher.open = Some(Open { at: Rectangle::new((x, y).into(), (w, h).into()), typed: String::new(), selected: 0, scroll: 0, tab: None, tabs, held: None });
+        self.launcher.open = Some(Open { at: Rectangle::new((x, y).into(), (w, h).into()), typed: String::new(), selected: 0, scroll: 0, tab: None, tabs, own, own_hover: None, held: None });
         self.redraw_all();
     }
 
@@ -217,6 +255,11 @@ impl Server {
         let count = self.launcher_found().len();
         let Some(open) = self.launcher.open.as_ref() else { return };
         let (x, y) = (at.x.floor() as i32, at.y.floor() as i32);
+        if let Some(app) = open.own_at(x, y) {
+            let id = self.shelf.apps[app].id.clone();
+            self.launcher_close();
+            return self.shelf_act(Act::Start(id));
+        }
         if let Some((tab, _)) = open.tab_rects().into_iter().find(|(_, r)| x >= r.x && x < r.right() && y >= r.y && y < r.bottom()) {
             let open = self.launcher.open.as_mut().unwrap();
             if open.tab != tab {
@@ -237,15 +280,23 @@ impl Server {
         let found = self.launcher_found();
         let Some(open) = self.launcher.open.as_ref() else { return };
         let grid = open.grid();
-        let Some(index) = grid.at(found.len(), at.x.floor() as i32, at.y.floor() as i32) else { return };
-        let Some(entry) = found.get(index).map(|i| self.shelf.apps[*i].clone()) else { return };
-        let cell = grid.cell(index);
+        let (x, y) = (at.x.floor() as i32, at.y.floor() as i32);
+        let (entry, cell, index) = if let Some(app) = open.own_at(x, y) {
+            let r = open.own_rects().into_iter().find(|(_, r)| x >= r.x && x < r.right() && y >= r.y && y < r.bottom()).map_or(Rect::new(x, y, 1, 1), |(_, r)| r);
+            (self.shelf.apps[app].clone(), r, None)
+        } else {
+            let Some(index) = grid.at(found.len(), x, y) else { return };
+            let Some(entry) = found.get(index).map(|i| self.shelf.apps[*i].clone()) else { return };
+            (entry, grid.cell(index), Some(index))
+        };
         let pinned = self.shelf.config.pinned.contains(&entry.id);
         let acts = vec![
             (Act::Start(entry.id.clone()), "Open".to_string()),
             if pinned { (Act::Unpin(entry.id.clone()), "Unpin from the dock".to_string()) } else { (Act::Pin(entry.id.clone()), "Pin to the dock".to_string()) },
         ];
-        if let Some(open) = self.launcher.open.as_mut() {
+        if let Some(open) = self.launcher.open.as_mut()
+            && let Some(index) = index
+        {
             open.selected = index;
         }
         self.open_shelf_menu(Rectangle::new((cell.x, cell.y).into(), (cell.w, cell.h).into()), vergence_shell::Edge::Right, acts);
@@ -272,10 +323,16 @@ impl Server {
             }
             return;
         }
+        let hover = open.own_at(at.x.floor() as i32, at.y.floor() as i32);
+        let mut changed = hover != open.own_hover;
+        open.own_hover = hover;
         if let Some(index) = open.grid().at(count, at.x.floor() as i32, at.y.floor() as i32)
             && index != open.selected
         {
             open.selected = index;
+            changed = true;
+        }
+        if changed {
             self.redraw_all();
         }
     }
@@ -317,6 +374,16 @@ impl Server {
         let (typed, selected) = (open.typed.clone(), open.selected);
         let (grid, field) = (open.grid(), open.field());
         let (tab, tab_rects) = (open.tab, open.tab_rects());
+        let (own_rects, own_hover, own_list) = (open.own_rects(), open.own_hover, open.own.clone());
+        let own_pixels = (OWN_ICON as f64 * scale).round() as u32;
+        let own_cells: Vec<(Rect, String, Option<_>, bool)> = own_rects
+            .iter()
+            .map(|(i, r)| {
+                let app = own_list[*i];
+                let (name, icon) = (self.shelf.apps[app].name.clone(), self.shelf.apps[app].icon.clone());
+                (*r, name, self.shelf_icon(&icon, own_pixels), own_hover == Some(app))
+            })
+            .collect();
         let found = self.launcher_found();
         // The cells that show, each with its application and its icon once that has come.
         let pixels = (ICON as f64 * scale).round() as u32;
@@ -340,6 +407,9 @@ impl Server {
         let counts = vergence_shell::launcher::tabs(&self.shelf.apps, &found);
         for (index, _, name, icon) in &cells {
             (index, name, icon.is_some()).hash(&mut hasher);
+        }
+        for (r, name, icon, hover) in &own_cells {
+            (r.x, name, icon.is_some(), hover).hash(&mut hasher);
         }
         let stamp = hasher.finish();
         if self.launcher.picture.as_ref().map(|(k, _)| *k) != Some(stamp) {
@@ -372,6 +442,45 @@ impl Server {
                     scene.fill(SceneRect::new(f.x + 11.0 + width, f.y + 8.0, 1.0, f.h - 16.0), color(s.menu_ink));
                 }
                 scene.pop_clip();
+            }
+            // Vergence's own applications, a row under the search field while
+            // nothing is typed: small icons, one line of name.
+            if let (Some(face), Some((first, _, _, _))) = (face, own_cells.first()) {
+                let head = local(Rect::new(first.x, first.y - OWN_HEAD, 200, OWN_HEAD));
+                let m = fonts.metrics(face, 11.5);
+                vergence_render::text(&mut scene, fonts, face, 11.5, color(s.menu_ink_off), ScenePoint::new(head.x + 6.0, (head.y + m.ascent).round()), "Vergence");
+                for (r, name, icon, hover) in &own_cells {
+                    let c = local(*r);
+                    if *hover {
+                        scene.fill_rounded(SceneRect::new(c.x + 2.0, c.y, c.w - 4.0, c.h), vergence_look::RADIUS, color(s.hover));
+                    }
+                    let square = SceneRect::new(c.x + (c.w - OWN_ICON as f32) / 2.0, c.y + 6.0, OWN_ICON as f32, OWN_ICON as f32);
+                    match icon {
+                        Some(icon) => {
+                            let (iw, ih) = (icon.width as f32 / scale as f32, icon.height as f32 / scale as f32);
+                            let picture = scene.image(Image { width: icon.width, height: icon.height, rgba: icon.rgba.clone() });
+                            scene.draw_image(picture, SceneRect::new(square.x + (square.w - iw) / 2.0, square.y + (square.h - ih) / 2.0, iw, ih), 1.0);
+                        }
+                        None => {
+                            scene.fill_rounded(square, vergence_look::RADIUS, color(s.tile));
+                        }
+                    }
+                    let size = 11.5;
+                    let m = fonts.metrics(face, size);
+                    let room = c.w - 8.0;
+                    let mut label = name.clone();
+                    if fonts.layout(face, size, &label).1 > room {
+                        while !label.is_empty() && fonts.layout(face, size, &format!("{label}…")).1 > room {
+                            label.pop();
+                        }
+                        label.push('…');
+                    }
+                    let (_, width) = fonts.layout(face, size, &label);
+                    vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink), ScenePoint::new((c.x + (c.w - width) / 2.0).round(), (square.y + square.h + 6.0 + m.ascent).round()), &label);
+                }
+                // A faint line under the row.
+                let y = c_bottom(&own_cells) - at.loc.y as f32 + 6.0;
+                scene.fill(SceneRect::new(PAD as f32, y, w - 2.0 * PAD as f32, 1.0), color(s.edge));
             }
             // The tabs: All and those that have an application; the chosen one shaded.
             // While something is typed, each says how many it holds of the finds.
@@ -511,4 +620,9 @@ impl Server {
         }
         elements
     }
+}
+
+/// The bottom of the row's cells, in global points.
+fn c_bottom<T>(cells: &[(Rect, String, Option<T>, bool)]) -> f32 {
+    cells.iter().map(|(r, ..)| r.bottom()).max().unwrap_or(0) as f32
 }
