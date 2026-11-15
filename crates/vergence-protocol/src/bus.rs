@@ -32,12 +32,14 @@
 //! listed and forgotten (`ListPlaces`, `ForgetPlaces`, `Places`). Version 10
 //! (2026-11-14, app settings milestone 1): a window's commands for its app
 //! menu (`WinRequest::Commands`, `WinEvent::Command`, crate::commands) and
-//! its bar style (`WinRequest::BarStyle`).
+//! its bar style (`WinRequest::BarStyle`). Version 11 (the same evening):
+//! a command can be `featured`, one of the app's everyday few on the
+//! menu's first panel.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 10;
+pub const VERSION: u32 = 11;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -1,12 +1,16 @@
 //! The app menu (app settings milestone 1): what opens from a window's app
 //! button, for every app. Its skeleton is fixed and the app fills in only
-//! the middle, from its commands (vergence_protocol::commands):
+//! the middle, from its commands (vergence_protocol::commands). After GNOME
+//! Terminal's menu (Dave, 2026-11-14: "click opens basic stuff right there.
+//! and then there is the option for everything ... maybe even an option to
+//! add things you use a lot to the flat menu"):
 //!
-//! 1. Search commands… (typing filters every command, submenus included);
-//! 2. About <App>, Settings…;
-//! 3. the app's menus: File, Edit, View, Tab, then its own;
-//! 4. Window ›, the desktop's (layouts, minimize, close);
-//! 5. Quit <App>.
+//! 1. Search commands… (typing filters every command, everywhere);
+//! 2. the app's everyday few (its `featured` commands) and those the user
+//!    added (pins, kept by the desktop per app), starred;
+//! 3. All commands ›: every command under its menu's heading, File, Edit,
+//!    View, Tab, then the app's own; Window ›, the desktop's;
+//! 4. Settings…, About <App>, Quit <App>, always last.
 //!
 //! A part with nothing in it is left out. An app that is not ours (no
 //! commands) gets the skeleton with a line saying its own menu holds the
@@ -48,9 +52,14 @@ pub enum WindowAct {
 pub enum Line {
     /// The search field (top level only).
     Search,
-    Item { action: Action, label: String, keys: String, enabled: bool, checked: Option<bool> },
+    /// `pin`: what names the command across runs, for adding it to the
+    /// first panel or taking it off (None: not a command of the app's);
+    /// `pinned`: the user added it there.
+    Item { action: Action, label: String, keys: String, enabled: bool, checked: Option<bool>, pin: Option<String>, pinned: bool },
     /// A submenu, by its name.
     Sub(String),
+    /// A menu's name over its commands, in All commands.
+    Header(String),
     /// A line of words, not chosen (a foreign app's note).
     Note(String),
     Separator,
@@ -67,6 +76,7 @@ impl Line {
             Line::Search => SEARCH_H,
             Line::Separator => SEP_H,
             Line::Note(_) => NOTE_H,
+            Line::Header(_) => HEADER_H,
             _ => ITEM_H,
         }
     }
@@ -78,6 +88,9 @@ pub const ITEM_H: i32 = 28;
 pub const SEARCH_H: i32 = 36;
 pub const SEP_H: i32 = 9;
 pub const NOTE_H: i32 = 40;
+pub const HEADER_H: i32 = 24;
+/// The submenu of every command.
+pub const ALL: &str = "All commands";
 pub const PAD: i32 = 6;
 /// At most this many results while searching.
 pub const MAX_FOUND: usize = 12;
@@ -95,6 +108,9 @@ pub struct Model {
     pub native: bool,
     /// The Window menu's lines, as the server offers them for this window.
     pub window: Vec<(WindowAct, String)>,
+    /// The commands the user added to the first panel, by their keys
+    /// (Command::key), in the order added.
+    pub pins: Vec<String>,
 }
 
 impl Model {
@@ -103,16 +119,22 @@ impl Model {
     }
 
     fn item(&self, c: &Command) -> Line {
-        Line::Item { action: Action::Command(c.id), label: c.label_shown(&self.app), keys: c.keys_shown(self.terminal), enabled: c.enabled, checked: c.checked }
+        let key = c.key();
+        let pinned = !c.featured && self.pins.contains(&key);
+        Line::Item { action: Action::Command(c.id), label: c.label_shown(&self.app), keys: c.keys_shown(self.terminal), enabled: c.enabled, checked: c.checked, pin: Some(key), pinned }
     }
 
     /// A skeleton line: the app's command for the role if it sent one, else the desktop's.
     fn skeleton(&self, role: Role, own: Action) -> Line {
         match self.role(role) {
-            Some(c) => self.item(c),
+            // The skeleton's lines are always there: nothing to add or take off.
+            Some(c) => match self.item(c) {
+                Line::Item { action, label, keys, enabled, checked, .. } => Line::Item { action, label, keys, enabled, checked, pin: None, pinned: false },
+                other => other,
+            },
             None => {
                 let info = role.info().expect("a role of the table");
-                Line::Item { action: own, label: info.label.replace("{app}", &self.app), keys: String::new(), enabled: true, checked: None }
+                Line::Item { action: own, label: info.label.replace("{app}", &self.app), keys: String::new(), enabled: true, checked: None, pin: None, pinned: false }
             }
         }
     }
@@ -130,36 +152,68 @@ impl Model {
         out
     }
 
+    /// The commands that go in menus (not the skeleton's About, Settings, Quit).
+    fn menu_commands(&self) -> impl Iterator<Item = &Command> {
+        self.commands.iter().filter(|c| !c.menu_shown().is_empty())
+    }
+
+    /// The first panel's own commands: the app's featured ones in the order it
+    /// sent them, then those the user added in the order added.
+    pub fn everyday(&self) -> Vec<Line> {
+        let mut lines: Vec<Line> = self.menu_commands().filter(|c| c.featured).map(|c| self.item(c)).collect();
+        for key in &self.pins {
+            if let Some(c) = self.menu_commands().find(|c| !c.featured && c.key() == *key) {
+                lines.push(self.item(c));
+            }
+        }
+        lines
+    }
+
     /// The top level.
     pub fn top(&self) -> Vec<Line> {
-        let mut lines = vec![Line::Search, self.skeleton(Role::About, Action::About), self.skeleton(Role::Settings, Action::Settings), Line::Separator];
+        let mut lines = vec![Line::Search];
         if self.native {
-            lines.extend(self.menus().into_iter().map(Line::Sub));
+            lines.extend(self.everyday());
+            lines.push(Line::Separator);
+            if self.menu_commands().next().is_some() {
+                lines.push(Line::Sub(ALL.into()));
+            }
         } else {
             lines.push(Line::Note(format!("{} keeps its own settings and commands in its own menu.", self.app)));
-        }
-        lines.push(Line::Separator);
-        if !self.window.is_empty() {
-            lines.push(Line::Sub("Window".into()));
             lines.push(Line::Separator);
         }
+        if !self.window.is_empty() {
+            lines.push(Line::Sub("Window".into()));
+        }
+        lines.push(Line::Separator);
+        lines.push(self.skeleton(Role::Settings, Action::Settings));
+        lines.push(self.skeleton(Role::About, Action::About));
         lines.push(self.skeleton(Role::Quit, Action::Quit));
         tidy(lines)
     }
 
-    /// A submenu's lines: the roles in the table's order, then the app's own
-    /// in the order it sent them, a line between the two.
+    /// One menu's commands: the roles in the table's order, then the app's
+    /// own in the order it sent them.
+    fn menu(&self, name: &str) -> Vec<Line> {
+        let mut lines: Vec<Line> = ROLES.iter().filter_map(|r| self.commands.iter().find(|c| c.role == r.role && r.menu == name)).map(|c| self.item(c)).collect();
+        lines.extend(self.commands.iter().filter(|c| c.role == Role::Own && c.menu == name).map(|c| self.item(c)));
+        lines
+    }
+
+    /// A submenu's lines: All commands (each menu under its heading) or Window.
     pub fn sub(&self, name: &str) -> Vec<Line> {
         if name == "Window" {
-            return self.window.iter().map(|(a, l)| Line::Item { action: Action::Window(*a), label: l.clone(), keys: String::new(), enabled: true, checked: None }).collect();
+            return self.window.iter().map(|(a, l)| Line::Item { action: Action::Window(*a), label: l.clone(), keys: String::new(), enabled: true, checked: None, pin: None, pinned: false }).collect();
         }
-        let mut lines: Vec<Line> = ROLES.iter().filter_map(|r| self.commands.iter().find(|c| c.role == r.role && r.menu == name)).map(|c| self.item(c)).collect();
-        let own: Vec<Line> = self.commands.iter().filter(|c| c.role == Role::Own && c.menu == name).map(|c| self.item(c)).collect();
-        if !lines.is_empty() && !own.is_empty() {
-            lines.push(Line::Separator);
+        if name != ALL {
+            return Vec::new();
         }
-        lines.extend(own);
-        tidy(lines)
+        let mut lines = Vec::new();
+        for m in self.menus() {
+            lines.push(Line::Header(m.clone()));
+            lines.extend(self.menu(&m));
+        }
+        lines
     }
 
     /// Search: every line that can be chosen, in every menu, whose label
@@ -171,18 +225,13 @@ impl Model {
             return Vec::new();
         }
         let mut all: Vec<(Line, String)> = Vec::new();
-        for l in self.top() {
-            if matches!(l, Line::Item { .. }) {
-                all.push((l, String::new()));
+        if self.native {
+            for m in self.menus() {
+                all.extend(self.menu(&m).into_iter().map(|l| (l, m.clone())));
             }
         }
-        let mut subs = if self.native { self.menus() } else { Vec::new() };
-        if !self.window.is_empty() {
-            subs.push("Window".into());
-        }
-        for m in subs {
-            all.extend(self.sub(&m).into_iter().filter(|l| matches!(l, Line::Item { .. })).map(|l| (l, m.clone())));
-        }
+        all.extend(self.sub("Window").into_iter().map(|l| (l, "Window".to_string())));
+        all.extend(self.top().into_iter().filter(|l| matches!(l, Line::Item { pin: None, .. })).map(|l| (l, String::new())));
         all.retain(|(l, _)| match l {
             Line::Item { label, enabled: true, .. } => {
                 let label = label.to_lowercase();
@@ -405,10 +454,10 @@ mod tests {
         Model {
             app: "Terminal".into(),
             commands: vec![
-                Command::role(1, Role::Copy).enabled(false),
-                Command::role(2, Role::Paste),
-                Command::role(3, Role::NewTab),
-                Command::own(4, "Tab", "Split side by side", "Ctrl+Shift+R"),
+                Command::role(1, Role::Copy).enabled(false).featured(),
+                Command::role(2, Role::Paste).featured(),
+                Command::role(3, Role::NewTab).featured(),
+                Command::own(4, "Tab", "Split side by side", "Ctrl+Shift+R").featured(),
                 Command::role(5, Role::Settings),
                 Command::role(6, Role::NextTab),
                 Command::own(7, "Shell", "Clear", ""),
@@ -416,6 +465,7 @@ mod tests {
             terminal: true,
             native: true,
             window: vec![(WindowAct::Snap(Zone::Left), "Left half".into()), (WindowAct::Minimize, "Minimize".into())],
+            pins: Vec::new(),
         }
     }
 
@@ -424,9 +474,12 @@ mod tests {
             .iter()
             .map(|l| match l {
                 Line::Search => "[search]".into(),
-                Line::Item { label, keys, .. } if keys.is_empty() => label.clone(),
-                Line::Item { label, keys, .. } => format!("{label} ({keys})"),
+                Line::Item { label, keys, pinned, .. } => {
+                    let star = if *pinned { " *" } else { "" };
+                    if keys.is_empty() { format!("{label}{star}") } else { format!("{label} ({keys}){star}") }
+                }
                 Line::Sub(n) => format!("{n} >"),
+                Line::Header(n) => format!("# {n}"),
                 Line::Note(_) => "[note]".into(),
                 Line::Separator => "---".into(),
             })
@@ -434,28 +487,48 @@ mod tests {
     }
 
     #[test]
-    fn the_skeleton_holds_the_apps_menus_in_their_order() {
+    fn the_first_panel_has_the_everyday_few_then_everything_then_the_skeleton() {
         let m = terminal();
-        assert_eq!(labels(&m.top()), ["[search]", "About Terminal", "Settings… (Ctrl+,)", "---", "File >", "Edit >", "Tab >", "Shell >", "---", "Window >", "---", "Quit Terminal"]);
-        assert_eq!(labels(&m.sub("Edit")), ["Copy (Ctrl+C)", "Paste (Ctrl+V)"]);
-        assert_eq!(labels(&m.sub("Tab")), ["Next tab (Ctrl+Page Down)", "---", "Split side by side (Ctrl+Shift+R)"]);
-        assert_eq!(labels(&m.sub("File")), ["New tab (Ctrl+Shift+T)"]);
+        assert_eq!(
+            labels(&m.top()),
+            ["[search]", "Copy (Ctrl+C)", "Paste (Ctrl+V)", "New tab (Ctrl+Shift+T)", "Split side by side (Ctrl+Shift+R)", "---", "All commands >", "Window >", "---", "Settings… (Ctrl+,)", "About Terminal", "Quit Terminal"]
+        );
+        assert_eq!(
+            labels(&m.sub(ALL)),
+            ["# File", "New tab (Ctrl+Shift+T)", "# Edit", "Copy (Ctrl+C)", "Paste (Ctrl+V)", "# Tab", "Next tab (Ctrl+Page Down)", "Split side by side (Ctrl+Shift+R)", "# Shell", "Clear"]
+        );
         assert_eq!(labels(&m.sub("Window")), ["Left half", "Minimize"]);
+    }
+
+    #[test]
+    fn what_the_user_added_follows_the_apps_own_starred() {
+        let mut m = terminal();
+        m.pins = vec!["Shell/Clear".into(), "role:3".into(), "gone/away".into(), "role:40".into()];
+        let top = labels(&m.top());
+        assert_eq!(&top[1..7], ["Copy (Ctrl+C)", "Paste (Ctrl+V)", "New tab (Ctrl+Shift+T)", "Split side by side (Ctrl+Shift+R)", "Clear *", "Next tab (Ctrl+Page Down) *"]);
+        // Starred in All commands too; a featured one is never doubled or starred.
+        assert!(labels(&m.sub(ALL)).contains(&"Clear *".to_string()));
+        assert!(labels(&m.sub(ALL)).contains(&"New tab (Ctrl+Shift+T)".to_string()));
+        match &m.top()[5] {
+            Line::Item { pin, pinned: true, .. } => assert_eq!(pin.as_deref(), Some("Shell/Clear")),
+            l => panic!("{l:?}"),
+        }
     }
 
     #[test]
     fn the_desktops_lines_stand_in_where_the_app_sent_none() {
         let m = terminal();
         let top = m.top();
-        assert!(matches!(&top[1], Line::Item { action: Action::About, .. }));
-        assert!(matches!(&top[2], Line::Item { action: Action::Command(5), .. }));
-        assert!(matches!(top.last(), Some(Line::Item { action: Action::Quit, .. })));
+        let n = top.len();
+        assert!(matches!(&top[n - 3], Line::Item { action: Action::Command(5), pin: None, .. }));
+        assert!(matches!(&top[n - 2], Line::Item { action: Action::About, .. }));
+        assert!(matches!(&top[n - 1], Line::Item { action: Action::Quit, .. }));
     }
 
     #[test]
     fn a_foreign_app_gets_the_skeleton_and_a_note() {
-        let m = Model { app: "Firefox".into(), commands: vec![], terminal: false, native: false, window: vec![(WindowAct::Minimize, "Minimize".into())] };
-        assert_eq!(labels(&m.top()), ["[search]", "About Firefox", "Settings…", "---", "[note]", "---", "Window >", "---", "Quit Firefox"]);
+        let m = Model { app: "Firefox".into(), commands: vec![], terminal: false, native: false, window: vec![(WindowAct::Minimize, "Minimize".into())], pins: Vec::new() };
+        assert_eq!(labels(&m.top()), ["[search]", "[note]", "---", "Window >", "---", "Settings…", "About Firefox", "Quit Firefox"]);
     }
 
     #[test]
@@ -468,6 +541,7 @@ mod tests {
         assert!(m.search("copy").is_empty(), "Copy is disabled");
         assert_eq!(m.search("TAB").len(), 2, "New tab and Next tab, case aside");
         assert_eq!(m.search("left").len(), 1);
+        assert_eq!(m.search("quit").len(), 1);
         assert!(m.search("   ").is_empty());
     }
 
@@ -476,16 +550,16 @@ mod tests {
         let m = terminal();
         let mut s = State::default();
         assert_eq!(s.key(&m, Key::Down), Did::Moved);
-        assert_eq!(s.top, Some(1), "About is first");
-        s.key(&m, Key::Down);
-        assert_eq!(s.key(&m, Key::Enter), Did::Chosen(Action::Command(5)));
-        // Down to Edit: it opens; Right goes in; Down skips the disabled Copy.
-        s.key(&m, Key::Down);
-        s.key(&m, Key::Down);
-        assert_eq!(s.open, Some(5));
-        s.key(&m, Key::Right);
-        assert_eq!(s.sub, Some(1), "Paste, Copy being disabled");
+        assert_eq!(s.top, Some(2), "Paste: Copy is disabled");
         assert_eq!(s.key(&m, Key::Enter), Did::Chosen(Action::Command(2)));
+        // Down to All commands: it opens; Right goes in, past its heading.
+        s.key(&m, Key::Down);
+        s.key(&m, Key::Down);
+        s.key(&m, Key::Down);
+        assert_eq!(s.open, Some(6));
+        s.key(&m, Key::Right);
+        assert_eq!(s.sub, Some(1), "New tab, under File");
+        assert_eq!(s.key(&m, Key::Enter), Did::Chosen(Action::Command(3)));
         assert_eq!(s.key(&m, Key::Left), Did::Moved);
         assert_eq!(s.sub, None);
         // Up from the top wraps to Quit.
@@ -504,13 +578,11 @@ mod tests {
         }
         assert_eq!(labels(&s.shown(&m)), ["[search]", "New tab (Ctrl+Shift+T)"]);
         assert_eq!(s.key(&m, Key::Enter), Did::Chosen(Action::Command(3)));
-        // Escape clears what was typed, then closes.
         assert_eq!(s.key(&m, Key::Escape), Did::Moved);
         assert_eq!(s.typed, "");
         assert_eq!(s.key(&m, Key::Escape), Did::Close);
-        // Typing while in a submenu leaves it for the search.
         let mut s = State::default();
-        s.hover_top(&m, Some(5));
+        s.hover_top(&m, Some(6));
         s.key(&m, Key::Right);
         assert!(s.sub.is_some());
         s.key(&m, Key::Char('q'));
@@ -518,22 +590,20 @@ mod tests {
     }
 
     #[test]
-    fn the_pointer_chooses_and_opens_submenus() {
+    fn the_pointer_chooses_and_opens_submenus_and_headings_are_not_chosen() {
         let m = terminal();
         let mut s = State::default();
         s.hover_top(&m, Some(6));
         assert_eq!((s.top, s.open), (Some(6), Some(6)));
-        assert_eq!(labels(&s.sub_lines(&m)), labels(&m.sub("Tab")));
-        s.hover_sub(&m, Some(2));
-        assert_eq!(s.sub, Some(2));
+        assert_eq!(labels(&s.sub_lines(&m)), labels(&m.sub(ALL)));
         s.hover_sub(&m, Some(1));
-        assert_eq!(s.sub, None, "a separator is not chosen");
-        // Off the panel, the open submenu stays.
+        assert_eq!(s.sub, Some(1));
+        s.hover_sub(&m, Some(0));
+        assert_eq!(s.sub, None, "a heading is not chosen");
         s.hover_top(&m, None);
         assert_eq!(s.open, Some(6));
-        // A separator or the search field is not chosen.
-        s.hover_top(&m, Some(3));
-        assert_eq!(s.top, Some(6));
+        s.hover_top(&m, Some(5));
+        assert_eq!(s.top, Some(6), "a separator is not chosen");
     }
 
     #[test]

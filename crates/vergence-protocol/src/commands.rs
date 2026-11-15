@@ -110,7 +110,9 @@ impl Role {
 /// One command of a window's menu: an id the app chose (unique in the
 /// window, not 0), its role, and for its own commands the menu, label and
 /// keys (ignored for a role: [`ROLES`] says). `enabled`: it can be chosen
-/// now; `checked`: a switch, on or off (None: not a switch).
+/// now; `checked`: a switch, on or off (None: not a switch); `featured`: one
+/// of the app's everyday few, shown on the menu's first panel (the rest are
+/// under All commands; Dave, 2026-11-14, after GNOME Terminal's menu).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Command {
     pub id: u32,
@@ -120,17 +122,18 @@ pub struct Command {
     pub keys: String,
     pub enabled: bool,
     pub checked: Option<bool>,
+    pub featured: bool,
 }
 
 impl Command {
     /// A role's command.
     pub fn role(id: u32, role: Role) -> Command {
-        Command { id, role, menu: String::new(), label: String::new(), keys: String::new(), enabled: true, checked: None }
+        Command { id, role, menu: String::new(), label: String::new(), keys: String::new(), enabled: true, checked: None, featured: false }
     }
 
     /// One of the app's own.
     pub fn own(id: u32, menu: &str, label: &str, keys: &str) -> Command {
-        Command { id, role: Role::Own, menu: menu.into(), label: label.into(), keys: keys.into(), enabled: true, checked: None }
+        Command { id, role: Role::Own, menu: menu.into(), label: label.into(), keys: keys.into(), enabled: true, checked: None, featured: false }
     }
 
     pub fn enabled(mut self, on: bool) -> Command {
@@ -141,6 +144,22 @@ impl Command {
     pub fn checked(mut self, on: bool) -> Command {
         self.checked = Some(on);
         self
+    }
+
+    /// One of the app's everyday few.
+    pub fn featured(mut self) -> Command {
+        self.featured = true;
+        self
+    }
+
+    /// What names it across runs (ids are the app's and may change): a
+    /// role by its code, one of its own by menu and label. The desktop keeps
+    /// the commands a user added to an app's first panel by this.
+    pub fn key(&self) -> String {
+        match self.role.info() {
+            Some(i) => format!("role:{}", i.code),
+            None => format!("{}/{}", self.menu, self.label),
+        }
     }
 
     /// The menu it goes in ("" the menu's own part), as shown.
@@ -207,7 +226,9 @@ mod tests {
 
     #[test]
     fn a_role_is_the_same_whatever_the_app_sends() {
-        let c = Command { id: 1, role: Role::Copy, menu: "Stuff".into(), label: "Duplicate".into(), keys: "Ctrl+D".into(), enabled: true, checked: None };
+        let c = Command { id: 1, role: Role::Copy, menu: "Stuff".into(), label: "Duplicate".into(), keys: "Ctrl+D".into(), enabled: true, checked: None, featured: false };
+        assert_eq!(c.key(), "role:23");
+        assert_eq!(Command::own(2, "Tab", "Split", "").key(), "Tab/Split");
         assert_eq!((c.menu_shown(), c.label_shown("Terminal").as_str(), c.keys_shown(false).as_str()), ("Edit", "Copy", "Ctrl+C"));
         assert_eq!(Command::role(2, Role::Quit).label_shown("Terminal"), "Quit Terminal");
     }

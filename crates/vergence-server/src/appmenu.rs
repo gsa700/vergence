@@ -4,7 +4,10 @@
 // under the button, drawn, given the pointer and the keys, and what is
 // chosen is carried out: an app's command goes to the app, the skeleton's
 // own lines (About, Settings…, Quit for an app that sent none) and the
-// Window menu are the desktop's.
+// Window menu are the desktop's. A right click on one of the app's commands
+// adds it to the first panel or takes it off (Dave, 2026-11-14): kept per
+// app in ~/.local/state/vergence/app-menu.toml (owner only), by the
+// command's key (its role, or its menu and label), not its id.
 
 use std::hash::{Hash, Hasher};
 
@@ -33,6 +36,8 @@ pub struct AppMenu {
 
 struct Open {
     win: Win,
+    /// The app, as its pins are kept (its windows' class).
+    app_key: String,
     model: Model,
     state: State,
     /// The top panel's top left corner, and whether submenus open to its left
@@ -112,7 +117,9 @@ impl Server {
         }
         self.close_menu();
         self.launcher_close();
-        let model = self.app_model(w);
+        let app_key = self.app_key(w);
+        let mut model = self.app_model(w);
+        model.pins = pins_of(&app_key);
         let Some((bar, layout)) = self.bar_of(w) else { return };
         let button = layout.buttons.iter().find(|(b, _)| *b == vergence_bar::WinButton::AppMenu).map(|(_, r)| *r);
         let (bx, bw, by) = match button {
@@ -132,9 +139,14 @@ impl Server {
             state.key(&model, appmenu::Key::Down);
         }
         tracing::info!("app menu: opened for {:?} ({} commands)", model.app, model.commands.len());
-        self.app_menu.open = Some(Open { win: w.clone(), model, state, at: (x, y).into(), leftward, screen });
+        self.app_menu.open = Some(Open { win: w.clone(), app_key, model, state, at: (x, y).into(), leftward, screen });
         self.app_menu.pictures = [None, None];
         self.redraw_all();
+    }
+
+    /// The app a window belongs to, as pins and the settings app name it.
+    fn app_key(&mut self, w: &Win) -> String {
+        self.window_identity(w).map(|i| if i.class.is_empty() { i.instance } else { i.class }).unwrap_or_default()
     }
 
     /// What a window's app menu is made from: its app's name (the dock's),
@@ -157,7 +169,7 @@ impl Server {
         }
         window.push((WindowAct::Minimize, "Minimize".into()));
         window.push((WindowAct::Close, "Close window".into()));
-        Model { app, commands, terminal, native: w.native().is_some(), window }
+        Model { app, commands, terminal, native: w.native().is_some(), window, pins: Vec::new() }
     }
 
     /// The pointer moved: the line under it is chosen, a submenu there opens.
@@ -174,8 +186,11 @@ impl Server {
         }
     }
 
-    pub fn app_menu_press(&mut self, pos: Point<f64, Logical>) {
+    pub fn app_menu_press(&mut self, pos: Point<f64, Logical>, button: u32) {
         self.app_menu_hover(pos);
+        if button == vergence_seat::BTN_RIGHT {
+            return self.app_menu_pin(pos);
+        }
         let Some(o) = self.app_menu.open.as_ref() else { return };
         let action = match o.line_at(pos) {
             Some((true, Some(i))) => match o.state.sub_lines(&o.model).get(i) {
@@ -191,6 +206,35 @@ impl Server {
         if let Some(a) = action {
             self.app_menu_do(a);
         }
+    }
+
+    /// A right click on one of the app's commands: onto the first panel, or
+    /// off it. The menu stays open and shows the change.
+    fn app_menu_pin(&mut self, pos: Point<f64, Logical>) {
+        let Some(o) = self.app_menu.open.as_mut() else { return };
+        let line = match o.line_at(pos) {
+            Some((true, Some(i))) => o.state.sub_lines(&o.model).get(i).cloned(),
+            Some((false, Some(i))) => o.top_lines().get(i).cloned(),
+            _ => None,
+        };
+        let Some(Line::Item { pin: Some(key), .. }) = line else { return };
+        // The app's own everyday few are its to choose: not added, not taken off.
+        if o.model.commands.iter().any(|c| c.featured && c.key() == key) {
+            return;
+        }
+        if let Some(at) = o.model.pins.iter().position(|k| *k == key) {
+            o.model.pins.remove(at);
+        } else {
+            o.model.pins.push(key.clone());
+        }
+        tracing::info!("app menu: {:?} pins now {:?}", o.app_key, o.model.pins);
+        keep_pins(&o.app_key, &o.model.pins);
+        // Lines moved: what was chosen may be elsewhere now.
+        o.state.top = None;
+        if o.state.sub.is_none() {
+            o.state.open = None;
+        }
+        self.redraw_all();
     }
 
     /// A key while the menu is open (the seat gives it every key).
@@ -237,7 +281,7 @@ impl Server {
             Action::Settings => {
                 // The desktop's part of the app's settings, in the settings app
                 // (app settings milestone 1, step 6).
-                let id = self.window_identity(&w).map(|i| if i.class.is_empty() { i.instance } else { i.class }).unwrap_or_default();
+                let id = o.app_key.clone();
                 if let Err(e) = crate::spawn(std::process::Command::new("vergence-settings").args(["--app", &id])) {
                     tracing::warn!("app menu: vergence-settings --app {id}: {e}");
                 }
@@ -380,7 +424,15 @@ impl Server {
                         }
                     }
                 }
-                Line::Item { label, keys, enabled, checked, .. } => {
+                Line::Header(name) => {
+                    if let Some(face) = face {
+                        let size = 11.5;
+                        let m = fonts.metrics(face, size);
+                        let base = (r.y + r.h - 6.0 - m.descent).round();
+                        vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink_off), ScenePoint::new(r.x + 12.0, base), name);
+                    }
+                }
+                Line::Item { label, keys, enabled, checked, pinned, .. } => {
                     if lit && *enabled {
                         scene.fill_rounded(r, vergence_look::RADIUS, color(s.hover));
                     }
@@ -407,6 +459,11 @@ impl Server {
                         if !keys.is_empty() {
                             vergence_render::text(&mut scene, fonts, face, 12.0, color(s.menu_ink_off), ScenePoint::new(r.x + r.w - 12.0 - kw, base), keys);
                         }
+                        // Added by the user: a small star at the line's end (before its keys).
+                        if *pinned {
+                            let cx = r.x + r.w - 12.0 - kw - if keys.is_empty() { 4.0 } else { 14.0 };
+                            star(&mut scene, cx, r.y + r.h / 2.0, 4.5, color(vergence_look::ACCENT));
+                        }
                     }
                 }
                 Line::Sub(name) => {
@@ -432,5 +489,55 @@ impl Server {
                 None
             }
         }
+    }
+}
+
+/// A five-pointed star's outline, `r` from its middle to a point.
+fn star(scene: &mut Scene, cx: f32, cy: f32, r: f32, ink: Color) {
+    let at = |k: usize| {
+        let a = -std::f32::consts::FRAC_PI_2 + k as f32 * std::f32::consts::PI / 5.0;
+        let d = if k % 2 == 0 { r } else { r * 0.45 };
+        ScenePoint::new(cx + d * a.cos(), cy + d * a.sin())
+    };
+    for k in 0..10 {
+        scene.line(at(k), at(k + 1), 1.2, ink);
+    }
+}
+
+/// Where the commands users added to apps' first panels are kept.
+fn pins_path() -> Option<std::path::PathBuf> {
+    let state = std::env::var_os("XDG_STATE_HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))?;
+    Some(state.join("vergence/app-menu.toml"))
+}
+
+/// The commands the user added to an app's first panel.
+fn pins_of(app: &str) -> Vec<String> {
+    let table = pins_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| t.parse::<toml::Table>().ok()).unwrap_or_default();
+    table.get(app).and_then(|a| a.get("pins")).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str()).take(64).map(String::from).collect()).unwrap_or_default()
+}
+
+/// Keeps an app's pins (the file's other apps as they were).
+fn keep_pins(app: &str, pins: &[String]) {
+    use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt}};
+    let Some(path) = pins_path() else { return };
+    if app.is_empty() {
+        return;
+    }
+    let mut table = std::fs::read_to_string(&path).ok().and_then(|t| t.parse::<toml::Table>().ok()).unwrap_or_default();
+    if pins.is_empty() {
+        table.remove(app);
+    } else {
+        let mut t = toml::Table::new();
+        t.insert("pins".into(), toml::Value::Array(pins.iter().map(|p| toml::Value::String(p.clone())).collect()));
+        table.insert(app.to_string(), toml::Value::Table(t));
+    }
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir);
+    }
+    let text = toml::to_string(&table).unwrap_or_default();
+    let beside = path.with_extension("toml.new");
+    let written = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&beside).and_then(|mut f| f.write_all(text.as_bytes())).and_then(|_| std::fs::rename(&beside, &path));
+    if let Err(e) = written {
+        tracing::warn!("app menu: can't keep {app}'s commands: {e}");
     }
 }

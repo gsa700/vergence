@@ -506,7 +506,7 @@ impl Server {
                 }
             }
             Target::Server(Part::Menu) if pressed => self.menu_press(pos),
-            Target::Server(Part::AppList) if pressed => self.app_menu_press(pos),
+            Target::Server(Part::AppList) if pressed => self.app_menu_press(pos, button),
             Target::Server(Part::Popup) if pressed && button == vergence_seat::BTN_RIGHT => self.launcher_menu(pos),
             Target::Server(Part::Popup) if pressed => self.launcher_press(pos),
             Target::Server(Part::Popup) => self.launcher_release(pos),

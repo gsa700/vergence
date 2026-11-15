@@ -728,6 +728,7 @@ impl WinRequest {
                         Some(false) => e.u8(1),
                         Some(true) => e.u8(2),
                     };
+                    e.u8(c.featured as u8);
                 }
                 e
             }
@@ -842,7 +843,7 @@ impl WinRequest {
                 use crate::commands::{Command, MAX_COMMANDS, MAX_LABEL, Role};
                 let window = d.u32()?;
                 let terminal = d.bool()?;
-                let n = d.count(15)?;
+                let n = d.count(16)?;
                 if n > MAX_COMMANDS {
                     return Err(WireError::TooLong(n));
                 }
@@ -861,13 +862,18 @@ impl WinRequest {
                         2 => Some(true),
                         _ => return Err(WireError::BadValue("command switch")),
                     };
+                    let featured = match d.u8()? {
+                        0 => false,
+                        1 => true,
+                        _ => return Err(WireError::BadValue("command featured")),
+                    };
                     if id == 0 || commands.iter().any(|c| c.id == id) {
                         return Err(WireError::BadValue("command id"));
                     }
                     if role == Role::Own && label.is_empty() {
                         return Err(WireError::BadValue("command label"));
                     }
-                    commands.push(Command { id, role, menu, label, keys, enabled, checked });
+                    commands.push(Command { id, role, menu, label, keys, enabled, checked, featured });
                 }
                 WinRequest::Commands { window, terminal, commands }
             }
@@ -1256,7 +1262,7 @@ mod tests {
                 terminal: true,
                 commands: vec![
                     crate::commands::Command::role(1, crate::commands::Role::Copy).enabled(false),
-                    crate::commands::Command::own(2, "Tab", "Split side by side", "Ctrl+Shift+R"),
+                    crate::commands::Command::own(2, "Tab", "Split side by side", "Ctrl+Shift+R").featured(),
                     crate::commands::Command::own(3, "View", "Show scroll bar", "").checked(true),
                 ],
             },

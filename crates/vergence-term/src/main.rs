@@ -1727,21 +1727,22 @@ impl App for Terminal {
 
     /// The app menu (app settings milestone 1): Edit's Copy and Paste, File's
     /// New tab and Close tab, Tab's next and previous, and the terminal's own
-    /// splitting and moving in Tab. A terminal: roles' Ctrl+letter keys take
+    /// splitting and moving in Tab; Copy, Paste, New tab and the two splits
+    /// on the first panel. A terminal: roles' Ctrl+letter keys take
     /// Shift (Ctrl+Shift+T), as its shortcuts always have.
     fn commands(&mut self) -> Option<(bool, Vec<vergence_ui::AppCommand>)> {
         use vergence_ui::{AppCommand as C, Role};
         let selected = self.front().is_some_and(|s| lock(&s.screen).selection.is_some());
         let several = self.tabs.len() > 1;
         let list = vec![
-            C::role(cmd::COPY, Role::Copy).enabled(selected),
-            C::role(cmd::PASTE, Role::Paste),
-            C::role(cmd::NEW_TAB, Role::NewTab),
+            C::role(cmd::COPY, Role::Copy).enabled(selected).featured(),
+            C::role(cmd::PASTE, Role::Paste).featured(),
+            C::role(cmd::NEW_TAB, Role::NewTab).featured(),
             C::role(cmd::CLOSE_TAB, Role::CloseTab),
             C::role(cmd::NEXT_TAB, Role::NextTab).enabled(several),
             C::role(cmd::PREVIOUS_TAB, Role::PreviousTab).enabled(several),
-            C::own(cmd::SPLIT_SIDE, "Tab", "Split side by side", "Ctrl+Shift+R"),
-            C::own(cmd::SPLIT_STACK, "Tab", "Split top and bottom", "Ctrl+Shift+D"),
+            C::own(cmd::SPLIT_SIDE, "Tab", "Split side by side", "Ctrl+Shift+R").featured(),
+            C::own(cmd::SPLIT_STACK, "Tab", "Split top and bottom", "Ctrl+Shift+D").featured(),
             C::own(cmd::PANE_TO_TAB, "Tab", "Move section to a new tab", ""),
             C::own(cmd::PANE_TO_WINDOW, "Tab", "Move to a new window", ""),
         ];
