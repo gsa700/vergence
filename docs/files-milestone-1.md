@@ -355,6 +355,19 @@ the wallpaper, a scratch place for launchers and files.
   Not yet: EXIF date in the status line; the preview following File
   Viewer's selection (with File Viewer, step 7). Tests: Hubble 602,
   kepler 598, Techbench 602.
+- **Step 6 built** (2026-11-15): vergence-widgets files.rs, taken out of
+  filedialog.rs: `Entry` (with its type), `read_folder`, `recent`, `sort`
+  (folders first, names naturally), `Place`/`places` with the user's
+  folders by the XDG user-dirs file (`user_dirs`: a renamed or translated
+  Desktop or Downloads is found), the helpers (`natural`, `size_words`,
+  `when`, `tilde`, `mounted_disks`, the recent-files state), and the views
+  both draw: `sidebar`, `list` (sortable headings and rows, `View`
+  carrying the entries, which are chosen, the row kept in view and the
+  click) and the new `icons` view (a wrapping row of cells, a large mark
+  over the name); the marks draw at any size (`kind_icon_sized`). The Open
+  dialog uses them. New in the toolkit: `label(...).elide()`, one line cut
+  with "…" where its place ends (long names in the list no longer run into
+  the Size column). Tests: Hubble 603, kepler 599, Techbench 603.
 ## Steps
 
 1. **vergence-types**: the database reader (globs2, magic, subclasses,

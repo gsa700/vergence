@@ -354,6 +354,20 @@ impl Layout<'_> {
             Kind::Rule { color, .. } => push(out, What::Rule { color }),
             Kind::Label(l) => {
                 let (mut lines, _) = self.lines(&l, Some(rect.w));
+                // Cut to its place, "…" at the end, characters taken off until it fits.
+                if l.elide && !l.wrap && lines.len() == 1 && lines[0].width > rect.w + 0.5 {
+                    let size = l.size.unwrap_or(self.text_size);
+                    let chars: Vec<char> = lines[0].text.chars().collect();
+                    let (mut lo, mut hi) = (0usize, chars.len());
+                    while lo < hi {
+                        let mid = (lo + hi).div_ceil(2);
+                        let t: String = chars[..mid].iter().collect::<String>() + "…";
+                        if self.measure.width(size, l.weight, &t) <= rect.w { lo = mid } else { hi = mid - 1 }
+                    }
+                    let t: String = chars[..lo].iter().collect::<String>().trim_end().to_string() + "…";
+                    lines[0].width = self.measure.width(size, l.weight, &t);
+                    lines[0].text = t;
+                }
                 for line in &mut lines {
                     line.x = match l.align {
                         Align::Start => 0.0,

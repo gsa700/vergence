@@ -23,17 +23,14 @@ use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
-use vergence_scene::{Color, Rect};
 use vergence_ui::{Input, Window};
 
-use crate::{Align, ButtonLook, Element, Length, Padding, Program, Theme, button, column, drawing, field, label, panel, row, rule, scroll, space};
+use crate::{Align, ButtonLook, Element, Length, Padding, Program, Theme, button, column, field, label, panel, row, rule, scroll, space};
 
 /// The most rows listed (a folder of more is narrowed by typing).
 const MAX_ROWS: usize = 2000;
-const MAX_RECENT: usize = 16;
-const PREVIEW_BYTES: usize = 8 * 1024;
 const PREVIEW_LINES: usize = 40;
 const DOUBLE: Duration = Duration::from_millis(450);
 
@@ -95,23 +92,8 @@ enum Mode {
     Folder,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SortBy {
-    Name,
-    Size,
-    Changed,
-}
-
-#[derive(Clone, Debug)]
-struct Entry {
-    name: String,
-    path: PathBuf,
-    dir: bool,
-    /// Its type by its name (a folder's is a folder), if the name says.
-    mime: Option<&'static str>,
-    size: u64,
-    changed: Option<SystemTime>,
-}
+pub use crate::files::{Kind, SortBy, kind_icon};
+use crate::files::{Entry, expand, home, looks_like_path, plain, remember, remembered_folder, size_words, text_start, when};
 
 #[derive(Clone, Debug)]
 pub enum FileMsg {
@@ -255,40 +237,16 @@ impl FileDialog {
         }
     }
 
-    /// Reads what it shows again.
+    /// Reads what it shows again (files.rs).
     fn read(&mut self) {
         self.problem = None;
         self.selected = None;
         self.entries = match &self.showing {
-            Showing::Folder(dir) => match fs::read_dir(dir) {
-                Ok(rd) => rd
-                    .flatten()
-                    .filter_map(|e| {
-                        let name = e.file_name().to_string_lossy().into_owned();
-                        let path = e.path();
-                        // Follow links: a link to a folder is a folder.
-                        let m = fs::metadata(&path).ok();
-                        {
-                            let dir = m.as_ref().is_some_and(|m| m.is_dir());
-                            Some(Entry { dir, mime: kind_of(dir, &name), size: m.as_ref().map_or(0, |m| m.len()), changed: m.and_then(|m| m.modified().ok()), name, path })
-                        }
-                    })
-                    .collect(),
-                Err(e) => {
-                    self.problem = Some(format!("This folder cannot be read: {}", plain(&e)));
-                    Vec::new()
-                }
-            },
-            Showing::Recent => recent_files()
-                .into_iter()
-                .filter_map(|p| {
-                    let m = fs::metadata(&p).ok()?;
-                    {
-                        let name = p.file_name()?.to_string_lossy().into_owned();
-                        Some(Entry { mime: kind_of(m.is_dir(), &name), name, dir: m.is_dir(), size: m.len(), changed: m.modified().ok(), path: p })
-                    }
-                })
-                .collect(),
+            Showing::Folder(dir) => crate::files::read_folder(dir).unwrap_or_else(|why| {
+                self.problem = Some(why);
+                Vec::new()
+            }),
+            Showing::Recent => crate::files::recent(),
         };
     }
 
@@ -304,18 +262,8 @@ impl FileDialog {
             .filter(|e| e.dir || (self.mode != Mode::Folder && filter.is_none_or(|f| f.admits(&e.name, e.mime))))
             .filter(|e| narrow.is_empty() || e.name.to_lowercase().contains(&narrow))
             .collect();
-        let (by, up) = self.sort;
-        let recent = self.showing == Showing::Recent;
-        v.sort_by(|a, b| {
-            // Folders first (the recent files keep their order unless sorted).
-            let o = b.dir.cmp(&a.dir).then_with(|| match by {
-                SortBy::Name if recent => std::cmp::Ordering::Equal,
-                SortBy::Name => natural(&a.name, &b.name),
-                SortBy::Size => a.size.cmp(&b.size),
-                SortBy::Changed => a.changed.cmp(&b.changed),
-            });
-            if up || b.dir != a.dir { o } else { o.reverse() }
-        });
+        // Folders first (the recent files keep their order unless sorted).
+        crate::files::sort(&mut v, self.sort.0, self.sort.1, self.showing == Showing::Recent);
         v.truncate(MAX_ROWS);
         v
     }
@@ -477,24 +425,8 @@ impl FileDialog {
         self.choose_row(k as usize);
     }
 
-    fn places(&self) -> Vec<(String, Showing)> {
-        let mut out = Vec::new();
-        if let Some(h) = home() {
-            out.push(("Home".to_string(), Showing::Folder(h.clone())));
-            for name in ["Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos"] {
-                let p = h.join(name);
-                if p.is_dir() {
-                    out.push((name.to_string(), Showing::Folder(p)));
-                }
-            }
-        }
-        out.push(("Recent".into(), Showing::Recent));
-        out.push(("Computer".into(), Showing::Folder(PathBuf::from("/"))));
-        for m in mounted_disks() {
-            let name = m.file_name().map_or_else(|| m.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
-            out.push((name, Showing::Folder(m)));
-        }
-        out
+    fn places(&self) -> Vec<crate::files::Place> {
+        crate::files::places()
     }
 
     /// The folder's path as buttons, from Home if it is under it.
@@ -573,59 +505,16 @@ impl Program for FileDialog {
         let path = row(path).spacing(2.0).align(Align::Center).width(Length::FILL);
 
         // The places.
-        let places: Vec<Element<FileMsg>> = self
-            .places()
-            .into_iter()
-            .map(|(name, s)| {
-                let here = s == self.showing;
-                let m = match &s {
-                    Showing::Recent => FileMsg::Recent,
-                    Showing::Folder(p) => FileMsg::Go(p.clone()),
-                };
-                button(label(name.clone()).size(12.0).width(Length::FILL)).look(if here { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(5.0, 10.0)).on_press(m).width(Length::FILL).name(name)
-            })
-            .collect();
-        let sidebar = panel(scroll(column(places).spacing(1.0).width(Length::FILL))).color(t.card).radius(8.0).padding(6.0).width(Length::Fixed(160.0)).height(Length::FILL);
+        let places = self.places();
+        let sidebar = crate::files::sidebar(&places, self.dir(), |p| p.path.clone().map_or(FileMsg::Recent, FileMsg::Go), t);
 
         // The list: headings, then the rows.
         let recent = self.showing == Showing::Recent;
-        let heading = |text: &str, by: SortBy, w: Length, end: bool| -> Element<FileMsg> {
-            let mark = if self.sort.0 == by { if self.sort.1 { " ▲" } else { " ▼" } } else { "" };
-            button(label(format!("{text}{mark}")).size(11.0).dim().align(if end { Align::End } else { Align::Start }).width(Length::FILL)).look(ButtonLook::Plain).padding(Padding::hv(2.0, 6.0)).on_press(FileMsg::Sort(by)).width(w).name(format!("Sort by {text}"))
-        };
-        let size_w = Length::Fixed(80.0);
-        let when_w = Length::Fixed(130.0);
-        let head = row(vec![space().width(Length::Fixed(22.0)), heading("Name", SortBy::Name, Length::FILL, false), heading("Size", SortBy::Size, size_w, true), heading("Changed", SortBy::Changed, when_w, false)]).spacing(4.0).align(Align::Center).width(Length::FILL);
         let visible = self.visible();
-        let mut rows: Vec<Element<FileMsg>> = Vec::with_capacity(visible.len());
-        for (k, e) in visible.iter().enumerate() {
-            let chosen = self.selected == Some(k) || self.marked.contains(&e.path);
-            let mut name_col: Vec<Element<FileMsg>> = vec![label(e.name.clone()).size(12.0).width(Length::FILL)];
-            if recent && let Some(p) = e.path.parent() {
-                name_col.push(label(tilde(p)).size(10.0).dim().width(Length::FILL));
-            }
-            let mut b = button(
-                row(vec![
-                    kind_icon(Kind::of(e.mime)),
-                    column(name_col).width(Length::FILL),
-                    label(if e.dir { String::new() } else { size_words(e.size) }).size(11.0).dim().align(Align::End).width(size_w),
-                    label(e.changed.map(when).unwrap_or_default()).size(11.0).dim().width(when_w),
-                ])
-                .spacing(4.0)
-                .align(Align::Center)
-                .width(Length::FILL),
-            )
-            .look(if chosen { ButtonLook::Chosen } else { ButtonLook::Plain })
-            .padding(Padding::hv(3.0, 6.0))
-            .on_press(FileMsg::Click(k))
-            .width(Length::FILL)
-            .name(e.name.clone());
-            if chosen {
-                // A new row each time the choice moves, so it is scrolled to.
-                b = b.key(self.turn.get() << 32 | k as u64).keep_in_view();
-            }
-            rows.push(b);
-        }
+        let chosen = |k: usize, e: &Entry| self.selected == Some(k) || self.marked.contains(&e.path);
+        let click = |k: usize| FileMsg::Click(k);
+        let view = crate::files::View { entries: &visible, chosen: &chosen, in_view: self.selected.map(|k| (k, self.turn.get() << 32 | k as u64)), click: &click, folders: recent };
+        let (head, rows) = crate::files::list(&view, self.sort, FileMsg::Sort);
         let empty = rows.is_empty();
         let mut list: Vec<Element<FileMsg>> = vec![head, rule()];
         if let Some(p) = &self.problem {
@@ -871,342 +760,11 @@ impl Drop for FileDialog {
     }
 }
 
-/// A list entry's type by its name: a folder, or what the name says.
-fn kind_of(dir: bool, name: &str) -> Option<&'static str> {
-    if dir { Some(vergence_types::FOLDER) } else { vergence_types::of_name(name) }
-}
-
-/// The families of file types the list draws a mark for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    Folder,
-    Text,
-    Picture,
-    Sound,
-    Video,
-    Archive,
-    Document,
-    Program,
-    Other,
-}
-
-impl Kind {
-    /// The family of a type, by its generic icon (vergence-types).
-    pub fn of(mime: Option<&str>) -> Kind {
-        let Some(m) = mime else { return Kind::Other };
-        match vergence_types::icons(m)[1].as_str() {
-            "folder" => Kind::Folder,
-            "text-x-generic" | "text-x-script" | "text-html" => Kind::Text,
-            "image-x-generic" => Kind::Picture,
-            "audio-x-generic" => Kind::Sound,
-            "video-x-generic" => Kind::Video,
-            "package-x-generic" | "media-optical" | "drive-harddisk" => Kind::Archive,
-            "x-office-document" | "x-office-spreadsheet" | "x-office-presentation" | "x-office-calendar" | "x-office-address-book" => Kind::Document,
-            "application-x-executable" if m != vergence_types::BINARY => Kind::Program,
-            _ => Kind::Other,
-        }
-    }
-}
-
-/// A small mark for a family of files, drawn: a folder in the accent
-/// color; a page, with lines for text, a hill and sun for a picture, a note
-/// for sound, a play mark for video, a band for an archive, a heading for a
-/// document; a window for a program.
-pub fn kind_icon<M: 'static>(kind: Kind) -> Element<M> {
-    drawing(move |scene, _, r: Rect, t: &Theme| {
-        let (x, y) = (r.x + 2.0, r.y + (r.h - 14.0) / 2.0);
-        let mark = Color { a: 170, ..t.dim };
-        match kind {
-            Kind::Folder => {
-                let c = t.accent;
-                scene.fill_rounded(Rect::new(x, y + 1.0, 7.0, 4.0), 1.5, c);
-                scene.fill_rounded(Rect::new(x, y + 3.0, 16.0, 11.0), 2.0, c);
-            }
-            Kind::Program => {
-                scene.fill_rounded(Rect::new(x, y + 1.0, 16.0, 13.0), 2.0, t.dim);
-                scene.fill_rounded(Rect::new(x + 1.0, y + 4.0, 14.0, 9.0), 1.0, t.page);
-                scene.fill(Rect::new(x + 3.0, y + 6.0, 4.0, 1.0), mark);
-                scene.fill(Rect::new(x + 3.0, y + 9.0, 7.0, 1.0), mark);
-            }
-            _ => {
-                scene.fill_rounded(Rect::new(x + 2.0, y, 12.0, 15.0), 2.0, t.dim);
-                scene.fill_rounded(Rect::new(x + 3.0, y + 1.0, 10.0, 13.0), 1.5, t.page);
-                let (cx, cy) = (x + 8.0, y + 7.5);
-                match kind {
-                    Kind::Text | Kind::Other => {
-                        let lines = if kind == Kind::Text { 3 } else { 0 };
-                        for k in 0..lines {
-                            scene.fill(Rect::new(x + 5.0, y + 4.0 + k as f32 * 3.0, 6.0, 1.0), mark);
-                        }
-                    }
-                    Kind::Picture => {
-                        scene.fill_rounded(Rect::new(x + 9.0, y + 3.0, 3.0, 3.0), 1.5, t.accent);
-                        scene.fill_rounded(Rect::new(x + 4.0, y + 8.0, 8.0, 4.0), 1.0, Color { a: 200, ..t.accent });
-                    }
-                    Kind::Sound => {
-                        scene.fill_rounded(Rect::new(cx - 3.0, cy + 1.0, 4.0, 3.0), 1.5, mark);
-                        scene.fill(Rect::new(cx, cy - 4.0, 1.2, 6.0), mark);
-                        scene.fill(Rect::new(cx, cy - 4.0, 3.0, 1.2), mark);
-                    }
-                    Kind::Video => {
-                        for k in 0..4 {
-                            let h = 6.0 - k as f32 * 1.5;
-                            scene.fill(Rect::new(cx - 2.0 + k as f32, cy - h / 2.0, 1.0, h), mark);
-                        }
-                    }
-                    Kind::Archive => {
-                        scene.fill(Rect::new(cx - 1.0, y + 1.0, 2.0, 13.0), mark);
-                        scene.fill(Rect::new(cx - 2.0, y + 9.0, 4.0, 3.0), mark);
-                    }
-                    Kind::Document => {
-                        scene.fill(Rect::new(x + 5.0, y + 3.5, 6.0, 2.0), mark);
-                        for k in 0..2 {
-                            scene.fill(Rect::new(x + 5.0, y + 7.5 + k as f32 * 2.5, 6.0, 1.0), mark);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    })
-    .width(Length::Fixed(20.0))
-    .height(Length::Fixed(18.0))
-}
-
-fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from).filter(|p| p.is_absolute())
-}
-
-/// A path as shown: ~ for Home.
-fn tilde(p: &Path) -> String {
-    match home().and_then(|h| p.strip_prefix(&h).ok().map(Path::to_path_buf)) {
-        Some(r) if r.as_os_str().is_empty() => "~".into(),
-        Some(r) => format!("~/{}", r.display()),
-        None => p.display().to_string(),
-    }
-}
-
-fn looks_like_path(s: &str) -> bool {
-    s.starts_with('/') || s.starts_with('~')
-}
-
-/// A typed path made whole: ~ is Home; anything else is from `dir`.
-fn expand(s: &str, dir: Option<&Path>) -> PathBuf {
-    if s == "~" {
-        return home().unwrap_or_else(|| PathBuf::from("/"));
-    }
-    if let Some(rest) = s.strip_prefix("~/") {
-        return home().unwrap_or_else(|| PathBuf::from("/")).join(rest);
-    }
-    let p = PathBuf::from(s);
-    if p.is_absolute() { p } else { dir.map_or(p.clone(), |d| d.join(&p)) }
-}
-
-/// Names in the order people expect: without case, numbers by their value.
-fn natural(a: &str, b: &str) -> std::cmp::Ordering {
-    let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
-    loop {
-        match (x.peek().copied(), y.peek().copied()) {
-            (None, None) => return a.cmp(b),
-            (None, _) => return std::cmp::Ordering::Less,
-            (_, None) => return std::cmp::Ordering::Greater,
-            (Some(c), Some(d)) if c.is_ascii_digit() && d.is_ascii_digit() => {
-                let mut n = String::new();
-                let mut m = String::new();
-                while let Some(c) = x.peek().copied().filter(char::is_ascii_digit) {
-                    n.push(c);
-                    x.next();
-                }
-                while let Some(d) = y.peek().copied().filter(char::is_ascii_digit) {
-                    m.push(d);
-                    y.next();
-                }
-                let (n2, m2) = (n.trim_start_matches('0'), m.trim_start_matches('0'));
-                let o = n2.len().cmp(&m2.len()).then_with(|| n2.cmp(m2));
-                if o != std::cmp::Ordering::Equal {
-                    return o;
-                }
-            }
-            (Some(c), Some(d)) => {
-                let o = c.to_lowercase().cmp(d.to_lowercase());
-                if o != std::cmp::Ordering::Equal {
-                    return o;
-                }
-                x.next();
-                y.next();
-            }
-        }
-    }
-}
-
-fn size_words(n: u64) -> String {
-    match n {
-        0..1000 => format!("{n} bytes"),
-        1000..1_000_000 => format!("{:.0} KB", n as f64 / 1e3),
-        1_000_000..1_000_000_000 => format!("{:.1} MB", n as f64 / 1e6),
-        _ => format!("{:.1} GB", n as f64 / 1e9),
-    }
-}
-
-/// When a file changed, in words: "Today 14:03", "Yesterday 09:12",
-/// "Nov 3", "2025-11-03".
-fn when(t: SystemTime) -> String {
-    let secs = |t: SystemTime| t.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
-    let (Some(at), Some(now)) = (local(secs(t)), local(secs(SystemTime::now()))) else { return String::new() };
-    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    let day = |d: &Local| (d.year, d.yday);
-    if day(&at) == day(&now) {
-        format!("Today {:02}:{:02}", at.hour, at.min)
-    } else if (at.year == now.year && at.yday + 1 == now.yday) || local(secs(SystemTime::now()) - 86_400).is_some_and(|y| day(&y) == day(&at)) {
-        format!("Yesterday {:02}:{:02}", at.hour, at.min)
-    } else if at.year == now.year {
-        format!("{} {}", MONTHS[at.month.min(11) as usize], at.mday)
-    } else {
-        format!("{}-{:02}-{:02}", at.year, at.month + 1, at.mday)
-    }
-}
-
-struct Local {
-    year: i32,
-    month: i32,
-    mday: i32,
-    yday: i32,
-    hour: i32,
-    min: i32,
-}
-
-/// The local time of `secs` since 1970, by localtime_r(3) (glibc's and
-/// FreeBSD's struct tm agree on these fields and their order).
-fn local(secs: i64) -> Option<Local> {
-    #[repr(C)]
-    struct Tm {
-        sec: i32,
-        min: i32,
-        hour: i32,
-        mday: i32,
-        mon: i32,
-        year: i32,
-        wday: i32,
-        yday: i32,
-        isdst: i32,
-        gmtoff: i64,
-        zone: *const std::ffi::c_char,
-    }
-    unsafe extern "C" {
-        fn localtime_r(t: *const i64, out: *mut Tm) -> *mut Tm;
-    }
-    let mut tm = Tm { sec: 0, min: 0, hour: 0, mday: 0, mon: 0, year: 0, wday: 0, yday: 0, isdst: 0, gmtoff: 0, zone: std::ptr::null() };
-    // SAFETY: localtime_r reads the time and fills the struct we own.
-    let r = unsafe { localtime_r(&secs, &mut tm) };
-    (!r.is_null()).then_some(Local { year: tm.year + 1900, month: tm.mon, mday: tm.mday, yday: tm.yday, hour: tm.hour, min: tm.min })
-}
-
-/// The start of a file, if it is text.
-fn text_start(p: &Path) -> Option<String> {
-    use std::io::Read;
-    let mut buf = vec![0u8; PREVIEW_BYTES];
-    let n = fs::File::open(p).ok()?.read(&mut buf).ok()?;
-    buf.truncate(n);
-    if buf.contains(&0) {
-        return None;
-    }
-    // Cut at a character's edge.
-    let s = match std::str::from_utf8(&buf) {
-        Ok(s) => s.to_string(),
-        Err(e) if e.valid_up_to() + 4 >= buf.len() => String::from_utf8_lossy(&buf[..e.valid_up_to()]).into_owned(),
-        Err(_) => return None,
-    };
-    Some(s)
-}
-
-/// Disks mounted where removable and extra disks go.
-fn mounted_disks() -> Vec<PathBuf> {
-    let text = fs::read_to_string("/proc/self/mounts").ok().or_else(|| {
-        // FreeBSD: mount -p prints the table in fstab's form.
-        std::process::Command::new("mount").arg("-p").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-    });
-    let mut out: Vec<PathBuf> = text
-        .unwrap_or_default()
-        .lines()
-        .filter_map(|l| l.split_whitespace().nth(1))
-        .map(|m| m.replace("\\040", " "))
-        .filter(|m| ["/media/", "/mnt/", "/run/media/"].iter().any(|p| m.starts_with(p)) || m == "/mnt")
-        .map(PathBuf::from)
-        .collect();
-    out.sort();
-    out.dedup();
-    out
-}
-
-fn plain(e: &std::io::Error) -> String {
-    match e.kind() {
-        std::io::ErrorKind::PermissionDenied => "you do not have permission.".into(),
-        std::io::ErrorKind::NotFound => "it is not there.".into(),
-        std::io::ErrorKind::AlreadyExists => "something of that name is already here.".into(),
-        _ => {
-            let s = e.to_string();
-            format!("{}.", s.split(" (os error").next().unwrap_or(&s).trim_end_matches('.'))
-        }
-    }
-}
-
-// --- What is remembered ---
-
-fn state_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| home().map(|h| h.join(".local/state")))?;
-    Some(base.join("vergence/file-dialog"))
-}
-
-/// The state file's lines: "folder <app>\t<path>" and "file\t<path>", newest files first.
-fn state_lines() -> Vec<(String, String)> {
-    let Some(p) = state_path() else { return Vec::new() };
-    fs::read_to_string(p)
-        .unwrap_or_default()
-        .lines()
-        .filter_map(|l| l.split_once('\t'))
-        .filter(|(_, v)| v.starts_with('/') && v.len() <= 4096)
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .take(256)
-        .collect()
-}
-
-fn remembered_folder(app: &str) -> Option<PathBuf> {
-    let key = format!("folder {app}");
-    state_lines().into_iter().find(|(k, _)| *k == key).map(|(_, v)| PathBuf::from(v))
-}
-
-fn recent_files() -> Vec<PathBuf> {
-    state_lines().into_iter().filter(|(k, _)| k == "file").map(|(_, v)| PathBuf::from(v)).collect()
-}
-
-/// Keeps `app`'s folder and puts `file` at the top of the recent files.
-fn remember(app: &str, dir: &Path, file: &Path) {
-    let Some(path) = state_path() else { return };
-    let key = format!("folder {app}");
-    let (dir, file) = (dir.to_string_lossy().into_owned(), file.to_string_lossy().into_owned());
-    if dir.contains(['\t', '\n']) || file.contains(['\t', '\n']) {
-        return;
-    }
-    let old = state_lines();
-    let mut lines = vec![(key.clone(), dir), ("file".to_string(), file.clone())];
-    lines.extend(old.iter().filter(|(k, _)| *k != key && k.starts_with("folder ")).cloned());
-    lines.extend(old.iter().filter(|(k, v)| k == "file" && *v != file).take(MAX_RECENT - 1).cloned());
-    let text: String = lines.iter().map(|(k, v)| format!("{k}\t{v}\n")).collect();
-    if let Some(d) = path.parent() {
-        let _ = fs::create_dir_all(d);
-    }
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let tmp = path.with_extension("new");
-    let written = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp).and_then(|mut f| f.write_all(text.as_bytes()));
-    if written.is_ok() {
-        let _ = fs::rename(&tmp, &path);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::files::natural;
+    use std::time::SystemTime;
 
     #[test]
     fn names_sort_naturally_and_patterns_match_without_case() {

@@ -25,6 +25,7 @@ pub mod about;
 pub mod chart;
 pub mod edit;
 pub mod filedialog;
+pub mod files;
 pub mod prefs;
 pub mod textarea;
 mod layout;

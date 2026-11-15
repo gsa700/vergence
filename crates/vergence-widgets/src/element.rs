@@ -93,6 +93,8 @@ pub(crate) struct Label {
     pub dim: bool,
     pub align: Align,
     pub wrap: bool,
+    /// One line, cut with "…" where its place ends (a long file name).
+    pub elide: bool,
 }
 
 /// What a [drawing](drawing) is told of the pointer or a finger, in its own
@@ -238,6 +240,14 @@ impl<M> Element<M> {
 
     /// A label broken into lines at its width; a row's children carried
     /// on to a new line where they do not fit (a grid of tiles).
+    /// A label kept to one line, cut with "…" where its place ends.
+    pub fn elide(mut self) -> Self {
+        if let Kind::Label(l) = &mut self.kind {
+            l.elide = true;
+        }
+        self
+    }
+
     pub fn wrap(mut self) -> Self {
         match &mut self.kind {
             Kind::Label(l) => l.wrap = true,
@@ -425,7 +435,7 @@ pub fn vrule<M>() -> Element<M> {
 
 /// Text: one line unless it [wraps](Element::wrap).
 pub fn label<M>(text: impl Into<String>) -> Element<M> {
-    Element::new(Kind::Label(Label { text: text.into(), size: None, weight: 400, color: None, dim: false, align: Align::Start, wrap: false }), Length::Shrink, Length::Shrink)
+    Element::new(Kind::Label(Label { text: text.into(), size: None, weight: 400, color: None, dim: false, align: Align::Start, wrap: false, elide: false }), Length::Shrink, Length::Shrink)
 }
 
 /// A box around one child: a ground, an edge, rounded corners, padding.
