@@ -110,6 +110,23 @@ pub fn arrange(names: &[String], placed: &HashMap<String, (i32, i32)>, cols: i32
     out.into_iter().map(|s| s.unwrap_or((0, 0))).collect()
 }
 
+/// The icons every desktop has before its files (Dave, 2026-11-15: "a
+/// default set of icons there: Home, Trash, Mounted Volumes"): they open in
+/// File Viewer and take drops (into Home or a disk; the Trash trashes), but
+/// are not files of the Desktop folder: they cannot be renamed or trashed,
+/// and dragged they only move on the desktop (their drag carries no file
+/// links, so nothing can move Home itself). `[desktop] home`, `trash`,
+/// `volumes` = false leaves one out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Fixed {
+    Home,
+    Trash,
+    Volume,
+}
+
+/// A drag of the desktop's own fixed icons: their keys, a line each.
+const FIXED_KIND: &str = "application/x-vergence-desktop-icons";
+
 #[derive(Clone, Debug)]
 enum Ask {
     /// May this launcher start a program?
@@ -130,6 +147,9 @@ pub enum Msg {
 pub struct Desktop {
     dir: PathBuf,
     entries: Vec<Entry>,
+    /// The fixed icons among the entries (by their key, which is their entry's
+    /// name: "::home", "::trash", "::volume:/mnt/x"), what, and what they are called.
+    fixed: HashMap<String, (Fixed, String)>,
     stamp: Option<SystemTime>,
     /// This setup's placed cells, by name.
     placed: HashMap<String, (i32, i32)>,
@@ -154,6 +174,7 @@ impl Desktop {
         let mut d = Desktop {
             dir: desktop_dir(),
             entries: Vec::new(),
+            fixed: HashMap::new(),
             stamp: None,
             placed: HashMap::new(),
             size: (0.0, 0.0),
@@ -183,7 +204,25 @@ impl Desktop {
         self.stamp = std::fs::metadata(&self.dir).and_then(|m| m.modified()).ok();
         let mut e: Vec<Entry> = files::read_folder(&self.dir).unwrap_or_default().into_iter().filter(|e| !e.name.starts_with('.')).collect();
         e.sort_by(|a, b| files::natural(&a.name, &b.name));
-        self.entries = e;
+        // The fixed icons first: Home, the disks mounted, the Trash.
+        let wants = |k: &str| vergence_ui::table_value(&self.desktop_text, "[desktop]", k).as_deref() != Some("false");
+        let mut fixed: Vec<(String, Fixed, String, PathBuf)> = Vec::new();
+        if wants("home") && let Some(h) = files::home() {
+            fixed.push(("::home".into(), Fixed::Home, "Home".into(), h));
+        }
+        if wants("volumes") {
+            for m in files::mounted_disks() {
+                let name = m.file_name().map_or_else(|| m.display().to_string(), |n| n.to_string_lossy().into_owned());
+                fixed.push((format!("::volume:{}", m.display()), Fixed::Volume, name, m));
+            }
+        }
+        if wants("trash") && let Some(t) = ops::trash_dir() {
+            fixed.push(("::trash".into(), Fixed::Trash, "Trash".into(), t.join("files")));
+        }
+        self.fixed = fixed.iter().map(|(k, f, n, _)| (k.clone(), (*f, n.clone()))).collect();
+        let mut all: Vec<Entry> = fixed.into_iter().map(|(k, _, _, p)| Entry { name: k, path: p, dir: true, mime: Some(vergence_types::FOLDER), size: 0, changed: None }).collect();
+        all.extend(e);
+        self.entries = all;
         let here: HashSet<&PathBuf> = self.entries.iter().map(|e| &e.path).collect();
         self.chosen.retain(|p| here.contains(p));
     }
@@ -220,6 +259,15 @@ impl Desktop {
 
     fn icon_at(&self, x: f32, y: f32) -> Option<usize> {
         self.cells().iter().position(|c| x >= c.x + 4.0 && x < c.x + c.w - 4.0 && y >= c.y && y < c.y + c.h - 4.0)
+    }
+
+    fn fixed_of(&self, e: &Entry) -> Option<Fixed> {
+        self.fixed.get(&e.name).map(|(f, _)| *f)
+    }
+
+    /// The chosen files of the Desktop folder (the fixed icons left out).
+    fn chosen_files(&self) -> Vec<PathBuf> {
+        self.entries.iter().filter(|e| self.chosen.contains(&e.path) && self.fixed_of(e).is_none()).map(|e| e.path.clone()).collect()
     }
 
     /// Whether an entry is a launcher (a desktop entry file).
@@ -266,7 +314,12 @@ impl Desktop {
     /// first if it is not trusted), a file with its app.
     fn open(&mut self, i: usize) {
         let Some(e) = self.entries.get(i).cloned() else { return };
+        // A folder, Home, a disk, the Trash: in File Viewer.
         if e.dir {
+            // The Trash may not have been made yet.
+            if self.fixed_of(&e) == Some(Fixed::Trash) {
+                let _ = std::fs::create_dir_all(&e.path);
+            }
             let _ = std::process::Command::new("vergence-files").arg(&e.path).spawn();
             return;
         }
@@ -299,25 +352,30 @@ impl Desktop {
     fn view_icons(&self, t: &Theme) -> Element<Msg> {
         let cells = self.cells();
         let marks = self.marks.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let items: Vec<(Rect, String, Kind, Option<Arc<Image>>, bool)> = self
+        let items: Vec<(Rect, String, Kind, Option<Arc<Image>>, bool, Option<Fixed>)> = self
             .entries
             .iter()
             .zip(cells)
             .map(|(e, c)| {
-                let name = if Desktop::launcher(e) { Desktop::entry_of(e).map(|x| x.name).unwrap_or_else(|| e.name.clone()) } else { e.name.clone() };
-                (c, name, e.kind(), marks.get(&e.path).cloned().flatten(), self.chosen.contains(&e.path))
+                let name = match self.fixed.get(&e.name) {
+                    Some((_, n)) => n.clone(),
+                    None if Desktop::launcher(e) => Desktop::entry_of(e).map(|x| x.name).unwrap_or_else(|| e.name.clone()),
+                    None => e.name.clone(),
+                };
+                (c, name, e.kind(), marks.get(&e.path).cloned().flatten(), self.chosen.contains(&e.path), self.fixed_of(e))
             })
             .collect();
         let accent = t.accent;
         drawing(move |scene, fonts, r: Rect, t: &Theme| {
             let face = fonts.face("sans-serif", 400, false);
-            for (c, name, kind, img, chosen) in &items {
+            for (c, name, kind, img, chosen, fixed) in &items {
                 let c = Rect::new(r.x + c.x, r.y + c.y, c.w, c.h);
                 if *chosen {
                     scene.fill_rounded(Rect::new(c.x + 4.0, c.y + 2.0, c.w - 8.0, c.h - 6.0), 8.0, Color { a: 110, ..accent });
                 }
                 let icon = Rect::new(c.x + (c.w - ICON) / 2.0, c.y + 8.0, ICON, ICON);
                 match img {
+                    _ if fixed.is_some() => draw_fixed(scene, icon, fixed.unwrap_or(Fixed::Home), t),
                     Some(img) => {
                         let s = (ICON / img.width as f32).min(ICON / img.height as f32);
                         let (w, h) = (img.width as f32 * s, img.height as f32 * s);
@@ -440,6 +498,14 @@ impl Program for Desktop {
                     && ((x - px).powi(2) + (y - py).powi(2)) > 36.0
                 {
                     self.dragged = true;
+                    // The fixed icons only move on the desktop: their drag has no file links.
+                    let keys: Vec<String> = self.entries.iter().filter(|e| self.chosen.contains(&e.path) && self.fixed_of(e).is_some()).map(|e| e.name.clone()).collect();
+                    if !keys.is_empty() {
+                        let label = if keys.len() == 1 { self.fixed.get(&keys[0]).map(|(_, n)| n.clone()).unwrap_or_default() } else { format!("{} items", keys.len()) };
+                        window.start_drag(&label, vec![(FIXED_KIND.into(), keys.join("\n").into_bytes())]);
+                        window.redraw();
+                        return;
+                    }
                     let paths = self.chosen.clone();
                     let uris: String = paths.iter().map(|p| format!("file://{}\r\n", ops::escape(p))).collect();
                     let plain = paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join("\n");
@@ -546,8 +612,8 @@ impl Program for Desktop {
                 }
             }
             ESCAPE => self.chosen.clear(),
-            DELETE if !self.chosen.is_empty() => {
-                for p in self.chosen.clone() {
+            DELETE if !self.chosen_files().is_empty() => {
+                for p in self.chosen_files() {
                     if let Err(e) = ops::trash(&p) {
                         self.notice = Some(format!("“{}” could not be moved to the Trash: {e}", p.file_name().unwrap_or_default().to_string_lossy()));
                         break;
@@ -556,7 +622,7 @@ impl Program for Desktop {
                 self.read();
             }
             F2 => {
-                if let [one] = self.chosen.as_slice() {
+                if let [one] = self.chosen_files().as_slice() {
                     let name = one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     self.ask = Some(Ask::Rename(one.clone(), name));
                 }
@@ -607,21 +673,57 @@ impl Program for Desktop {
     }
 
     /// Files dragged here: moved in (Ctrl copies); the desktop's own: placed where let go.
-    fn drag_over(&mut self, _x: f32, _y: f32, kinds: &[String], ctrl: bool) -> u8 {
+    fn drag_over(&mut self, x: f32, y: f32, kinds: &[String], ctrl: bool) -> u8 {
+        if kinds.iter().any(|k| k == FIXED_KIND) {
+            return vergence_ui::DROP_MOVE;
+        }
         if !kinds.iter().any(|k| k == "text/uri-list") {
             return vergence_ui::DROP_NONE;
+        }
+        // Over the Trash: moved there.
+        if self.icon_at(x, y).and_then(|i| self.entries.get(i)).and_then(|e| self.fixed_of(e)) == Some(Fixed::Trash) {
+            return vergence_ui::DROP_MOVE;
         }
         if ctrl { vergence_ui::DROP_COPY } else { vergence_ui::DROP_MOVE }
     }
 
     fn dropped(&mut self, x: f32, y: f32, action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
-        let paths: Vec<PathBuf> = items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default();
-        if paths.is_empty() {
-            return;
-        }
         let (cols, rows) = self.grid();
         let (c0, r0) = self.cell_at(x, y);
-        let names: Vec<String> = if paths.iter().all(|p| p.parent() == Some(self.dir.as_path())) && action == vergence_ui::DROP_MOVE {
+        // The fixed icons, moved on the desktop.
+        let fixed_keys: Vec<String> = items.iter().find(|(k, _)| k == FIXED_KIND).map(|(_, v)| String::from_utf8_lossy(v).lines().map(str::to_string).filter(|k| self.fixed.contains_key(k)).collect()).unwrap_or_default();
+        let paths: Vec<PathBuf> = items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default();
+        if paths.is_empty() && fixed_keys.is_empty() {
+            return;
+        }
+        // Onto an icon that takes files: the Trash, Home, a disk, a folder.
+        let onto = self.icon_at(x, y).and_then(|i| self.entries.get(i).cloned()).filter(|e| fixed_keys.is_empty() && !paths.contains(&e.path));
+        if let Some(target) = onto {
+            if self.fixed_of(&target) == Some(Fixed::Trash) {
+                for p in &paths {
+                    if let Err(e) = ops::trash(p) {
+                        self.notice = Some(format!("“{}” could not be moved to the Trash: {e}", p.file_name().unwrap_or_default().to_string_lossy()));
+                        break;
+                    }
+                }
+                self.read();
+                window.redraw();
+                return;
+            }
+            if target.dir {
+                let plan = ops::plan_paste(&paths, &target.path, action == vergence_ui::DROP_MOVE, ops::Clash::KeepBoth);
+                let (_, error) = ops::run_paste(&plan, action == vergence_ui::DROP_MOVE, &Arc::new(ops::Progress::default()));
+                if let Some(e) = error {
+                    self.notice = Some(e);
+                }
+                self.read();
+                window.redraw();
+                return;
+            }
+        }
+        let names: Vec<String> = if !fixed_keys.is_empty() {
+            fixed_keys
+        } else if paths.iter().all(|p| p.parent() == Some(self.dir.as_path())) && action == vergence_ui::DROP_MOVE {
             // The desktop's own icons, moved: to where they were let go.
             paths.iter().filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).collect()
         } else {
@@ -655,6 +757,37 @@ impl Program for Desktop {
     fn drag_ended(&mut self, _action: u8, window: &mut Window) {
         self.read();
         window.redraw();
+    }
+}
+
+/// A fixed icon's mark: a house, a drive, a trash can, drawn in the icon's square.
+fn draw_fixed(scene: &mut vergence_scene::Scene, r: Rect, f: Fixed, t: &Theme) {
+    let k = r.w / 16.0;
+    let p = |x: f32, y: f32| Point::new(r.x + x * k, r.y + y * k);
+    let ink = Color::rgb(255, 255, 255);
+    let w = 1.2 * k;
+    match f {
+        Fixed::Home => {
+            scene.fill_rounded(Rect::new(r.x + 3.0 * k, r.y + 7.0 * k, 10.0 * k, 8.0 * k), 1.0 * k, t.accent);
+            for (a, b) in [((1.5, 8.0), (8.0, 1.8)), ((8.0, 1.8), (14.5, 8.0))] {
+                scene.line(p(a.0, a.1), p(b.0, b.1), w * 1.4, t.accent);
+            }
+            scene.fill_rounded(Rect::new(r.x + 6.8 * k, r.y + 10.0 * k, 2.4 * k, 5.0 * k), 0.5 * k, ink);
+        }
+        Fixed::Volume => {
+            scene.fill_rounded(Rect::new(r.x + 1.5 * k, r.y + 5.0 * k, 13.0 * k, 7.0 * k), 1.5 * k, Color::rgb(0x8a, 0x92, 0xa3));
+            scene.fill_rounded(Rect::new(r.x + 2.5 * k, r.y + 9.5 * k, 11.0 * k, 1.0 * k), 0.5 * k, Color::rgb(0x5d, 0x65, 0x75));
+            scene.fill_rounded(Rect::new(r.x + 11.5 * k, r.y + 6.5 * k, 1.5 * k, 1.5 * k), 0.75 * k, Color::rgb(0x6f, 0xd0, 0x80));
+        }
+        Fixed::Trash => {
+            let body = Color::rgb(0xd5, 0xd8, 0xde);
+            scene.fill_rounded(Rect::new(r.x + 3.5 * k, r.y + 4.5 * k, 9.0 * k, 10.5 * k), 1.2 * k, body);
+            scene.fill_rounded(Rect::new(r.x + 2.5 * k, r.y + 3.0 * k, 11.0 * k, 1.6 * k), 0.8 * k, body);
+            scene.fill_rounded(Rect::new(r.x + 6.0 * k, r.y + 1.8 * k, 4.0 * k, 1.4 * k), 0.6 * k, body);
+            for x in [5.8, 8.0, 10.2] {
+                scene.line(p(x, 6.5), p(x, 13.5), w, Color::rgb(0x8a, 0x92, 0xa3));
+            }
+        }
     }
 }
 

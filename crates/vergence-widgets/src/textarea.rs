@@ -56,6 +56,11 @@ enum Action {
     Cut,
     Copy,
     Paste,
+    Undo,
+    Redo,
+    SelectAll,
+    /// A dividing line in the menu (nothing to choose).
+    Line,
 }
 
 /// The popup under the caret or the pointer: completions, spelling
@@ -63,6 +68,11 @@ enum Action {
 struct List {
     words: Vec<String>,
     actions: Vec<Action>,
+    /// The right-click menu (drawn as the desktop's menus are: the keys at
+    /// the right, lines that cannot be used now faint): which can be, and
+    /// the keys that do the same. Empty for the completion popup.
+    enabled: Vec<bool>,
+    keys: Vec<&'static str>,
     /// Where it opens (the right click's point); None: under the caret.
     at: Option<(f32, f32)>,
     chosen: usize,
@@ -520,7 +530,7 @@ impl Doc {
         let keep = self.list.as_ref().and_then(|l| l.words.get(l.chosen).cloned());
         let chosen = keep.and_then(|k| words.iter().position(|w| *w == k)).unwrap_or(0);
         let actions = vec![Action::Word; words.len()];
-        self.list = Some(List { words, actions, at: None, chosen, start, first: 0 });
+        self.list = Some(List { words, actions, enabled: Vec::new(), keys: Vec::new(), at: None, chosen, start, first: 0 });
         true
     }
 
@@ -1044,7 +1054,17 @@ impl Doc {
                     sym::PAGE_UP => -(LIST_ROWS as isize),
                     _ => LIST_ROWS as isize,
                 };
-                l.chosen = (l.chosen as isize + step).clamp(0, n as isize - 1) as usize;
+                let mut k = (l.chosen as isize + step).clamp(0, n as isize - 1) as usize;
+                // The menu's faint and dividing lines are stepped over.
+                while !l.enabled.is_empty() && l.enabled.get(k) == Some(&false) {
+                    let next = k as isize + step.signum();
+                    if next < 0 || next >= n as isize {
+                        k = l.chosen;
+                        break;
+                    }
+                    k = next as usize;
+                }
+                l.chosen = k;
                 Some(used)
             }
             sym::RETURN | KP_ENTER | sym::TAB if plain => {
@@ -1081,6 +1101,11 @@ impl Doc {
     /// Does what line `k` of the popup says.
     fn take_item(&mut self, l: List, k: usize) -> Effect {
         let mut e = Effect { used: true, ..Effect::default() };
+        // A faint line, or a dividing one, does nothing (the menu stays open).
+        if l.enabled.get(k) == Some(&false) {
+            self.list = Some(l);
+            return e;
+        }
         let (Some(word), Some(action)) = (l.words.get(k).cloned(), l.actions.get(k).cloned()) else { return e };
         let editable = self.options.editable;
         match action {
@@ -1119,6 +1144,22 @@ impl Doc {
                 }
             }
             Action::Paste if editable => e.paste = true,
+            Action::Undo if editable => {
+                if self.undo() {
+                    e.text = true;
+                    e.moved = true;
+                }
+            }
+            Action::Redo if editable => {
+                if self.redo() {
+                    e.text = true;
+                    e.moved = true;
+                }
+            }
+            Action::SelectAll => {
+                self.select_all();
+                e.moved = true;
+            }
             _ => {}
         }
         e
@@ -1152,15 +1193,33 @@ impl Doc {
             words.push("Ignore it here".into());
             actions.push(Action::Ignore(w));
         }
+        // The standard menu (Dave, 2026-11-15: "a standard style context menu
+        // as terminal does"): every line always there, faint when it cannot be
+        // used, the keys at the right; the spelling lines above it.
+        let mut enabled = vec![true; words.len()];
+        let mut keys = vec![""; words.len()];
         let selected = self.caret != self.anchor;
         let editable = self.options.editable;
-        for (label, act, on) in [("Cut", Action::Cut, selected && editable), ("Copy", Action::Copy, selected), ("Paste", Action::Paste, editable)] {
-            if on {
-                words.push(label.into());
-                actions.push(act);
-            }
+        let spelling = !words.is_empty();
+        let mut add = |label: &str, act: Action, on: bool, key: &'static str| {
+            words.push(label.into());
+            actions.push(act);
+            enabled.push(on);
+            keys.push(key);
+        };
+        if spelling {
+            add("", Action::Line, false, "");
         }
-        self.list = (!words.is_empty()).then(|| List { words, actions, at: Some((x, y)), chosen: 0, start: p, first: 0 });
+        add("Undo", Action::Undo, editable && self.history.can_undo(), "Ctrl+Z");
+        add("Redo", Action::Redo, editable && self.history.can_redo(), "Ctrl+Shift+Z");
+        add("", Action::Line, false, "");
+        add("Cut", Action::Cut, selected && editable, "Ctrl+X");
+        add("Copy", Action::Copy, selected, "Ctrl+C");
+        add("Paste", Action::Paste, editable, "Ctrl+V");
+        add("", Action::Line, false, "");
+        add("Select all", Action::SelectAll, true, "Ctrl+A");
+        let chosen = enabled.iter().position(|e| *e).unwrap_or(0);
+        self.list = Some(List { words, actions, enabled, keys, at: Some((x, y)), chosen, start: p, first: 0 });
     }
 
     /// The word spelled wrong at `p`, if any: where it starts and ends, and it.
@@ -1699,14 +1758,15 @@ impl Doc {
             && (caret_seen || self.list.as_ref().is_some_and(|l| l.at.is_some()))
             && let Some(l) = self.list.as_mut()
         {
-            let rows = l.words.len().min(LIST_ROWS);
+            let menu = !l.enabled.is_empty();
+            let rows = if menu { l.words.len() } else { l.words.len().min(LIST_ROWS) };
             if l.chosen < l.first {
                 l.first = l.chosen;
             } else if l.chosen >= l.first + rows {
                 l.first = l.chosen + 1 - rows;
             }
-            let widest = l.words.iter().map(|w| fonts.layout(face, size, w).1).fold(0.0f32, f32::max);
-            let w = (widest + 24.0).clamp(140.0, (r.w - 8.0).max(140.0));
+            let widest = l.words.iter().zip(l.keys.iter().chain(std::iter::repeat(&""))).map(|(w, k)| fonts.layout(face, size, w).1 + if k.is_empty() { 0.0 } else { fonts.layout(face, size, k).1 + 28.0 }).fold(0.0f32, f32::max);
+            let w = (widest + 24.0).clamp(if menu { 220.0 } else { 140.0 }, (r.w - 8.0).max(140.0));
             let h = rows as f32 * line_h + 8.0;
             // Under the caret's row (above it where there is no room), or at the right click.
             let (ax, ay, below) = match l.at {
@@ -1716,17 +1776,35 @@ impl Doc {
             let lx = ax.clamp(r.x + 4.0, (r.x + r.w - w - 4.0).max(r.x + 4.0));
             let ly = if below + h <= r.y + r.h { below } else { (ay - h).max(r.y) };
             let lr = Rect::new(lx, ly, w, h);
-            let ground = if theme.dark { theme.card } else { Color::rgb(255, 255, 255) };
+            let menu_c = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
+            let ground = if menu { menu_c(vergence_look::MENU) } else if theme.dark { theme.card } else { Color::rgb(255, 255, 255) };
             scene.fill_rounded(Rect::new(lx - 1.0, ly + 1.0, w + 2.0, h + 2.0), vergence_look::RADIUS + 1.0, alpha(Color::rgb(0, 0, 0), 50));
             scene.fill_rounded(lr, vergence_look::RADIUS, ground);
             scene.stroke(lr, vergence_look::RADIUS, 1.0, theme.line);
             for (k, word) in l.words.iter().enumerate().skip(l.first).take(rows) {
                 let ry = ly + 4.0 + (k - l.first) as f32 * line_h;
-                let chosen = k == l.chosen;
+                if menu && l.actions.get(k) == Some(&Action::Line) {
+                    scene.fill(Rect::new(lx + 10.0, ry + line_h / 2.0, w - 20.0, 1.0), alpha(menu_c(vergence_look::MENU_INK_OFF), 120));
+                    continue;
+                }
+                let on = l.enabled.get(k) != Some(&false);
+                let chosen = k == l.chosen && on;
                 if chosen {
                     scene.fill_rounded(Rect::new(lx + 4.0, ry, w - 8.0, line_h), vergence_look::RADIUS, theme.accent);
                 }
-                text(scene, fonts, face, size, if chosen { Color::rgb(255, 255, 255) } else { text_c }, Point::new(lx + 12.0, base(ry)), word);
+                let ink = if chosen {
+                    Color::rgb(255, 255, 255)
+                } else if menu {
+                    menu_c(if on { vergence_look::MENU_INK } else { vergence_look::MENU_INK_OFF })
+                } else {
+                    text_c
+                };
+                text(scene, fonts, face, size, ink, Point::new(lx + 12.0, base(ry)), word);
+                if let Some(key) = l.keys.get(k).filter(|k| !k.is_empty()) {
+                    let kw = fonts.layout(face, size, key).1;
+                    let kc = if chosen { Color::rgb(255, 255, 255) } else { menu_c(vergence_look::MENU_INK_OFF) };
+                    text(scene, fonts, face, size, kc, Point::new(lx + w - 12.0 - kw, base(ry)), key);
+                }
             }
             self.geom.list = Some((lr, line_h));
         }

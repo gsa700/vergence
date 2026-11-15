@@ -470,6 +470,21 @@ the wallpaper, a scratch place for launchers and files.
   the trusted Calculator starting. Not yet: a rubber-band choice, desktops
   on other screens, rename in place, thumbnails of other kinds. Tests:
   Hubble 614, kepler 610, Techbench 614.
+- **Fixed desktop icons and the text area's menu** (2026-11-15, Dave: "a
+  default set of icons there: Home, Trash, Mounted Volumes"; "text edit to
+  have a standard style context menu as terminal does"): the desktop shows
+  Home, each disk mounted (files::mounted_disks) and the Trash before its
+  files, with marks of their own; they open in File Viewer, take drops
+  (the Trash trashes, Home and a disk take files in, as any folder icon
+  does now), cannot be renamed or trashed, and dragged only move on the
+  desktop (their drag carries `application/x-vergence-desktop-icons`, no
+  file links); `[desktop] home`, `volumes`, `trash` = false leaves one out.
+  The toolkit's text area's right-click menu is the standard one: the
+  spelling lines first, then Undo, Redo | Cut, Copy, Paste | Select all,
+  every line always there (faint when it cannot be used), the keys at the
+  right, the desktop's menu colors; the arrows step over faint lines. Seen
+  on kepler: Home and the Trash on the desktop; the menu in Close-Up's text
+  view. Tests: Hubble 614, kepler 610, Techbench 614.
 ## Steps
 
 1. **vergence-types**: the database reader (globs2, magic, subclasses,
