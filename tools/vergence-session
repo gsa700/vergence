@@ -28,6 +28,18 @@ elif [ -x "$here/../target/release/vergence-server" ]; then
     # (Exec=vergence-term) and `vergence-term -e` find this build's.
     PATH=$(cd "$here/../target/release" && pwd):$PATH
     export PATH
+    # Its desktop entries and icons too, ahead of any installed ones (an
+    # older install lacks the newer apps: Techbench, 2026-11-15, had no File
+    # Viewer in the launcher): links to the checkout's data/ in a share
+    # directory under target/.
+    root=$(cd "$here/.." && pwd)
+    share=$root/target/dev-share
+    mkdir -p "$share/applications" "$share/icons/hicolor/scalable/apps"
+    rm -f "$share"/applications/vergence-*.desktop "$share"/icons/hicolor/scalable/apps/vergence-*.svg
+    for f in "$root"/data/applications/*.desktop; do ln -sf "$f" "$share/applications/"; done
+    for f in "$root"/data/icons/*.svg; do ln -sf "$f" "$share/icons/hicolor/scalable/apps/"; done
+    XDG_DATA_DIRS=$share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}
+    export XDG_DATA_DIRS
 else
     BIN=vergence-server                              # whatever PATH finds
     installed=1
