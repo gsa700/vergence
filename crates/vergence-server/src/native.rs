@@ -496,6 +496,12 @@ impl Server {
             // A size asked for (bus v12): within its limits and its screen's work
             // area, kept where it is unless its right or bottom edge would leave the
             // screen; not while maximized, snapped or full screen.
+            // Come forward (bus v16): by the rule new windows take the keyboard by.
+            WinRequest::Activate { window } => {
+                if let Some(w) = self.natives.get(&(client, window)).cloned() {
+                    self.window_activate(&w);
+                }
+            }
             // Drag and drop (drag.rs, bus v16).
             WinRequest::DragStart { window, label, items } => {
                 if let Some(w) = self.natives.get(&(client, window)).cloned() {

@@ -1397,6 +1397,8 @@ impl Program for Viewer {
         let asked: Vec<Vec<PathBuf>> = std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
         for paths in asked {
             self.open_paths(&paths);
+            // Handed over by a start the person just made: forward (the server judges).
+            window.activate();
             changed = true;
         }
         // A copy or move running (its ticks) or ended.

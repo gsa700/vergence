@@ -41,7 +41,7 @@
 //! links opened by the server with the applications chosen for their types.
 //! Version 16 (files milestone 1, step 8): drag and drop between native
 //! windows (`WinRequest::DragStart`/`DragAccept`, `WinEvent::DragOver`/
-//! `DragLeave`/`DragDrop`/`DragEnded`).
+//! `DragLeave`/`DragDrop`/`DragEnded`), and `WinRequest::Activate`.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 

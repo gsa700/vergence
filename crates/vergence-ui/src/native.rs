@@ -397,6 +397,7 @@ impl<'a> Native<'a> {
                 Command::Maximize(on) => self.send(WinRequest::Maximize { window: id, on })?,
                 Command::Size(w, h) => self.send(WinRequest::Size { window: id, width: w as f64, height: h as f64 })?,
                 Command::Drag(label, items) => self.send(WinRequest::DragStart { window: id, label, items })?,
+                Command::Activate => self.send(WinRequest::Activate { window: id })?,
                 Command::Minimize => self.send(WinRequest::Minimize { window: id })?,
                 Command::Copy(text) => {
                     self.send(WinRequest::Copy { input_serial: self.input_serial, kinds: TEXT_KINDS.iter().map(|k| k.to_string()).collect() })?;

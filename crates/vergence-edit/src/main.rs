@@ -1461,6 +1461,8 @@ impl Program for EditWindow {
                     window.open_window(vergence_widgets::window(EditWindow::new(self.shared.clone(), Vec::new())));
                 } else {
                     self.open_files(&files);
+                    // Handed over by a start the person just made: forward (the server judges).
+                    window.activate();
                     changed = true;
                 }
             }

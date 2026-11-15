@@ -370,6 +370,8 @@ enum Command {
     Size(u32, u32),
     /// Start dragging (the native road; files milestone 1, step 8).
     Drag(String, Vec<(String, Vec<u8>)>),
+    /// Forward with the keyboard, if the server agrees.
+    Activate,
 }
 
 /// What a program may ask of its window while it handles input.
@@ -400,6 +402,14 @@ impl Window {
     /// native road; elsewhere nothing happens yet.
     pub fn start_drag(&mut self, label: &str, items: Vec<(String, Vec<u8>)>) {
         self.commands.push(Command::Drag(label.to_string(), items));
+    }
+
+    /// Asks to come forward with the keyboard: the program was just handed
+    /// something to show (a file another start passed on). The server grants
+    /// it only for a start the person just made, or while the program has the
+    /// keyboard anyway: no stealing focus.
+    pub fn activate(&mut self) {
+        self.commands.push(Command::Activate);
     }
 
     /// Lets the user move the window with the button that was just pressed.
@@ -1291,8 +1301,9 @@ impl<'a> Runner<'a> {
                 Command::Maximize(on) => self.client.set_maximized(toplevel, on)?,
                 // Wayland has no size request; the user resizes.
                 Command::Size(..) => {}
-                // Drags under other desktops: Wayland drag and drop, later.
-                Command::Drag(..) => {}
+                // Drags under other desktops: Wayland drag and drop, later;
+                // activation: xdg-activation, later.
+                Command::Drag(..) | Command::Activate => {}
                 Command::Minimize => self.client.set_minimized(toplevel)?,
                 Command::Copy(text) => {
                     if let (Some(manager), Some(device)) = (self.data_manager, self.data_device) {

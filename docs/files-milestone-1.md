@@ -432,6 +432,19 @@ the wallpaper, a scratch place for launchers and files.
   from Wayland and X11 programs (Smithay's drag grab knows only Wayland
   surfaces), drops on a folder row or a sidebar place. Tests: Hubble 612,
   kepler 608, Techbench 612.
+- **Opening brings the app forward** (2026-11-15, Dave: "double clicking a
+  file in the file manager should open it in the app associated with it
+  AND bring that window forward focussed"): a program of one process (the
+  Text Editor, Close-Up, File Viewer) handed a file by a new start opened
+  no window, so nothing came forward. Bus v16 `WinRequest::Activate`
+  (toolkit `Window::activate()`, asked on each hand-over): the server
+  (opened.rs `window_activate`) grants it by the new window's rule (the
+  app just started by the person, nothing typed elsewhere since, or the
+  focused program's own): raised, brought back if minimized, given the
+  keyboard; else refused (no stealing focus). Seen on kepler: a double
+  click in File Viewer sent the file to the running Text Editor, which came
+  forward with the keyboard. Wayland programs ask by xdg-activation, which
+  the server does not offer yet.
 ## Steps
 
 1. **vergence-types**: the database reader (globs2, magic, subclasses,

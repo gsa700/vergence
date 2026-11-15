@@ -56,6 +56,34 @@ impl Server {
         }
     }
 
+    /// A window asks to come forward (WinRequest::Activate): a program that
+    /// was handed a file by a start the person just made (one process for all
+    /// its windows: the start passed the file on and ended, so no window
+    /// opened). Granted by the new window's rule: its application was just
+    /// started (and nothing typed elsewhere since), or it is the focused
+    /// program's. Raised, brought back if minimized, given the keyboard.
+    pub fn window_activate(&mut self, w: &Win) {
+        let focused = self.keyboard_window();
+        let same = focused.as_ref().is_some_and(|f| self.same_program(f, w));
+        let items = self.shelf_items();
+        let key = items.iter().find(|(_, ws)| ws.contains(w)).map(|(i, _)| i.key.clone());
+        let started_at = key.as_ref().and_then(|key| self.shelf.launched.iter().find(|(k, since)| k == key && since.elapsed() < LAUNCHED).map(|(_, since)| *since));
+        if !takes_keyboard(focused.is_some(), same, started_at, self.input.typed_at) {
+            tracing::info!("activate: refused for {:?} (not just started by the person)", self.window_title(w));
+            return;
+        }
+        if let Some(key) = key {
+            self.shelf.launched.retain(|(k, _)| *k != key);
+        }
+        if self.shelf.minimized.iter().any(|(m, _)| m == w) {
+            self.unminimize(w);
+        }
+        self.space.raise_element(w, true);
+        self.focus_window(w, smithay::utils::SERIAL_COUNTER.next_serial());
+        tracing::info!("activate: {:?} forward", self.window_title(w));
+        self.redraw_all();
+    }
+
     /// Two windows of one program: the same identity (class, else instance), as
     /// the dock groups them.
     pub fn same_program(&mut self, a: &Win, b: &Win) -> bool {

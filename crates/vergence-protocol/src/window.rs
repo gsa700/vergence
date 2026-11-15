@@ -272,6 +272,11 @@ pub enum WinRequest {
     /// The answer to [`WinEvent::DragOver`]: what a drop here would do
     /// ([`DROP_NONE`], [`DROP_COPY`], [`DROP_MOVE`]).
     DragAccept { window: u32, action: u8 },
+    /// Bring this window forward with the keyboard: the program was handed
+    /// something to show by a start the person just made (a file opened in
+    /// File Viewer going to the running Text Editor). The server grants it
+    /// by the rule a new window takes the keyboard by (opened.rs).
+    Activate { window: u32 },
 }
 
 /// A drag's data, all kinds together, at the most (a frame is 64 KB).
@@ -468,6 +473,7 @@ pub(crate) mod op {
     pub const SIZE: u16 = 119;
     pub const DRAG_START: u16 = 120;
     pub const DRAG_ACCEPT: u16 = 121;
+    pub const ACTIVATE: u16 = 122;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -817,6 +823,11 @@ impl WinRequest {
                 e.u32(*window).u8(*action);
                 e
             }
+            WinRequest::Activate { window } => {
+                let mut e = Encoder::frame(op::ACTIVATE);
+                e.u32(*window);
+                e
+            }
             WinRequest::BarStyle { window, style } => {
                 let mut e = Encoder::frame(op::BAR_STYLE);
                 e.u32(*window).u8(match style {
@@ -989,6 +1000,7 @@ impl WinRequest {
                 }
                 WinRequest::DragAccept { window, action }
             }
+            op::ACTIVATE => WinRequest::Activate { window: d.u32()? },
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -1404,6 +1416,7 @@ mod tests {
             WinRequest::Size { window: 1, width: 680.0, height: 560.0 },
             WinRequest::DragStart { window: 1, label: "2 items".into(), items: vec![("text/uri-list".into(), b"file:///a\r\nfile:///b\r\n".to_vec()), ("text/plain".into(), b"/a\n/b".to_vec())] },
             WinRequest::DragAccept { window: 1, action: DROP_MOVE },
+            WinRequest::Activate { window: 1 },
             WinRequest::BarStyle { window: 2, style: BarStyle::Desktop },
             WinRequest::Bar {
                 window: 1,
