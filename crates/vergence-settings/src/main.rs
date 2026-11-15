@@ -1535,13 +1535,14 @@ impl App {
         if searching && found.is_empty() {
             items.push(label("Nothing by that name.").size(12.0).dim());
         }
-        // Its color runs up under the frosted bar; its items start below it.
-        panel(column(items).spacing(2.0).width(Length::FILL))
+        // Its color runs up under the frosted bar; its items start below it
+        // and scroll under it when the window is shorter than the list (Dave,
+        // 2026-11-14).
+        let list = panel(column(items).spacing(2.0).width(Length::FILL))
             .padding(Padding { top: 12.0 + self.top.get(), bottom: 12.0, left: 10.0, right: 10.0 })
             .radius(0.0)
-            .width(Length::Fixed(SIDEBAR_W))
-            .height(Length::FILL)
-            .name("Pages")
+            .width(Length::FILL);
+        panel(scroll(list)).radius(0.0).width(Length::Fixed(SIDEBAR_W)).height(Length::FILL).name("Pages")
     }
 
     /// High contrast, motion, transparency and the size of everything, in one
