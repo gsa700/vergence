@@ -1,7 +1,15 @@
 # Editor milestone 1: text editing in the toolkit, the Text Editor, spellchecking
 
-**Drafted 2026-11-14**, item 4 of docs/apps-roadmap.md. Waiting for
-Dave's answers to the questions at the end.
+**Drafted 2026-11-14**, item 4 of docs/apps-roadmap.md.
+
+**Accepted 2026-11-15** (Dave): "1 plain text now - other formats later md
+rtf etc" (plain text; Markdown, RTF and others in a later milestone), "2 a"
+(the Open/Save dialog is built now, as the first part of item 5), "3 ship
+our own plus try and do the auto-complete like text-edit does" (a word list
+in the repo, so checking works without a system package; completion also
+offers dictionary words, the way TextEdit does), "4 a" (Find: case and
+whole words, no regular expressions yet), "5 a now b later maybe" (non-UTF-8
+files open read-only), "6 a" (the order as planned).
 
 Dave's words: "a native text editor for Vergence. Like TextEdit on Mac or
 GNOME Edit. Autocomplete and line numbers required." Spellchecking: "all
@@ -27,7 +35,7 @@ native apps and maybe others via extensions".
   does), window memory, and the close question (vergence-term confirm.rs).
 - **Open/Save dialogs and file types are item 5** of the roadmap. The
   editor is the first app that needs them, so this milestone has to settle
-  how it opens and saves files (question 2).
+  how it opens and saves files: the dialog is built now (Dave, "2 a").
 
 ## Design
 
@@ -66,7 +74,7 @@ code navigator), so it lives in the toolkit, not in the editor.
 - **Find and replace**: a bar at the window's top (under the server's
   bar), not a dialog. Matches are highlighted as you type, with "3 of 17".
   Options: match case, whole words. Replace and Replace all; Replace all
-  is a single undo step. Regular expressions depend on question 4.
+  is a single undo step. No regular expressions yet (Dave, "4 a").
 - **Meaning (Contract 3)**: the area is an editable text with its caret and
   selection in the meaning tree, so `vctl tree` and later a screen reader
   can read it.
@@ -75,20 +83,29 @@ code navigator), so it lives in the toolkit, not in the editor.
   wishlist), input methods for CJK (needs a text-input protocol on both
   roads), syntax colors.
 
-### 2. Autocomplete
+### 2. Autocomplete, the TextEdit way
 
-- **The words of the open documents first** (roadmap): every word of three
-  or more letters in all of the editor's open documents, ranked by how
-  near the caret it appears and how often. Languages (keywords, a
-  language server) come later.
-- **How it shows**: after two letters typed and a short pause (250 ms), a
-  small list under the caret (at most 8 entries); the best entry
-  pre-selected; Tab or Enter takes it; Up/Down move; Escape or typing
-  something else closes it. It never takes a word by itself.
+macOS TextEdit completes in two ways, and the editor does both (Dave: "try
+and do the auto-complete like text-edit does"):
+
+- **Inline completion while typing**: after two letters and a short pause
+  (250 ms), the most likely end of the word is drawn after the caret in the
+  secondary text color. Tab takes it; any other key goes on as if it were
+  not there. It never takes a word by itself.
+- **The completion list** (Option+Escape or F5 on the Mac; here Alt+Escape
+  and F5, also Ctrl+Space): a list under the caret of every word that starts
+  with what is typed (at most 12 shown, the list scrolls), the best one
+  selected; Up/Down move, Enter or Tab takes it, Escape closes it, typing
+  goes on narrowing it.
+- **Where the words come from**: the words of three or more letters in all
+  the editor's open documents first (ranked by how near the caret and how
+  often), then the dictionary's words (ranked by how common they are: the
+  word list's size levels, below). Languages (keywords, a language server)
+  come later.
 - In the toolkit as a service the text area asks (`Completer`), so other
   apps can supply their own words later. Off in the one-line field by
   default.
-- Can be turned off in the editor's settings.
+- Both ways can be turned off in the editor's settings.
 
 ### 3. Spellchecking, a toolkit service
 
@@ -96,10 +113,21 @@ code navigator), so it lives in the toolkit, not in the editor.
   dictionary get a wavy red underline after the word is finished, never
   while it is being typed. A right click on one gives up to five
   suggestions, "Add to dictionary" and "Ignore" (for this document).
-- **Our own checker** (lean own code): reads Hunspell-format dictionaries
-  (.dic word lists with .aff affix rules: prefixes, suffixes,
-  compounding) and gives suggestions by edit distance with the affix
-  rules applied. Where the dictionaries come from is question 3.
+- **Our own checker and our own copy of the words** (Dave: "ship our
+  own"): the word list lives in the repo (data/words/en_US.txt), installed
+  with the apps, so checking works on every machine without a package.
+  It is made from SCOWL (Spell Checker Oriented Word Lists, Kevin
+  Atkinson's; permissive, MIT-like terms), sizes up to 60 (the size
+  Hunspell's en_US uses), American spelling, with every inflected form
+  already written out, so no affix rules are needed. Each word keeps its
+  SCOWL size level (10 = most common … 60), which ranks suggestions and
+  completions. A small tool (tools/make-words.py) rebuilds the list from
+  SCOWL's release; the list, its source and terms go in
+  THIRD-PARTY-NOTICES.md and docs/borrowed-review.md (data, not code).
+  Other languages later, from the same kind of lists.
+- **Suggestions**: words within two edits (letters swapped, missing,
+  extra, wrong), with common typing slips (a key's neighbors) and the
+  size level weighing in; the best five shown.
 - **The user's own words**: ~/.local/share/vergence/words.txt (0600, one
   word per line), shared by every app.
 - **The language** follows the desktop's locale. A setting on the settings
@@ -111,17 +139,41 @@ code navigator), so it lives in the toolkit, not in the editor.
   they do not ask for. Left for later; the checker is a library
   (`vergence-spell`) so it can be served later without rewriting.
 
-### 4. The Text Editor app (`vergence-edit`)
+### 4. The Open and Save dialog (vergence-widgets `files.rs`)
 
-- **A plain-text editor**, like GNOME Text Editor, unless question 1 says
-  rich text like TextEdit.
+The first part of roadmap item 5, built now (Dave: "2 a"); file types and
+the rest of item 5 come with the Viewer and the File Manager.
+
+- **A dialog window of the asking app** (the window styles milestone's
+  dialog kind, attached to its window), drawn by the toolkit, so every
+  native app gets the same one by calling `open_file`/`save_file`.
+- **Sidebar of places**: Home, Desktop, Documents, Downloads (those that
+  exist), the root, mounted disks, and recent folders; the user's own
+  places later with the file manager.
+- **The folder's list**: name, size and date, folders first, sorted by any
+  heading; type to jump to a name; hidden files on Ctrl+H; Enter opens;
+  double-click opens. Icons by kind (folder, text, image, other) until
+  file types exist.
+- **A path line** above the list: the folder as clickable parts; typing a
+  path (with `~` and Tab completion) goes there.
+- **Save**: a name field with the name selected without its extension, the
+  folder chosen in the same list, a question before replacing a file.
+- **Filters**: an app gives the kinds it opens ("Text files", "All files");
+  the editor opens anything and warns only for files that are not text.
+- **Remembers** the last folder per app and the dialog's size
+  (~/.local/state/vergence/settings-windows.toml's neighbor, 0600).
+
+### 5. The Text Editor app (`vergence-edit`)
+
+- **A plain-text editor**, like GNOME Text Editor (Dave: "plain text now
+  - other formats later md rtf etc").
 - **Windows and tabs**: one process for all of its windows, a document per
   tab in the server-drawn bar (as the terminal's tabs), tabs dragged
   between windows. A tab shows the file's name, with a dot while it has
   unsaved changes.
 - **Files**: UTF-8, with the file's line endings (LF or CRLF) and final
   newline kept as found. A file that is not valid UTF-8 opens read-only
-  with a notice, unless question 5 says otherwise. Save writes a
+  with a notice (Dave, "5 a now b later maybe"). Save writes a
   temporary file next to the original and renames it over the original,
   so a crash never leaves half a file; the file's permissions are kept.
   If the file changed on disk while open: a bar offers Reload or Keep
@@ -162,11 +214,13 @@ code navigator), so it lives in the toolkit, not in the editor.
    save (atomic), the close question, tabs and windows, the status line,
    command roles, the settings window, the desktop entry and icon,
    install.sh.
-4. **Open and save from the app**, by the answer to question 2.
+4. **The Open and Save dialog** in vergence-widgets (`--example vfiles`),
+   then the editor's Open…, Save as… and the recent files.
 5. **Find and replace** bar.
 6. **Autocomplete**.
-7. **Spellchecking**: `vergence-spell` (the dictionary reader, affixes,
-   suggestions, the user's words) with tests on real dictionaries; then
+7. **Spellchecking**: the word list (tools/make-words.py, data/words),
+   `vergence-spell` (lookup, suggestions, the user's words, size levels
+   for ranking) with tests; then
    underlines and the right-click menu in the field and the area; the
    desktop setting and each app's override.
 8. **Keeping unsaved work across restarts**, reload-on-change, Go to line.
@@ -183,18 +237,21 @@ Each step is tested on Hubble, kepler and Techbench and pushed.
    sideways.
 3. Undo and redo bring back every edit with its caret, in sensible steps;
    the one-line fields in the settings app undo too.
-4. Autocomplete offers words from all open documents, never takes one by
-   itself, and goes away with Escape.
+4. Inline completion shows a word's likely end in gray and Tab takes it;
+   Alt+Escape/F5 lists the words from open documents and the dictionary;
+   neither ever takes a word by itself.
 5. Find highlights every match as you type; Replace all is one undo.
-6. Misspelled words get underlined in the editor and in a settings-app
+6. Open… and Save as… use the toolkit's dialog: places, sorting, typed
+   paths, the replace question; the last folder is remembered.
+7. Misspelled words get underlined in the editor and in a settings-app
    field; the right-click suggestions are sensible; an added word is no
    longer underlined in any app.
-7. A crash or `kill -9` during a save never leaves a damaged file; closing
+8. A crash or `kill -9` during a save never leaves a damaged file; closing
    with unsaved changes asks; untitled work survives a session restart.
-8. Works the same on Hubble (Void), kepler (FreeBSD) and Techbench
+9. Works the same on Hubble (Void), kepler (FreeBSD) and Techbench
    (Fedora).
 
-## Questions for Dave
+## Questions for Dave (answered 2026-11-15, see the header)
 
 1. **Plain text or rich text?** (a) Plain text, like GNOME Text Editor:
    what this plan describes, and a good base for code. (b) Rich text, like
