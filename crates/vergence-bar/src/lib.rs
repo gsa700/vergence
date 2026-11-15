@@ -262,7 +262,9 @@ impl Layout {
 
     /// [`Layout::new`] at a size of controls (look milestone 1, step 8).
     pub fn sized(width: f32, count: usize, shown: usize, left: &[WinButton], right: &[WinButton], z: Sizes) -> Layout {
-        let (buttons, start, end) = Layout::buttons(width, left, right, &z);
+        // As tall as the tabs and standing where they stand, at the bar's
+        // bottom edge, joined to the page (Dave, 2026-11-10).
+        let (buttons, start, end) = Layout::buttons(width, left, right, &z, z.bar_h - z.item_h);
         // The tabs share what is left after +, down to a least width.
         let room = (end - start - z.plus_w - z.gap).max(0.0);
         let n = count.max(1) as f32;
@@ -292,8 +294,10 @@ impl Layout {
 
     /// [`Layout::plain`] at a size of controls.
     pub fn plain_sized(width: f32, left: &[WinButton], right: &[WinButton], z: Sizes) -> Layout {
-        let (buttons, start, end) = Layout::buttons(width, left, right, &z);
-        let top = z.bar_h - z.item_h;
+        // No tabs to stand with: everything in the bar's middle (Dave,
+        // 2026-11-14: "the buttons never got centered").
+        let top = ((z.bar_h - z.item_h) / 2.0).round();
+        let (buttons, start, end) = Layout::buttons(width, left, right, &z, top);
         let title = Rect::new(start + 6.0, top, (end - start - 12.0).max(0.0), z.item_h);
         Layout { buttons, tabs: Vec::new(), closes: Vec::new(), plus: Rect::new(end, top, 0.0, z.item_h), title: Some(title), tools: Vec::new(), controls_left: !left.is_empty(), sizes: z }
     }
@@ -303,8 +307,9 @@ impl Layout {
     /// width of a sidebar the content has on the left), or after the window's
     /// buttons if they reach further.
     pub fn tools_sized(width: f32, left: &[WinButton], right: &[WinButton], z: Sizes, from: f32, count: usize) -> Layout {
-        let (buttons, start, end) = Layout::buttons(width, left, right, &z);
-        let top = z.bar_h - z.item_h;
+        // Centered, as in a plain bar.
+        let top = ((z.bar_h - z.item_h) / 2.0).round();
+        let (buttons, start, end) = Layout::buttons(width, left, right, &z, top);
         let mut x = start.max(from + z.side);
         let mut tools = Vec::new();
         for _ in 0..count {
@@ -320,10 +325,8 @@ impl Layout {
 
     /// The window's buttons on their sides, and where the room between them
     /// starts and ends.
-    fn buttons(width: f32, left: &[WinButton], right: &[WinButton], z: &Sizes) -> (Vec<(WinButton, Rect)>, f32, f32) {
+    fn buttons(width: f32, left: &[WinButton], right: &[WinButton], z: &Sizes, button_y: f32) -> (Vec<(WinButton, Rect)>, f32, f32) {
         let mut buttons = Vec::new();
-        // As tall as the tabs and standing where they stand (Dave, 2026-11-10).
-        let button_y = z.bar_h - z.item_h;
         let mut x = z.side;
         for b in left {
             buttons.push((*b, Rect::new(x, button_y, z.button_w, z.item_h)));

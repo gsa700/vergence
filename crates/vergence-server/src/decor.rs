@@ -507,6 +507,19 @@ impl Server {
         self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "color-scheme".to_string())) == Some(&vergence_protocol::bus::SettingValue::U32(2))
     }
 
+    /// The style a window's bar is drawn in: the desktop's, except that with
+    /// Style "App default" an app may have a bar of its own style. Built in
+    /// for now (Dave, 2026-11-14: the settings app's bar light by default);
+    /// the app settings milestone makes it each app's choice.
+    pub fn bar_light(&self, w: &Win, desktop_light: bool) -> bool {
+        if desktop_light {
+            return true;
+        }
+        let scheme = self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "color-scheme".to_string()));
+        let app_default = matches!(scheme, None | Some(vergence_protocol::bus::SettingValue::U32(0)));
+        app_default && w.native().is_some_and(|n| LIGHT_BAR_APPS.contains(&n.app_id.as_str()))
+    }
+
     fn button_layout_text(&self) -> String {
         match self.settings.current.get(&(crate::settings::WM.to_string(), "button-layout".to_string())) {
             Some(vergence_protocol::bus::SettingValue::Str(layout)) => layout.clone(),
@@ -650,6 +663,9 @@ impl Server {
         // Where a dragged window will go if let go now (snap.rs).
         elements.extend(self.snap_preview_element(renderer, out, scale, light));
         for w in windows {
+            // This window's own bar style (bar_light).
+            let light = self.bar_light(&w, light);
+            let style = vergence_look::bar_look(light);
             // A parent a modal dialog blocks is dimmed, in front of its own bar
             // and content and behind the dialog (dialogs.rs).
             if self.modal_of(&w).is_some()
@@ -1074,6 +1090,9 @@ fn tabs_of(w: &Win) -> Option<Tabs> {
         _ => None,
     }
 }
+
+/// Apps whose bar is light under Style "App default" (bar_light).
+const LIGHT_BAR_APPS: &[&str] = &["vergence-settings"];
 
 /// A native window's own bar buttons (window styles milestone 1): where the
 /// title starts, and each button's icon, whether it can be pressed, and id.

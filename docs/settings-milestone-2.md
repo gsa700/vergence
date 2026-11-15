@@ -154,6 +154,12 @@ as now.
   server saw the battery 33 s later and, idle 2 min already, turned the
   screens off at once; plugged in, back to the power times. 483 tests
   (kepler 479).
+- **Asked on the way** (Dave, 2026-11-14): the settings app's bar is light
+  by default (with Style "App default"; the server's decor.rs `bar_light`,
+  a built-in list until the app settings milestone makes it each app's
+  choice), and the buttons of a bar without tabs (plain and sidebar bars)
+  stand in the bar's middle; a bar with tabs keeps them at its bottom edge
+  with the tabs.
 
 ## Steps
 
