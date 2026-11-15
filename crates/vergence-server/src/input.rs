@@ -65,6 +65,14 @@ impl Server {
                 }
             }
             KeyOut::Quit => self.loop_signal.stop(),
+            KeyOut::ForceQuit => {
+                self.app_menu_close();
+                self.close_menu();
+                self.launcher_close();
+                if let Err(e) = crate::spawn(&mut std::process::Command::new("vergence-quit")) {
+                    tracing::warn!("force quit: vergence-quit: {e}");
+                }
+            }
             KeyOut::CloseMenu => self.close_menu(),
             KeyOut::Vt(n) => {
                 if let Some(session) = self.session.as_mut() {

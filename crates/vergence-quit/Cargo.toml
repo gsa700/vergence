@@ -1,0 +1,15 @@
+[package]
+name = "vergence-quit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Vergence's Force Quit: the user's running applications, and one of them ended at once"
+
+# Force Quit is the project's own: a window on the toolkit; the listing and
+# the ending are the server's (forcequit.rs), over the session bus.
+[dependencies]
+vergence-protocol.workspace = true
+vergence-ui.workspace = true
+vergence-widgets.workspace = true
+vergence-scene.workspace = true

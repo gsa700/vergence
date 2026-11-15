@@ -204,7 +204,7 @@ pub fn reply_serial(m: &ServerMsg) -> Option<u32> {
     let s = match m {
         ServerMsg::Welcome { .. } | ServerMsg::NotificationClosed { .. } | ServerMsg::ActionInvoked { .. } => return None,
         ServerMsg::Pong { serial } | ServerMsg::Done { serial } | ServerMsg::Notified { serial, .. } => *serial,
-        ServerMsg::Error { serial, .. } | ServerMsg::Outputs { serial, .. } | ServerMsg::Settings { serial, .. } | ServerMsg::Inputs { serial, .. } | ServerMsg::Places { serial, .. } => *serial,
+        ServerMsg::Error { serial, .. } | ServerMsg::Outputs { serial, .. } | ServerMsg::Settings { serial, .. } | ServerMsg::Inputs { serial, .. } | ServerMsg::Places { serial, .. } | ServerMsg::Apps { serial, .. } => *serial,
         ServerMsg::Window(w) => return w.reply_serial(),
     };
     (s != 0).then_some(s)

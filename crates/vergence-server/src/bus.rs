@@ -267,6 +267,15 @@ impl Server {
                 self.forget_places(&app);
                 self.bus_send(id, ServerMsg::Done { serial });
             }
+            // Force Quit (forcequit.rs).
+            ClientMsg::ListApps { serial } => {
+                let apps = self.running_apps();
+                self.bus_send(id, ServerMsg::Apps { serial, apps });
+            }
+            ClientMsg::ForceQuit { serial, app } => match self.force_quit(&app) {
+                Ok(_) => self.bus_send(id, ServerMsg::Done { serial }),
+                Err(message) => self.bus_send(id, ServerMsg::Error { serial, code: vergence_protocol::bus::ErrorCode::Denied, message }),
+            },
             ClientMsg::GetSettings { serial } => {
                 let settings = crate::settings::all(&self.settings.current);
                 self.bus_send(id, ServerMsg::Settings { serial, complete: true, settings });

@@ -88,6 +88,8 @@ pub struct Mods {
 pub enum KeyOut {
     /// End the session.
     Quit,
+    /// Ctrl+Alt+Escape: open Force Quit.
+    ForceQuit,
     /// Switch to console n.
     Vt(u8),
     /// Close the menu.
@@ -153,6 +155,11 @@ impl Seat {
         if pressed {
             if mods.ctrl && mods.alt && key == Key::BackSpace {
                 return KeyOut::Quit;
+            }
+            // Force Quit (tools milestone 1), as macOS has Cmd+Option+Esc: whatever has the keyboard.
+            if mods.ctrl && mods.alt && !mods.logo && key == Key::Escape {
+                self.menu = None;
+                return KeyOut::ForceQuit;
             }
             if self.menu == Some(Menu::Menu) && key == Key::Escape {
                 self.menu = None;
@@ -343,6 +350,18 @@ mod tests {
         // Super tapped again closes it.
         seat.key(Key::Super, true, none());
         assert_eq!(seat.key(Key::Super, false, none()), KeyOut::Apps);
+    }
+
+    #[test]
+    fn ctrl_alt_escape_is_force_quit_whatever_has_the_keyboard() {
+        let mut seat = Seat::new();
+        seat.focus(Some(W1));
+        let m = Mods { ctrl: true, alt: true, ..none() };
+        assert_eq!(seat.key(Key::Escape, true, m), KeyOut::ForceQuit);
+        seat.menu_opened(Menu::AppMenu);
+        assert_eq!(seat.key(Key::Escape, true, m), KeyOut::ForceQuit);
+        assert_eq!(seat.menu(), None);
+        assert_eq!(seat.key(Key::Escape, true, Mods { ctrl: true, ..none() }), KeyOut::Forward(Some(W1)));
     }
 
     #[test]

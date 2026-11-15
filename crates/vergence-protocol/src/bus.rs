@@ -35,12 +35,13 @@
 //! its bar style (`WinRequest::BarStyle`). Version 11 (the same evening):
 //! a command can be `featured`, one of the app's everyday few on the
 //! menu's first panel. Version 12 (tools milestone 1): a window may ask for
-//! a size (`WinRequest::Size`); the server decides.
+//! a size (`WinRequest::Size`); the server decides. Version 13: Force
+//! Quit's `ListApps`, `Apps` and `ForceQuit`.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 12;
+pub const VERSION: u32 = 13;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -288,9 +289,32 @@ pub enum ClientMsg {
     /// Forget every place of an app (its class), on every setup; an empty
     /// `app` forgets all. Reply: Done.
     ForgetPlaces { serial: u32, app: String },
+    /// The user's running applications (Force Quit, tools milestone 1).
+    /// Reply: [`ServerMsg::Apps`].
+    ListApps { serial: u32 },
+    /// End an application at once: every process of its windows is sent
+    /// SIGKILL (the user's own processes only). Reply: Done, or an error.
+    ForceQuit { serial: u32, app: String },
     /// Windows (window.rs).
     Window(crate::window::WinRequest),
 }
+
+/// A running application, as Force Quit lists it: its key (the dock's),
+/// name, icon (`icon_side` square, RGBA; empty if none) and whether it is
+/// answering.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AppInfo {
+    pub key: String,
+    pub name: String,
+    pub icon_side: u16,
+    pub icon: Vec<u8>,
+    pub responding: bool,
+}
+
+/// The icon side Apps carries (points; drawn sharp at scale 1, smooth above).
+pub const APP_ICON: u16 = 32;
+/// The most applications one Apps message lists with icons (a frame is 64 KB).
+pub const MAX_APP_ICONS: usize = 12;
 
 /// Server to client.
 #[derive(Debug, Clone, PartialEq)]
@@ -320,6 +344,8 @@ pub enum ServerMsg {
     Inputs { serial: u32, devices: Vec<InputInfo>, seen: Vec<InputKind> },
     /// The apps window memory keeps places for (their class) and how many places each.
     Places { serial: u32, apps: Vec<(String, u32)> },
+    /// The user's running applications.
+    Apps { serial: u32, apps: Vec<AppInfo> },
     /// Windows (window.rs).
     Window(crate::window::WinEvent),
 }
@@ -336,6 +362,8 @@ mod op {
     pub const CLOSE_NOTIFICATION: u16 = 8;
     pub const LIST_PLACES: u16 = 9;
     pub const FORGET_PLACES: u16 = 10;
+    pub const LIST_APPS: u16 = 11;
+    pub const FORCE_QUIT: u16 = 12;
     // Server to client.
     pub const WELCOME: u16 = 1;
     pub const PONG: u16 = 2;
@@ -348,6 +376,7 @@ mod op {
     pub const ACTION_INVOKED: u16 = 9;
     pub const INPUTS: u16 = 10;
     pub const PLACES: u16 = 11;
+    pub const APPS: u16 = 12;
 }
 
 fn put_setting_value(e: &mut Encoder, v: &SettingValue) {
@@ -441,6 +470,16 @@ impl ClientMsg {
                 e.u32(*serial).str(app);
                 e
             }
+            ClientMsg::ListApps { serial } => {
+                let mut e = Encoder::frame(op::LIST_APPS);
+                e.u32(*serial);
+                e
+            }
+            ClientMsg::ForceQuit { serial, app } => {
+                let mut e = Encoder::frame(op::FORCE_QUIT);
+                e.u32(*serial).str(app);
+                e
+            }
             // Its descriptors are lost here: send it with encode_with_fds.
             ClientMsg::Window(w) => return w.encode().map(|(bytes, _)| bytes),
         };
@@ -522,6 +561,12 @@ impl ClientMsg {
                 let app = d.str().map_err(|e| bad(serial, e))?;
                 Ok(ClientMsg::ForgetPlaces { serial, app })
             }
+            op::LIST_APPS => Ok(ClientMsg::ListApps { serial: d.u32().map_err(|e| bad(0, e))? }),
+            op::FORCE_QUIT => {
+                let serial = d.u32().map_err(|e| bad(0, e))?;
+                let app = d.str().map_err(|e| bad(serial, e))?;
+                Ok(ClientMsg::ForceQuit { serial, app })
+            }
             other => {
                 // Every request starts with its serial; answer with it if present.
                 let serial = d.u32().unwrap_or(0);
@@ -589,6 +634,14 @@ impl ServerMsg {
             ServerMsg::ActionInvoked { id, key } => {
                 let mut e = Encoder::frame(op::ACTION_INVOKED);
                 e.u32(*id).str(key);
+                e
+            }
+            ServerMsg::Apps { serial, apps } => {
+                let mut e = Encoder::frame(op::APPS);
+                e.u32(*serial).count(apps.len());
+                for a in apps {
+                    e.str(&a.key).str(&a.name).u16(a.icon_side).bytes(&a.icon).bool(a.responding);
+                }
                 e
             }
             ServerMsg::Places { serial, apps } => {
@@ -691,6 +744,20 @@ impl ServerMsg {
             op::NOTIFIED => ServerMsg::Notified { serial: d.u32()?, id: d.u32()? },
             op::NOTIFICATION_CLOSED => ServerMsg::NotificationClosed { id: d.u32()?, reason: d.u32()? },
             op::ACTION_INVOKED => ServerMsg::ActionInvoked { id: d.u32()?, key: d.str()? },
+            op::APPS => {
+                let serial = d.u32()?;
+                let n = d.count(12)?;
+                let mut apps = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let (key, name, icon_side) = (d.str()?, d.str()?, d.u16()?);
+                    let icon = d.bytes()?.to_vec();
+                    if !icon.is_empty() && icon.len() != icon_side as usize * icon_side as usize * 4 {
+                        return Err(WireError::BadValue("app icon"));
+                    }
+                    apps.push(AppInfo { key, name, icon_side, icon, responding: d.bool()? });
+                }
+                ServerMsg::Apps { serial, apps }
+            }
             op::PLACES => {
                 let serial = d.u32()?;
                 let n = d.count(8)?;
@@ -761,6 +828,8 @@ mod tests {
             ClientMsg::ListPlaces { serial: 17 },
             ClientMsg::ForgetPlaces { serial: 18, app: "vergence-term".into() },
             ClientMsg::ForgetPlaces { serial: 19, app: String::new() },
+            ClientMsg::ListApps { serial: 22 },
+            ClientMsg::ForceQuit { serial: 23, app: "firefox".into() },
         ] {
             assert_eq!(ClientMsg::decode(&frame(&m.encode().unwrap())).unwrap(), m);
         }
@@ -791,6 +860,13 @@ mod tests {
             ServerMsg::Inputs { serial: 0, devices: Vec::new(), seen: Vec::new() },
             ServerMsg::Places { serial: 20, apps: vec![("vergence-term".into(), 3), ("firefox".into(), 1)] },
             ServerMsg::Places { serial: 21, apps: Vec::new() },
+            ServerMsg::Apps {
+                serial: 24,
+                apps: vec![
+                    AppInfo { key: "vergence-calc".into(), name: "Calculator".into(), icon_side: 2, icon: vec![9; 16], responding: true },
+                    AppInfo { key: "firefox".into(), name: "Firefox".into(), icon_side: 0, icon: Vec::new(), responding: false },
+                ],
+            },
             ServerMsg::Settings {
                 serial: 0,
                 complete: true,

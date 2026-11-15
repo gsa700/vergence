@@ -20,6 +20,7 @@ mod memory;
 mod wallpaper;
 mod menu;
 mod appmenu;
+mod forcequit;
 mod backdrop;
 mod bus;
 mod dbus;

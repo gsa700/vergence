@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Force Quit
+Comment=End an application that has stopped answering
+Exec=vergence-quit
+Icon=vergence-quit
+Terminal=false
+Categories=System;Monitor;
+Keywords=force;quit;kill;stuck;frozen;not responding;applications;
+StartupWMClass=vergence-quit

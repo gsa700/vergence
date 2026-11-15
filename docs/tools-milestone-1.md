@@ -124,6 +124,18 @@ Quit Applications); anything more is the terminal's.
   server decides: the calculator widens for its scientific keys and
   narrows back). Desktop entry, icon, install.sh.
 
+- **2026-11-14 night: Force Quit built** (Dave: "they call it force quit
+  on the mac ... very simple as we said, term for the hard stuff"; the app
+  is named Force Quit, crate vergence-quit): the user's running
+  applications with their icons, Force Quit after one question; bus v13
+  `ListApps`/`Apps`/`ForceQuit` (the server lists from the dock's items
+  and ends an app by SIGKILL to the processes behind its windows: native
+  bus peer, Wayland credentials, X11 _NET_WM_PID; never itself or pid 1);
+  Ctrl+Alt+Escape opens it (a seat key, whatever has the keyboard).
+  Dropped as too much for "very simple": End and Pick a window. Not yet:
+  "not responding" (every app shows as answering until the server pings
+  its clients).
+
 ## Steps
 
 1. **Toolkit**: About, the app skeleton.

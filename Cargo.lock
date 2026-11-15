@@ -2215,6 +2215,16 @@ name = "vergence-protocol"
 version = "0.1.0"
 
 [[package]]
+name = "vergence-quit"
+version = "0.1.0"
+dependencies = [
+ "vergence-protocol",
+ "vergence-scene",
+ "vergence-ui",
+ "vergence-widgets",
+]
+
+[[package]]
 name = "vergence-render"
 version = "0.1.0"
 dependencies = [
