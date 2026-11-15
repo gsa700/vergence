@@ -8,6 +8,14 @@
 //                             runs the machine, else `sudo -n zzz` (FreeBSD, Void: zzz needs root;
 //                             a sudoers line `user ALL=(root) NOPASSWD: /usr/bin/zzz` does it)
 //
+//   [energy.battery]          the same two times while the machine runs on its battery
+//   screens-off = 5           (settings milestone 2, 2026-11-14); a key left out, or the
+//   sleep = 20                whole table, means the same as on power
+//
+// On battery or on power comes from vergence-power, read on a thread every 30 s
+// (/sys or sysctls, never on the server's frame); the matching pair applies
+// from the current idle clock, so pulling the plug can turn the screens off at
+// once if the battery's time has already passed.
 // Idle is counted from the last key, button, pointer or wheel event (input.rs).
 // Screens off means each monitor's CRTC is disabled (DPMS off, through the DRM
 // compositor's clear), so drawing stops: no VBlank comes, the watchdog keeps
@@ -20,7 +28,13 @@
 // Both files are re-read within a second of a change (settings.rs), so the
 // settings app's choices apply live. Nothing here runs in a nested session.
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
 use smithay::{
     backend::session::Session,
@@ -36,11 +50,25 @@ pub struct Config {
     pub sleep: Duration,
     /// Empty: the platform's default command.
     pub sleep_command: String,
+    /// [energy.battery]: None for a key left out (the same as on power).
+    pub battery_screens_off: Option<Duration>,
+    pub battery_sleep: Option<Duration>,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { screens_off: Duration::ZERO, sleep: Duration::ZERO, sleep_command: String::new() }
+        Config { screens_off: Duration::ZERO, sleep: Duration::ZERO, sleep_command: String::new(), battery_screens_off: None, battery_sleep: None }
+    }
+}
+
+impl Config {
+    /// The screens-off and sleep times that apply on battery or on power.
+    pub fn times(&self, on_battery: bool) -> (Duration, Duration) {
+        if on_battery {
+            (self.battery_screens_off.unwrap_or(self.screens_off), self.battery_sleep.unwrap_or(self.sleep))
+        } else {
+            (self.screens_off, self.sleep)
+        }
     }
 }
 
@@ -51,11 +79,15 @@ pub struct Energy {
     pub screens_off: bool,
     /// Sleep was requested in this idle stretch (once per stretch).
     pub slept: bool,
+    /// On battery, as the power thread last read it.
+    pub on_battery: Arc<AtomicBool>,
+    /// What energy_tick last used (to log a change once).
+    pub was_on_battery: bool,
 }
 
 impl Energy {
     pub fn new() -> Self {
-        Energy { config: load(), last_input: Instant::now(), screens_off: false, slept: false }
+        Energy { config: load(), last_input: Instant::now(), screens_off: false, slept: false, on_battery: Arc::new(AtomicBool::new(false)), was_on_battery: false }
     }
 }
 
@@ -69,14 +101,30 @@ pub fn load() -> Config {
 
 pub fn parse(text: &str) -> Config {
     let table = text.parse::<toml::Table>().ok().and_then(|t| t.get("energy").and_then(|e| e.as_table()).cloned()).unwrap_or_default();
-    let minutes = |k: &str| {
-        let v = table.get(k).and_then(|v| v.as_integer().or_else(|| v.as_float().map(|f| f.round() as i64))).unwrap_or(0);
-        Duration::from_secs(v.clamp(0, 24 * 60) as u64 * 60)
+    let read = |t: &toml::Table, k: &str| {
+        t.get(k)
+            .and_then(|v| v.as_integer().or_else(|| v.as_float().map(|f| f.round() as i64)))
+            .map(|v| Duration::from_secs(v.clamp(0, 24 * 60) as u64 * 60))
     };
+    let battery = table.get("battery").and_then(|b| b.as_table()).cloned().unwrap_or_default();
     Config {
-        screens_off: minutes("screens-off"),
-        sleep: minutes("sleep"),
+        screens_off: read(&table, "screens-off").unwrap_or_default(),
+        sleep: read(&table, "sleep").unwrap_or_default(),
         sleep_command: table.get("sleep-command").and_then(|v| v.as_str()).map(|s| s.trim().to_string()).unwrap_or_default(),
+        battery_screens_off: read(&battery, "screens-off"),
+        battery_sleep: read(&battery, "sleep"),
+    }
+}
+
+/// Read battery or mains every 30 s; a machine with no battery is read once.
+fn follow_power(flag: Arc<AtomicBool>) {
+    loop {
+        let p = vergence_power::power();
+        flag.store(p.on_battery(), Ordering::Relaxed);
+        if p.batteries.is_empty() && p.on_mains.is_none_or(|m| m) {
+            return;
+        }
+        std::thread::sleep(Duration::from_secs(30));
     }
 }
 
@@ -95,15 +143,18 @@ impl Server {
         if let Err(e) = res {
             tracing::warn!("energy: {e}");
         }
-        let c = &self.energy.config;
-        tracing::info!("energy: screens off after {}, sleep after {} ({})", minutes(c.screens_off), minutes(c.sleep), sleep_command(c));
+        let flag = self.energy.on_battery.clone();
+        if let Err(e) = std::thread::Builder::new().name("energy-power".into()).spawn(move || follow_power(flag)) {
+            tracing::warn!("energy: can't follow the power: {e}");
+        }
+        log_config(&self.energy.config);
     }
 
     /// desktop.toml changed: new times apply from the current idle clock.
     pub fn energy_reload(&mut self) {
         let new = load();
         if new != self.energy.config {
-            tracing::info!("energy: screens off after {}, sleep after {} ({})", minutes(new.screens_off), minutes(new.sleep), sleep_command(&new));
+            log_config(&new);
             self.energy.config = new;
         }
     }
@@ -128,13 +179,20 @@ impl Server {
         }
         let idle = self.energy.last_input.elapsed();
         let c = self.energy.config.clone();
-        if !c.screens_off.is_zero() && !self.energy.screens_off && idle >= c.screens_off {
+        let battery = self.energy.on_battery.load(Ordering::Relaxed);
+        if battery != self.energy.was_on_battery {
+            self.energy.was_on_battery = battery;
+            let (off, sleep) = c.times(battery);
+            tracing::info!("energy: on {}; screens off after {}, sleep after {}", if battery { "battery" } else { "power" }, minutes(off), minutes(sleep));
+        }
+        let (screens_off, sleep) = c.times(battery);
+        if !screens_off.is_zero() && !self.energy.screens_off && idle >= screens_off {
             tracing::info!("energy: no input for {}; screens off", minutes(idle));
             self.energy.screens_off = true;
             crate::drm::screens_off(self);
             self.input_screens_off();
         }
-        if !c.sleep.is_zero() && !self.energy.slept && idle >= c.sleep {
+        if !sleep.is_zero() && !self.energy.slept && idle >= sleep {
             self.energy.slept = true;
             let cmd = sleep_command(&c).to_string();
             tracing::info!("energy: no input for {}; sleep: {cmd}", minutes(idle));
@@ -152,6 +210,18 @@ impl Server {
             });
         }
     }
+}
+
+fn log_config(c: &Config) {
+    let (boff, bsleep) = c.times(true);
+    tracing::info!(
+        "energy: on power screens off after {}, sleep after {}; on battery {}, {} ({})",
+        minutes(c.screens_off),
+        minutes(c.sleep),
+        minutes(boff),
+        minutes(bsleep),
+        sleep_command(c)
+    );
 }
 
 fn sleep_command(c: &Config) -> &str {
@@ -189,5 +259,27 @@ mod tests {
         assert_eq!(c.sleep, Duration::from_secs(24 * 3600));
         assert_eq!(minutes(Duration::ZERO), "never");
         assert!(!default_sleep_command().is_empty());
+    }
+
+    #[test]
+    fn battery_times_fall_back_to_power() {
+        let c = parse("[energy]\nscreens-off = 15\nsleep = 60\n");
+        assert_eq!(c.times(true), c.times(false));
+        let c = parse("[energy]\nscreens-off = 15\nsleep = 60\n[energy.battery]\nscreens-off = 5\n");
+        assert_eq!(c.times(false), (Duration::from_secs(900), Duration::from_secs(3600)));
+        assert_eq!(c.times(true), (Duration::from_secs(300), Duration::from_secs(3600)));
+        let c = parse("[energy]\nsleep = 60\n[energy.battery]\nsleep = 0\n");
+        assert_eq!(c.times(true).1, Duration::ZERO);
+    }
+
+    #[test]
+    fn on_battery_from_mains_or_discharging() {
+        use vergence_power::{Battery, Power, State};
+        let bat = |state| Battery { state, ..Default::default() };
+        assert!((Power { on_mains: Some(false), batteries: vec![] }).on_battery());
+        assert!(!(Power { on_mains: Some(true), batteries: vec![bat(State::Discharging)] }).on_battery());
+        assert!((Power { on_mains: None, batteries: vec![bat(State::Discharging)] }).on_battery());
+        assert!(!(Power { on_mains: None, batteries: vec![bat(State::Charging)] }).on_battery());
+        assert!(!(Power::default()).on_battery());
     }
 }

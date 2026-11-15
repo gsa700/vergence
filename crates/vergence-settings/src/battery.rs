@@ -67,6 +67,11 @@ impl App {
     }
 
     pub fn battery_sample(&mut self) {
+        if self.page == Page::Energy {
+            // Only "(now)" on the Energy page follows the plug.
+            self.battery.power = vergence_power::power();
+            return;
+        }
         if self.page != Page::Battery {
             return;
         }

@@ -140,6 +140,20 @@ as now.
   tick, so a USB card plugged in brings them back). kepler's sidebar has
   Network only, Hubble's Wi-Fi and Network. This replaces settings
   milestone 1's "kepler says no Wi-Fi device" page. 481 tests (kepler 477).
+- **Step 5 in: energy on battery and on power** (2026-11-14). desktop.toml
+  `[energy.battery]` (screens-off, sleep; a key left out means the same as
+  on power); vergence-power's `Power::on_battery` (the mains, else a
+  battery running down); the server reads it on a thread every 30 s (a
+  machine with neither battery nor mains report is read once) and uses the
+  matching pair from the current idle clock, logging each change. The
+  Energy page, where there is a battery: "On battery" and "On power"
+  groups, the one in use marked "(now)", followed while the page is open;
+  without a battery one group as before. The settings app's `--page` now
+  takes any sidebar page by name (`--page energy`), for the dock's Forget
+  next. Hubble, battery screens off at 1 min, power never: unplugged, the
+  server saw the battery 33 s later and, idle 2 min already, turned the
+  screens off at once; plugged in, back to the power times. 483 tests
+  (kepler 479).
 
 ## Steps
 

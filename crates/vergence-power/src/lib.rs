@@ -68,6 +68,17 @@ pub struct Power {
     pub batteries: Vec<Battery>,
 }
 
+impl Power {
+    /// Running on the battery now: the mains say so, or (where nothing
+    /// reports the mains) a battery is running down.
+    pub fn on_battery(&self) -> bool {
+        match self.on_mains {
+            Some(m) => !m,
+            None => self.batteries.iter().any(|b| b.state == State::Discharging),
+        }
+    }
+}
+
 /// A GPU and whether it is awake.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Gpu {

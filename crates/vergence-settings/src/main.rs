@@ -450,6 +450,9 @@ enum Message {
     // Energy.
     ScreensOff(String),
     SleepAfter(String),
+    /// The same two on battery ([energy.battery]).
+    BatteryScreensOff(String),
+    BatterySleepAfter(String),
     SleepCommand(String),
     SleepCommandSubmit,
     // Screens.
@@ -630,6 +633,15 @@ const SLEEP_CHOICES: [(&str, i64); 9] =
 
 fn energy_int(d: &toml::Table, k: &str, default: i64) -> i64 {
     d.get("energy").and_then(|a| a.get(k)).and_then(|v| v.as_integer()).unwrap_or(default)
+}
+
+/// [energy.battery]'s value, else the on-power one (absent means the same).
+fn energy_battery_int(d: &toml::Table, k: &str) -> i64 {
+    d.get("energy")
+        .and_then(|a| a.get("battery"))
+        .and_then(|b| b.get(k))
+        .and_then(|v| v.as_integer())
+        .unwrap_or_else(|| energy_int(d, k, 0))
 }
 
 fn energy_cmd(d: &toml::Table) -> String {
@@ -857,7 +869,7 @@ impl App {
         if matches!(p, Page::WiFi | Page::Network) {
             self.wifi_read();
         }
-        if p == Page::Battery {
+        if matches!(p, Page::Battery | Page::Energy) {
             self.battery_read();
         }
         self.browser = None;
@@ -1132,6 +1144,14 @@ impl App {
                     t.insert("sleep".into(), m.into());
                 })
             }
+            Message::BatteryScreensOff(label) => {
+                let m = minutes_of(&OFF_CHOICES, &label);
+                self.save_energy_battery("screens-off", m)
+            }
+            Message::BatterySleepAfter(label) => {
+                let m = minutes_of(&SLEEP_CHOICES, &label);
+                self.save_energy_battery("sleep", m)
+            }
             Message::SleepCommand(s) => self.sleep_cmd = s,
             Message::SleepCommandSubmit => {
                 let v = self.sleep_cmd.trim().to_string();
@@ -1336,6 +1356,19 @@ impl App {
         });
     }
 
+    /// One key of [energy.battery]; the other stays absent (the same as on
+    /// power) until it is chosen too.
+    fn save_energy_battery(&mut self, key: &str, minutes: i64) {
+        self.save_table("energy", |t| {
+            if !t.get("battery").is_some_and(|b| b.is_table()) {
+                t.insert("battery".into(), toml::Value::Table(toml::Table::new()));
+            }
+            if let Some(b) = t.get_mut("battery").and_then(|b| b.as_table_mut()) {
+                b.insert(key.into(), minutes.into());
+            }
+        })
+    }
+
     fn save_appearance(&mut self, f: impl FnOnce(&mut toml::Table)) {
         self.save_table("appearance", f);
     }
@@ -1391,6 +1424,13 @@ impl App {
     /// The pages in the sidebar's groups (settings milestone 1; Dave: "pages
     /// are grouped by type"), each with its group's color for its icon and
     /// the words its settings go by, for the search.
+    /// A sidebar page by its name, case and punctuation aside ("wifi" is Wi-Fi).
+    fn page_named(&self, name: &str) -> Option<Page> {
+        let key = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
+        let want = key(name);
+        self.page_groups().into_iter().flat_map(|(_, rows)| rows).find(|(n, ..)| key(n) == want).map(|(_, p, ..)| p)
+    }
+
     fn page_groups(&self) -> Vec<(&'static str, Vec<(String, Page, Icon, &'static str)>)> {
         let multi = self.outputs.len() > 1;
         let screens_page = if multi { Page::Overview } else { Page::Screen(0) };
@@ -1896,14 +1936,32 @@ impl App {
             let options = list.clone();
             choice(options, at, move |i| f(list[i].clone())).width(Length::Fixed(160.0)).name(name)
         };
+        let mut groups = if self.has_battery() {
+                    // Two pairs where there is a battery; the one in use says so.
+                    let on_battery = self.battery.power.on_battery();
+                    let (boff_list, boff_now) = minute_choices(&OFF_CHOICES, energy_battery_int(&self.desktop, "screens-off"));
+                    let (bsleep_list, bsleep_now) = minute_choices(&SLEEP_CHOICES, energy_battery_int(&self.desktop, "sleep"));
+                    vec![
+                        self.group(Some(if on_battery { "On battery (now)" } else { "On battery" }), vec![
+                            setting("Turn the screens off", "After no input. Every monitor is switched off; apps keep running.", minutes(boff_list, &boff_now, Message::BatteryScreensOff, "On battery: turn the screens off")),
+                            setting("Put the machine to sleep", "Suspend to memory. The screens go off first.", minutes(bsleep_list, &bsleep_now, Message::BatterySleepAfter, "On battery: put the machine to sleep")),
+                        ]),
+                        self.group(Some(if on_battery { "On power" } else { "On power (now)" }), vec![
+                            setting("Turn the screens off", "After no input, plugged in.", minutes(off_list, &off_now, Message::ScreensOff, "On power: turn the screens off")),
+                            setting("Put the machine to sleep", "Suspend to memory. The screens go off first.", minutes(sleep_list, &sleep_now, Message::SleepAfter, "On power: put the machine to sleep")),
+                        ]),
+                    ]
+                } else {
+                    vec![self.group(Some("After no input"), vec![
+                        setting("Turn the screens off", "Every monitor is switched off; apps keep running.", minutes(off_list, &off_now, Message::ScreensOff, "Turn the screens off")),
+                        setting("Put the machine to sleep", "Suspend to memory. The screens go off first.", minutes(sleep_list, &sleep_now, Message::SleepAfter, "Put the machine to sleep")),
+                    ])]
+                };
         self.page_layout(
             "Energy",
             "When nothing has been touched for a while: the screens go dark, then the machine sleeps. Any key or a nudge of the mouse brings everything back.",
-            vec![
-                self.group(Some("After no input"), vec![
-                    setting("Turn the screens off", "Every monitor is switched off; apps keep running.", minutes(off_list, &off_now, Message::ScreensOff, "Turn the screens off")),
-                    setting("Put the machine to sleep", "Suspend to memory. The screens go off first.", minutes(sleep_list, &sleep_now, Message::SleepAfter, "Put the machine to sleep")),
-                ]),
+            {
+                groups.extend([
                 self.group(Some("How it sleeps"), vec![setting(
                     "Sleep command",
                     &detail,
@@ -1911,7 +1969,9 @@ impl App {
                 )]),
                 self.group(None, vec![setting("Apps", "Apps cannot yet ask to keep the screens on while they play or present; that comes with the session bus.", space())]),
                 self.status_line(),
-            ],
+                ]);
+                groups
+            },
         )
     }
 
@@ -3027,8 +3087,9 @@ fn main() -> std::io::Result<()> {
     }
     // Portrait (Dave's screenshot of macOS's System Settings): the server fits
     // the height to the screen; window memory decides after the first time.
-    // `--page wifi`: the page to open with (the server's "no network cable"
-    // notification opens Wi-Fi).
+    // `--page wifi`: the page to open with, by its sidebar name in lower case
+    // ("wifi", "energy", "windows", "theme and fonts"); the server's "no network
+    // cable" notification opens Wi-Fi.
     let mut app = App::new();
     // Whether there is a battery, for the sidebar (the page reads it again when opened).
     app.battery.power = vergence_power::power();
@@ -3036,9 +3097,10 @@ fn main() -> std::io::Result<()> {
     app.read_interfaces();
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--page")
-        && args.get(i + 1).map(String::as_str) == Some("wifi")
+        && let Some(name) = args.get(i + 1)
+        && let Some(page) = app.page_named(name)
     {
-        app.open(Page::WiFi);
+        app.open(page);
     }
     vergence_widgets::run(app, (840, 1100))
 }
