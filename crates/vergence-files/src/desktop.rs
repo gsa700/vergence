@@ -920,7 +920,11 @@ impl Program for Desktop {
         }
         window.wake_after(WATCH_TIMER, WATCH_EVERY);
         let now = std::fs::metadata(&self.dir).and_then(|m| m.modified()).ok();
-        if now != self.stamp {
+        // A drive plugged in or ejected: its icon comes or goes.
+        let disks: Vec<String> = files::mounted_disks().iter().map(|m| format!("::volume:{}", m.display())).collect();
+        let shown: Vec<String> = self.entries.iter().filter(|e| self.fixed_of(e) == Some(Fixed::Volume)).map(|e| e.name.clone()).collect();
+        let wants_volumes = vergence_ui::table_value(&self.desktop_text, "[desktop]", "volumes").as_deref() != Some("false");
+        if now != self.stamp || (wants_volumes && disks != shown) {
             self.read();
             self.want_marks();
             return true;

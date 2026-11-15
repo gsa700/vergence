@@ -548,6 +548,31 @@ the wallpaper, a scratch place for launchers and files.
   among them) as thumbnails within seconds; a loopback NFS mount (made with
   onestart, removed after) under Network; 24 milestone files found below
   ~/src/vergence. Tests: 73 suites on kepler and Techbench (Hubble off).
+- **Touch and hold; removable drives** (2026-11-15, Dave: touch "works pretty
+  good in the icon view, but there is no way to get to the desktop context
+  menu?", "would USB drive show up and eject the same way then?", then "yes,
+  udisks2 on Linux and automounter on kepler"). The toolkit (vergence-widgets
+  Host) turns a finger held still for 500 ms into a right click there, the
+  finger's touch taken back from the widgets. crates/vergence-media: on
+  Linux the server runs `automount` on a thread at the session's start
+  (desktop.toml `[media] automount = false` turns it off): udisks2 over the
+  system bus (vergence-dbus's new blocking client: EXTERNAL, Hello, calls,
+  signals), new file systems with HintAuto and not HintSystem/HintIgnore
+  mounted (also those plugged in at the start), `eject` unmounts and powers
+  the drive off. On FreeBSD install.sh turns on the base automounter and
+  points /media at tools/freebsd/media-map, installed as the special map
+  /etc/autofs/special_vergence_media (special maps are the ones asked for
+  the list), FreeBSD's special_media with FAT drives mounted group video,
+  664/775, so the seat can write; Eject is the setuid helper media-eject
+  (video group only; one `/media/<name>` path, mounted now, `/sbin/umount`,
+  empty environment). files.rs: /media's names count as drives while
+  mounted or their device is there (pulled-out names linger); FreeBSD's
+  `map -media` mount line parsed. The desktop checks its drives every 2 s,
+  so icons come and go. Seen on kepler with FAT memory disks standing in for
+  sticks: listed, mounted on looking, writable by the user, Eject from the
+  desktop's menu, the icon gone when "pulled out", back when "plugged in";
+  on Techbench the server watching udisks2 (8 objects). A real stick on
+  Techbench is Dave's to try. Tests: 76 suites on kepler and Techbench.
 ## Steps
 
 1. **vergence-types**: the database reader (globs2, magic, subclasses,

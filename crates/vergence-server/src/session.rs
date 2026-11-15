@@ -136,6 +136,13 @@ impl Server {
     fn session_begin(&mut self) {
         // The desktop's icons (desktop.rs) first, under whatever is restored.
         self.desktop_start();
+        // Drives plugged in are mounted (vergence-media: udisks2 on Linux),
+        // unless desktop.toml `[media] automount = false`.
+        let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        let automount = text.parse::<toml::Table>().ok().and_then(|t| t.get("media")?.get("automount")?.as_bool()).unwrap_or(true);
+        if automount {
+            std::thread::spawn(|| vergence_media::automount(|said| tracing::info!("{said}")));
+        }
         let last = read();
         let (restore, strikes) = vergence_shell::session::at_start(last.pending, last.strikes);
         let clean = std::env::var_os("VERGENCE_CLEAN").is_some_and(|v| !v.is_empty());

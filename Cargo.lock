@@ -2264,6 +2264,13 @@ name = "vergence-look"
 version = "0.1.0"
 
 [[package]]
+name = "vergence-media"
+version = "0.1.0"
+dependencies = [
+ "vergence-dbus",
+]
+
+[[package]]
 name = "vergence-net"
 version = "0.1.0"
 
@@ -2330,6 +2337,7 @@ dependencies = [
  "vergence-dbus",
  "vergence-edid",
  "vergence-look",
+ "vergence-media",
  "vergence-net",
  "vergence-power",
  "vergence-profile",
@@ -2444,6 +2452,7 @@ name = "vergence-widgets"
 version = "0.1.0"
 dependencies = [
  "vergence-look",
+ "vergence-media",
  "vergence-render",
  "vergence-scene",
  "vergence-spell",

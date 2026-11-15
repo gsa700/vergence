@@ -1,11 +1,13 @@
 //! Vergence's own D-Bus wire protocol (whitepaper §6.8): authentication,
 //! values, messages and match rules, for the D-Bus front end at the session
-//! bus's edge. The bus logic (names, routing, the org.freedesktop.DBus
-//! methods) lives in the server, which owns the connections.
+//! bus's edge, and a small client (client.rs: the system bus, for udisks2).
+//! The bus logic (names, routing, the org.freedesktop.DBus methods) lives
+//! in the server, which owns the connections.
 //!
 //! Written from the D-Bus specification; no dependencies (§8).
 
 pub mod auth;
+pub mod client;
 pub mod matchrule;
 pub mod message;
 pub mod value;

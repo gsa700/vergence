@@ -552,8 +552,13 @@ pub fn parse_mounts(text: &str) -> Vec<Mount> {
     text.lines()
         .filter_map(|l| {
             let mut f = l.split_whitespace();
-            let (what, at, kind) = (f.next()?, f.next()?, f.next()?);
-            (!what.starts_with('#')).then(|| Mount { what: unescape(what), at: PathBuf::from(unescape(at)), kind: kind.to_string() })
+            let mut what = f.next()?.to_string();
+            // FreeBSD's automounter: "map -media  /media  autofs ..." (a space in the first field).
+            if what == "map" {
+                what = format!("map {}", f.next()?);
+            }
+            let (at, kind) = (f.next()?, f.next()?);
+            (!what.starts_with('#')).then(|| Mount { what: unescape(&what), at: PathBuf::from(unescape(at)), kind: kind.to_string() })
         })
         .collect()
 }
@@ -581,13 +586,26 @@ pub fn mounted_disks() -> Vec<PathBuf> {
 fn disks_of(table: &[Mount]) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = table
         .iter()
-        .filter(|m| !network_kind(&m.kind))
+        .filter(|m| !network_kind(&m.kind) && m.kind != "autofs")
         .map(|m| m.at.clone())
         .filter(|m| {
             let s = m.to_string_lossy();
             ["/media/", "/mnt/", "/run/media/"].iter().any(|p| s.starts_with(p)) || s == "/mnt"
         })
         .collect();
+    // FreeBSD's automounter (vergence-media; install.sh): /media lists the
+    // drives plugged in before they are mounted (looking into one mounts it).
+    if table.iter().any(|m| m.at == Path::new("/media") && m.kind == "autofs")
+        && let Ok(rd) = fs::read_dir("/media")
+    {
+        // A name stays listed after its drive is pulled out: kept only while
+        // it is mounted or its device is there (by name, or by its label).
+        let mounted: Vec<&Path> = table.iter().map(|m| m.at.as_path()).collect();
+        let present = |name: &std::ffi::OsStr| {
+            std::iter::once(PathBuf::from("/dev").join(name)).chain(["msdosfs", "ufs", "ext2fs", "ntfs", "exfat", "iso9660", "label", "gpt"].iter().map(|d| PathBuf::from("/dev").join(d).join(name))).any(|p| p.exists())
+        };
+        out.extend(rd.flatten().map(|e| e.path()).filter(|p| mounted.contains(&p.as_path()) || p.file_name().is_some_and(present)));
+    }
     out.sort();
     out.dedup();
     out
@@ -608,11 +626,17 @@ pub fn ejectable(path: &Path) -> bool {
     table.iter().any(|m| m.at == path && network_kind(&m.kind)) || disks_of(&table).iter().any(|d| d == path)
 }
 
-/// Unmounts a disk or a network mount: sshfs and other FUSE mounts by
+/// Unmounts a disk or a network mount: a removable drive through
+/// vergence-media (udisks2, the automounter); sshfs and other FUSE mounts by
 /// `fusermount3 -u` / `fusermount -u` on Linux, everything else (and
 /// everything on FreeBSD) by `umount`. The system decides whether the user
 /// may: the error says why not.
 pub fn eject(path: &Path) -> Result<(), String> {
+    // A drive the system's media service mounted (udisks2 on Linux, the
+    // automounter on FreeBSD) is let go of through it, and powered off.
+    if vergence_media::eject(path)? {
+        return Ok(());
+    }
     let kind = mounts().into_iter().find(|m| m.at == path).map(|m| m.kind).unwrap_or_default();
     let mut tries: Vec<(&str, Vec<&str>)> = Vec::new();
     if kind.starts_with("fuse.") && cfg!(target_os = "linux") {
@@ -714,6 +738,8 @@ mod tests {
         let t = super::parse_mounts(bsd);
         assert_eq!(super::disks_of(&t), vec![std::path::PathBuf::from("/media/usb")]);
         assert!(super::network_kind(&t[1].kind));
+        let auto = super::parse_mounts("map -vergence_media\t/media\t\t\tautofs\trw\t\t0 0\n");
+        assert_eq!((auto[0].what.as_str(), auto[0].at.to_str(), auto[0].kind.as_str()), ("map -vergence_media", Some("/media"), "autofs"));
     }
 
     use super::*;

@@ -156,6 +156,17 @@ Everyday Rust crates. Review: low priority; replacing them buys little.
 
 The pointer. Not shipped by us. Review: draw our own cursors.
 
+### udisks2 (Linux; a system daemon, talked to over D-Bus)
+
+Mounts a drive plugged in, unmounts and powers it off on Eject (files
+milestone 1; Dave's yes, 2026-11-15: "udisks2 on Linux and automounter on
+kepler"). Not linked or shipped: vergence-media talks to it with our own
+D-Bus client (vergence-dbus client.rs), and polkit decides what the
+session may do. FreeBSD uses the base system's automounter instead
+(autofs, /etc/autofs/special_vergence_media wrapping special_media, and our
+setuid helper media-eject). Review: our own root helper that finds and
+mounts drives on Linux too, if udisks ever stands in the way.
+
 ### Fonts and themes from the system
 
 Read at run time (fontconfig names, the GTK theme name for X11 apps). Not

@@ -1,0 +1,11 @@
+[package]
+name = "vergence-media"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Removable drives: mounted when plugged in and ejected, by udisks2 on Linux and the automounter on FreeBSD"
+
+# udisks2 is reached over D-Bus on Linux only.
+[target.'cfg(target_os = "linux")'.dependencies]
+vergence-dbus.workspace = true

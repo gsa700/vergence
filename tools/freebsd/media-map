@@ -1,0 +1,16 @@
+#!/bin/sh
+#
+# Vergence's map for /media (files milestone 1; Dave, 2026-11-15: "automounter
+# on kepler"): FreeBSD's own -media map (/etc/autofs/special_media), with FAT
+# drives mounted for the seat's users to write: group video, files 664,
+# folders 775 (install.sh puts the seat's users in video). Everything else
+# is as special_media says. Installed as /etc/autofs/special_vergence_media
+# (a special map: the automounter asks those, and only those, for the list
+# of what is there); auto_master:
+#
+#   /media  -vergence_media  -nosuid,noatime,autoro
+#
+# Called with no argument it lists the drives; with one, it gives that
+# drive's entry.
+
+/etc/autofs/special_media "$@" | sed -e 's/^-fstype=msdosfs,/-fstype=msdosfs,-g=video,-m=664,-M=775,/'

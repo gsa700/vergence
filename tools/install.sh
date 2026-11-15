@@ -20,6 +20,10 @@
 #   share/vergence/words/                    the spelling list (data/words/en_US.txt, from SCOWL) and its terms
 #   libexec/vergence/vergence-choose         the Open/Save dialog the portal shows for apps not ours
 #   libexec/vergence/vergence-decode         pictures decoded apart, limited (Capsicum on FreeBSD)
+#   libexec/vergence/media-eject             FreeBSD only: the root helper that unmounts a drive
+#                                            under /media (setuid root, video group)
+#   /etc/autofs/special_vergence_media       FreeBSD only: the automounter's /media map (FAT
+#                                            drives writable by video; a special map, so it lists)
 #   libexec/vergence/sound-default           FreeBSD only: the root helper that sets the default
 #                                            sound output (hw.snd.default_unit) and nothing else;
 #                                            setuid root, group video, mode 4750
@@ -65,6 +69,8 @@ if [ -n "$uninstall" ]; then
     rm -f "$sessions/vergence.desktop"
     for t in $tools; do rm -f "$applications/$t.desktop" "$icons/$t.svg"; done
     for d in $docfiles; do rm -f "$docs/$d"; done
+    rm -f "$libexec/media-eject"
+    [ -z "$destdir" ] && [ "$(uname -s)" = FreeBSD ] && rm -f /etc/autofs/special_vergence_media
     rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
     rmdir "$words" "$destdir$prefix/share/vergence" 2>/dev/null || true
     rmdir "$libexec" 2>/dev/null || true
@@ -104,6 +110,22 @@ if [ "$(uname -s)" = FreeBSD ]; then
     else
         install -m 755 "$release/sound-default" "$libexec/sound-default"
         echo "note: $prefix/libexec/vergence/sound-default needs owner root, group video, mode 4750 in the package"
+    fi
+    # Removable drives (files milestone 1): the eject helper, as the sound
+    # helper; the automounter's /media map.
+    [ -x "$release/media-eject" ] || { echo "install.sh: $release/media-eject is missing; run cargo build --release first" >&2; exit 1; }
+    if [ -z "$destdir" ]; then
+        install -o root -g video -m 4750 "$release/media-eject" "$libexec/media-eject"
+    else
+        install -m 755 "$release/media-eject" "$libexec/media-eject"
+        echo "note: $prefix/libexec/vergence/media-eject needs owner root, group video, mode 4750 in the package"
+    fi
+    # A special map (auto_master's -vergence_media) lives in /etc/autofs:
+    # only special maps are asked for the list of what is there.
+    if [ -z "$destdir" ]; then
+        install -m 755 "$here/freebsd/media-map" /etc/autofs/special_vergence_media
+    else
+        mkdir -p "$destdir/etc/autofs" && install -m 755 "$here/freebsd/media-map" "$destdir/etc/autofs/special_vergence_media"
     fi
 fi
 # Our Open/Save dialog for apps not ours (the portal's FileChooser; files milestone 1).
@@ -153,6 +175,35 @@ if [ -n "${group:-}" ]; then
         if [ "$(uname -s)" = FreeBSD ]; then pw groupmod "$group" -m "$user"; else usermod -aG "$group" "$user"; fi
         echo "seat: $user added to $group (takes effect at the next login)"
     fi
+fi
+# ---- system setup: removable drives (files milestone 1; Dave, 2026-11-15) ----
+# Linux: udisks2 mounts a drive plugged in when the session asks (the
+# server does); nothing to set up but the daemon itself. FreeBSD: the base
+# system's automounter, /media pointed at our map (FAT drives writable by
+# the video group); the original auto_master is kept beside it.
+if [ "$(uname -s)" = FreeBSD ]; then
+    line="/media		-vergence_media	-nosuid,noatime,autoro"
+    if grep -q "^/media[[:space:]]*-vergence_media" /etc/auto_master; then
+        echo "drives: /media is already Vergence's map"
+    else
+        [ -e /etc/auto_master.before-vergence ] || cp /etc/auto_master /etc/auto_master.before-vergence
+        grep -v '^#\{0,1\}/media[[:space:]]' /etc/auto_master > /etc/auto_master.new
+        printf '%s\n' "$line" >> /etc/auto_master.new
+        mv /etc/auto_master.new /etc/auto_master
+        echo "drives: /media in /etc/auto_master is Vergence's map (the original is /etc/auto_master.before-vergence)"
+    fi
+    sysrc autofs_enable=YES >/dev/null
+    for s in automountd autounmountd; do service "$s" status >/dev/null 2>&1 || service "$s" start >/dev/null 2>&1 || true; done
+    # An autofs mount keeps the map it was made with: /media made from
+    # another map is unmounted first, so it is mounted again with ours.
+    if mount -p | grep "[[:space:]]/media[[:space:]]*autofs" | grep -vq "^map -vergence_media"; then umount /media 2>/dev/null || true; fi
+    automount >/dev/null 2>&1 || true
+    automount -c >/dev/null 2>&1 || true
+    echo "drives: the automounter is enabled (rc.conf autofs_enable) and running"
+elif command -v udisksctl >/dev/null || [ -x /usr/libexec/udisks2/udisksd ] || [ -x /usr/lib/udisks2/udisksd ]; then
+    echo "drives: udisks2 is installed; the session mounts drives through it"
+else
+    echo "drives: udisks2 is not installed, so drives plugged in are not mounted (Void: xbps-install udisks2)" >&2
 fi
 # ---- system setup: Wi-Fi (settings milestone 1, step 4) ----
 # wpa_supplicant is enabled where there is a Wi-Fi card and nothing else
