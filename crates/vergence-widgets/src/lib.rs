@@ -21,6 +21,7 @@
 //! toolkit keeps those above for its widgets.
 
 mod element;
+pub mod about;
 pub mod prefs;
 mod layout;
 mod theme;
@@ -62,6 +63,12 @@ pub trait Program {
     /// ground). True if the state changed.
     fn input(&mut self, _input: &Input, _window: &mut Window) -> bool {
         false
+    }
+
+    /// A key before any widget sees it (a calculator's keys, which must not
+    /// press the button last clicked): Some(changed) if the program took it.
+    fn key_first(&mut self, _input: &Input, _window: &mut Window) -> Option<bool> {
+        None
     }
 
     /// Called once, before the window opens, with the means for other
@@ -327,6 +334,15 @@ impl<P: Program> vergence_ui::App for Host<P> {
     }
 
     fn input(&mut self, input: &Input, window: &mut Window) {
+        if matches!(input, Input::Key { .. })
+            && let Some(changed) = self.program.key_first(input, window)
+        {
+            if changed {
+                self.changed(window);
+            }
+            self.rearm(window);
+            return;
+        }
         let r = self.ui.input(input);
         if let Some(c) = r.cursor {
             window.set_cursor(c);

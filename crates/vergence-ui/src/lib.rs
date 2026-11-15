@@ -366,6 +366,8 @@ enum Command {
     Place(Place),
     /// Another window of the same program (bar milestone 1, step 4).
     Open(Box<dyn App>),
+    /// A size the window would like (the server decides).
+    Size(u32, u32),
 }
 
 /// What a program may ask of its window while it handles input.
@@ -382,6 +384,13 @@ impl Window {
 
     pub fn close(&mut self) {
         self.commands.push(Command::Close);
+    }
+
+    /// Asks for the window to be this size, in points; the server decides
+    /// (within its limits and its screen). Only where the server draws the
+    /// bar; elsewhere nothing happens.
+    pub fn request_size(&mut self, width: u32, height: u32) {
+        self.commands.push(Command::Size(width, height));
     }
 
     /// Lets the user move the window with the button that was just pressed.
@@ -1256,6 +1265,8 @@ impl<'a> Runner<'a> {
                 }
                 Command::Title(title) => self.client.set_title(toplevel, &title)?,
                 Command::Maximize(on) => self.client.set_maximized(toplevel, on)?,
+                // Wayland has no size request; the user resizes.
+                Command::Size(..) => {}
                 Command::Minimize => self.client.set_minimized(toplevel)?,
                 Command::Copy(text) => {
                     if let (Some(manager), Some(device)) = (self.data_manager, self.data_device) {

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Calculator
+Comment=Exact decimal arithmetic, with a scientific mode
+Exec=vergence-calc
+Icon=vergence-calc
+Terminal=false
+Categories=Utility;Calculator;
+Keywords=calculator;math;arithmetic;scientific;sum;
+StartupWMClass=vergence-calc

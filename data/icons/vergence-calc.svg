@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Vergence's calculator: a display over a keypad, the equals key in the accent. Drawn by the project. -->
+  <rect x="10" y="4" width="44" height="56" rx="8" fill="#eef0f4"/>
+  <rect x="10" y="4" width="44" height="56" rx="8" fill="none" stroke="#6b7a9e" stroke-width="2"/>
+  <rect x="16" y="10" width="32" height="12" rx="3" fill="#20232c"/>
+  <rect x="38" y="14" width="7" height="4" rx="1" fill="#e6e9ef"/>
+  <g fill="#9aa3b5">
+    <rect x="16" y="27" width="8" height="7" rx="2"/><rect x="28" y="27" width="8" height="7" rx="2"/><rect x="40" y="27" width="8" height="7" rx="2"/>
+    <rect x="16" y="38" width="8" height="7" rx="2"/><rect x="28" y="38" width="8" height="7" rx="2"/><rect x="40" y="38" width="8" height="7" rx="2"/>
+    <rect x="16" y="49" width="8" height="7" rx="2"/><rect x="28" y="49" width="8" height="7" rx="2"/>
+  </g>
+  <rect x="40" y="49" width="8" height="7" rx="2" fill="#729fcf"/>
+</svg>

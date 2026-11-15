@@ -2162,6 +2162,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vergence-calc"
+version = "0.1.0"
+dependencies = [
+ "vergence-look",
+ "vergence-scene",
+ "vergence-text",
+ "vergence-ui",
+ "vergence-widgets",
+]
+
+[[package]]
 name = "vergence-dbus"
 version = "0.1.0"
 

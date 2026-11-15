@@ -488,6 +488,33 @@ impl Server {
                     self.app_menu_refresh(&w);
                 }
             }
+            // A size asked for (bus v12): within its limits and its screen's work
+            // area, kept where it is unless its right or bottom edge would leave the
+            // screen; not while maximized, snapped or full screen.
+            WinRequest::Size { window, width, height } => {
+                let Some(w) = self.natives.get(&(client, window)).cloned() else { return };
+                let Win::Native(n) = &w else { return };
+                if self.restore.contains_key(&w) || self.snap.snapped.contains_key(&w) {
+                    return;
+                }
+                let Some(loc) = self.space.element_location(&w) else { return };
+                let screen = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|g| g.contains(loc)).or_else(|| self.output_at_pointer());
+                let mut size = self.within_limits(&w, Size::from((width.round() as i32, height.round() as i32)));
+                let mut at = loc;
+                if let Some(area) = screen.map(|s| self.work_area(s)) {
+                    let bar = self.bar_h(&w);
+                    size.w = size.w.min(area.size.w);
+                    size.h = size.h.min(area.size.h - bar);
+                    at.x = at.x.min(area.loc.x + area.size.w - size.w).max(area.loc.x);
+                    at.y = at.y.min(area.loc.y + area.size.h - size.h).max(area.loc.y + bar);
+                }
+                tracing::info!("native: {:?} window {window} asks {width}x{height}, given {}x{} at {},{}", n.app_id, size.w, size.h, at.x, at.y);
+                if at != loc {
+                    self.space.map_element(w.clone(), at, false);
+                }
+                let maximized = n.state.lock().unwrap().maximized;
+                self.native_configure(n, size, maximized);
+            }
             WinRequest::BarStyle { window, style } => {
                 if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
                     let was = std::mem::replace(&mut n.state.lock().unwrap().bar_style, style);

@@ -256,6 +256,10 @@ pub enum WinRequest {
     /// desktop's, or the app's own light or dark. After Create, and again
     /// whenever the app's setting changes.
     BarStyle { window: u32, style: BarStyle },
+    /// The size the window would like now, in points (a calculator opening
+    /// its scientific keys; tools milestone 1). The server decides: within
+    /// the window's limits and its screen, not while maximized or snapped.
+    Size { window: u32, width: f64, height: f64 },
 }
 
 /// A window's bar style: the desktop's, or the app's own.
@@ -403,6 +407,7 @@ pub(crate) mod op {
     pub const STYLE: u16 = 116;
     pub const COMMANDS: u16 = 117;
     pub const BAR_STYLE: u16 = 118;
+    pub const SIZE: u16 = 119;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -732,6 +737,11 @@ impl WinRequest {
                 }
                 e
             }
+            WinRequest::Size { window, width, height } => {
+                let mut e = Encoder::frame(op::SIZE);
+                e.u32(*window).f64(*width).f64(*height);
+                e
+            }
             WinRequest::BarStyle { window, style } => {
                 let mut e = Encoder::frame(op::BAR_STYLE);
                 e.u32(*window).u8(match style {
@@ -876,6 +886,14 @@ impl WinRequest {
                     commands.push(Command { id, role, menu, label, keys, enabled, checked, featured });
                 }
                 WinRequest::Commands { window, terminal, commands }
+            }
+            op::SIZE => {
+                let window = d.u32()?;
+                let (width, height) = (finite(d.f64()?, "width")?, finite(d.f64()?, "height")?);
+                if !(1.0..=16384.0).contains(&width) || !(1.0..=16384.0).contains(&height) {
+                    return Err(WireError::BadValue("size"));
+                }
+                WinRequest::Size { window, width, height }
             }
             op::BAR_STYLE => {
                 let window = d.u32()?;
@@ -1267,6 +1285,7 @@ mod tests {
                 ],
             },
             WinRequest::BarStyle { window: 1, style: BarStyle::Light },
+            WinRequest::Size { window: 1, width: 680.0, height: 560.0 },
             WinRequest::BarStyle { window: 2, style: BarStyle::Desktop },
             WinRequest::Bar {
                 window: 1,

@@ -107,6 +107,23 @@ Quit Applications); anything more is the terminal's.
   hw.physmem, vm.stats, dev.cpu.N.temperature, kern.devstat). A crate of
   its own, `vergence-sysinfo`.
 
+## Progress
+
+- **2026-11-14 night: the Calculator built** (steps 1 and 2): vergence-calc
+  with dec.rs (exact decimals, 34 digits, half to even; sqrt, powers, ln,
+  log, exp, the trigonometric functions and their inverses, factorial;
+  degrees split exactly so sin 180° is 0) and expr.rs (the usual order,
+  "2π", "a + b%", open brackets closed); the keypad window, the live
+  answer, the tape (the last three shown, a click takes one back, brackets
+  closed), scientific keys on the left; its menu (New window, Copy,
+  Scientific; Paste, Angles, Clear under Keyboard shortcuts), its settings
+  (angles, decimal places, grouping, scientific, its look), About.
+  Toolkit: vergence-widgets about.rs (the About window), Program::key_first
+  (an app's keys before the widgets: Enter is =, not the last button
+  clicked); bus v12 `WinRequest::Size` (a window asks for a size, the
+  server decides: the calculator widens for its scientific keys and
+  narrows back). Desktop entry, icon, install.sh.
+
 ## Steps
 
 1. **Toolkit**: About, the app skeleton.
