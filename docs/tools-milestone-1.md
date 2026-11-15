@@ -2,7 +2,16 @@
 
 Drafted 2026-11-14, item 3 of docs/apps-roadmap.md: three small native
 tools from Dave's list, each small, together settling the app framework
-every later app stands on. **Draft: the questions at the end are for Dave.**
+every later app stands on.
+
+**Accepted 2026-11-14** (Dave): "1 a" (a keypad window), "2 a" (the tape
+for the session only), 3 RPN left to me: not now, the arithmetic and the
+window kept so an RPN mode can come later; "4 this is meant to be a simple
+app stopper in the mac tradition - others can use terminal - any of the
+names is fine" (Running Applications is macOS's Force Quit Applications:
+applications only, no process table), "5 a" (other users' processes are
+not the app's business: it shows only the user's own applications), "6 a"
+(Calculator, then Running Applications, then Hardware).
 
 ## Where things stand
 
@@ -27,11 +36,11 @@ every later app stands on. **Draft: the questions at the end are for Dave.**
 
 ### What the framework gains (used by all three, then by every app)
 
-1. **A table** in vergence-widgets: rows of cells under headings, a
-   selected row (keys and pointer), sorting by a heading, rows updated in
-   place without losing the selection or the scroll, Contract 3 meaning
-   (a table, its rows and cells, named). Running Applications needs it
-   first; the file manager and the text editor's lists later.
+1. **A list** in vergence-widgets: rows with an icon and words, a selected
+   row (keys and pointer), rows updated in place without losing the
+   selection or the scroll, Contract 3 meaning (a list, its items, named).
+   Running Applications needs it first; the table with headings and
+   sorting comes with the file manager.
 2. **A chart** in vergence-widgets, lifted out of the settings app's Wi-Fi
    page: a line or two over the last N samples, with a scale, in the
    accent and a second color; Hardware uses it for every reading, the
@@ -63,22 +72,23 @@ every later app stands on. **Draft: the questions at the end are for Dave.**
 
 ### Running Applications (`vergence-procs`)
 
-- **Applications first**: each running application as the dock knows it
-  (icon, name, its windows), with its processes' CPU and memory summed;
-  opened, a table of its processes. **All processes** as a second view: a
-  table of every process (name, user, CPU, memory, started), sortable,
-  with search.
-- **End and Force quit**: End asks politely (the app's windows are asked
-  to close first, then SIGTERM), Force quit sends SIGKILL after a
-  question; processes of other users and of the system are shown but
-  cannot be ended (no root here; §7.3).
-- **By window**: "Pick a window" lets the next click on any window select
-  its application (the server tells which, by the window's client; a
-  native or Wayland window's pid, an X11 window's): the way to find what
-  a stuck window belongs to.
-- **Reading processes, our own code**: Linux /proc (stat, status, cmdline),
-  FreeBSD the kern.proc sysctls; CPU from the change in each process's
-  time between samples (every 2 s while open).
+A simple app stopper in the Mac tradition (Dave, 2026-11-14; macOS's Force
+Quit Applications); anything more is the terminal's.
+
+- **A list of the user's running applications**, as the dock knows them:
+  icon and name, and "not responding" after an application has not
+  answered for a few seconds (the server asks each window's client: a
+  ping on the native protocol, xdg-shell's own ping for Wayland, the X11
+  window manager's ping where the client offers it).
+- **End**: the application's windows are asked to close, as their close
+  buttons ask (the terminal's question still comes); **Force Quit**, after
+  a question: its processes are sent SIGKILL. Opened from the launcher
+  like any app, and by **Ctrl+Alt+Escape**, a server key, as macOS has
+  Cmd+Option+Esc.
+- **Pick a window**: the next click on any window selects its application
+  (the server tells which, by the window's client), for a stuck window
+  whose application is hard to find.
+- Only the user's own applications: no other users' processes, no root.
 
 ### Hardware (`vergence-hw`)
 
@@ -95,20 +105,21 @@ every later app stands on. **Draft: the questions at the end are for Dave.**
 - **Reading, our own code**: Linux /proc and /sys (stat, meminfo,
   hwmon, thermal_zone, diskstats), FreeBSD sysctls (kern.cp_times,
   hw.physmem, vm.stats, dev.cpu.N.temperature, kern.devstat). A crate of
-  its own, `vergence-sysinfo`, that Running Applications shares.
+  its own, `vergence-sysinfo`.
 
 ## Steps
 
-1. **vergence-sysinfo**: processes, CPU, memory, disks, temperatures on
-   Linux and FreeBSD, with tests against known /proc and sysctl texts.
-2. **Toolkit**: the table, the chart (moved from the settings app), About,
-   the app skeleton.
-3. **Calculator**: the decimal arithmetic (tests first: the precision, the
+1. **Toolkit**: About, the app skeleton.
+2. **Calculator**: the decimal arithmetic (tests first: the precision, the
    functions, rounding), then the window, keys, tape, scientific mode,
    settings.
-4. **Running Applications**: the two views, End and Force quit, the
-   server's "pick a window" (bus v12: a pick request and its answer).
-5. **Hardware**: the pages.
+3. **Toolkit and server for Running Applications**: the list widget; the
+   server's ping and "not responding", the application list and "pick a
+   window" on the bus (v12).
+4. **Running Applications.**
+5. **vergence-sysinfo and Hardware**: CPU, memory, disks, temperatures on
+   Linux and FreeBSD (tests against known /proc and sysctl texts); the
+   chart moved from the settings app; the pages.
 6. **Docs**: whitepaper (the apps, §9), the Map, desktop entries and
    install.sh for the three.
 
@@ -116,26 +127,10 @@ every later app stands on. **Draft: the questions at the end are for Dave.**
 
 - Calculator: 0.1 + 0.2 = 0.3; 1 ÷ 3 × 3 = 1; sin 30° = 0.5 exactly;
   the number pad and Enter work; the tape copies a line.
-- Running Applications: a busy `yes` is found by its CPU, ended by End;
-  a window picked with "Pick a window" selects its application; another
-  user's process cannot be ended.
+- Running Applications: an app stopped with `kill -STOP` shows as not
+  responding and Force Quit ends it; End closes an app's windows as their
+  close buttons do; "Pick a window" selects the window's application.
 - Hardware: every reading on Hubble (Void, two GPUs, a battery), kepler
   (FreeBSD) and Techbench (Fedora); charts move only while shown.
 - Each app: app button with its commands, its settings window, About, its
   windows remembered; full suites on all three machines.
-
-## Questions for Dave
-
-1. **Calculator's look**: (a) a keypad window like GNOME's and macOS's
-   calculators (recommended for basic; scientific widens it), or (b) an
-   expression line first, with the keypad below as an option?
-2. **The tape**: (a) kept for the session only (recommended), (b) kept
-   between runs.
-3. **RPN**: do you want an RPN mode (HP style) beside the algebraic one?
-4. **Running Applications' name**: keep "Running Applications", or
-   "Activity" / "Processes"?
-5. **End for processes of other users**: (a) shown, cannot be ended
-   (recommended; no root in the app), (b) ask for a password and end them
-   through a small root helper as the sound one does on FreeBSD?
-6. **Order**: (a) Calculator first, then Running Applications, then
-   Hardware (recommended: the smallest proves the skeleton), or another?

@@ -61,7 +61,7 @@ build once than in every app:
    decision**: §6.10 says window furniture "is the desktop's alone and has
    no per-application override"; the bar's light/dark becomes a per-app
    override (the bar's layout, buttons and corners stay the desktop's).
-3. **Three small native tools that make the app framework**: **Calculator**
+3. *Planned 2026-11-14 (docs/tools-milestone-1.md, accepted).* **Three small native tools that make the app framework**: **Calculator**
    (basic, with a scientific mode), **Running Applications** (processes:
    Linux /proc, FreeBSD's kern.proc sysctls; end, kill, by window too),
    **Hardware** (CPU, GPU, memory, disks, network: vergence-power,
@@ -88,6 +88,23 @@ build once than in every app:
    hub would hold.
 9. **Web browser, then Mail**: the largest by far, and the most borrowed;
    last, and only by Dave's word.
+
+## From Dave's list, 2026-11-14 night
+
+Added to the roadmap at his word ("Yes add them"); each gets its place in
+the order when its turn is near:
+
+- **Fonts of our own**: "not every font, just a few: Sans Mono etc."
+- **Font rendering checked against publishing standards and readability
+  guidelines**, to make Vergence "the BEST at font rendering and scaling",
+  with "extra focus on the window and app proportions"; and **the same
+  layout (fonts, spacing) on FreeBSD and Linux**.
+- **The Sound page picks up a card's extra features**: "mostly things like
+  IO and loopback, midi, etc."
+- **The dock's icons by drag and drop**, while the dock itself is moved
+  "with its menu or a modifier and drag".
+- **The dark title bar's color chosen**, "maybe something like the accent
+  color picker".
 
 ## Questions for Dave (when each app's turn comes)
 
