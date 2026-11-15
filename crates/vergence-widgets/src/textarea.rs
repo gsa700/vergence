@@ -224,6 +224,9 @@ fn wrap_rows(s: &str, stops: &[(usize, f32)], wrap_w: f32) -> Vec<(usize, f32)> 
 /// What the area measured when it was last drawn.
 #[derive(Clone, Copy, Debug, Default)]
 struct Geom {
+    /// The view: the area less the strip under the window's bar, where the
+    /// text starts and the caret is kept (the strip shows what scrolled
+    /// under the bar, frosted, as the terminal's does).
     rect: Rect,
     /// Where x 0 of a row is drawn (before scrolling sideways).
     text_x: f32,
@@ -1064,7 +1067,11 @@ impl Doc {
 
     // --- Drawing ---
 
-    pub(crate) fn draw(&mut self, scene: &mut Scene, fonts: &mut Fonts, r: Rect, theme: &Theme, focused: bool, caret_on: bool) {
+    /// Draws the area in `r`; its top `inset` points are under the window's
+    /// bar: the text starts below them and scrolls up beneath them.
+    pub(crate) fn draw(&mut self, scene: &mut Scene, fonts: &mut Fonts, r: Rect, inset: f32, theme: &Theme, focused: bool, caret_on: bool) {
+        let inset = inset.clamp(0.0, (r.h - 40.0).max(0.0));
+        let v = Rect::new(r.x, r.y + inset, r.w, r.h - inset);
         let size = self.options.size.unwrap_or(theme.text_size).clamp(4.0, 200.0);
         let Some(face) = fonts.face(&self.options.font, 400, false).or_else(|| fonts.face("monospace", 400, false)).or_else(|| fonts.face(&theme.font, 400, false)) else { return };
         let m = fonts.metrics(face, size);
@@ -1087,19 +1094,20 @@ impl Doc {
             self.shaped_for = key;
             self.reshape_all();
         }
-        let resized = self.geom.rect.h != r.h || self.geom.rect.w != r.w;
-        self.geom = Geom { rect: r, text_x, text_w, line_h, char_w, wrap_w, tab_w, thumb: self.geom.thumb };
+        let resized = self.geom.rect.h != v.h || self.geom.rect.w != v.w;
+        self.geom = Geom { rect: v, text_x, text_w, line_h, char_w, wrap_w, tab_w, thumb: self.geom.thumb };
         self.top = self.top.min(n - 1);
         if resized {
             // The top line's rows may have changed: stay on the same row.
             self.scroll_by(0.0);
         }
 
-        scene.fill(r, theme.page);
-        // The line numbers on a gray of their own (Dave, 2026-11-15: "to set
-        // it apart from the rest").
+        // No ground of its own: the window's shows, as opaque as its settings
+        // say (a second fill would make it nearly solid). The line numbers on a
+        // shade of their own over it (Dave, 2026-11-15: "to set it apart from
+        // the rest").
         if gutter > 0.0 {
-            scene.fill(Rect::new(r.x, r.y, gutter, r.h), theme.card);
+            scene.fill(Rect::new(r.x, r.y, gutter, r.h), alpha(theme.text, if theme.dark { 14 } else { 11 }));
         }
         scene.push_clip(r, 0.0);
         let (sa, sb) = self.selection();
@@ -1110,8 +1118,16 @@ impl Doc {
         let text_c = theme.text;
         let num_c = theme.dim;
         let text_clip = Rect::new(r.x + gutter, r.y, (r.w - gutter).max(0.0), r.h);
-        let mut y = r.y + PAD_Y - self.top_off;
+        let mut y = v.y + PAD_Y - self.top_off;
         let mut i = self.top;
+        // The lines above the view that show under the bar.
+        while i > 0 && y > r.y {
+            i -= 1;
+            if self.shaped[i].is_none() {
+                self.shaped[i] = Some(Rc::new(shape_line(fonts, face, size, tab_w, wrap_w, self.buffer.line(i))));
+            }
+            y -= self.line_height(i);
+        }
         let mut widest = 0.0f32;
         while i < n && y < r.y + r.h {
             if self.shaped[i].is_none() {
@@ -1198,7 +1214,7 @@ impl Doc {
         // The caret.
         if focused && caret_on && !selected {
             let (row, x) = self.visual(self.caret);
-            let cy = r.y + PAD_Y + self.line_y(self.caret.line) + row as f32 * line_h;
+            let cy = v.y + PAD_Y + self.line_y(self.caret.line) + row as f32 * line_h;
             let cx = text_x - self.xscroll + x;
             if cy + line_h > r.y && cy < r.y + r.h && cx >= text_clip.x {
                 scene.fill(Rect::new(cx.round() - 0.5, cy + 1.0, 1.5, line_h - 2.0), text_c);
@@ -1211,10 +1227,11 @@ impl Doc {
         scene.pop_clip();
         // The scroll bar, when there is more than fits.
         let (above, total, view) = self.extent();
+        // Its track starts below the bar.
         self.geom.thumb = (total > view + 1.0 && view > 0.0).then(|| {
-            let th = (r.h * view / total).max(MIN_THUMB).min(r.h);
+            let th = (v.h * view / total).max(MIN_THUMB).min(v.h);
             let f = (above / (total - view).max(1.0)).clamp(0.0, 1.0);
-            Rect::new(r.x + r.w - BAR_W - 2.0, r.y + (r.h - th) * f, BAR_W, th)
+            Rect::new(v.x + v.w - BAR_W - 2.0, v.y + (v.h - th) * f, BAR_W, th)
         });
         if let Some(t) = self.geom.thumb {
             scene.fill_rounded(t, BAR_W / 2.0, alpha(theme.text, 80));

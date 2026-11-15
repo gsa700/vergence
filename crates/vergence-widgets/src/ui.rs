@@ -1685,7 +1685,9 @@ impl<M: Clone> Ui<M> {
                 }
                 What::Area { doc, .. } => {
                     let focused = self.focus == Some(n.id);
-                    doc.borrow_mut().draw(scene, fonts, r, theme, focused, self.caret_on());
+                    // The part of it under the window's bar (look milestone 1).
+                    let inset = (self.under_bar - r.y).max(0.0);
+                    doc.borrow_mut().draw(scene, fonts, r, inset, theme, focused, self.caret_on());
                     if ringed {
                         ring(scene, r, 0.0);
                     }

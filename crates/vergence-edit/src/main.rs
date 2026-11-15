@@ -26,7 +26,7 @@ use std::time::SystemTime;
 use vergence_ui::{AppCommand as C, Bar, BarStyle, BarTab, Role, TabEvent};
 use vergence_widgets::edit::Ending;
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
-use vergence_widgets::{Align, AreaOptions, ButtonLook, Element, Input, Length, Padding, Program, TextDoc, Theme, Waker, Window, button, column, field, label, panel, row, space, text_area};
+use vergence_widgets::{Align, AreaOptions, ButtonLook, Element, Input, Length, Padding, Program, TextDoc, Theme, Waker, Window, button, column, field, label, panel, row, rule, space, text_area};
 
 const APP_ID: &str = "vergence-edit";
 const SECTION: &str = "[editor]";
@@ -748,7 +748,8 @@ impl EditWindow {
                 .width(Length::FILL),
             );
         }
-        panel(column(rows).spacing(6.0).width(Length::FILL)).color(t.card).radius(0.0).padding(Padding::hv(6.0, 10.0)).width(Length::FILL)
+        let _ = t;
+        panel(column(rows).spacing(6.0).width(Length::FILL)).radius(0.0).padding(Padding::hv(6.0, 10.0)).width(Length::FILL)
     }
 }
 
@@ -787,13 +788,16 @@ impl Program for EditWindow {
 
     fn view(&self, t: &Theme) -> Element<Msg> {
         let Some(tab) = self.front_tab() else { return space() };
+        // Strips above the text (notices, the find bar), on a shade over the
+        // window's ground so its opacity shows through as everywhere else.
+        let shade = vergence_scene::Color { a: if t.dark { 20 } else { 14 }, ..t.text };
         let mut parts: Vec<Element<Msg>> = Vec::new();
         let strip = |text: String, dismiss: bool| -> Element<Msg> {
             let mut items: Vec<Element<Msg>> = vec![label(text).size(12.0).wrap().width(Length::FILL)];
             if dismiss {
                 items.push(button(label("OK").size(12.0)).padding(Padding::hv(2.0, 10.0)).on_press(Msg::DismissNotice).name("OK"));
             }
-            panel(row(items).spacing(8.0).align(Align::Center).width(Length::FILL)).color(t.card).radius(0.0).padding(Padding::hv(6.0, 12.0)).width(Length::FILL)
+            panel(row(items).spacing(8.0).align(Align::Center).width(Length::FILL)).padding(Padding::hv(6.0, 12.0)).width(Length::FILL)
         };
         if let Some(n) = &self.notice {
             parts.push(strip(n.clone(), true));
@@ -804,10 +808,18 @@ impl Program for EditWindow {
         if let Some(f) = &self.find {
             parts.push(self.find_bar(f, t));
         }
+        // With strips, they go under the server's bar (padding is a panel's,
+        // not a column's) and the text below them; without, the text itself
+        // starts under the bar and scrolls up beneath it, frosted, as the
+        // terminal's does (the text area keeps its first line below the bar).
+        let mut all: Vec<Element<Msg>> = Vec::new();
+        if !parts.is_empty() {
+            all.push(panel(column(std::mem::take(&mut parts)).spacing(1.0).width(Length::FILL)).color(shade).padding(Padding { top: t.top, ..Padding::default() }).radius(0.0).width(Length::FILL));
+        }
         // The area's id changes with focus_turn, so it takes the keyboard back
         // when the find bar closes (its state is the document's, not the id's).
         let area = text_area(&tab.doc).key((self.focus_turn << 32) | tab.id as u64).on_change(Msg::Changed).name(tab.name());
-        parts.push(if self.find.is_none() { area.autofocus() } else { area });
+        all.push(if self.find.is_none() { area.autofocus() } else { area });
         // The status line: where the caret is, how Tab indents, the line endings.
         let d = tab.doc.borrow();
         let (l, c) = d.line_column();
@@ -828,9 +840,9 @@ impl Program for EditWindow {
         status.push(small(indent, Msg::ToggleSpaces, "Indent with spaces or tabs"));
         status.push(small(ending.into(), Msg::ToggleEnding, "Line endings"));
         status.push(label("UTF-8").size(12.0).dim());
-        parts.push(panel(row(status).spacing(14.0).align(Align::Center).width(Length::FILL)).color(t.page).radius(0.0).padding(Padding { top: 3.0, bottom: 3.0, left: 12.0, right: 12.0 }).width(Length::FILL));
-        // Below the server's bar (padding is a panel's, not a column's).
-        panel(column(parts).width(Length::FILL).height(Length::FILL)).padding(Padding { top: t.top, ..Padding::default() }).radius(0.0).width(Length::FILL).height(Length::FILL)
+        all.push(rule());
+        all.push(panel(row(status).spacing(14.0).align(Align::Center).width(Length::FILL)).radius(0.0).padding(Padding { top: 3.0, bottom: 3.0, left: 12.0, right: 12.0 }).width(Length::FILL));
+        column(all).width(Length::FILL).height(Length::FILL)
     }
 
     fn update(&mut self, m: Msg, window: &mut Window) {
