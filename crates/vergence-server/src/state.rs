@@ -134,6 +134,9 @@ pub struct Server {
     pub launcher: crate::launcher::Launcher,
     /// A window's app menu, if open (app settings milestone 1).
     pub app_menu: crate::appmenu::AppMenu,
+    /// Apps not ours with a title bar style of their own: desktop.toml
+    /// `[app."<id>"] bar-style` (app settings milestone 1), true for light.
+    pub app_bars: std::collections::HashMap<String, bool>,
     /// Touch panels and the fingers on them (touch.rs).
     pub touch: crate::touch::Touch,
     /// Mice and touchpads, kept to be given the settings again when they change (pointer.rs).
@@ -286,6 +289,7 @@ impl Server {
             resume: Default::default(),
             launcher: Default::default(),
             app_menu: Default::default(),
+            app_bars: crate::decor::app_bars(),
             pointer_devices: Vec::new(),
             touch_panels: Vec::new(),
             inputs: Default::default(),

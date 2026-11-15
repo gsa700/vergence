@@ -520,8 +520,28 @@ impl Server {
         match w.native().map(|n| n.bar_style()) {
             Some(vergence_protocol::window::BarStyle::Light) => true,
             Some(vergence_protocol::window::BarStyle::Dark) => false,
-            _ => desktop_light,
+            Some(_) => desktop_light,
+            // An app not ours: its `[app."<id>"] bar-style`, while the desktop's
+            // Style is App default (Dark or Light forces every app).
+            None if self.app_default_style() => self.foreign_app_key(w).and_then(|k| self.app_bars.get(&k).copied()).unwrap_or(desktop_light),
+            None => desktop_light,
         }
+    }
+
+    /// The desktop's Style is "App default": each app as it chooses.
+    fn app_default_style(&self) -> bool {
+        matches!(self.settings.current.get(&(crate::settings::APPEARANCE.to_string(), "color-scheme".to_string())), None | Some(vergence_protocol::bus::SettingValue::U32(0)))
+    }
+
+    /// The name an app not ours goes by in desktop.toml's `[app."<id>"]`:
+    /// its windows' class (Wayland app id, X11 class), lower case.
+    fn foreign_app_key(&self, w: &Win) -> Option<String> {
+        let id = match (w.toplevel(), w.x11_surface()) {
+            (Some(t), _) => smithay::wayland::compositor::with_states(t.wl_surface(), |s| s.data_map.get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>().and_then(|d| d.lock().ok()?.app_id.clone())),
+            (None, Some(x)) => Some(x.class()),
+            _ => None,
+        }?;
+        (!id.is_empty()).then(|| id.to_lowercase())
     }
 
     fn button_layout_text(&self) -> String {
@@ -1133,4 +1153,26 @@ impl Server {
     pub fn bar_tool_id(&self, w: &Win, index: usize) -> Option<u32> {
         tools_of(w).and_then(|(_, t)| t.get(index).filter(|(_, enabled, _)| *enabled).map(|(_, _, id)| *id))
     }
+}
+
+/// desktop.toml's `[app."<id>"] bar-style` for each app not ours that has
+/// one (app settings milestone 1): id (lower case) to light.
+pub fn app_bars() -> std::collections::HashMap<String, bool> {
+    let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let table = text.parse::<toml::Table>().unwrap_or_default();
+    let mut out = std::collections::HashMap::new();
+    if let Some(apps) = table.get("app").and_then(|a| a.as_table()) {
+        for (id, t) in apps {
+            match t.get("bar-style").and_then(|v| v.as_str()) {
+                Some("light") => {
+                    out.insert(id.to_lowercase(), true);
+                }
+                Some("dark") => {
+                    out.insert(id.to_lowercase(), false);
+                }
+                _ => {}
+            }
+        }
+    }
+    out
 }

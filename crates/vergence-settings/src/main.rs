@@ -38,6 +38,8 @@ mod notify;
 use notify::NotifyMsg;
 mod places;
 use places::PlacesMsg;
+mod apps;
+use apps::AppsMsg;
 mod wifi;
 mod winbar;
 
@@ -174,6 +176,7 @@ enum Icon {
     Battery,
     About,
     Notifications,
+    Apps,
 }
 
 impl Icon {
@@ -182,7 +185,7 @@ impl Icon {
         match self {
             Icon::WiFi | Icon::Network => Color::rgb(0x1e, 0x88, 0xe5),
             Icon::Appearance | Icon::Fonts | Icon::Wallpaper => Color::rgb(0x2f, 0x6f, 0xd6),
-            Icon::Windows | Icon::Dock => Color::rgb(0x5b, 0x5f, 0x6b),
+            Icon::Windows | Icon::Dock | Icon::Apps => Color::rgb(0x5b, 0x5f, 0x6b),
             Icon::Screen => Color::rgb(0x1f, 0x8a, 0x8a),
             Icon::Keyboard | Icon::Pointer | Icon::Touchpad | Icon::Touchscreen => Color::rgb(0x6e, 0x55, 0xc9),
             Icon::Sound => Color::rgb(0xd2, 0x3f, 0x6a),
@@ -248,6 +251,12 @@ fn icon_mark<M: 'static>(icon: Icon) -> Element<M> {
             Icon::Windows => {
                 scene.stroke(Rect::new(x + 4.5, y + 5.5, 11.0, 9.0), 1.5, 1.4, w);
                 scene.fill(Rect::new(x + 4.5, y + 5.5, 11.0, 2.5), w);
+            }
+            // Four squares: apps.
+            Icon::Apps => {
+                for (i, j) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+                    scene.fill_rounded(Rect::new(x + 5.0 + i * 5.5, y + 5.0 + j * 5.5, 4.5, 4.5), 1.2, w);
+                }
             }
             // A dock of three.
             Icon::Dock => {
@@ -376,6 +385,10 @@ enum Page {
     /// screen whose wallpaper is open, by index (0 with one screen or none).
     Wallpaper(usize),
     About,
+    /// Every app the desktop knows, and one app's page (`App::app_open`;
+    /// apps.rs, app settings milestone 1).
+    Apps,
+    AppPage,
     /// About's sub-pages: the license texts, and the code Vergence is built with.
     LicenseText,
     Notices,
@@ -387,6 +400,8 @@ enum Message {
     Notify(NotifyMsg),
     /// Window places on the Windows page (places.rs).
     Places(PlacesMsg),
+    /// The Apps page (apps.rs).
+    Apps(AppsMsg),
     Go(Page),
     /// The Wi-Fi page (wifi.rs).
     Wifi(wifi::WifiMsg),
@@ -565,6 +580,8 @@ struct App {
     places_ask: Option<String>,
     /// `--forget <app>` from the dock: asked once the list has come.
     places_from_dock: Option<String>,
+    /// The app whose page is open (apps.rs).
+    app_open: Option<String>,
     page: Page,
     /// The Sound page (vergence-sound): the system, read when the page opens,
     /// and its outputs as last read.
@@ -764,6 +781,7 @@ impl App {
             places: None,
             places_ask: None,
             places_from_dock: None,
+            app_open: None,
             accent_text: appearance_text(&desktop, "accent"),
             size: disp::size(&desktop) as f32,
             sleep_cmd: energy_cmd(&desktop),
@@ -908,7 +926,7 @@ impl App {
         if matches!(p, Page::WiFi | Page::Network) {
             self.wifi_read();
         }
-        if p == Page::Windows {
+        if matches!(p, Page::Windows | Page::Apps | Page::AppPage) {
             places::fetch(self.mail.clone());
         }
         if p == Page::Notifications {
@@ -933,6 +951,7 @@ impl App {
             Message::BatterySample => self.battery_sample(),
             Message::Notify(m) => self.notify_message(m),
             Message::Places(m) => self.places_message(m),
+            Message::Apps(m) => self.apps_message(m),
             Message::Resolution(i) => self.pick_mode(Some(i), None),
             Message::Refresh(i) => self.pick_mode(None, Some(i)),
             Message::KeepMode(keep) => self.settle_mode(keep),
@@ -1504,6 +1523,7 @@ impl App {
                 ("Windows".into(), Page::Windows, Icon::Windows, "window title bar buttons controls minimize maximize close snap snapping alt tab keys x11"),
                 ("Dock".into(), Page::Dock, Icon::Dock, "dock shelf pin hide opacity gap edge"),
                 ("Notifications".into(), Page::Notifications, Icon::Notifications, "notifications cards alerts do not disturb quiet corner banner"),
+                ("Apps".into(), Page::Apps, Icon::Apps, "apps applications title bar light dark firefox per app own settings"),
             ]),
             ("Screens", screens),
             ("Input", vec![
@@ -2777,6 +2797,8 @@ impl Program for App {
             Page::Sound => "Sound".into(),
             Page::Energy => "Energy".into(),
             Page::Notifications => "Notifications".into(),
+            Page::Apps => "Apps".into(),
+            Page::AppPage => self.app_open.as_deref().map(|a| self.known_app_name(a)).unwrap_or_else(|| "Apps".into()),
             Page::Accessibility => "Accessibility".into(),
             Page::Overview => "Screens".into(),
             Page::Screen(i) => self.outputs.get(i).map(screen_label).unwrap_or_else(|| "Screens".into()),
@@ -2827,6 +2849,8 @@ impl Program for App {
             Page::Touchscreen => self.touchscreen_page(),
             Page::Energy => self.energy(),
             Page::Notifications => self.notifications_page(),
+            Page::Apps => self.apps_page(),
+            Page::AppPage => self.app_page(),
             Page::Sound => self.sound_page(),
             Page::Accessibility => self.accessibility(),
             Page::Overview => self.overview(),
@@ -3194,6 +3218,12 @@ fn main() -> std::io::Result<()> {
         && let Some(page) = app.page_named(name)
     {
         app.open(page);
+    }
+    // `--app <id>`: that app's page (the app menu's Settings… for an app not ours).
+    if let Some(i) = args.iter().position(|a| a == "--app")
+        && let Some(id) = args.get(i + 1).filter(|id| !id.is_empty() && id.len() < 256)
+    {
+        app.apps_message(AppsMsg::Open(id.to_lowercase()));
     }
     vergence_widgets::run(app, (840, 1100))
 }

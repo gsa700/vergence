@@ -313,6 +313,12 @@ impl Server {
                 state.shelf_reload();
                 // Snapping's choices (snap.rs).
                 state.snap_reload();
+                // Title bar styles of apps not ours (decor.rs).
+                let bars = crate::decor::app_bars();
+                if bars != state.app_bars {
+                    state.app_bars = bars;
+                    state.redraw_all();
+                }
                 // Notifications' choices (notify.rs).
                 state.notify_reload();
                 // Wallpaper tint's switch (tint.rs).

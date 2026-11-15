@@ -297,7 +297,8 @@ impl Server {
             Action::Settings => {
                 // The desktop's part of the app's settings, in the settings app
                 // (app settings milestone 1, step 6).
-                let id = o.app_key.clone();
+                // Lower case, as desktop.toml's [app."<id>"] tables are named.
+                let id = o.app_key.to_lowercase();
                 if let Err(e) = crate::spawn(std::process::Command::new("vergence-settings").args(["--app", &id])) {
                     tracing::warn!("app menu: vergence-settings --app {id}: {e}");
                 }
