@@ -213,6 +213,8 @@ struct Viewer {
 #[derive(Debug, Clone)]
 enum Msg {
     Touch(Touch),
+    /// A command from the toolbar.
+    Run(u32),
     OpenWith,
     OpenInEditor,
 }
@@ -536,6 +538,28 @@ impl Viewer {
         .height(Length::FILL)
     }
 
+    /// The toolbar: through the folder, zoom, turn; Open at the end.
+    fn toolbar(&self, t: &Tab, th: &Theme) -> Element<Msg> {
+        use vergence_widgets::toolbar::{Icon, flexible, group, tool, toggle, toolbar};
+        let picture = matches!(t.content, Content::Picture { .. });
+        let on = |c: u32| picture.then_some(Msg::Run(c));
+        let many = picture && pictures::siblings(&t.path).len() > 1;
+        let step = |c: u32| many.then_some(Msg::Run(c));
+        let items = vec![
+            group(vec![tool(Icon::Previous, "Previous picture", step(cmd::PREVIOUS)), tool(Icon::Next, "Next picture", step(cmd::NEXT))]),
+            group(vec![
+                tool(Icon::ZoomOut, "Zoom out", on(cmd::ZOOM_OUT)),
+                tool(Icon::ZoomIn, "Zoom in", on(cmd::ZOOM_IN)),
+                if picture { toggle(Icon::Fit, "Fit to the window", t.zoom.is_none(), Msg::Run(cmd::FIT)) } else { tool(Icon::Fit, "Fit to the window", None) },
+                tool(Icon::Actual, "Actual size", on(cmd::ACTUAL)),
+            ]),
+            group(vec![tool(Icon::TurnLeft, "Turn left", on(cmd::TURN_LEFT)), tool(Icon::TurnRight, "Turn right", on(cmd::TURN_RIGHT))]),
+            flexible(),
+            tool(Icon::Open, "Open…", Some(Msg::Run(cmd::OPEN))),
+        ];
+        toolbar(items, th)
+    }
+
     fn status(&self, t: &Tab, th: &Theme) -> Element<Msg> {
         let mut items: Vec<Element<Msg>> = vec![label(t.name()).size(12.0).width(Length::FILL)];
         match &t.content {
@@ -588,6 +612,11 @@ impl Program for Viewer {
         Some(vergence_ui::bar_style_setting(&self.desktop, SECTION, BarStyle::Dark))
     }
 
+    /// The toolbar reaches up under the bar: one band (toolbar.rs).
+    fn under_bar(&self) -> bool {
+        !self.preview
+    }
+
     fn bar(&self) -> Option<Bar> {
         if self.preview {
             return None;
@@ -612,7 +641,11 @@ impl Program for Viewer {
                 panel(column(items).spacing(12.0).width(Length::Fixed(420.0))).padding(24.0).width(Length::FILL).height(Length::FILL)
             }
         };
-        let mut all = vec![panel(body).padding(Padding { top: t.top, ..Padding::default() }).radius(0.0).width(Length::FILL).height(Length::FILL)];
+        let mut all = Vec::new();
+        if !self.preview {
+            all.push(self.toolbar(tab, t));
+        }
+        all.push(panel(body).padding(Padding { top: if self.preview { t.top } else { 0.0 }, ..Padding::default() }).radius(0.0).width(Length::FILL).height(Length::FILL));
         if !self.preview {
             all.push(rule());
             all.push(self.status(tab, t));
@@ -655,6 +688,7 @@ impl Program for Viewer {
                 }
             }
             Msg::Touch(Touch::Release { .. }) | Msg::Touch(Touch::Leave) => self.drag = None,
+            Msg::Run(c) => return self.run(c, window),
             Msg::OpenWith => self.open_with(false),
             Msg::OpenInEditor => self.open_with(true),
         }

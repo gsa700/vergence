@@ -28,6 +28,7 @@ pub mod filedialog;
 pub mod files;
 pub mod prefs;
 pub mod textarea;
+pub mod toolbar;
 mod layout;
 mod theme;
 mod ui;
