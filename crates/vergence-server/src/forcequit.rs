@@ -9,6 +9,12 @@
 // reach the server, so only the user's own processes are ever named; the
 // server itself and process 1 are never sent anything. The Force Quit app
 // (vergence-quit) is only the window; Ctrl+Alt+Escape opens it.
+//
+// "Not responding": while Force Quit asks for the list (every two seconds),
+// each app's clients are asked whether they are alive (a native client by
+// the bus's Alive, which the toolkit answers from its loop; a Wayland client
+// by xdg_wm_base's ping); one asked more than NOT_RESPONDING ago and still
+// silent is not responding. X11 clients are taken as answering.
 
 use std::collections::BTreeSet;
 
@@ -23,6 +29,8 @@ unsafe extern "C" {
 
 const SIGKILL: i32 = 9;
 const SIGTERM: i32 = 15;
+/// How long a client may leave "are you alive?" unanswered before it is not responding.
+const NOT_RESPONDING: std::time::Duration = std::time::Duration::from_secs(3);
 /// How long a program asked to end has before it is killed.
 const GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
@@ -50,11 +58,40 @@ impl Server {
                 name: item.name.clone(),
                 icon_side: if icon.is_some() { APP_ICON } else { 0 },
                 icon: icon.map(|i| i.rgba.clone()).unwrap_or_default(),
-                responding: true,
+                responding: windows.iter().all(|w| self.answering(w)),
                 quitting: self.quitting.contains_key(&item.key),
             });
         }
         out
+    }
+
+    /// Whether a window's client answers: asked now if nothing is pending,
+    /// silent if what was asked is older than NOT_RESPONDING.
+    fn answering(&mut self, w: &Win) -> bool {
+        let now = std::time::Instant::now();
+        if let Some(n) = w.native() {
+            let client = n.client;
+            return match self.alive_asked.get(&client) {
+                Some(since) => now.duration_since(*since) < NOT_RESPONDING,
+                None => {
+                    let serial: u32 = smithay::utils::SERIAL_COUNTER.next_serial().into();
+                    self.bus_send(client, vergence_protocol::bus::ServerMsg::Alive { serial });
+                    self.alive_asked.insert(client, now);
+                    true
+                }
+            };
+        }
+        let Some(t) = w.toplevel() else { return true };
+        let Some(id) = smithay::reexports::wayland_server::Resource::client(t.wl_surface()).map(|c| c.id()) else { return true };
+        match t.client().send_ping(smithay::utils::SERIAL_COUNTER.next_serial()) {
+            // Sent: the last one was answered.
+            Ok(()) => {
+                self.pinged.insert(id, now);
+                true
+            }
+            Err(smithay::wayland::shell::PingError::PingAlreadyPending(_)) => self.pinged.get(&id).is_none_or(|since| now.duration_since(*since) < NOT_RESPONDING),
+            Err(_) => true,
+        }
     }
 
     /// The process behind a window, if known.

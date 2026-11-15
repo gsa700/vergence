@@ -268,6 +268,10 @@ impl Server {
                 self.bus_send(id, ServerMsg::Done { serial });
             }
             // Force Quit (forcequit.rs).
+            // Its loop answered (forcequit.rs's "not responding").
+            ClientMsg::Alive { .. } => {
+                self.alive_asked.remove(&id);
+            }
             ClientMsg::ListApps { serial } => {
                 let apps = self.running_apps();
                 self.bus_send(id, ServerMsg::Apps { serial, apps });

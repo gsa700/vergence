@@ -139,6 +139,10 @@ pub struct Server {
     pub app_bars: std::collections::HashMap<String, bool>,
     /// Applications being force-quit: asked with SIGTERM, killed if still there (forcequit.rs).
     pub quitting: std::collections::HashMap<String, Vec<u32>>,
+    /// Asked whether they are alive and not answered yet, since when: native
+    /// clients by bus id, Wayland clients by their id (forcequit.rs).
+    pub alive_asked: std::collections::HashMap<u32, std::time::Instant>,
+    pub pinged: std::collections::HashMap<smithay::reexports::wayland_server::backend::ClientId, std::time::Instant>,
     /// Touch panels and the fingers on them (touch.rs).
     pub touch: crate::touch::Touch,
     /// Mice and touchpads, kept to be given the settings again when they change (pointer.rs).
@@ -293,6 +297,8 @@ impl Server {
             app_menu: Default::default(),
             app_bars: crate::decor::app_bars(),
             quitting: Default::default(),
+            alive_asked: Default::default(),
+            pinged: Default::default(),
             pointer_devices: Vec::new(),
             touch_panels: Vec::new(),
             inputs: Default::default(),

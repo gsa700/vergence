@@ -478,6 +478,11 @@ impl<'a> Native<'a> {
     fn handle(&mut self, m: ServerMsg) -> io::Result<()> {
         let ev = match m {
             ServerMsg::Window(ev) => ev,
+            // Asked whether the loop runs (Force Quit's "not responding"): it does.
+            ServerMsg::Alive { serial } => {
+                self.client.send(&ClientMsg::Alive { serial }).map_err(client_error)?;
+                return Ok(());
+            }
             // A paste the server could not serve: nothing comes.
             ServerMsg::Error { serial, .. } if Some(serial) == self.paste_serial => {
                 self.paste_serial = None;

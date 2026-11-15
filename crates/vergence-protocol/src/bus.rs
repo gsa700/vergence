@@ -295,6 +295,8 @@ pub enum ClientMsg {
     /// End an application at once: every process of its windows is sent
     /// SIGKILL (the user's own processes only). Reply: Done, or an error.
     ForceQuit { serial: u32, app: String },
+    /// The answer to [`ServerMsg::Alive`]: this client's loop is running.
+    Alive { serial: u32 },
     /// Windows (window.rs).
     Window(crate::window::WinRequest),
 }
@@ -348,6 +350,10 @@ pub enum ServerMsg {
     Places { serial: u32, apps: Vec<(String, u32)> },
     /// The user's running applications.
     Apps { serial: u32, apps: Vec<AppInfo> },
+    /// Is this client's loop running? Answer with [`ClientMsg::Alive`] (the
+    /// toolkit does, from its loop): a client that has not answered for a
+    /// few seconds is "not responding" in Force Quit.
+    Alive { serial: u32 },
     /// Windows (window.rs).
     Window(crate::window::WinEvent),
 }
@@ -366,6 +372,7 @@ mod op {
     pub const FORGET_PLACES: u16 = 10;
     pub const LIST_APPS: u16 = 11;
     pub const FORCE_QUIT: u16 = 12;
+    pub const ALIVE_REPLY: u16 = 13;
     // Server to client.
     pub const WELCOME: u16 = 1;
     pub const PONG: u16 = 2;
@@ -379,6 +386,7 @@ mod op {
     pub const INPUTS: u16 = 10;
     pub const PLACES: u16 = 11;
     pub const APPS: u16 = 12;
+    pub const ALIVE: u16 = 13;
 }
 
 fn put_setting_value(e: &mut Encoder, v: &SettingValue) {
@@ -482,6 +490,11 @@ impl ClientMsg {
                 e.u32(*serial).str(app);
                 e
             }
+            ClientMsg::Alive { serial } => {
+                let mut e = Encoder::frame(op::ALIVE_REPLY);
+                e.u32(*serial);
+                e
+            }
             // Its descriptors are lost here: send it with encode_with_fds.
             ClientMsg::Window(w) => return w.encode().map(|(bytes, _)| bytes),
         };
@@ -569,6 +582,7 @@ impl ClientMsg {
                 let app = d.str().map_err(|e| bad(serial, e))?;
                 Ok(ClientMsg::ForceQuit { serial, app })
             }
+            op::ALIVE_REPLY => Ok(ClientMsg::Alive { serial: d.u32().map_err(|e| bad(0, e))? }),
             other => {
                 // Every request starts with its serial; answer with it if present.
                 let serial = d.u32().unwrap_or(0);
@@ -636,6 +650,11 @@ impl ServerMsg {
             ServerMsg::ActionInvoked { id, key } => {
                 let mut e = Encoder::frame(op::ACTION_INVOKED);
                 e.u32(*id).str(key);
+                e
+            }
+            ServerMsg::Alive { serial } => {
+                let mut e = Encoder::frame(op::ALIVE);
+                e.u32(*serial);
                 e
             }
             ServerMsg::Apps { serial, apps } => {
@@ -746,6 +765,7 @@ impl ServerMsg {
             op::NOTIFIED => ServerMsg::Notified { serial: d.u32()?, id: d.u32()? },
             op::NOTIFICATION_CLOSED => ServerMsg::NotificationClosed { id: d.u32()?, reason: d.u32()? },
             op::ACTION_INVOKED => ServerMsg::ActionInvoked { id: d.u32()?, key: d.str()? },
+            op::ALIVE => ServerMsg::Alive { serial: d.u32()? },
             op::APPS => {
                 let serial = d.u32()?;
                 let n = d.count(14)?;
@@ -833,6 +853,7 @@ mod tests {
             ClientMsg::ForgetPlaces { serial: 19, app: String::new() },
             ClientMsg::ListApps { serial: 22 },
             ClientMsg::ForceQuit { serial: 23, app: "firefox".into() },
+            ClientMsg::Alive { serial: 25 },
         ] {
             assert_eq!(ClientMsg::decode(&frame(&m.encode().unwrap())).unwrap(), m);
         }
@@ -863,6 +884,7 @@ mod tests {
             ServerMsg::Inputs { serial: 0, devices: Vec::new(), seen: Vec::new() },
             ServerMsg::Places { serial: 20, apps: vec![("vergence-term".into(), 3), ("firefox".into(), 1)] },
             ServerMsg::Places { serial: 21, apps: Vec::new() },
+            ServerMsg::Alive { serial: 26 },
             ServerMsg::Apps {
                 serial: 24,
                 apps: vec![

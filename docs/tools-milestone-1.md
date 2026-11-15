@@ -136,9 +136,12 @@ Quit Applications); anything more is the terminal's.
   two seconds with the app shown "Quitting…", SIGKILL to what is left (a
   real close would bring up the app's own questions, which Force Quit's
   question has already answered).
-  Dropped as too much for "very simple": End and Pick a window. Not yet:
-  "not responding" (every app shows as answering until the server pings
-  its clients).
+  Dropped as too much for "very simple": End and Pick a window. "Not
+  responding" (the same night): while Force Quit asks for the list, the
+  server asks each app's clients whether they are alive (bus `Alive`,
+  answered by the toolkit's loop; xdg_wm_base's ping for Wayland); one
+  silent for 3 s shows "Not responding" in red; X11 clients count as
+  answering.
 
 ## Steps
 
