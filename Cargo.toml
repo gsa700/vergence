@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/vergence-edid", "crates/vergence-profile", "crates/vergence-xsettings", "crates/vergence-harness", "crates/vergence-server", "crates/vergence-settings", "crates/vergence-protocol", "crates/vergence-dbus", "crates/vergence-term", "crates/vergence-scene", "crates/vergence-text", "crates/vergence-render", "crates/vergence-wl", "crates/vergence-ui", "crates/vergence-look", "crates/vergence-shell", "crates/vergence-widgets", "crates/vergence-sound", "crates/vergence-seat", "crates/vergence-bar", "crates/vergence-net", "crates/vergence-power", "crates/vergence-calc", "crates/vergence-quit"]
+members = ["crates/vergence-edid", "crates/vergence-profile", "crates/vergence-xsettings", "crates/vergence-harness", "crates/vergence-server", "crates/vergence-settings", "crates/vergence-protocol", "crates/vergence-dbus", "crates/vergence-term", "crates/vergence-scene", "crates/vergence-text", "crates/vergence-render", "crates/vergence-wl", "crates/vergence-ui", "crates/vergence-look", "crates/vergence-shell", "crates/vergence-widgets", "crates/vergence-sound", "crates/vergence-seat", "crates/vergence-bar", "crates/vergence-net", "crates/vergence-power", "crates/vergence-calc", "crates/vergence-quit", "crates/vergence-sysinfo", "crates/vergence-hw"]
 
 [workspace.package]
 version = "0.1.0"
@@ -28,6 +28,7 @@ vergence-bar = { path = "crates/vergence-bar" }
 vergence-net = { path = "crates/vergence-net" }
 vergence-power = { path = "crates/vergence-power" }
 vergence-calc = { path = "crates/vergence-calc" }
+vergence-sysinfo = { path = "crates/vergence-sysinfo" }
 
 # drm-rs 0.14.1 with the FreeBSD DRM node fixes (patches/README.md).
 [patch.crates-io]

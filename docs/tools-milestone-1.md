@@ -143,6 +143,19 @@ Quit Applications); anything more is the terminal's.
   silent for 3 s shows "Not responding" in red; X11 clients count as
   answering.
 
+- **2026-11-15 early: Hardware built** (step 5): vergence-sysinfo
+  (processors and their load, clock, temperatures, memory, file systems by
+  `df -kP`, disk traffic; Linux /proc and /sys, FreeBSD sysctlbyname;
+  tests pass on Hubble and kepler); vergence-widgets chart.rs (a chart of
+  the last minute, and a meter); vergence-hw, a sidebar window: This
+  computer, Processors (a chart, each thread's meter, temperatures),
+  Memory, Storage (each file system's meter, disk traffic on Linux),
+  Network (each interface, its addresses, link, in and out charted),
+  Graphics (vergence-power's GPUs, awake or asleep, temperatures), Power
+  (mains, each battery's charge, power, time left, health, cycles);
+  refreshed once a second. Checked on Hubble: This computer; the other
+  pages not yet looked at on screen (Dave was using Hubble).
+
 ## Steps
 
 1. **Toolkit**: About, the app skeleton.

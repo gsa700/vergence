@@ -1,0 +1,9 @@
+[package]
+name = "vergence-sysinfo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "What the machine is doing: processors, memory, file systems, disks, temperatures; Linux /proc and /sys, FreeBSD sysctls"
+
+[dependencies]

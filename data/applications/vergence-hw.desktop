@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Hardware
+Comment=What this computer is and what it is doing now
+Exec=vergence-hw
+Icon=vergence-hw
+Terminal=false
+Categories=System;Monitor;
+Keywords=hardware;cpu;processor;memory;ram;disk;storage;network;gpu;graphics;battery;temperature;
+StartupWMClass=vergence-hw

@@ -1,0 +1,17 @@
+[package]
+name = "vergence-hw"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Vergence's Hardware app: what the computer is and what it is doing now"
+
+# Our own throughout: the window on the toolkit, the readings from our own
+# crates (vergence-sysinfo, vergence-net, vergence-power).
+[dependencies]
+vergence-sysinfo.workspace = true
+vergence-net.workspace = true
+vergence-power.workspace = true
+vergence-ui.workspace = true
+vergence-widgets.workspace = true
+vergence-scene.workspace = true

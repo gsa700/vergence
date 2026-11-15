@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Vergence's Hardware: a chip with its pins and a line of load across it. Drawn by the project. -->
+  <g stroke="#6b7a9e" stroke-width="3" stroke-linecap="round">
+    <path d="M22 6 V12 M32 6 V12 M42 6 V12 M22 52 V58 M32 52 V58 M42 52 V58 M6 22 H12 M6 32 H12 M6 42 H12 M52 22 H58 M52 32 H58 M52 42 H58"/>
+  </g>
+  <rect x="12" y="12" width="40" height="40" rx="7" fill="#20232c"/>
+  <rect x="12" y="12" width="40" height="40" rx="7" fill="none" stroke="#6b7a9e" stroke-width="2"/>
+  <path d="M17 38 L25 30 L31 35 L39 24 L47 29" fill="none" stroke="#729fcf" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

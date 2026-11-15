@@ -2190,6 +2190,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vergence-hw"
+version = "0.1.0"
+dependencies = [
+ "vergence-net",
+ "vergence-power",
+ "vergence-scene",
+ "vergence-sysinfo",
+ "vergence-ui",
+ "vergence-widgets",
+]
+
+[[package]]
 name = "vergence-look"
 version = "0.1.0"
 
@@ -2308,6 +2320,10 @@ dependencies = [
 
 [[package]]
 name = "vergence-sound"
+version = "0.1.0"
+
+[[package]]
+name = "vergence-sysinfo"
 version = "0.1.0"
 
 [[package]]
