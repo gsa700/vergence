@@ -209,12 +209,16 @@ pub const fn frost_radius(step: u32) -> f32 {
 /// The contrast the bar's ink must keep over the bare frost so that it keeps
 /// the bar's rule (4.5:1 focused, 3:1 not) on the shapes laid on the frost
 /// too (a tab behind, a button, anything under the pointer). Worked out over
-/// a grid of colors; the test below checks it.
+/// a grid of colors; the test below checks it. A light bar's frost over a
+/// dark window (a light title bar on a dark terminal) is raised until the ink
+/// reads: the unfocused grey ink needs a near-white ground, so the focused
+/// bar asks for as much from its near-black ink, or it stays a dimmer grey
+/// than the unfocused one and focus looks reversed (Dave, 2026-11-14).
 pub const fn frost_need(light: bool, focused: bool) -> f32 {
     match (light, focused) {
         (false, true) => 7.0,
         (false, false) => 5.1,
-        (true, true) => 5.85,
+        (true, true) => 14.0,
         (true, false) => 4.05,
     }
 }
@@ -414,6 +418,17 @@ mod tests {
 
     /// A frost that keeps frost_need keeps the bar's rule with every shape
     /// laid on it, over a grid of colors.
+    #[test]
+    fn a_focused_light_bars_frost_is_never_darker_than_an_unfocused_ones() {
+        // The darkest gray each frost floor allows under its ink.
+        let floor = |focused: bool| {
+            let l = bar_look(true);
+            let ink = if focused { l.ink } else { l.ink_off };
+            (0..=255u8).find(|v| contrast(ink, Rgb(*v, *v, *v)) >= frost_need(true, focused)).unwrap()
+        };
+        assert!(floor(true) >= floor(false), "focused {} unfocused {}", floor(true), floor(false));
+    }
+
     #[test]
     fn the_frost_floor_covers_the_shapes_on_it() {
         for light in [false, true] {
