@@ -50,7 +50,6 @@ impl Rows for TermRows {
             _ => "Catppuccin",
         };
         let opacity = vergence_ui::opacity_setting(text, "[appearance]");
-        let opacities: Vec<Choice> = [1.0, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7].iter().map(|o: &f32| Choice::decimal(&format!("{:.0}%", o * 100.0), *o)).collect();
         let styles = vec![Choice::text("Dark", "dark"), Choice::text("Light", "light")];
         vec![
             Part {
@@ -82,7 +81,7 @@ impl Rows for TermRows {
                 rows: vec![
                     Row::new("style", "Style", "While the desktop's Style is App default.", Control::Choose { choices: styles.clone(), desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(forced_by_desktop(text)),
                     Row::new("bar-style", "Title bar", "", Control::Choose { choices: styles, desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(forced_by_desktop(text)),
-                    Row { key: "opacity".into(), name: "Opacity".into(), help: String::new(), control: Control::Choose { choices: opacities, desktop: Some(format!("Desktop default ({:.0}%)", opacity * 100.0)), app_default: 0 } , locked: None },
+                    Row::new("opacity", "Opacity", "30 to 100: how much of the window's ground shows; the text stays as it is.", Control::Percent { min: 30, desktop: format!("Desktop default ({:.0})", opacity * 100.0), now: (opacity * 100.0).round() as u32 }),
                     Row { key: String::new(), name: "Window places".into(), help: "Where the desktop puts the terminal's windows, for each set of screens.".into(), control: Control::Button { label: "Forget…".into(), id: FORGET } , locked: None },
                 ],
             },

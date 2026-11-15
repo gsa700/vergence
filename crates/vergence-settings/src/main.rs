@@ -402,6 +402,8 @@ enum Message {
     Places(PlacesMsg),
     /// The Apps page (apps.rs).
     Apps(AppsMsg),
+    /// desktop.toml changed under the app (its own settings window wrote it).
+    Reread,
     Go(Page),
     /// The Wi-Fi page (wifi.rs).
     Wifi(wifi::WifiMsg),
@@ -857,7 +859,12 @@ impl App {
         if self.prefs_open.get() {
             return;
         }
-        window.open_window(vergence_widgets::window(vergence_widgets::prefs::Prefs::new("Settings", "vergence-settings", "[settings]", false, Box::new(OwnRows), self.prefs_open.clone())));
+        // Its changes (opacity) shown in the main window at once, not when it next has the keyboard.
+        let mail = self.mail.clone();
+        let prefs = vergence_widgets::prefs::Prefs::new("Settings", "vergence-settings", "[settings]", false, Box::new(OwnRows), self.prefs_open.clone()).on_write(move || {
+            mail.send(Message::Reread);
+        });
+        window.open_window(vergence_widgets::window(prefs));
     }
 
     fn accent(&self) -> Color {
@@ -952,6 +959,7 @@ impl App {
             Message::Notify(m) => self.notify_message(m),
             Message::Places(m) => self.places_message(m),
             Message::Apps(m) => self.apps_message(m),
+            Message::Reread => self.reread(),
             Message::Resolution(i) => self.pick_mode(Some(i), None),
             Message::Refresh(i) => self.pick_mode(None, Some(i)),
             Message::KeepMode(keep) => self.settle_mode(keep),
@@ -1681,7 +1689,7 @@ impl App {
             "Light or dark, the accent color, contrast and motion. Every app that follows the desktop changes at once.",
             vec![
                 self.group(None, vec![
-                    setting("Style", "App default lets each app look as it chooses (its own settings, Ctrl+, in it); Dark or Light is for every app but this one, which stays light to be read easily.", choice(names, Some(scheme), Message::Scheme).width(Length::Fixed(160.0)).name("Style")),
+                    setting("Style", "App default lets each app look as it chooses (its own settings, Ctrl+, in it); Dark or Light is for every app. Settings windows stay light under App default, to be read easily.", choice(names, Some(scheme), Message::Scheme).width(Length::Fixed(160.0)).name("Style")),
                     setting("Accent color", if accent.is_empty() { "None: each app uses its own." } else { "" }, row(swatches).spacing(6.0).align(Align::Center)),
                     setting(
                         "Custom accent",
@@ -2755,10 +2763,9 @@ impl App {
         if self.status.is_empty() { space() } else { label(self.status.clone()).size(11.0).dim().wrap().width(Length::FILL) }
     }
 
-    // The theme's colors, for the few places that are drawn by hand: light,
-    // as the app always is.
+    // The theme's colors, for the few places that are drawn by hand.
     fn palette(&self) -> vergence_look::Palette {
-        vergence_look::PALETTE_LIGHT
+        if appearance_text(&self.desktop, "color-scheme") == "dark" { vergence_look::PALETTE_DARK } else { vergence_look::PALETTE_LIGHT }
     }
 
     fn text_color(&self) -> Color {
@@ -2813,10 +2820,10 @@ impl Program for App {
 
     fn theme(&self) -> Theme {
         let text = toml::to_string(&self.desktop).unwrap_or_default();
-        // Always light (Dave, 2026-11-14: "settings should always be light. It's so
-        // hard to read when dark with the small text"): the one app the desktop's
-        // Dark does not reach. High contrast still does.
-        let dark = false;
+        // Light (Dave, 2026-11-14: "so hard to read when dark with the small
+        // text"), unless the desktop's Style forces Dark ("unless the master
+        // override is engaged"). Its own Style choice does not apply.
+        let dark = vergence_ui::desktop_pick(&text) == Some(false);
         let mut t = Theme::new(dark, self.accent(), appearance_text(&self.desktop, "contrast") == "high");
         t.reduced_motion = self.desktop.get("appearance").and_then(|a| a.get("reduced-motion")).and_then(|v| v.as_bool()).unwrap_or(false);
         t.double_click = self.desktop.get("mouse").and_then(|a| a.get("double-click")).and_then(|v| v.as_integer()).map_or(400, |v| v.clamp(100, 2000) as u32);
@@ -2828,9 +2835,10 @@ impl Program for App {
         t
     }
 
-    /// Its bar: light, always, as its content (Dave, 2026-11-14).
+    /// Its bar: light as its content, unless the desktop's Style forces one.
     fn bar_style(&self) -> Option<vergence_ui::BarStyle> {
-        Some(vergence_ui::BarStyle::Light)
+        let text = toml::to_string(&self.desktop).unwrap_or_default();
+        Some(vergence_ui::bar_style_setting(&text, "[settings window]", vergence_ui::BarStyle::Light))
     }
 
     fn view(&self, t: &Theme) -> Element<Message> {
@@ -3257,14 +3265,13 @@ struct OwnRows;
 
 impl vergence_widgets::prefs::Rows for OwnRows {
     fn parts(&self, text: &str) -> Vec<vergence_widgets::prefs::Part> {
-        use vergence_widgets::prefs::{Choice, Control, Part, Row};
+        use vergence_widgets::prefs::{Control, Part, Row};
         // Always light (Dave, 2026-11-14): no Style or Title bar of its own to choose.
         let opacity = vergence_ui::opacity_setting(text, "[appearance]");
-        let opacities: Vec<Choice> = [1.0, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7].iter().map(|o: &f32| Choice::decimal(&format!("{:.0}%", o * 100.0), *o)).collect();
         vec![Part {
             title: "On this desktop".into(),
             rows: vec![
-                Row::new("opacity", "Opacity", "", Control::Choose { choices: opacities, desktop: Some(format!("Desktop default ({:.0}%)", opacity * 100.0)), app_default: 0 }),
+                Row::new("opacity", "Opacity", "30 to 100: how much of the window's ground shows; the text stays as it is.", Control::Percent { min: 30, desktop: format!("Desktop default ({:.0})", opacity * 100.0), now: (opacity * 100.0).round() as u32 }),
                 Row::new("", "Window places", "Where the desktop puts the settings window, for each set of screens.", Control::Button { label: "Forget…".into(), id: 1 }),
             ],
         }]

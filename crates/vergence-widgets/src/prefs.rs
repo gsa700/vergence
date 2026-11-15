@@ -87,6 +87,11 @@ pub enum Control {
     Switch { default: bool },
     /// A button the app answers ([`Rows::button`]): "Forget…".
     Button { label: String, id: u32 },
+    /// A percentage typed in (an opacity: Dave, 2026-11-14, rather than a
+    /// list in steps of 5), from `min` to 100, written as a fraction; empty
+    /// is the default, which `desktop` names ("Desktop default (100)") and
+    /// `now` is (where the slider beside it rests while the field is empty).
+    Percent { min: u32, desktop: String, now: u32 },
 }
 
 /// One row: the key it writes, its name, a line saying what it does.
@@ -141,15 +146,19 @@ pub struct Prefs {
     pub rows: Box<dyn Rows>,
     /// Set while the window is open: the app opens no second one.
     pub open: Rc<Cell<bool>>,
+    /// Told after each change it writes (the app shows it at once).
+    pub on_write: Option<Box<dyn Fn()>>,
     text: String,
     stamp: Option<SystemTime>,
     alive: Arc<AtomicBool>,
+    /// What is typed in a percentage's field, by key, until it is a value.
+    drafts: std::collections::HashMap<String, String>,
 }
 
 impl Prefs {
     pub fn new(app: &str, app_id: &str, section: &str, default_dark: bool, rows: Box<dyn Rows>, open: Rc<Cell<bool>>) -> Prefs {
         open.set(true);
-        let mut p = Prefs { app: app.into(), app_id: app_id.into(), section: section.into(), default_dark, rows, open, text: String::new(), stamp: None, alive: Arc::new(AtomicBool::new(true)) };
+        let mut p = Prefs { app: app.into(), app_id: app_id.into(), section: section.into(), default_dark, rows, open, on_write: None, text: String::new(), stamp: None, alive: Arc::new(AtomicBool::new(true)), drafts: Default::default() };
         p.reread();
         p
     }
@@ -184,6 +193,15 @@ impl Prefs {
         }
         self.text = new;
         self.stamp = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        if let Some(f) = &self.on_write {
+            f();
+        }
+    }
+
+    /// Something to call after each change it writes.
+    pub fn on_write(mut self, f: impl Fn() + 'static) -> Prefs {
+        self.on_write = Some(Box::new(f));
+        self
     }
 
     fn value(&self, key: &str) -> Option<String> {
@@ -254,6 +272,36 @@ impl Prefs {
                 switch(on, move |b| PrefsMsg::Set(key.clone(), (b != default).then_some(Value::Flag(b)))).name(r.name.clone())
             }
             Control::Button { label: words, id } => button(label(words.clone()).size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(PrefsMsg::Button(*id)).name(words.clone()),
+            Control::Percent { min, desktop, now } => {
+                let shown = self.drafts.get(&r.key).cloned().unwrap_or_else(|| own.as_deref().and_then(|v| v.parse::<f32>().ok()).map(|x| format!("{:.0}", x * 100.0)).unwrap_or_default());
+                if own.is_none() {
+                    left.push(label(desktop.clone()).size(11.0).dim());
+                }
+                if own.is_some() {
+                    let key = r.key.clone();
+                    left.push(
+                        row(vec![
+                            button(label("Use the desktop's").size(11.0).color(theme.accent)).look(ButtonLook::Plain).padding(Padding::hv(0.0, 0.0)).on_press(PrefsMsg::Set(key, None)).name(format!("{}: use the desktop's", r.name)),
+                            space().width(Length::FILL),
+                        ])
+                        .width(Length::FILL),
+                    );
+                }
+                let help = format!("{min} to 100");
+                let (key, min) = (r.key.clone(), *min);
+                // A slider for a quick change (Dave: "could be a slider too"), the
+                // field beside it for an exact one; the slider writes when let go.
+                let at = shown.parse::<u32>().ok().filter(|n| (min..=100).contains(n)).unwrap_or(*now) as f32;
+                let (k1, k2) = (key.clone(), key.clone());
+                row(vec![
+                    crate::slider(min as f32, 100.0, at, move |v| PrefsMsg::Slid(k1.clone(), v.round() as u32)).step(1.0).on_release(PrefsMsg::Let(k2, min)).width(Length::Fixed(150.0)).name(format!("{} slider", r.name)),
+                    crate::field(shown, move |t| PrefsMsg::Typed(key.clone(), t, min)).placeholder(now.to_string()).width(Length::Fixed(64.0)).name(format!("{} ({help})", r.name)),
+                    label("%").size(13.0),
+                ])
+                .spacing(6.0)
+                .align(Align::Center)
+                .into()
+            }
         };
         panel(row(vec![column(left).spacing(2.0).width(Length::FILL), control]).spacing(16.0).align(Align::Center).width(Length::FILL)).padding(Padding::hv(8.0, 12.0)).width(Length::FILL)
     }
@@ -264,6 +312,11 @@ impl Prefs {
 pub enum PrefsMsg {
     Set(String, Option<Value>),
     Button(u32),
+    /// A percentage's field: the key, what is typed, the least allowed.
+    Typed(String, String, u32),
+    /// Its slider moved, and was let go.
+    Slid(String, u32),
+    Let(String, u32),
 }
 
 impl Program for Prefs {
@@ -278,8 +331,16 @@ impl Program for Prefs {
         self.app_id.clone()
     }
 
+    /// Light, whatever the app's own look, unless the desktop's Style forces
+    /// Dark (Dave, 2026-11-14: settings are hard to read dark with small
+    /// text); not the app's opacity either: no section of its own.
     fn theme(&self) -> Theme {
-        Theme::from_desktop(&self.text, self.default_dark, &self.section)
+        Theme::from_desktop(&self.text, false, "[settings window]")
+    }
+
+    /// Its bar light too, unless the desktop's Style forces one.
+    fn bar_style(&self) -> Option<vergence_ui::BarStyle> {
+        Some(vergence_ui::bar_style_setting(&self.text, "[settings window]", vergence_ui::BarStyle::Light))
     }
 
     fn view(&self, theme: &Theme) -> Element<PrefsMsg> {
@@ -300,8 +361,29 @@ impl Program for Prefs {
 
     fn update(&mut self, m: PrefsMsg, window: &mut Window) {
         match m {
-            PrefsMsg::Set(key, value) => self.write(&key, value.as_ref()),
+            PrefsMsg::Set(key, value) => {
+                self.drafts.remove(&key);
+                self.write(&key, value.as_ref());
+            }
             PrefsMsg::Button(id) => self.rows.button(id),
+            // Written as soon as it is a value in range; empty is the default.
+            PrefsMsg::Typed(key, typed, min) => {
+                let digits: String = typed.chars().filter(|c| c.is_ascii_digit()).take(3).collect();
+                match percent_of(&digits, min) {
+                    Some(v) => self.write(&key, Some(&Value::Decimal(v))),
+                    None if digits.is_empty() => self.write(&key, None),
+                    None => {}
+                }
+                self.drafts.insert(key, digits);
+            }
+            PrefsMsg::Slid(key, n) => {
+                self.drafts.insert(key, n.to_string());
+            }
+            PrefsMsg::Let(key, min) => {
+                if let Some(v) = self.drafts.get(&key).and_then(|d| percent_of(d, min)) {
+                    self.write(&key, Some(&Value::Decimal(v)));
+                }
+            }
         }
         window.redraw();
     }
@@ -341,6 +423,12 @@ impl Drop for Prefs {
         self.open.set(false);
         self.alive.store(false, Ordering::Relaxed);
     }
+}
+
+/// What a percentage's field holds, as a fraction, if it is `min` to 100.
+fn percent_of(digits: &str, min: u32) -> Option<f32> {
+    let n: u32 = digits.parse().ok()?;
+    (min..=100).contains(&n).then(|| n as f32 / 100.0)
 }
 
 /// ~/.config/vergence/desktop.toml.
@@ -412,6 +500,15 @@ mod tests {
         assert!(d.ends_with("name = \"x\"\n\n[settings]\nopacity = 0.9\n"));
         assert!(d.contains("opacity = 0.97 # see-through"));
         assert_eq!(set_key("", "[terminal]", "style", Some("\"dark\"")), "[terminal]\nstyle = \"dark\"\n");
+    }
+
+    #[test]
+    fn a_percentage_is_a_value_only_in_its_range() {
+        assert_eq!(percent_of("85", 30), Some(0.85));
+        assert_eq!(percent_of("100", 30), Some(1.0));
+        assert_eq!(percent_of("8", 30), None, "on its way to 85");
+        assert_eq!(percent_of("101", 30), None);
+        assert_eq!(percent_of("", 30), None);
     }
 
     #[test]
