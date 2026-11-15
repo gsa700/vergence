@@ -1,0 +1,20 @@
+[package]
+name = "vergence-closeup"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Close-Up: Vergence's viewer for pictures and text, the step after File Viewer's Preview"
+
+# Pictures are decoded apart (vergence-decode's helper); what Close-Up does
+# with the pixels (a pyramid of halvings, turning) is its own.
+[dependencies]
+vergence-ui.workspace = true
+vergence-widgets.workspace = true
+vergence-scene.workspace = true
+vergence-decode.workspace = true
+vergence-types.workspace = true
+
+[[bin]]
+name = "vergence-closeup"
+path = "src/main.rs"

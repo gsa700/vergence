@@ -334,6 +334,27 @@ the wallpaper, a scratch place for launchers and files.
   from the settings app). Checked on kepler: its 17 wallpapers, 8K
   included, decoded in Capsicum; the Wallpaper page's previews rebuilt
   through it. Tests: Hubble 596, kepler 592, Techbench 596.
+- **Step 5 built** (2026-11-15): crates/vergence-closeup, **Close-Up**
+  (data/applications/vergence-closeup.desktop: the picture types it shows,
+  keywords closeup / close up; data/icons/vergence-closeup.svg; install.sh).
+  Pictures through vergence-decode, a pyramid of halvings made off the
+  window's thread (pictures.rs: the renderer samples by the nearest pixel,
+  so a large photo is drawn from the level just larger than shown), fitted
+  (small ones kept at actual size) or zoomed by the wheel about the pointer,
+  + − 0 1 and the roles, panned by dragging, a double click between fitted
+  and actual size; R / Shift+R turn a quarter; GIF and WebP animations
+  played; a checkerboard under transparency; Left/Right/Home/End through
+  the folder's pictures in File Viewer's order, "5 of 17". Text read-only
+  in the toolkit's text area with "Open in Text Editor"; other types say
+  what they are and offer "Open with its app". One process (hand.rs), a
+  file a tab; settings (`[closeup]` ground, small-actual, animate, and the
+  usual look rows); dark by default. `--preview FILE`: one file, plain bar,
+  Space/Escape close, Enter opens it in full. Seen on kepler's screen: an
+  8K photo fitted, next picture, actual size, a quarter turn, a text tab
+  handed to the running Close-Up, a tar archive's notice, the preview.
+  Not yet: EXIF date in the status line; the preview following File
+  Viewer's selection (with File Viewer, step 7). Tests: Hubble 602,
+  kepler 598, Techbench 602.
 ## Steps
 
 1. **vergence-types**: the database reader (globs2, magic, subclasses,
