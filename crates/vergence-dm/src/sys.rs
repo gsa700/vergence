@@ -24,8 +24,10 @@ unsafe extern "C" {
     fn procctl(idtype: c_int, id: i64, cmd: c_int, data: *mut c_void) -> c_int;
     #[cfg(not(target_os = "linux"))]
     fn getpeereid(fd: c_int, euid: *mut u32, egid: *mut u32) -> c_int;
-    #[cfg(target_os = "linux")]
     fn getsockopt(fd: c_int, level: c_int, name: c_int, val: *mut c_void, len: *mut u32) -> c_int;
+    fn getgrouplist(name: *const std::ffi::c_char, gid: u32, groups: *mut u32, n: *mut c_int) -> c_int;
+    fn close(fd: c_int) -> c_int;
+    fn poll(fds: *mut [i32; 2], n: u64, timeout: c_int) -> c_int;
 }
 
 pub fn uid() -> u32 {
@@ -56,6 +58,111 @@ pub fn peer_uid(stream: &UnixStream) -> Option<u32> {
         // SAFETY: a buffer of the size we pass; the fd is the stream's.
         let ok = unsafe { getsockopt(stream.as_raw_fd(), 1, 17, buf.as_mut_ptr().cast(), &mut len) } == 0;
         (ok && len == 12).then(|| u32::from_ne_bytes([buf[4], buf[5], buf[6], buf[7]]))
+    }
+}
+
+/// The connecting process's pid, as the kernel recorded it: Linux's struct
+/// ucred (pid first); FreeBSD's struct xucred from LOCAL_PEERCRED (SOL_LOCAL
+/// 0, option 1): cr_version, cr_uid, cr_ngroups, cr_groups[16], then a
+/// pointer-sized union holding cr_pid at byte 80 (FreeBSD 13 and later).
+pub fn peer_pid(stream: &UnixStream) -> Option<u32> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut buf = [0u8; 12];
+        let mut len = buf.len() as u32;
+        // SAFETY: a buffer of the size we pass; the fd is the stream's.
+        let ok = unsafe { getsockopt(stream.as_raw_fd(), 1, 17, buf.as_mut_ptr().cast(), &mut len) } == 0;
+        (ok && len == 12).then(|| u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]])).filter(|p| *p > 0)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let mut buf = [0u8; 88];
+        let mut len = buf.len() as u32;
+        // SAFETY: a struct xucred's size, ours; the fd is the stream's.
+        let ok = unsafe { getsockopt(stream.as_raw_fd(), 0, 1, buf.as_mut_ptr().cast(), &mut len) } == 0;
+        (ok && len as usize >= 84).then(|| u32::from_ne_bytes([buf[80], buf[81], buf[82], buf[83]])).filter(|p| *p > 0)
+    }
+}
+
+/// Whether process `pid` has a virtual terminal (a console of this machine)
+/// as its controlling terminal: so it was started by someone at the machine,
+/// not over ssh or from cron (security review 2026-11-16, finding 4). Linux:
+/// /proc/<pid>/stat's tty_nr, major 4 and minor 1 to 63; FreeBSD: ps's tt
+/// column ("v0" for ttyv0).
+pub fn on_console(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { return false };
+        let Some(after) = stat.rfind(')').map(|i| &stat[i + 1..]) else { return false };
+        // After the name: state, ppid, pgrp, session, tty_nr.
+        let Some(tty) = after.split_whitespace().nth(4).and_then(|t| t.parse::<u64>().ok()) else { return false };
+        let major = (tty >> 8) & 0xfff;
+        let minor = (tty & 0xff) | ((tty >> 12) & 0xfff00);
+        major == 4 && (1..=63).contains(&minor)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let out = std::process::Command::new("/bin/ps").args(["-o", "tt=", "-p", &pid.to_string()]).env_clear().output();
+        out.ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).is_some_and(|t| t.len() >= 2 && t.starts_with('v') && t[1..].chars().all(|c| c.is_ascii_hexdigit()))
+    }
+}
+
+/// An account's groups (its own gid among them), read before a fork so the
+/// child only calls setgroups: name lookups after PAM may not be safe in a
+/// forked child (a module may have started threads).
+pub fn groups_of(name: &str, gid: u32) -> Vec<u32> {
+    let Ok(c) = std::ffi::CString::new(name) else { return vec![gid] };
+    let mut n: c_int = 64;
+    loop {
+        let mut list = vec![0u32; n as usize];
+        let want = n;
+        // SAFETY: a list of n gids and its length, both ours.
+        let r = unsafe { getgrouplist(c.as_ptr(), gid, list.as_mut_ptr(), &mut n) };
+        if r >= 0 {
+            list.truncate(n.max(0) as usize);
+            return list;
+        }
+        if n <= want {
+            n = want * 2;
+        }
+        if n > 65536 {
+            return vec![gid];
+        }
+    }
+}
+
+/// Close each of `fds` but those in `keep` (in a forked child: vdm's sockets
+/// and other connections it should not hold).
+pub fn close_fds(fds: &[c_int], keep: &[c_int]) {
+    for &fd in fds {
+        if fd > 2 && !keep.contains(&fd) {
+            // SAFETY: a descriptor this process holds and no longer uses.
+            unsafe { close(fd) };
+        }
+    }
+}
+
+/// A reader that gives up when a deadline passes, however slowly the bytes
+/// come (security review, finding 3: a byte every 1.9 s held vdm for minutes).
+pub struct Deadline<'a> {
+    pub stream: &'a UnixStream,
+    pub until: std::time::Instant,
+}
+
+impl std::io::Read for Deadline<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let left = self.until.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "too slow"));
+        }
+        // struct pollfd { int fd; short events; short revents; }: POLLIN 1.
+        let mut p = [self.stream.as_raw_fd(), 1];
+        // SAFETY: one pollfd we own.
+        let r = unsafe { poll(&mut p, 1, left.as_millis().clamp(1, i32::MAX as u128) as c_int) };
+        if r <= 0 {
+            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "too slow"));
+        }
+        std::io::Read::read(&mut &*self.stream, buf)
     }
 }
 
@@ -306,5 +413,19 @@ mod tests {
     fn the_peer_of_our_own_socket_is_us() {
         let (a, _b) = UnixStream::pair().unwrap();
         assert_eq!(peer_uid(&a), Some(euid()));
+        assert_eq!(peer_pid(&a), Some(std::process::id()));
+    }
+
+    #[test]
+    fn a_slow_peer_meets_the_deadline() {
+        use std::io::Read;
+        let (a, mut b) = UnixStream::pair().unwrap();
+        std::io::Write::write_all(&mut b, b"ab").unwrap();
+        let mut r = Deadline { stream: &a, until: std::time::Instant::now() + std::time::Duration::from_millis(200) };
+        let mut buf = [0u8; 8];
+        assert_eq!(r.read(&mut buf).unwrap(), 2);
+        let t = std::time::Instant::now();
+        assert!(r.read(&mut buf).is_err(), "nothing more came");
+        assert!(t.elapsed() < std::time::Duration::from_secs(1));
     }
 }

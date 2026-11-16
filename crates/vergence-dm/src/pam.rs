@@ -30,6 +30,8 @@ mod n {
     /// pam_setcred's flags (Linux-PAM's _pam_types.h).
     pub const ESTABLISH_CRED: c_int = 0x2;
     pub const DELETE_CRED: c_int = 0x4;
+    /// pam_chauthtok's flag (Linux-PAM's _pam_types.h).
+    pub const CHANGE_EXPIRED_AUTHTOK: c_int = 0x20;
 }
 #[cfg(not(target_os = "linux"))]
 mod n {
@@ -44,6 +46,8 @@ mod n {
     /// pam_setcred's flags (OpenPAM's pam_constants.h).
     pub const ESTABLISH_CRED: c_int = 0x1;
     pub const DELETE_CRED: c_int = 0x2;
+    /// pam_chauthtok's flag (OpenPAM's pam_constants.h).
+    pub const CHANGE_EXPIRED_AUTHTOK: c_int = 0x4;
 }
 pub use n::*;
 
@@ -54,6 +58,8 @@ pub const ERROR_MSG: c_int = 3;
 pub const TEXT_INFO: c_int = 4;
 /// The terminal item (the same on both).
 pub const TTY: c_int = 3;
+/// The user item (the same on both).
+pub const USER: c_int = 2;
 /// pam_authenticate's flag: an empty password is not enough (the same on both).
 pub const DISALLOW_NULL_AUTHTOK: c_int = 1;
 /// The most messages one conversation call may bring (both: 32).
@@ -91,6 +97,8 @@ unsafe extern "C" {
     fn pam_putenv(handle: *mut c_void, name_value: *const c_char) -> c_int;
     fn pam_getenvlist(handle: *mut c_void) -> *mut *mut c_char;
     fn pam_set_item(handle: *mut c_void, item: c_int, value: *const c_void) -> c_int;
+    fn pam_get_item(handle: *mut c_void, item: c_int, value: *mut *const c_void) -> c_int;
+    fn pam_chauthtok(handle: *mut c_void, flags: c_int) -> c_int;
     fn calloc(n: usize, size: usize) -> *mut c_void;
     fn free(p: *mut c_void);
 }
@@ -245,6 +253,17 @@ impl Handle {
         unsafe { pam_close_session(self.0, 0) }
     }
 
+    /// PAM_USER as PAM has it now.
+    pub fn user(&self) -> Option<String> {
+        let mut p: *const c_void = std::ptr::null();
+        // SAFETY: an out-parameter; PAM keeps the string.
+        if unsafe { pam_get_item(self.0, USER, &mut p) } != SUCCESS || p.is_null() {
+            return None;
+        }
+        // SAFETY: a NUL-terminated string PAM owns.
+        Some(unsafe { CStr::from_ptr(p.cast()) }.to_string_lossy().into_owned())
+    }
+
     /// PAM's environment for the session (what its modules set), `NAME=value` each.
     pub fn env(&self) -> Vec<String> {
         // SAFETY: a NULL-terminated array of malloc'd strings, all ours to free.
@@ -277,13 +296,26 @@ impl Handle {
 /// password is not enough), then the account check, an expired password
 /// allowed. PAM's prompts go to `conv`.
 pub fn authenticate(service: &str, user: &str, conv: &mut dyn Conversation) -> Outcome {
-    authenticate_then(service, user, conv, &mut |_| {})
+    authenticate_then(service, user, conv, &Options::default(), &mut |_| {})
+}
+
+/// How a transaction goes beyond the check itself.
+#[derive(Default)]
+pub struct Options {
+    /// PAM_TTY before the check, so rules by terminal apply to it (a login:
+    /// security review 2026-11-16, finding 10).
+    pub tty: Option<String>,
+    /// An expired password must be changed, through the conversation, before
+    /// the yes (a login: finding 6). Without it an expired password is let
+    /// through (an unlock: review I9, never shut out of a running session).
+    pub change_expired: bool,
 }
 
 /// As [`authenticate`]; on a yes, `then` runs with the transaction still
 /// open (a login opens its session there and runs it to its end), before
 /// pam_end.
-pub fn authenticate_then(service: &str, user: &str, conv: &mut dyn Conversation, then: &mut dyn FnMut(&Handle)) -> Outcome {
+pub fn authenticate_then(service: &str, user: &str, conv: &mut dyn Conversation, opts: &Options, then: &mut dyn FnMut(&Handle)) -> Outcome {
+    let wanted = user.to_string();
     let (Ok(service), Ok(user)) = (CString::new(service), CString::new(user)) else { return Outcome::Broken };
     let mut state = State { conv, gave_up: false };
     let c = Conv { conv: converse, appdata: (&mut state as *mut State).cast() };
@@ -301,12 +333,25 @@ pub fn authenticate_then(service: &str, user: &str, conv: &mut dyn Conversation,
         // SAFETY: the handle pam_start gave; a function pointer PAM calls with these arguments.
         unsafe { pam_set_item(h, 10, f as *const c_void) };
     }
+    if let Some(t) = &opts.tty {
+        Handle(h).set_item(TTY, t);
+    }
     // SAFETY: the handle pam_start gave.
     let mut r = unsafe { pam_authenticate(h, DISALLOW_NULL_AUTHTOK) };
+    // The account is the one asked for: a module may change PAM_USER, and
+    // the session must not then start as someone else (finding 10).
+    if r == SUCCESS && Handle(h).user().as_deref() != Some(wanted.as_str()) {
+        r = PERM_DENIED;
+    }
     if r == SUCCESS {
         // SAFETY: as above.
         let a = unsafe { pam_acct_mgmt(h, 0) };
-        r = if a == NEW_AUTHTOK_REQD { SUCCESS } else { a };
+        r = match a {
+            // SAFETY: as above; its prompts go through the conversation.
+            NEW_AUTHTOK_REQD if opts.change_expired => unsafe { pam_chauthtok(h, CHANGE_EXPIRED_AUTHTOK) },
+            NEW_AUTHTOK_REQD => SUCCESS,
+            other => other,
+        };
     }
     if r == SUCCESS {
         then(&Handle(h));
@@ -324,8 +369,10 @@ pub fn authenticate_then(service: &str, user: &str, conv: &mut dyn Conversation,
 /// A transaction with no check, for a session alone (the login screen's
 /// own, VDM step 7: logind gives the seat only to a process in a session,
 /// review I4): pam_start, `then` (which opens and closes the session), pam_end.
-/// Prompts are refused. Whether PAM started.
-pub fn session_only(service: &str, user: &str, then: &mut dyn FnMut(&Handle)) -> bool {
+/// Prompts are refused. With `check_account` (automatic login: security
+/// review 2026-11-16, finding 8), pam_acct_mgmt first: an account that is
+/// locked, expired, or shut out by nologin is refused. Ok when `then` ran.
+pub fn session_only(service: &str, user: &str, check_account: bool, then: &mut dyn FnMut(&Handle)) -> Result<(), String> {
     struct Silent;
     impl Conversation for Silent {
         fn prompt(&mut self, _echo: bool, _text: &str) -> Option<Secret> {
@@ -334,7 +381,7 @@ pub fn session_only(service: &str, user: &str, then: &mut dyn FnMut(&Handle)) ->
         fn info(&mut self, _text: &str) {}
         fn error(&mut self, _text: &str) {}
     }
-    let (Ok(service), Ok(user)) = (CString::new(service), CString::new(user)) else { return false };
+    let (Ok(service), Ok(user)) = (CString::new(service), CString::new(user)) else { return Err("a name with a NUL".into()) };
     let mut silent = Silent;
     let mut state = State { conv: &mut silent, gave_up: false };
     let c = Conv { conv: converse, appdata: (&mut state as *mut State).cast() };
@@ -342,12 +389,21 @@ pub fn session_only(service: &str, user: &str, then: &mut dyn FnMut(&Handle)) ->
     // SAFETY: strings and a Conv that outlive the transaction (pam_end below).
     let r = unsafe { pam_start(service.as_ptr(), user.as_ptr(), &c, &mut h) };
     if r != SUCCESS || h.is_null() {
-        return false;
+        return Err(format!("PAM did not start: {}", describe(r)));
+    }
+    if check_account {
+        // SAFETY: the handle pam_start gave.
+        let a = unsafe { pam_acct_mgmt(h, 0) };
+        if a != SUCCESS {
+            // SAFETY: the handle, ended once.
+            unsafe { pam_end(h, a) };
+            return Err(format!("the account may not log in now: {}", describe(a)));
+        }
     }
     then(&Handle(h));
     // SAFETY: the handle, ended once.
     unsafe { pam_end(h, SUCCESS) };
-    true
+    Ok(())
 }
 
 #[cfg(test)]

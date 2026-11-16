@@ -117,7 +117,11 @@ fn marker() -> Option<std::path::PathBuf> {
 /// The process names a session may run under without a shell above it
 /// (review C2): login(1) after `exec vergence`, vdm, and display managers
 /// that start sessions themselves (names cut at 15, as the system keeps them).
-const SAFE_PARENTS: [&str; 7] = ["login", "vdm", "gdm-wayland-ses", "gdm-x-session", "dbus-run-sessio", "greetd", "sddm-helper"];
+/// dbus-run-session is passed through to its own parent, which must be one
+/// of these (security review 2026-11-16, finding 5: typed in a logged-in
+/// shell, it returned to that shell when the server crashed).
+const SAFE_PARENTS: [&str; 6] = ["login", "vdm", "gdm-wayland-ses", "gdm-x-session", "greetd", "sddm-helper"];
+const PASS_THROUGH: [&str; 1] = ["dbus-run-sessio"];
 
 fn ps(field: &str, pid: u32) -> Option<String> {
     let out = std::process::Command::new("ps").args(["-o", &format!("{field}="), "-p", &pid.to_string()]).output().ok()?;
@@ -131,14 +135,19 @@ fn ps(field: &str, pid: u32) -> Option<String> {
 /// parent is what is asked about.
 fn no_shell_above() -> Result<(), String> {
     let script = std::os::unix::process::parent_id();
-    let above = ps("ppid", script).and_then(|p| p.parse::<u32>().ok()).ok_or("the session's parent is not known")?;
-    let name = ps("comm", above).unwrap_or_default();
-    let name = name.rsplit('/').next().unwrap_or(&name).trim_start_matches('-').to_string();
-    if SAFE_PARENTS.contains(&name.as_str()) {
-        Ok(())
-    } else {
-        Err(format!("the session was started from {name}, which a crash would return to, logged in"))
+    let mut above = ps("ppid", script).and_then(|p| p.parse::<u32>().ok()).ok_or("the session's parent is not known")?;
+    for _ in 0..4 {
+        let name = ps("comm", above).unwrap_or_default();
+        let name = name.rsplit('/').next().unwrap_or(&name).trim_start_matches('-').to_string();
+        if SAFE_PARENTS.contains(&name.as_str()) {
+            return Ok(());
+        }
+        if !PASS_THROUGH.contains(&name.as_str()) {
+            return Err(format!("the session was started from {name}, which a crash would return to, logged in"));
+        }
+        above = ps("ppid", above).and_then(|p| p.parse::<u32>().ok()).ok_or("the session's parent is not known")?;
     }
+    Err("the session's parents could not be followed".into())
 }
 
 /// The session's standing connection to vdm (step 2, review C4): vdm learns
@@ -280,7 +289,9 @@ impl Server {
     /// Why the screen could not be locked now, if it could not.
     fn lock_blocker(&self) -> Option<String> {
         use std::os::unix::fs::FileTypeExt;
-        let vdm = std::fs::symlink_metadata(vergence_dm::paths::UNLOCK_SOCKET).is_ok_and(|m| m.file_type().is_socket());
+        // vdm answering, not only its socket's file (finding 9: a stopped vdm
+        // left the file, and a lock no one could open).
+        let vdm = std::fs::symlink_metadata(vergence_dm::paths::UNLOCK_SOCKET).is_ok_and(|m| m.file_type().is_socket()) && std::os::unix::net::UnixStream::connect(vergence_dm::paths::POWER_SOCKET).is_ok();
         if !vdm {
             return Some("vdm is not running, so nothing could check the password".into());
         }

@@ -667,6 +667,79 @@ socket off on installed sessions and the bus checking its peer's uid; no
 screencopy, virtual-keyboard or keyboard-grab protocol offered to clients;
 Linux's PR_SET_DUMPABLE blocking same-uid ptrace.
 
+## Security review of the code, 2026-11-16: findings and fixes
+
+An independent review (a separate agent given the code and this plan, not
+the author's opinion of it) read every part of VDM against the threat
+model. Each finding and what was done:
+
+1. **Critical: the greeter account could get root through a chown race.**
+   start_greeter made greeter-home, handed it to _vdm, then made and
+   chowned greeter-home/run, following links: a leftover _vdm process could
+   swap `run` for a link to any file. *Fixed:* both made while root owns
+   them, run handed over first and home last, each by fchown on a
+   descriptor opened O_DIRECTORY|O_NOFOLLOW.
+2. **Important: the greeter's leftovers survived it** (T10). *Fixed:* the
+   greeter worker becomes the reaper and ends everything left when the
+   server ends; before every start, every process of _vdm is killed (a
+   child becomes _vdm and sends kill(-1, SIGKILL)); the greeter socket is
+   heard only while the login screen runs.
+3. **Important: any local account could stall vdm** (a byte every 1.9 s on
+   the power socket held the single loop for minutes: no unlocks, and a
+   sleep went ahead unlocked). *Fixed:* every read of something untrusted
+   has a deadline for the whole message (sys::Deadline: the power line in
+   1 s, the greeter's request in 1 s, sessions' answers before sleep by
+   the sleep deadline); "login-state" (which ran `zfs get`) is worked out
+   at most once a minute.
+4. **Important: any local account could register as a session**, gaining
+   Sleep, Restart, Shut Down and Turn Off for automatic login, and keeping
+   the login screen away. *Fixed:* a registration counts only from a
+   process whose controlling terminal is one of the machine's consoles
+   (peer pid by SO_PEERCRED / LOCAL_PEERCRED; Linux /proc tty_nr major 4,
+   FreeBSD ps tt "vN"); others are refused and logged. Seen on kepler: a
+   registration over ssh refused.
+5. **Important: `dbus-run-session` counted as a safe parent** (C2): typed
+   in a logged-in shell, a crash returned to it. *Fixed:* it is passed
+   through to its own parent, which must be login, vdm or a display
+   manager.
+6. **Important: an expired password was let through at login.** *Fixed:*
+   at login pam_chauthtok(PAM_CHANGE_EXPIRED_AUTHTOK) runs through the
+   login screen's conversation (new password, again); the unlock still lets
+   it through (I9).
+7. **Minor: the encryption check failed open** (T14). *Fixed:* GELI looked
+   for in /dev's gpt, label, gptid, diskid and ufs directories too; Linux
+   eCryptfs mounts and any /etc/crypttab entry count; a `zfs get` that
+   fails means "cannot tell", which means not allowed.
+8. **Minor: automatic login gaps.** *Fixed:* pam_acct_mgmt runs first
+   (locked, expired, nologin refuse it); once per boot (a mark in the run
+   directory, which boot clears); the people are counted with getpwent, so
+   LDAP, sssd or NIS accounts count.
+9. **Minor: a stopped vdm left its sockets**, so a lock could come on with
+   no one to open it. *Fixed:* vdm removes its sockets when it stops, and
+   the lock asks for vdm to answer, not only for its socket file.
+10. **Minor, several.** *Fixed:* an unlock waits for a login of the same
+    account in progress (one check at a time, M1); giving up after an
+    answer counts as a wrong answer (no skipping the pause at a second
+    prompt); every forked worker gets SIGTERM's default back (vdm's own
+    handler only notes a stop); a SIGTERM to the greeter worker before its
+    server started is kept and passed on; children close vdm's other
+    sockets and connections; groups are read before a fork and set with
+    setgroups in the child (no name lookups after PAM modules may have
+    started threads); PAM_TTY is set before the check at login and PAM_USER
+    is checked after it; the login screen's files are capped at 16 MB
+    (RLIMIT_FSIZE, SIGXFSZ ignored); on Linux the end of a session's
+    leftovers repeats SIGKILL until none is left. Doc: /run/vdm is 0755
+    root's (the greeter socket is 0600 _vdm's, peer-checked), not a
+    root-and-_vdm directory as T9 said.
+
+Found sound by the review: the struct layouts and constants on both
+systems (struct passwd, peer credentials, VT ioctls, procctl, PAM's
+numbers, madvise, rlimits, clocks), the PAM conversation's memory, the
+protocol parser and its limits, the uid-only unlock (T7), refusing root
+and system accounts, the session list read by vdm (M2), dropping root,
+the environment from nothing, the runtime directory's checks, the lock's
+client, the root-only control socket, and install.sh's files.
+
 ## Steps
 
 (Revised after the design review.)

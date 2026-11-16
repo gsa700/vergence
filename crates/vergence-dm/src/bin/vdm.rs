@@ -58,8 +58,9 @@ unsafe extern "C" {
     fn setsid() -> c_int;
     fn setuid(uid: u32) -> c_int;
     fn setgid(gid: u32) -> c_int;
-    fn initgroups(name: *const c_char, gid: u32) -> c_int;
     fn kill(pid: c_int, sig: c_int) -> c_int;
+    /// SIG_DFL 0, SIG_IGN 1, or a handler's address.
+    fn signal(sig: c_int, handler: usize) -> usize;
     #[cfg(target_os = "freebsd")]
     fn setlogin(name: *const c_char) -> c_int;
 }
@@ -163,24 +164,49 @@ fn may_log_in(uid: u32, shell: &str) -> bool {
 }
 
 /// The people who may log in here: accounts that are not root nor system
-/// accounts, with a real login shell (the login screen's list, may_log_in).
+/// accounts, with a real login shell (may_log_in), from every source the
+/// system names accounts by (getpwent: files, and LDAP, sssd or NIS where
+/// set up; finding 8: /etc/passwd alone missed those).
 fn people() -> Vec<String> {
-    std::fs::read_to_string("/etc/passwd")
-        .unwrap_or_default()
-        .lines()
-        .filter_map(|l| {
-            let f: Vec<&str> = l.split(':').collect();
-            let uid: u32 = f.get(2)?.parse().ok()?;
-            may_log_in(uid, f.get(6)?).then(|| f[0].to_string())
-        })
-        .collect()
+    unsafe extern "C" {
+        fn setpwent();
+        fn getpwent() -> *const c_void;
+        fn endpwent();
+    }
+    let mut out = Vec::new();
+    // SAFETY: vdm is single-threaded; each struct passwd is read before the
+    // next call (layout as in account()).
+    unsafe {
+        setpwent();
+        loop {
+            let p = getpwent() as *const u64;
+            if p.is_null() || out.len() > 10_000 {
+                break;
+            }
+            let name = *p as *const c_char;
+            let uid = (*p.add(2) & 0xffff_ffff) as u32;
+            let shell = *p.add(if cfg!(target_os = "linux") { 5 } else { 7 }) as *const c_char;
+            if name.is_null() || shell.is_null() {
+                continue;
+            }
+            let shell = CStr::from_ptr(shell).to_string_lossy().into_owned();
+            if may_log_in(uid, &shell) {
+                let n = CStr::from_ptr(name).to_string_lossy().into_owned();
+                if !out.contains(&n) {
+                    out.push(n);
+                }
+            }
+        }
+        endpwent();
+    }
+    out
 }
 
 /// Whether automatic login may be on (Dave's "4 a", review M6): only where
 /// exactly one person can log in, and nothing on the machine is encrypted.
 /// That person's name, or why not.
 fn autologin_allowed() -> Result<String, String> {
-    let enc = vergence_dm::encryption::found();
+    let enc = vergence_dm::encryption::found().map_err(|why| format!("it cannot be told whether storage here is encrypted: {why}"))?;
     if !enc.is_empty() {
         return Err(format!("storage here is encrypted ({}): automatic login would unlock at power on what the encryption keeps", enc.join(", ")));
     }
@@ -189,6 +215,19 @@ fn autologin_allowed() -> Result<String, String> {
         [] => Err("no one can log in here".into()),
         _ => Err("more than one person can log in here".into()),
     }
+}
+
+/// autologin_allowed, worked out at most once a minute for the Login page
+/// (finding 3: anyone asking ran `zfs get` as root on vdm's main loop).
+fn allowed_cached(cache: &mut Option<(std::time::Instant, Result<String, String>)>) -> Result<String, String> {
+    if let Some((at, r)) = cache.as_ref()
+        && at.elapsed() < Duration::from_secs(60)
+    {
+        return r.clone();
+    }
+    let r = autologin_allowed();
+    *cache = Some((std::time::Instant::now(), r.clone()));
+    r
 }
 
 /// The pause after `failures` wrong answers in a row: 1, 2, 4 ... seconds, at most MAX_PAUSE.
@@ -258,13 +297,20 @@ impl Pauses {
 /// The child's conversation: PAM's messages to the client, its answers back.
 struct Relay {
     stream: UnixStream,
+    /// An answer was given: giving up after it counts as a wrong one, so the
+    /// pause cannot be skipped by answering the password and cancelling at
+    /// a second prompt (finding 10).
+    answered: bool,
 }
 
 impl Conversation for Relay {
     fn prompt(&mut self, echo: bool, text: &str) -> Option<Secret> {
         proto::send_from_vdm(&mut self.stream, &FromVdm::Prompt { echo, text: text.into() }).ok()?;
         match proto::read_to_vdm(&mut self.stream) {
-            Ok(ToVdm::Answer(s)) => Some(s),
+            Ok(ToVdm::Answer(s)) => {
+                self.answered = true;
+                Some(s)
+            }
             _ => None,
         }
     }
@@ -290,11 +336,12 @@ fn check(mut stream: UnixStream, name: &str, service: &str, hello_read: bool) ->
             Ok(_) | Err(ProtoError::Bad(_)) | Err(ProtoError::Io(_)) => return 3,
         }
     }
-    let mut relay = Relay { stream };
+    let mut relay = Relay { stream, answered: false };
     let outcome = pam::authenticate(service, name, &mut relay);
     match outcome {
         Outcome::Yes => 0,
         Outcome::No => 1,
+        Outcome::GivenUp if relay.answered => 1,
         Outcome::GivenUp => 2,
         Outcome::Broken => 3,
     }
@@ -315,9 +362,12 @@ struct LoginPlan {
 /// (the reaper, review C6), and closes the PAM session. Its exit status:
 /// 0 a session ran; 1 no; 2 given up; 3 PAM broken; 4 the session could not start.
 fn login(stream: UnixStream, plan: &LoginPlan, service: &str, said: UnixStream) -> c_int {
-    let mut relay = Relay { stream };
+    let mut relay = Relay { stream, answered: false };
     let mut code = 0;
-    let outcome = pam::authenticate_then(service, &plan.account.name, &mut relay, &mut |h| {
+    // The session's terminal before the check; an expired password changed
+    // before the yes (findings 6, 10).
+    let opts = pam::Options { tty: Some(vergence_dm::vt::tty_path(plan.vt)), change_expired: true };
+    let outcome = pam::authenticate_then(service, &plan.account.name, &mut relay, &opts, &mut |h| {
         // The check's limit does not apply to the session.
         // SAFETY: cancels this process's alarm.
         unsafe { alarm(0) };
@@ -327,6 +377,7 @@ fn login(stream: UnixStream, plan: &LoginPlan, service: &str, said: UnixStream) 
     match outcome {
         Outcome::Yes => code,
         Outcome::No => 1,
+        Outcome::GivenUp if relay.answered => 1,
         Outcome::GivenUp => 2,
         Outcome::Broken => 3,
     }
@@ -418,8 +469,10 @@ fn run_session(h: &pam::Handle, plan: &LoginPlan) -> c_int {
             let null = std::fs::OpenOptions::new().write(true).open("/dev/null");
             match (opened, null) {
                 (Ok(tty_file), Ok(null)) => {
+                    #[cfg(target_os = "freebsd")]
                     let name = std::ffi::CString::new(a.name.clone()).unwrap_or_default();
                     let (uid, gid, vt) = (a.uid, a.gid, plan.vt);
+                    let groups = sys::groups_of(&a.name, gid);
                     let mut cmd = std::process::Command::new(&a.shell);
                     // A login shell ("-zsh"), which reads the user's profile, runs the session.
                     cmd.arg0(format!("-{shell_name}"))
@@ -442,13 +495,7 @@ fn run_session(h: &pam::Handle, plan: &LoginPlan) -> c_int {
                             }
                             vergence_dm::vt::make_controlling(0)?;
                             vergence_dm::vt::activate(0, vt)?;
-                            if initgroups(name.as_ptr(), gid) != 0 || setgid(gid) != 0 || setuid(uid) != 0 {
-                                return Err(std::io::Error::last_os_error());
-                            }
-                            if setuid(0) == 0 {
-                                return Err(std::io::Error::other("could still become root"));
-                            }
-                            Ok(())
+                            drop_to(uid, gid, &groups)
                         })
                     };
                     match cmd.spawn() {
@@ -505,9 +552,18 @@ fn end_leftovers(who: &str) {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    let killed = sys::signal_descendants(9);
-    std::thread::sleep(Duration::from_millis(200));
-    reap();
+    // SIGKILL until none is left (on Linux the tree is read and then
+    // signalled, so one that forks in a loop needs more than one pass).
+    let mut killed = 0;
+    for _ in 0..10 {
+        let n = sys::signal_descendants(9);
+        killed += n;
+        std::thread::sleep(Duration::from_millis(100));
+        reap();
+        if n == 0 || sys::count_descendants() == 0 {
+            break;
+        }
+    }
     log(&format!("session for {who}: {asked} process(es) left at its end were ended{}", if killed > 0 { format!(", {killed} by force") } else { String::new() }));
 }
 
@@ -609,18 +665,28 @@ const GIVE_UP: u32 = 5;
 /// time under vdm's run directory (nothing of a previous login screen is
 /// kept), its output to STATE_DIR/greeter.log. Every descriptor of vdm's is
 /// close-on-exec (Rust opens them so), so it inherits none.
-fn start_greeter(uid: u32, gid: u32) -> std::io::Result<c_int> {
+fn start_greeter(uid: u32, gid: u32, close: &[c_int]) -> std::io::Result<c_int> {
     let exe = std::env::current_exe()?;
     let server = exe.parent().and_then(|d| d.parent()).map(|p| p.join("bin/vergence-server")).filter(|p| p.is_file()).ok_or_else(|| std::io::Error::other("no vergence-server beside vdm ($prefix/bin)"))?;
     let base = std::path::Path::new(paths::GREETER_SOCKET).parent().ok_or_else(|| std::io::Error::other("no run directory"))?;
     let home = base.join("greeter-home");
     let run = home.join("run");
+    // Nothing of a previous login screen runs on (security review
+    // 2026-11-16, finding 2): every process of the greeter account is ended
+    // before a new one starts, by a child that becomes that account and
+    // signals all of its processes.
+    end_account_processes(uid, gid);
     if home.symlink_metadata().is_ok() {
         std::fs::remove_dir_all(&home)?;
     }
+    // Both made while root owns them, the home handed over last (finding 1:
+    // with the home already _vdm's, a leftover could swap `run` for a link
+    // and have root's chown give it any file). Neither is followed if a link.
     for d in [&home, &run] {
         std::fs::DirBuilder::new().mode(0o700).create(d)?;
-        std::os::unix::fs::chown(d, Some(uid), Some(gid))?;
+    }
+    for d in [&run, &home] {
+        chown_no_follow(d, uid, gid)?;
     }
     // What the login screen keeps from one start to the next (its text size):
     // its own small directory under vdm's state, the one thing that lasts.
@@ -628,7 +694,7 @@ fn start_greeter(uid: u32, gid: u32) -> std::io::Result<c_int> {
     if keep.symlink_metadata().is_err() {
         std::fs::DirBuilder::new().mode(0o700).create(keep)?;
     }
-    std::os::unix::fs::chown(keep, Some(uid), Some(gid))?;
+    chown_no_follow(keep, uid, gid)?;
     let tty = vergence_dm::vt::open(vergence_dm::vt::GREETER_VT)?;
     let out = std::fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(std::path::Path::new(paths::STATE_DIR).join("greeter.log"))?;
     // A worker holds the login screen's PAM session (logind's seat goes only
@@ -642,9 +708,101 @@ fn start_greeter(uid: u32, gid: u32) -> std::io::Result<c_int> {
     if pid > 0 {
         return Ok(pid);
     }
+    // vdm's sockets and connections are not the worker's to hold (finding 10:
+    // a server vdm dropped never saw its connection close).
+    sys::close_fds(close, &[]);
+    reset_sigterm();
     let code = greeter_worker(uid, gid, &server, &home, &run, tty, out);
     // SAFETY: leave without running the parent's exit handlers.
     unsafe { _exit(code) }
+}
+
+/// In a forked child before exec: become `uid`/`gid` with `groups` (read
+/// before the fork: no name lookups after it, finding 10), and make sure
+/// root cannot be had back.
+fn drop_to(uid: u32, gid: u32, groups: &[u32]) -> std::io::Result<()> {
+    unsafe extern "C" {
+        #[cfg(target_os = "linux")]
+        fn setgroups(n: usize, list: *const u32) -> c_int;
+        #[cfg(not(target_os = "linux"))]
+        fn setgroups(n: c_int, list: *const u32) -> c_int;
+    }
+    // SAFETY: a list and its length, ours.
+    let r = unsafe { setgroups(groups.len() as _, groups.as_ptr()) };
+    // SAFETY: plain id changes.
+    if r != 0 || unsafe { setgid(gid) } != 0 || unsafe { setuid(uid) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: as above; must fail now.
+    if unsafe { setuid(0) } == 0 {
+        return Err(std::io::Error::other("could still become root"));
+    }
+    Ok(())
+}
+
+/// In a forked child: files it writes at most `bytes`; SIGXFSZ ignored, so a
+/// write past it fails (EFBIG) instead of ending the program. RLIMIT_FSIZE 1
+/// and SIGXFSZ 25 on both.
+fn limit_file_size(bytes: u64) {
+    unsafe extern "C" {
+        fn setrlimit(resource: c_int, rlim: *const [u64; 2]) -> c_int;
+    }
+    // SAFETY: a limit we own; SIG_IGN is 1.
+    unsafe {
+        setrlimit(1, &[bytes, bytes]);
+        signal(25, 1);
+    }
+}
+
+/// chown a directory without following a link: opened O_DIRECTORY|O_NOFOLLOW
+/// and changed through the descriptor (fchown), so a name swapped for a link
+/// fails instead of handing over what it points to.
+fn chown_no_follow(path: &std::path::Path, uid: u32, gid: u32) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    const FLAGS: i32 = 0o200000 | 0o400000; // O_DIRECTORY | O_NOFOLLOW
+    #[cfg(not(target_os = "linux"))]
+    const FLAGS: i32 = 0x0002_0000 | 0x0100; // O_DIRECTORY | O_NOFOLLOW
+    unsafe extern "C" {
+        fn fchown(fd: c_int, uid: u32, gid: u32) -> c_int;
+    }
+    let d = std::fs::OpenOptions::new().read(true).custom_flags(FLAGS).open(path)?;
+    if !d.metadata()?.is_dir() {
+        return Err(std::io::Error::other(format!("{} is not a directory", path.display())));
+    }
+    // SAFETY: the descriptor we just opened.
+    if unsafe { fchown(d.as_raw_fd(), uid, gid) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// End every process of an account (the greeter's): a child becomes it and
+/// sends SIGKILL to all it may signal (kill(-1), which spares the sender),
+/// then vdm waits for that child.
+fn end_account_processes(uid: u32, gid: u32) {
+    // SAFETY: vdm is single-threaded; the child only changes ids, signals and exits.
+    let pid = unsafe { fork() };
+    if pid == 0 {
+        // SAFETY: async-signal-safe calls only, then _exit.
+        unsafe {
+            if setgid(gid) == 0 && setuid(uid) == 0 && setuid(0) != 0 {
+                kill(-1, 9);
+            }
+            _exit(0);
+        }
+    }
+    if pid > 0 {
+        let mut status: c_int = 0;
+        // SAFETY: our own child.
+        unsafe { waitpid(pid, &mut status, 0) };
+    }
+}
+
+/// In a forked worker: SIGTERM ends it again (vdm's own handler, which only
+/// notes a stop for the main loop, is inherited by a fork; finding 10).
+fn reset_sigterm() {
+    // SAFETY: SIG_DFL is 0.
+    unsafe { signal(15, 0) };
 }
 
 /// vdm was asked to stop (SIGTERM from its service): it stops the login
@@ -659,7 +817,11 @@ extern "C" fn note_stop(_sig: c_int) {
 /// The server the login screen's worker started, for SIGTERM to reach it.
 static GREETER_SERVER: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
+/// A SIGTERM that came before the server was started (finding 10).
+static GREETER_TERM: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 extern "C" fn pass_term_on(_sig: c_int) {
+    GREETER_TERM.store(true, std::sync::atomic::Ordering::Relaxed);
     let pid = GREETER_SERVER.load(std::sync::atomic::Ordering::Relaxed);
     if pid > 0 {
         // SAFETY: kill is async-signal-safe.
@@ -670,11 +832,11 @@ extern "C" fn pass_term_on(_sig: c_int) {
 /// In the login screen's worker: its PAM session (when /etc/pam.d/vdm-greeter
 /// is there), the server in it, and the session closed when the server ends.
 fn greeter_worker(uid: u32, gid: u32, server: &std::path::Path, home: &std::path::Path, run: &std::path::Path, tty: std::fs::File, out: std::fs::File) -> c_int {
-    unsafe extern "C" {
-        fn signal(sig: c_int, handler: extern "C" fn(c_int)) -> usize;
-    }
-    // SAFETY: a handler that only reads an atomic and calls kill.
-    unsafe { signal(15, pass_term_on) };
+    // SAFETY: a handler that only touches atomics and calls kill.
+    unsafe { signal(15, pass_term_on as extern "C" fn(c_int) as usize) };
+    // Everything the login screen starts stays below this worker, and is
+    // ended with it (finding 2).
+    sys::become_reaper();
     let mut io = Some((tty, out));
     let mut code = 3;
     let tty_path = vergence_dm::vt::tty_path(vergence_dm::vt::GREETER_VT);
@@ -684,7 +846,12 @@ fn greeter_worker(uid: u32, gid: u32, server: &std::path::Path, home: &std::path
         match spawn_greeter_server(uid, gid, server, home, run, tty, out, env) {
             Ok(mut child) => {
                 GREETER_SERVER.store(child.id() as i32, std::sync::atomic::Ordering::Relaxed);
+                if GREETER_TERM.load(std::sync::atomic::Ordering::Relaxed) {
+                    // SAFETY: our own child.
+                    unsafe { kill(child.id() as c_int, 15) };
+                }
                 let _ = child.wait();
+                end_leftovers("the login screen");
                 0
             }
             Err(e) => {
@@ -694,7 +861,7 @@ fn greeter_worker(uid: u32, gid: u32, server: &std::path::Path, home: &std::path
         }
     };
     if with_pam {
-        let started = pam::session_only(paths::GREETER_SERVICE, paths::GREETER_USER, &mut |h| {
+        let started = pam::session_only(paths::GREETER_SERVICE, paths::GREETER_USER, false, &mut |h| {
             h.set_item(pam::TTY, &tty_path);
             for kv in ["XDG_SEAT=seat0".to_string(), format!("XDG_VTNR={}", vergence_dm::vt::GREETER_VT), "XDG_SESSION_TYPE=wayland".into(), "XDG_SESSION_CLASS=greeter".into()] {
                 h.putenv(&kv);
@@ -709,8 +876,8 @@ fn greeter_worker(uid: u32, gid: u32, server: &std::path::Path, home: &std::path
                 h.close_session();
             }
         });
-        if !started {
-            log("login screen: PAM did not start; running without its session");
+        if let Err(e) = started {
+            log(&format!("login screen: {e}; running without its session"));
             code = run_it(Vec::new());
         }
     } else {
@@ -725,7 +892,7 @@ fn greeter_worker(uid: u32, gid: u32, server: &std::path::Path, home: &std::path
 #[allow(clippy::too_many_arguments)]
 fn spawn_greeter_server(uid: u32, gid: u32, server: &std::path::Path, home: &std::path::Path, run: &std::path::Path, tty: std::fs::File, out: std::fs::File, pam_env: Vec<(String, String)>) -> std::io::Result<std::process::Child> {
     use std::os::unix::process::CommandExt;
-    let name = std::ffi::CString::new(paths::GREETER_USER).map_err(std::io::Error::other)?;
+    let groups = sys::groups_of(paths::GREETER_USER, gid);
     // logind's runtime directory where it made one; ours otherwise.
     let runtime = pam_env.iter().find(|(k, _)| k == "XDG_RUNTIME_DIR").map(|(_, v)| std::path::PathBuf::from(v)).unwrap_or_else(|| run.to_path_buf());
     let mut cmd = std::process::Command::new(server);
@@ -752,14 +919,11 @@ fn spawn_greeter_server(uid: u32, gid: u32, server: &std::path::Path, home: &std
             }
             vergence_dm::vt::make_controlling(0)?;
             vergence_dm::vt::activate(0, vergence_dm::vt::GREETER_VT)?;
-            if initgroups(name.as_ptr(), gid) != 0 || setgid(gid) != 0 || setuid(uid) != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            // Root is gone for good.
-            if setuid(0) == 0 {
-                return Err(std::io::Error::other("could still become root"));
-            }
-            Ok(())
+            // Its log (and any file it makes) at most 16 MB, the write past
+            // that failing rather than ending it (finding 10: the log grew
+            // unbounded in root's state directory).
+            limit_file_size(16 << 20);
+            drop_to(uid, gid, &groups)
         })
     };
     // The machine's keyboard layout (step 6), which xkbcommon takes from these.
@@ -823,9 +987,9 @@ fn lock_all(sessions: &mut Vec<(u32, UnixStream)>) -> String {
         for i in ready {
             waiting.retain(|w| *w != i);
             let (uid, s) = &mut sessions[i];
-            let _ = s.set_read_timeout(Some(Duration::from_secs(1)));
             let who = user_name(*uid).unwrap_or_default();
-            match proto::read_to_vdm(s) {
+            // The whole answer by the deadline, however slowly it comes (finding 3).
+            match proto::read_to_vdm(&mut sys::Deadline { stream: &*s, until: deadline }) {
                 Ok(ToVdm::Presented) => shown += 1,
                 Ok(ToVdm::CannotLock(why)) => {
                     cannot += 1;
@@ -939,16 +1103,18 @@ fn main() {
     // then, and the login screen waits for them.
     let first = (at_boot && sys::uptime() >= 180).then(|| std::time::Instant::now() + Duration::from_secs(6));
     {
-        unsafe extern "C" {
-            fn signal(sig: c_int, handler: extern "C" fn(c_int)) -> usize;
-        }
         // SAFETY: a handler that only sets an atomic; SIGTERM 15.
-        unsafe { signal(15, note_stop) };
+        unsafe { signal(15, note_stop as extern "C" fn(c_int) as usize) };
     }
     // Automatic login at boot (step 8): only at boot, only if turned on, and
     // only while the rules still hold (checked now, every boot: M6).
     let mut logins: HashMap<c_int, LoginRun> = HashMap::new();
+    // Once per boot (finding 8: a vdm restarted soon after boot logged in
+    // again): a mark in the run directory, which boot clears.
+    let autologin_done = std::path::Path::new(paths::GREETER_SOCKET).with_file_name("autologin-done");
     if at_boot && sys::uptime() < 180
+        && !autologin_done.exists()
+        && std::fs::write(&autologin_done, b"").is_ok()
         && let Ok(wanted) = std::fs::read_to_string(paths::autologin_file())
     {
         let wanted = wanted.trim().to_string();
@@ -963,10 +1129,14 @@ fn main() {
                         // SAFETY: vdm is single-threaded; the worker runs the session and exits.
                         let pid = unsafe { fork() };
                         if pid == 0 {
+                            reset_sigterm();
                             let mut code = 4;
-                            let started = pam::session_only(paths::AUTOLOGIN_SERVICE, &user, &mut |h| code = run_session(h, &plan));
+                            let started = pam::session_only(paths::AUTOLOGIN_SERVICE, &user, true, &mut |h| code = run_session(h, &plan));
+                            if let Err(e) = &started {
+                                log(&format!("automatic login for {user}: {e}"));
+                            }
                             // SAFETY: leave without running the parent's exit handlers.
-                            unsafe { _exit(if started { code } else { 3 }) };
+                            unsafe { _exit(if started.is_ok() { code } else { 3 }) };
                         }
                         if pid > 0 {
                             log(&format!("automatic login for {user} on VT {vt}"));
@@ -980,6 +1150,7 @@ fn main() {
             Err(why) => log(&format!("automatic login not done: {why}")),
         }
     }
+    let mut allowed_cache: Option<(std::time::Instant, Result<String, String>)> = None;
     let mut greeter_run = Greeter { on: at_boot, pid: 0, started: std::time::Instant::now(), quick: 0, next: first, came_from: None, back_to: None };
     loop {
         if STOPPING.load(std::sync::atomic::Ordering::Relaxed) {
@@ -995,6 +1166,11 @@ fn main() {
                     }
                     std::thread::sleep(Duration::from_millis(50));
                 }
+            }
+            // Its sockets go with it (finding 9: a lock checking for them
+            // would have locked with no one to open it).
+            for p in [socket.as_str(), paths::SESSION_SOCKET, paths::CONTROL_SOCKET, paths::POWER_SOCKET, paths::GREETER_SOCKET] {
+                let _ = std::fs::remove_file(p);
             }
             log("stopping (asked to); the login screen stopped, sessions run on");
             std::process::exit(0);
@@ -1032,7 +1208,11 @@ fn main() {
         let session_running = logins.values().any(|l| l.yes) || !sessions.is_empty();
         if greeter_run.on && greeter_run.pid == 0 && !session_running && greeter_run.next.is_none_or(|t| std::time::Instant::now() >= t) {
             greeter_run.next = None;
-            match greeter_account.as_ref().map(|a| start_greeter(a.uid, a.gid)) {
+            let mut ours: Vec<c_int> = [Some(&listener), Some(&session_listener), Some(&control), Some(&power), greeter.as_ref()].into_iter().flatten().map(|l| l.as_raw_fd()).collect();
+            ours.extend(sessions.iter().map(|(_, s)| s.as_raw_fd()));
+            ours.extend(running.values().map(|(_, s, _)| s.as_raw_fd()));
+            ours.extend(logins.values().flat_map(|l| [Some(l.said.as_raw_fd()), l.client.as_ref().map(|c| c.as_raw_fd())]).flatten());
+            match greeter_account.as_ref().map(|a| start_greeter(a.uid, a.gid, &ours)) {
                 Some(Ok(pid)) => {
                     greeter_run.pid = pid;
                     greeter_run.started = std::time::Instant::now();
@@ -1131,9 +1311,16 @@ fn main() {
             sessions.remove(i);
         }
         // A server registering: the connection is the registration.
+        // Only a server on one of the machine's consoles counts as someone at
+        // the machine (finding 4: an ssh login registering got Sleep,
+        // Restart and Shut Down, and kept the login screen away).
         if let Ok((s, _)) = session_listener.accept() {
             let _ = s.set_nonblocking(false);
+            let console = sys::peer_pid(&s).is_some_and(sys::on_console);
             match sys::peer_uid(&s) {
+                Some(uid) if uid != 0 && uid >= paths::MIN_UID && !console => {
+                    log(&format!("session registration from {} refused: not on a console of this machine", user_name(uid).unwrap_or_else(|| uid.to_string())));
+                }
                 Some(uid) if uid != 0 && uid >= paths::MIN_UID => {
                     if sessions.iter().filter(|(u, _)| *u == uid).count() >= SESSIONS_PER_UID
                         && let Some(oldest) = sessions.iter().position(|(u, _)| *u == uid)
@@ -1215,10 +1402,10 @@ fn main() {
         if let Ok((mut s, _)) = power.accept() {
             use std::io::{BufRead, BufReader};
             let _ = s.set_nonblocking(false);
-            let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
-            let _ = s.set_write_timeout(Some(Duration::from_secs(2)));
+            let _ = s.set_write_timeout(Some(Duration::from_secs(1)));
             let mut line = String::new();
-            let _ = BufReader::new((&s).take(64)).read_line(&mut line);
+            // One short line within a second, or nothing (finding 3).
+            let _ = BufReader::new(sys::Deadline { stream: &s, until: std::time::Instant::now() + Duration::from_secs(1) }.take(64)).read_line(&mut line);
             let uid = sys::peer_uid(&s);
             let has_session = |u: u32| sessions.iter().any(|(x, _)| *x == u) || logins.values().any(|l| l.yes && l.uid == u);
             let others = |u: u32| sessions.iter().any(|(x, _)| *x != u) || logins.values().any(|l| l.yes && l.uid != u);
@@ -1231,7 +1418,7 @@ fn main() {
                         "login-screen={}\tautologin={}\tallowed={}",
                         if paths::login_screen_file().is_file() { "on" } else { "off" },
                         auto.as_deref().unwrap_or("-"),
-                        match autologin_allowed() {
+                        match allowed_cached(&mut allowed_cache) {
                             Ok(u) => u,
                             Err(why) => format!("no: {why}"),
                         }
@@ -1283,12 +1470,16 @@ fn main() {
             let _ = s.write_all(format!("{answer}\n").as_bytes());
         }
         // The login screen asking to log someone in (step 4).
+        let greeter_fd = greeter.as_ref().map_or(-1, |l| l.as_raw_fd());
         if let Some(Ok((mut g, _))) = greeter.as_ref().map(|l| l.accept()) {
             let _ = g.set_nonblocking(false);
-            let _ = g.set_read_timeout(Some(Duration::from_secs(2)));
             let _ = g.set_write_timeout(Some(IO_LIMIT));
-            let request = if sys::peer_uid(&g) == greeter_uid {
-                match (proto::read_to_vdm(&mut g), proto::read_to_vdm(&mut g)) {
+            // Only the running login screen is heard (finding 2), its request
+            // whole within a second (finding 3).
+            let until = std::time::Instant::now() + Duration::from_secs(1);
+            let request = if sys::peer_uid(&g) == greeter_uid && greeter_run.pid > 0 {
+                let mut r = sys::Deadline { stream: &g, until };
+                match (proto::read_to_vdm(&mut r), proto::read_to_vdm(&mut r)) {
                     (Ok(ToVdm::Hello { version: proto::VERSION, service: proto::Service::Login }), Ok(ToVdm::Login { user, session })) => Some((user, session)),
                     _ => None,
                 }
@@ -1323,13 +1514,17 @@ fn main() {
                                     // SAFETY: vdm is single-threaded; the child runs login() and exits.
                                     let pid = unsafe { fork() };
                                     if pid == 0 {
+                                        reset_sigterm();
                                         drop(listener);
                                         drop(session_listener);
                                         drop(control);
                                         drop(power);
                                         drop(sessions);
                                         drop(running);
+                                        drop(logins);
                                         drop(said_parent);
+                                        // The greeter listener, borrowed here, by its number (finding 10).
+                                        sys::close_fds(&[greeter_fd], &[]);
                                         // SAFETY: the check's limit (login() cancels it on a yes).
                                         unsafe { alarm(TIME_LIMIT) };
                                         let code = login(g, &plan, &login_service, said_child);
@@ -1375,7 +1570,8 @@ fn main() {
             refuse(stream, 0);
             continue;
         };
-        if running.values().any(|(u, ..)| *u == uid) {
+        // One check at a time per account, a login's included (finding 10).
+        if running.values().any(|(u, ..)| *u == uid) || logins.values().any(|l| l.uid == uid && !l.yes) {
             refuse(stream, 1);
             continue;
         }
@@ -1390,11 +1586,13 @@ fn main() {
         if pid == 0 {
             drop(listener);
             drop(session_listener);
+            reset_sigterm();
             drop(control);
             drop(power);
             drop(sessions);
             drop(running);
             drop(greeter);
+            drop(logins);
             // SAFETY: the child's own limit: SIGALRM ends it if PAM blocks.
             unsafe { alarm(TIME_LIMIT) };
             let code = check(stream, &name, &service, false);
