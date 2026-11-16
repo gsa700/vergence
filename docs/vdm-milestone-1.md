@@ -15,7 +15,29 @@ hand the machine to whoever powers it on, undoing the encryption's point),
 "5 b" (Vergence and the installed Wayland sessions), "6 a" (the lock screen
 first). "Let's make sure we get this right, it's really important."
 
-Question 3 is open; nothing is built until it is settled.
+**Question 3, settled 2026-11-16 (Dave: "c"):** vdm is the one part that
+checks passwords, and **it always runs**: `install.sh` enables it as a
+system service whether or not it is the machine's login screen, so every
+session can lock however it was started. Two rules with it: **never show
+a lock that is not one** (if vdm cannot be reached, Super+L says so and the
+desktop stays visibly unlocked); and **the server is the lock** (no locker
+app whose crash could leave the desktop open; under vdm a server that dies
+ends the session and the greeter comes back).
+
+**Before any code** (Dave: "yes to the threat model and review"): a threat
+model in this document, then an independent review of the design by a
+reviewer who sees the design and the code, not this reasoning; then the
+steps; the security pass at the end as well.
+
+**Later, its own milestone: elevation prompts** (Dave: "can this same
+mechanism give up per command elevation prompts on the desktop as well?").
+Yes: the server draws the prompt (no app can draw a look-alike or read it),
+PAM checks the administrator, vdm carries out **one named action with
+checked arguments**, never an arbitrary command; a yes is for that request
+only. It can take over the FreeBSD setuid helpers and the Linux polkit rule,
+and is the permission question §6.5 and §7 ask for agents. Not in this
+milestone; vdm's protocol and its PAM conversation are built so that it is
+one more kind of request, not a rework.
 This is security code: a part of it runs as root and it handles passwords,
 so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
 
