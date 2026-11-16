@@ -203,7 +203,7 @@ nothing on the network, and §7.4's honest limit.
   commented with what it relies on.
 - PAM is linked from the system (libpam on Linux, OpenPAM on FreeBSD)
   through our own declarations: it is the operating system's interface for
-  logging in, as DRM and evdev are (to confirm with Dave: not borrowing).
+  logging in, as DRM and evdev are (Dave, 2026-11-16: not borrowing).
 - Passwords: one buffer type that wipes itself, never `String`, never
   formatted into text; no `Debug` for it.
 - Every login, failure, lock, unlock failure, session start and end goes to
@@ -222,14 +222,14 @@ nothing on the network, and §7.4's honest limit.
   attacks on the hardware are out of scope.
 - **The greeter sees typed passwords** (T10): contained, not prevented.
 
-### Open points for Dave
+### Open points, settled (Dave, 2026-11-16: "1 yes, 2 refuse, 3 yes")
 
-1. PAM through our own declarations, linked from the system: is that an
-   operating system interface (not borrowing), as DRM is?
-2. Paste into the password field (a password manager's copy): allow, or
-   refuse while locked and at the greeter?
-3. Users' pictures at the greeter: initials in this milestone, pictures
-   later through a file vdm keeps (never read from a home by root)?
+1. **PAM is an operating system interface**, not borrowing: linked from the
+   system (libpam, OpenPAM) through our own declarations, as DRM and evdev.
+2. **No paste** into the password field, at the lock or the greeter: only
+   keys typed at the machine (and the PAM prompts' own devices) answer.
+3. **Initials** at the greeter in this milestone; users' pictures later,
+   from a copy vdm keeps itself, never read from a home by root.
 
 ## Steps
 
