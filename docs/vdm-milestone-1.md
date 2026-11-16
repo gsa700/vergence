@@ -117,6 +117,120 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
 12. Nothing is installed or enabled without `--vdm`: today's console start
     keeps working, and so does GDM.
 
+## Threat model
+
+Written 2026-11-16, before any code, at Dave's word ("let's make sure we
+get this right"). It is checked again by an independent review of the
+design, and against the code in the security pass at the end. It builds on
+whitepaper §7: deny by default, the server draws whatever must be trusted,
+nothing on the network, and §7.4's honest limit.
+
+### What is protected
+
+- **A1. Every account's password** (and second factors: a YubiKey's
+  touch, a fingerprint). Learning one is the prize: with it come the
+  account, its files, and `sudo` if it is an administrator.
+- **A2. A locked session's contents**: what the windows show, what is
+  typed, the clipboard, the session's power to act as its user.
+- **A3. Who may start a session at all** (the greeter's one job).
+- **A4. The point of disk encryption**: a machine powered on by a stranger
+  must still ask for something before it is anyone's desktop.
+- **A5. The machine's power and its other users' sessions** (Restart and
+  Shut down from the greeter; sessions of others on the same machine).
+
+### Who might attack, and from where
+
+- **P. A person at the machine** without a password: keyboard, mouse,
+  touch, a USB device plugged in (a keyboard emulator typing guesses), the
+  power button, a monitor plugged in. **The adversary the lock screen and
+  the greeter exist for.**
+- **L. Another local account**: another person's session on the same
+  machine, or someone logged in over SSH as someone else.
+- **U. A program running as the user** (malware, a malicious script, a
+  confused agent). §7.4 applies: it can already read the user's files and
+  run `su`/`sudo` attempts. VDM must give it **nothing it does not already
+  have**, and must not let it reach other accounts.
+- **G. The greeter, compromised** (a bug in vergence-server or the
+  greeter app exploited through what it handles: input devices, fonts,
+  monitors' EDIDs). It runs as `_vdm` and sees passwords typed at it.
+- **N. The network.** VDM opens no network socket; nothing here listens.
+- **D. Someone with the disk** (the machine off, the disk taken). Only
+  disk encryption defends; VDM's part is A4 (no automatic login with an
+  encrypted file system).
+
+### The parts and what each is trusted with
+
+| Part | Runs as | Trusted with | Must never |
+|---|---|---|---|
+| **vdm** | root | checking passwords (PAM), starting sessions as a user, power actions | read files a user controls, run a command it was sent, open a network socket, keep a password after its check |
+| **greeter** (vergence-server + vergence-greeter) | `_vdm`, nothing else | showing the login dialog; the keys typed into it | check a password itself, start any program, keep a typed password after sending it, reach a user's files |
+| **user's server** | the user | drawing the lock, holding all input while locked | unlock on anything but vdm's yes to its own request; show a window while locked |
+| **vdm's greeter socket** | root, `_vdm` only | the greeter's requests (log in, power) | answer anyone but `_vdm` |
+| **vdm's lock socket** | root, any local user | "is this the right password for **me**?" | check anyone but the caller (its uid from the socket, not from what it says) |
+
+### Threats and their defenses
+
+| # | Who | Threat | Defense | Checked by |
+|---|---|---|---|---|
+| T1 | P | Guessing the password at the lock or the greeter (by hand or a USB keyboard emulator) | A pause after each wrong answer that grows; PAM's own lockout where the system has it (pam_faillock on Fedora); every failure in the system log | a test of the pause; the log |
+| T2 | P | Getting past the lock without the password: switching to a text console, Ctrl+Alt+Backspace, killing or crashing the server, unplugging or plugging a monitor | Under vdm, the session's terminal has no shell: a server that ends brings the greeter, never a logged-in console. While locked: Ctrl+Alt+Backspace and every server key but volume and brightness are off; a new monitor shows the lock; a text console (Ctrl+Alt+F2) asks for its own login | tests by hand on all three; seat tests for the keys |
+| T3 | P | Seeing the session while locked: a frame of the desktop shown on waking, after sleep, on a new monitor, in a notification | The lock is drawn and **presented on every screen before** sleep proceeds or the screens go off; notifications held back; a new monitor's first frame is the lock | tests with vctl and by hand: sleep, wake, hot-plug |
+| T4 | U | Unlocking its own session: telling the server to unlock (bus, D-Bus edge, vctl), injecting keys, drawing over the lock | The server unlocks **only** on vdm's yes to the request the lock dialog sent; no bus, D-Bus or control-socket command unlocks; while locked the control socket refuses everything but reports; input goes to the lock only; nothing is drawn above it | tests: each command while locked |
+| T5 | U | Reading the lock's password as it is typed (keylogging the server, a look-alike dialog) | Keys while locked reach no client (native, Wayland, X11); the dialog is drawn by the server, and no window can stand above it | tests: a client listening while locked hears nothing |
+| T6 | U | Attaching a debugger to the server (or the greeter) and unlocking in memory | The server and the greeter forbid it: `PR_SET_DUMPABLE` 0 on Linux, `procctl(PROC_TRACE_CTL)` on FreeBSD, so a process of the same user cannot ptrace them; what remains (root, a kernel bug) is §7.4's limit | a test that ptrace is refused |
+| T7 | U, L | Using the lock socket to guess **another** account's password | vdm checks only the caller's own account, by the uid the kernel gives for the socket (`SO_PEERCRED` on Linux, `getpeereid` on FreeBSD), never a name sent in the request | a test from a second account |
+| T8 | U | Using the lock socket to guess **its own** user's password faster than `su` allows | The same growing pause per account as T1, kept by vdm; so it gains nothing over `su`/`sudo` attempts it can already make | a test of the pause |
+| T9 | L | Reaching the greeter's socket (start sessions, power off) | The greeter socket is in a directory only root and `_vdm` may enter, and vdm checks the peer is `_vdm` | a test from another account |
+| T10 | G | A compromised greeter collects passwords as they are typed | Accepted in part, as for every login screen: whatever draws the login sees the keys. Contained: `_vdm` owns nothing, starts nothing, cannot reach users' files; vdm starts the greeter fresh after each login; it is the same well-tested server code as the session | the review; the security pass |
+| T11 | G | A compromised greeter starts a session without a password, or as another user | It cannot: vdm decides from PAM's answer, which the greeter only relays words into; vdm starts sessions, the greeter has no way to | the review; a fuzz test of the greeter socket |
+| T12 | U, L | vdm (root) tricked through files a user controls: a symbolic link in the runtime directory, a crafted session file, a user's picture | vdm reads no file a user can write; it makes the runtime directory with mkdir (failing if anything is there), checks it, and removes it without following links; the session list comes from system directories only; users' pictures are not read by vdm (initials in this milestone) | tests with a planted link |
+| T13 | U, G | vdm's own parser fed bad messages: crashes, overflows | Rust; a strict small format with lengths checked first (as the bus's); fuzz tests; no `unsafe` but the PAM and socket calls | fuzz tests |
+| T14 | P | Automatic login undoing disk encryption | Never offered with any encrypted file system mounted (LUKS/dm-crypt on Linux; GELI and ZFS encryption on FreeBSD); if it cannot tell, it is not offered; never with more than one person on the machine | tests of the detection |
+| T15 | P | Restart or Shut down from the greeter, ending other people's sessions | Accepted for the machine's own power, as its power button; with others logged in, vdm asks first and names them | by hand |
+| T16 | all | A password left in memory or a log | Typed passwords are kept in buffers that are wiped when done, in the greeter, the server and vdm; never logged, never in an error message; core dumps of vdm, the greeter and the server off | the review; the security pass |
+| T17 | U | Starting a session's programs with an environment vdm inherited (root's) | vdm builds the session's environment from nothing: HOME, USER, LOGNAME, SHELL, PATH, LANG and what PAM gives; the session is started through the user's login shell as the user | a test of the environment |
+| T18 | P | The lock that is not one: Super+L when vdm is not reachable | Super+L then says the screen cannot be locked and leaves it visibly unlocked; idle and sleep do the same, with a notification | a test with vdm stopped |
+
+### Rules for the code
+
+- vdm is small: PAM, the two sockets, starting and ending sessions, power.
+  Anything that can run unprivileged does (drawing, fonts, input, the list
+  of sessions shown).
+- Every request vdm takes is in a fixed, versioned format, its lengths
+  checked before anything is read; anything unknown ends the connection.
+- No `unsafe` outside the calls to PAM, the socket peer, `setuid`/
+  `setgroups`/`initgroups`, `ptrace` protection and the VT; each such call
+  commented with what it relies on.
+- PAM is linked from the system (libpam on Linux, OpenPAM on FreeBSD)
+  through our own declarations: it is the operating system's interface for
+  logging in, as DRM and evdev are (to confirm with Dave: not borrowing).
+- Passwords: one buffer type that wipes itself, never `String`, never
+  formatted into text; no `Debug` for it.
+- Every login, failure, lock, unlock failure, session start and end goes to
+  the system log (user and time, never what was typed): §7.2's audit log.
+
+### What is accepted, and why
+
+- **A program running as the user** can end its own session (it can kill
+  its server), read its files, and watch what the user does while
+  **unlocked**: §7.4. The lock protects against a person at the machine,
+  not against malware already inside the session.
+- **Anyone at the greeter** sees the list of the machine's people (Dave's
+  answer 1 a), and can restart or shut the machine down (T15).
+- **Root, and kernel bugs,** are out of reach of any display manager.
+- **Cold boot, DMA over Thunderbolt, a keyboard that logs**: physical
+  attacks on the hardware are out of scope.
+- **The greeter sees typed passwords** (T10): contained, not prevented.
+
+### Open points for Dave
+
+1. PAM through our own declarations, linked from the system: is that an
+   operating system interface (not borrowing), as DRM is?
+2. Paste into the password field (a password manager's copy): allow, or
+   refuse while locked and at the greeter?
+3. Users' pictures at the greeter: initials in this milestone, pictures
+   later through a file vdm keeps (never read from a home by root)?
+
 ## Steps
 
 1. The lock screen in the server (drawing, input, Super+L, idle and sleep,
