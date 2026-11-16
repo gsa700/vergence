@@ -612,6 +612,10 @@ impl Server {
     /// The dock itself, as long as the apps button's place and `items` after
     /// it; while it is being dragged, where the pointer has taken it.
     fn shelf_dock(&mut self, items: usize) -> Option<Rectangle<i32, Logical>> {
+        // No dock at the login screen (review C3).
+        if crate::greeter() {
+            return None;
+        }
         let at = self.shelf.config.placement();
         // The live tiles stand after the applications (tiles.rs); an
         // application dragged from the launcher over the dock has a place too.

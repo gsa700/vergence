@@ -84,6 +84,9 @@ impl Server {
 
     /// The desktop's icons, at the session's start, if wanted.
     pub fn desktop_start(&mut self) {
+        if crate::greeter() {
+            return;
+        }
         if !icons_wanted() {
             return tracing::info!("desktop: icons switched off ([desktop] icons = false)");
         }

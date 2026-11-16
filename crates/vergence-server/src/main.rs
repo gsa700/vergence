@@ -80,12 +80,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let display: Display<Server> = Display::new()?;
 
+    // The login screen (VDM milestone 1, review C3): `--greeter`, as vdm starts
+    // it for _vdm. It starts no program and opens nothing to programs.
+    if std::env::args().any(|a| a == "--greeter") {
+        GREETER.store(true, std::sync::atomic::Ordering::Relaxed);
+        tracing::info!("greeter: the login screen; no program is started, no session bus, no X11");
+    }
     let mut state = Server::new(&mut event_loop, display);
     state.start_wallpaper();
-    state.start_network();
-    state.start_applets();
-    state.start_lock();
-    state.start_battery_history();
+    if !greeter() {
+        state.start_network();
+        state.start_applets();
+        state.start_lock();
+        state.start_battery_history();
+    }
     state.start_settings();
     state.start_energy();
 
@@ -105,15 +113,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     crate::portal::export_env();
     // The development control socket (owner-only; control.rs).
     crate::control::listen(&mut state);
-    // The session bus (bus.rs); sets VERGENCE_BUS for everything started after it.
-    crate::bus::listen(&mut state);
-    // The D-Bus edge (dbus.rs); sets DBUS_SESSION_BUS_ADDRESS unless one is set.
-    crate::dbus::listen(&mut state);
+    if !greeter() {
+        // The session bus (bus.rs); sets VERGENCE_BUS for everything started after it.
+        crate::bus::listen(&mut state);
+        // The D-Bus edge (dbus.rs); sets DBUS_SESSION_BUS_ADDRESS unless one is set.
+        crate::dbus::listen(&mut state);
+    }
 
     // X11 apps through Xwayland, if the settings ask for it (off by default since
     // 2026-11-10: Dave runs no X11-only programs); the first app then starts once
-    // it is ready (or failed), so it inherits DISPLAY.
-    if crate::state::x11_wanted() {
+    // it is ready (or failed), so it inherits DISPLAY. Never at the login screen.
+    if greeter() {
+        tracing::info!("Xwayland: off (the login screen)");
+    } else if crate::state::x11_wanted() {
         state.xwayland_started = true;
         state.start_xwayland(spawn_client);
     } else {
@@ -154,6 +166,13 @@ fn init_logging() {
     }
 }
 
+/// The server is the login screen (`--greeter`; VDM milestone 1, review C3).
+static GREETER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn greeter() -> bool {
+    GREETER.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// The program `cmd` starts runs in a session of its own, with no
 /// controlling terminal (review C6): it cannot open /dev/tty to reach the
 /// console the session was started on.
@@ -178,6 +197,11 @@ pub fn no_terminal(cmd: &mut std::process::Command) {
 /// app had the console as its controlling terminal and could open /dev/tty, which
 /// a lock screen must not allow), reaped when it exits.
 pub fn spawn(cmd: &mut std::process::Command) -> std::io::Result<u32> {
+    // The login screen starts nothing, whatever asks (review C3).
+    if greeter() {
+        tracing::warn!("greeter: refused to start {:?}", cmd.get_program());
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "the login screen starts no program"));
+    }
     no_terminal(cmd);
     let mut child = cmd.stdin(std::process::Stdio::null()).spawn()?;
     let pid = child.id();

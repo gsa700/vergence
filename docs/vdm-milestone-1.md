@@ -168,6 +168,21 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   button would. Sleep, Restart and Shut Down join it in step 6. Seen on
   kepler.
 
+- **Step 4, a change of design** (2026-11-16): the server draws the login
+  dialog itself, as it draws the lock, instead of running a greeter app:
+  the toolkit's text field passes text around as ordinary strings, which
+  cannot be wiped, while the server's dialog keeps it in a `Secret` from
+  the first key; greeter mode can then start no program at all; and the
+  lock and the login share one dialog and one conversation with vdm.
+- **Step 4, part 4a** (2026-11-16): greeter mode (`vergence-server
+  --greeter`, review C3). `crate::spawn` refuses every program; not started
+  at all: applets, the battery history, network control, the lock, the
+  session bus, the D-Bus edge (so no portal), Xwayland; off: the dock, the
+  launcher, the desktop menu, session restore and autostart, the desktop's
+  icons, Super+L and the log out dialog, the sleep command. The control
+  socket stays as it is (off unless VERGENCE_CONTROL=1, and owner-only:
+  _vdm's).
+
 ## Design
 
 ### The parts

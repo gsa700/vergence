@@ -194,7 +194,8 @@ impl Server {
             crate::drm::screens_off(self);
             self.input_screens_off();
         }
-        if !sleep.is_zero() && !self.energy.slept && idle >= sleep {
+        // The login screen does not put the machine to sleep itself (vdm, step 6).
+        if !sleep.is_zero() && !self.energy.slept && idle >= sleep && !crate::greeter() {
             self.lock_for_idle("sleep");
             self.energy.slept = true;
             let cmd = sleep_command(&c).to_string();

@@ -194,6 +194,10 @@ impl Server {
 
     /// Open the desktop menu at the pointer, kept on its monitor.
     pub fn open_menu(&mut self, pos: Point<f64, Logical>) {
+        // No desktop menu at the login screen (review C3).
+        if crate::greeter() {
+            return;
+        }
         // Applications are the dock's and the launcher's now; the desktop's own
         // things here (2026-11-15). Apps a desktop.toml names still come first.
         let mut entries: Vec<Entry> = configured_apps().into_iter().map(Entry::App).collect();

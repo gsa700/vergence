@@ -107,6 +107,10 @@ impl Server {
     /// Once a second: at the session's start, the applications of the last
     /// one are started; after that, the list of what is running is kept.
     pub fn session_tick(&mut self) {
+        // The login screen restores nothing and starts nothing (review C3).
+        if crate::greeter() {
+            return;
+        }
         // Once, at the session's start, on the real monitors: what the user
         // put in ~/.config/autostart (dock milestone 1: lab tiles, say),
         // whether or not the last session is restored.

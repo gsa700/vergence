@@ -139,6 +139,10 @@ impl Server {
     }
 
     pub fn launcher_toggle(&mut self) {
+        // No launcher at the login screen (review C3).
+        if crate::greeter() {
+            return;
+        }
         if self.launcher.open.is_some() {
             return self.launcher_close();
         }

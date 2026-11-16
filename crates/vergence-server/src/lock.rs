@@ -284,6 +284,10 @@ impl Server {
         if self.lock.on {
             return true;
         }
+        // Nothing to lock at the login screen.
+        if crate::greeter() {
+            return false;
+        }
         if let Some(reason) = self.lock_blocker() {
             tracing::warn!("lock: not locked ({why}): {reason}");
             let req = crate::notify::Request {
@@ -306,7 +310,7 @@ impl Server {
     /// Idle long enough for the screens to go off, or going to sleep: locked
     /// if it can be; if not, said once (not at every idle stretch).
     pub fn lock_for_idle(&mut self, why: &str) {
-        if self.lock.on {
+        if self.lock.on || crate::greeter() {
             return;
         }
         if self.lock_blocker().is_some() {
