@@ -68,6 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::error!("{why}");
         return Err(why.into());
     }
+    tighten_own_folders();
 
     let mut event_loop: EventLoop<Server> = EventLoop::try_new()?;
 
@@ -182,6 +183,44 @@ fn check_runtime_dir() -> Result<(), String> {
     match runtime_dir_fault(m.file_type().is_symlink(), m.is_dir(), m.uid(), m.permissions().mode(), crate::control::our_uid()) {
         Some(fault) => Err(format!("runtime directory {} {fault}; refusing to put the session's sockets there", dir.to_string_lossy())),
         None => Ok(()),
+    }
+}
+
+/// The session's settings and state are the user's alone (CLAUDE.md's
+/// owner-only rule; security pass 2026-11-15, finding 12): desktop.toml
+/// holds commands the server runs. At every start the two folders are made
+/// 0700 and the files directly in them owner-only; links and what is not
+/// ours are left alone. Other files the user's programs save are not
+/// touched.
+fn tighten_own_folders() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else { return };
+    let config = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| home.join(".config"));
+    let state = std::env::var_os("XDG_STATE_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| home.join(".local/state"));
+    let us = crate::control::our_uid();
+    for dir in [config.join("vergence"), state.join("vergence")] {
+        let Ok(m) = std::fs::symlink_metadata(&dir) else { continue };
+        if !m.is_dir() || m.uid() != us {
+            tracing::warn!("{} is not a folder of ours; left alone", dir.display());
+            continue;
+        }
+        if m.mode() & 0o077 != 0 {
+            tracing::info!("{}: mode {:o} made 700", dir.display(), m.mode() & 0o777);
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let Ok(m) = e.path().symlink_metadata() else { continue };
+            if m.uid() == us && (m.is_file() || m.is_dir()) && m.mode() & 0o077 != 0 {
+                let _ = std::fs::set_permissions(e.path(), std::fs::Permissions::from_mode(m.mode() & 0o700));
+            }
+        }
+    }
+    // desktop.toml's commands run with `sh -c`: say so if anyone else could change them.
+    let desktop = config.join("vergence/desktop.toml");
+    if let Ok(m) = std::fs::metadata(&desktop)
+        && (m.uid() != us || m.mode() & 0o022 != 0)
+    {
+        tracing::warn!("{} can be changed by another user (owner {}, mode {:o}); its commands run in this session", desktop.display(), m.uid(), m.mode() & 0o777);
     }
 }
 

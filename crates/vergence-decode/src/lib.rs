@@ -6,10 +6,12 @@
 //! helper needs no file system at all. The helper ([`helper_main`]) reads
 //! it, then limits itself before decoding: on FreeBSD it enters Capsicum
 //! capability mode (`cap_enter`: no file system, no network, no new
-//! descriptors); on Linux it sets no-new-privileges (Landlock and seccomp
-//! are later, whitepaper §8.3's list); on both it closes every other
-//! descriptor and lowers its limits: CPU time, memory, file size, open
-//! files. It writes the picture to standard output and ends. A crash, a
+//! descriptors); on Linux it sets no-new-privileges and enters a seccomp
+//! filter that allows only memory, the standard descriptors, locks and the
+//! end (x86_64; another processor is refused until it has its list); on
+//! both it closes every other descriptor and lowers its limits: CPU time,
+//! memory, file size, open files (three: no new one). A limit that cannot
+//! be set ends it before it decodes. It writes the picture to standard output and ends. A crash, a
 //! hang (killed after [`TIMEOUT`]) or an error in a bad file is an error
 //! here, never a crash of the program that asked.
 //!
@@ -280,6 +282,9 @@ pub fn decode_bytes(data: &[u8], at_least: Option<(u32, u32)>) -> Result<Picture
 }
 
 /// The helper's limits, set before it decodes (see the crate's comment).
+/// Any limit that cannot be set ends the helper (exit 3): it never decodes
+/// with less confinement than it means to have (security pass 2026-11-15,
+/// finding 3).
 fn limit_self() {
     #[repr(C)]
     struct Rlimit {
@@ -290,10 +295,16 @@ fn limit_self() {
         fn setrlimit(resource: i32, rlim: *const Rlimit) -> i32;
         fn close(fd: i32) -> i32;
     }
+    fn refuse(what: &str) -> ! {
+        eprintln!("vergence-decode: {what} could not be set; not decoding");
+        std::process::exit(3);
+    }
+    // CPU seconds, file size (none written), open files (only the three
+    // standard ones: no new descriptor at all), address space.
     #[cfg(target_os = "linux")]
-    const LIMITS: [(i32, u64); 4] = [(0, 10), (1, 0), (7, 8), (9, 4 << 30)]; // CPU s, FSIZE, NOFILE, AS
+    const LIMITS: [(i32, u64); 4] = [(0, 10), (1, 0), (7, 3), (9, 4 << 30)]; // CPU, FSIZE, NOFILE, AS
     #[cfg(target_os = "freebsd")]
-    const LIMITS: [(i32, u64); 4] = [(0, 10), (1, 0), (8, 8), (10, 4 << 30)]; // CPU s, FSIZE, NOFILE, VMEM (AS)
+    const LIMITS: [(i32, u64); 4] = [(0, 10), (1, 0), (8, 3), (10, 4 << 30)]; // CPU, FSIZE, NOFILE, VMEM (AS)
     #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
     const LIMITS: [(i32, u64); 0] = [];
     // Nothing but the three standard descriptors stays open.
@@ -304,7 +315,9 @@ fn limit_self() {
     for (resource, value) in LIMITS {
         let r = Rlimit { cur: value, max: value };
         // SAFETY: setrlimit(2) with a valid struct of two rlim_t.
-        unsafe { setrlimit(resource, &r) };
+        if unsafe { setrlimit(resource, &r) } != 0 {
+            refuse("a resource limit");
+        }
     }
     #[cfg(target_os = "linux")]
     {
@@ -312,7 +325,12 @@ fn limit_self() {
             fn prctl(option: i32, a: u64, b: u64, c: u64, d: u64) -> i32;
         }
         // SAFETY: PR_SET_NO_NEW_PRIVS (38) takes plain numbers.
-        unsafe { prctl(38, 1, 0, 0, 0) };
+        if unsafe { prctl(38, 1, 0, 0, 0) } != 0 {
+            refuse("no-new-privileges");
+        }
+        if let Err(what) = seccomp::enter() {
+            refuse(what);
+        }
     }
     #[cfg(target_os = "freebsd")]
     {
@@ -321,9 +339,99 @@ fn limit_self() {
         }
         // SAFETY: cap_enter(2) takes nothing; from here no file system or network.
         if unsafe { cap_enter() } != 0 {
-            eprintln!("vergence-decode: capability mode could not be entered");
-            std::process::exit(3);
+            refuse("capability mode");
         }
+    }
+}
+
+/// Linux's counterpart of Capsicum for the helper (security pass
+/// 2026-11-15, finding 2): a seccomp filter that allows only what decoding
+/// a picture already in memory and writing the answer needs (memory,
+/// reading and writing the standard descriptors, locks, the end). No open,
+/// no socket, no unlink or rename, no signal to another process: any other
+/// system call kills the helper, which its caller reports as a crash.
+#[cfg(target_os = "linux")]
+mod seccomp {
+    #[repr(C)]
+    struct SockFilter {
+        code: u16,
+        jt: u8,
+        jf: u8,
+        k: u32,
+    }
+    #[repr(C)]
+    struct SockFprog {
+        len: u16,
+        filter: *const SockFilter,
+    }
+
+    const LD_W_ABS: u16 = 0x20; // BPF_LD | BPF_W | BPF_ABS
+    const JEQ_K: u16 = 0x15; // BPF_JMP | BPF_JEQ | BPF_K
+    const RET_K: u16 = 0x06; // BPF_RET | BPF_K
+    const RET_ALLOW: u32 = 0x7fff_0000;
+    const RET_KILL_PROCESS: u32 = 0x8000_0000;
+    // struct seccomp_data: nr at 0, arch at 4.
+    const OFF_NR: u32 = 0;
+    const OFF_ARCH: u32 = 4;
+
+    #[cfg(target_arch = "x86_64")]
+    const ARCH: u32 = 0xC000_003E; // AUDIT_ARCH_X86_64
+    /// read, write, close, fstat, lseek, mmap, mprotect, munmap, brk,
+    /// rt_sigreturn, readv, writev, sched_yield, mremap, madvise, exit,
+    /// futex, sched_getaffinity, clock_gettime, exit_group, newfstatat,
+    /// getrandom, statx.
+    #[cfg(target_arch = "x86_64")]
+    pub const ALLOWED: &[u32] = &[0, 1, 3, 5, 8, 9, 10, 11, 12, 14, 15, 19, 20, 24, 25, 28, 60, 202, 204, 228, 231, 262, 318, 332];
+
+    /// The filter program: the wrong architecture or a call not listed is
+    /// killed.
+    #[cfg(target_arch = "x86_64")]
+    fn program() -> Vec<SockFilter> {
+        let f = |code, jt, jf, k| SockFilter { code, jt, jf, k };
+        let mut p = vec![f(LD_W_ABS, 0, 0, OFF_ARCH), f(JEQ_K, 1, 0, ARCH), f(RET_K, 0, 0, RET_KILL_PROCESS), f(LD_W_ABS, 0, 0, OFF_NR)];
+        for &nr in ALLOWED {
+            p.push(f(JEQ_K, 0, 1, nr));
+            p.push(f(RET_K, 0, 0, RET_ALLOW));
+        }
+        p.push(f(RET_K, 0, 0, RET_KILL_PROCESS));
+        p
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn enter() -> Result<(), &'static str> {
+        unsafe extern "C" {
+            fn prctl(option: i32, a: u64, b: u64, c: u64, d: u64) -> i32;
+        }
+        let prog = program();
+        let fprog = SockFprog { len: prog.len() as u16, filter: prog.as_ptr() };
+        // SAFETY: PR_SET_SECCOMP (22), SECCOMP_MODE_FILTER (2) with a valid
+        // sock_fprog whose filter outlives the call (the kernel copies it).
+        if unsafe { prctl(22, 2, &fprog as *const SockFprog as u64, 0, 0) } != 0 {
+            return Err("the seccomp filter");
+        }
+        Ok(())
+    }
+
+    /// No list of system calls for this processor yet: refused rather than
+    /// decoding unconfined.
+    #[cfg(not(target_arch = "x86_64"))]
+    pub fn enter() -> Result<(), &'static str> {
+        Err("the seccomp filter (no system call list for this processor)")
+    }
+}
+
+/// For the tests: limit itself as for a picture, then try to open a file.
+/// Exit 4 if refused (FreeBSD's capability mode says ECAPMODE); on Linux the
+/// seccomp filter kills it at the open instead. Exit 0 would mean it is not
+/// confined.
+fn check_confined() -> std::process::ExitCode {
+    limit_self();
+    match std::fs::File::open("/") {
+        Ok(_) => {
+            eprintln!("vergence-decode: NOT confined: a file could be opened");
+            std::process::ExitCode::SUCCESS
+        }
+        Err(_) => std::process::ExitCode::from(4),
     }
 }
 
@@ -333,8 +441,11 @@ fn limit_self() {
 pub fn helper_main() -> std::process::ExitCode {
     let mut at_least = None;
     for a in std::env::args().skip(1) {
+        if a == "--check-confined" {
+            return check_confined();
+        }
         let Some((w, h)) = a.strip_prefix("--at-least=").and_then(|s| s.split_once('x')) else {
-            eprintln!("usage: vergence-decode [--at-least=WxH] < picture");
+            eprintln!("usage: vergence-decode [--at-least=WxH] < picture | --check-confined");
             return std::process::ExitCode::from(2);
         };
         match (w.parse::<u32>(), h.parse::<u32>()) {
@@ -434,5 +545,93 @@ mod tests {
         let out = std::process::Command::new(&helper).stdin(std::fs::File::open(&file).unwrap()).output().unwrap();
         assert_eq!(out.status.code(), Some(1));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn helper() -> Option<PathBuf> {
+        std::env::current_exe().ok().and_then(|e| Some(e.parent()?.parent()?.join("vergence-decode"))).filter(|p| p.is_file())
+    }
+
+    /// A 2 x 2 BMP, 32 bits, bottom-up.
+    fn bmp() -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(b"BM");
+        b.extend_from_slice(&(54u32 + 16).to_le_bytes());
+        b.extend_from_slice(&[0; 4]);
+        b.extend_from_slice(&54u32.to_le_bytes());
+        b.extend_from_slice(&40u32.to_le_bytes());
+        b.extend_from_slice(&2i32.to_le_bytes());
+        b.extend_from_slice(&2i32.to_le_bytes());
+        b.extend_from_slice(&1u16.to_le_bytes());
+        b.extend_from_slice(&32u16.to_le_bytes());
+        b.extend_from_slice(&[0; 24]);
+        for _ in 0..4 {
+            b.extend_from_slice(&[0, 0, 255, 0]);
+        }
+        b
+    }
+
+    fn encoded(format: image::ImageFormat) -> Vec<u8> {
+        let img = image::RgbaImage::from_fn(16, 8, |x, y| image::Rgba([x as u8 * 9, y as u8 * 20, 7, 255]));
+        let mut out = Vec::new();
+        let pic = if format == image::ImageFormat::Jpeg { image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(img).to_rgb8()) } else { image::DynamicImage::ImageRgba8(img) };
+        pic.write_to(&mut std::io::Cursor::new(&mut out), format).unwrap();
+        out
+    }
+
+    fn animated_gif() -> Vec<u8> {
+        use image::codecs::gif::GifEncoder;
+        let mut out = Vec::new();
+        {
+            let mut enc = GifEncoder::new(&mut out);
+            for i in 0..3u8 {
+                let img = image::RgbaImage::from_pixel(4, 4, image::Rgba([i * 80, 0, 0, 255]));
+                enc.encode_frame(image::Frame::from_parts(img, 0, 0, image::Delay::from_numer_denom_ms(100, 1))).unwrap();
+            }
+        }
+        out
+    }
+
+    /// Every format, through the real helper with its limits on (seccomp on
+    /// Linux, Capsicum on FreeBSD): a system call the filter lacks would kill
+    /// it here.
+    #[test]
+    fn the_confined_helper_decodes_every_format() {
+        let Some(helper) = helper() else { return };
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="#ff0000"/></svg>"##.to_vec();
+        let cases: Vec<(&str, Vec<u8>, (u32, u32), usize)> = vec![
+            ("png", encoded(image::ImageFormat::Png), (16, 8), 1),
+            ("jpeg", encoded(image::ImageFormat::Jpeg), (16, 8), 1),
+            ("webp", encoded(image::ImageFormat::WebP), (16, 8), 1),
+            ("gif", animated_gif(), (4, 4), 3),
+            ("bmp", bmp(), (2, 2), 1),
+            ("svg", svg, (20, 10), 1),
+        ];
+        let dir = std::env::temp_dir().join(format!("vergence-decode-all-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, bytes, size, frames) in cases {
+            let file = dir.join(name);
+            std::fs::write(&file, &bytes).unwrap();
+            let out = std::process::Command::new(&helper).stdin(std::fs::File::open(&file).unwrap()).output().unwrap();
+            assert!(out.status.success(), "{name}: {:?} {}", out.status, String::from_utf8_lossy(&out.stderr));
+            let p = parse(&out.stdout).unwrap();
+            assert_eq!(((p.width, p.height), p.frames.len()), (size, frames), "{name}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Once limited, the helper cannot open a file: refused (exit 4) or
+    /// killed by the filter, never allowed (exit 0).
+    #[test]
+    fn the_confined_helper_cannot_open_a_file() {
+        let Some(helper) = helper() else { return };
+        let out = std::process::Command::new(&helper).arg("--check-confined").output().unwrap();
+        assert!(!out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            assert_eq!(out.status.signal(), Some(31), "killed by seccomp (SIGSYS): {:?}", out.status);
+        }
+        #[cfg(target_os = "freebsd")]
+        assert_eq!(out.status.code(), Some(4), "{}", String::from_utf8_lossy(&out.stderr));
     }
 }

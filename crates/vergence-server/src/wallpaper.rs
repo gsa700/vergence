@@ -357,7 +357,7 @@ fn cache_path(look: &Look, w: u32, h: u32) -> Option<PathBuf> {
 /// A finished picture from the cache: 8-byte magic, width and height (u32 LE),
 /// then w x h premultiplied RGBA.
 fn cache_read(path: &std::path::Path, w: u32, h: u32) -> Option<Vec<u8>> {
-    let data = std::fs::read(path).ok()?;
+    let data = vergence_types::read_regular(path, 16 + w as u64 * h as u64 * 4).ok()?;
     let want = 16 + w as usize * h as usize * 4;
     if data.len() != want || &data[..8] != CACHE_MAGIC || data[8..12] != w.to_le_bytes() || data[12..16] != h.to_le_bytes() {
         return None;
@@ -415,8 +415,8 @@ fn worker(jobs: std::sync::mpsc::Receiver<Job>, done: Sender<Done>) {
         let grew = job.w > cover.0 || job.h > cover.1;
         cover = (cover.0.max(job.w), cover.1.max(job.h));
         if grew {
-            // Kept rasters may now be too small for this monitor.
-            sources.retain(|(_, _, s)| matches!(s, Source::Svg(_)));
+            // Kept pictures may now be too small for this monitor.
+            sources.clear();
         }
         // "center" shows the picture at its own pixels: never from a shrunk copy.
         let may_shrink = job.look.mode != "center";
@@ -447,46 +447,39 @@ fn worker(jobs: std::sync::mpsc::Receiver<Job>, done: Sender<Done>) {
 
 enum Source {
     Raster(image::RgbaImage),
-    Svg(resvg::usvg::Tree),
 }
 
 impl Source {
-    /// Read a picture; a raster bigger than it needs to be to fill `cover` is
-    /// shrunk to that size at once (a triangle filter over the whole footprint:
-    /// Lanczos took a second for an 8K JPEG).
+    /// Read a picture: decoded by the helper (vergence-decode, confined),
+    /// never in the server, which sees every key and every window (security
+    /// pass 2026-11-15, finding 4). A picture bigger than it needs to be to
+    /// fill `cover` comes back shrunk to that size; a drawing (SVG) comes
+    /// drawn at that size, with no outside files. Unless shrinking is not
+    /// allowed ("center"): then every pixel, a drawing at its own size.
     fn load(path: &std::path::Path, cover: (u32, u32), may_shrink: bool) -> Option<(Source, bool)> {
-        let is_svg = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg") || e.eq_ignore_ascii_case("svgz"));
-        if is_svg {
-            let data = std::fs::read(path).ok()?;
-            let opt = resvg::usvg::Options { resources_dir: path.parent().map(|p| p.to_path_buf()), ..Default::default() };
-            return resvg::usvg::Tree::from_data(&data, &opt).ok().map(|t| (Source::Svg(t), false));
-        }
-        let img = image::open(path).ok()?;
-        let (iw, ih) = (img.width() as f64, img.height() as f64);
-        let fill = (cover.0 as f64 / iw).max(cover.1 as f64 / ih);
-        if may_shrink && fill > 0.0 && fill < 0.9 {
-            let (nw, nh) = ((iw * fill).ceil() as u32, (ih * fill).ceil() as u32);
-            let small = img.resize_exact(nw.max(1), nh.max(1), image::imageops::FilterType::Triangle);
-            return Some((Source::Raster(small.to_rgba8()), true));
-        }
-        Some((Source::Raster(img.to_rgba8()), false))
+        let at_least = may_shrink.then_some((cover.0.max(1), cover.1.max(1)));
+        let p = match vergence_decode::decode_file(path, at_least) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("wallpaper: {}: {e}", path.display());
+                return None;
+            }
+        };
+        let frame = p.frames.into_iter().next()?;
+        let img = image::RgbaImage::from_raw(p.width, p.height, frame.rgba)?;
+        Some((Source::Raster(img), may_shrink))
     }
 
     /// The picture for a w x h output: premultiplied RGBA, the color behind.
     fn render(&self, w: u32, h: u32, mode: &str, color: [f32; 3]) -> Vec<u8> {
         let (sw, sh) = match self {
             Source::Raster(i) => (i.width() as f64, i.height() as f64),
-            Source::Svg(t) => (t.size().width() as f64, t.size().height() as f64),
         };
         let (fw, fh) = placement(sw, sh, w as f64, h as f64, mode);
         let (x, y) = ((w as f64 - fw) / 2.0, (h as f64 - fh) / 2.0);
         let mut canvas = resvg::tiny_skia::Pixmap::new(w, h).expect("non-empty output");
         canvas.fill(resvg::tiny_skia::Color::from_rgba(color[0], color[1], color[2], 1.0).unwrap());
         match self {
-            Source::Svg(tree) => {
-                let ts = resvg::tiny_skia::Transform::from_row((fw / sw) as f32, 0.0, 0.0, (fh / sh) as f32, x as f32, y as f32);
-                resvg::render(tree, ts, &mut canvas.as_mut());
-            }
             Source::Raster(img) => {
                 let scaled = image::imageops::resize(img, fw.round().max(1.0) as u32, fh.round().max(1.0) as u32, image::imageops::FilterType::CatmullRom);
                 // Premultiply and place it (straight alpha in, premultiplied canvas).

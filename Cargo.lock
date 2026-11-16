@@ -2335,6 +2335,7 @@ dependencies = [
  "tracing-subscriber",
  "vergence-bar",
  "vergence-dbus",
+ "vergence-decode",
  "vergence-edid",
  "vergence-look",
  "vergence-media",

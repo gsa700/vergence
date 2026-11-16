@@ -49,8 +49,10 @@ fn cache_path(path: &Path) -> Option<PathBuf> {
 
 /// The preview if it is already in the cache (never drawn here).
 pub fn cached(path: &Path) -> Option<Thumb> {
-    let img = image::open(cache_path(path)?).ok()?.to_rgba8();
-    Some(Thumb { w: img.width(), h: img.height(), rgba: img.into_raw() })
+    // Our own cache, but a file all the same: read by the helper too.
+    let p = vergence_decode::decode_file(&cache_path(path)?, None).ok()?;
+    let rgba = p.frames.into_iter().next()?.rgba;
+    Some(Thumb { w: p.width, h: p.height, rgba })
 }
 
 /// The preview: from the cache, else drawn and cached.

@@ -85,35 +85,22 @@ enum Asked {
 const MAX_ICON_FILE: u64 = 8 * 1024 * 1024;
 const MAX_ICON_SIDE: u32 = 4096;
 
-/// A file as an icon about `pixels` across. Run on the shelf's own thread:
-/// decoding a picture is work on a file the server did not write, and is
-/// kept off the thread that owns the screen and the input.
+/// A file as an icon about `pixels` across. Run on the shelf's own thread,
+/// and decoded by the helper (vergence-decode, confined), never in the
+/// server: the file's path comes from a desktop entry's `Icon=` (security
+/// pass 2026-11-15, finding 4). Only the resizing of what comes back is
+/// done here.
 fn decode(path: &Path, pixels: u32) -> Option<Icon> {
     if std::fs::metadata(path).ok()?.len() > MAX_ICON_FILE {
         return None;
     }
     let pixels = pixels.clamp(8, 512);
-    if path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("svg")) {
-        let data = std::fs::read(path).ok()?;
-        let tree = resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()).ok()?;
-        let size = tree.size();
-        let scale = pixels as f32 / size.width().max(size.height()).max(1.0);
-        let (w, h) = (((size.width() * scale).round() as u32).clamp(1, pixels), ((size.height() * scale).round() as u32).clamp(1, pixels));
-        let mut canvas = resvg::tiny_skia::Pixmap::new(w, h)?;
-        resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(scale, scale), &mut canvas.as_mut());
-        // The drawing comes with alpha multiplied in; a scene's pictures do not.
-        let rgba = canvas.pixels().iter().flat_map(|p| {
-            let c = p.demultiply();
-            [c.red(), c.green(), c.blue(), c.alpha()]
-        }).collect();
-        return Some(Icon { width: w, height: h, rgba });
-    }
-    let reader = image::ImageReader::open(path).ok()?.with_guessed_format().ok()?;
-    let (w, h) = reader.into_dimensions().ok()?;
+    let p = vergence_decode::decode_file(path, Some((pixels, pixels))).map_err(|e| tracing::debug!("icon {}: {e}", path.display())).ok()?;
+    let (w, h) = (p.width, p.height);
     if w == 0 || h == 0 || w > MAX_ICON_SIDE || h > MAX_ICON_SIDE {
         return None;
     }
-    let picture = image::open(path).ok()?.into_rgba8();
+    let picture = image::RgbaImage::from_raw(w, h, p.frames.into_iter().next()?.rgba)?;
     let scale = pixels as f32 / w.max(h) as f32;
     let (nw, nh) = (((w as f32 * scale).round() as u32).clamp(1, pixels), ((h as f32 * scale).round() as u32).clamp(1, pixels));
     let fitted = if (nw, nh) == (w, h) { picture } else { image::imageops::resize(&picture, nw, nh, image::imageops::FilterType::CatmullRom) };

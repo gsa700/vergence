@@ -22,6 +22,7 @@ vergence-profile.workspace = true
 vergence-look.workspace = true
 vergence-sysinfo.workspace = true
 vergence-types.workspace = true
+vergence-decode.workspace = true
 vergence-shell.workspace = true
 vergence-seat.workspace = true
 vergence-bar.workspace = true
@@ -40,7 +41,8 @@ png = "0.18"
 ab_glyph = "0.2"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# Resizing only: pictures are decoded by vergence-decode, never in the server.
+image = { version = "0.25", default-features = false }
 resvg = "0.45"
 
 [dependencies.smithay]
