@@ -336,7 +336,9 @@ impl Server {
     pub fn lock_if_idle(&mut self) {
         let battery = self.energy.on_battery.load(std::sync::atomic::Ordering::Relaxed);
         let (off, _) = self.energy.config.times(battery);
-        if !off.is_zero() && self.energy.last_input.elapsed() >= off {
+        let after = self.energy.config.lock_after;
+        let idle = self.energy.last_input.elapsed();
+        if (self.energy.config.lock_on_screens_off && !off.is_zero() && idle >= off) || (!after.is_zero() && idle >= after) {
             self.lock_for_idle("back after the idle time");
         }
     }
@@ -349,6 +351,11 @@ impl Server {
                 let _ = tx.send(r);
             }
         };
+        // [lock] before-sleep = false: the person chose a machine that wakes
+        // into the session; vdm is told so (it logs it), not shown a lock.
+        if !self.lock.on && !self.energy.config.lock_before_sleep {
+            return reply(self, Reply::Cannot("lock before sleep is off in the settings".into()));
+        }
         if !self.lock.on {
             if let Some(why) = self.lock_blocker() {
                 self.lock_request("sleep");

@@ -79,7 +79,8 @@ if [ -n "$uninstall" ]; then
     # vdm's PAM files and the login screen at boot (the service itself is the
     # init system's to stop: vdm will not start without its binary).
     if [ -z "$destdir" ]; then
-        rm -f /etc/pam.d/vdm /etc/pam.d/vdm-unlock /etc/pam.d/vdm-greeter /var/lib/vdm/login-screen /var/db/vdm/login-screen
+        rm -f /etc/pam.d/vdm /etc/pam.d/vdm-unlock /etc/pam.d/vdm-greeter /etc/pam.d/vdm-autologin \
+            /var/lib/vdm/login-screen /var/db/vdm/login-screen /var/lib/vdm/autologin /var/db/vdm/autologin
     fi
     rm -f "$sessions/vergence.desktop"
     for t in $tools; do rm -f "$applications/$t.desktop" "$icons/$t.svg"; done
@@ -285,6 +286,23 @@ else
         "session		required	pam_limits.so" "-session	optional	pam_elogind.so" > /etc/pam.d/vdm-greeter
 fi
 chmod 644 /etc/pam.d/vdm-greeter
+# Automatic login (VDM step 8, off unless `vdm autologin on`): no check, the
+# account and session stacks of the system's login.
+if [ -f /etc/pam.d/password-auth ]; then
+    printf '%s\n' "# vdm-autologin: Vergence's automatic login (tools/install.sh writes it)" \
+        "auth		required	pam_permit.so" "account		required	pam_nologin.so" "account		include		password-auth" \
+        "password	required	pam_deny.so" \
+        "session		required	pam_loginuid.so" "session		include		password-auth" "session		include		postlogin" > /etc/pam.d/vdm-autologin
+elif [ -f /etc/pam.d/system-local-login ]; then
+    printf '%s\n' "# vdm-autologin: Vergence's automatic login (tools/install.sh writes it)" \
+        "auth		required	pam_permit.so" "account		include		system-local-login" \
+        "password	required	pam_deny.so" "session		include		system-local-login" > /etc/pam.d/vdm-autologin
+elif [ "$(uname -s)" = FreeBSD ] && [ -f /etc/pam.d/login ]; then
+    printf '%s\n' "# vdm-autologin: Vergence's automatic login (tools/install.sh writes it)" \
+        "auth		required	pam_permit.so" "account		required	pam_nologin.so" "account		include		system" \
+        "password	required	pam_deny.so" "session		include		system" > /etc/pam.d/vdm-autologin
+fi
+[ -f /etc/pam.d/vdm-autologin ] && chmod 644 /etc/pam.d/vdm-autologin
 # The login screen at boot (--vdm), or not (--no-vdm); vdm reads the file
 # when it starts. Neither: left as it was.
 if [ "$(uname -s)" = FreeBSD ]; then vdm_state=/var/db/vdm; else vdm_state=/var/lib/vdm; fi

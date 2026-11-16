@@ -47,6 +47,16 @@ pub const GREETER_KEEP: &str = "/var/lib/vdm-greeter";
 #[cfg(not(target_os = "linux"))]
 pub const GREETER_KEEP: &str = "/var/db/vdm-greeter";
 
+/// The PAM service an automatic login runs (no check: auth is pam_permit;
+/// the account and session stacks are the system's login's).
+pub const AUTOLOGIN_SERVICE: &str = "vdm-autologin";
+
+/// Automatic login (step 8): the one person's name, when it is turned on
+/// (`vdm autologin on`, root's); vdm checks the rules again at every boot.
+pub fn autologin_file() -> std::path::PathBuf {
+    std::path::Path::new(STATE_DIR).join("autologin")
+}
+
 /// The greeter's account.
 pub const GREETER_USER: &str = "_vdm";
 

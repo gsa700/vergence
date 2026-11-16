@@ -6,6 +6,7 @@
 //   vdm [--socket PATH] [--service NAME]   the daemon
 //   vdm before-sleep                       from the sleep hooks
 //   vdm greeter [stop]                     start (keep running) or stop the login screen
+//   vdm autologin on [USER] | off          automatic login at boot (root; the rules: below)
 //
 // It runs as root, started by the init system (it always runs: question 3).
 // The unlock socket (paths::UNLOCK_SOCKET) takes any local user; vdm learns
@@ -159,6 +160,35 @@ fn account(name: &str) -> Option<Account> {
 fn may_log_in(uid: u32, shell: &str) -> bool {
     let real_shell = !shell.is_empty() && !shell.ends_with("/nologin") && !shell.ends_with("/false") && std::path::Path::new(shell).is_file();
     uid != 0 && uid >= paths::MIN_UID && real_shell
+}
+
+/// The people who may log in here: accounts that are not root nor system
+/// accounts, with a real login shell (the login screen's list, may_log_in).
+fn people() -> Vec<String> {
+    std::fs::read_to_string("/etc/passwd")
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split(':').collect();
+            let uid: u32 = f.get(2)?.parse().ok()?;
+            may_log_in(uid, f.get(6)?).then(|| f[0].to_string())
+        })
+        .collect()
+}
+
+/// Whether automatic login may be on (Dave's "4 a", review M6): only where
+/// exactly one person can log in, and nothing on the machine is encrypted.
+/// That person's name, or why not.
+fn autologin_allowed() -> Result<String, String> {
+    let enc = vergence_dm::encryption::found();
+    if !enc.is_empty() {
+        return Err(format!("storage here is encrypted ({}): automatic login would unlock at power on what the encryption keeps", enc.join(", ")));
+    }
+    match people().as_slice() {
+        [one] => Ok(one.clone()),
+        [] => Err("no one can log in here".into()),
+        _ => Err("more than one person can log in here".into()),
+    }
 }
 
 /// The pause after `failures` wrong answers in a row: 1, 2, 4 ... seconds, at most MAX_PAUSE.
@@ -822,6 +852,18 @@ fn main() {
     if args.get(1).map(String::as_str) == Some("before-sleep") {
         before_sleep();
     }
+    if args.get(1).map(String::as_str) == Some("autologin") {
+        let line = match (args.get(2).map(String::as_str), args.get(3)) {
+            (Some("on"), Some(u)) => format!("autologin on {u}"),
+            (Some("on"), None) => "autologin on".to_string(),
+            (Some("off"), _) => "autologin off".to_string(),
+            _ => {
+                eprintln!("usage: vdm autologin on [USER] | off");
+                std::process::exit(2)
+            }
+        };
+        control_command(&line);
+    }
     if args.get(1).map(String::as_str) == Some("greeter") {
         let line = if args.get(2).map(String::as_str) == Some("stop") { "greeter stop" } else { "greeter" };
         control_command(line);
@@ -884,8 +926,8 @@ fn main() {
     let mut running: HashMap<c_int, (u32, UnixStream, bool)> = HashMap::new();
     // The servers registered to be locked before sleep, by account.
     let mut sessions: Vec<(u32, UnixStream)> = Vec::new();
-    // Logins by their worker's pid: checking, then (yes) the running session.
-    let mut logins: HashMap<c_int, LoginRun> = HashMap::new();
+    // Logins by their worker's pid: checking, then (yes) the running session
+    // (made above, with an automatic login's).
     // The login screen at boot, where the machine is set up for it (step 7).
     let at_boot = paths::login_screen_file().is_file() && greeter_account.is_some();
     if at_boot {
@@ -902,6 +944,41 @@ fn main() {
         }
         // SAFETY: a handler that only sets an atomic; SIGTERM 15.
         unsafe { signal(15, note_stop) };
+    }
+    // Automatic login at boot (step 8): only at boot, only if turned on, and
+    // only while the rules still hold (checked now, every boot: M6).
+    let mut logins: HashMap<c_int, LoginRun> = HashMap::new();
+    if at_boot && sys::uptime() < 180
+        && let Ok(wanted) = std::fs::read_to_string(paths::autologin_file())
+    {
+        let wanted = wanted.trim().to_string();
+        match autologin_allowed() {
+            Ok(user) if user == wanted => {
+                let exec = vergence_dm::sessions::list().first().and_then(|e| std::fs::read_to_string(&e.file).ok()).and_then(|t| vergence_dm::sessions::entry_exec(&t));
+                match (account(&user), exec, UnixStream::pair()) {
+                    (Some(acct), Some(exec), Ok((said, _other))) => {
+                        let uid = acct.uid;
+                        let vt = vergence_dm::vt::GREETER_VT + 1;
+                        let plan = LoginPlan { account: acct, exec, vt };
+                        // SAFETY: vdm is single-threaded; the worker runs the session and exits.
+                        let pid = unsafe { fork() };
+                        if pid == 0 {
+                            let mut code = 4;
+                            let started = pam::session_only(paths::AUTOLOGIN_SERVICE, &user, &mut |h| code = run_session(h, &plan));
+                            // SAFETY: leave without running the parent's exit handlers.
+                            unsafe { _exit(if started { code } else { 3 }) };
+                        }
+                        if pid > 0 {
+                            log(&format!("automatic login for {user} on VT {vt}"));
+                            logins.insert(pid, LoginRun { uid, name: user.clone(), client: None, said, vt, yes: true });
+                        }
+                    }
+                    _ => log(&format!("automatic login for {user}: no account or no session to start")),
+                }
+            }
+            Ok(user) => log(&format!("automatic login not done: it is set for {wanted}, but {user} is the one who can log in")),
+            Err(why) => log(&format!("automatic login not done: {why}")),
+        }
     }
     let mut greeter_run = Greeter { on: at_boot, pid: 0, started: std::time::Instant::now(), quick: 0, next: first, came_from: None, back_to: None };
     loop {
@@ -1108,6 +1185,25 @@ fn main() {
                         }
                         "the login screen is stopping".to_string()
                     }
+                    cmd if cmd.starts_with("autologin on") => {
+                        let asked = cmd.strip_prefix("autologin on").map(str::trim).filter(|u| !u.is_empty());
+                        match autologin_allowed() {
+                            Ok(user) if asked.is_none_or(|a| a == user) => match std::fs::write(paths::autologin_file(), format!("{user}\n")) {
+                                Ok(()) => {
+                                    log(&format!("automatic login turned on for {user}"));
+                                    format!("automatic login is on for {user} (at boot; the rules are checked again each time)")
+                                }
+                                Err(e) => format!("not turned on: {e}"),
+                            },
+                            Ok(user) => format!("not turned on: only {user} can log in here"),
+                            Err(why) => format!("not turned on: {why}"),
+                        }
+                    }
+                    "autologin off" => {
+                        let _ = std::fs::remove_file(paths::autologin_file());
+                        log("automatic login turned off");
+                        "automatic login is off".to_string()
+                    }
                     other => format!("unknown: {other}"),
                 };
                 let _ = s.write_all(format!("{answer}\n").as_bytes());
@@ -1127,7 +1223,30 @@ fn main() {
             let has_session = |u: u32| sessions.iter().any(|(x, _)| *x == u) || logins.values().any(|l| l.yes && l.uid == u);
             let others = |u: u32| sessions.iter().any(|(x, _)| *x != u) || logins.values().any(|l| l.yes && l.uid != u);
             let who = uid.map(|u| user_name(u).unwrap_or_else(|| u.to_string())).unwrap_or_else(|| "?".into());
-            let answer = match (vergence_dm::power::Power::from_word(line.trim()), uid) {
+            let answer = match line.trim() {
+                // What the settings app's Login page shows (anyone may ask).
+                "login-state" => {
+                    let auto = std::fs::read_to_string(paths::autologin_file()).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+                    format!(
+                        "login-screen={}\tautologin={}\tallowed={}",
+                        if paths::login_screen_file().is_file() { "on" } else { "off" },
+                        auto.as_deref().unwrap_or("-"),
+                        match autologin_allowed() {
+                            Ok(u) => u,
+                            Err(why) => format!("no: {why}"),
+                        }
+                    )
+                }
+                // Turning it off only takes away: anyone with a session here may.
+                "autologin-off" => match uid {
+                    Some(u) if u == 0 || (u >= paths::MIN_UID && has_session(u)) => {
+                        let _ = std::fs::remove_file(paths::autologin_file());
+                        log(&format!("automatic login turned off by {who}"));
+                        "ok".to_string()
+                    }
+                    _ => "no: only someone logged in at this machine can do that".to_string(),
+                },
+                word => match (vergence_dm::power::Power::from_word(word), uid) {
                 (None, _) | (_, None) => "no: not understood".to_string(),
                 (Some(p), Some(u)) => {
                     let allowed = u == 0 || (Some(u) == greeter_uid && !logins.values().any(|l| l.yes)) || (u >= paths::MIN_UID && has_session(u));
@@ -1159,6 +1278,7 @@ fn main() {
                         }
                     }
                 }
+                },
             };
             let _ = s.write_all(format!("{answer}\n").as_bytes());
         }

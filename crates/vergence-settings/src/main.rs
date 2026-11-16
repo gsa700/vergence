@@ -36,6 +36,7 @@ mod battery;
 mod modes;
 mod notify;
 mod datetime;
+mod lockscreen;
 use notify::NotifyMsg;
 mod places;
 use places::PlacesMsg;
@@ -181,6 +182,7 @@ enum Icon {
     Notifications,
     Apps,
     Clock,
+    Lock,
 }
 
 impl Icon {
@@ -198,6 +200,7 @@ impl Icon {
             Icon::About => Color::rgb(0x70, 0x74, 0x7c),
             Icon::Notifications => Color::rgb(0xe5, 0x48, 0x3a),
             Icon::Clock => Color::rgb(0x70, 0x74, 0x7c),
+            Icon::Lock => Color::rgb(0x3d, 0x6b, 0xb8),
         }
     }
 }
@@ -343,6 +346,11 @@ fn icon_mark<M: 'static>(icon: Icon) -> Element<M> {
                 line(scene, (10.0, 10.0), (10.0, 6.0));
                 line(scene, (10.0, 10.0), (13.0, 11.5));
             }
+            // A padlock.
+            Icon::Lock => {
+                scene.stroke(Rect::new(x + 6.8, y + 3.8, 6.4, 8.0), 3.2, 1.4, w);
+                scene.fill_rounded(Rect::new(x + 5.0, y + 9.0, 10.0, 7.5), 1.5, w);
+            }
             // An i.
             Icon::About => {
                 scene.fill_rounded(Rect::new(x + 9.1, y + 4.5, 1.8, 1.8), 0.9, w);
@@ -387,6 +395,8 @@ enum Page {
     Notifications,
     /// The dock's clock and the time zone (datetime.rs; dock milestone 1).
     DateTime,
+    LockScreen,
+    Login,
     /// The battery and the GPUs (battery.rs); only where there is a battery.
     Battery,
     Sound,
@@ -414,6 +424,7 @@ enum Message {
     /// The Notifications page (notify.rs).
     Notify(NotifyMsg),
     Clock(datetime::ClockMsg),
+    Lock(lockscreen::LockMsg),
     /// Window places on the Windows page (places.rs).
     Places(PlacesMsg),
     /// The Apps page (apps.rs).
@@ -601,6 +612,8 @@ struct App {
     battery: battery::BatteryPage,
     /// Apps that have sent cards, newest first (notify.rs, read when the page opens).
     notify_apps: Vec<(String, u64)>,
+    /// What vdm said about logging in (the Login page), or why it could not be asked.
+    login: Result<lockscreen::LoginState, String>,
     /// Every applet the desktop has seen: tile id, name, who supplies it
     /// (the server's applets.toml), read when the Dock page opens.
     applets: Vec<(String, String, String)>,
@@ -813,6 +826,7 @@ impl App {
             wifi: Default::default(),
             battery: Default::default(),
             notify_apps: Vec::new(),
+            login: Err(String::new()),
             applets: Vec::new(),
             mode_pending: None,
             mode_ask: false,
@@ -989,6 +1003,9 @@ impl App {
         if p == Page::DefaultApps {
             self.defaults_read();
         }
+        if p == Page::Login {
+            self.login_read();
+        }
         if matches!(p, Page::Battery | Page::Energy) {
             self.battery_read();
         }
@@ -1008,6 +1025,7 @@ impl App {
             Message::BatterySample => self.battery_sample(),
             Message::Notify(m) => self.notify_message(m),
             Message::Clock(m) => self.clock_message(m),
+            Message::Lock(m) => self.lock_message(m),
             Message::Places(m) => self.places_message(m),
             Message::Apps(m) => self.apps_message(m),
             Message::Defaults(m) => self.defaults_message(m),
@@ -1627,6 +1645,8 @@ impl App {
             ("System", vec![
                 ("Energy".into(), Page::Energy, Icon::Energy, "energy power sleep screens off idle"),
                 ("Date & Time".into(), Page::DateTime, Icon::Clock, "date time clock zone timezone 24 hour am pm calendar"),
+                ("Lock Screen".into(), Page::LockScreen, Icon::Lock, "lock screen password idle sleep super l security"),
+                ("Login".into(), Page::Login, Icon::Lock, "login log in automatic autologin login screen boot password vdm"),
             ]
             .into_iter()
             .chain(self.has_battery().then(|| ("Battery".into(), Page::Battery, Icon::Battery, "battery charge power watts time left health gpu graphics nvidia")))
@@ -2897,6 +2917,8 @@ impl Program for App {
             Page::Energy => "Energy".into(),
             Page::Notifications => "Notifications".into(),
             Page::DateTime => "Date & Time".into(),
+            Page::LockScreen => "Lock Screen".into(),
+            Page::Login => "Login".into(),
             Page::Apps => "Apps".into(),
             Page::DefaultApps => "Default apps".into(),
             Page::AppPage => self.app_open.as_deref().map(|a| self.known_app_name(a)).unwrap_or_else(|| "Apps".into()),
@@ -2957,6 +2979,8 @@ impl Program for App {
             Page::Energy => self.energy(),
             Page::Notifications => self.notifications_page(),
             Page::DateTime => self.datetime_page(),
+            Page::LockScreen => self.lock_page(),
+            Page::Login => self.login_page(),
             Page::Apps => self.apps_page(),
             Page::DefaultApps => self.defaults_page(),
             Page::AppPage => self.app_page(),

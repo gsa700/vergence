@@ -53,11 +53,25 @@ pub struct Config {
     /// [energy.battery]: None for a key left out (the same as on power).
     pub battery_screens_off: Option<Duration>,
     pub battery_sleep: Option<Duration>,
+    /// [lock] (VDM step 8): lock when the screens go off (default on), after
+    /// this long with no input (zero: not on its own), before sleep (default on).
+    pub lock_on_screens_off: bool,
+    pub lock_after: Duration,
+    pub lock_before_sleep: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { screens_off: Duration::ZERO, sleep: Duration::ZERO, sleep_command: String::new(), battery_screens_off: None, battery_sleep: None }
+        Config {
+            screens_off: Duration::ZERO,
+            sleep: Duration::ZERO,
+            sleep_command: String::new(),
+            battery_screens_off: None,
+            battery_sleep: None,
+            lock_on_screens_off: true,
+            lock_after: Duration::ZERO,
+            lock_before_sleep: true,
+        }
     }
 }
 
@@ -107,7 +121,12 @@ pub fn parse(text: &str) -> Config {
             .map(|v| Duration::from_secs(v.clamp(0, 24 * 60) as u64 * 60))
     };
     let battery = table.get("battery").and_then(|b| b.as_table()).cloned().unwrap_or_default();
+    let lock = text.parse::<toml::Table>().ok().and_then(|t| t.get("lock").and_then(|e| e.as_table()).cloned()).unwrap_or_default();
+    let on = |k: &str| lock.get(k).and_then(|v| v.as_bool()).unwrap_or(true);
     Config {
+        lock_on_screens_off: on("screens-off"),
+        lock_after: read(&lock, "after").unwrap_or_default(),
+        lock_before_sleep: on("before-sleep"),
         screens_off: read(&table, "screens-off").unwrap_or_default(),
         sleep: read(&table, "sleep").unwrap_or_default(),
         sleep_command: table.get("sleep-command").and_then(|v| v.as_str()).map(|s| s.trim().to_string()).unwrap_or_default(),
@@ -186,17 +205,25 @@ impl Server {
             tracing::info!("energy: on {}; screens off after {}, sleep after {}", if battery { "battery" } else { "power" }, minutes(off), minutes(sleep));
         }
         let (screens_off, sleep) = c.times(battery);
+        // [lock] after: locked after this long with no input, screens on or off.
+        if !c.lock_after.is_zero() && idle >= c.lock_after && !self.lock.on {
+            self.lock_for_idle("no input for the lock's time");
+        }
         if !screens_off.is_zero() && !self.energy.screens_off && idle >= screens_off {
             tracing::info!("energy: no input for {}; screens off", minutes(idle));
             // Locked first (VDM milestone 1): the screens come back to the lock.
-            self.lock_for_idle("the screens went off");
+            if c.lock_on_screens_off {
+                self.lock_for_idle("the screens went off");
+            }
             self.energy.screens_off = true;
             crate::drm::screens_off(self);
             self.input_screens_off();
         }
         // The login screen does not put the machine to sleep itself (vdm, step 6).
         if !sleep.is_zero() && !self.energy.slept && idle >= sleep && !crate::greeter() {
-            self.lock_for_idle("sleep");
+            if c.lock_before_sleep {
+                self.lock_for_idle("sleep");
+            }
             self.energy.slept = true;
             let cmd = sleep_command(&c).to_string();
             tracing::info!("energy: no input for {}; sleep: {cmd}", minutes(idle));

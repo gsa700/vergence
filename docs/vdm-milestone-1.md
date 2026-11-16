@@ -323,6 +323,31 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   own settings are the place, later): Techbench's caps:none is the
   login screen's only.
 
+- **Step 8** (2026-11-16): settings. desktop.toml `[lock]`, read by the
+  server's energy.rs: `screens-off` (lock when the screens go off, and on
+  coming back to the console after that long; default on), `after`
+  (minutes with no input, screens on or off; 0, the default: not on its
+  own), `before-sleep` (default on; off, the server answers vdm's
+  LockNow "cannot lock: lock before sleep is off in the settings", and
+  vdm logs it). The settings app's Lock Screen page (System) sets them.
+  Automatic login (Dave's "4 a", M6): vergence-dm's encryption.rs finds
+  dm-crypt (by /sys/block/*/dm/uuid "CRYPT-"), GELI (/dev/*.eli) and ZFS
+  native encryption (`zfs get encryption`); vdm allows automatic login
+  only where exactly one person can log in and nothing is encrypted.
+  `vdm autologin on [USER]` (root, over the control socket) writes
+  STATE_DIR/autologin; `vdm autologin off`, or the Login page's Turn Off
+  (anyone with a session here: it only takes away), removes it. At boot
+  (up under 3 minutes) vdm checks the rules again and, if they hold,
+  starts that person's first session (Vergence) on VT 8 (FreeBSD 10)
+  through PAM service vdm-autologin (auth pam_permit; the system login's
+  account and session stacks; install.sh writes it), with no login
+  screen; when it ends, the login screen comes. The power socket also
+  answers "login-state" (login screen at boot, automatic login, allowed
+  for whom or why not) for the Login page, which shows them with the
+  rules; turning it on stays root's until elevation prompts (a later
+  milestone). kepler and Hubble: allowed (one person, nothing
+  encrypted); Techbench: not (LUKS).
+
 ## Design
 
 ### The parts
