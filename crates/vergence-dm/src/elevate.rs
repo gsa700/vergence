@@ -91,3 +91,24 @@ mod tests {
         assert!(Action::parse(&[]).is_err());
     }
 }
+
+/// A program's side (Settings): ask vdm for an action and wait for the
+/// person's answer at the prompt (up to about two minutes: run it in a
+/// thread). What vdm said it did, or why not.
+pub fn request(words: &[&str]) -> Result<String, String> {
+    use crate::proto::{self, FromVdm, Service, ToVdm};
+    let mut s = std::os::unix::net::UnixStream::connect(crate::paths::ELEVATE_SOCKET).map_err(|_| "vdm is not running here".to_string())?;
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(150)));
+    proto::send_to_vdm(&mut s, &ToVdm::Hello { version: proto::VERSION, service: Service::Elevate }).map_err(|e| e.to_string())?;
+    proto::send_to_vdm(&mut s, &ToVdm::Act(words.iter().map(|w| w.to_string()).collect())).map_err(|e| e.to_string())?;
+    let mut said = String::new();
+    loop {
+        match proto::read_from_vdm(&mut s) {
+            Ok(FromVdm::Info(t) | FromVdm::Error(t)) => said = t,
+            Ok(FromVdm::Done { ok: true, .. }) => return Ok(said),
+            Ok(FromVdm::Done { ok: false, .. }) => return Err(if said.is_empty() { "not allowed".into() } else { said }),
+            Ok(_) => return Err("vdm answered out of turn".into()),
+            Err(e) => return Err(format!("vdm: {e}")),
+        }
+    }
+}

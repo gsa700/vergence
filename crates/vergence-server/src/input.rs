@@ -34,6 +34,13 @@ impl Server {
         let Some(keys) = self.input.keys.as_mut() else { return };
         let key = keys.feed(code, pressed);
         let mods = keys.mods();
+        // The elevation prompt takes every key while it shows (elevate.rs).
+        if self.elevating() {
+            if let Some(k) = self.seat.get_keyboard() {
+                k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| FilterResult::Intercept(()));
+            }
+            return self.elevate_key(key.sym, key.typed, pressed);
+        }
         // The log out dialog takes every key while it is open (session_dialog.rs).
         if self.session_dialog.open && !self.lock.on {
             if let Some(k) = self.seat.get_keyboard() {

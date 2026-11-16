@@ -130,6 +130,8 @@ pub struct Server {
     pub session_dialog: crate::session_dialog::SessionDialog,
     /// The login screen, in greeter mode (greeter.rs).
     pub greeter: crate::greeter::Greeter,
+    /// The elevation prompt, while vdm has one asked (elevate.rs).
+    pub elevate: crate::elevate::Elevate,
     /// How each output's scale was found (displays.rs), by output name, and the
     /// [displays] settings last applied.
     pub scale_notes: std::collections::HashMap<String, crate::displays::Scales>,
@@ -307,6 +309,7 @@ impl Server {
             lock: Default::default(),
             session_dialog: Default::default(),
             greeter: Default::default(),
+            elevate: Default::default(),
             scale_notes: Default::default(),
             displays: crate::displays::load(),
             shelf: crate::shelf::Shelf::load(),

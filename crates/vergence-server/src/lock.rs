@@ -61,6 +61,10 @@ pub(crate) enum Heard {
     Gone(String),
     /// vdm, on the session socket: the machine is about to sleep (step 2).
     LockNow,
+    /// vdm, on the session socket: show the elevation prompt (elevate.rs).
+    Ask { id: u32, what: String, who: String },
+    /// vdm: that prompt is over.
+    Withdrawn(u32),
 }
 
 /// What the server answers vdm before sleep.
@@ -177,6 +181,16 @@ fn session(heard: channel::Sender<Heard>, replies: std::sync::mpsc::Receiver<Rep
                         break;
                     }
                 }
+                Ok(FromVdm::Ask { id, what, who }) => {
+                    if heard.send(Heard::Ask { id, what, who }).is_err() {
+                        return;
+                    }
+                }
+                Ok(FromVdm::Withdrawn(id)) => {
+                    if heard.send(Heard::Withdrawn(id)).is_err() {
+                        return;
+                    }
+                }
                 Ok(_) | Err(_) => break,
             }
         }
@@ -237,7 +251,7 @@ pub(crate) fn converse(heard: channel::Sender<Heard>, answers: std::sync::mpsc::
                 return;
             }
             // Only on the session socket; here it breaks the protocol.
-            Ok(FromVdm::LockNow) => {
+            Ok(FromVdm::LockNow | FromVdm::Ask { .. } | FromVdm::Withdrawn(_)) => {
                 let _ = heard.send(Heard::Gone("vdm: a session's message on the unlock socket".into()));
                 return;
             }
@@ -564,6 +578,9 @@ impl Server {
         if let Heard::LockNow = h {
             return self.lock_for_sleep();
         }
+        if matches!(h, Heard::Ask { .. } | Heard::Withdrawn(_)) {
+            return self.elevate_from_vdm(h);
+        }
         if !self.lock.on {
             return;
         }
@@ -579,7 +596,7 @@ impl Server {
             }
             Heard::Info(t) => self.lock.message = Some((t, false)),
             Heard::Error(t) => self.lock.message = Some((t, true)),
-            Heard::LockNow => {}
+            Heard::LockNow | Heard::Ask { .. } | Heard::Withdrawn(_) => {}
             Heard::Done { ok: true, .. } => return self.unlock_now(),
             Heard::Done { ok: false, wait } => {
                 self.lock.talk = None;

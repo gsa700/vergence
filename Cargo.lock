@@ -2369,6 +2369,7 @@ dependencies = [
  "image",
  "toml",
  "vergence-decode",
+ "vergence-dm",
  "vergence-look",
  "vergence-net",
  "vergence-power",

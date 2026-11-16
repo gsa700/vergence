@@ -37,6 +37,7 @@ mod tiles;
 mod lock;
 mod session_dialog;
 mod greeter;
+mod elevate;
 mod actions;
 mod drawer;
 mod applets;

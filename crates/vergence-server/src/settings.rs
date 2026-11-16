@@ -351,6 +351,7 @@ impl Server {
             state.tiles_tick();
             state.lock_tick();
             state.greeter_tick();
+            state.elevate_tick();
             state.session_tick();
             TimeoutAction::ToDuration(std::time::Duration::from_secs(1))
         });

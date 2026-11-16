@@ -220,8 +220,9 @@ impl Server {
         if self.lock.on || crate::greeter() {
             return Some(Target::Server(Part::Lock));
         }
-        // The log out dialog: everything is its while it is open (session_dialog.rs).
-        if self.session_dialog.open {
+        // The log out dialog, or the elevation prompt: everything is theirs
+        // while one shows (session_dialog.rs, elevate.rs).
+        if self.session_dialog.open || self.elevating() {
             return Some(Target::Server(Part::Session));
         }
         if self.app_menu_contains(pos) {
@@ -544,6 +545,7 @@ impl Server {
             Target::Server(Part::Card) if !pressed => self.card_release(),
             Target::Server(Part::Drawer) if pressed && button == vergence_seat::BTN_LEFT => self.drawer_press(pos),
             Target::Server(Part::Drawer) if !pressed => self.drawer_release(pos),
+            Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT && self.elevating() => self.elevate_press(pos),
             Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT => self.session_dialog_press(pos),
             // The login screen's people and session line (greeter.rs).
             Target::Server(Part::Lock) if pressed && button == vergence_seat::BTN_LEFT && crate::greeter() => self.greeter_press(pos),

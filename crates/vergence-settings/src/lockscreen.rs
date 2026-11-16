@@ -8,8 +8,9 @@
 // login screen comes up at boot, and automatic login, with Dave's rules
 // ("4 a", review M6): off unless turned on, only where exactly one person
 // can log in, never with any encrypted storage, checked at every boot.
-// Turning it on is root's (`sudo vdm autologin on`), as an elevation prompt
-// comes later; turning it off only takes away, so the page may.
+// Every change goes through an elevation prompt (elevation milestone 1;
+// Dave: administrators only, their own password, every time, off too): the
+// page asks vdm, the server shows the prompt, vdm does it.
 
 use super::*;
 
@@ -29,12 +30,15 @@ pub enum LockMsg {
     After(String),
     BeforeSleep(bool),
     AutologinOff,
+    AutologinOn(String),
+    LoginScreen(bool),
+    /// The prompt's outcome came back (from the asking thread).
+    Elevated(Result<String, String>),
 }
 
-/// vdm's power socket, by platform (vergence-dm's paths, not linked here: it
-/// would bring PAM into the settings app).
+/// vdm's power socket.
 fn vdm_socket() -> &'static str {
-    if cfg!(target_os = "linux") { "/run/vdm/power" } else { "/var/run/vdm/power" }
+    vergence_dm::paths::POWER_SOCKET
 }
 
 /// One line to vdm, its one-line answer.
@@ -78,6 +82,17 @@ pub fn parse_login_state(line: &str) -> Option<LoginState> {
 }
 
 impl App {
+    /// Ask vdm for an action through the elevation prompt, in a thread (the
+    /// person answers at the prompt); the outcome comes back as a message.
+    fn elevate(&mut self, words: Vec<String>) {
+        self.status = "Waiting for your answer at the prompt…".into();
+        let mail = self.mail.clone();
+        let _ = std::thread::Builder::new().name("elevate".into()).spawn(move || {
+            let w: Vec<&str> = words.iter().map(String::as_str).collect();
+            mail.send(Message::Lock(LockMsg::Elevated(vergence_dm::elevate::request(&w))));
+        });
+    }
+
     pub fn login_read(&mut self) {
         self.login = match ask_vdm("login-state") {
             Ok(line) => parse_login_state(&line).ok_or_else(|| format!("vdm said: {line}")),
@@ -99,11 +114,13 @@ impl App {
                     t.insert("after".into(), m.into());
                 })
             }
-            LockMsg::AutologinOff => {
-                self.status = match ask_vdm("autologin-off") {
-                    Ok(a) if a == "ok" => "Automatic login is off.".into(),
-                    Ok(a) => a.strip_prefix("no: ").unwrap_or(&a).to_string(),
-                    Err(e) => e,
+            LockMsg::AutologinOff => self.elevate(vec!["autologin.off".into()]),
+            LockMsg::AutologinOn(user) => self.elevate(vec!["autologin.on".into(), user]),
+            LockMsg::LoginScreen(on) => self.elevate(vec![if on { "login-screen.on" } else { "login-screen.off" }.into()]),
+            LockMsg::Elevated(r) => {
+                self.status = match r {
+                    Ok(t) => format!("Done: {t}."),
+                    Err(t) => format!("Not done: {t}."),
                 };
                 self.login_read();
             }
@@ -140,19 +157,19 @@ impl App {
             Ok(st) => {
                 groups.push(self.group(Some("At boot"), vec![setting(
                     "The login screen",
-                    if st.login_screen { "On: the machine starts at the Vergence login screen. The text consoles stay (Ctrl+Alt+F1)." } else { "Off: log in on a text console and run vergence. Turn it on with: sudo tools/install.sh --vdm" },
-                    label(if st.login_screen { "On" } else { "Off" }),
+                    if st.login_screen { "On: the machine starts at the Vergence login screen. The text consoles stay (Ctrl+Alt+F1)." } else { "Off: the machine starts at a text console; log in there and run vergence." },
+                    switch(st.login_screen, |on| Message::Lock(LockMsg::LoginScreen(on))).name("The login screen at boot"),
                 )]));
                 let (what, control): (String, Element<Message>) = match (&st.autologin, &st.allowed) {
-                    (Some(user), Ok(_)) => (format!("On for {user}: the machine starts straight into {user}'s session, without a password, at boot only."), button(label("Turn Off").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Lock(LockMsg::AutologinOff)).name("Turn automatic login off")),
-                    (Some(user), Err(why)) => (format!("Set for {user}, but not done: {why}."), button(label("Turn Off").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Lock(LockMsg::AutologinOff)).name("Turn automatic login off")),
-                    (None, Ok(user)) => (format!("Off. It can be on here, for {user}: turn it on as root with: sudo vdm autologin on"), label("Off")),
+                    (Some(user), Ok(_)) => (format!("On for {user}: the machine starts straight into {user}'s session, without a password, at boot only."), button(label("Turn Off…").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Lock(LockMsg::AutologinOff)).name("Turn automatic login off")),
+                    (Some(user), Err(why)) => (format!("Set for {user}, but not done: {why}."), button(label("Turn Off…").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Lock(LockMsg::AutologinOff)).name("Turn automatic login off")),
+                    (None, Ok(user)) => (format!("Off. It can be on here, for {user}."), button(label("Turn On…").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::Lock(LockMsg::AutologinOn(user.clone()))).name("Turn automatic login on")),
                     (None, Err(why)) => (format!("Off, and it cannot be on here: {why}."), label("Off")),
                 };
                 groups.push(self.group(Some("Automatic login"), vec![setting("Log in without a password", &what, control)]));
                 groups.push(self.group(None, vec![setting(
                     "The rules",
-                    "Automatic login is only ever allowed where exactly one person can log in and nothing on the machine is encrypted; both are checked again at every boot. The lock still asks for the password.",
+                    "Automatic login is only ever allowed where exactly one person can log in and nothing on the machine is encrypted; both are checked again at every boot. The lock still asks for the password. Every change here asks an administrator's password first.",
                     space(),
                 )]));
             }

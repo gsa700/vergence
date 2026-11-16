@@ -392,7 +392,7 @@ impl Server {
                 g.waiting = false;
                 g.message = Some(("Waiting for vdm…".into(), true));
             }
-            Heard::LockNow => {}
+            Heard::LockNow | Heard::Ask { .. } | Heard::Withdrawn(_) => {}
         }
         self.redraw_all();
     }
