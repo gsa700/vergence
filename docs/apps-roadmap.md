@@ -241,6 +241,27 @@ it is today:
   applies only when the screens went off by their timeout; a lock asked
   for (Super+L, Lock in the log out dialog, the named action, vctl) locks
   at once, and so does locking before sleep.
+- **The login screen's look, machine-wide** (Dave, 2026-11-16: "it would
+  be nice if the user could set some vdm prefs like wallpaper"), as KDE
+  does for SDDM: a Login screen part on Settings' Login page (wallpaper:
+  a picture, a color or the default; light or dark and the accent; its
+  text size; maybe a short message, as macOS offers), each change through
+  the elevation prompt. vdm never opens a path a program names as root:
+  it reads the chosen picture *as the person* (a child that becomes them),
+  keeps a copy in the login screen's own directory (/var/lib/vdm-greeter,
+  /var/db/vdm-greeter), and the login screen decodes it as _vdm, so root
+  never handles picture data. Settings in a small file there the login
+  screen reads.
+- **Each person's own look at the login screen, if they choose** (as
+  slick-greeter, macOS and Windows do): "Show my wallpaper on the login
+  screen when I'm selected", off by default (it shows the wallpaper to
+  anyone at the machine). vdm keeps a copy per person, read as them, as
+  AccountsService does; the same copy gives **account pictures** in the
+  login screen's list in place of initials (VDM milestone 1's "pictures
+  later from a vdm-kept copy"). Also possibly: **system-wide defaults**
+  for new accounts (/etc/vergence/desktop.toml, /usr/local/etc/vergence on
+  FreeBSD, read under each person's own settings), the machine-wide look
+  above being one use of it.
 - Open by hand from VDM milestone 1: a YubiKey at the login screen, a
   screenshot while locked, the login screen on several monitors,
   `--no-vdm`.
