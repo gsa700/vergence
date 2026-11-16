@@ -245,6 +245,11 @@ if [ -n "$stack" ]; then
     printf '%s\n' "# vdm-unlock: the Vergence lock screen's password check (tools/install.sh writes it)" \
         "auth		include		$stack" "account		include		$stack" > /etc/pam.d/vdm-unlock
     chmod 644 /etc/pam.d/vdm-unlock
+    # Elevation prompts (elevation milestone 1): the person's own password,
+    # by the same stack; the administrators' group is vdm's check.
+    printf '%s\n' "# vdm-elevate: an administrator approving one named action (tools/install.sh writes it)" \
+        "auth		include		$stack" "account		include		$stack" > /etc/pam.d/vdm-elevate
+    chmod 644 /etc/pam.d/vdm-elevate
     echo "vdm: /etc/pam.d/vdm-unlock uses the $stack stack"
 else
     echo "vdm: no system PAM stack found (password-auth, system-auth or system); write /etc/pam.d/vdm-unlock by hand" >&2

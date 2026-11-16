@@ -937,6 +937,76 @@ fn spawn_greeter_server(uid: u32, gid: u32, server: &std::path::Path, home: &std
     cmd.spawn()
 }
 
+/// An elevation request waiting for its prompt (docs/elevation-milestone-1.md).
+struct Elevation {
+    id: u32,
+    uid: u32,
+    name: String,
+    action: vergence_dm::elevate::Action,
+    /// The asking program's name, from the kernel's pid.
+    who: String,
+    /// The asking program, told the outcome at the end.
+    program: UnixStream,
+    /// The PAM check running for it: its worker and the server's connection.
+    checking: Option<(c_int, UnixStream)>,
+    since: std::time::Instant,
+}
+
+/// How long a prompt waits for its answer.
+const ELEVATION_LIMIT: Duration = Duration::from_secs(120);
+
+/// Whether an account is an administrator (Dave, 1 a): in the system's
+/// administrators' group (wheel). struct group: gr_name, gr_passwd, gr_gid
+/// at byte 16, on both.
+fn is_admin(name: &str, gid: u32) -> bool {
+    unsafe extern "C" {
+        fn getgrnam(name: *const c_char) -> *const u8;
+    }
+    let Ok(g) = std::ffi::CString::new(paths::ADMIN_GROUP) else { return false };
+    // SAFETY: vdm is single-threaded; the struct is read at once.
+    let p = unsafe { getgrnam(g.as_ptr()) };
+    if p.is_null() {
+        return false;
+    }
+    // SAFETY: gr_gid at offset 16 of the struct getgrnam gave.
+    let admin = unsafe { std::ptr::read_unaligned(p.add(16) as *const u32) };
+    sys::groups_of(name, gid).contains(&admin)
+}
+
+/// An approved action, done by vdm's own code: what it did, or why not.
+fn carry_out(action: &vergence_dm::elevate::Action) -> Result<String, String> {
+    use vergence_dm::elevate::Action;
+    match action {
+        Action::AutologinOn(user) => match autologin_allowed() {
+            Ok(one) if &one == user => std::fs::write(paths::autologin_file(), format!("{user}\n")).map(|_| format!("automatic login is on for {user}")).map_err(|e| e.to_string()),
+            Ok(one) => Err(format!("only {one} can log in here")),
+            Err(why) => Err(why),
+        },
+        Action::AutologinOff => match std::fs::remove_file(paths::autologin_file()) {
+            Ok(()) => Ok("automatic login is off".into()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("automatic login was off".into()),
+            Err(e) => Err(e.to_string()),
+        },
+        Action::LoginScreenOn => std::fs::write(paths::login_screen_file(), b"").map(|_| "the login screen starts at boot".into()).map_err(|e| e.to_string()),
+        Action::LoginScreenOff => match std::fs::remove_file(paths::login_screen_file()) {
+            Ok(()) => Ok("no login screen at boot".into()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("there was no login screen at boot".into()),
+            Err(e) => Err(e.to_string()),
+        },
+    }
+}
+
+/// Tell the asking program how it ended.
+fn finish(mut program: UnixStream, outcome: Result<String, String>) {
+    let _ = program.set_write_timeout(Some(Duration::from_secs(1)));
+    let ok = outcome.is_ok();
+    let text = match outcome {
+        Ok(t) | Err(t) => t,
+    };
+    let _ = proto::send_from_vdm(&mut program, &if ok { FromVdm::Info(text) } else { FromVdm::Error(text) });
+    let _ = proto::send_from_vdm(&mut program, &FromVdm::Done { ok, wait: 0 });
+}
+
 /// A login vdm is running: its worker checks, then runs the session.
 struct LoginRun {
     uid: u32,
@@ -1068,6 +1138,8 @@ fn main() {
     let control = bind(paths::CONTROL_SOCKET, 0o600);
     // Sleep, Restart, Shut Down (step 6): anyone may ask; vdm decides by who.
     let power = bind(paths::POWER_SOCKET, 0o666);
+    // Elevation (docs/elevation-milestone-1.md): anyone may ask; vdm decides.
+    let elevate = bind(paths::ELEVATE_SOCKET, 0o666);
     // The login screen's socket: its account's only (threat model T9).
     let greeter_account = account(paths::GREETER_USER);
     let greeter_uid = greeter_account.as_ref().map(|a| a.uid);
@@ -1151,6 +1223,12 @@ fn main() {
         }
     }
     let mut allowed_cache: Option<(std::time::Instant, Result<String, String>)> = None;
+    // Elevation requests waiting for their prompt's answer, one per person.
+    let mut elevations: Vec<Elevation> = Vec::new();
+    let mut next_elevation: u32 = 1;
+    // When a person last said no to a prompt: a new request waits (finding: a
+    // program asking again and again).
+    let mut declined: HashMap<u32, std::time::Instant> = HashMap::new();
     let mut greeter_run = Greeter { on: at_boot, pid: 0, started: std::time::Instant::now(), quick: 0, next: first, came_from: None, back_to: None };
     loop {
         if STOPPING.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1169,7 +1247,7 @@ fn main() {
             }
             // Its sockets go with it (finding 9: a lock checking for them
             // would have locked with no one to open it).
-            for p in [socket.as_str(), paths::SESSION_SOCKET, paths::CONTROL_SOCKET, paths::POWER_SOCKET, paths::GREETER_SOCKET] {
+            for p in [socket.as_str(), paths::SESSION_SOCKET, paths::CONTROL_SOCKET, paths::POWER_SOCKET, paths::ELEVATE_SOCKET, paths::GREETER_SOCKET] {
                 let _ = std::fs::remove_file(p);
             }
             log("stopping (asked to); the login screen stopped, sessions run on");
@@ -1208,10 +1286,11 @@ fn main() {
         let session_running = logins.values().any(|l| l.yes) || !sessions.is_empty();
         if greeter_run.on && greeter_run.pid == 0 && !session_running && greeter_run.next.is_none_or(|t| std::time::Instant::now() >= t) {
             greeter_run.next = None;
-            let mut ours: Vec<c_int> = [Some(&listener), Some(&session_listener), Some(&control), Some(&power), greeter.as_ref()].into_iter().flatten().map(|l| l.as_raw_fd()).collect();
+            let mut ours: Vec<c_int> = [Some(&listener), Some(&session_listener), Some(&control), Some(&power), Some(&elevate), greeter.as_ref()].into_iter().flatten().map(|l| l.as_raw_fd()).collect();
             ours.extend(sessions.iter().map(|(_, s)| s.as_raw_fd()));
             ours.extend(running.values().map(|(_, s, _)| s.as_raw_fd()));
             ours.extend(logins.values().flat_map(|l| [Some(l.said.as_raw_fd()), l.client.as_ref().map(|c| c.as_raw_fd())]).flatten());
+            ours.extend(elevations.iter().flat_map(|e| [Some(e.program.as_raw_fd()), e.checking.as_ref().map(|(_, s)| s.as_raw_fd())]).flatten());
             match greeter_account.as_ref().map(|a| start_greeter(a.uid, a.gid, &ours)) {
                 Some(Ok(pid)) => {
                     greeter_run.pid = pid;
@@ -1246,6 +1325,28 @@ fn main() {
                 } else if greeter_run.on {
                     let pause = 1u64 << greeter_run.quick.min(6);
                     greeter_run.next = Some(std::time::Instant::now() + Duration::from_secs(pause));
+                }
+                continue;
+            }
+            if let Some(i) = elevations.iter().position(|e| e.checking.as_ref().is_some_and(|(p, _)| *p == pid)) {
+                let code = if status & 0x7f == 0 { (status >> 8) & 0xff } else { -1 };
+                let (_, mut server) = elevations[i].checking.take().expect("checking");
+                let _ = server.set_write_timeout(Some(Duration::from_secs(1)));
+                let uid = elevations[i].uid;
+                if code == 0 {
+                    pauses.succeeded(uid);
+                    let e = elevations.remove(i);
+                    let _ = proto::send_from_vdm(&mut server, &FromVdm::Done { ok: true, wait: 0 });
+                    let outcome = carry_out(&e.action);
+                    log(&format!("elevation: {} by {} through {}: {}", e.action.name(), e.name, e.who, match &outcome { Ok(m) => m.clone(), Err(m) => format!("failed: {m}") }));
+                    finish(e.program, outcome);
+                } else {
+                    if code == 1 {
+                        pauses.failed(uid);
+                    }
+                    let wait = pauses.wait(uid);
+                    log(&format!("elevation: {} by {}: {}", elevations[i].action.name(), elevations[i].name, if code == 1 { format!("wrong password (a pause of {wait} s)") } else { format!("not checked (status {code})") }));
+                    let _ = proto::send_from_vdm(&mut server, &FromVdm::Done { ok: false, wait: wait.min(u16::MAX as u64) as u16 });
                 }
                 continue;
             }
@@ -1298,7 +1399,7 @@ fn main() {
             let wait = pauses.wait(uid).min(u16::MAX as u64) as u16;
             let _ = proto::send_from_vdm(&mut client, &FromVdm::Done { ok: code == 0, wait });
         }
-        let mut fds: Vec<PollFd> = [Some(&listener), Some(&session_listener), Some(&control), Some(&power), greeter.as_ref()].into_iter().flatten().map(|l| PollFd { fd: l.as_raw_fd(), events: 1, revents: 0 }).collect();
+        let mut fds: Vec<PollFd> = [Some(&listener), Some(&session_listener), Some(&control), Some(&power), Some(&elevate), greeter.as_ref()].into_iter().flatten().map(|l| PollFd { fd: l.as_raw_fd(), events: 1, revents: 0 }).collect();
         let first_session = fds.len();
         fds.extend(sessions.iter().map(|(_, s)| PollFd { fd: s.as_raw_fd(), events: 1, revents: 0 }));
         // SAFETY: pollfds we own. A check running: look again in 50 ms, so its
@@ -1424,15 +1525,6 @@ fn main() {
                         }
                     )
                 }
-                // Turning it off only takes away: anyone with a session here may.
-                "autologin-off" => match uid {
-                    Some(u) if u == 0 || (u >= paths::MIN_UID && has_session(u)) => {
-                        let _ = std::fs::remove_file(paths::autologin_file());
-                        log(&format!("automatic login turned off by {who}"));
-                        "ok".to_string()
-                    }
-                    _ => "no: only someone logged in at this machine can do that".to_string(),
-                },
                 word => match (vergence_dm::power::Power::from_word(word), uid) {
                 (None, _) | (_, None) => "no: not understood".to_string(),
                 (Some(p), Some(u)) => {
@@ -1468,6 +1560,114 @@ fn main() {
                 },
             };
             let _ = s.write_all(format!("{answer}\n").as_bytes());
+        }
+        // Elevation prompts that waited too long: over.
+        let now = std::time::Instant::now();
+        while let Some(i) = elevations.iter().position(|e| e.checking.is_none() && now.duration_since(e.since) > ELEVATION_LIMIT) {
+            let e = elevations.remove(i);
+            log(&format!("elevation: {} by {} through {}: no answer in {} s", e.action.name(), e.name, e.who, ELEVATION_LIMIT.as_secs()));
+            for (_, st) in sessions.iter_mut().filter(|(u, _)| *u == e.uid) {
+                let _ = st.set_write_timeout(Some(Duration::from_secs(1)));
+                let _ = proto::send_from_vdm(st, &FromVdm::Withdrawn(e.id));
+            }
+            finish(e.program, Err("no answer at the prompt".into()));
+        }
+        // Elevation (docs/elevation-milestone-1.md): a program asking for a
+        // named action, or the person's server answering or declining.
+        if let Ok((mut c, _)) = elevate.accept() {
+            let _ = c.set_nonblocking(false);
+            let _ = c.set_write_timeout(Some(Duration::from_secs(1)));
+            let until = std::time::Instant::now() + Duration::from_secs(1);
+            let (uid, pid) = (sys::peer_uid(&c), sys::peer_pid(&c));
+            let first = {
+                let mut r = sys::Deadline { stream: &c, until };
+                match (proto::read_to_vdm(&mut r), proto::read_to_vdm(&mut r)) {
+                    (Ok(ToVdm::Hello { version: proto::VERSION, service: proto::Service::Elevate }), Ok(m)) => Some(m),
+                    _ => None,
+                }
+            };
+            let refuse_with = |mut c: UnixStream, why: &str| {
+                let _ = proto::send_from_vdm(&mut c, &FromVdm::Error(why.into()));
+                let _ = proto::send_from_vdm(&mut c, &FromVdm::Done { ok: false, wait: 0 });
+            };
+            match (first, uid, pid) {
+                (Some(ToVdm::Act(words)), Some(uid), Some(pid)) => {
+                    let acct = user_name(uid).and_then(|n| account(&n));
+                    let action = vergence_dm::elevate::Action::parse(&words);
+                    let who = vergence_dm::elevate::program_name(pid);
+                    let at_console = sessions.iter().any(|(u, _)| *u == uid);
+                    match (acct, action) {
+                        (_, Err(why)) => refuse_with(c, &why),
+                        (None, _) => refuse_with(c, "no such account"),
+                        (Some(a), Ok(_)) if !may_log_in(a.uid, &a.shell) || !at_console => refuse_with(c, "only someone logged in at this machine can ask"),
+                        (Some(a), Ok(_)) if !is_admin(&a.name, a.gid) => {
+                            log(&format!("elevation: refused for {} (not in {})", a.name, paths::ADMIN_GROUP));
+                            refuse_with(c, &format!("only an administrator (the {} group) can do that", paths::ADMIN_GROUP));
+                        }
+                        (Some(_), Ok(_)) if elevations.iter().any(|e| e.uid == uid) => refuse_with(c, "another request is waiting at the prompt"),
+                        (Some(_), Ok(_)) if declined.get(&uid).is_some_and(|t| t.elapsed() < Duration::from_secs(10)) => refuse_with(c, "the last request was declined a moment ago"),
+                        (Some(_), Ok(_)) if pauses.wait(uid) > 0 => refuse_with(c, &format!("wait {} s after a wrong password", pauses.wait(uid))),
+                        (Some(a), Ok(action)) => {
+                            let id = next_elevation;
+                            next_elevation = next_elevation.wrapping_add(1).max(1);
+                            let what = action.describe();
+                            // The person's server: the one that registered last.
+                            let sent = sessions.iter_mut().rev().find(|(u, _)| *u == uid).is_some_and(|(_, st)| {
+                                let _ = st.set_write_timeout(Some(Duration::from_secs(1)));
+                                proto::send_from_vdm(st, &FromVdm::Ask { id, what: what.clone(), who: who.clone() }).is_ok()
+                            });
+                            if sent {
+                                log(&format!("elevation: {} asks for {} ({})", who, action.name(), a.name));
+                                elevations.push(Elevation { id, uid, name: a.name, action, who, program: c, checking: None, since: std::time::Instant::now() });
+                            } else {
+                                refuse_with(c, "the prompt could not be shown");
+                            }
+                        }
+                    }
+                }
+                // The person's server answers prompt `id`: its PAM check, in a worker.
+                (Some(ToVdm::Answering(id)), Some(uid), Some(pid)) if sys::on_console(pid) && vergence_dm::elevate::program_name(pid) == "vergence-server" => {
+                    match elevations.iter_mut().find(|e| e.id == id && e.uid == uid && e.checking.is_none()) {
+                        Some(e) if pauses.wait(uid) == 0 => {
+                            let _ = c.set_read_timeout(Some(IO_LIMIT));
+                            let _ = c.set_write_timeout(Some(IO_LIMIT));
+                            let name = e.name.clone();
+                            if let Ok(theirs) = c.try_clone() {
+                                // SAFETY: vdm is single-threaded; the child runs check() and exits.
+                                let pid = unsafe { fork() };
+                                if pid == 0 {
+                                    reset_sigterm();
+                                    // SAFETY: the check's own limit.
+                                    unsafe { alarm(TIME_LIMIT) };
+                                    let code = check(theirs, &name, paths::ELEVATE_SERVICE, true);
+                                    // SAFETY: leave without running the parent's exit handlers.
+                                    unsafe { _exit(code) };
+                                }
+                                drop(theirs);
+                                if pid > 0 {
+                                    e.checking = Some((pid, c));
+                                }
+                            }
+                        }
+                        Some(_) => {
+                            let w = pauses.wait(uid).min(u16::MAX as u64) as u16;
+                            let _ = proto::send_from_vdm(&mut c, &FromVdm::Done { ok: false, wait: w });
+                        }
+                        None => {
+                            let _ = proto::send_from_vdm(&mut c, &FromVdm::Done { ok: false, wait: 0 });
+                        }
+                    }
+                }
+                (Some(ToVdm::Decline(id)), Some(uid), Some(pid)) if sys::on_console(pid) => {
+                    if let Some(i) = elevations.iter().position(|e| e.id == id && e.uid == uid && e.checking.is_none()) {
+                        let e = elevations.remove(i);
+                        log(&format!("elevation: {} by {} through {}: declined", e.action.name(), e.name, e.who));
+                        declined.insert(uid, std::time::Instant::now());
+                        finish(e.program, Err("declined at the prompt".into()));
+                    }
+                }
+                _ => {}
+            }
         }
         // The login screen asking to log someone in (step 4).
         let greeter_fd = greeter.as_ref().map_or(-1, |l| l.as_raw_fd());
@@ -1519,9 +1719,11 @@ fn main() {
                                         drop(session_listener);
                                         drop(control);
                                         drop(power);
+            drop(elevate);
                                         drop(sessions);
                                         drop(running);
                                         drop(logins);
+                                        drop(elevations);
                                         drop(said_parent);
                                         // The greeter listener, borrowed here, by its number (finding 10).
                                         sys::close_fds(&[greeter_fd], &[]);
@@ -1589,10 +1791,12 @@ fn main() {
             reset_sigterm();
             drop(control);
             drop(power);
+            drop(elevate);
             drop(sessions);
             drop(running);
             drop(greeter);
             drop(logins);
+            drop(elevations);
             // SAFETY: the child's own limit: SIGALRM ends it if PAM blocks.
             unsafe { alarm(TIME_LIMIT) };
             let code = check(stream, &name, &service, false);

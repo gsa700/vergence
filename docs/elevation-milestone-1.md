@@ -7,6 +7,11 @@ look-alike or read it), PAM checks the administrator, vdm carries out one
 named action with checked arguments, never an arbitrary command; a yes is
 for that request only."*
 
+**Decisions (Dave, 2026-11-16):** 1 a, only administrators (the wheel
+group) may approve; 2 a, with their own password; 3 a, a yes is never
+remembered, every action asks; 4 b, turning something off asks too
+(automatic login's Turn Off, which skipped the prompt, goes through it).
+
 ## Why
 
 Some things a person at the machine should be able to do from Settings are

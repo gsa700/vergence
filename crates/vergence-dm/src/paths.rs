@@ -21,6 +21,20 @@ pub const POWER_SOCKET: &str = "/run/vdm/power";
 #[cfg(not(target_os = "linux"))]
 pub const POWER_SOCKET: &str = "/var/run/vdm/power";
 
+/// The elevate socket (elevation milestone 1, review M7): programs ask for
+/// named actions; the person's server answers the prompt. Anyone may
+/// connect; vdm decides by who it is.
+#[cfg(target_os = "linux")]
+pub const ELEVATE_SOCKET: &str = "/run/vdm/elevate";
+#[cfg(not(target_os = "linux"))]
+pub const ELEVATE_SOCKET: &str = "/var/run/vdm/elevate";
+
+/// The PAM service the elevation prompt's check runs.
+pub const ELEVATE_SERVICE: &str = "vdm-elevate";
+
+/// The administrators' group: who may approve an elevation (Dave, 1 a).
+pub const ADMIN_GROUP: &str = "wheel";
+
 /// The greeter socket: the login screen's (_vdm's) only.
 #[cfg(target_os = "linux")]
 pub const GREETER_SOCKET: &str = "/run/vdm/greeter";

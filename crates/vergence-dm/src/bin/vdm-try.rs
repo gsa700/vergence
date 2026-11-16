@@ -62,7 +62,7 @@ fn main() {
                 }
                 std::process::exit(1);
             }
-            Ok(FromVdm::LockNow) => {
+            Ok(FromVdm::LockNow | FromVdm::Ask { .. } | FromVdm::Withdrawn(_)) => {
                 eprintln!("vdm-try: vdm sent a session's message on the unlock socket");
                 std::process::exit(2);
             }

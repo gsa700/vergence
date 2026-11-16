@@ -5,6 +5,7 @@
 //! system calls they share ([`sys`]), and our own declarations of PAM
 //! ([`pam`]), the operating system's interface for logging in.
 
+pub mod elevate;
 pub mod encryption;
 pub mod keyboard;
 pub mod pam;

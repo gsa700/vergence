@@ -19,6 +19,18 @@
 //!   vdm -> server   LockNow                      the machine is about to sleep
 //!   server -> vdm   Presented                    the lock is on every screen
 //!                   CannotLock { text }          and why (it says so to the user too)
+//!
+//! Elevation (docs/elevation-milestone-1.md) has a socket of its own (review
+//! M7). A program asks for a named action; vdm asks the person's own server,
+//! over its session connection, to show the prompt; the server answers on
+//! the elevate socket with the PAM conversation above:
+//!
+//!   program -> vdm  Hello { Elevate }, Act { words }   the action and its arguments
+//!   vdm -> program  Error { why }?, Done { ok, wait }   the outcome
+//!   vdm -> server   Ask { id, what, who }              show the prompt
+//!                   Withdrawn { id }                   it ended (answered, timed out)
+//!   server -> vdm   Hello { Elevate }, Answering { id }, then the conversation
+//!                   Hello { Elevate }, Decline { id }  the person said no
 
 use std::io::{self, Read, Write};
 
@@ -37,6 +49,8 @@ pub enum Service {
     Unlock,
     /// The login screen (step 4), on the greeter socket only.
     Login,
+    /// Elevation, on the elevate socket only.
+    Elevate,
 }
 
 pub enum ToVdm {
@@ -48,6 +62,13 @@ pub enum ToVdm {
     /// The login screen: who logs in, and which session (an index into the
     /// list vdm and the greeter both read, the system's own files).
     Login { user: String, session: u8 },
+    /// A named action and its arguments (elevation): 1 to 8 words of
+    /// letters, digits, '.', '_' and '-', 256 bytes at most in all.
+    Act(Vec<String>),
+    /// The server answers prompt `id` (the conversation follows).
+    Answering(u32),
+    /// The person said no to prompt `id`.
+    Decline(u32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +78,11 @@ pub enum FromVdm {
     Error(String),
     Done { ok: bool, wait: u16 },
     LockNow,
+    /// Show the elevation prompt: what is asked, in vdm's words, and who
+    /// asks (the program's name, from the kernel's pid).
+    Ask { id: u32, what: String, who: String },
+    /// Prompt `id` is over: close it.
+    Withdrawn(u32),
 }
 
 #[derive(Debug)]
@@ -88,11 +114,16 @@ mod kind {
     pub const PRESENTED: u8 = 4;
     pub const CANNOT_LOCK: u8 = 5;
     pub const LOGIN: u8 = 6;
+    pub const ACT: u8 = 7;
+    pub const ANSWERING: u8 = 8;
+    pub const DECLINE: u8 = 9;
     pub const PROMPT: u8 = 16;
     pub const INFO: u8 = 17;
     pub const ERROR: u8 = 18;
     pub const DONE: u8 = 19;
     pub const LOCK_NOW: u8 = 20;
+    pub const ASK: u8 = 21;
+    pub const WITHDRAWN: u8 = 22;
 }
 
 /// Text from PAM as it may be shown: no control characters, at most
@@ -138,6 +169,7 @@ pub fn send_to_vdm(w: &mut impl Write, m: &ToVdm) -> io::Result<()> {
             w.write_all(&[*version, match service {
                 Service::Unlock => 1,
                 Service::Login => 2,
+                Service::Elevate => 3,
             }])?;
         }
         ToVdm::Answer(s) => {
@@ -156,6 +188,19 @@ pub fn send_to_vdm(w: &mut impl Write, m: &ToVdm) -> io::Result<()> {
             header(w, kind::CANNOT_LOCK, t.len())?;
             w.write_all(t.as_bytes())?;
         }
+        ToVdm::Act(words) => {
+            let b = words.join("\t");
+            header(w, kind::ACT, b.len())?;
+            w.write_all(b.as_bytes())?;
+        }
+        ToVdm::Answering(id) => {
+            header(w, kind::ANSWERING, 4)?;
+            w.write_all(&id.to_be_bytes())?;
+        }
+        ToVdm::Decline(id) => {
+            header(w, kind::DECLINE, 4)?;
+            w.write_all(&id.to_be_bytes())?;
+        }
     }
     w.flush()
 }
@@ -169,6 +214,7 @@ pub fn read_to_vdm(r: &mut impl Read) -> Result<ToVdm, ProtoError> {
             match b.as_slice() {
                 [version, 1] => Ok(ToVdm::Hello { version: *version, service: Service::Unlock }),
                 [version, 2] => Ok(ToVdm::Hello { version: *version, service: Service::Login }),
+                [version, 3] => Ok(ToVdm::Hello { version: *version, service: Service::Elevate }),
                 [_, _] => Err(ProtoError::Bad("service")),
                 _ => Err(ProtoError::Bad("hello")),
             }
@@ -192,6 +238,21 @@ pub fn read_to_vdm(r: &mut impl Read) -> Result<ToVdm, ProtoError> {
                 return Err(ProtoError::Bad("user"));
             }
             Ok(ToVdm::Login { user: user.to_string(), session: b[0] })
+        }
+        kind::ACT if (1..=256).contains(&len) => {
+            let b = read_body(r, len)?;
+            let t = std::str::from_utf8(&b).map_err(|_| ProtoError::Bad("act"))?;
+            let words: Vec<String> = t.split('\t').map(str::to_string).collect();
+            let ok = |w: &String| !w.is_empty() && !w.starts_with('-') && w.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'));
+            if words.len() > 8 || !words.iter().all(ok) {
+                return Err(ProtoError::Bad("act"));
+            }
+            Ok(ToVdm::Act(words))
+        }
+        kind::ANSWERING | kind::DECLINE if len == 4 => {
+            let b = read_body(r, len)?;
+            let id = u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+            Ok(if k == kind::ANSWERING { ToVdm::Answering(id) } else { ToVdm::Decline(id) })
         }
         kind::CANNOT_LOCK if len <= MAX_TEXT => {
             let b = read_body(r, len)?;
@@ -218,6 +279,18 @@ pub fn send_from_vdm(w: &mut impl Write, m: &FromVdm) -> io::Result<()> {
             w.write_all(&[u8::from(*ok), (*wait >> 8) as u8, *wait as u8])?;
         }
         FromVdm::LockNow => header(w, kind::LOCK_NOW, 0)?,
+        FromVdm::Ask { id, what, who } => {
+            let (what, who) = (clean(what), clean(who));
+            header(w, kind::ASK, 6 + what.len() + who.len())?;
+            w.write_all(&id.to_be_bytes())?;
+            w.write_all(&(what.len() as u16).to_be_bytes())?;
+            w.write_all(what.as_bytes())?;
+            w.write_all(who.as_bytes())?;
+        }
+        FromVdm::Withdrawn(id) => {
+            header(w, kind::WITHDRAWN, 4)?;
+            w.write_all(&id.to_be_bytes())?;
+        }
     }
     w.flush()
 }
@@ -238,6 +311,14 @@ pub fn read_from_vdm(r: &mut impl Read) -> Result<FromVdm, ProtoError> {
         (kind::ERROR, rest) => Ok(FromVdm::Error(text(rest)?)),
         (kind::DONE, [ok @ (0 | 1), hi, lo]) => Ok(FromVdm::Done { ok: *ok == 1, wait: u16::from_be_bytes([*hi, *lo]) }),
         (kind::LOCK_NOW, []) => Ok(FromVdm::LockNow),
+        (kind::ASK, [a, b, c, d, wh, wl, rest @ ..]) => {
+            let n = u16::from_be_bytes([*wh, *wl]) as usize;
+            if n > rest.len() {
+                return Err(ProtoError::Bad("ask"));
+            }
+            Ok(FromVdm::Ask { id: u32::from_be_bytes([*a, *b, *c, *d]), what: text(&rest[..n])?, who: text(&rest[n..])? })
+        }
+        (kind::WITHDRAWN, [a, b, c, d]) => Ok(FromVdm::Withdrawn(u32::from_be_bytes([*a, *b, *c, *d]))),
         _ => Err(ProtoError::Bad("kind")),
     }
 }
@@ -257,6 +338,8 @@ mod tests {
             FromVdm::Done { ok: true, wait: 0 },
             FromVdm::Done { ok: false, wait: 64 },
             FromVdm::LockNow,
+            FromVdm::Ask { id: 7, what: "Turn on automatic login for derickson".into(), who: "System Settings".into() },
+            FromVdm::Withdrawn(7),
         ] {
             let mut b = Vec::new();
             send_from_vdm(&mut b, &m).unwrap();
@@ -275,6 +358,10 @@ mod tests {
         send_to_vdm(&mut b, &ToVdm::Presented).unwrap();
         send_to_vdm(&mut b, &ToVdm::CannotLock("no shell\nhere".into())).unwrap();
         send_to_vdm(&mut b, &ToVdm::Login { user: "derickson".into(), session: 2 }).unwrap();
+        send_to_vdm(&mut b, &ToVdm::Hello { version: VERSION, service: Service::Elevate }).unwrap();
+        send_to_vdm(&mut b, &ToVdm::Act(vec!["autologin.on".into(), "derickson".into()])).unwrap();
+        send_to_vdm(&mut b, &ToVdm::Answering(9)).unwrap();
+        send_to_vdm(&mut b, &ToVdm::Decline(9)).unwrap();
         let mut r = Cursor::new(b);
         assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Hello { version: VERSION, service: Service::Unlock }));
         match read_to_vdm(&mut r).unwrap() {
@@ -285,6 +372,16 @@ mod tests {
         assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Presented));
         assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::CannotLock(t) if t == "no shell here"));
         assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Login { user, session: 2 } if user == "derickson"));
+        assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Hello { version: VERSION, service: Service::Elevate }));
+        assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Act(w) if w == ["autologin.on", "derickson"]));
+        assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Answering(9)));
+        assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Decline(9)));
+        // An action's words: nothing a shell or a path could take.
+        for bad in [vec!["a b".to_string()], vec!["-rf".into()], vec!["x/y".into()], vec![String::new()], vec!["w".into(); 9]] {
+            let mut b = Vec::new();
+            send_to_vdm(&mut b, &ToVdm::Act(bad.clone())).unwrap();
+            assert!(read_to_vdm(&mut Cursor::new(b)).is_err(), "{bad:?}");
+        }
         // A name that could be read as an option, or with other bytes, is refused.
         for bad in ["-root", "a b", "x\n", ""] {
             let mut b = Vec::new();
