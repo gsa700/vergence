@@ -120,6 +120,11 @@ for p in $programs; do install -m 755 "$release/$p" "$bin/$p"; done
 # screen's password for the account that asks, and always runs (question 3).
 [ -x "$release/vdm" ] || { echo "install.sh: $release/vdm is missing; run cargo build --release first" >&2; exit 1; }
 install -d -m 755 "$sbin"
+# Restarting vdm ends every session it started (they are its children), so
+# it is restarted only when its binary changed and no one is logged in
+# (kepler 2026-11-16: an install for an app change logged Dave out).
+vdm_changed=no
+cmp -s "$release/vdm" "$sbin/vdm" 2>/dev/null || vdm_changed=yes
 install -m 755 "$release/vdm" "$sbin/vdm"
 # The spelling list every native app checks with (vergence-spell finds it beside bin/).
 install -d -m 755 "$words"
@@ -339,13 +344,31 @@ case $login_screen in
     off) rm -f "$vdm_state/login-screen"; echo "vdm: no login screen at boot (log in on a console and run 'vergence')" ;;
     *) [ -f "$vdm_state/login-screen" ] && echo "vdm: the login screen starts at boot (--no-vdm turns it off)" ;;
 esac
-# The service, by init system; started now and at every boot.
+# The service, by init system; started now and at every boot. What to do
+# with a running vdm: leave it (unchanged), restart it (changed, no Vergence
+# session running), or leave it and say how (changed, sessions running).
+if ps -ax -o command= | grep -E '(^|/)vergence-server( |$)' | grep -v -- '--greeter' | grep -q .; then
+    sessions=yes
+else
+    sessions=no
+fi
+if [ "$vdm_changed" = no ]; then vdm_do=start
+elif [ "$sessions" = yes ]; then vdm_do=defer
+else vdm_do=restart
+fi
+vdm_deferred() {
+    echo "vdm: updated, but a Vergence session is running, so the running vdm was left alone (restarting it ends every session); the new one starts at the next boot, or now, logging everyone out, with: sudo $1" >&2
+}
 if [ -d /run/systemd/system ]; then
     printf '%s\n' "[Unit]" "Description=VDM, the Vergence display manager" "After=systemd-user-sessions.service systemd-logind.service" "" "[Service]" \
         "ExecStart=$prefix/sbin/vdm" "Restart=always" "" "[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/vdm.service
     systemctl daemon-reload
     systemctl enable vdm >/dev/null 2>&1 || true
-    systemctl restart vdm
+    case $vdm_do in
+        restart) systemctl restart vdm ;;
+        *) systemctl start vdm ;;
+    esac
+    if [ "$vdm_do" = defer ]; then vdm_deferred "systemctl restart vdm"; fi
     # Before any sleep, every session locks (VDM step 2): systemd runs
     # system-sleep hooks with "pre" before the machine sleeps.
     printf '%s\n' "#!/bin/sh" "# vdm: lock every Vergence session before sleeping (tools/install.sh)" \
@@ -356,14 +379,25 @@ elif [ "$(uname -s)" = FreeBSD ]; then
     install -m 555 "$here/freebsd/vdm.rc" /usr/local/etc/rc.d/vdm
     sed -i '' "s|@PREFIX@|$prefix|g" /usr/local/etc/rc.d/vdm
     sysrc vdm_enable=YES >/dev/null
-    service vdm restart >/dev/null 2>&1 || service vdm start >/dev/null 2>&1 || true
+    case $vdm_do in
+        restart) service vdm restart >/dev/null 2>&1 || service vdm start >/dev/null 2>&1 || true ;;
+        *) service vdm status >/dev/null 2>&1 || service vdm start >/dev/null 2>&1 || true ;;
+    esac
+    if [ "$vdm_do" = defer ]; then vdm_deferred "service vdm restart"; fi
     echo "vdm: enabled in rc.conf and started"
 elif [ -d /etc/sv ] && [ -d /var/service ]; then
     mkdir -p /etc/sv/vdm/log
     printf '%s\n' "#!/bin/sh" "exec 2>&1" "exec $prefix/sbin/vdm" > /etc/sv/vdm/run
     printf '%s\n' "#!/bin/sh" "exec vlogger -t vdm -p auth" > /etc/sv/vdm/log/run
     chmod 755 /etc/sv/vdm/run /etc/sv/vdm/log/run
-    if [ -e /var/service/vdm ]; then sv restart vdm >/dev/null 2>&1 || true; else ln -s /etc/sv/vdm /var/service/vdm; fi
+    if [ ! -e /var/service/vdm ]; then
+        ln -s /etc/sv/vdm /var/service/vdm
+    elif [ "$vdm_do" = restart ]; then
+        sv restart vdm >/dev/null 2>&1 || true
+    else
+        sv up vdm >/dev/null 2>&1 || true
+    fi
+    if [ "$vdm_do" = defer ]; then vdm_deferred "sv restart vdm"; fi
     # Before any sleep, every session locks (VDM step 2): zzz runs these first.
     if [ -d /etc/zzz.d/suspend ]; then
         printf '%s\n' "#!/bin/sh" "# vdm: lock every Vergence session before sleeping (tools/install.sh)" "$prefix/sbin/vdm before-sleep" > /etc/zzz.d/suspend/50-vdm
