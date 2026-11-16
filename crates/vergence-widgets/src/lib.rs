@@ -169,6 +169,13 @@ pub trait Program {
         None
     }
 
+    /// The window's height follows its content when it opens: the toolkit
+    /// measures what its outermost scrolling place holds and asks for that
+    /// (the server keeps it on the screen). False by default.
+    fn fit_content(&self) -> bool {
+        false
+    }
+
     /// Another thread used the [`Waker`]. True if the state changed.
     fn woken(&mut self, _window: &mut Window) -> bool {
         false
@@ -219,6 +226,13 @@ impl Measure for FontsMeasure<'_> {
 }
 
 /// A [`Program`] as `vergence-ui` sees it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum FitToContent {
+    Wanted,
+    Ask(u32, u32),
+    Done,
+}
+
 struct Host<P: Program> {
     program: P,
     ui: Ui<P::Message>,
@@ -250,6 +264,11 @@ struct Host<P: Program> {
     /// The finger whose hold became a right click: the rest of its touch
     /// is dropped (lifting it does not also tap).
     held: Option<i32>,
+    /// Fitting the window's height to its content (Program::fit_content):
+    /// wanted until the first layout, then the size to ask for, then done.
+    fit: FitToContent,
+    /// The means to come back with the window (for the fit's request).
+    waker: Option<Waker>,
 }
 
 /// The toolkit's timer for touch and hold, and how long a finger is held.
@@ -519,10 +538,15 @@ impl<P: Program> vergence_ui::App for Host<P> {
     }
 
     fn waker(&mut self, waker: Waker) {
+        self.waker = Some(waker.clone());
         self.program.waker(waker);
     }
 
     fn woken(&mut self, window: &mut Window) {
+        if let FitToContent::Ask(w, h) = self.fit {
+            self.fit = FitToContent::Done;
+            window.request_size(w, h);
+        }
         if self.program.woken(window) {
             self.changed(window);
         }
@@ -576,6 +600,22 @@ impl<P: Program> Host<P> {
                 self.program.resized(frame.width, frame.height);
             }
             self.laid_at = (frame.width, frame.height);
+            // As tall as its content, once, after the first layout (Dave,
+            // 2026-11-16: "size to content, then window space"; the server
+            // keeps it on the screen, where a long one scrolls).
+            if self.fit == FitToContent::Wanted {
+                self.fit = FitToContent::Done;
+                if self.program.fit_content()
+                    && let Some(extra) = self.ui.overflow()
+                    && extra.abs() >= 2.0
+                {
+                    let h = (frame.height + extra).max(self.program.style().min.1 as f32).ceil();
+                    self.fit = FitToContent::Ask(frame.width.round() as u32, h as u32);
+                    if let Some(w) = self.waker.as_ref() {
+                        w.wake();
+                    }
+                }
+            }
             if self.print_tree {
                 eprint!("{}", self.ui.meaning_text());
             }
@@ -592,7 +632,7 @@ impl<P: Program> Host<P> {
 pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
     let theme = program.theme();
     let title_sent = program.title();
-    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None })
+    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None, fit: FitToContent::Wanted, waker: None })
 }
 
 /// Opens the program's window and runs until it is closed. `size` is the
@@ -600,7 +640,7 @@ pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
 pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {
     let theme = program.theme();
     let title_sent = program.title();
-    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None };
+    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None, fit: FitToContent::Wanted, waker: None };
     vergence_ui::run(&mut host, size)
 }
 

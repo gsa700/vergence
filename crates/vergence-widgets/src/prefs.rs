@@ -418,19 +418,19 @@ impl Program for Prefs {
         vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (520.0, 260.0), max: (900.0, 0.0) }
     }
 
-    /// As tall as its rows want (up to 900; the server keeps it on the
-    /// screen), and never shorter than that when it opens again: a size kept
-    /// from before (its width, and a height that was taller) is kept, but a
-    /// window that would have to scroll is not (Dave's list, 2026-11-15:
-    /// "make terminals settings size a little bigger to fit the entire window").
+    /// It opens at a guess from its rows (the width kept from before), then
+    /// fits its height to what it holds (Dave, 2026-11-16: "size to content,
+    /// then window space"; the guess came out too tall once the font
+    /// changed). The server keeps it on the screen, where a long one scrolls.
     fn opening_size(&self) -> Option<(u32, u32)> {
         let parts = self.rows.parts(&self.text);
         let rows: usize = parts.iter().map(|p| p.rows.len()).sum();
         let tall = (60.0 + parts.len() as f64 * 44.0 + rows as f64 * 56.0).clamp(300.0, 900.0).round() as u32;
-        Some(match kept_size(&self.app_id) {
-            Some((w, h)) => (w, h.max(tall)),
-            None => (580, tall),
-        })
+        Some((kept_size(&self.app_id).map_or(580, |(w, _)| w), tall))
+    }
+
+    fn fit_content(&self) -> bool {
+        true
     }
 
     fn resized(&mut self, width: f32, height: f32) {

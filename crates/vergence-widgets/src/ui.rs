@@ -471,6 +471,15 @@ impl<M: Clone> Ui<M> {
         s.offset != before
     }
 
+    /// How much taller the outermost scrolling place's content is than the
+    /// place itself (negative: shorter), as last laid out; None without one.
+    pub fn overflow(&self) -> Option<f32> {
+        self.nodes.iter().find_map(|n| match n.what {
+            What::Scroll { content } => Some(content - n.rect.h),
+            _ => None,
+        })
+    }
+
     /// The scrollbar's thumb of scrolling place `i`, if it has one.
     fn thumb(&self, i: usize) -> Option<Rect> {
         let What::Scroll { content } = self.nodes[i].what else { return None };
