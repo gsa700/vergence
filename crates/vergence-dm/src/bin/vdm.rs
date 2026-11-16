@@ -367,8 +367,10 @@ fn main() {
         }
         let mut fds: Vec<PollFd> = [&listener, &session_listener, &control].iter().map(|l| PollFd { fd: l.as_raw_fd(), events: 1, revents: 0 }).collect();
         fds.extend(sessions.iter().map(|(_, s)| PollFd { fd: s.as_raw_fd(), events: 1, revents: 0 }));
-        // SAFETY: pollfds we own; a second's wait so children are reaped.
-        unsafe { poll(fds.as_mut_ptr(), fds.len() as u64, 1000) };
+        // SAFETY: pollfds we own. A check running: look again in 50 ms, so its
+        // answer goes out as soon as it ends; none: a second's wait.
+        let wait = if running.is_empty() { 1000 } else { 50 };
+        unsafe { poll(fds.as_mut_ptr(), fds.len() as u64, wait) };
         // A registered server that went away (or said something out of turn): dropped.
         let gone: Vec<usize> = fds[3..].iter().enumerate().filter(|(_, f)| f.revents != 0).map(|(i, _)| i).collect();
         for i in gone.into_iter().rev() {

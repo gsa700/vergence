@@ -77,6 +77,8 @@ unsafe extern "C" {
     fn pam_acct_mgmt(handle: *mut c_void, flags: c_int) -> c_int;
     fn pam_end(handle: *mut c_void, status: c_int) -> c_int;
     fn pam_strerror(handle: *mut c_void, errnum: c_int) -> *const c_char;
+    #[cfg(target_os = "linux")]
+    fn pam_set_item(handle: *mut c_void, item: c_int, value: *const c_void) -> c_int;
     fn calloc(n: usize, size: usize) -> *mut c_void;
     fn free(p: *mut c_void);
 }
@@ -190,6 +192,14 @@ fn free_responses(out: *mut Response, n: usize) {
     unsafe { free(out.cast()) };
 }
 
+/// Linux-PAM's delay after a failure (pam_unix's 2 s, pam_faildelay's), taken
+/// over by the application through the PAM_FAIL_DELAY item (10): vdm keeps a
+/// pause of its own per account (1, 2, 4 ... s, across restarts), so PAM's
+/// wait only made the "no" slow (Dave, 2026-11-16: FreeBSD, whose OpenPAM has
+/// no such delay, was "smoother and more consistent"). Called by PAM; waits for nothing.
+#[cfg(target_os = "linux")]
+extern "C" fn no_fail_delay(_retval: c_int, _usec: std::ffi::c_uint, _appdata: *mut c_void) {}
+
 /// One PAM transaction for `user` with `service`: authenticate (an empty
 /// password is not enough), then the account check, an expired password
 /// allowed. PAM's prompts go to `conv`.
@@ -203,6 +213,13 @@ pub fn authenticate(service: &str, user: &str, conv: &mut dyn Conversation) -> O
     let r = unsafe { pam_start(service.as_ptr(), user.as_ptr(), &c, &mut h) };
     if r != SUCCESS || h.is_null() {
         return Outcome::Broken;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // PAM_FAIL_DELAY 10: our function instead of PAM's wait (see no_fail_delay).
+        let f: extern "C" fn(c_int, std::ffi::c_uint, *mut c_void) = no_fail_delay;
+        // SAFETY: the handle pam_start gave; a function pointer PAM calls with these arguments.
+        unsafe { pam_set_item(h, 10, f as *const c_void) };
     }
     // SAFETY: the handle pam_start gave.
     let mut r = unsafe { pam_authenticate(h, DISALLOW_NULL_AUTHTOK) };
