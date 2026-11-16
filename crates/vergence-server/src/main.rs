@@ -61,6 +61,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     init_logging();
+    // Every socket of the session goes in the runtime directory: refuse one
+    // that another user could swap files in (security pass 2026-11-15,
+    // finding 6).
+    if let Err(why) = check_runtime_dir() {
+        tracing::error!("{why}");
+        return Err(why.into());
+    }
 
     let mut event_loop: EventLoop<Server> = EventLoop::try_new()?;
 
@@ -163,5 +170,47 @@ fn spawn_client() {
         && (flag == "-c" || flag == "--command")
     {
         let _ = spawn(&mut std::process::Command::new(command));
+    }
+}
+
+/// XDG_RUNTIME_DIR must be set and be a real directory (not a link), ours,
+/// and closed to everyone else (mode 700 or tighter).
+fn check_runtime_dir() -> Result<(), String> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR is not set; start the session with `vergence`")?;
+    let m = std::fs::symlink_metadata(&dir).map_err(|e| format!("runtime directory {}: {e}", dir.to_string_lossy()))?;
+    match runtime_dir_fault(m.file_type().is_symlink(), m.is_dir(), m.uid(), m.permissions().mode(), crate::control::our_uid()) {
+        Some(fault) => Err(format!("runtime directory {} {fault}; refusing to put the session's sockets there", dir.to_string_lossy())),
+        None => Ok(()),
+    }
+}
+
+/// What is wrong with a runtime directory, if anything.
+fn runtime_dir_fault(link: bool, dir: bool, owner: u32, mode: u32, us: u32) -> Option<String> {
+    if link {
+        Some("is a link".into())
+    } else if !dir {
+        Some("is not a directory".into())
+    } else if owner != us {
+        Some(format!("belongs to user {owner}, not to us ({us})"))
+    } else if mode & 0o077 != 0 {
+        Some(format!("is open to others (mode {:o})", mode & 0o777))
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod runtime_dir_tests {
+    use super::runtime_dir_fault;
+
+    #[test]
+    fn only_our_own_closed_directory_passes() {
+        assert_eq!(runtime_dir_fault(false, true, 1000, 0o40700, 1000), None);
+        assert!(runtime_dir_fault(true, false, 1000, 0o120777, 1000).unwrap().contains("link"));
+        assert!(runtime_dir_fault(false, false, 1000, 0o100600, 1000).unwrap().contains("not a directory"));
+        assert!(runtime_dir_fault(false, true, 1001, 0o40700, 1000).unwrap().contains("user 1001"));
+        assert!(runtime_dir_fault(false, true, 1000, 0o40755, 1000).unwrap().contains("755"));
+        assert!(runtime_dir_fault(false, true, 1000, 0o41777, 1000).is_some(), "a shared /tmp-like folder");
     }
 }

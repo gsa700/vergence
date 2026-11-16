@@ -45,10 +45,19 @@ else
     installed=1
 fi
 # A display manager's PAM gives a private runtime directory; from a console there
-# is none (nor on a Linux without logind): make one.
+# is none (nor on a Linux without logind): make one, /tmp/xdg-<uid> (where vctl
+# looks). Every socket of the session goes in it, so it must be ours: if
+# another account made that name first (or it is a link), use a fresh one from
+# mktemp instead (security pass 2026-11-15, finding 6). The server checks
+# again at start and refuses a runtime directory that is not its user's.
 if [ -z "$XDG_RUNTIME_DIR" ]; then
     XDG_RUNTIME_DIR=/tmp/xdg-$(id -u)
-    mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+    mkdir -m 700 "$XDG_RUNTIME_DIR" 2>/dev/null
+    if [ -L "$XDG_RUNTIME_DIR" ] || [ ! -d "$XDG_RUNTIME_DIR" ] || [ ! -O "$XDG_RUNTIME_DIR" ] \
+        || ! chmod 700 "$XDG_RUNTIME_DIR"; then
+        echo "vergence: $XDG_RUNTIME_DIR is not ours; using a new runtime directory" >&2
+        XDG_RUNTIME_DIR=$(mktemp -d "/tmp/xdg-$(id -u).XXXXXX") || exit 1
+    fi
 fi
 export XDG_RUNTIME_DIR
 # The server tells apps their scale (Wayland fractional scale; XSETTINGS and
