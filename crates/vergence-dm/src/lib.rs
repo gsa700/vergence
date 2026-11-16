@@ -11,3 +11,4 @@ pub mod proto;
 pub mod secret;
 pub mod sessions;
 pub mod sys;
+pub mod vt;

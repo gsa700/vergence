@@ -200,6 +200,21 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   state the whole time. A "yes" says so; starting the session is step 5.
   Not yet seen: vdm starting the greeter on a VT of its own (4c).
 
+- **Step 4, part 4c** (2026-11-16): vdm runs the login screen. `vdm
+  greeter` (root, over the control socket) has vdm start
+  `vergence-server --drm --greeter` from $prefix/bin as _vdm on its own VT
+  (vergence-dm vt.rs: VT 7 on Linux, past Void's agetty 1-6; VT 9, ttyv8,
+  on FreeBSD, past /etc/ttys' 0-7): made the one on the screen first so
+  seatd gives it the seat, in a session of its own with the VT as its
+  terminal, groups, gid and uid set (and a check that root cannot be had
+  back), a cleared environment, a home and runtime directory made fresh
+  each time under vdm's run directory, output to STATE_DIR/greeter.log
+  (root's, 0600). vdm starts it again when it ends, after 1, 2, 4 ... s
+  if it ended within 30 s, and gives up (and says so) after five such
+  ends in a row. `vdm greeter stop` ends it. Seen on kepler: it starts
+  as _vdm on ttyv8, one person and one session (Vergence), no Xwayland.
+  From step 7 vdm starts it at boot.
+
 ## Design
 
 ### The parts
