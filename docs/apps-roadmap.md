@@ -171,7 +171,7 @@ it is today:
   without scrolling. Small.
 - *Done 2026-11-15 (8bbcc0c).* **A terminal setting to scroll on output** (jump to the bottom when a
   program writes, or stay where you scrolled to). Small.
-- **Terminal programs as default apps** (nano, vi, emacs, ed for text
+- *Done 2026-11-15 (8bbcc0c: terminal editors as the default for text).* **Terminal programs as default apps** (nano, vi, emacs, ed for text
   files). Opening already runs a desktop entry with `Terminal=true` in our
   terminal (`vergence-term -e`); what is missing is that nano and the others
   ship no desktop entry on Fedora or Void. Settings > Apps would offer the
