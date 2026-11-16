@@ -212,7 +212,9 @@ it is today:
   editor has Zoom in, Zoom out and Actual size (Ctrl+=, Ctrl+-, Ctrl+0),
   but they are not featured, so its app menu shows no "− 100% +" Text size
   row as the terminal's does; featuring them (and limiting them at the
-  ends, as the terminal does) is likely all it takes. Small.
+  ends, as the terminal does) is likely all it takes. Small. As in the
+  terminal (Dave): the row's change is for now (this window, this run);
+  the lasting text size is the app's own settings window's.
 - **A context menu for File Viewer's items**, "a blend of macOS and
   Windows with Linux flavoring": Open, Open With ▸, Show in Folder; Cut,
   Copy, Paste, Duplicate, Make Alias/Link; Rename, Move to Trash; Compress,
@@ -235,9 +237,10 @@ it is today:
 - **A delay between the screens going off and the lock coming on**
   (10 s, 30 s, 1 minute): a touch within it brings the screens back with
   no password. The Lock Screen page gains "Require the password: at once,
-  after 10 s, 30 s, 1 minute" (desktop.toml `[lock] grace`), applying to
-  the screens-off lock only; Super+L, sleep and the after-no-input lock
-  stay immediate.
+  after 10 s, 30 s, 1 minute" (desktop.toml `[lock] grace`). Dave: it
+  applies only when the screens went off by their timeout; a lock asked
+  for (Super+L, Lock in the log out dialog, the named action, vctl) locks
+  at once, and so does locking before sleep.
 - Open by hand from VDM milestone 1: a YubiKey at the login screen, a
   screenshot while locked, the login screen on several monitors,
   `--no-vdm`.
