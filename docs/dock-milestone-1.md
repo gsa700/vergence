@@ -172,9 +172,18 @@ milestone: the list and the launcher only).
 
 ### Settings
 
-23. The Dock page gains a Tiles part: on the dock or in the drawer, in
-    order, with the same drag as the dock, and a switch for "a tile in
-    trouble comes out by itself".
+23. **The Dock page: Applets instead of Pinned** (Dave, 2026-11-16:
+    "remove the pinned apps section and replace it with some Dock Applets a
+    user can activate and deactivate"). Pinning is done on the dock itself
+    now (drag, the icon's menu, the launcher's Pin), so the Pinned list with
+    its up/down buttons goes. In its place, **Applets**: every tile the
+    desktop has (Clock, Sound, Network, Power) and every one a program has
+    published (the rack UPS), each with its name, who supplies it, and a
+    switch. Off means off: not on the dock, not in the drawer, and it does
+    not come out when in trouble. Kept in `[shelf] applets` by tile id. A
+    switch for "an applet in trouble comes out of the drawer by itself".
+    "Applet" is the word in the settings app and the dock's menus; the code
+    keeps "tile".
 
 ## Steps
 
@@ -187,7 +196,8 @@ milestone: the list and the launcher only).
 6. Dragging from the launcher onto the dock (5).
 7. The rack UPS and the demo publisher (21).
 8. Named actions and the launcher (22).
-9. The Dock page's Tiles part (23); whitepaper §6.9 and its PDF; CLAUDE.md.
+9. The Dock page's Applets part in place of Pinned (23); whitepaper §6.9
+   and its PDF; CLAUDE.md.
 
 Each step is tested and installed on kepler and Techbench's dev session as
 it lands; Hubble on Dave's word (restart only when needed).
