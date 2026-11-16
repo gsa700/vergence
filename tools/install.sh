@@ -21,6 +21,7 @@
 #   share/icons/hicolor/scalable/apps/       their icons (data/icons, drawn by the project)
 #   share/doc/vergence/                      LICENSE-APACHE, LICENSE-GPL, THIRD-PARTY-NOTICES.md
 #   share/vergence/words/                    the spelling list (data/words/en_US.txt, from SCOWL) and its terms
+#   share/vergence/fonts/                    Inter and JetBrains Mono (data/fonts), with their licenses
 #   libexec/vergence/ups-tile, vtile-demo  lab tiles on the dock from scripts (tools/lab)
 #   libexec/vergence/vergence-choose         the Open/Save dialog the portal shows for apps not ours
 #   libexec/vergence/vergence-decode         pictures decoded apart, limited (Capsicum on FreeBSD)
@@ -72,6 +73,7 @@ tools="vergence-term vergence-settings vergence-calc vergence-quit vergence-hw v
 libexec=$destdir$prefix/libexec/vergence
 sbin=$destdir$prefix/sbin
 words=$destdir$prefix/share/vergence/words
+fonts=$destdir$prefix/share/vergence/fonts
 
 if [ -n "$uninstall" ]; then
     for p in $programs vctl vergence-session vergence; do rm -f "$bin/$p"; done
@@ -89,7 +91,8 @@ if [ -n "$uninstall" ]; then
     [ -z "$destdir" ] && [ "$(uname -s)" = FreeBSD ] && rm -f /etc/autofs/special_vergence_media
     rm -f "$libexec/ups-tile" "$libexec/vtile-demo"
     rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
-    rmdir "$words" "$destdir$prefix/share/vergence" 2>/dev/null || true
+    rm -f "$fonts"/InterVariable*.ttf "$fonts"/JetBrainsMono-Variable*.ttf "$fonts"/Inter-OFL.txt "$fonts"/JetBrainsMono-OFL.txt
+    rmdir "$words" "$fonts" "$destdir$prefix/share/vergence" 2>/dev/null || true
     rmdir "$libexec" 2>/dev/null || true
     rmdir "$docs" 2>/dev/null || true
     echo "removed Vergence from $destdir$prefix (user settings and logs kept)"
@@ -121,6 +124,11 @@ install -m 755 "$release/vdm" "$sbin/vdm"
 install -d -m 755 "$words"
 install -m 644 "$root/data/words/en_US.txt" "$words/en_US.txt"
 install -m 644 "$root/data/words/SCOWL-COPYRIGHT.txt" "$words/SCOWL-COPYRIGHT.txt"
+# Vergence's own fonts (Dave, 2026-11-16: a uniform look): Inter and JetBrains
+# Mono with their licenses (SIL OFL 1.1); a family the system has itself is
+# the system's copy, these the fallback (vergence-text db.rs).
+install -d -m 755 "$fonts"
+for f in "$root"/data/fonts/*; do install -m 644 "$f" "$fonts/"; done
 install -m 755 "$here/vctl" "$bin/vctl"
 # Lab tiles (dock milestone 1): a NUT UPS and a demonstration tile, scripts on vtile.
 install -d -m 755 "$libexec"

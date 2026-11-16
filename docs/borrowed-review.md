@@ -49,6 +49,25 @@ Review: none needed for the code. Writing our own list of English words is
 not a sensible project; other languages would come the same way, from
 lists under terms like these.
 
+### Inter and JetBrains Mono (SIL Open Font License 1.1), as data
+
+Where: `data/fonts/` (about 2.4 MB): Inter 4.1's variable fonts
+(InterVariable.ttf, InterVariable-Italic.ttf) and JetBrains Mono 2.304's
+(JetBrainsMono-Variable.ttf and -Italic, renamed from `[wght]`), each with
+its license; installed in `share/vergence/fonts`. SHA-256 as downloaded
+from the projects' GitHub releases on 2026-11-16: InterVariable.ttf
+4989b125…0ccaf, InterVariable-Italic.ttf d6f1f6a1…44586f,
+JetBrainsMono[wght].ttf 662a196d…cac016, JetBrainsMono-Italic[wght].ttf
+f115aaa1…1063f2. Dave, 2026-11-16: a uniform look on every system is
+"really important"; Inter and JetBrains Mono chosen, the OFL accepted. The
+code that reads and draws them is ours (crates/vergence-text); a family
+the system has itself is used from the system, ours the fallback.
+
+Review: the roadmap's "fonts of our own: not every font, just a few"
+(Dave, 2026-11-14) would replace these; until then they are the default.
+The OFL lets them be shipped with the software and modified under another
+name; it forbids selling them alone.
+
 ### drm-rs 0.14.1 (MIT), patched
 
 Where: `third_party/drm-rs` (about 4,700 lines of Rust), our patch in

@@ -33,6 +33,10 @@ VENDORED = [
      "crates/vergence-server started from it on 2026-11-07 (per-file attribution in the source)."),
     ("SCOWL (Spell Checker Oriented Word Lists), the spelling list", "data/words/SCOWL-COPYRIGHT.txt",
      "data/words/en_US.txt is made from SCOWL 2020.12.07 by tools/make-words.py (editor milestone 1); data, not code."),
+    ("Inter, the interface font (SIL Open Font License 1.1)", "data/fonts/Inter-OFL.txt",
+     "data/fonts/InterVariable.ttf and InterVariable-Italic.ttf, Inter 4.1 from rsms/inter's release, unchanged; installed in share/vergence/fonts."),
+    ("JetBrains Mono, the monospace font (SIL Open Font License 1.1)", "data/fonts/JetBrainsMono-OFL.txt",
+     "data/fonts/JetBrainsMono-Variable.ttf and JetBrainsMono-Variable-Italic.ttf, JetBrains Mono 2.304's variable fonts from JetBrains/JetBrainsMono's release, unchanged but for the file names; installed in share/vergence/fonts."),
 ]
 
 

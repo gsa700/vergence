@@ -22,8 +22,12 @@ use crate::sfnt::{self, Coverage, FaceInfo};
 const MAX_FILES: usize = 20_000;
 const MAX_DEPTH: usize = 8;
 
-const MONOSPACE: [&str; 6] = ["Noto Sans Mono", "DejaVu Sans Mono", "Liberation Mono", "Adwaita Mono", "Source Code Pro", "Cascadia Mono"];
-const SANS: [&str; 5] = ["Noto Sans", "DejaVu Sans", "Liberation Sans", "Adwaita Sans", "Cantarell"];
+/// The usual families, best first. Vergence's own two lead (Dave, 2026-11-16:
+/// a uniform look everywhere, "really important"): Inter for text and the
+/// interface, JetBrains Mono for code, both shipped in share/vergence/fonts
+/// and found there when the system has none of its own.
+const MONOSPACE: [&str; 7] = ["JetBrains Mono", "Noto Sans Mono", "DejaVu Sans Mono", "Liberation Mono", "Adwaita Mono", "Source Code Pro", "Cascadia Mono"];
+const SANS: [&str; 7] = ["Inter", "Inter Variable", "Noto Sans", "DejaVu Sans", "Liberation Sans", "Adwaita Sans", "Cantarell"];
 const SERIF: [&str; 3] = ["Noto Serif", "DejaVu Serif", "Liberation Serif"];
 
 pub struct Entry {
@@ -75,6 +79,17 @@ impl FontDb {
         }
         dirs.push("/usr/share/fonts".into());
         dirs.push("/usr/local/share/fonts".into());
+        // Vergence's own, after the system's (a family the system has too is
+        // the system's copy): beside the program ($prefix/share/vergence/fonts),
+        // a checkout's data/fonts, and the usual prefixes.
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(bin) = exe.parent()
+        {
+            dirs.push(bin.join("../share/vergence/fonts"));
+            dirs.push(bin.join("../../data/fonts"));
+        }
+        dirs.push("/usr/local/share/vergence/fonts".into());
+        dirs.push("/usr/share/vergence/fonts".into());
         let mut seen = Vec::new();
         dirs.retain(|d| {
             let fresh = !seen.contains(d);
