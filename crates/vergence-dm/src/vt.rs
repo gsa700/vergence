@@ -48,6 +48,34 @@ pub fn activate(fd: c_int, n: u32) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The VT on the screen now (to go back to it when the login screen stops).
+/// Linux: VT_GETSTATE 0x5603 on /dev/tty0 (struct vt_stat: v_active first,
+/// a u16); FreeBSD: VT_GETACTIVE _IOR('v', 7, int) on /dev/ttyv0.
+pub fn active() -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    #[cfg(target_os = "linux")]
+    {
+        let f = std::fs::File::open("/dev/tty0").ok()?;
+        let mut st = [0u16; 3];
+        // SAFETY: a struct vt_stat (three u16) we own.
+        (unsafe { ioctl(f.as_raw_fd(), 0x5603, st.as_mut_ptr()) } == 0).then_some(st[0] as u32)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let f = std::fs::File::open("/dev/ttyv0").ok()?;
+        let mut n: c_int = 0;
+        // SAFETY: an int we own.
+        (unsafe { ioctl(f.as_raw_fd(), 0x4004_7607, &mut n as *mut c_int) } == 0).then_some(n as u32)
+    }
+}
+
+/// Put VT `n` on the screen, from any process with a VT open (vdm).
+pub fn switch_to(n: u32) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let f = std::fs::OpenOptions::new().read(true).write(true).open(tty_path(n))?;
+    activate(f.as_raw_fd(), n)
+}
+
 /// Make the terminal on `fd` the calling session leader's controlling terminal.
 pub fn make_controlling(fd: c_int) -> std::io::Result<()> {
     // SAFETY: TIOCSCTTY takes an int (0: do not steal it from another session).

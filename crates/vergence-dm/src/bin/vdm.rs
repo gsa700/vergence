@@ -545,6 +545,10 @@ struct Greeter {
     /// start doubles; after GIVE_UP of them vdm stops trying (and says so).
     quick: u32,
     next: Option<std::time::Instant>,
+    /// The VT on the screen when `vdm greeter` was asked, to go back to
+    /// when it is stopped (kepler, 2026-11-16: a blank screen otherwise).
+    came_from: Option<u32>,
+    back_to: Option<(u32, std::time::Instant)>,
 }
 
 const QUICK: Duration = Duration::from_secs(30);
@@ -736,7 +740,7 @@ fn main() {
     let mut sessions: Vec<(u32, UnixStream)> = Vec::new();
     // Logins by their worker's pid: checking, then (yes) the running session.
     let mut logins: HashMap<c_int, LoginRun> = HashMap::new();
-    let mut greeter_run = Greeter { on: false, pid: 0, started: std::time::Instant::now(), quick: 0, next: None };
+    let mut greeter_run = Greeter { on: false, pid: 0, started: std::time::Instant::now(), quick: 0, next: None, came_from: None, back_to: None };
     loop {
         // The login screen, when wanted and not running, once its pause is over.
         // A yes: answer the login screen, which then gives way to the session.
@@ -754,6 +758,16 @@ fn main() {
                     // SAFETY: our own child; SIGTERM 15.
                     unsafe { kill(greeter_run.pid, 15) };
                 }
+            }
+        }
+        // After `vdm greeter stop`: the console it was asked from, once the login screen has gone.
+        if let Some((vt, at)) = greeter_run.back_to
+            && greeter_run.pid == 0
+            && std::time::Instant::now() >= at
+        {
+            greeter_run.back_to = None;
+            if let Err(e) = vergence_dm::vt::switch_to(vt) {
+                log(&format!("back to VT {vt}: {e}"));
             }
         }
         let session_running = logins.values().any(|l| l.yes);
@@ -850,7 +864,7 @@ fn main() {
         fds.extend(sessions.iter().map(|(_, s)| PollFd { fd: s.as_raw_fd(), events: 1, revents: 0 }));
         // SAFETY: pollfds we own. A check running: look again in 50 ms, so its
         // answer goes out as soon as it ends; none: a second's wait.
-        let wait = if running.is_empty() && greeter_run.next.is_none() && logins.values().all(|l| l.yes) { 1000 } else { 50 };
+        let wait = if running.is_empty() && greeter_run.next.is_none() && greeter_run.back_to.is_none() && logins.values().all(|l| l.yes) { 1000 } else { 50 };
         unsafe { poll(fds.as_mut_ptr(), fds.len() as u64, wait) };
         // A registered server that went away (or said something out of turn): dropped.
         let gone: Vec<usize> = fds[first_session..].iter().enumerate().filter(|(_, f)| f.revents != 0).map(|(i, _)| i).collect();
@@ -884,6 +898,9 @@ fn main() {
                     "before-sleep" => lock_all(&mut sessions),
                     "greeter" if greeter_account.is_none() => format!("no {} account (tools/install.sh makes it)", paths::GREETER_USER),
                     "greeter" => {
+                        if !greeter_run.on {
+                            greeter_run.came_from = vergence_dm::vt::active().filter(|v| *v != vergence_dm::vt::GREETER_VT);
+                        }
                         greeter_run.on = true;
                         greeter_run.quick = 0;
                         if greeter_run.pid == 0 {
@@ -897,6 +914,10 @@ fn main() {
                         if greeter_run.pid > 0 {
                             // SAFETY: our own child; SIGTERM 15.
                             unsafe { kill(greeter_run.pid, 15) };
+                        }
+                        // Back to the console it was asked from (once it has let go of the seat).
+                        if let Some(vt) = greeter_run.came_from.take() {
+                            greeter_run.back_to = Some((vt, std::time::Instant::now() + Duration::from_millis(500)));
                         }
                         "the login screen is stopping".to_string()
                     }

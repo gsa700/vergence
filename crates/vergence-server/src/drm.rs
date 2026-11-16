@@ -167,6 +167,10 @@ pub struct Backend {
     /// devices[0] is the primary GPU, the one that draws.
     devices: Vec<Device>,
     surfaces: HashMap<Key, Surface>,
+    /// The seat is another console's (a VT switch away, the login screen):
+    /// nothing is drawn until it comes back (kepler, 2026-11-16: ten failed
+    /// frames a second, 10,000 log lines, while the login screen had the seat).
+    paused: bool,
     /// Monitors that came back while the screens were off (energy.rs), set up by
     /// screens_on. Setting one up turns it on, and a monitor that drops off in
     /// standby (Techbench's ASUS, 2026-11-12) then woke and dropped again.
@@ -287,7 +291,7 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
             }
         }
     })?;
-    state.backend = Some(Backend { renderer, gbm: primary_gbm, devices, surfaces: HashMap::new(), waiting: Vec::new(), probed });
+    state.backend = Some(Backend { renderer, gbm: primary_gbm, devices, surfaces: HashMap::new(), paused: false, waiting: Vec::new(), probed });
     state.session = Some(session.clone());
 
     // Input from every device on the seat.
@@ -366,6 +370,7 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
             tracing::info!("session paused");
             libinput.suspend();
             if let Some(b) = state.backend.as_mut() {
+                b.paused = true;
                 for d in &mut b.devices {
                     d.manager.pause();
                 }
@@ -380,6 +385,7 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
                 .backend
                 .as_mut()
                 .map(|b| {
+                    b.paused = false;
                     for d in &mut b.devices {
                         let _ = d.manager.lock().activate(false);
                     }
@@ -854,6 +860,9 @@ fn lay_out(state: &mut Server) {
 fn render(state: &mut Server, crtc: Key) {
     // The backend is taken out of the state for the frame, so the scene can be
     // built from the state with the backend's renderer.
+    if state.backend.as_ref().is_some_and(|b| b.paused) {
+        return;
+    }
     let Some(mut backend) = state.backend.take() else { return };
     let t = std::time::Instant::now();
     render_with(state, &mut backend, crtc);
