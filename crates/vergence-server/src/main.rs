@@ -33,6 +33,7 @@ mod notify;
 mod displays;
 mod energy;
 mod shelf;
+mod tiles;
 mod session;
 mod launcher;
 mod touch;

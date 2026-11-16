@@ -11,6 +11,7 @@ pub mod sock;
 pub mod window;
 pub mod wire;
 pub mod shm;
+pub mod tile;
 
 use std::{
     os::unix::net::UnixStream,

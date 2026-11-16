@@ -20,6 +20,7 @@ pub mod open;
 pub mod running;
 pub mod session;
 pub mod snap;
+pub mod tiles;
 
 /// A rectangle in points: its top-left corner and its size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

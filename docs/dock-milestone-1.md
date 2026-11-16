@@ -29,6 +29,19 @@ milestone: the list and the launcher only).
   reorder, remove, pin Calculator by dropping, Escape, Alt+drag to the
   bottom, "Move dock" back to the right. Tests 638 Hubble/Techbench, 631
   kepler. By hand still: a mouse and a finger on kepler.
+- **Step 2 done** (2026-11-16): vergence-protocol tile.rs (Tile, Card,
+  TileState: the values a tile is drawn from, on the bus from step 3);
+  vergence-shell tiles.rs (tile places after the applications, `tile_at`,
+  the clock tile, local time and UTC by localtime_r/gmtime_r, with tests);
+  the server's tiles.rs (the list by owner, the clock set each minute from
+  the one-second tick, the card: opens after 250 ms on a tile, closes 200
+  ms after the pointer leaves tile and card, drawn beside the tile on the
+  windows' side with title, a large line, rows, a chart and small print;
+  a click on a tile or the card's title opens its settings page); seat
+  `Part::Card`. The dock draws tiles after a line: value over label, in the
+  warning or problem color when not fine. Seen on kepler: the clock tile,
+  its card, a click opening the settings app (no Date & Time page yet: it
+  comes with step 4). Tests 641 Hubble/Techbench, 634 kepler.
 
 ## Where things stand
 

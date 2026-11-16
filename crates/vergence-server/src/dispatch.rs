@@ -236,6 +236,9 @@ impl Server {
         if let Some(modal) = hit_window.and_then(|w| self.modal_of(&w)) {
             return Some(Target::Server(Part::Blocked(self.win_id(&modal))));
         }
+        if self.card_at(pos) {
+            return Some(Target::Server(Part::Card));
+        }
         if self.notify_at(pos) {
             return Some(Target::Server(Part::Note));
         }
@@ -521,6 +524,7 @@ impl Server {
             Target::Server(Part::Popup) if pressed => self.launcher_press(pos),
             Target::Server(Part::Popup) => self.launcher_release(pos),
             Target::Server(Part::Note) if pressed => self.notify_press(pos),
+            Target::Server(Part::Card) if pressed && button == vergence_seat::BTN_LEFT => self.card_press(pos),
             // The dock: a left press is a click or the start of a drag, let go where
             // it ends; a right press is an icon's menu.
             Target::Server(Part::Dock) if pressed && button == vergence_seat::BTN_LEFT => self.shelf_press(pos, button),

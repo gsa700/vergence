@@ -294,6 +294,8 @@ pub struct Held {
 pub enum Grip {
     Dock,
     Item(usize),
+    /// A live tile, by its place among the tiles (tiles.rs).
+    Tile(usize),
     Head,
 }
 
@@ -384,7 +386,7 @@ pub struct Shelf {
     hover: Option<usize>,
     named: bool,
     /// The items' names as last drawn, and the name's picture for a scale.
-    names: Vec<String>,
+    pub names: Vec<String>,
     label: Option<((String, u64, bool), MemoryRenderBuffer, i32)>,
     /// Minimized windows, each with the place it goes back to. They are on no
     /// screen (the server's space does not hold them); their application's icon
@@ -585,6 +587,8 @@ impl Server {
     /// it; while it is being dragged, where the pointer has taken it.
     fn shelf_dock(&mut self, items: usize) -> Option<Rectangle<i32, Logical>> {
         let at = self.shelf.config.placement();
+        // The live tiles stand after the applications (tiles.rs).
+        let items = items + self.tiles.list.len();
         let mut dock = self.shelf.dragged.or_else(|| self.shelf_screen().and_then(|s| vergence_shell::dock(rect(s), &at, items)).map(rectangle));
         // Hidden: moved out past its edge as far as it is slid away.
         // Out or away as the mode says, judged where the dock stands when out.
@@ -756,6 +760,9 @@ impl Server {
     /// stands upright has no room for names).
     pub fn shelf_hover(&mut self, at: Point<f64, Logical>) {
         self.shelf_hide_follow(at);
+        // A tile rested on opens its card (tiles.rs); not during a drag.
+        let busy = self.shelf_busy() || self.shelf.held.is_some();
+        self.tiles_hover(at, busy);
         // A press on the dock that moves far enough is a drag: the dock goes with
         // the pointer until it is let go.
         // "Move dock": the dock follows the pointer, its middle under it.
@@ -784,7 +791,8 @@ impl Server {
                         }
                     }
                     Grip::Item(index) => self.shelf_lift_follow(index, at),
-                    Grip::Head => {}
+                    // Tiles move between the dock and the drawer in step 5.
+                    Grip::Tile(_) | Grip::Head => {}
                 }
                 return;
             }
@@ -986,7 +994,7 @@ impl Server {
         } else {
             match running::item_at(rect(dock), self.shelf.names.len(), upright, at.x.floor() as i32, at.y.floor() as i32) {
                 Some(i) => Grip::Item(i),
-                None => Grip::Head,
+                None => self.tile_under(at).map_or(Grip::Head, Grip::Tile),
             }
         };
         self.shelf.held = Some((button, Held { start: at, dock, dragging: false, grip }));
@@ -1058,6 +1066,11 @@ impl Server {
             return;
         }
         if held.dragging && held.grip != Grip::Dock {
+            return;
+        }
+        // A click on a tile: to where it lives (tiles.rs).
+        if let Grip::Tile(index) = held.grip {
+            self.tile_go(index);
             return;
         }
         if held.dragging {
@@ -1309,7 +1322,7 @@ impl Server {
         let w = self.work_area(s);
         let items = self.shelf_items();
         let hidden = if self.shelf_hides() && self.shelf_shown() <= 0.0 { " (away now)" } else { "" };
-        let Some(dock) = self.shelf_dock(items.len()).or_else(|| vergence_shell::dock(rect(s), &at, items.len()).map(rectangle)) else {
+        let Some(dock) = self.shelf_dock(items.len()).or_else(|| vergence_shell::dock(rect(s), &at, items.len() + self.tiles.list.len()).map(rectangle)) else {
             return "no shelf: its screen is too small for it".into();
         };
         let mut out = format!(
@@ -1393,6 +1406,9 @@ impl Server {
             _ => (0..items.len()).map(Some).collect(),
         };
         order.hash(&mut hasher);
+        // The live tiles after the applications (tiles.rs).
+        let tiles = self.tiles_on_dock();
+        tiles.hash(&mut hasher);
         // The frost behind the dock (look milestone 1, step 5): its ground is then
         // the frost, drawn under the picture; Reduce transparency (or no frost
         // on this renderer) leaves the dock as its own setting says, solid if that.
@@ -1476,6 +1492,33 @@ impl Server {
                             vergence_render::text(&mut scene, fonts, face, size, color(s.tile_ink), origin, &letter);
                         }
                     }
+                }
+            }
+            // The tiles: a line between them and the applications, then each
+            // one's value with its label under it, in its state's color.
+            let small = fonts.face("sans-serif", 400, false);
+            for (j, tile) in tiles.iter().enumerate() {
+                let Some(slot) = vergence_shell::tiles::slot(local, order.len(), j, upright) else { break };
+                if j == 0 {
+                    let (a, b) = if upright {
+                        (ScenePoint::new(slot.x as f32 + 10.0, slot.y as f32 + 0.5), ScenePoint::new((slot.x + slot.w) as f32 - 10.0, slot.y as f32 + 0.5))
+                    } else {
+                        (ScenePoint::new(slot.x as f32 + 0.5, slot.y as f32 + 10.0), ScenePoint::new(slot.x as f32 + 0.5, (slot.y + slot.h) as f32 - 10.0))
+                    };
+                    scene.line(a, b, 1.0, color(s.separator));
+                }
+                let ink = crate::tiles::state_ink(tile.state, light, s.tile_ink);
+                let (Some(big), Some(small)) = (face, small) else { continue };
+                let (vs, ls) = (13.0, 9.5);
+                let (vm, lm) = (fonts.metrics(big, vs), fonts.metrics(small, ls));
+                let (vh, lh) = (vm.ascent + vm.descent, if tile.label.is_empty() { 0.0 } else { lm.ascent + lm.descent });
+                let top = slot.y as f32 + (slot.h as f32 - vh - lh) / 2.0;
+                let vw = fonts.layout(big, vs, &tile.value).1;
+                vergence_render::text(&mut scene, fonts, big, vs, ink, ScenePoint::new(slot.x as f32 + (slot.w as f32 - vw) / 2.0, (top + vm.ascent).round()), &tile.value);
+                if !tile.label.is_empty() {
+                    let lw = fonts.layout(small, ls, &tile.label).1;
+                    let dim = if tile.state == vergence_protocol::tile::TileState::Fine { color(s.mark) } else { ink };
+                    vergence_render::text(&mut scene, fonts, small, ls, dim, ScenePoint::new(slot.x as f32 + (slot.w as f32 - lw) / 2.0, (top + vh + lm.ascent).round()), &tile.label);
                 }
             }
             let buffer = match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) {

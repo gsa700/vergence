@@ -88,6 +88,8 @@ pub enum Part {
     Menu,
     /// A notification card.
     Note,
+    /// A live tile's card beside the dock (dock milestone 1).
+    Card,
     /// Alt+Tab's list of windows (windows milestone 1, step 5).
     Switcher,
     /// A window a modal dialog blocks (window styles milestone 1): every press

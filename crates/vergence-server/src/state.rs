@@ -122,6 +122,8 @@ pub struct Server {
     pub settings: crate::settings::SettingsState,
     /// Notifications on screen (notify.rs).
     pub notes: crate::notify::Notifications,
+    /// Live tiles on the dock and the open card (tiles.rs).
+    pub tiles: crate::tiles::Tiles,
     /// How each output's scale was found (displays.rs), by output name, and the
     /// [displays] settings last applied.
     pub scale_notes: std::collections::HashMap<String, crate::displays::Scales>,
@@ -295,6 +297,7 @@ impl Server {
             dbus: Default::default(),
             settings: Default::default(),
             notes: Default::default(),
+            tiles: Default::default(),
             scale_notes: Default::default(),
             displays: crate::displays::load(),
             shelf: crate::shelf::Shelf::load(),

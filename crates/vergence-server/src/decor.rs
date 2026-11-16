@@ -694,6 +694,8 @@ impl Server {
         elements.extend(self.menu_elements(renderer, out, scale));
         // Then notifications, in front of every window (notify.rs).
         elements.extend(self.notify_elements(renderer, out, scale));
+        // Then a tile's card beside the dock (tiles.rs).
+        elements.extend(self.card_elements(renderer, out, scale));
         // Then the applications popup, if open (launcher.rs).
         elements.extend(self.launcher_elements(renderer, out, scale));
         // Then Alt+Tab's list, once Alt has been held a moment (switch.rs).
