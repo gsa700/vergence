@@ -1523,12 +1523,15 @@ impl Server {
             let face = fonts.face("sans-serif", 700, false).or_else(|| fonts.face("sans-serif", 400, false));
             // The apps button at its head, saying the apps live there (Dave,
             // 2026-11-16, after macOS's Apps icon): a search field across the
-            // top and six apps under it, two rows of three, in the dock's own
-            // colors (the nine dots are the drawer's).
-            scene.stroke(SceneRect::new(12.5, 12.5, 23.0, 5.0), 2.5, 1.2, color(s.mark));
+            // top and six apps under it, two rows of three, inside a window's
+            // outline, in the dock's own colors (the nine dots are the drawer's).
+            // All of it in the outline of a window (Dave: "might still need
+            // something like an outline of a window").
+            scene.stroke(SceneRect::new(7.5, 7.5, 33.0, 33.0), 6.0, 1.3, color(s.mark));
+            scene.stroke(SceneRect::new(13.0, 13.0, 22.0, 4.5), 2.25, 1.1, color(s.mark));
             for i in 0..6 {
                 let (column, row) = ((i % 3) as f32, (i / 3) as f32);
-                scene.fill_rounded(SceneRect::new(12.0 + column * 9.0, 21.0 + row * 9.0, 6.0, 6.0), 1.6, color(s.mark));
+                scene.fill_rounded(SceneRect::new(13.0 + column * 8.5, 21.5 + row * 8.0, 5.0, 5.0), 1.4, color(s.mark));
             }
             let local = Rect::new(0, 0, strip.size.w, strip.size.h);
             for (place, shown) in order.iter().enumerate() {
