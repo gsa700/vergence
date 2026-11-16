@@ -142,7 +142,7 @@ impl FontDb {
             .filter(|(i, _)| *i != base)
             .map(|(i, e)| {
                 let rank = (e.info.monospace != like.monospace) as u32 * 4 + (e.info.family.split(' ').next() != Some(foundry)) as u32 * 2 + (e.info.italic != like.italic) as u32;
-                (rank, weight_distance(&e.info, like.weight), i)
+                (rank, (e.info.width as i32 - like.width as i32).unsigned_abs() * 10_000 + weight_distance(&e.info, like.weight), i)
             })
             .collect();
         order.sort_unstable();
@@ -160,8 +160,13 @@ fn weight_distance(info: &FaceInfo, weight: u16) -> u32 {
 }
 
 /// Slant first, then weight.
+/// How far a face is from what is asked: the slant first, then the width
+/// (a family's normal width always before its condensed or expanded faces:
+/// kepler, 2026-11-16, set every text in Noto Sans Condensed, its file
+/// sorting before Regular and the width not looked at; Dave: "the display
+/// seems a little off ... slightly taller than wide"), then the weight.
 fn distance(info: &FaceInfo, weight: u16, italic: bool) -> u32 {
-    (info.italic != italic) as u32 * 10_000 + weight_distance(info, weight)
+    (info.italic != italic) as u32 * 100_000 + (info.width as i32 - 5).unsigned_abs() * 10_000 + weight_distance(info, weight)
 }
 
 fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
@@ -221,6 +226,24 @@ mod tests {
         assert_eq!(name(&db, db.find("Noto Sans Mono", 900, false)), Some(("Noto Sans Mono", 700, false)));
         assert_eq!(name(&db, db.find("Noto Sans", 700, true)), Some(("Noto Sans", 400, true)));
         assert_eq!(db.find("No Such Family", 400, false), None);
+    }
+
+    /// A family's condensed face, listed first (its file sorts before
+    /// Regular, as Noto Sans's do on FreeBSD), is never the plain text's.
+    #[test]
+    fn the_normal_width_before_a_condensed_face() {
+        let db = FontDb {
+            faces: vec![
+                entry(Spec { family: "Noto Sans", width: 3, ..Spec::default() }),
+                entry(Spec { family: "Noto Sans", width: 3, weight: 700, ..Spec::default() }),
+                entry(Spec { family: "Noto Sans", ..Spec::default() }),
+                entry(Spec { family: "Noto Sans", weight: 700, ..Spec::default() }),
+            ],
+        };
+        let regular = db.find("sans-serif", 400, false).unwrap();
+        assert_eq!(db.faces[regular].info.width, 5);
+        let bold = db.find("Noto Sans", 600, false).unwrap();
+        assert_eq!((db.faces[bold].info.width, db.faces[bold].info.weight), (5, 700), "a normal-width bold before a condensed one");
     }
 
     #[test]

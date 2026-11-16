@@ -50,6 +50,8 @@ pub struct FaceInfo {
     /// 1 to 1000 (400 regular, 700 bold): the face's own, or a variable
     /// font's default.
     pub weight: u16,
+    /// OS/2 usWidthClass, 1 to 9 (5 normal; 3 condensed; 7 expanded).
+    pub width: u16,
     pub italic: bool,
     pub monospace: bool,
     /// Which face of a collection (0 for a plain font file).
@@ -119,6 +121,7 @@ fn face(src: &mut dyn Source, at: u64, index: u32) -> Option<FaceInfo> {
     let family = family_name(&tables.load(src, b"name", 1 << 20)?)?;
     let os2 = tables.load(src, b"OS/2", 4096);
     let weight = os2.as_deref().and_then(|t| u16_at(t, 4)).filter(|w| (1..=1000).contains(w)).unwrap_or(400);
+    let width = os2.as_deref().and_then(|t| u16_at(t, 6)).filter(|w| (1..=9).contains(w)).unwrap_or(5);
     let selection = os2.as_deref().and_then(|t| u16_at(t, 62));
     let mac_style = tables.load(src, b"head", 4096).and_then(|t| u16_at(&t, 44)).unwrap_or(0);
     // OS/2 fsSelection bit 0 (italic) or 9 (oblique); head's macStyle bit 1 if there is no OS/2.
@@ -131,7 +134,7 @@ fn face(src: &mut dyn Source, at: u64, index: u32) -> Option<FaceInfo> {
     let monospace = post || panose;
     let weight_axis = tables.load(src, b"fvar", 1 << 16).and_then(|t| weight_axis(&t));
     let cmap = tables.find(b"cmap").map(|(o, l)| (o as u64, l));
-    Some(FaceInfo { family, weight, italic, monospace, index, weight_axis, cmap })
+    Some(FaceInfo { family, weight, width, italic, monospace, index, weight_axis, cmap })
 }
 
 /// The family from a `name` table: the typographic family (name 16) if there
@@ -293,6 +296,8 @@ pub mod testfont {
         /// A second name, as name 16 (the typographic family).
         pub typographic: Option<&'a str>,
         pub weight: u16,
+        /// usWidthClass (0: written as 0, read as normal).
+        pub width: u16,
         pub italic: bool,
         pub monospace: bool,
         /// Fixed pitch said only by PANOSE, as Noto Sans Mono does.
@@ -306,7 +311,7 @@ pub mod testfont {
 
     impl Default for Spec<'_> {
         fn default() -> Self {
-            Spec { family: "Test Sans", typographic: None, weight: 400, italic: false, monospace: false, panose_mono: false, weight_axis: None, ranges: &[(0x20, 0x7e)], wide: &[] }
+            Spec { family: "Test Sans", typographic: None, weight: 400, width: 5, italic: false, monospace: false, panose_mono: false, weight_axis: None, ranges: &[(0x20, 0x7e)], wide: &[] }
         }
     }
 
@@ -382,6 +387,7 @@ pub mod testfont {
     fn tables(spec: &Spec) -> Vec<([u8; 4], Vec<u8>)> {
         let mut os2 = vec![0u8; 78];
         os2[4..6].copy_from_slice(&spec.weight.to_be_bytes());
+        os2[6..8].copy_from_slice(&spec.width.to_be_bytes());
         os2[62..64].copy_from_slice(&(spec.italic as u16).to_be_bytes());
         if spec.panose_mono {
             os2[32..36].copy_from_slice(&[2, 11, 5, 9]);
