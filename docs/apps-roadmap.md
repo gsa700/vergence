@@ -167,9 +167,9 @@ it is today:
   (00eacae, the launcher's "Vergence" row at the top). If "app picker"
   also means File Viewer's "Open with" list: our own apps are already first
   among those that open a type, after the user's own choices.
-- **The terminal's settings window a little larger**, so all of it shows
+- *Done 2026-11-15 (8bbcc0c).* **The terminal's settings window a little larger**, so all of it shows
   without scrolling. Small.
-- **A terminal setting to scroll on output** (jump to the bottom when a
+- *Done 2026-11-15 (8bbcc0c).* **A terminal setting to scroll on output** (jump to the bottom when a
   program writes, or stay where you scrolled to). Small.
 - **Terminal programs as default apps** (nano, vi, emacs, ed for text
   files). Opening already runs a desktop entry with `Terminal=true` in our
@@ -178,7 +178,7 @@ it is today:
   terminal editors found on the system and write a small entry of our own
   for the chosen one (`vergence-term-nano.desktop`, `Terminal=true`) plus
   the line in vergence-mimeapps.list.
-- **The Text Editor's right-click menu as full as the terminal's.** The text
+- *Done 2026-11-16 (polish batch): New Tab, New Window and Find… after the text's lines, through vergence-widgets' AreaOptions::commands.* **The Text Editor's right-click menu as full as the terminal's.** The text
   area gained a standard menu on 15 November at about 15:10 (Undo, Redo,
   Cut, Copy, Paste, Select all, spelling suggestions above); a session
   started before then does not have it. The terminal's also has New tab,
@@ -193,7 +193,7 @@ it is today:
 
 ## From Dave, 2026-11-16
 
-- **Only one System Settings at a time** (Dave: "there should only ever
+- *Done 2026-11-16 (polish batch, vergence-settings single.rs): a second start hands its --page/--app/--forget to the running one, which turns to the page and comes forward.* **Only one System Settings at a time** (Dave: "there should only ever
   be one copy of System Settings at any one time"). Starting
   vergence-settings while one is running (a dock tile's click, `--page`,
   `--app`, `--forget`, an app menu's Settings…) brings the running window

@@ -278,6 +278,9 @@ impl EditWindow {
             spaces: t.spaces.unwrap_or_else(|| self.flag("spaces", true)),
             current_line: self.flag("current-line", true),
             editable: t.read_only.is_none(),
+            // The right-click menu as full as the terminal's (Dave's list):
+            // the editor's own lines after the text's.
+            commands: vec![("New Tab".into(), cmd::NEW_TAB, "Ctrl+T"), ("New Window".into(), cmd::NEW_WINDOW, "Ctrl+N"), ("Find…".into(), cmd::FIND, "Ctrl+F")],
             complete: self.flag("complete", true),
             // Its own choice, else the desktop's ([text] spellcheck), on by default.
             spell: match self.setting("spellcheck").as_deref() {
@@ -1079,6 +1082,10 @@ impl Program for EditWindow {
     fn update(&mut self, m: Msg, window: &mut Window) {
         match m {
             Msg::Changed => {
+                // One of our own lines in the text's right-click menu.
+                if let Some(id) = self.doc().and_then(|d| d.borrow_mut().take_command()) {
+                    self.run(id, window);
+                }
                 if self.find.is_some() {
                     self.refind();
                 }

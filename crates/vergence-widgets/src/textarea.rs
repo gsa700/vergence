@@ -59,6 +59,8 @@ enum Action {
     Undo,
     Redo,
     SelectAll,
+    /// One of the program's own lines ([`AreaOptions::commands`]).
+    Command(u32),
     /// A dividing line in the menu (nothing to choose).
     Line,
 }
@@ -116,11 +118,16 @@ pub struct AreaOptions {
     /// Words spelled wrong are underlined (step 7); a right click on one
     /// gives suggestions.
     pub spell: bool,
+    /// The program's own lines at the end of the right-click menu (the
+    /// Text Editor's New Tab, New Window, Find…: Dave's list, "as full as
+    /// the terminal's"): the label, its id, its keys. A chosen one is read
+    /// with [`Doc::take_command`] when the area's change message comes.
+    pub commands: Vec<(String, u32, &'static str)>,
 }
 
 impl Default for AreaOptions {
     fn default() -> Self {
-        AreaOptions { font: "monospace".into(), size: None, line_numbers: true, wrap: true, tab_width: 4, spaces: true, current_line: true, editable: true, complete: true, spell: true }
+        AreaOptions { font: "monospace".into(), size: None, line_numbers: true, wrap: true, tab_width: 4, spaces: true, current_line: true, editable: true, complete: true, spell: true, commands: Vec::new() }
     }
 }
 
@@ -327,6 +334,8 @@ pub(crate) struct Effect {
 
 /// A document: its text, its history, its caret, its view.
 pub struct Doc {
+    /// The program's own menu line chosen, until it asks (take_command).
+    asked: Option<u32>,
     buffer: Buffer,
     history: History<Pos>,
     caret: Pos,
@@ -394,6 +403,7 @@ impl Doc {
             spelled: Vec::new(),
             ignored: HashSet::new(),
             typing_word: false,
+            asked: None,
         }
         .with_saved_ending()
     }
@@ -635,6 +645,11 @@ impl Doc {
     /// Goes up by one each time the text changes.
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// The program's own menu line chosen since last asked, if one was.
+    pub fn take_command(&mut self) -> Option<u32> {
+        self.asked.take()
     }
 
     pub fn options(&self) -> &AreaOptions {
@@ -1160,6 +1175,10 @@ impl Doc {
                 self.select_all();
                 e.moved = true;
             }
+            Action::Command(id) => {
+                self.asked = Some(id);
+                e.moved = true;
+            }
             _ => {}
         }
         e
@@ -1218,6 +1237,13 @@ impl Doc {
         add("Paste", Action::Paste, editable, "Ctrl+V");
         add("", Action::Line, false, "");
         add("Select all", Action::SelectAll, true, "Ctrl+A");
+        let own = self.options.commands.clone();
+        if !own.is_empty() {
+            add("", Action::Line, false, "");
+            for (label, id, key) in own {
+                add(&label, Action::Command(id), true, key);
+            }
+        }
         let chosen = enabled.iter().position(|e| *e).unwrap_or(0);
         self.list = Some(List { words, actions, enabled, keys, at: Some((x, y)), chosen, start: p, first: 0 });
     }

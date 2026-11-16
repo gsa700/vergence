@@ -37,6 +37,7 @@ mod modes;
 mod notify;
 mod datetime;
 mod lockscreen;
+mod single;
 use notify::NotifyMsg;
 mod places;
 use places::PlacesMsg;
@@ -425,6 +426,8 @@ enum Message {
     Notify(NotifyMsg),
     Clock(datetime::ClockMsg),
     Lock(lockscreen::LockMsg),
+    /// Another start's arguments (single.rs): its page, then forward.
+    HandedOver(Vec<String>),
     /// Window places on the Windows page (places.rs).
     Places(PlacesMsg),
     /// The Apps page (apps.rs).
@@ -982,6 +985,29 @@ impl App {
         (self.primary().as_deref() != Some(o.id.as_str())).then(|| (o.id.clone(), screen_label(o)))
     }
 
+    /// The start's arguments (or another start's, handed over): `--forget
+    /// <app>` (the dock's "Forget window places...": the question, asked once
+    /// the Windows page's list has come from the server), `--page <name>`,
+    /// `--app <id>` (the app menu's Settings… for an app not ours).
+    fn apply_args(&mut self, args: &[String]) {
+        if let Some(i) = args.iter().position(|a| a == "--forget")
+            && let Some(name) = args.get(i + 1)
+        {
+            self.places_from_dock = Some(name.clone());
+        }
+        if let Some(i) = args.iter().position(|a| a == "--page")
+            && let Some(name) = args.get(i + 1)
+            && let Some(page) = self.page_named(name)
+        {
+            self.open(page);
+        }
+        if let Some(i) = args.iter().position(|a| a == "--app")
+            && let Some(id) = args.get(i + 1).filter(|id| !id.is_empty() && id.len() < 256)
+        {
+            self.apps_message(AppsMsg::Open(id.to_lowercase()));
+        }
+    }
+
     fn open(&mut self, p: Page) {
         self.page = p;
         self.reread();
@@ -1026,6 +1052,7 @@ impl App {
             Message::Notify(m) => self.notify_message(m),
             Message::Clock(m) => self.clock_message(m),
             Message::Lock(m) => self.lock_message(m),
+            Message::HandedOver(args) => self.apply_args(&args),
             Message::Places(m) => self.places_message(m),
             Message::Apps(m) => self.apps_message(m),
             Message::Defaults(m) => self.defaults_message(m),
@@ -3071,6 +3098,10 @@ impl Program for App {
     fn woken(&mut self, window: &mut Window) -> bool {
         let mut any = false;
         while let Ok(m) = self.inbox.try_recv() {
+            // Another start asked for this window: forward (the server judges).
+            if matches!(m, Message::HandedOver(_)) {
+                window.activate();
+            }
             // The keep-or-revert dialog answered: its window's timer is not needed.
             if matches!(m, Message::KeepMode(_)) {
                 window.cancel_timer(modes::REVERT_TIMER);
@@ -3333,31 +3364,23 @@ fn main() -> std::io::Result<()> {
     // `--page wifi`: the page to open with, by its sidebar name in lower case
     // ("wifi", "energy", "windows", "theme and fonts"); the server's "no network
     // cable" notification opens Wi-Fi.
+    // Only one at a time: one is running already, so it turns to what this
+    // start asks for and comes forward (single.rs).
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if single::hand_over(&args) {
+        return Ok(());
+    }
     let mut app = App::new();
     // Whether there is a battery, for the sidebar (the page reads it again when opened).
     app.battery.power = vergence_power::power();
     // Whether there is Wi-Fi, for the sidebar.
     app.read_interfaces();
-    let args: Vec<String> = std::env::args().collect();
-    // `--forget <app>` (the dock's "Forget window places..."): the question,
-    // asked once the Windows page's list has come from the server.
-    if let Some(i) = args.iter().position(|a| a == "--forget")
-        && let Some(name) = args.get(i + 1)
-    {
-        app.places_from_dock = Some(name.clone());
-    }
-    if let Some(i) = args.iter().position(|a| a == "--page")
-        && let Some(name) = args.get(i + 1)
-        && let Some(page) = app.page_named(name)
-    {
-        app.open(page);
-    }
-    // `--app <id>`: that app's page (the app menu's Settings… for an app not ours).
-    if let Some(i) = args.iter().position(|a| a == "--app")
-        && let Some(id) = args.get(i + 1).filter(|id| !id.is_empty() && id.len() < 256)
-    {
-        app.apps_message(AppsMsg::Open(id.to_lowercase()));
-    }
+    app.apply_args(&args);
+    // Only one System Settings (single.rs): this one now takes later starts'.
+    let mail = app.mail.clone();
+    single::listen(move |args| {
+        mail.send(Message::HandedOver(args));
+    });
     vergence_widgets::run(app, (840, 1100))
 }
 
