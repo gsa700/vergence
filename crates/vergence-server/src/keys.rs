@@ -96,7 +96,27 @@ pub fn seat_key(sym: u32, code: u32) -> vergence_seat::keyboard::Key {
         k::KEY_Down => Key::Down,
         k::KEY_space => Key::Space,
         k::KEY_d | k::KEY_D => Key::D,
+        k::KEY_l | k::KEY_L => Key::L,
+        k::KEY_q | k::KEY_Q => Key::Q,
         s if (k::KEY_XF86Switch_VT_1..k::KEY_XF86Switch_VT_1 + 12).contains(&s) => Key::Vt((s - k::KEY_XF86Switch_VT_1 + 1) as u8),
         _ => Key::Other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::seat_key;
+    use vergence_seat::keyboard::Key;
+    use xkbcommon::xkb::keysyms as k;
+
+    /// Every letter the seat decides on reaches it as that letter, in either
+    /// case (Super+L once came through as Other: VDM milestone 1, 2026-11-16).
+    #[test]
+    fn the_seats_letters_reach_it() {
+        for (syms, key) in [((k::KEY_d, k::KEY_D), Key::D), ((k::KEY_l, k::KEY_L), Key::L), ((k::KEY_q, k::KEY_Q), Key::Q)] {
+            assert_eq!(seat_key(syms.0, 0), key);
+            assert_eq!(seat_key(syms.1, 0), key);
+        }
+        assert_eq!(seat_key(k::KEY_a, 0), Key::Other);
     }
 }
