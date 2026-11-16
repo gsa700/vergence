@@ -787,6 +787,18 @@ client, the root-only control socket, and install.sh's files.
 - The console start and GDM still work where VDM is not enabled.
 - Tests green on all three; the security pass's findings fixed.
 
+Where acceptance stands (2026-11-16): **seen** on all three: booting to
+the login screen (kepler and Techbench rebooted to it; Hubble installed
+with --vdm), log in, log out back to it, Super+L and unlock, a wrong
+password refused with the pause, Sleep, Restart and Shut Down from the
+login screen and the session (kepler), tests green (674, 674, 667), the
+code review's findings fixed. **Not yet seen:** a YubiKey at the login
+screen (pam_u2f, which Techbench's stack would ask for if set up);
+a screenshot taken while locked showing only the lock; the login screen
+on several monitors at once (Hubble with its external screens); the
+console start where VDM is off (`install.sh --no-vdm`) after these
+changes. These stay open as checks by hand.
+
 ## Questions
 
 1. **Who logs in:** (a) a list of the machine's people (name and picture;
