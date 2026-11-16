@@ -580,7 +580,6 @@ const GIVE_UP: u32 = 5;
 /// kept), its output to STATE_DIR/greeter.log. Every descriptor of vdm's is
 /// close-on-exec (Rust opens them so), so it inherits none.
 fn start_greeter(uid: u32, gid: u32) -> std::io::Result<c_int> {
-    use std::os::unix::process::CommandExt;
     let exe = std::env::current_exe()?;
     let server = exe.parent().and_then(|d| d.parent()).map(|p| p.join("bin/vergence-server")).filter(|p| p.is_file()).ok_or_else(|| std::io::Error::other("no vergence-server beside vdm ($prefix/bin)"))?;
     let base = std::path::Path::new(paths::GREETER_SOCKET).parent().ok_or_else(|| std::io::Error::other("no run directory"))?;
@@ -595,22 +594,110 @@ fn start_greeter(uid: u32, gid: u32) -> std::io::Result<c_int> {
     }
     let tty = std::fs::OpenOptions::new().read(true).write(true).open(vergence_dm::vt::tty_path(vergence_dm::vt::GREETER_VT))?;
     let out = std::fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(std::path::Path::new(paths::STATE_DIR).join("greeter.log"))?;
+    // A worker holds the login screen's PAM session (logind's seat goes only
+    // to a process in a session, review I4) and starts the server in it; vdm
+    // knows the worker, which passes SIGTERM on to the server.
+    // SAFETY: vdm is single-threaded; the worker runs greeter_worker and exits.
+    let pid = unsafe { fork() };
+    if pid < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if pid > 0 {
+        return Ok(pid);
+    }
+    let code = greeter_worker(uid, gid, &server, &home, &run, tty, out);
+    // SAFETY: leave without running the parent's exit handlers.
+    unsafe { _exit(code) }
+}
+
+/// The server the login screen's worker started, for SIGTERM to reach it.
+static GREETER_SERVER: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+extern "C" fn pass_term_on(_sig: c_int) {
+    let pid = GREETER_SERVER.load(std::sync::atomic::Ordering::Relaxed);
+    if pid > 0 {
+        // SAFETY: kill is async-signal-safe.
+        unsafe { kill(pid, 15) };
+    }
+}
+
+/// In the login screen's worker: its PAM session (when /etc/pam.d/vdm-greeter
+/// is there), the server in it, and the session closed when the server ends.
+fn greeter_worker(uid: u32, gid: u32, server: &std::path::Path, home: &std::path::Path, run: &std::path::Path, tty: std::fs::File, out: std::fs::File) -> c_int {
+    unsafe extern "C" {
+        fn signal(sig: c_int, handler: extern "C" fn(c_int)) -> usize;
+    }
+    // SAFETY: a handler that only reads an atomic and calls kill.
+    unsafe { signal(15, pass_term_on) };
+    let mut io = Some((tty, out));
+    let mut code = 3;
+    let tty_path = vergence_dm::vt::tty_path(vergence_dm::vt::GREETER_VT);
+    let with_pam = std::path::Path::new(paths::PAM_DIR).join(paths::GREETER_SERVICE).is_file();
+    let mut run_it = |env: Vec<(String, String)>| -> c_int {
+        let Some((tty, out)) = io.take() else { return 3 };
+        match spawn_greeter_server(uid, gid, server, home, run, tty, out, env) {
+            Ok(mut child) => {
+                GREETER_SERVER.store(child.id() as i32, std::sync::atomic::Ordering::Relaxed);
+                let _ = child.wait();
+                0
+            }
+            Err(e) => {
+                log(&format!("login screen: could not start the server: {e}"));
+                3
+            }
+        }
+    };
+    if with_pam {
+        let started = pam::session_only(paths::GREETER_SERVICE, paths::GREETER_USER, &mut |h| {
+            h.set_item(pam::TTY, &tty_path);
+            for kv in ["XDG_SEAT=seat0".to_string(), format!("XDG_VTNR={}", vergence_dm::vt::GREETER_VT), "XDG_SESSION_TYPE=wayland".into(), "XDG_SESSION_CLASS=greeter".into()] {
+                h.putenv(&kv);
+            }
+            let r = h.open_session();
+            if r != pam::SUCCESS {
+                log(&format!("login screen: PAM would not open its session: {}", pam::describe(r)));
+            }
+            let env = h.env().into_iter().filter_map(|kv| kv.split_once('=').map(|(k, v)| (k.to_string(), v.to_string()))).collect();
+            code = run_it(env);
+            if r == pam::SUCCESS {
+                h.close_session();
+            }
+        });
+        if !started {
+            log("login screen: PAM did not start; running without its session");
+            code = run_it(Vec::new());
+        }
+    } else {
+        code = run_it(Vec::new());
+    }
+    code
+}
+
+/// The login screen's server: as the greeter account, on its VT, in a
+/// session of its own with the VT as its terminal, the environment from
+/// nothing (PAM's session's, then ours).
+#[allow(clippy::too_many_arguments)]
+fn spawn_greeter_server(uid: u32, gid: u32, server: &std::path::Path, home: &std::path::Path, run: &std::path::Path, tty: std::fs::File, out: std::fs::File, pam_env: Vec<(String, String)>) -> std::io::Result<std::process::Child> {
+    use std::os::unix::process::CommandExt;
     let name = std::ffi::CString::new(paths::GREETER_USER).map_err(std::io::Error::other)?;
-    let mut cmd = std::process::Command::new(&server);
+    // logind's runtime directory where it made one; ours otherwise.
+    let runtime = pam_env.iter().find(|(k, _)| k == "XDG_RUNTIME_DIR").map(|(_, v)| std::path::PathBuf::from(v)).unwrap_or_else(|| run.to_path_buf());
+    let mut cmd = std::process::Command::new(server);
     cmd.args(["--drm", "--greeter"])
         .env_clear()
-        .env("HOME", &home)
-        .env("XDG_RUNTIME_DIR", &run)
+        .envs(pam_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+        .env("HOME", home)
+        .env("XDG_RUNTIME_DIR", &runtime)
         .env("USER", paths::GREETER_USER)
         .env("LOGNAME", paths::GREETER_USER)
         .env("PATH", "/usr/local/bin:/usr/bin:/bin")
         .env("XDG_SEAT", "seat0")
         .env("XDG_VTNR", vergence_dm::vt::GREETER_VT.to_string())
-        .current_dir(&home)
+        .current_dir(home)
         .stdin(tty)
         .stdout(out.try_clone()?)
         .stderr(out);
-    // SAFETY: vdm is single-threaded, so the forked child may call these.
+    // SAFETY: the worker is single-threaded, so the forked child may call these.
     unsafe {
         cmd.pre_exec(move || {
             if setsid() < 0 {
@@ -628,8 +715,7 @@ fn start_greeter(uid: u32, gid: u32) -> std::io::Result<c_int> {
             Ok(())
         })
     };
-    let child = cmd.spawn()?;
-    Ok(child.id() as c_int)
+    cmd.spawn()
 }
 
 /// A login vdm is running: its worker checks, then runs the session.
@@ -730,6 +816,21 @@ fn main() {
     }
     sys::no_core_files();
     sys::no_debugger();
+    // FreeBSD: vdm writes to syslog itself (log()); its standard output and
+    // error, daemon(8)'s pipe, go to /dev/null, so no session or login screen
+    // started from it holds that pipe: daemon waited for them to close it
+    // before a restart could finish (kepler, 2026-11-16).
+    #[cfg(target_os = "freebsd")]
+    if let Ok(null) = std::fs::OpenOptions::new().write(true).open("/dev/null") {
+        unsafe extern "C" {
+            fn dup2(from: c_int, to: c_int) -> c_int;
+        }
+        // SAFETY: our own descriptors; /dev/null stays open in 1 and 2.
+        unsafe {
+            dup2(null.as_raw_fd(), 1);
+            dup2(null.as_raw_fd(), 2);
+        }
+    }
 
     let listener = bind(&socket, 0o666);
     let session_listener = bind(paths::SESSION_SOCKET, 0o666);
@@ -760,7 +861,15 @@ fn main() {
     let mut sessions: Vec<(u32, UnixStream)> = Vec::new();
     // Logins by their worker's pid: checking, then (yes) the running session.
     let mut logins: HashMap<c_int, LoginRun> = HashMap::new();
-    let mut greeter_run = Greeter { on: false, pid: 0, started: std::time::Instant::now(), quick: 0, next: None, came_from: None, back_to: None };
+    // The login screen at boot, where the machine is set up for it (step 7).
+    let at_boot = paths::login_screen_file().is_file() && greeter_account.is_some();
+    if at_boot {
+        log(&format!("the login screen starts with vdm ({} is there)", paths::login_screen_file().display()));
+    }
+    // A first start after 6 s: servers already running (vdm restarted under
+    // them) have registered by then, and the login screen waits for them.
+    let first = at_boot.then(|| std::time::Instant::now() + Duration::from_secs(6));
+    let mut greeter_run = Greeter { on: at_boot, pid: 0, started: std::time::Instant::now(), quick: 0, next: first, came_from: None, back_to: None };
     loop {
         // The login screen, when wanted and not running, once its pause is over.
         // A yes: answer the login screen, which then gives way to the session.
@@ -790,7 +899,9 @@ fn main() {
                 log(&format!("back to VT {vt}: {e}"));
             }
         }
-        let session_running = logins.values().any(|l| l.yes);
+        // Never over a session: one of vdm's, or a server registered from a
+        // console (whose end then brings the login screen).
+        let session_running = logins.values().any(|l| l.yes) || !sessions.is_empty();
         if greeter_run.on && greeter_run.pid == 0 && !session_running && greeter_run.next.is_none_or(|t| std::time::Instant::now() >= t) {
             greeter_run.next = None;
             match greeter_account.as_ref().map(|a| start_greeter(a.uid, a.gid)) {

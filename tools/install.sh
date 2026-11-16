@@ -5,6 +5,9 @@
 #   sudo tools/install.sh --prefix /usr    another prefix
 #   tools/install.sh --destdir DIR         stage under DIR (packaging; no root, no system setup)
 #   sudo tools/install.sh --uninstall      remove what an earlier run put there
+#   sudo tools/install.sh --vdm            also: the login screen at boot (VDM)
+#   sudo tools/install.sh --no-vdm         also: no login screen at boot (vdm still
+#                                          runs for the lock); neither: as it was
 #
 # Build first, on this machine or one with the same OS and architecture:
 #   cargo build --release
@@ -45,12 +48,15 @@ prefix=/usr/local
 destdir=
 user=${SUDO_USER:-${DOAS_USER:-}}
 uninstall=
+login_screen=
 while [ $# -gt 0 ]; do
     case $1 in
         --prefix) prefix=$2; shift 2 ;;
         --destdir) destdir=$2; shift 2 ;;
         --user) user=$2; shift 2 ;;
         --uninstall) uninstall=1; shift ;;
+        --vdm) login_screen=on; shift ;;
+        --no-vdm) login_screen=off; shift ;;
         -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
         *) echo "install.sh: unknown argument $1" >&2; exit 2 ;;
     esac
@@ -70,6 +76,11 @@ words=$destdir$prefix/share/vergence/words
 if [ -n "$uninstall" ]; then
     for p in $programs vctl vergence-session vergence; do rm -f "$bin/$p"; done
     rm -f "$sbin/vdm"
+    # vdm's PAM files and the login screen at boot (the service itself is the
+    # init system's to stop: vdm will not start without its binary).
+    if [ -z "$destdir" ]; then
+        rm -f /etc/pam.d/vdm /etc/pam.d/vdm-unlock /etc/pam.d/vdm-greeter /var/lib/vdm/login-screen /var/db/vdm/login-screen
+    fi
     rm -f "$sessions/vergence.desktop"
     for t in $tools; do rm -f "$applications/$t.desktop" "$icons/$t.svg"; done
     for d in $docfiles; do rm -f "$docs/$d"; done
@@ -256,9 +267,36 @@ elif [ "$(uname -s)" = FreeBSD ] && [ -f /etc/pam.d/login ]; then
         "password	include		login" "session		include		login" > /etc/pam.d/vdm
 fi
 [ -f /etc/pam.d/vdm ] && chmod 644 /etc/pam.d/vdm && echo "vdm: /etc/pam.d/vdm written for the login screen"
+# The login screen's own session (no check, nothing to answer): on Fedora
+# logind gives the seat only to a process in a session (class greeter, as
+# GDM's), so the login screen gets one; elsewhere a session that does nothing.
+if [ -d /run/systemd/system ]; then
+    printf '%s\n' "# vdm-greeter: the Vergence login screen's own session (tools/install.sh writes it)" \
+        "auth		required	pam_permit.so" "account		required	pam_permit.so" "password	required	pam_deny.so" \
+        "session		required	pam_loginuid.so" "session		optional	pam_keyinit.so force revoke" \
+        "session		required	pam_systemd.so" "session		required	pam_limits.so" > /etc/pam.d/vdm-greeter
+elif [ "$(uname -s)" = FreeBSD ]; then
+    printf '%s\n' "# vdm-greeter: the Vergence login screen's own session (tools/install.sh writes it)" \
+        "auth		required	pam_permit.so" "account		required	pam_permit.so" "password	required	pam_deny.so" \
+        "session		required	pam_permit.so" > /etc/pam.d/vdm-greeter
+else
+    printf '%s\n' "# vdm-greeter: the Vergence login screen's own session (tools/install.sh writes it)" \
+        "auth		required	pam_permit.so" "account		required	pam_permit.so" "password	required	pam_deny.so" \
+        "session		required	pam_limits.so" "-session	optional	pam_elogind.so" > /etc/pam.d/vdm-greeter
+fi
+chmod 644 /etc/pam.d/vdm-greeter
+# The login screen at boot (--vdm), or not (--no-vdm); vdm reads the file
+# when it starts. Neither: left as it was.
+if [ "$(uname -s)" = FreeBSD ]; then vdm_state=/var/db/vdm; else vdm_state=/var/lib/vdm; fi
+mkdir -p "$vdm_state" && chmod 700 "$vdm_state"
+case $login_screen in
+    on) : > "$vdm_state/login-screen"; echo "vdm: the login screen starts at boot (VT 7 on Linux, VT 9 on FreeBSD; the text consoles stay, Ctrl+Alt+F1)" ;;
+    off) rm -f "$vdm_state/login-screen"; echo "vdm: no login screen at boot (log in on a console and run 'vergence')" ;;
+    *) [ -f "$vdm_state/login-screen" ] && echo "vdm: the login screen starts at boot (--no-vdm turns it off)" ;;
+esac
 # The service, by init system; started now and at every boot.
 if [ -d /run/systemd/system ]; then
-    printf '%s\n' "[Unit]" "Description=VDM, the Vergence display manager (unlock checks)" "" "[Service]" \
+    printf '%s\n' "[Unit]" "Description=VDM, the Vergence display manager" "After=systemd-user-sessions.service systemd-logind.service" "" "[Service]" \
         "ExecStart=$prefix/sbin/vdm" "Restart=always" "" "[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/vdm.service
     systemctl daemon-reload
     systemctl enable vdm >/dev/null 2>&1 || true

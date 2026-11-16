@@ -1,11 +1,12 @@
 #!/bin/sh
 #
 # PROVIDE: vdm
-# REQUIRE: LOGIN
+# REQUIRE: LOGIN seatd
 # KEYWORD: shutdown suspend
 #
 # vdm, VDM's root daemon (docs/vdm-milestone-1.md): the lock screen's
-# password check. tools/install.sh installs this as /usr/local/etc/rc.d/vdm
+# password check, and the login screen (at boot after `install.sh --vdm`).
+# tools/install.sh installs this as /usr/local/etc/rc.d/vdm
 # and sets vdm_enable=YES. It logs to syslog (auth) itself; restarted if it ends.
 # /etc/rc.suspend runs every rc.d script with the suspend keyword before the
 # machine sleeps (the lid, the power button, acpiconf, zzz): vdm then locks

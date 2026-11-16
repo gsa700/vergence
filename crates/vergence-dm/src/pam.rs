@@ -321,6 +321,35 @@ pub fn authenticate_then(service: &str, user: &str, conv: &mut dyn Conversation,
     }
 }
 
+/// A transaction with no check, for a session alone (the login screen's
+/// own, VDM step 7: logind gives the seat only to a process in a session,
+/// review I4): pam_start, `then` (which opens and closes the session), pam_end.
+/// Prompts are refused. Whether PAM started.
+pub fn session_only(service: &str, user: &str, then: &mut dyn FnMut(&Handle)) -> bool {
+    struct Silent;
+    impl Conversation for Silent {
+        fn prompt(&mut self, _echo: bool, _text: &str) -> Option<Secret> {
+            None
+        }
+        fn info(&mut self, _text: &str) {}
+        fn error(&mut self, _text: &str) {}
+    }
+    let (Ok(service), Ok(user)) = (CString::new(service), CString::new(user)) else { return false };
+    let mut silent = Silent;
+    let mut state = State { conv: &mut silent, gave_up: false };
+    let c = Conv { conv: converse, appdata: (&mut state as *mut State).cast() };
+    let mut h: *mut c_void = std::ptr::null_mut();
+    // SAFETY: strings and a Conv that outlive the transaction (pam_end below).
+    let r = unsafe { pam_start(service.as_ptr(), user.as_ptr(), &c, &mut h) };
+    if r != SUCCESS || h.is_null() {
+        return false;
+    }
+    then(&Handle(h));
+    // SAFETY: the handle, ended once.
+    unsafe { pam_end(h, SUCCESS) };
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -30,6 +30,16 @@ pub const GREETER_SOCKET: &str = "/var/run/vdm/greeter";
 /// The PAM service logging in runs (our own file, review I2).
 pub const LOGIN_SERVICE: &str = "vdm";
 
+/// The PAM service the login screen's own session runs (no check; a
+/// session for logind, review I4).
+pub const GREETER_SERVICE: &str = "vdm-greeter";
+
+/// When this file is there, vdm starts the login screen itself when it
+/// starts (at boot): `tools/install.sh --vdm` makes it, `--no-vdm` removes it.
+pub fn login_screen_file() -> std::path::PathBuf {
+    std::path::Path::new(STATE_DIR).join("login-screen")
+}
+
 /// The greeter's account.
 pub const GREETER_USER: &str = "_vdm";
 

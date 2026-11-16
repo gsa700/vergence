@@ -277,6 +277,30 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   refuses while someone is logged in (it had taken the screen from Dave's
   session for 8 s).
 
+- **Step 7** (2026-11-16): the login screen at boot. `tools/install.sh
+  --vdm` makes STATE_DIR/login-screen (`--no-vdm` removes it; neither
+  leaves it), and vdm starts the login screen when it starts if the file
+  is there: after 6 s (a vdm restarted under running servers hears them
+  register first) and never while anyone has a session (one of vdm's, or
+  a server registered from a console, whose end then brings the login
+  screen). The login screen runs in a PAM session of its own
+  (/etc/pam.d/vdm-greeter, no check; class greeter, PAM_TTY, XDG_SEAT,
+  XDG_VTNR; on Fedora pam_systemd, so logind gives it the seat, I4): a
+  worker holds the session, starts the server in it (with logind's
+  runtime directory where it made one), passes SIGTERM on, and closes the
+  session when the server ends. Services: the FreeBSD rc script REQUIREs
+  seatd; the systemd unit comes After systemd-user-sessions and logind.
+  The text consoles stay (Ctrl+Alt+F1) as the way in when the login
+  screen cannot start. On FreeBSD vdm points its own standard output and
+  error at /dev/null (it logs to syslog), so nothing it starts holds
+  daemon(8)'s pipe: a restart hung again on a session's worker. Seen on
+  kepler: installed with --vdm, the login screen came up by itself; with
+  Dave's session running a vdm restart left it alone. Found: rsync keeps
+  Control's file times, so an edit made before a dev box's last build can
+  look older than it and cargo skips it (kepler ran a vdm without the
+  "never over a session" rule, and took Dave's screen for 15 s);
+  `touch` the changed files there when in doubt.
+
 ## Design
 
 ### The parts
