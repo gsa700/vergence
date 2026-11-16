@@ -213,10 +213,15 @@ if [ -d /run/systemd/system ]; then
     systemctl daemon-reload
     systemctl enable vdm >/dev/null 2>&1 || true
     systemctl restart vdm
-    echo "vdm: enabled and started (systemd)"
+    # Before any sleep, every session locks (VDM step 2): systemd runs
+    # system-sleep hooks with "pre" before the machine sleeps.
+    printf '%s\n' "#!/bin/sh" "# vdm: lock every Vergence session before sleeping (tools/install.sh)" \
+        'case "$1" in pre) exec '"$prefix"'/sbin/vdm before-sleep ;; esac' > /usr/lib/systemd/system-sleep/vdm
+    chmod 755 /usr/lib/systemd/system-sleep/vdm
+    echo "vdm: enabled and started (systemd); sessions lock before sleep (system-sleep hook)"
 elif [ "$(uname -s)" = FreeBSD ]; then
     install -m 555 "$here/freebsd/vdm.rc" /usr/local/etc/rc.d/vdm
-    sed -i '' "s|@PREFIX@|$prefix|" /usr/local/etc/rc.d/vdm
+    sed -i '' "s|@PREFIX@|$prefix|g" /usr/local/etc/rc.d/vdm
     sysrc vdm_enable=YES >/dev/null
     service vdm restart >/dev/null 2>&1 || service vdm start >/dev/null 2>&1 || true
     echo "vdm: enabled in rc.conf and started"
@@ -226,6 +231,12 @@ elif [ -d /etc/sv ] && [ -d /var/service ]; then
     printf '%s\n' "#!/bin/sh" "exec vlogger -t vdm -p auth" > /etc/sv/vdm/log/run
     chmod 755 /etc/sv/vdm/run /etc/sv/vdm/log/run
     if [ -e /var/service/vdm ]; then sv restart vdm >/dev/null 2>&1 || true; else ln -s /etc/sv/vdm /var/service/vdm; fi
+    # Before any sleep, every session locks (VDM step 2): zzz runs these first.
+    if [ -d /etc/zzz.d/suspend ]; then
+        printf '%s\n' "#!/bin/sh" "# vdm: lock every Vergence session before sleeping (tools/install.sh)" "$prefix/sbin/vdm before-sleep" > /etc/zzz.d/suspend/50-vdm
+        chmod 755 /etc/zzz.d/suspend/50-vdm
+        echo "vdm: sessions lock before sleep (/etc/zzz.d/suspend/50-vdm)"
+    fi
     echo "vdm: enabled and started (runit, /var/service/vdm)"
 else
     echo "vdm: no known init system; start $prefix/sbin/vdm as root at boot" >&2

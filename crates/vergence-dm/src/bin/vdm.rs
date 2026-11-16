@@ -173,7 +173,9 @@ impl Conversation for Relay {
     }
 }
 
-/// In the child: one check, start to end. Its exit status is what PAM said.
+/// In the child: one check, start to end. Its exit status is what PAM said;
+/// the answer to the client (with the pause that follows a "no") is the
+/// parent's to send, which alone keeps the pauses.
 fn check(mut stream: UnixStream, name: &str, service: &str) -> c_int {
     match proto::read_to_vdm(&mut stream) {
         Ok(ToVdm::Hello { version: proto::VERSION, service: proto::Service::Unlock }) => {}
@@ -182,7 +184,6 @@ fn check(mut stream: UnixStream, name: &str, service: &str) -> c_int {
     }
     let mut relay = Relay { stream };
     let outcome = pam::authenticate(service, name, &mut relay);
-    let _ = proto::send_from_vdm(&mut relay.stream, &FromVdm::Done { ok: outcome == Outcome::Yes, wait: 0 });
     match outcome {
         Outcome::Yes => 0,
         Outcome::No => 1,
@@ -195,27 +196,11 @@ fn refuse(mut stream: UnixStream, wait: u64) {
     let _ = proto::send_from_vdm(&mut stream, &FromVdm::Done { ok: false, wait: wait.min(u16::MAX as u64) as u16 });
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let opt = |name: &str, default: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| default.to_string());
-    let socket = opt("--socket", paths::UNLOCK_SOCKET);
-    let service = opt("--service", paths::UNLOCK_SERVICE);
-    if sys::euid() != 0 {
-        eprintln!("vdm: must run as root");
-        std::process::exit(1);
-    }
-    // Our own PAM file, or nothing: without it PAM would use "other", which
-    // differs between systems (review I2).
-    if !std::path::Path::new(paths::PAM_DIR).join(&service).is_file() {
-        log(&format!("{}/{service} is missing; not starting (tools/install.sh puts it there)", paths::PAM_DIR));
-        std::process::exit(1);
-    }
-    sys::no_core_files();
-    sys::no_debugger();
-
-    // The socket: its directory root's and readable by all; a socket left by
-    // a vdm that ended is replaced, anything else there is not touched.
-    let path = std::path::Path::new(&socket);
+/// Make a listening socket: its directory root's and readable by all; a
+/// socket left by a vdm that ended is replaced, anything else there is not
+/// touched.
+fn bind(socket: &str, mode: u32) -> UnixListener {
+    let path = std::path::Path::new(socket);
     if let Some(dir) = path.parent() {
         let _ = std::fs::DirBuilder::new().recursive(true).mode(0o755).create(dir);
     }
@@ -236,13 +221,120 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o666));
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
     let _ = listener.set_nonblocking(true);
-    log(&format!("checking unlocks on {socket} with PAM service {service}"));
+    listener
+}
+
+/// `vdm before-sleep`, from the system's sleep hooks: ask the running vdm to
+/// lock every session and wait (it answers within a few seconds). Never
+/// fails the sleep: a vdm that is not there is said and left.
+fn before_sleep() -> ! {
+    use std::io::{BufRead, BufReader};
+    match UnixStream::connect(paths::CONTROL_SOCKET) {
+        Ok(mut s) => {
+            let _ = s.set_read_timeout(Some(Duration::from_secs(SLEEP_LIMIT + 5)));
+            let _ = s.write_all(b"before-sleep\n");
+            let mut line = String::new();
+            let _ = BufReader::new(&s).read_line(&mut line);
+            eprintln!("vdm before-sleep: {}", line.trim());
+        }
+        Err(e) => eprintln!("vdm before-sleep: {}: {e}", paths::CONTROL_SOCKET),
+    }
+    std::process::exit(0)
+}
+
+/// How long the sessions have to show the lock before the machine sleeps anyway.
+const SLEEP_LIMIT: u64 = 5;
+/// At most this many servers per account stay registered (the oldest go).
+const SESSIONS_PER_UID: usize = 4;
+
+/// Before the machine sleeps (review C4): every registered session is told
+/// to lock, and vdm waits until each says the lock is on every screen, or
+/// that it cannot lock, or SLEEP_LIMIT passes. Sessions that do not answer
+/// are logged and dropped. What happened, for the hook.
+fn lock_all(sessions: &mut Vec<(u32, UnixStream)>) -> String {
+    let mut waiting: Vec<usize> = Vec::new();
+    for (i, (uid, s)) in sessions.iter_mut().enumerate() {
+        let _ = s.set_write_timeout(Some(Duration::from_secs(1)));
+        if proto::send_from_vdm(s, &FromVdm::LockNow).is_ok() {
+            waiting.push(i);
+        } else {
+            log(&format!("before sleep: {}'s server could not be told", user_name(*uid).unwrap_or_default()));
+        }
+    }
+    let total = waiting.len();
+    let (mut shown, mut cannot) = (0, 0);
+    let deadline = std::time::Instant::now() + Duration::from_secs(SLEEP_LIMIT);
+    let mut dead: Vec<usize> = Vec::new();
+    while !waiting.is_empty() {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        let mut fds: Vec<PollFd> = waiting.iter().map(|i| PollFd { fd: sessions[*i].1.as_raw_fd(), events: 1, revents: 0 }).collect();
+        // SAFETY: pollfds we own, as many as we pass.
+        unsafe { poll(fds.as_mut_ptr(), fds.len() as u64, left.as_millis().min(i32::MAX as u128) as c_int) };
+        let ready: Vec<usize> = waiting.iter().zip(&fds).filter(|(_, f)| f.revents != 0).map(|(i, _)| *i).collect();
+        for i in ready {
+            waiting.retain(|w| *w != i);
+            let (uid, s) = &mut sessions[i];
+            let _ = s.set_read_timeout(Some(Duration::from_secs(1)));
+            let who = user_name(*uid).unwrap_or_default();
+            match proto::read_to_vdm(s) {
+                Ok(ToVdm::Presented) => shown += 1,
+                Ok(ToVdm::CannotLock(why)) => {
+                    cannot += 1;
+                    log(&format!("before sleep: {who}'s session cannot lock: {why}"));
+                }
+                _ => dead.push(i),
+            }
+        }
+    }
+    for i in &waiting {
+        log(&format!("before sleep: {}'s session did not show the lock in time", user_name(sessions[*i].0).unwrap_or_default()));
+    }
+    dead.sort_unstable();
+    for i in dead.into_iter().rev() {
+        sessions.remove(i);
+    }
+    let said = format!("{shown} of {total} sessions locked, {cannot} could not lock, {} did not answer", waiting.len());
+    log(&format!("before sleep: {said}"));
+    said
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("before-sleep") {
+        before_sleep();
+    }
+    let opt = |name: &str, default: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| default.to_string());
+    let socket = opt("--socket", paths::UNLOCK_SOCKET);
+    let service = opt("--service", paths::UNLOCK_SERVICE);
+    if sys::euid() != 0 {
+        eprintln!("vdm: must run as root");
+        std::process::exit(1);
+    }
+    // Our own PAM file, or nothing: without it PAM would use "other", which
+    // differs between systems (review I2).
+    if !std::path::Path::new(paths::PAM_DIR).join(&service).is_file() {
+        log(&format!("{}/{service} is missing; not starting (tools/install.sh puts it there)", paths::PAM_DIR));
+        std::process::exit(1);
+    }
+    sys::no_core_files();
+    sys::no_debugger();
+
+    let listener = bind(&socket, 0o666);
+    let session_listener = bind(paths::SESSION_SOCKET, 0o666);
+    let control = bind(paths::CONTROL_SOCKET, 0o600);
+    log(&format!("checking unlocks on {socket} with PAM service {service}; sessions on {}", paths::SESSION_SOCKET));
 
     let mut pauses = Pauses::load();
-    // The check running for each uid: its child's pid.
-    let mut running: HashMap<c_int, u32> = HashMap::new();
+    // The check running for each uid, by its child's pid, with the client's
+    // connection (the parent answers it when the child ends).
+    let mut running: HashMap<c_int, (u32, UnixStream)> = HashMap::new();
+    // The servers registered to be locked before sleep, by account.
+    let mut sessions: Vec<(u32, UnixStream)> = Vec::new();
     loop {
         // Children that ended: what PAM said for their account.
         loop {
@@ -252,7 +344,7 @@ fn main() {
             if pid <= 0 {
                 break;
             }
-            let Some(uid) = running.remove(&pid) else { continue };
+            let Some((uid, mut client)) = running.remove(&pid) else { continue };
             let code = if status & 0x7f == 0 { (status >> 8) & 0xff } else { -1 };
             let who = user_name(uid).unwrap_or_else(|| uid.to_string());
             match code {
@@ -268,10 +360,49 @@ fn main() {
                 -1 => log(&format!("unlock for {who}: the check ran out of time")),
                 _ => log(&format!("unlock for {who}: PAM could not run (status {code})")),
             }
+            // The answer, with the pause it starts, so the lock counts it down at once.
+            let _ = client.set_write_timeout(Some(Duration::from_secs(1)));
+            let wait = pauses.wait(uid).min(u16::MAX as u64) as u16;
+            let _ = proto::send_from_vdm(&mut client, &FromVdm::Done { ok: code == 0, wait });
         }
-        let mut fds = [PollFd { fd: listener.as_raw_fd(), events: 1, revents: 0 }];
-        // SAFETY: one pollfd we own; a second's wait so children are reaped.
-        unsafe { poll(fds.as_mut_ptr(), 1, 1000) };
+        let mut fds: Vec<PollFd> = [&listener, &session_listener, &control].iter().map(|l| PollFd { fd: l.as_raw_fd(), events: 1, revents: 0 }).collect();
+        fds.extend(sessions.iter().map(|(_, s)| PollFd { fd: s.as_raw_fd(), events: 1, revents: 0 }));
+        // SAFETY: pollfds we own; a second's wait so children are reaped.
+        unsafe { poll(fds.as_mut_ptr(), fds.len() as u64, 1000) };
+        // A registered server that went away (or said something out of turn): dropped.
+        let gone: Vec<usize> = fds[3..].iter().enumerate().filter(|(_, f)| f.revents != 0).map(|(i, _)| i).collect();
+        for i in gone.into_iter().rev() {
+            sessions.remove(i);
+        }
+        // A server registering: the connection is the registration.
+        if let Ok((s, _)) = session_listener.accept() {
+            let _ = s.set_nonblocking(false);
+            match sys::peer_uid(&s) {
+                Some(uid) if uid != 0 && uid >= paths::MIN_UID => {
+                    if sessions.iter().filter(|(u, _)| *u == uid).count() >= SESSIONS_PER_UID
+                        && let Some(oldest) = sessions.iter().position(|(u, _)| *u == uid)
+                    {
+                        sessions.remove(oldest);
+                    }
+                    sessions.push((uid, s));
+                }
+                _ => {}
+            }
+        }
+        // Root's: lock every session before sleeping.
+        if let Ok((mut s, _)) = control.accept() {
+            let _ = s.set_nonblocking(false);
+            if sys::peer_uid(&s) == Some(0) {
+                use std::io::{BufRead, BufReader};
+                let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
+                let mut line = String::new();
+                let _ = BufReader::new(&s).read_line(&mut line);
+                if line.trim() == "before-sleep" {
+                    let said = lock_all(&mut sessions);
+                    let _ = s.write_all(format!("{said}\n").as_bytes());
+                }
+            }
+        }
         let stream = match listener.accept() {
             Ok((s, _)) => s,
             Err(_) => continue,
@@ -290,7 +421,7 @@ fn main() {
             refuse(stream, 0);
             continue;
         };
-        if running.values().any(|u| *u == uid) {
+        if running.values().any(|(u, _)| *u == uid) {
             refuse(stream, 1);
             continue;
         }
@@ -304,6 +435,10 @@ fn main() {
         let pid = unsafe { fork() };
         if pid == 0 {
             drop(listener);
+            drop(session_listener);
+            drop(control);
+            drop(sessions);
+            drop(running);
             // SAFETY: the child's own limit: SIGALRM ends it if PAM blocks.
             unsafe { alarm(TIME_LIMIT) };
             let code = check(stream, &name, &service);
@@ -314,7 +449,6 @@ fn main() {
             log("fork failed");
             continue;
         }
-        running.insert(pid, uid);
-        drop(stream);
+        running.insert(pid, (uid, stream));
     }
 }

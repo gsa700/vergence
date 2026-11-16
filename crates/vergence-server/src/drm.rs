@@ -311,10 +311,16 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
         event_loop.handle().insert_source(notifier, move |event, _, state| match event {
             DrmEvent::VBlank(crtc) => {
                 let key = (gpu, crtc);
+                let mut shown = None;
                 if let Some(b) = state.backend.as_mut()
                     && let Some(s) = b.surfaces.get_mut(&key)
                 {
                     let _ = s.drm_output.frame_submitted();
+                    shown = Some((s.connector.clone(), b.surfaces.len()));
+                }
+                // The lock's frame is on this screen now (lock.rs, before sleep).
+                if let Some((name, screens)) = shown {
+                    state.lock_frame_shown(&name, screens);
                 }
                 render(state, key);
             }
@@ -944,7 +950,12 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
             });
         }
         Ok(Relayed::Shown) => {
-            if let Err(e) = s.drm_output.queue_frame(()) {
+            let queued = s.drm_output.queue_frame(());
+            if queued.is_ok() {
+                let name = s.connector.clone();
+                state.lock_frame_queued(name);
+            }
+            if let Err(e) = queued {
                 tracing::warn!("queue frame: {e:?}");
                 let _ = state.loop_handle.insert_source(Timer::from_duration(Duration::from_millis(100)), move |_, _, st| {
                     render(st, crtc);

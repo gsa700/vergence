@@ -111,6 +111,26 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   by Dave: the pause now counts down on the screen each second, the field
   greyed and taking nothing until it is over.
 
+- **Step 2** (2026-11-16): sleep from anywhere locks (review C4). vdm's
+  session socket: each user's server stays connected (the connection is the
+  registration, its account from the kernel; four per account at most);
+  vdm's control socket, root's only; `vdm before-sleep` (from the sleep
+  hooks) makes vdm tell every session LockNow and wait up to 5 s for
+  Presented or CannotLock, logging the rest. The server answers Presented
+  only once a frame queued after locking has reached every screen (its
+  VBlank came), or at once if the screens are off (their CRTCs cleared).
+  Hooks by tools/install.sh: FreeBSD's rc.d/vdm has the suspend keyword and
+  a suspend command (/etc/rc.suspend runs it before the lid, the power
+  button, acpiconf or zzz sleep); Void /etc/zzz.d/suspend/50-vdm; Fedora
+  /usr/lib/systemd/system-sleep/vdm (pre). Seen on Hubble: before-sleep
+  locked the session and had "1 of 1 sessions locked" back in 51 ms.
+  Found by Dave on Void: Void's pam_unix waits about 2 s after a wrong
+  password (FreeBSD's does not), and the countdown began only at the next
+  key because the PAM child sent the "no" without the pause; now vdm's
+  parent, which keeps the pauses, sends the answer with the pause in it, so
+  the countdown starts at once everywhere; a child closes the connections
+  of other checks it inherited.
+
 ## Design
 
 ### The parts

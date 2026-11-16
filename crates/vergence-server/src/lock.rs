@@ -59,6 +59,14 @@ enum Heard {
     Done { ok: bool, wait: u16 },
     /// vdm could not be reached, or the connection broke.
     Gone(String),
+    /// vdm, on the session socket: the machine is about to sleep (step 2).
+    LockNow,
+}
+
+/// What the server answers vdm before sleep.
+enum Reply {
+    Presented,
+    Cannot(String),
 }
 
 /// One conversation with vdm in progress.
@@ -88,6 +96,15 @@ pub struct Lock {
     heard: Option<channel::Sender<Heard>>,
     /// Idle could not lock and has said so once this session.
     told_idle: bool,
+    /// The answer to vdm's LockNow, sent by the session thread.
+    replies: Option<std::sync::mpsc::Sender<Reply>>,
+    /// vdm waits to hear the lock is on every screen.
+    awaiting: bool,
+    /// Since it locked: the screens a frame was queued for, and those it was
+    /// shown on (their VBlank came); when all have, the lock is presented.
+    queued: std::collections::HashSet<String>,
+    shown: std::collections::HashSet<String>,
+    pub presented: bool,
     dim: Option<(Id, CommitCounter)>,
     picture: Option<(u64, MemoryRenderBuffer, i32, i32)>,
 }
@@ -121,6 +138,40 @@ fn no_shell_above() -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("the session was started from {name}, which a crash would return to, logged in"))
+    }
+}
+
+/// The session's standing connection to vdm (step 2, review C4): vdm learns
+/// the account from the kernel; when the machine is about to sleep it says
+/// LockNow, and this answers once the lock is on every screen. Reconnects
+/// when vdm restarts.
+fn session(heard: channel::Sender<Heard>, replies: std::sync::mpsc::Receiver<Reply>) {
+    loop {
+        let Ok(mut s) = UnixStream::connect(vergence_dm::paths::SESSION_SOCKET) else {
+            std::thread::sleep(Duration::from_secs(5));
+            continue;
+        };
+        tracing::info!("lock: registered with vdm for sleep");
+        loop {
+            match proto::read_from_vdm(&mut s) {
+                Ok(FromVdm::LockNow) => {
+                    while replies.try_recv().is_ok() {}
+                    if heard.send(Heard::LockNow).is_err() {
+                        return;
+                    }
+                    let msg = match replies.recv_timeout(Duration::from_secs(6)) {
+                        Ok(Reply::Presented) => ToVdm::Presented,
+                        Ok(Reply::Cannot(why)) => ToVdm::CannotLock(why),
+                        Err(_) => continue,
+                    };
+                    if proto::send_to_vdm(&mut s, &msg).is_err() {
+                        break;
+                    }
+                }
+                Ok(_) | Err(_) => break,
+            }
+        }
+        std::thread::sleep(Duration::from_secs(2));
     }
 }
 
@@ -167,6 +218,11 @@ fn talk(heard: channel::Sender<Heard>, answers: std::sync::mpsc::Receiver<Option
                 let _ = heard.send(Heard::Done { ok, wait });
                 return;
             }
+            // Only on the session socket; here it breaks the protocol.
+            Ok(FromVdm::LockNow) => {
+                let _ = heard.send(Heard::Gone("vdm: a session's message on the unlock socket".into()));
+                return;
+            }
             Err(e) => {
                 let _ = heard.send(Heard::Gone(format!("vdm: {e}")));
                 return;
@@ -186,6 +242,15 @@ impl Server {
             }
         });
         if let Err(e) = res {
+            tracing::warn!("lock: {e}");
+        }
+        // Registered with vdm, to be locked before the machine sleeps (step 2).
+        let (rtx, rrx) = std::sync::mpsc::channel();
+        self.lock.replies = Some(rtx);
+        let heard = tx.clone();
+        if std::env::args().any(|a| a == "--drm")
+            && let Err(e) = std::thread::Builder::new().name("lock-session".into()).spawn(move || session(heard, rrx))
+        {
             tracing::warn!("lock: {e}");
         }
         self.lock.heard = Some(tx);
@@ -263,8 +328,61 @@ impl Server {
         }
     }
 
+    /// vdm says the machine is about to sleep: lock (or say why not), and
+    /// answer once the lock is on every screen.
+    fn lock_for_sleep(&mut self) {
+        let reply = |st: &mut Server, r: Reply| {
+            if let Some(tx) = st.lock.replies.as_ref() {
+                let _ = tx.send(r);
+            }
+        };
+        if !self.lock.on {
+            if let Some(why) = self.lock_blocker() {
+                self.lock_request("sleep");
+                return reply(self, Reply::Cannot(why));
+            }
+            tracing::info!("lock: locked (the machine is going to sleep)");
+            self.lock_now();
+        }
+        // Screens off: their CRTCs are cleared, nothing of the session is on
+        // them; already shown everywhere: nothing more to wait for.
+        if self.energy.screens_off || self.lock.presented {
+            return reply(self, Reply::Presented);
+        }
+        self.lock.awaiting = true;
+        self.redraw_all();
+    }
+
+    /// drm.rs: a frame for a screen was queued (it shows at that screen's VBlank).
+    pub fn lock_frame_queued(&mut self, screen: String) {
+        if self.lock.on && !self.lock.presented {
+            self.lock.queued.insert(screen);
+        }
+    }
+
+    /// drm.rs: a screen's VBlank: a frame queued since it locked is on it.
+    /// When every screen shows the lock, it is presented (vdm is told, if it waits).
+    pub fn lock_frame_shown(&mut self, screen: &str, screens: usize) {
+        if !self.lock.on || self.lock.presented || !self.lock.queued.contains(screen) {
+            return;
+        }
+        self.lock.shown.insert(screen.to_string());
+        if self.lock.shown.len() >= screens {
+            self.lock.presented = true;
+            tracing::info!("lock: shown on every screen");
+            if std::mem::take(&mut self.lock.awaiting)
+                && let Some(tx) = self.lock.replies.as_ref()
+            {
+                let _ = tx.send(Reply::Presented);
+            }
+        }
+    }
+
     fn lock_now(&mut self) {
         self.lock.on = true;
+        self.lock.presented = false;
+        self.lock.queued.clear();
+        self.lock.shown.clear();
         if let Some(m) = marker() {
             let _ = std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(&m).and_then(|mut f| f.write_all(b"locked\n"));
         }
@@ -412,6 +530,9 @@ impl Server {
     }
 
     fn lock_heard(&mut self, h: Heard) {
+        if let Heard::LockNow = h {
+            return self.lock_for_sleep();
+        }
         if !self.lock.on {
             return;
         }
@@ -427,6 +548,7 @@ impl Server {
             }
             Heard::Info(t) => self.lock.message = Some((t, false)),
             Heard::Error(t) => self.lock.message = Some((t, true)),
+            Heard::LockNow => {}
             Heard::Done { ok: true, .. } => return self.unlock_now(),
             Heard::Done { ok: false, wait } => {
                 self.lock.talk = None;

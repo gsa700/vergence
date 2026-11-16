@@ -12,6 +12,13 @@
 //!   vdm -> client   Prompt { echo, text }        PAM asks (echo: show what is typed)
 //!                   Info { text } / Error { text }
 //!                   Done { ok, wait }            the end; wait: seconds before another try is taken
+//!
+//! On the session socket (step 2, review C4) a user's server stays connected;
+//! the connection is the registration (vdm knows its uid from the kernel):
+//!
+//!   vdm -> server   LockNow                      the machine is about to sleep
+//!   server -> vdm   Presented                    the lock is on every screen
+//!                   CannotLock { text }          and why (it says so to the user too)
 
 use std::io::{self, Read, Write};
 
@@ -34,6 +41,8 @@ pub enum ToVdm {
     Hello { version: u8, service: Service },
     Answer(Secret),
     Cancel,
+    Presented,
+    CannotLock(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +51,7 @@ pub enum FromVdm {
     Info(String),
     Error(String),
     Done { ok: bool, wait: u16 },
+    LockNow,
 }
 
 #[derive(Debug)]
@@ -70,10 +80,13 @@ mod kind {
     pub const HELLO: u8 = 1;
     pub const ANSWER: u8 = 2;
     pub const CANCEL: u8 = 3;
+    pub const PRESENTED: u8 = 4;
+    pub const CANNOT_LOCK: u8 = 5;
     pub const PROMPT: u8 = 16;
     pub const INFO: u8 = 17;
     pub const ERROR: u8 = 18;
     pub const DONE: u8 = 19;
+    pub const LOCK_NOW: u8 = 20;
 }
 
 /// Text from PAM as it may be shown: no control characters, at most
@@ -125,6 +138,12 @@ pub fn send_to_vdm(w: &mut impl Write, m: &ToVdm) -> io::Result<()> {
             w.write_all(s.as_bytes())?;
         }
         ToVdm::Cancel => header(w, kind::CANCEL, 0)?,
+        ToVdm::Presented => header(w, kind::PRESENTED, 0)?,
+        ToVdm::CannotLock(t) => {
+            let t = clean(t);
+            header(w, kind::CANNOT_LOCK, t.len())?;
+            w.write_all(t.as_bytes())?;
+        }
     }
     w.flush()
 }
@@ -151,6 +170,11 @@ pub fn read_to_vdm(r: &mut impl Read) -> Result<ToVdm, ProtoError> {
             Ok(ToVdm::Answer(s))
         }
         kind::CANCEL if len == 0 => Ok(ToVdm::Cancel),
+        kind::PRESENTED if len == 0 => Ok(ToVdm::Presented),
+        kind::CANNOT_LOCK if len <= MAX_TEXT => {
+            let b = read_body(r, len)?;
+            std::str::from_utf8(&b).map(|t| ToVdm::CannotLock(clean(t))).map_err(|_| ProtoError::Bad("text"))
+        }
         _ => Err(ProtoError::Bad("kind")),
     }
 }
@@ -171,6 +195,7 @@ pub fn send_from_vdm(w: &mut impl Write, m: &FromVdm) -> io::Result<()> {
             header(w, kind::DONE, 3)?;
             w.write_all(&[u8::from(*ok), (*wait >> 8) as u8, *wait as u8])?;
         }
+        FromVdm::LockNow => header(w, kind::LOCK_NOW, 0)?,
     }
     w.flush()
 }
@@ -190,6 +215,7 @@ pub fn read_from_vdm(r: &mut impl Read) -> Result<FromVdm, ProtoError> {
         (kind::INFO, rest) => Ok(FromVdm::Info(text(rest)?)),
         (kind::ERROR, rest) => Ok(FromVdm::Error(text(rest)?)),
         (kind::DONE, [ok @ (0 | 1), hi, lo]) => Ok(FromVdm::Done { ok: *ok == 1, wait: u16::from_be_bytes([*hi, *lo]) }),
+        (kind::LOCK_NOW, []) => Ok(FromVdm::LockNow),
         _ => Err(ProtoError::Bad("kind")),
     }
 }
@@ -208,6 +234,7 @@ mod tests {
             FromVdm::Error("Sorry".into()),
             FromVdm::Done { ok: true, wait: 0 },
             FromVdm::Done { ok: false, wait: 64 },
+            FromVdm::LockNow,
         ] {
             let mut b = Vec::new();
             send_from_vdm(&mut b, &m).unwrap();
@@ -223,6 +250,8 @@ mod tests {
         s.push_str("hunter2");
         send_to_vdm(&mut b, &ToVdm::Answer(s)).unwrap();
         send_to_vdm(&mut b, &ToVdm::Cancel).unwrap();
+        send_to_vdm(&mut b, &ToVdm::Presented).unwrap();
+        send_to_vdm(&mut b, &ToVdm::CannotLock("no shell\nhere".into())).unwrap();
         let mut r = Cursor::new(b);
         assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Hello { version: VERSION, service: Service::Unlock }));
         match read_to_vdm(&mut r).unwrap() {
@@ -230,6 +259,8 @@ mod tests {
             _ => panic!("an answer"),
         }
         assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Cancel));
+        assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Presented));
+        assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::CannotLock(t) if t == "no shell here"));
     }
 
     #[test]

@@ -7,6 +7,20 @@ pub const UNLOCK_SOCKET: &str = "/run/vdm/unlock";
 #[cfg(not(target_os = "linux"))]
 pub const UNLOCK_SOCKET: &str = "/var/run/vdm/unlock";
 
+/// The session socket (step 2, review C4): each user's server stays
+/// connected, so vdm can lock them all before the machine sleeps.
+#[cfg(target_os = "linux")]
+pub const SESSION_SOCKET: &str = "/run/vdm/session";
+#[cfg(not(target_os = "linux"))]
+pub const SESSION_SOCKET: &str = "/var/run/vdm/session";
+
+/// The control socket: root's only (`vdm before-sleep`, from the system's
+/// sleep hooks).
+#[cfg(target_os = "linux")]
+pub const CONTROL_SOCKET: &str = "/run/vdm/control";
+#[cfg(not(target_os = "linux"))]
+pub const CONTROL_SOCKET: &str = "/var/run/vdm/control";
+
 /// vdm's own state: the pause after failures per uid, kept across restarts (review M1).
 #[cfg(target_os = "linux")]
 pub const STATE_DIR: &str = "/var/lib/vdm";
