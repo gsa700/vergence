@@ -115,6 +115,27 @@ milestone: the list and the launcher only).
   Hardware dragged and given up with Escape; kepler's pins put back.
   Tests 650 Hubble, 643 kepler (Techbench left alone at Dave's word).
 
+- **Step 7 done** (2026-11-16): tools/lab/ups-tile (a NUT UPS as a tile:
+  `ups-tile <ups>@<host>[:port] [title] [seconds]`, NUT's text protocol by
+  nc, so no NUT client is installed; runtime on the dock; a warning on
+  battery, a problem when low or not answering; the card: on mains or
+  battery, charge, runtime, load, input, a chart of the load) and
+  tools/lab/vtile-demo (a tile going fine, warning, problem, fine), both
+  installed in libexec/vergence; tools/lab/autostart.desktop to copy into
+  ~/.config/autostart. The session now starts the user's own **autostart
+  entries** once at its start, on the real monitors (vergence-shell
+  autostart.rs: ~/.config/autostart only, not /etc/xdg/autostart; hidden,
+  other-desktop and X-GNOME-Autostart-enabled=false entries skipped; at
+  most 64); desktop.rs `Entry::elsewhere`. The server opens no network
+  socket: the script is the user's program talking to the NUT server.
+  Seen on kepler: the rack's Eaton 5SC 1500 (on mains, 100 %, 20 min, 28
+  % load, 122.6 V) in the drawer under Lab with its card; the demo coming
+  out onto the dock in warning and problem and going back; kepler's
+  ~/.config/autostart/ups-tile.desktop starting it with the session (left
+  in place for Dave). Neither Hubble nor kepler had an autostart directory
+  before; Techbench's (GNOME) must be looked at before it gets this build.
+  Tests 652 Hubble, 645 kepler.
+
 ## Where things stand
 
 - The dock (shelf milestones 1 and 2): the apps button, pinned and running

@@ -55,6 +55,8 @@ pub struct Session {
     /// An exit is closing the apps (exit.rs): the list stays as it was, so
     /// they are started again at the next session's start.
     pub exiting: bool,
+    /// The user's autostart entries have been started (vergence-shell autostart.rs).
+    autostarted: bool,
 }
 
 fn path() -> Option<PathBuf> {
@@ -91,9 +93,29 @@ fn wanted() -> bool {
 }
 
 impl Server {
+    /// Start the user's autostart entries, each as the dock starts an application.
+    fn autostart(&mut self) {
+        let Some(dir) = vergence_shell::autostart::dir() else { return };
+        for e in vergence_shell::autostart::entries(&dir) {
+            tracing::info!("session: autostart {} ({})", e.name, e.id);
+            if let Err(err) = crate::spawn(std::process::Command::new(&e.exec[0]).args(&e.exec[1..])) {
+                tracing::warn!("session: autostart {}: {err}", e.id);
+            }
+        }
+    }
+
     /// Once a second: at the session's start, the applications of the last
     /// one are started; after that, the list of what is running is kept.
     pub fn session_tick(&mut self) {
+        // Once, at the session's start, on the real monitors: what the user
+        // put in ~/.config/autostart (dock milestone 1: lab tiles, say),
+        // whether or not the last session is restored.
+        if !self.resume.autostarted && self.start_time.elapsed() >= WAIT {
+            self.resume.autostarted = true;
+            if std::env::args().any(|a| a == "--drm") {
+                self.autostart();
+            }
+        }
         if self.resume.off || self.resume.exiting {
             return;
         }

@@ -1,0 +1,24 @@
+#!/bin/sh
+# vtile-demo: a tile that goes through every state, to see the dock and its
+# drawer at work (dock milestone 1, step 7): fine, then a warning, then a
+# problem, then fine again, a step every few seconds. A tile in trouble
+# comes out of the drawer onto the dock while it lasts, and goes back.
+#
+#   vtile-demo [seconds]     (10 by default; Ctrl+C ends it and the tile)
+
+set -u
+every=${1:-10}
+{
+    n=0
+    while :; do
+        case $((n % 4)) in
+            0) echo '--value ok --state fine --row "Now=all well" --note "Next: a warning."' ;;
+            1) echo '--value warn --state warning --row "Now=a warning" --note "Next: a problem."' ;;
+            2) echo '--value fail --state problem --row "Now=a problem" --note "Next: all well again."' ;;
+            3) echo '--value ok --state fine --row "Now=all well again" --note "Then round again."' ;;
+        esac
+        echo "--push $((n % 4 * 10))"
+        n=$((n + 1))
+        sleep "$every"
+    done
+} | vtile run demo --label Demo --group Lab --title "A demonstration tile" --value ok

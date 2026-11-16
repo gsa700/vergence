@@ -18,6 +18,7 @@
 #   share/icons/hicolor/scalable/apps/       their icons (data/icons, drawn by the project)
 #   share/doc/vergence/                      LICENSE-APACHE, LICENSE-GPL, THIRD-PARTY-NOTICES.md
 #   share/vergence/words/                    the spelling list (data/words/en_US.txt, from SCOWL) and its terms
+#   libexec/vergence/ups-tile, vtile-demo  lab tiles on the dock from scripts (tools/lab)
 #   libexec/vergence/vergence-choose         the Open/Save dialog the portal shows for apps not ours
 #   libexec/vergence/vergence-decode         pictures decoded apart, limited (Capsicum on FreeBSD)
 #   libexec/vergence/media-eject             FreeBSD only: the root helper that unmounts a drive
@@ -71,6 +72,7 @@ if [ -n "$uninstall" ]; then
     for d in $docfiles; do rm -f "$docs/$d"; done
     rm -f "$libexec/media-eject"
     [ -z "$destdir" ] && [ "$(uname -s)" = FreeBSD ] && rm -f /etc/autofs/special_vergence_media
+    rm -f "$libexec/ups-tile" "$libexec/vtile-demo"
     rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
     rmdir "$words" "$destdir$prefix/share/vergence" 2>/dev/null || true
     rmdir "$libexec" 2>/dev/null || true
@@ -100,6 +102,10 @@ install -d -m 755 "$words"
 install -m 644 "$root/data/words/en_US.txt" "$words/en_US.txt"
 install -m 644 "$root/data/words/SCOWL-COPYRIGHT.txt" "$words/SCOWL-COPYRIGHT.txt"
 install -m 755 "$here/vctl" "$bin/vctl"
+# Lab tiles (dock milestone 1): a NUT UPS and a demonstration tile, scripts on vtile.
+install -d -m 755 "$libexec"
+install -m 755 "$here/lab/ups-tile" "$libexec/ups-tile"
+install -m 755 "$here/lab/vtile-demo" "$libexec/vtile-demo"
 if [ "$(uname -s)" = FreeBSD ]; then
     # The sound helper: setuid root, run only by the video group (the seat's,
     # below). Staged (--destdir) without the bits; the package sets them.

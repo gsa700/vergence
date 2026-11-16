@@ -1,0 +1,9 @@
+# Copy to ~/.config/autostart/ups-tile.desktop, put the UPS and its NUT
+# server in Exec, and the rack UPS is on the dock in every Vergence session.
+[Desktop Entry]
+Type=Application
+Name=UPS tile
+Comment=The rack UPS on the Vergence dock, from its NUT server
+Exec=/usr/local/libexec/vergence/ups-tile eaton5sc@nut-server.example "UPS (rack)" 10
+OnlyShowIn=Vergence;
+NoDisplay=true

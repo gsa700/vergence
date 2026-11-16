@@ -1,0 +1,81 @@
+#!/bin/sh
+# ups-tile: a UPS served by NUT as a live tile on the Vergence dock (dock
+# milestone 1, step 7). It asks the NUT server for the UPS's figures every
+# few seconds over NUT's own text protocol (with nc, so no NUT client is
+# needed) and hands each change to `vtile run`. When this script ends, so
+# does the tile.
+#
+#   ups-tile <ups>@<host>[:port] [title] [seconds]
+#   e.g. ups-tile eaton5sc@pfsense.home.arpa "UPS (rack)" 10
+#
+# On the dock: the runtime left. Fine on mains; a warning on battery; a
+# problem when the battery is low or the server stops answering. The card
+# has what the UPS is doing, its charge, runtime, load and input, and a
+# chart of the load. Start it from ~/.config/autostart (see autostart.desktop
+# beside it) to have it in every session.
+#
+# This is a program of the user's, not the desktop's: the server opens no
+# network socket (whitepaper §7.3); this script talks to the NUT server.
+
+set -u
+target=${1:?usage: ups-tile <ups>@<host>[:port] [title] [seconds]}
+title=${2:-UPS}
+every=${3:-10}
+ups=${target%@*}
+hostport=${target#*@}
+host=${hostport%:*}
+port=3493
+case $hostport in *:*) port=${hostport##*:} ;; esac
+
+# Every variable of the UPS, as "name value" lines; nothing if it did not answer.
+vars() {
+    printf 'LIST VAR %s\nLOGOUT\n' "$ups" | nc -w 5 "$host" "$port" 2>/dev/null |
+        awk -v u="$ups" '$1 == "VAR" && $2 == u { v = $0; sub(/^[^"]*"/, "", v); sub(/"[^"]*$/, "", v); print $3, v }'
+}
+
+# Minutes and seconds, short: "20 m", "45 s", "1 h 5 m".
+dur() {
+    awk -v s="$1" 'BEGIN { s = int(s); if (s < 60) printf "%d s", s; else if (s < 3600) printf "%d m", s / 60; else printf "%d h %d m", s / 3600, (s % 3600) / 60 }'
+}
+
+loads=""
+last=""
+publish() {
+    t=$(vars)
+    if [ -z "$t" ]; then
+        line="--value ? --state problem --row \"UPS=not answering\" --note \"No answer from $host.\""
+    else
+        get() { printf '%s\n' "$t" | awk -v k="$1" '$1 == k { $1 = ""; sub(/^ /, ""); print; exit }'; }
+        status=$(get ups.status)
+        charge=$(get battery.charge)
+        low=$(get battery.charge.low)
+        runtime=$(get battery.runtime)
+        load=$(get ups.load)
+        volts=$(get input.voltage)
+        model=$(get device.model)
+        on="mains"
+        state=fine
+        case " $status " in *" OB "*) on="battery"; state=warning ;; esac
+        case " $status " in *" LB "*) state=problem ;; esac
+        if [ -n "$charge" ] && [ -n "$low" ] && [ "${charge%.*}" -le "${low%.*}" ] 2>/dev/null; then state=problem; fi
+        case " $status " in *" CHRG "*) on="mains, charging" ;; esac
+        [ -n "$load" ] && loads=$(printf '%s %s\n' "$loads" "${load%.*}" | awk '{ n = NF > 60 ? NF - 59 : 1; s = ""; for (i = n; i <= NF; i++) s = s (s == "" ? "" : ",") $i; print s }')
+        value=$( [ -n "$runtime" ] && dur "$runtime" || echo "?" )
+        line="--value \"$value\" --state $state --row \"On=$on\" --row \"Charge=${charge:-?} %\" --row \"Runtime=$value\" --row \"Load=${load:-?} %\""
+        [ -n "$volts" ] && line="$line --row \"Input=$volts V\""
+        [ -n "$loads" ] && line="$line --chart $loads"
+        line="$line --note \"${model:-$ups}, by NUT on $host. Load, the last readings.\""
+    fi
+    # Only changes go to the dock.
+    if [ "$line" != "$last" ]; then
+        printf '%s\n' "$line"
+        last=$line
+    fi
+}
+
+{
+    while :; do
+        publish
+        sleep "$every"
+    done
+} | vtile run ups --label UPS --group Lab --title "$title" --value "…"

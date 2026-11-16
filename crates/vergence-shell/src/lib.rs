@@ -12,6 +12,7 @@
 //! it).
 
 pub mod appmenu;
+pub mod autostart;
 pub mod apps;
 pub mod desktop;
 pub mod icons;

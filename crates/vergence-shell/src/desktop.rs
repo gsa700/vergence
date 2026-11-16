@@ -48,6 +48,9 @@ pub struct Entry {
     pub no_display: bool,
     /// As good as deleted: a user's entry of this kind hides the system's.
     pub hidden: bool,
+    /// For other desktops only (OnlyShowIn without Vergence, or NotShowIn
+    /// with it): autostart leaves it alone (autostart.rs).
+    pub elsewhere: bool,
     /// The class its windows carry, where that is not its id.
     pub startup_wm_class: String,
     pub keywords: Vec<String>,
@@ -259,7 +262,8 @@ pub fn parse(id: &str, text: &str) -> Option<Entry> {
         }
     }
     // An entry for other desktops only is kept but not listed: it may still own windows.
-    entry.no_display |= only_elsewhere || not_here;
+    entry.elsewhere = only_elsewhere || not_here;
+    entry.no_display |= entry.elsewhere;
     // A hidden entry is kept (it hides the system's of its id) whatever else it lacks.
     if entry.hidden {
         return seen_group.then_some(entry);
