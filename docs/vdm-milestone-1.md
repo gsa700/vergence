@@ -146,6 +146,16 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   controlling terminal (main.rs `no_terminal`). Checked on kepler: none
   left. Revoking input devices at a session's end is step 5's reaper.
 
+- **Step 3 done** (2026-11-16): I5: FreeBSD's setuid helpers (sound-default,
+  media-eject) are root:vergence 4750, a group of their own the installing
+  user joins (from the next login), not the seat's video group. I10: the
+  greeter's account `_vdm` (a system uid: 900 on kepler, 994 on Hubble),
+  home /var/empty (root's, not writable), shell nologin, in the seat's group
+  (video, _seatd; on Fedora logind will give the greeter's session its
+  devices), not in vergence; vdm refuses it for unlock as a system account.
+  Its state on a tmpfs made fresh at each start is step 4's. Seen on kepler
+  and Hubble.
+
 ## Design
 
 ### The parts

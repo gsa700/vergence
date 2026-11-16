@@ -27,7 +27,8 @@
 #                                            drives writable by video; a special map, so it lists)
 #   libexec/vergence/sound-default           FreeBSD only: the root helper that sets the default
 #                                            sound output (hw.snd.default_unit) and nothing else;
-#                                            setuid root, group video, mode 4750
+#                                            setuid root, group vergence, mode 4750 (its own group,
+#                                            not the seat's: VDM review I5)
 # User files stay in the user's home: ~/.config/vergence (settings), ~/.local/state/vergence (logs).
 #
 # System setup, unless --destdir: where there is no logind, seatd is enabled and
@@ -114,24 +115,34 @@ install -d -m 755 "$libexec"
 install -m 755 "$here/lab/ups-tile" "$libexec/ups-tile"
 install -m 755 "$here/lab/vtile-demo" "$libexec/vtile-demo"
 if [ "$(uname -s)" = FreeBSD ]; then
-    # The sound helper: setuid root, run only by the video group (the seat's,
-    # below). Staged (--destdir) without the bits; the package sets them.
+    # The sound helper: setuid root, run only by the vergence group, a group of
+    # its own (VDM review I5: the seat's group, video, will also have the
+    # greeter's account in it, which must not run these). The installing user
+    # joins it (from the next login). Staged (--destdir) without the bits; the
+    # package sets them.
     [ -x "$release/sound-default" ] || { echo "install.sh: $release/sound-default is missing; run cargo build --release first" >&2; exit 1; }
     mkdir -p "$libexec"
     if [ -z "$destdir" ]; then
-        install -o root -g video -m 4750 "$release/sound-default" "$libexec/sound-default"
+        pw groupshow vergence >/dev/null 2>&1 || pw groupadd vergence
+        if [ -n "$user" ] && ! id -Gn "$user" | tr ' ' '\n' | grep -qx vergence; then
+            pw groupmod vergence -m "$user"
+            echo "helpers: $user added to the vergence group (sound output and eject, from the next login)"
+        fi
+    fi
+    if [ -z "$destdir" ]; then
+        install -o root -g vergence -m 4750 "$release/sound-default" "$libexec/sound-default"
     else
         install -m 755 "$release/sound-default" "$libexec/sound-default"
-        echo "note: $prefix/libexec/vergence/sound-default needs owner root, group video, mode 4750 in the package"
+        echo "note: $prefix/libexec/vergence/sound-default needs owner root, group vergence, mode 4750 in the package"
     fi
     # Removable drives (files milestone 1): the eject helper, as the sound
     # helper; the automounter's /media map.
     [ -x "$release/media-eject" ] || { echo "install.sh: $release/media-eject is missing; run cargo build --release first" >&2; exit 1; }
     if [ -z "$destdir" ]; then
-        install -o root -g video -m 4750 "$release/media-eject" "$libexec/media-eject"
+        install -o root -g vergence -m 4750 "$release/media-eject" "$libexec/media-eject"
     else
         install -m 755 "$release/media-eject" "$libexec/media-eject"
-        echo "note: $prefix/libexec/vergence/media-eject needs owner root, group video, mode 4750 in the package"
+        echo "note: $prefix/libexec/vergence/media-eject needs owner root, group vergence, mode 4750 in the package"
     fi
     # A special map (auto_master's -vergence_media) lives in /etc/autofs:
     # only special maps are asked for the list of what is there.
@@ -240,6 +251,25 @@ elif [ -d /etc/sv ] && [ -d /var/service ]; then
     echo "vdm: enabled and started (runit, /var/service/vdm)"
 else
     echo "vdm: no known init system; start $prefix/sbin/vdm as root at boot" >&2
+fi
+# ---- system setup: _vdm, the greeter's account (VDM milestone 1, review I10) ----
+# The login screen runs as _vdm: a system account that owns nothing, logs in
+# nowhere (nologin) and has a home it cannot write (/var/empty); its state
+# lives on a tmpfs vdm makes fresh at each start (step 4). It may use the
+# seat (seatd's group where there is no logind), never the setuid helpers.
+if ! id _vdm >/dev/null 2>&1; then
+    if [ "$(uname -s)" = FreeBSD ]; then
+        u=900
+        while id "$u" >/dev/null 2>&1 || pw groupshow -g "$u" >/dev/null 2>&1; do u=$((u + 1)); done
+        pw useradd _vdm -u "$u" -c "Vergence display manager (greeter)" -d /var/empty -s /usr/sbin/nologin
+    else
+        useradd -r -M -d /var/empty -s "$(command -v nologin || echo /sbin/nologin)" -c "Vergence display manager (greeter)" _vdm
+    fi
+    echo "vdm: the greeter's account _vdm made (uid $(id -u _vdm))"
+fi
+if [ -n "${group:-}" ] && ! id -Gn _vdm | tr ' ' '\n' | grep -qx "$group"; then
+    if [ "$(uname -s)" = FreeBSD ]; then pw groupmod "$group" -m _vdm; else usermod -aG "$group" _vdm; fi
+    echo "vdm: _vdm may use the seat ($group)"
 fi
 # ---- system setup: removable drives (files milestone 1; Dave, 2026-11-15) ----
 # Linux: udisks2 mounts a drive plugged in when the session asks (the
