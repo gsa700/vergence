@@ -58,6 +58,22 @@ pub fn entry_name(text: &str) -> Option<String> {
     name.filter(|n| !n.is_empty() && exec && !hidden)
 }
 
+/// A session entry's Exec line, its field codes (%f, %U ...) left out.
+pub fn entry_exec(text: &str) -> Option<String> {
+    let mut group = false;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            group = line == "[Desktop Entry]";
+            continue;
+        }
+        if group && let Some(v) = line.strip_prefix("Exec=") {
+            let words: Vec<&str> = v.split_whitespace().filter(|w| !(w.len() == 2 && w.starts_with('%'))).collect();
+            return (!words.is_empty()).then(|| words.join(" "));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,5 +85,7 @@ mod tests {
         assert_eq!(entry_name("[Desktop Entry]\nName=X\n"), None, "nothing to start");
         assert_eq!(entry_name("[Desktop Entry]\nName=X\nExec=x\nHidden=true\n"), None);
         assert_eq!(entry_name("[Other]\nName=X\nExec=x\n"), None);
+        assert_eq!(entry_exec(e).as_deref(), Some("/usr/local/bin/vergence-session"));
+        assert_eq!(entry_exec("[Desktop Entry]\nExec=sway --unsupported-gpu %U\n").as_deref(), Some("sway --unsupported-gpu"));
     }
 }

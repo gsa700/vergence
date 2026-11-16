@@ -299,7 +299,7 @@ impl Server {
                 let g = &mut self.greeter;
                 g.talk = None;
                 g.waiting = false;
-                g.message = Some(("Welcome. (Starting your session comes with VDM step 5.)".into(), false));
+                g.message = Some(("Welcome. Starting your session…".into(), false));
             }
             Heard::Done { ok: false, wait } => {
                 let g = &mut self.greeter;

@@ -28,7 +28,7 @@
 
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_int, c_uint, c_void};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -59,6 +59,8 @@ unsafe extern "C" {
     fn setgid(gid: u32) -> c_int;
     fn initgroups(name: *const c_char, gid: u32) -> c_int;
     fn kill(pid: c_int, sig: c_int) -> c_int;
+    #[cfg(target_os = "freebsd")]
+    fn setlogin(name: *const c_char) -> c_int;
 }
 
 #[repr(C)]
@@ -95,10 +97,20 @@ fn user_name(uid: u32) -> Option<String> {
     Some(unsafe { CStr::from_ptr(name) }.to_string_lossy().into_owned())
 }
 
-/// An account by name: its uid, gid and login shell. struct passwd: pw_name,
+/// An account by name.
+#[derive(Clone)]
+struct Account {
+    name: String,
+    uid: u32,
+    gid: u32,
+    home: String,
+    shell: String,
+}
+
+/// An account by name: its uid, gid, home and login shell. struct passwd: pw_name,
 /// pw_passwd, then pw_uid and pw_gid (one 8-byte word); Linux: pw_gecos,
 /// pw_dir, pw_shell; FreeBSD: pw_change, pw_class, pw_gecos, pw_dir, pw_shell.
-fn account(name: &str) -> Option<(u32, u32, String)> {
+fn account(name: &str) -> Option<Account> {
     let c = std::ffi::CString::new(name).ok()?;
     let mut pwd = [0u64; 16];
     let mut buf = vec![0 as c_char; 4096];
@@ -110,14 +122,17 @@ fn account(name: &str) -> Option<(u32, u32, String)> {
     }
     let uid = (pwd[2] & 0xffff_ffff) as u32;
     let gid = (pwd[2] >> 32) as u32;
-    let shell = pwd[if cfg!(target_os = "linux") { 5 } else { 7 }] as *const c_char;
-    let shell = if shell.is_null() {
-        String::new()
-    } else {
-        // SAFETY: pw_shell points into buf, NUL-terminated.
-        unsafe { CStr::from_ptr(shell) }.to_string_lossy().into_owned()
+    let text = |i: usize| {
+        let p = pwd[i] as *const c_char;
+        if p.is_null() {
+            String::new()
+        } else {
+            // SAFETY: the field points into buf, NUL-terminated.
+            unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
+        }
     };
-    Some((uid, gid, shell))
+    let (dir, shell) = if cfg!(target_os = "linux") { (4, 5) } else { (6, 7) };
+    Some(Account { name: name.to_string(), uid, gid, home: text(dir), shell: text(shell) })
 }
 
 /// Whether an account may log in at the login screen (review I10): not root
@@ -235,6 +250,217 @@ fn check(mut stream: UnixStream, name: &str, service: &str, hello_read: bool) ->
         Outcome::GivenUp => 2,
         Outcome::Broken => 3,
     }
+}
+
+/// What a login starts, decided by the parent before the worker forks.
+struct LoginPlan {
+    account: Account,
+    /// The session's command (its entry's Exec), run by the login shell.
+    exec: String,
+    vt: u32,
+}
+
+/// In the login worker (step 5): the check, and on a yes the whole session.
+/// It tells the parent "Y" on `said` the moment PAM says yes (the parent
+/// answers the login screen and stops it), then opens the PAM session,
+/// starts the session on its VT and waits for it, ends whatever it left
+/// (the reaper, review C6), and closes the PAM session. Its exit status:
+/// 0 a session ran; 1 no; 2 given up; 3 PAM broken; 4 the session could not start.
+fn login(stream: UnixStream, plan: &LoginPlan, service: &str, said: UnixStream) -> c_int {
+    let mut relay = Relay { stream };
+    let mut code = 0;
+    let outcome = pam::authenticate_then(service, &plan.account.name, &mut relay, &mut |h| {
+        // The check's limit does not apply to the session.
+        // SAFETY: cancels this process's alarm.
+        unsafe { alarm(0) };
+        let _ = (&said).write_all(b"Y");
+        code = run_session(h, plan);
+    });
+    match outcome {
+        Outcome::Yes => code,
+        Outcome::No => 1,
+        Outcome::GivenUp => 2,
+        Outcome::Broken => 3,
+    }
+}
+
+/// The runtime directory, where no PAM module made one (review I3): Linux
+/// /run/user/<uid>, FreeBSD /var/run/xdg/<user> (pam_xdg's), the user's and
+/// 0700; one that is there must be the user's and not a link.
+fn runtime_dir(a: &Account) -> std::io::Result<std::path::PathBuf> {
+    let dir = if cfg!(target_os = "linux") { std::path::PathBuf::from(format!("/run/user/{}", a.uid)) } else { std::path::PathBuf::from(format!("/var/run/xdg/{}", a.name)) };
+    if let Some(parent) = dir.parent() {
+        std::fs::DirBuilder::new().recursive(true).mode(0o755).create(parent)?;
+    }
+    match dir.symlink_metadata() {
+        Ok(m) => {
+            use std::os::unix::fs::MetadataExt;
+            if !m.is_dir() || m.uid() != a.uid {
+                return Err(std::io::Error::other(format!("{} is not {}'s", dir.display(), a.name)));
+            }
+        }
+        Err(_) => {
+            std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
+            std::os::unix::fs::chown(&dir, Some(a.uid), Some(a.gid))?;
+        }
+    }
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    Ok(dir)
+}
+
+/// The session, from the PAM session's opening to its closing.
+fn run_session(h: &pam::Handle, plan: &LoginPlan) -> c_int {
+    use std::os::unix::process::CommandExt;
+    let a = &plan.account;
+    let tty = vergence_dm::vt::tty_path(plan.vt);
+    // What logind (pam_systemd) needs to know before the session opens (review I4).
+    h.set_item(pam::TTY, &tty);
+    for kv in ["XDG_SEAT=seat0".to_string(), format!("XDG_VTNR={}", plan.vt), "XDG_SESSION_TYPE=wayland".into(), "XDG_SESSION_CLASS=user".into()] {
+        h.putenv(&kv);
+    }
+    let r = h.setcred(pam::ESTABLISH_CRED);
+    if r != pam::SUCCESS {
+        log(&format!("session for {}: PAM would not give credentials: {}", a.name, pam::describe(r)));
+        return 4;
+    }
+    let r = h.open_session();
+    if r != pam::SUCCESS {
+        log(&format!("session for {}: PAM would not open the session: {}", a.name, pam::describe(r)));
+        h.setcred(pam::DELETE_CRED);
+        return 4;
+    }
+    if !sys::become_reaper() {
+        log("session: could not become the reaper; leftovers may survive the session");
+    }
+    // The environment from nothing (threat model T17): PAM's, then ours.
+    let mut env: Vec<(String, String)> = h.env().into_iter().filter_map(|kv| kv.split_once('=').map(|(k, v)| (k.to_string(), v.to_string()))).collect();
+    let has = |env: &Vec<(String, String)>, k: &str| env.iter().any(|(n, _)| n == k);
+    let runtime = match env.iter().find(|(k, _)| k == "XDG_RUNTIME_DIR") {
+        Some((_, v)) => Ok(std::path::PathBuf::from(v)),
+        None => runtime_dir(a),
+    };
+    let code = match runtime {
+        Err(e) => {
+            log(&format!("session for {}: no runtime directory: {e}", a.name));
+            4
+        }
+        Ok(runtime) => {
+            let set = |env: &mut Vec<(String, String)>, k: &str, v: String| {
+                env.retain(|(n, _)| n != k);
+                env.push((k.to_string(), v));
+            };
+            set(&mut env, "HOME", a.home.clone());
+            set(&mut env, "USER", a.name.clone());
+            set(&mut env, "LOGNAME", a.name.clone());
+            set(&mut env, "SHELL", a.shell.clone());
+            set(&mut env, "XDG_RUNTIME_DIR", runtime.display().to_string());
+            set(&mut env, "XDG_SEAT", "seat0".into());
+            set(&mut env, "XDG_VTNR", plan.vt.to_string());
+            set(&mut env, "XDG_SESSION_TYPE", "wayland".into());
+            set(&mut env, "XDG_SESSION_CLASS", "user".into());
+            if !has(&env, "PATH") {
+                set(&mut env, "PATH", "/usr/local/bin:/usr/bin:/bin".into());
+            }
+            if !has(&env, "LANG") {
+                set(&mut env, "LANG", "C.UTF-8".into());
+            }
+            let shell_name = std::path::Path::new(&a.shell).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "sh".into());
+            let home = if std::path::Path::new(&a.home).is_dir() { a.home.clone() } else { "/".into() };
+            let opened = std::fs::OpenOptions::new().read(true).write(true).open(&tty);
+            let null = std::fs::OpenOptions::new().write(true).open("/dev/null");
+            match (opened, null) {
+                (Ok(tty_file), Ok(null)) => {
+                    let name = std::ffi::CString::new(a.name.clone()).unwrap_or_default();
+                    let (uid, gid, vt) = (a.uid, a.gid, plan.vt);
+                    let mut cmd = std::process::Command::new(&a.shell);
+                    // A login shell ("-zsh"), which reads the user's profile, runs the session.
+                    cmd.arg0(format!("-{shell_name}"))
+                        .args(["-c", &format!("exec {}", plan.exec)])
+                        .env_clear()
+                        .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+                        .current_dir(&home)
+                        .stdin(tty_file)
+                        .stdout(null.try_clone().unwrap_or_else(|_| std::fs::File::open("/dev/null").expect("/dev/null")))
+                        .stderr(null);
+                    // SAFETY: the worker is single-threaded, so the forked child may call these.
+                    unsafe {
+                        cmd.pre_exec(move || {
+                            if setsid() < 0 {
+                                return Err(std::io::Error::last_os_error());
+                            }
+                            #[cfg(target_os = "freebsd")]
+                            if setlogin(name.as_ptr()) != 0 {
+                                return Err(std::io::Error::last_os_error());
+                            }
+                            vergence_dm::vt::make_controlling(0)?;
+                            vergence_dm::vt::activate(0, vt)?;
+                            if initgroups(name.as_ptr(), gid) != 0 || setgid(gid) != 0 || setuid(uid) != 0 {
+                                return Err(std::io::Error::last_os_error());
+                            }
+                            if setuid(0) == 0 {
+                                return Err(std::io::Error::other("could still become root"));
+                            }
+                            Ok(())
+                        })
+                    };
+                    match cmd.spawn() {
+                        Ok(mut child) => {
+                            log(&format!("session for {} started on VT {vt} (pid {}): {}", a.name, child.id(), plan.exec));
+                            let status = child.wait();
+                            log(&format!("session for {} ended ({})", a.name, status.map(|s| s.to_string()).unwrap_or_else(|e| e.to_string())));
+                            0
+                        }
+                        Err(e) => {
+                            log(&format!("session for {}: could not start: {e}", a.name));
+                            4
+                        }
+                    }
+                }
+                (Err(e), _) | (_, Err(e)) => {
+                    log(&format!("session for {}: {tty}: {e}", a.name));
+                    4
+                }
+            }
+        }
+    };
+    // Whatever the session left running ends with it (review C6): asked,
+    // then, after 3 s, made to.
+    end_leftovers(&a.name);
+    let r = h.close_session();
+    if r != pam::SUCCESS {
+        log(&format!("session for {}: closing the PAM session: {}", a.name, pam::describe(r)));
+    }
+    h.setcred(pam::DELETE_CRED);
+    code
+}
+
+/// Every process left below the worker: SIGTERM, up to 3 s for them to go,
+/// then SIGKILL; each one reaped.
+fn end_leftovers(who: &str) {
+    let reap = || loop {
+        let mut status: c_int = 0;
+        // SAFETY: an out-parameter we own.
+        if unsafe { waitpid(-1, &mut status, WNOHANG) } <= 0 {
+            break;
+        }
+    };
+    reap();
+    let asked = sys::signal_descendants(15);
+    if asked == 0 {
+        return;
+    }
+    let until = std::time::Instant::now() + Duration::from_secs(3);
+    while std::time::Instant::now() < until {
+        reap();
+        if sys::count_descendants() == 0 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let killed = sys::signal_descendants(9);
+    std::thread::sleep(Duration::from_millis(200));
+    reap();
+    log(&format!("session for {who}: {asked} process(es) left at its end were ended{}", if killed > 0 { format!(", {killed} by force") } else { String::new() }));
 }
 
 fn refuse(mut stream: UnixStream, wait: u64) {
@@ -384,6 +610,21 @@ fn start_greeter(uid: u32, gid: u32) -> std::io::Result<c_int> {
     Ok(child.id() as c_int)
 }
 
+/// A login vdm is running: its worker checks, then runs the session.
+struct LoginRun {
+    uid: u32,
+    name: String,
+    /// The login screen's connection, until it is answered.
+    client: Option<UnixStream>,
+    /// The worker says "Y" here the moment PAM says yes.
+    said: UnixStream,
+    vt: u32,
+    yes: bool,
+}
+
+/// At most this many sessions at once (each on a VT of its own).
+const MAX_SESSIONS: u32 = 4;
+
 /// How long the sessions have to show the lock before the machine sleeps anyway.
 const SLEEP_LIMIT: u64 = 5;
 /// At most this many servers per account stay registered (the oldest go).
@@ -473,7 +714,7 @@ fn main() {
     let control = bind(paths::CONTROL_SOCKET, 0o600);
     // The login screen's socket: its account's only (threat model T9).
     let greeter_account = account(paths::GREETER_USER);
-    let greeter_uid = greeter_account.as_ref().map(|(u, ..)| *u);
+    let greeter_uid = greeter_account.as_ref().map(|a| a.uid);
     let greeter = greeter_uid.map(|uid| {
         let l = bind(paths::GREETER_SOCKET, 0o600);
         if let Err(e) = std::os::unix::fs::chown(paths::GREETER_SOCKET, Some(uid), None) {
@@ -493,12 +734,32 @@ fn main() {
     let mut running: HashMap<c_int, (u32, UnixStream, bool)> = HashMap::new();
     // The servers registered to be locked before sleep, by account.
     let mut sessions: Vec<(u32, UnixStream)> = Vec::new();
+    // Logins by their worker's pid: checking, then (yes) the running session.
+    let mut logins: HashMap<c_int, LoginRun> = HashMap::new();
     let mut greeter_run = Greeter { on: false, pid: 0, started: std::time::Instant::now(), quick: 0, next: None };
     loop {
         // The login screen, when wanted and not running, once its pause is over.
-        if greeter_run.on && greeter_run.pid == 0 && greeter_run.next.is_none_or(|t| std::time::Instant::now() >= t) {
+        // A yes: answer the login screen, which then gives way to the session.
+        for l in logins.values_mut().filter(|l| !l.yes) {
+            let mut b = [0u8; 1];
+            if matches!((&l.said).read(&mut b), Ok(1)) && b[0] == b'Y' {
+                l.yes = true;
+                pauses.succeeded(l.uid);
+                log(&format!("login for {}: yes; the session starts on VT {}", l.name, l.vt));
+                if let Some(mut c) = l.client.take() {
+                    let _ = c.set_write_timeout(Some(Duration::from_secs(1)));
+                    let _ = proto::send_from_vdm(&mut c, &FromVdm::Done { ok: true, wait: 0 });
+                }
+                if greeter_run.pid > 0 {
+                    // SAFETY: our own child; SIGTERM 15.
+                    unsafe { kill(greeter_run.pid, 15) };
+                }
+            }
+        }
+        let session_running = logins.values().any(|l| l.yes);
+        if greeter_run.on && greeter_run.pid == 0 && !session_running && greeter_run.next.is_none_or(|t| std::time::Instant::now() >= t) {
             greeter_run.next = None;
-            match greeter_account.as_ref().map(|(u, g, _)| start_greeter(*u, *g)) {
+            match greeter_account.as_ref().map(|a| start_greeter(a.uid, a.gid)) {
                 Some(Ok(pid)) => {
                     greeter_run.pid = pid;
                     greeter_run.started = std::time::Instant::now();
@@ -522,7 +783,9 @@ fn main() {
             if pid == greeter_run.pid {
                 greeter_run.pid = 0;
                 let ran = greeter_run.started.elapsed();
-                greeter_run.quick = if ran < QUICK { greeter_run.quick + 1 } else { 0 };
+                // Stopped for a session: not a failure.
+                let for_session = logins.values().any(|l| l.yes);
+                greeter_run.quick = if ran < QUICK && !for_session { greeter_run.quick + 1 } else { 0 };
                 log(&format!("login screen ended after {} s (status {status:#x})", ran.as_secs()));
                 if greeter_run.on && greeter_run.quick >= GIVE_UP {
                     greeter_run.on = false;
@@ -533,13 +796,40 @@ fn main() {
                 }
                 continue;
             }
+            if let Some(mut l) = logins.remove(&pid) {
+                let code = if status & 0x7f == 0 { (status >> 8) & 0xff } else { -1 };
+                if l.yes {
+                    log(&format!("session for {} on VT {}: over (status {code})", l.name, l.vt));
+                    // The login screen again, if it is wanted.
+                    if greeter_run.on && greeter_run.pid == 0 {
+                        greeter_run.quick = 0;
+                        greeter_run.next = None;
+                    }
+                    continue;
+                }
+                match code {
+                    1 => {
+                        pauses.failed(l.uid);
+                        log(&format!("login for {}: no (a pause of {} s before the next try)", l.name, pauses.wait(l.uid)));
+                    }
+                    2 => log(&format!("login for {}: given up", l.name)),
+                    -1 => log(&format!("login for {}: the check ran out of time", l.name)),
+                    _ => log(&format!("login for {}: PAM could not run (status {code})", l.name)),
+                }
+                if let Some(mut c) = l.client.take() {
+                    let _ = c.set_write_timeout(Some(Duration::from_secs(1)));
+                    let wait = pauses.wait(l.uid).min(u16::MAX as u64) as u16;
+                    let _ = proto::send_from_vdm(&mut c, &FromVdm::Done { ok: false, wait });
+                }
+                continue;
+            }
             let Some((uid, mut client, login)) = running.remove(&pid) else { continue };
             let what = if login { "login" } else { "unlock" };
             let code = if status & 0x7f == 0 { (status >> 8) & 0xff } else { -1 };
             let who = user_name(uid).unwrap_or_else(|| uid.to_string());
             match code {
                 0 => {
-                    log(&format!("{what} for {who}: yes{}", if login { " (starting the session is step 5)" } else { "" }));
+                    log(&format!("{what} for {who}: yes"));
                     pauses.succeeded(uid);
                 }
                 1 => {
@@ -560,7 +850,7 @@ fn main() {
         fds.extend(sessions.iter().map(|(_, s)| PollFd { fd: s.as_raw_fd(), events: 1, revents: 0 }));
         // SAFETY: pollfds we own. A check running: look again in 50 ms, so its
         // answer goes out as soon as it ends; none: a second's wait.
-        let wait = if running.is_empty() && greeter_run.next.is_none() { 1000 } else { 50 };
+        let wait = if running.is_empty() && greeter_run.next.is_none() && logins.values().all(|l| l.yes) { 1000 } else { 50 };
         unsafe { poll(fds.as_mut_ptr(), fds.len() as u64, wait) };
         // A registered server that went away (or said something out of turn): dropped.
         let gone: Vec<usize> = fds[first_session..].iter().enumerate().filter(|(_, f)| f.revents != 0).map(|(i, _)| i).collect();
@@ -628,34 +918,49 @@ fn main() {
             } else {
                 None
             };
-            if let Some((user, _session)) = request {
+            if let Some((user, session)) = request {
                 match account(&user) {
-                    Some((uid, _, shell)) if may_log_in(uid, &shell) => {
+                    Some(acct) if may_log_in(acct.uid, &acct.shell) => {
+                        let uid = acct.uid;
                         let wait = pauses.wait(uid);
-                        if running.values().any(|(u, ..)| *u == uid) {
+                        // The session the login screen chose, by vdm's own reading of the list (review M2).
+                        let exec = vergence_dm::sessions::list().get(session as usize).and_then(|e| std::fs::read_to_string(&e.file).ok()).and_then(|t| vergence_dm::sessions::entry_exec(&t));
+                        let vt = (0..MAX_SESSIONS).map(|k| vergence_dm::vt::GREETER_VT + 1 + k).find(|vt| !logins.values().any(|l| l.vt == *vt));
+                        if running.values().any(|(u, ..)| *u == uid) || logins.values().any(|l| l.uid == uid && !l.yes) {
                             refuse(g, 1);
                         } else if wait > 0 {
                             log(&format!("login for {user}: refused, {wait} s of its pause left"));
                             refuse(g, wait);
-                        } else {
+                        } else if let (Some(exec), Some(vt)) = (exec, vt) {
                             let _ = g.set_read_timeout(Some(IO_LIMIT));
-                            // SAFETY: vdm is single-threaded; the child only runs check() and exits.
-                            let pid = unsafe { fork() };
-                            if pid == 0 {
-                                drop(listener);
-                                drop(session_listener);
-                                drop(control);
-                                drop(sessions);
-                                drop(running);
-                                // SAFETY: the child's own limit: SIGALRM ends it if PAM blocks.
-                                unsafe { alarm(TIME_LIMIT) };
-                                let code = check(g, &user, &login_service, true);
-                                // SAFETY: leave without running the parent's exit handlers.
-                                unsafe { _exit(code) };
+                            let plan = LoginPlan { account: acct, exec, vt };
+                            match UnixStream::pair() {
+                                Ok((said_parent, said_child)) => {
+                                    // SAFETY: vdm is single-threaded; the child runs login() and exits.
+                                    let pid = unsafe { fork() };
+                                    if pid == 0 {
+                                        drop(listener);
+                                        drop(session_listener);
+                                        drop(control);
+                                        drop(sessions);
+                                        drop(running);
+                                        drop(said_parent);
+                                        // SAFETY: the check's limit (login() cancels it on a yes).
+                                        unsafe { alarm(TIME_LIMIT) };
+                                        let code = login(g, &plan, &login_service, said_child);
+                                        // SAFETY: leave without running the parent's exit handlers.
+                                        unsafe { _exit(code) };
+                                    }
+                                    if pid > 0 {
+                                        let _ = said_parent.set_nonblocking(true);
+                                        logins.insert(pid, LoginRun { uid, name: user.clone(), client: Some(g), said: said_parent, vt, yes: false });
+                                    }
+                                }
+                                Err(e) => log(&format!("login for {user}: {e}")),
                             }
-                            if pid > 0 {
-                                running.insert(pid, (uid, g, true));
-                            }
+                        } else {
+                            log(&format!("login for {user}: refused (no such session, or {MAX_SESSIONS} sessions running)"));
+                            refuse(g, 0);
                         }
                     }
                     // Root, system accounts, no real shell, no such account:

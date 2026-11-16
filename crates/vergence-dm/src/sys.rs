@@ -165,6 +165,115 @@ pub fn no_debugger() -> bool {
     }
 }
 
+/// This process becomes the reaper of everything it starts (review C6):
+/// whatever a session leaves behind, however it detaches, stays below it,
+/// so it can be ended with [`end_descendants`]. Linux PR_SET_CHILD_SUBREAPER
+/// 36; FreeBSD procctl PROC_REAP_ACQUIRE 2. Whether it was set.
+pub fn become_reaper() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: prctl with integer arguments only.
+        unsafe { prctl(36, 1, 0, 0, 0) == 0 }
+    }
+    #[cfg(target_os = "freebsd")]
+    {
+        // SAFETY: our own pid; PROC_REAP_ACQUIRE takes no data.
+        unsafe { procctl(0, std::process::id() as i64, 2, std::ptr::null_mut()) == 0 }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+    {
+        false
+    }
+}
+
+/// Send `sig` to every process below this one (the reaper's). FreeBSD:
+/// PROC_REAP_KILL 6, all descendants (flags 0). Linux: the tree from
+/// /proc's parent links (orphans have come back to us as the reaper).
+/// How many were sent it.
+pub fn signal_descendants(sig: c_int) -> usize {
+    #[cfg(target_os = "freebsd")]
+    {
+        #[repr(C)]
+        struct ReaperKill {
+            sig: c_int,
+            flags: u32,
+            subtree: c_int,
+            killed: u32,
+            fpid: c_int,
+            pad: [u32; 15],
+        }
+        let mut k = ReaperKill { sig, flags: 0, subtree: 0, killed: 0, fpid: 0, pad: [0; 15] };
+        // SAFETY: our own pid and a struct procctl_reaper_kill we own.
+        unsafe { procctl(0, std::process::id() as i64, 6, (&mut k as *mut ReaperKill).cast()) };
+        k.killed as usize
+    }
+    #[cfg(not(target_os = "freebsd"))]
+    {
+        unsafe extern "C" {
+            fn kill(pid: c_int, sig: c_int) -> c_int;
+        }
+        let pids = descendants(std::process::id());
+        for &p in &pids {
+            // SAFETY: a plain signal to a process below us.
+            unsafe { kill(p as c_int, sig) };
+        }
+        pids.len()
+    }
+}
+
+/// How many processes are below this one (the reaper's). FreeBSD:
+/// PROC_REAP_STATUS 4's rs_descendants; Linux: /proc's tree.
+pub fn count_descendants() -> usize {
+    #[cfg(target_os = "freebsd")]
+    {
+        #[repr(C)]
+        struct ReaperStatus {
+            flags: u32,
+            children: u32,
+            descendants: u32,
+            reaper: c_int,
+            pid: c_int,
+            pad: [u32; 15],
+        }
+        let mut st = ReaperStatus { flags: 0, children: 0, descendants: 0, reaper: 0, pid: 0, pad: [0; 15] };
+        // SAFETY: our own pid and a struct procctl_reaper_status we own.
+        if unsafe { procctl(0, std::process::id() as i64, 4, (&mut st as *mut ReaperStatus).cast()) } != 0 {
+            return 0;
+        }
+        st.descendants as usize
+    }
+    #[cfg(not(target_os = "freebsd"))]
+    {
+        descendants(std::process::id()).len()
+    }
+}
+
+/// Every process below `root`, from /proc/<pid>/stat's parent field.
+#[cfg(not(target_os = "freebsd"))]
+pub fn descendants(root: u32) -> Vec<u32> {
+    let mut parent: Vec<(u32, u32)> = Vec::new();
+    for e in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
+        let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { continue };
+        let Ok(stat) = std::fs::read_to_string(e.path().join("stat")) else { continue };
+        // "pid (comm) state ppid ...": comm may hold spaces and parentheses.
+        let Some(after) = stat.rfind(')').map(|i| &stat[i + 1..]) else { continue };
+        if let Some(ppid) = after.split_whitespace().nth(1).and_then(|p| p.parse().ok()) {
+            parent.push((pid, ppid));
+        }
+    }
+    let mut out = Vec::new();
+    let mut frontier = vec![root];
+    while let Some(p) = frontier.pop() {
+        for &(c, pp) in &parent {
+            if pp == p && !out.contains(&c) {
+                out.push(c);
+                frontier.push(c);
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -27,6 +27,9 @@ mod n {
     pub const NEW_AUTHTOK_REQD: c_int = 12;
     pub const ACCT_EXPIRED: c_int = 13;
     pub const CONV_ERR: c_int = 19;
+    /// pam_setcred's flags (Linux-PAM's _pam_types.h).
+    pub const ESTABLISH_CRED: c_int = 0x2;
+    pub const DELETE_CRED: c_int = 0x4;
 }
 #[cfg(not(target_os = "linux"))]
 mod n {
@@ -38,6 +41,9 @@ mod n {
     pub const NEW_AUTHTOK_REQD: c_int = 10;
     pub const USER_UNKNOWN: c_int = 13;
     pub const ACCT_EXPIRED: c_int = 17;
+    /// pam_setcred's flags (OpenPAM's pam_constants.h).
+    pub const ESTABLISH_CRED: c_int = 0x1;
+    pub const DELETE_CRED: c_int = 0x2;
 }
 pub use n::*;
 
@@ -46,6 +52,8 @@ pub const PROMPT_ECHO_OFF: c_int = 1;
 pub const PROMPT_ECHO_ON: c_int = 2;
 pub const ERROR_MSG: c_int = 3;
 pub const TEXT_INFO: c_int = 4;
+/// The terminal item (the same on both).
+pub const TTY: c_int = 3;
 /// pam_authenticate's flag: an empty password is not enough (the same on both).
 pub const DISALLOW_NULL_AUTHTOK: c_int = 1;
 /// The most messages one conversation call may bring (both: 32).
@@ -77,7 +85,11 @@ unsafe extern "C" {
     fn pam_acct_mgmt(handle: *mut c_void, flags: c_int) -> c_int;
     fn pam_end(handle: *mut c_void, status: c_int) -> c_int;
     fn pam_strerror(handle: *mut c_void, errnum: c_int) -> *const c_char;
-    #[cfg(target_os = "linux")]
+    fn pam_setcred(handle: *mut c_void, flags: c_int) -> c_int;
+    fn pam_open_session(handle: *mut c_void, flags: c_int) -> c_int;
+    fn pam_close_session(handle: *mut c_void, flags: c_int) -> c_int;
+    fn pam_putenv(handle: *mut c_void, name_value: *const c_char) -> c_int;
+    fn pam_getenvlist(handle: *mut c_void) -> *mut *mut c_char;
     fn pam_set_item(handle: *mut c_void, item: c_int, value: *const c_void) -> c_int;
     fn calloc(n: usize, size: usize) -> *mut c_void;
     fn free(p: *mut c_void);
@@ -200,10 +212,78 @@ fn free_responses(out: *mut Response, n: usize) {
 #[cfg(target_os = "linux")]
 extern "C" fn no_fail_delay(_retval: c_int, _usec: std::ffi::c_uint, _appdata: *mut c_void) {}
 
+/// A transaction that has said yes, for what a login does next (step 5):
+/// the session's items and environment, credentials, opening and closing it.
+pub struct Handle(*mut c_void);
+
+impl Handle {
+    pub fn set_item(&self, item: c_int, value: &str) -> c_int {
+        let Ok(v) = CString::new(value) else { return BUF_ERR };
+        // SAFETY: PAM copies the string.
+        unsafe { pam_set_item(self.0, item, v.as_ptr().cast()) }
+    }
+
+    /// One `NAME=value` in PAM's environment (modules such as pam_systemd read it).
+    pub fn putenv(&self, name_value: &str) -> c_int {
+        let Ok(v) = CString::new(name_value) else { return BUF_ERR };
+        // SAFETY: PAM copies the string.
+        unsafe { pam_putenv(self.0, v.as_ptr()) }
+    }
+
+    pub fn setcred(&self, flags: c_int) -> c_int {
+        // SAFETY: the transaction's handle.
+        unsafe { pam_setcred(self.0, flags) }
+    }
+
+    pub fn open_session(&self) -> c_int {
+        // SAFETY: as above.
+        unsafe { pam_open_session(self.0, 0) }
+    }
+
+    pub fn close_session(&self) -> c_int {
+        // SAFETY: as above.
+        unsafe { pam_close_session(self.0, 0) }
+    }
+
+    /// PAM's environment for the session (what its modules set), `NAME=value` each.
+    pub fn env(&self) -> Vec<String> {
+        // SAFETY: a NULL-terminated array of malloc'd strings, all ours to free.
+        let list = unsafe { pam_getenvlist(self.0) };
+        let mut out = Vec::new();
+        if list.is_null() {
+            return out;
+        }
+        let mut i = 0;
+        loop {
+            // SAFETY: within the array, up to its NULL.
+            let p = unsafe { *list.add(i) };
+            if p.is_null() {
+                break;
+            }
+            // SAFETY: a NUL-terminated string, freed once.
+            unsafe {
+                out.push(CStr::from_ptr(p).to_string_lossy().into_owned());
+                free(p.cast());
+            }
+            i += 1;
+        }
+        // SAFETY: the array itself.
+        unsafe { free(list.cast()) };
+        out
+    }
+}
+
 /// One PAM transaction for `user` with `service`: authenticate (an empty
 /// password is not enough), then the account check, an expired password
 /// allowed. PAM's prompts go to `conv`.
 pub fn authenticate(service: &str, user: &str, conv: &mut dyn Conversation) -> Outcome {
+    authenticate_then(service, user, conv, &mut |_| {})
+}
+
+/// As [`authenticate`]; on a yes, `then` runs with the transaction still
+/// open (a login opens its session there and runs it to its end), before
+/// pam_end.
+pub fn authenticate_then(service: &str, user: &str, conv: &mut dyn Conversation, then: &mut dyn FnMut(&Handle)) -> Outcome {
     let (Ok(service), Ok(user)) = (CString::new(service), CString::new(user)) else { return Outcome::Broken };
     let mut state = State { conv, gave_up: false };
     let c = Conv { conv: converse, appdata: (&mut state as *mut State).cast() };
@@ -227,6 +307,9 @@ pub fn authenticate(service: &str, user: &str, conv: &mut dyn Conversation) -> O
         // SAFETY: as above.
         let a = unsafe { pam_acct_mgmt(h, 0) };
         r = if a == NEW_AUTHTOK_REQD { SUCCESS } else { a };
+    }
+    if r == SUCCESS {
+        then(&Handle(h));
     }
     // SAFETY: the handle, ended once.
     unsafe { pam_end(h, r) };

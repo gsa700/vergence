@@ -217,6 +217,26 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   Dave logged in at it on kepler (2026-11-16 12:55: "it works, welcome
   showed up"; vdm logged the login as yes). Step 4 is done.
 
+- **Step 5** (2026-11-16, built; seen on kepler: below): starting and
+  ending sessions. vdm's login worker keeps the PAM transaction open on a
+  yes: it tells vdm at once (vdm answers the login screen, stops it, and
+  starts it again when the session is over), sets PAM_TTY, XDG_SEAT,
+  XDG_VTNR, XDG_SESSION_TYPE and XDG_SESSION_CLASS (I4), establishes
+  credentials and opens the session, becomes the reaper
+  (PR_SET_CHILD_SUBREAPER / PROC_REAP_ACQUIRE), and starts the chosen
+  session's Exec (from vdm's own reading of the system's session list,
+  M2) through the user's login shell ("-zsh -c 'exec ...'") on a VT of
+  its own (Linux 8-11, FreeBSD 10-13; at most four sessions): a session
+  of its own with the VT as its terminal, setlogin on FreeBSD, groups,
+  gid, uid, root checked gone, the environment from nothing but PAM's
+  and the session's own (T17), XDG_RUNTIME_DIR from PAM (pam_xdg on
+  FreeBSD, logind on Fedora) or else made by vdm (/run/user/<uid>, I3;
+  left in place at the end, as another login may use it). When the
+  session's process ends, everything left below the worker is sent
+  SIGTERM, then after 3 s SIGKILL (C6), and the PAM session is closed and
+  credentials deleted. vergence-dm's sessions.rs reads Exec lines
+  (field codes left out); pam.rs's `authenticate_then` and `Handle`.
+
 ## Design
 
 ### The parts
