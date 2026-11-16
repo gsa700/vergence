@@ -60,6 +60,8 @@ pub(crate) struct Node<M> {
     pub parent: Option<usize>,
     pub what: What<M>,
     pub name: Option<String>,
+    /// Sent on a right click ([`crate::Element::on_menu`]).
+    pub on_menu: Option<M>,
     /// Scrolled into view when it first appears ([`crate::Element::keep_in_view`]).
     pub reveal: bool,
 }
@@ -348,8 +350,17 @@ impl Layout<'_> {
         let me = out.len();
         let name = e.name;
         let reveal = e.reveal;
-        let push = |out: &mut Vec<Node<M>>, what: What<M>| out.push(Node { id, rect, parent, what, name: name.clone(), reveal });
-        match e.kind {
+        let on_menu = e.on_menu;
+        let push = |out: &mut Vec<Node<M>>, what: What<M>| out.push(Node { id, rect, parent, what, name: name.clone(), on_menu: None, reveal });
+        // Each element is one node, pushed before its children.
+        self.arrange_kind(e.kind, rect, me, id, push, out);
+        if let Some(n) = out.get_mut(me) {
+            n.on_menu = on_menu;
+        }
+    }
+
+    fn arrange_kind<M>(&mut self, kind: Kind<M>, rect: Rect, me: usize, id: Id, push: impl Fn(&mut Vec<Node<M>>, What<M>), out: &mut Vec<Node<M>>) {
+        match kind {
             Kind::Space => push(out, What::Space),
             Kind::Rule { color, .. } => push(out, What::Rule { color }),
             Kind::Label(l) => {

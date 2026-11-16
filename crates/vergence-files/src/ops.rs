@@ -328,6 +328,9 @@ pub enum Done {
     Trashed(Vec<(PathBuf, String)>),
     Renamed(PathBuf, PathBuf),
     NewFolder(PathBuf),
+    /// Something new made from the menu (a file, a link, an archive): undo
+    /// puts it in the Trash.
+    Made(PathBuf),
 }
 
 /// Runs a paste's plan: each copied or moved, a replaced target first put
@@ -389,6 +392,10 @@ pub fn undo(d: &Done) -> Result<String, String> {
             }
             fs::rename(to, from).map_err(|e| e.to_string())?;
             Ok("The name is back.".into())
+        }
+        Done::Made(p) => {
+            trash(p).map_err(|e| e.to_string())?;
+            Ok(format!("“{}” is in the Trash.", p.file_name().unwrap_or_default().to_string_lossy()))
         }
         Done::NewFolder(p) => {
             fs::remove_dir(p).map_err(|_| "The new folder is not empty any more.".to_string())?;

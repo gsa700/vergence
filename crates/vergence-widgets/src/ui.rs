@@ -444,6 +444,14 @@ impl<M: Clone> Ui<M> {
         (0..self.nodes.len()).rev().find(|&i| self.nodes[i].active() && self.hit(i, x, y)).map(|i| self.nodes[i].id)
     }
 
+    /// The menu message of the innermost element at `x`, `y` that has one.
+    fn menu_at(&self, x: f32, y: f32) -> Option<M>
+    where
+        M: Clone,
+    {
+        (0..self.nodes.len()).rev().find(|&i| self.nodes[i].on_menu.is_some() && self.hit(i, x, y)).and_then(|i| self.nodes[i].on_menu.clone())
+    }
+
     /// The innermost scrolling place at `x`, `y` that has more than it shows.
     fn scroller_at(&self, x: f32, y: f32) -> Option<usize> {
         (0..self.nodes.len()).rev().find(|&i| matches!(self.nodes[i].what, What::Scroll { content } if content > self.nodes[i].rect.h + 0.5) && self.hit(i, x, y))
@@ -1185,6 +1193,14 @@ impl<M: Clone> Ui<M> {
                     self.caret_moved();
                     self.area_changed(id, &mut r);
                     r.redraw = true;
+                    r.used = true;
+                }
+            }
+            // A right click on something with a menu message (Element::on_menu):
+            // the innermost one under the pointer sends it.
+            Input::Button { button: MouseButton::Right, pressed: true, x, y, .. } if self.open.is_none() && self.menu_at(x, y).is_some() => {
+                if let Some(m) = self.menu_at(x, y) {
+                    r.messages.push(m);
                     r.used = true;
                 }
             }

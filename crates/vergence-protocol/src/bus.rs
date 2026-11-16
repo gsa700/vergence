@@ -44,12 +44,14 @@
 //! `DragLeave`/`DragDrop`/`DragEnded`), and `WinRequest::Activate`.
 //! Version 17 (step 9): `WinKind::Desktop`, the desktop's icons. Version
 //! 18: `WinRequest::ContextMenu`, a window's right click answered by the
-//! server's menu.
+//! server's menu. Version 19 (dock milestone 1): live tiles. Version 20
+//! (backup milestone 1, step 1): `WinRequest::Menu`, a window's own
+//! right-click menu by its lines (`window::MenuLine`), submenus included.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 19;
+pub const VERSION: u32 = 20;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

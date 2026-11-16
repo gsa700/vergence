@@ -281,6 +281,112 @@ pub enum WinRequest {
     /// window's commands (as last sent): a right click the program wants
     /// answered in the desktop's own menu style (the desktop's icons; step 9).
     ContextMenu { window: u32, x: f64, y: f64 },
+    /// Open the server's menu for this window at (x, y) in it with these
+    /// lines (bus v20): a right click on something in the window (a file
+    /// in File Viewer, the ground around them). The window's own menu, not
+    /// its app menu's commands; a chosen line comes back as
+    /// [`WinEvent::Command`] with its id.
+    Menu { window: u32, x: f64, y: f64, lines: Vec<MenuLine> },
+}
+
+/// A line of a window's right-click menu ([`WinRequest::Menu`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum MenuLine {
+    /// Something to do: its id (sent back), what it is called, its keys as
+    /// shown at the right, whether it can be done now (faint if not), and
+    /// whether it is a setting that is on or off.
+    Item { id: u32, label: String, keys: String, enabled: bool, checked: Option<bool> },
+    Separator,
+    /// A submenu (Open With ▸): its name and its lines, which hold no
+    /// submenus of their own.
+    Sub { label: String, lines: Vec<MenuLine> },
+}
+
+impl MenuLine {
+    pub fn item(id: u32, label: &str, keys: &str) -> MenuLine {
+        MenuLine::Item { id, label: label.into(), keys: keys.into(), enabled: true, checked: None }
+    }
+
+    /// Faint unless `on`.
+    pub fn enabled(mut self, on: bool) -> MenuLine {
+        if let MenuLine::Item { enabled, .. } = &mut self {
+            *enabled = on;
+        }
+        self
+    }
+
+    pub fn checked(mut self, on: bool) -> MenuLine {
+        if let MenuLine::Item { checked, .. } = &mut self {
+            *checked = Some(on);
+        }
+        self
+    }
+}
+
+/// The most lines a right-click menu, or one of its submenus, may have.
+pub const MAX_MENU_LINES: usize = 64;
+
+fn put_menu_lines(e: &mut Encoder, lines: &[MenuLine]) {
+    e.count(lines.len());
+    for l in lines {
+        match l {
+            MenuLine::Item { id, label, keys, enabled, checked } => {
+                e.u8(0).u32(*id).str(label).str(keys).bool(*enabled).u8(match checked {
+                    None => 0,
+                    Some(false) => 1,
+                    Some(true) => 2,
+                });
+            }
+            MenuLine::Separator => {
+                e.u8(1);
+            }
+            MenuLine::Sub { label, lines } => {
+                e.u8(2).str(label);
+                put_menu_lines(e, lines);
+            }
+        }
+    }
+}
+
+fn get_menu_lines(d: &mut Decoder, nested: bool) -> Result<Vec<MenuLine>, WireError> {
+    use crate::commands::MAX_LABEL;
+    let n = d.count(1)?;
+    if n > MAX_MENU_LINES {
+        return Err(WireError::TooLong(n));
+    }
+    let text = |d: &mut Decoder| -> Result<String, WireError> {
+        let t = d.str()?;
+        if t.len() > MAX_LABEL || t.chars().any(char::is_control) { Err(WireError::BadValue("menu text")) } else { Ok(t) }
+    };
+    let mut lines = Vec::with_capacity(n);
+    for _ in 0..n {
+        lines.push(match d.u8()? {
+            0 => {
+                let id = d.u32()?;
+                let (label, keys, enabled) = (text(d)?, text(d)?, d.bool()?);
+                let checked = match d.u8()? {
+                    0 => None,
+                    1 => Some(false),
+                    2 => Some(true),
+                    _ => return Err(WireError::BadValue("menu switch")),
+                };
+                if id == 0 || label.is_empty() {
+                    return Err(WireError::BadValue("menu item"));
+                }
+                MenuLine::Item { id, label, keys, enabled, checked }
+            }
+            1 => MenuLine::Separator,
+            2 if !nested => {
+                let label = text(d)?;
+                if label.is_empty() {
+                    return Err(WireError::BadValue("menu item"));
+                }
+                MenuLine::Sub { label, lines: get_menu_lines(d, true)? }
+            }
+            _ => return Err(WireError::BadValue("menu line")),
+        });
+    }
+    Ok(lines)
 }
 
 /// A drag's data, all kinds together, at the most (a frame is 64 KB).
@@ -485,6 +591,7 @@ pub(crate) mod op {
     pub const DRAG_ACCEPT: u16 = 121;
     pub const ACTIVATE: u16 = 122;
     pub const CONTEXT_MENU: u16 = 123;
+    pub const MENU: u16 = 124;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -844,6 +951,12 @@ impl WinRequest {
                 e.u32(*window).f64(*x).f64(*y);
                 e
             }
+            WinRequest::Menu { window, x, y, lines } => {
+                let mut e = Encoder::frame(op::MENU);
+                e.u32(*window).f64(*x).f64(*y);
+                put_menu_lines(&mut e, lines);
+                e
+            }
             WinRequest::BarStyle { window, style } => {
                 let mut e = Encoder::frame(op::BAR_STYLE);
                 e.u32(*window).u8(match style {
@@ -1018,6 +1131,10 @@ impl WinRequest {
             }
             op::ACTIVATE => WinRequest::Activate { window: d.u32()? },
             op::CONTEXT_MENU => WinRequest::ContextMenu { window: d.u32()?, x: finite(d.f64()?, "x")?, y: finite(d.f64()?, "y")? },
+            op::MENU => {
+                let (window, x, y) = (d.u32()?, finite(d.f64()?, "x")?, finite(d.f64()?, "y")?);
+                WinRequest::Menu { window, x, y, lines: get_menu_lines(&mut d, false)? }
+            }
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -1362,6 +1479,25 @@ mod tests {
     }
 
     #[test]
+    fn a_bad_menu_is_refused() {
+        let menu = |lines: Vec<MenuLine>| WinRequest::Menu { window: 1, x: 1.0, y: 2.0, lines };
+        let decode = |m: WinRequest| {
+            let (bytes, _) = m.encode().unwrap();
+            WinRequest::decode(op::MENU, &bytes[6..], &mut NoFds)
+        };
+        assert!(decode(menu(vec![])).is_ok());
+        assert!(decode(menu(vec![MenuLine::item(0, "Open", "")])).is_err(), "id 0");
+        assert!(decode(menu(vec![MenuLine::item(1, "", "")])).is_err(), "no label");
+        assert!(decode(menu(vec![MenuLine::item(1, "a\nb", "")])).is_err(), "a control character");
+        assert!(decode(menu(vec![MenuLine::item(1, &"x".repeat(crate::commands::MAX_LABEL + 1), "")])).is_err(), "label too long");
+        let many: Vec<MenuLine> = (1..=MAX_MENU_LINES as u32 + 1).map(|i| MenuLine::item(i, "x", "")).collect();
+        assert!(decode(menu(many.clone())).is_err(), "too many lines");
+        assert!(decode(menu(vec![MenuLine::Sub { label: "S".into(), lines: many }])).is_err(), "too many in a submenu");
+        let inner = MenuLine::Sub { label: "In".into(), lines: vec![MenuLine::item(2, "x", "")] };
+        assert!(decode(menu(vec![MenuLine::Sub { label: "Out".into(), lines: vec![inner] }])).is_err(), "a submenu in a submenu");
+    }
+
+    #[test]
     fn a_bad_bar_is_refused() {
         let tabs = |ids: &[u32], front: u32| WinRequest::Bar {
             window: 1,
@@ -1435,6 +1571,17 @@ mod tests {
             WinRequest::DragAccept { window: 1, action: DROP_MOVE },
             WinRequest::Activate { window: 1 },
             WinRequest::ContextMenu { window: 1, x: 40.0, y: 60.5 },
+            WinRequest::Menu {
+                window: 1,
+                x: 12.0,
+                y: 30.5,
+                lines: vec![
+                    MenuLine::item(1, "Open", "Enter"),
+                    MenuLine::Sub { label: "Open With".into(), lines: vec![MenuLine::item(100, "Text Editor", ""), MenuLine::Separator, MenuLine::item(101, "Other…", "").enabled(false)] },
+                    MenuLine::Separator,
+                    MenuLine::item(2, "Hidden files", "Ctrl+H").checked(true),
+                ],
+            },
             WinRequest::BarStyle { window: 2, style: BarStyle::Desktop },
             WinRequest::Bar {
                 window: 1,

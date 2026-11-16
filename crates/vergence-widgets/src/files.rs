@@ -169,6 +169,8 @@ pub struct View<'a, M> {
     /// A file's thumbnail, if it has one made (the icon view shows it in
     /// place of its mark; files milestone 1, step 10).
     pub thumb: Option<&'a dyn Fn(&Entry) -> Option<std::sync::Arc<vergence_scene::Image>>>,
+    /// What a right click on a row sends (its menu), if rows have one.
+    pub menu: Option<&'a dyn Fn(usize) -> M>,
 }
 
 /// The list: headings that sort (`sort`, the one now and its direction),
@@ -206,6 +208,9 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
         if let Some(d) = v.drag {
             b = b.on_drag(d(k));
         }
+        if let Some(m) = v.menu {
+            b = b.on_menu(m(k));
+        }
         if let Some((i, key)) = v.in_view
             && i == k
         {
@@ -236,6 +241,9 @@ pub fn icons<M: Clone + 'static>(v: &View<M>) -> Element<M> {
                 .on_press((v.click)(k))
                 .width(Length::Fixed(100.0))
                 .name(e.name.clone());
+            if let Some(m) = v.menu {
+                b = b.on_menu(m(k));
+            }
             if let Some(d) = v.drag {
                 b = b.on_drag(d(k));
             }

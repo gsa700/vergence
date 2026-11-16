@@ -18,6 +18,7 @@
 //! draws it and carries out what is chosen ([`Action`]).
 
 use vergence_protocol::commands::{Command, MENUS, ROLES, Role};
+use vergence_protocol::window::MenuLine;
 
 use crate::Rect;
 use crate::snap::Zone;
@@ -117,6 +118,18 @@ pub struct Model {
     /// The commands the user added to the first panel, by their keys
     /// (Command::key), in the order added.
     pub pins: Vec<String>,
+    /// A window's own right-click menu (bus v20 `WinRequest::Menu`): these
+    /// lines are the whole menu, with no skeleton, search or pins.
+    pub given: Option<Vec<MenuLine>>,
+}
+
+/// A given line as the menu draws it.
+fn given_line(l: &MenuLine) -> Line {
+    match l {
+        MenuLine::Item { id, label, keys, enabled, checked } => Line::Item { action: Action::Command(*id), label: label.clone(), keys: keys.clone(), enabled: *enabled, checked: *checked, pin: None, pinned: false },
+        MenuLine::Separator => Line::Separator,
+        MenuLine::Sub { label, .. } => Line::Sub(label.clone()),
+    }
 }
 
 impl Model {
@@ -188,6 +201,9 @@ impl Model {
 
     /// The top level.
     pub fn top(&self) -> Vec<Line> {
+        if let Some(given) = &self.given {
+            return tidy(given.iter().map(given_line).collect());
+        }
         let mut lines = Vec::new();
         if self.native && self.menu_commands().count() > SMALL {
             lines.push(Line::Search);
@@ -224,6 +240,15 @@ impl Model {
 
     /// A submenu's lines: All commands (each menu under its heading) or Window.
     pub fn sub(&self, name: &str) -> Vec<Line> {
+        if let Some(given) = &self.given {
+            return given
+                .iter()
+                .find_map(|l| match l {
+                    MenuLine::Sub { label, lines } if label == name => Some(tidy(lines.iter().map(given_line).collect())),
+                    _ => None,
+                })
+                .unwrap_or_default();
+        }
         if name == "Window" {
             return self.window.iter().map(|(a, l)| Line::Item { action: Action::Window(*a), label: l.clone(), keys: String::new(), enabled: true, checked: None, pin: None, pinned: false }).collect();
         }
@@ -349,7 +374,7 @@ impl State {
     /// The lines the top panel shows now: the top level, or the search field
     /// and what it found.
     pub fn shown(&self, m: &Model) -> Vec<Line> {
-        if self.typed.trim().is_empty() {
+        if self.typed.trim().is_empty() || m.given.is_some() {
             m.top()
         } else {
             std::iter::once(Line::Search).chain(m.search(&self.typed).into_iter().map(|(l, _)| l)).collect()
@@ -418,6 +443,8 @@ impl State {
                 Did::Moved
             }
             Key::Escape => Did::Close,
+            // A right-click menu has no search.
+            Key::Char(_) | Key::Back if m.given.is_some() => Did::Nothing,
             Key::Back => {
                 self.typed.pop();
                 self.after_typing(m);
@@ -509,6 +536,7 @@ mod tests {
             native: true,
             window: Vec::new(),
             pins: Vec::new(),
+            given: None,
         }
     }
 
@@ -537,6 +565,37 @@ mod tests {
             m.commands.push(Command::own(100 + i, "Shell", &format!("Thing {i}"), ""));
         }
         m
+    }
+
+    #[test]
+    fn a_right_click_menu_is_its_lines_alone() {
+        use vergence_protocol::window::MenuLine;
+        let mut m = big();
+        m.given = Some(vec![
+            MenuLine::Separator,
+            MenuLine::item(1, "Open", "Enter"),
+            MenuLine::Sub { label: "Open With".into(), lines: vec![MenuLine::item(10, "Text Editor", ""), MenuLine::item(11, "Close-Up", "")] },
+            MenuLine::Separator,
+            MenuLine::Separator,
+            MenuLine::item(2, "Rename…", "F2").enabled(false),
+            MenuLine::Separator,
+        ]);
+        assert_eq!(labels(&m.top()), ["Open (Enter)", "Open With >", "---", "Rename… (F2)"]);
+        assert_eq!(labels(&m.sub("Open With")), ["Text Editor", "Close-Up"]);
+        assert!(m.sub("Keyboard shortcuts").is_empty());
+        // No search: typing does nothing; the keys walk past the faint line.
+        let mut s = State::default();
+        assert_eq!(s.key(&m, Key::Char('x')), Did::Nothing);
+        assert_eq!(labels(&s.shown(&m)), labels(&m.top()));
+        s.key(&m, Key::Down);
+        assert_eq!(s.key(&m, Key::Enter), Did::Chosen(Action::Command(1)));
+        s.key(&m, Key::Down);
+        s.key(&m, Key::Right);
+        s.key(&m, Key::Down);
+        assert_eq!(s.key(&m, Key::Enter), Did::Chosen(Action::Command(11)));
+        s.key(&m, Key::Left);
+        s.key(&m, Key::Down);
+        assert_eq!(s.top, Some(0), "wrapped past the faint Rename");
     }
 
     #[test]
@@ -587,7 +646,7 @@ mod tests {
 
     #[test]
     fn a_foreign_app_gets_the_skeleton_and_a_note() {
-        let m = Model { app: "Firefox".into(), commands: vec![], terminal: false, native: false, window: Vec::new(), pins: Vec::new() };
+        let m = Model { app: "Firefox".into(), commands: vec![], terminal: false, native: false, window: Vec::new(), pins: Vec::new(), given: None };
         assert_eq!(labels(&m.top()), ["[note]", "---", "Settings…", "About Firefox", "Quit Firefox"]);
     }
 

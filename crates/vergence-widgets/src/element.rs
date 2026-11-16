@@ -152,11 +152,14 @@ pub struct Element<M> {
     pub(crate) key: Option<u64>,
     pub(crate) name: Option<String>,
     pub(crate) reveal: bool,
+    /// Sent on a right click (or a touch held) on it or on anything inside it
+    /// that has none of its own: a list row's menu, the ground's menu.
+    pub(crate) on_menu: Option<M>,
 }
 
 impl<M> Element<M> {
     pub(crate) fn new(kind: Kind<M>, width: Length, height: Length) -> Element<M> {
-        Element { kind, width, height, max_width: None, key: None, name: None, reveal: false }
+        Element { kind, width, height, max_width: None, key: None, name: None, reveal: false, on_menu: None }
     }
 
     pub fn width(mut self, width: Length) -> Self {
@@ -187,6 +190,15 @@ impl<M> Element<M> {
     /// so what it remembers (focus, hover) stays with it, not with its place.
     pub fn key(mut self, key: u64) -> Self {
         self.key = Some(key);
+        self
+    }
+
+    /// The message a right click on it sends (or a touch held on it): the
+    /// innermost element under the pointer that has one sends it, so a row
+    /// gets its own menu and the ground around the rows the ground's. The
+    /// program places its menu where the press was ([`crate::Program::saw`]).
+    pub fn on_menu(mut self, message: M) -> Self {
+        self.on_menu = Some(message);
         self
     }
 

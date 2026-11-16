@@ -57,7 +57,26 @@ milestone 1's menus already hold.
 
 ## Steps (rough)
 
-1. File Viewer's menu (the quick, visible part).
+1. File Viewer's menu (the quick, visible part). **Built 2026-11-16
+   evening** (Dave chose the server to draw it): bus v20
+   `WinRequest::Menu { window, x, y, lines }` with `window::MenuLine`
+   (Item with id, label, keys, enabled, checked; Separator; Sub, one level
+   deep; at most 64 lines a level), `Window::menu` in vergence-ui; the
+   server opens it as an app menu with given lines (vergence-shell
+   appmenu.rs `Model::given`: no skeleton, search or pins; the server's
+   appmenu.rs `app_menu_lines`), so it has faint lines, keys at the
+   right, submenus and the arrows. The toolkit's `Element::on_menu`: the
+   innermost element under a right click (or a held touch) with one sends
+   its message. File Viewer: the item menu (Open, Open With ▸ from the
+   type's applications, Show in Folder in results, Cut, Copy, Paste,
+   Duplicate, Make Link, Rename…, Move to the Trash or Put Back and Delete
+   for Good… in the Trash, Compress to .tar.gz by the system's tar, Get
+   Info in a strip, Earlier Versions… faint until step 4, Copy Path, Open
+   in Terminal) and the ground's (New Folder, New File, Paste, Sort By ▸,
+   Show Hidden Files, Empty Trash… in the Trash, Open in Terminal, Get
+   Info). Undo takes back a new file, link or archive (`Done::Made`).
+   Tests green on Hubble, kepler, Techbench. Not yet: the desktop's icons
+   on the new menu; trying it by hand.
 2. The Backup engine (a library: the copy with `--link-dest`, include and
    exclude rules, a run's record) and the app: a disk or an SSH
    destination, Back Up Now, the log; the docket.

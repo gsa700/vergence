@@ -374,6 +374,7 @@ enum Command {
     Activate,
     /// The server's menu with the window's commands, at this point in it.
     ContextMenu(f32, f32),
+    Menu(f32, f32, Vec<MenuLine>),
 }
 
 /// What a program may ask of its window while it handles input.
@@ -419,6 +420,14 @@ impl Window {
     /// The commands are sent first if they changed. The native road only.
     pub fn context_menu(&mut self, x: f32, y: f32) {
         self.commands.push(Command::ContextMenu(x, y));
+    }
+
+    /// Asks the server to open the window's own right-click menu here
+    /// (window points) with these lines (bus v20): a file's menu, the
+    /// ground's. A chosen line arrives as the app's command with its id.
+    /// The native road only; elsewhere nothing opens yet.
+    pub fn menu(&mut self, x: f32, y: f32, lines: Vec<MenuLine>) {
+        self.commands.push(Command::Menu(x, y, lines));
     }
 
     /// Lets the user move the window with the button that was just pressed.
@@ -520,6 +529,7 @@ pub use vergence_protocol::window::WinKind;
 /// the bar style an app asks for.
 pub use vergence_protocol::commands::{Command as AppCommand, Role};
 pub use vergence_protocol::window::BarStyle;
+pub use vergence_protocol::window::MenuLine;
 
 /// What kind of window an app's is, and its size limits in points (0: none):
 /// told to the server on the native road (window styles milestone 1).
@@ -1312,7 +1322,7 @@ impl<'a> Runner<'a> {
                 Command::Size(..) => {}
                 // Drags under other desktops: Wayland drag and drop, later;
                 // activation: xdg-activation, later.
-                Command::Drag(..) | Command::Activate | Command::ContextMenu(..) => {}
+                Command::Drag(..) | Command::Activate | Command::ContextMenu(..) | Command::Menu(..) => {}
                 Command::Minimize => self.client.set_minimized(toplevel)?,
                 Command::Copy(text) => {
                     if let (Some(manager), Some(device)) = (self.data_manager, self.data_device) {

@@ -513,6 +513,14 @@ impl Server {
                     self.open_context_menu(&w, at);
                 }
             }
+            // Its own right-click menu by its lines (bus v20; appmenu.rs).
+            WinRequest::Menu { window, x, y, lines } => {
+                if let Some(w) = self.natives.get(&(client, window)).cloned() {
+                    let loc = self.space.element_location(&w).unwrap_or_default();
+                    let at = smithay::utils::Point::<f64, smithay::utils::Logical>::from((loc.x as f64 + x, loc.y as f64 + y));
+                    self.app_menu_lines(&w, at, lines);
+                }
+            }
             // Come forward (bus v16): by the rule new windows take the keyboard by.
             WinRequest::Activate { window } => {
                 if let Some(w) = self.natives.get(&(client, window)).cloned() {

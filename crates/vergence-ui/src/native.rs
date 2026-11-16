@@ -405,6 +405,7 @@ impl<'a> Native<'a> {
                     }
                     self.send(WinRequest::ContextMenu { window: id, x: x as f64, y: y as f64 })?;
                 }
+                Command::Menu(x, y, lines) => self.send(WinRequest::Menu { window: id, x: x as f64, y: y as f64, lines })?,
                 Command::Minimize => self.send(WinRequest::Minimize { window: id })?,
                 Command::Copy(text) => {
                     self.send(WinRequest::Copy { input_serial: self.input_serial, kinds: TEXT_KINDS.iter().map(|k| k.to_string()).collect() })?;

@@ -47,6 +47,9 @@ struct Open {
     leftward: bool,
     /// The screen it is on: panels are kept inside it.
     screen: Rectangle<i32, Logical>,
+    /// A window's right-click menu (bus v20), not its app button's: the
+    /// button is not lit and nothing is pinned.
+    context: bool,
 }
 
 impl Open {
@@ -95,7 +98,7 @@ impl Server {
 
     /// The window whose app menu is open (its button stays lit).
     pub fn app_menu_window(&self) -> Option<&Win> {
-        self.app_menu.open.as_ref().map(|o| &o.win)
+        self.app_menu.open.as_ref().filter(|o| !o.context).map(|o| &o.win)
     }
 
     pub fn app_menu_contains(&self, pos: Point<f64, Logical>) -> bool {
@@ -139,7 +142,33 @@ impl Server {
             state.key(&model, appmenu::Key::Down);
         }
         tracing::info!("app menu: opened for {:?} ({} commands)", model.app, model.commands.len());
-        self.app_menu.open = Some(Open { win: w.clone(), app_key, model, state, at: (x, y).into(), leftward, screen });
+        self.app_menu.open = Some(Open { win: w.clone(), app_key, model, state, at: (x, y).into(), leftward, screen, context: false });
+        self.app_menu.pictures = [None, None];
+        self.redraw_all();
+    }
+
+    /// A window's own right-click menu (bus v20 `WinRequest::Menu`): its
+    /// lines at `pos`, drawn and worked as the app menu is (faint lines,
+    /// keys, submenus, the arrows), kept on the screen; submenus open to the
+    /// right unless the menu is in the screen's right part.
+    pub fn app_menu_lines(&mut self, w: &Win, pos: Point<f64, Logical>, lines: Vec<vergence_protocol::window::MenuLine>) {
+        // Nothing to show, or not over the window any more (a stale request).
+        if lines.is_empty() || crate::greeter() {
+            return;
+        }
+        self.close_menu();
+        self.launcher_close();
+        let model = Model { app: String::new(), commands: Vec::new(), terminal: false, native: true, window: Vec::new(), pins: Vec::new(), given: Some(lines) };
+        let state = State::default();
+        let at = pos.to_i32_round::<i32>();
+        let screen = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|g| g.contains(at)).or_else(|| self.output_at_pointer()).unwrap_or(Rectangle::new(at, (appmenu::WIDTH, 1).into()));
+        let h = appmenu::height(&state.shown(&model));
+        let x = at.x.min(screen.loc.x + screen.size.w - appmenu::WIDTH).max(screen.loc.x);
+        // Below the pointer, or above it if there is no room below.
+        let y = if at.y + h <= screen.loc.y + screen.size.h { at.y } else { (at.y - h).max(screen.loc.y) };
+        let leftward = x + appmenu::WIDTH * 2 > screen.loc.x + screen.size.w;
+        tracing::info!("right-click menu: {} lines", model.given.as_ref().map_or(0, Vec::len));
+        self.app_menu.open = Some(Open { win: w.clone(), app_key: String::new(), model, state, at: (x, y).into(), leftward, screen, context: true });
         self.app_menu.pictures = [None, None];
         self.redraw_all();
     }
@@ -159,7 +188,7 @@ impl Server {
         // title bar (right click, long press) and its maximize button, and
         // Super with the arrows; the app menu is the app's.
         let window: Vec<(WindowAct, String)> = Vec::new();
-        Model { app, commands, terminal, native: w.native().is_some(), window, pins: Vec::new() }
+        Model { app, commands, terminal, native: w.native().is_some(), window, pins: Vec::new(), given: None }
     }
 
     /// A window sent new commands: an open menu of it shows them (the Text

@@ -35,7 +35,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime};
 
 use vergence_scene::{Color, Image, Rect};
-use vergence_ui::{AppCommand as C, Bar, BarStyle, BarTab, Modifiers, Role, TabEvent};
+use vergence_ui::{AppCommand as C, Bar, BarStyle, BarTab, MenuLine, Modifiers, Role, TabEvent};
 use vergence_widgets::files::{self, Entry, Kind, Place, SortBy};
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
 use vergence_widgets::toolbar::{Icon, flexible, group, tool, toggle, toolbar};
@@ -81,6 +81,21 @@ mod cmd {
     pub const EJECT: u32 = 31;
     pub const SETTINGS: u32 = 40;
     pub const ABOUT: u32 = 41;
+    // The right-click menus' own (backup milestone 1, step 1).
+    pub const SHOW_IN_FOLDER: u32 = 50;
+    pub const MAKE_LINK: u32 = 51;
+    pub const COMPRESS: u32 = 52;
+    pub const INFO: u32 = 53;
+    pub const VERSIONS: u32 = 54;
+    pub const COPY_PATH: u32 = 55;
+    pub const TERMINAL: u32 = 56;
+    pub const NEW_FILE: u32 = 57;
+    pub const SORT_NAME: u32 = 58;
+    pub const SORT_SIZE: u32 = 59;
+    pub const SORT_CHANGED: u32 = 60;
+    /// Open With's applications: this, plus their place in the list.
+    pub const OPEN_WITH: u32 = 1000;
+    pub const MAX_OPEN_WITH: usize = 16;
 }
 
 /// A question in the strip above the folder.
@@ -98,6 +113,8 @@ enum Ask {
 struct Naming {
     rename: Option<PathBuf>,
     text: String,
+    /// A new empty file, not a folder.
+    file: bool,
 }
 
 /// A long copy or move on a worker.
@@ -243,6 +260,12 @@ struct Viewer {
     search: Option<search::Search>,
     search_entries: Vec<Entry>,
     search_done: bool,
+    /// Where the last right press was (the menu opens there).
+    menu_at: (f32, f32),
+    /// The applications the open menu's Open With lists (desktop ids), by place.
+    open_with: Vec<String>,
+    /// Get Info's item, shown in a strip above the folder.
+    info: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -267,6 +290,11 @@ enum Msg {
     OpenInCloseUp,
     DismissNotice,
     ClosePreview,
+    /// A right click on a row: its menu (the row chosen first, unless it is).
+    RowMenu(usize),
+    /// A right click on the ground around the rows: the folder's menu.
+    GroundMenu,
+    CloseInfo,
 }
 
 /// desktop.toml's text.
@@ -290,21 +318,70 @@ pub(crate) fn notify(summary: &str, body: &str) {
     eprintln!("vergence-files: {summary}: {body}");
 }
 
+/// Get Info's lines: name, kind, size, where, when changed, owner and
+/// permissions (what `ls -l` says, in words).
+fn info_lines(p: &Path) -> Vec<Element<Msg>> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string_lossy().into_owned());
+    let mut lines = vec![label(name).size(13.0).weight(600).wrap().width(Length::FILL)];
+    let small = |t: String| label(t).size(11.0).dim().wrap().width(Length::FILL);
+    let Ok(m) = p.symlink_metadata() else {
+        lines.push(small("It is not there any more.".into()));
+        return lines;
+    };
+    let kind = if m.file_type().is_symlink() {
+        format!("Link to {}", std::fs::read_link(p).map(|t| t.to_string_lossy().into_owned()).unwrap_or_default())
+    } else if m.is_dir() {
+        let n = std::fs::read_dir(p).map(|r| r.count()).unwrap_or(0);
+        format!("Folder, {n} item{}", if n == 1 { "" } else { "s" })
+    } else {
+        format!("{}, {}", vergence_types::describe(vergence_types::of_file(p)), files::size_words(m.len()))
+    };
+    lines.push(small(kind));
+    if let Some(dir) = p.parent() {
+        lines.push(small(format!("In {}", files::tilde(dir))));
+    }
+    if let Ok(t) = m.modified() {
+        lines.push(small(format!("Changed {}", files::when(t))));
+    }
+    let mode = m.permissions().mode();
+    let who = |bits: u32| match (bits & 4 != 0, bits & 2 != 0) {
+        (true, true) => "read and write",
+        (true, false) => "read only",
+        (false, true) => "write only",
+        (false, false) => "no access",
+    };
+    // The owner's name from the password file (local accounts), else the number.
+    let owner = std::fs::read_to_string("/etc/passwd").ok().and_then(|t| t.lines().find_map(|l| {
+        let mut f = l.split(':');
+        let (name, _, uid) = (f.next()?, f.next()?, f.next()?);
+        (uid.parse::<u32>().ok()? == m.uid()).then(|| name.to_string())
+    })).unwrap_or_else(|| m.uid().to_string());
+    lines.push(small(format!("Owner {owner}: {}; group: {}; others: {}", who(mode >> 6 & 7), who(mode >> 3 & 7), who(mode & 7))));
+    lines
+}
+
 /// Opens files with the apps chosen for their types: the server's Open in a
 /// Vergence session (the dock shows them starting), else started here.
 pub(crate) fn open_files(paths: &[PathBuf]) -> Result<(), String> {
+    open_files_with(paths, None)
+}
+
+/// Opens files with this application (a desktop id), or each with the one
+/// chosen for its type.
+pub(crate) fn open_files_with(paths: &[PathBuf], app: Option<&str>) -> Result<(), String> {
     let items: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
     if std::env::var_os(vergence_protocol::BUS_ENV).is_some()
         && let Ok(mut bus) = vergence_protocol::Client::connect(APP_ID)
     {
-        return match bus.request(|serial| vergence_protocol::bus::ClientMsg::Open { serial, items: items.clone(), app: String::new() }) {
+        return match bus.request(|serial| vergence_protocol::bus::ClientMsg::Open { serial, items: items.clone(), app: app.unwrap_or_default().to_string() }) {
             Ok(vergence_protocol::bus::ServerMsg::Done { .. }) => Ok(()),
             Err(vergence_protocol::ClientError::Refused(_, m)) | Ok(vergence_protocol::bus::ServerMsg::Error { message: m, .. }) => Err(m),
             other => Err(format!("{other:?}")),
         };
     }
     let parsed: Vec<vergence_shell::open::Item> = items.iter().map(|i| vergence_shell::open::item(i)).collect();
-    let (groups, failed) = vergence_shell::open::plan(&parsed, None, &vergence_shell::apps::installed(), &vergence_types::lists());
+    let (groups, failed) = vergence_shell::open::plan(&parsed, app, &vergence_shell::apps::installed(), &vergence_types::lists());
     for (entry, files) in groups {
         for argv in vergence_shell::open::commands(&entry, &files) {
             if let Some((p, rest)) = argv.split_first() {
@@ -358,6 +435,9 @@ impl Viewer {
             search: None,
             search_entries: Vec::new(),
             search_done: false,
+            menu_at: (0.0, 0.0),
+            open_with: Vec::new(),
+            info: None,
         }
     }
 
@@ -687,12 +767,12 @@ impl Viewer {
             cmd::RENAME => {
                 if let [one] = self.chosen_paths().as_slice() {
                     let name = one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    self.naming = Some(Naming { rename: Some(one.clone()), text: name });
+                    self.naming = Some(Naming { rename: Some(one.clone()), text: name, file: false });
                 }
             }
             cmd::NEW_FOLDER => {
                 if self.here().is_some() {
-                    self.naming = Some(Naming { rename: None, text: "New folder".into() });
+                    self.naming = Some(Naming { rename: None, text: "New folder".into(), file: false });
                 }
             }
             cmd::TRASH => self.trash_chosen(),
@@ -743,6 +823,61 @@ impl Viewer {
                     }
                 }
             }
+            cmd::NEW_FILE => {
+                if self.here().is_some() {
+                    self.naming = Some(Naming { rename: None, text: "New file.txt".into(), file: true });
+                }
+            }
+            cmd::MAKE_LINK => self.make_link(),
+            cmd::COMPRESS => self.compress(),
+            cmd::INFO => {
+                self.info = match self.chosen_paths().as_slice() {
+                    [one] => Some(one.clone()),
+                    [] => self.here(),
+                    _ => None,
+                };
+            }
+            cmd::COPY_PATH => {
+                let paths = self.chosen_paths();
+                if !paths.is_empty() {
+                    window.copy(&paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join("\n"));
+                }
+            }
+            cmd::TERMINAL => {
+                // A folder opens there; a file, in its folder; nothing chosen, here.
+                let at = match self.chosen_paths().as_slice() {
+                    [one] if one.is_dir() => Some(one.clone()),
+                    [one] => one.parent().map(Path::to_path_buf),
+                    _ => self.here(),
+                };
+                if let Some(d) = at
+                    && let Err(e) = std::process::Command::new("vergence-term").current_dir(&d).spawn()
+                {
+                    self.notice = Some(format!("The Terminal could not be opened: {}", files::plain(&e)));
+                }
+            }
+            cmd::SHOW_IN_FOLDER => {
+                if let [one] = self.chosen_paths().as_slice()
+                    && let Some(dir) = one.parent()
+                {
+                    let one = one.clone();
+                    self.search = None;
+                    self.search_entries.clear();
+                    self.clear_narrow();
+                    self.go(Showing::Folder(dir.to_path_buf()));
+                    self.choose_only(one);
+                }
+            }
+            cmd::SORT_NAME => self.sort = (SortBy::Name, true),
+            cmd::SORT_SIZE => self.sort = (SortBy::Size, false),
+            cmd::SORT_CHANGED => self.sort = (SortBy::Changed, false),
+            id if (cmd::OPEN_WITH..cmd::OPEN_WITH + cmd::MAX_OPEN_WITH as u32).contains(&id) => {
+                if let Some(app) = self.open_with.get((id - cmd::OPEN_WITH) as usize).cloned()
+                    && let Err(e) = open_files_with(&self.chosen_paths(), Some(&app))
+                {
+                    self.notice = Some(format!("It could not be opened: {e}"));
+                }
+            }
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
                 let about = vergence_widgets::about::About::new(APP_ID, "File Viewer", env!("CARGO_PKG_VERSION"), "Vergence's file manager: your folders as a list or icons, Preview on the space bar, files opened with the apps chosen for them.", self.theme());
@@ -752,6 +887,147 @@ impl Viewer {
         }
         self.want_picture();
         window.redraw();
+    }
+
+    /// A chosen item's menu (Dave: "a blend of macOS and Windows with Linux
+    /// flavoring"): every line always there, faint when it cannot be done.
+    fn item_menu(&mut self) -> Vec<MenuLine> {
+        let chosen = self.chosen_paths();
+        let one = chosen.len() == 1;
+        let any = !chosen.is_empty();
+        let trash = self.in_trash();
+        let results = self.search.is_some() || self.front_tab().is_some_and(|t| t.showing == Showing::Recent);
+        let mut lines = vec![MenuLine::item(cmd::OPEN, "Open", "Enter")];
+        // Open With: the applications for the files' type, when they share one.
+        self.open_with.clear();
+        let files: Vec<&PathBuf> = chosen.iter().filter(|p| !p.is_dir()).collect();
+        let mimes: Vec<String> = files.iter().map(|p| vergence_types::of_file(p).to_string()).collect();
+        if !files.is_empty() && files.len() == chosen.len() && mimes.iter().all(|m| *m == mimes[0]) {
+            let entries = vergence_shell::apps::installed();
+            let ids = vergence_shell::open::apps_for(&mimes[0], &entries, &vergence_types::lists());
+            let mut subs = Vec::new();
+            for id in ids.into_iter().take(cmd::MAX_OPEN_WITH) {
+                let name = entries.iter().find(|e| vergence_shell::open::desktop_id(&e.id) == id).map(|e| e.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| id.trim_end_matches(".desktop").to_string());
+                subs.push(MenuLine::item(cmd::OPEN_WITH + self.open_with.len() as u32, &name.chars().take(60).collect::<String>(), ""));
+                self.open_with.push(id);
+            }
+            if subs.is_empty() {
+                subs.push(MenuLine::item(cmd::OPEN_WITH + cmd::MAX_OPEN_WITH as u32, "No applications for this type", "").enabled(false));
+            }
+            lines.push(MenuLine::Sub { label: "Open With".into(), lines: subs });
+        }
+        if results {
+            lines.push(MenuLine::item(cmd::SHOW_IN_FOLDER, "Show in Folder", "").enabled(one));
+        }
+        lines.push(MenuLine::Separator);
+        lines.push(MenuLine::item(cmd::CUT, "Cut", "Ctrl+X").enabled(any));
+        lines.push(MenuLine::item(cmd::COPY, "Copy", "Ctrl+C").enabled(any));
+        lines.push(MenuLine::item(cmd::PASTE, "Paste", "Ctrl+V").enabled(self.here().is_some()));
+        lines.push(MenuLine::item(cmd::DUPLICATE, "Duplicate", "Ctrl+D").enabled(any && !trash));
+        lines.push(MenuLine::item(cmd::MAKE_LINK, "Make Link", "").enabled(one && !trash));
+        lines.push(MenuLine::Separator);
+        lines.push(MenuLine::item(cmd::RENAME, "Rename…", "F2").enabled(one && !trash));
+        if trash {
+            lines.push(MenuLine::item(cmd::RESTORE, "Put Back", "").enabled(any));
+            lines.push(MenuLine::item(cmd::DELETE, "Delete for Good…", "Shift+Delete").enabled(any));
+        } else {
+            lines.push(MenuLine::item(cmd::TRASH, "Move to the Trash", "Delete").enabled(any));
+        }
+        lines.push(MenuLine::Separator);
+        lines.push(MenuLine::item(cmd::COMPRESS, "Compress", "").enabled(any && !trash));
+        lines.push(MenuLine::item(cmd::INFO, "Get Info", "Ctrl+I").enabled(one));
+        // Backup milestone 1, step 4: versions from snapshots and the backup copy.
+        lines.push(MenuLine::item(cmd::VERSIONS, "Earlier Versions…", "").enabled(false));
+        lines.push(MenuLine::Separator);
+        lines.push(MenuLine::item(cmd::COPY_PATH, "Copy Path", "").enabled(any));
+        lines.push(MenuLine::item(cmd::TERMINAL, "Open in Terminal", "").enabled(one));
+        lines
+    }
+
+    /// The menu of the ground around the rows: the folder's own.
+    fn ground_menu(&mut self) -> Vec<MenuLine> {
+        let here = self.here().is_some();
+        let trash = self.in_trash();
+        let (by, _) = self.sort;
+        let mut lines = vec![
+            MenuLine::item(cmd::NEW_FOLDER, "New Folder", "Ctrl+Shift+N").enabled(here && !trash),
+            MenuLine::item(cmd::NEW_FILE, "New File", "").enabled(here && !trash),
+            MenuLine::item(cmd::PASTE, "Paste", "Ctrl+V").enabled(here && !trash),
+            MenuLine::Separator,
+            MenuLine::Sub {
+                label: "Sort By".into(),
+                lines: vec![
+                    MenuLine::item(cmd::SORT_NAME, "Name", "").checked(by == SortBy::Name),
+                    MenuLine::item(cmd::SORT_SIZE, "Size", "").checked(by == SortBy::Size),
+                    MenuLine::item(cmd::SORT_CHANGED, "Date Changed", "").checked(by == SortBy::Changed),
+                ],
+            },
+            MenuLine::item(cmd::HIDDEN, "Show Hidden Files", "Ctrl+H").checked(self.hidden),
+        ];
+        if trash {
+            lines.push(MenuLine::Separator);
+            lines.push(MenuLine::item(cmd::EMPTY_TRASH, "Empty Trash…", ""));
+        }
+        lines.push(MenuLine::Separator);
+        lines.push(MenuLine::item(cmd::TERMINAL, "Open in Terminal", "").enabled(here));
+        lines.push(MenuLine::item(cmd::INFO, "Get Info", "Ctrl+I").enabled(here));
+        lines
+    }
+
+    /// A link to the one chosen item beside it ("name link").
+    fn make_link(&mut self) {
+        let chosen = self.chosen_paths();
+        let [one] = chosen.as_slice() else { return };
+        let (Some(dir), Some(name)) = (one.parent(), one.file_name()) else { return };
+        let to = dir.join(ops::free_name(&format!("{} link", name.to_string_lossy()), |x| dir.join(x).symlink_metadata().is_ok()));
+        match std::os::unix::fs::symlink(one, &to) {
+            Ok(()) => {
+                self.shared.borrow_mut().undo.push(ops::Done::Made(to.clone()));
+                self.read_all();
+                self.choose_only(to);
+            }
+            Err(e) => self.notice = Some(format!("The link could not be made: {}", files::plain(&e))),
+        }
+    }
+
+    /// The chosen items into one archive beside them: "name.tar.gz" for one,
+    /// "Archive.tar.gz" for several, by the system's tar (principle 8), on a
+    /// worker; the folder's watch shows it when it is there.
+    fn compress(&mut self) {
+        let chosen = self.chosen_paths();
+        let Some(dir) = chosen.first().and_then(|p| p.parent()).map(Path::to_path_buf) else { return };
+        if chosen.iter().any(|p| p.parent() != Some(dir.as_path())) {
+            self.notice = Some("Items from different folders cannot be compressed together.".into());
+            return;
+        }
+        let base = match chosen.as_slice() {
+            [one] => one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Archive".into()),
+            _ => "Archive".into(),
+        };
+        let name = ops::free_name(&format!("{base}.tar.gz"), |x| dir.join(x).symlink_metadata().is_ok());
+        let to = dir.join(&name);
+        let names: Vec<std::ffi::OsString> = chosen.iter().filter_map(|p| p.file_name().map(|n| n.to_os_string())).collect();
+        std::thread::spawn(move || {
+            // "--" so a name starting with "-" is a name, not an option.
+            let out = std::process::Command::new("tar").arg("-czf").arg(&to).arg("-C").arg(&dir).arg("--").args(&names).output();
+            match out {
+                Ok(o) if o.status.success() => {}
+                Ok(o) => {
+                    let _ = std::fs::remove_file(&to);
+                    notify(&format!("“{name}” could not be made"), String::from_utf8_lossy(&o.stderr).trim());
+                }
+                Err(e) => notify(&format!("“{name}” could not be made"), &format!("tar: {e}")),
+            }
+        });
+    }
+
+    /// This item alone chosen, the arrows starting from it.
+    fn choose_only(&mut self, p: PathBuf) {
+        if let Some(t) = self.front_mut() {
+            t.chosen = vec![p.clone()];
+            t.cursor = Some(p);
+            t.turn += 1;
+        }
     }
 
     fn close_tab(&mut self, id: u32, window: &mut Window) {
@@ -928,7 +1204,11 @@ impl Viewer {
             None => {
                 let Some(dir) = self.here() else { return };
                 let to = dir.join(ops::free_name(&name, |x| dir.join(x).symlink_metadata().is_ok()));
-                std::fs::create_dir(&to).map(|_| (ops::Done::NewFolder(to.clone()), to))
+                if n.file {
+                    std::fs::OpenOptions::new().write(true).create_new(true).open(&to).map(|_| (ops::Done::Made(to.clone()), to))
+                } else {
+                    std::fs::create_dir(&to).map(|_| (ops::Done::NewFolder(to.clone()), to))
+                }
             }
         };
         match done {
@@ -996,11 +1276,14 @@ impl Viewer {
         }
         if let Some(n) = &self.naming {
             out.push(strip(vec![
-                label(if n.rename.is_some() { "New name" } else { "New folder" }).size(12.0),
+                label(if n.rename.is_some() { "New name" } else if n.file { "New file" } else { "New folder" }).size(12.0),
                 field(n.text.clone(), Msg::NameTyped).on_submit(Msg::NameDone).autofocus().width(Length::FILL).name("Name"),
                 b("Cancel", Msg::NameCancel, false),
                 b(if n.rename.is_some() { "Rename" } else { "Make" }, Msg::NameDone, true),
             ]));
+        }
+        if let Some(p) = &self.info {
+            out.push(strip(vec![column(info_lines(p)).spacing(2.0).width(Length::FILL), b("Close", Msg::CloseInfo, true)]));
         }
         if let Some(job) = &self.job {
             use std::sync::atomic::Ordering::Relaxed;
@@ -1109,6 +1392,7 @@ impl Viewer {
         let click = |k: usize| Msg::Click(k);
         let in_view = tab.cursor.as_ref().and_then(|c| visible.iter().position(|e| &e.path == c)).map(|k| (k, tab.turn << 32 | k as u64));
         let drag = |k: usize| Msg::DragRow(k);
+        let menu = |k: usize| Msg::RowMenu(k);
         // The icon view's thumbnails: this folder's pictures asked for, in
         // their order; what other folders asked and has not begun is dropped.
         if self.view == ViewKind::Icons {
@@ -1118,7 +1402,7 @@ impl Viewer {
             }
         }
         let thumb = |e: &Entry| self.thumbs.get(&e.path, e.changed).flatten();
-        let v = files::View { entries: &visible, chosen: &chosen, in_view, click: &click, drag: Some(&drag), folders: tab.showing == Showing::Recent || self.search.is_some(), thumb: if self.view == ViewKind::Icons { Some(&thumb) } else { None } };
+        let v = files::View { entries: &visible, chosen: &chosen, in_view, click: &click, drag: Some(&drag), folders: tab.showing == Showing::Recent || self.search.is_some(), thumb: if self.view == ViewKind::Icons { Some(&thumb) } else { None }, menu: Some(&menu) };
         let mut body: Vec<Element<Msg>> = Vec::new();
         if let Some(p) = &tab.problem {
             body.push(label(p.clone()).size(12.0).wrap().width(Length::FILL));
@@ -1140,7 +1424,7 @@ impl Viewer {
                 column(body).spacing(2.0).width(Length::FILL).height(Length::FILL)
             }
         };
-        panel(list).color(t.page).radius(8.0).edge(t.line, 1.0).padding(4.0).width(Length::FILL).height(Length::FILL)
+        panel(list).color(t.page).radius(8.0).edge(t.line, 1.0).padding(4.0).width(Length::FILL).height(Length::FILL).on_menu(Msg::GroundMenu)
     }
 
     /// A picture fitted into its place.
@@ -1332,6 +1616,25 @@ impl Program for Viewer {
                 }
             }
             Msg::DismissNotice => self.notice = None,
+            Msg::RowMenu(k) => {
+                let visible: Vec<PathBuf> = self.visible().iter().map(|e| e.path.clone()).collect();
+                if let (Some(p), Some(t)) = (visible.get(k).cloned(), self.front_mut())
+                    && !t.chosen.contains(&p)
+                {
+                    t.chosen = vec![p.clone()];
+                    t.cursor = Some(p);
+                }
+                let lines = self.item_menu();
+                window.menu(self.menu_at.0, self.menu_at.1, lines);
+            }
+            Msg::GroundMenu => {
+                if let Some(t) = self.front_mut() {
+                    t.chosen.clear();
+                }
+                let lines = self.ground_menu();
+                window.menu(self.menu_at.0, self.menu_at.1, lines);
+            }
+            Msg::CloseInfo => self.info = None,
             Msg::ClosePreview => self.preview = false,
             Msg::DragRow(k) => self.drag_row(k, window),
             Msg::Answer(a) => {
@@ -1381,8 +1684,11 @@ impl Program for Viewer {
     }
 
     fn saw(&mut self, input: &Input) {
-        if let Input::Button { pressed: true, modifiers, .. } = input {
+        if let Input::Button { pressed: true, modifiers, button, x, y } = input {
             self.mods = *modifiers;
+            if *button == vergence_ui::Button::Right {
+                self.menu_at = (*x, *y);
+            }
         }
         if let Input::Key { modifiers, .. } = input {
             self.mods = *modifiers;
