@@ -103,6 +103,14 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   Hubble, 659 kepler. Next: Dave starts kepler with `exec vergence` and
   tries the lock by hand.
 
+- **Step 1, by hand on kepler** (Dave, 2026-11-16, started with `exec
+  vergence`): Super+L locks (after a fix: L and Q had never been mapped to
+  the seat's keys; a test now covers the seat's letters); wrong passwords
+  refused with vdm's growing pause (8 s by the fourth); the right password
+  unlocks; console switching works while locked (as decided, "2 a"). Asked
+  by Dave: the pause now counts down on the screen each second, the field
+  greyed and taking nothing until it is over.
+
 ## Design
 
 ### The parts

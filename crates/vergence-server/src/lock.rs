@@ -321,6 +321,10 @@ impl Server {
         if !pressed || !self.lock.on {
             return;
         }
+        // During vdm's pause the field takes nothing: it is greyed and counts down.
+        if self.lock_pause_left() > 0 {
+            return;
+        }
         // A key is the first sign of someone: the conversation with vdm starts.
         if self.lock.talk.is_none() && !self.lock.waiting {
             self.lock_talk();
@@ -346,6 +350,27 @@ impl Server {
                     f.push_str(c.encode_utf8(&mut b));
                 }
             }
+        }
+        self.redraw_all();
+    }
+
+    /// Seconds left of vdm's pause after a wrong answer, 0 if none.
+    fn lock_pause_left(&self) -> u64 {
+        self.lock.pause_until.map_or(0, |u| {
+            let left = u.saturating_duration_since(Instant::now());
+            left.as_secs() + u64::from(left.subsec_nanos() > 0)
+        })
+    }
+
+    /// Once a second (settings.rs's tick): the pause counts down on the
+    /// screen, and when it is over the dialog asks again.
+    pub fn lock_tick(&mut self) {
+        if !self.lock.on || self.lock.pause_until.is_none() {
+            return;
+        }
+        if self.lock_pause_left() == 0 {
+            self.lock.pause_until = None;
+            self.lock.message = None;
         }
         self.redraw_all();
     }
@@ -454,9 +479,10 @@ impl Server {
         let time = format!("{:02}:{:02}", local.hour, local.min);
         let user = std::env::var("USER").unwrap_or_default();
         let dots = self.lock.field.as_ref().map_or(0, |f| f.chars());
+        let paused = self.lock_pause_left();
         let shown = if self.lock.echo { self.lock.field.as_ref().map(|f| String::from_utf8_lossy(f.as_bytes()).into_owned()) } else { None };
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (&time, &user, dots, &shown, &self.lock.prompt, &self.lock.message, self.lock.waiting, scale.to_bits()).hash(&mut h);
+        (&time, &user, dots, &shown, &self.lock.prompt, &self.lock.message, self.lock.waiting, paused, scale.to_bits()).hash(&mut h);
         let key = h.finish();
         if self.lock.picture.as_ref().map(|(k, ..)| *k) != Some(key) {
             let s = vergence_look::shelf_look(false);
@@ -478,8 +504,14 @@ impl Server {
             centered(fonts, &mut scene, face, 12.0, ink(s.menu_ink_off), 118.0, &self.lock.prompt);
             // The field: dots for what is typed (or the text, where PAM asks with echo).
             let field = SceneRect::new(40.0, 140.0, w - 80.0, 34.0);
-            scene.fill_rounded(field, vergence_look::RADIUS, ink(s.field));
-            scene.stroke(field, vergence_look::RADIUS, vergence_look::EDGE, color_accent());
+            // Greyed during the pause: no accent, faint, nothing typed shows.
+            if paused > 0 {
+                scene.fill_rounded(field, vergence_look::RADIUS, Color::rgba(s.field.0, s.field.1, s.field.2, 110));
+                scene.stroke(field, vergence_look::RADIUS, vergence_look::EDGE, ink(s.edge));
+            } else {
+                scene.fill_rounded(field, vergence_look::RADIUS, ink(s.field));
+                scene.stroke(field, vergence_look::RADIUS, vergence_look::EDGE, color_accent());
+            }
             match &shown {
                 Some(t) => {
                     let m = fonts.metrics(face, 14.0);
@@ -492,6 +524,7 @@ impl Server {
                 }
             }
             let (msg, bad) = match (&self.lock.message, self.lock.waiting) {
+                _ if paused > 0 => (format!("Try again in {paused} s"), true),
                 (_, true) => ("Checking…".to_string(), false),
                 (Some((m, bad)), _) => (m.clone(), *bad),
                 (None, _) => ("Locked. Type your password and press Enter.".to_string(), false),
