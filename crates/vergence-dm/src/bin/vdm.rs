@@ -384,7 +384,7 @@ fn run_session(h: &pam::Handle, plan: &LoginPlan) -> c_int {
             }
             let shell_name = std::path::Path::new(&a.shell).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "sh".into());
             let home = if std::path::Path::new(&a.home).is_dir() { a.home.clone() } else { "/".into() };
-            let opened = std::fs::OpenOptions::new().read(true).write(true).open(&tty);
+            let opened = vergence_dm::vt::open(plan.vt);
             let null = std::fs::OpenOptions::new().write(true).open("/dev/null");
             match (opened, null) {
                 (Ok(tty_file), Ok(null)) => {
@@ -592,7 +592,7 @@ fn start_greeter(uid: u32, gid: u32) -> std::io::Result<c_int> {
         std::fs::DirBuilder::new().mode(0o700).create(d)?;
         std::os::unix::fs::chown(d, Some(uid), Some(gid))?;
     }
-    let tty = std::fs::OpenOptions::new().read(true).write(true).open(vergence_dm::vt::tty_path(vergence_dm::vt::GREETER_VT))?;
+    let tty = vergence_dm::vt::open(vergence_dm::vt::GREETER_VT)?;
     let out = std::fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(std::path::Path::new(paths::STATE_DIR).join("greeter.log"))?;
     // A worker holds the login screen's PAM session (logind's seat goes only
     // to a process in a session, review I4) and starts the server in it; vdm

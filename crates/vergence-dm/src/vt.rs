@@ -35,6 +35,19 @@ pub fn tty_path(n: u32) -> String {
     if cfg!(target_os = "linux") { format!("/dev/tty{n}") } else { format!("/dev/ttyv{:x}", n.saturating_sub(1)) }
 }
 
+/// Open VT `n` for reading and writing, never as the opener's controlling
+/// terminal (O_NOCTTY): vdm runs as a session leader under systemd, and a
+/// plain open made the login screen's VT vdm's own terminal, so the login
+/// screen could not take it (Techbench, 2026-11-16: EPERM from TIOCSCTTY).
+pub fn open(n: u32) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    #[cfg(target_os = "linux")]
+    const O_NOCTTY: i32 = 0o400;
+    #[cfg(not(target_os = "linux"))]
+    const O_NOCTTY: i32 = 0x8000;
+    std::fs::OpenOptions::new().read(true).write(true).custom_flags(O_NOCTTY).open(tty_path(n))
+}
+
 /// Make VT `n` the one on the screen and wait until it is; `fd` is any open VT.
 pub fn activate(fd: c_int, n: u32) -> std::io::Result<()> {
     // SAFETY: both take the number by value.
@@ -72,7 +85,7 @@ pub fn active() -> Option<u32> {
 /// Put VT `n` on the screen, from any process with a VT open (vdm).
 pub fn switch_to(n: u32) -> std::io::Result<()> {
     use std::os::fd::AsRawFd;
-    let f = std::fs::OpenOptions::new().read(true).write(true).open(tty_path(n))?;
+    let f = open(n)?;
     activate(f.as_raw_fd(), n)
 }
 
