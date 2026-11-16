@@ -104,6 +104,43 @@ pub fn item_at(dock: Rect, count: usize, upright: bool, x: i32, y: i32) -> Optio
     (0..count).find(|i| slot(dock, *i, upright).is_some_and(|s| x >= s.x && x < s.right() && y >= s.y && y < s.bottom()))
 }
 
+/// Where an item being dragged along the dock would go: the place of the
+/// `count` (the dock keeps its length while an item is lifted) nearest the
+/// point along the dock, the apps button's place counting as the first.
+pub fn gap_at(dock: Rect, count: usize, upright: bool, x: i32, y: i32) -> usize {
+    let along = if upright { y - dock.y } else { x - dock.x } - SLOT;
+    let at = along.div_euclid(SLOT).max(0) as usize;
+    at.min(count.saturating_sub(1))
+}
+
+/// The pinned list after the item at `from` in `items` (the dock's keys in
+/// order, each with whether it is pinned; pinned ones come first) is dropped
+/// at place `to`. A pinned item moves among the pinned; one that is not
+/// pinned, dropped among them (or right after them), is pinned there; one
+/// dropped among the unpinned ones changes nothing (None). Ids in `pinned`
+/// the dock does not show (no entry for them now) keep their places at the end.
+pub fn dropped(pinned: &[String], items: &[(String, bool)], from: usize, to: usize) -> Option<Vec<String>> {
+    let (key, was_pinned) = items.get(from)?.clone();
+    let mut shown: Vec<String> = items.iter().filter(|(_, p)| *p).map(|(k, _)| k.clone()).collect();
+    let count = shown.len();
+    if was_pinned {
+        let at = shown.iter().position(|k| *k == key)?;
+        let to = to.min(count - 1);
+        if to == at {
+            return None;
+        }
+        shown.remove(at);
+        shown.insert(to, key);
+    } else {
+        if to > count {
+            return None;
+        }
+        shown.insert(to, key);
+    }
+    shown.extend(pinned.iter().filter(|p| !items.iter().any(|(k, _)| k == *p)).cloned());
+    Some(shown)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,5 +225,33 @@ mod tests {
         assert_eq!(item_at(level, 3, false, 150, 1040), Some(0));
         assert_eq!(item_at(level, 3, false, 120, 1040), None, "the apps button's place");
         assert_eq!(item_at(level, 3, false, 150, 1000), None, "above it");
+    }
+
+    #[test]
+    fn a_dragged_item_lands_on_the_nearest_place() {
+        let strip = Rect::new(1232, 0, 48, 720);
+        assert_eq!(gap_at(strip, 4, true, 1250, 60), 0);
+        assert_eq!(gap_at(strip, 4, true, 1250, 10), 0, "over the apps button: the first place");
+        assert_eq!(gap_at(strip, 4, true, 1250, 150), 2);
+        assert_eq!(gap_at(strip, 4, true, 1250, 600), 3, "past the end: the last");
+        let level = Rect::new(100, 1026, 240, 48);
+        assert_eq!(gap_at(level, 4, false, 200, 1040), 1);
+    }
+
+    #[test]
+    fn dropping_moves_pins_and_pins_what_was_not() {
+        let k = |v: &[(&str, bool)]| v.iter().map(|(a, b)| (a.to_string(), *b)).collect::<Vec<_>>();
+        let s = |v: &[&str]| v.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        let items = k(&[("a", true), ("b", true), ("c", true), ("x", false), ("y", false)]);
+        let pinned = s(&["a", "gone", "b", "c"]);
+        assert_eq!(dropped(&pinned, &items, 0, 2), Some(s(&["b", "c", "a", "gone"])), "moved down; an id not shown kept at the end");
+        assert_eq!(dropped(&pinned, &items, 2, 0), Some(s(&["c", "a", "b", "gone"])));
+        assert_eq!(dropped(&pinned, &items, 0, 4), Some(s(&["b", "c", "a", "gone"])), "a pinned item stays among the pinned");
+        assert_eq!(dropped(&pinned, &items, 1, 1), None, "back where it was");
+        assert_eq!(dropped(&pinned, &items, 3, 1), Some(s(&["a", "x", "b", "c", "gone"])), "pinned where it was dropped");
+        assert_eq!(dropped(&pinned, &items, 4, 3), Some(s(&["a", "b", "c", "y", "gone"])), "right after the pinned: pinned last");
+        assert_eq!(dropped(&pinned, &items, 3, 4), None, "among the unpinned: nothing changes");
+        assert_eq!(dropped(&[], &k(&[("x", false)]), 0, 0), Some(s(&["x"])), "the first pin");
+        assert_eq!(dropped(&pinned, &items, 9, 0), None);
     }
 }

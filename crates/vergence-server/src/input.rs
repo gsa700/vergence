@@ -34,6 +34,15 @@ impl Server {
         let Some(keys) = self.input.keys.as_mut() else { return };
         let key = keys.feed(code, pressed);
         let mods = keys.mods();
+        // Escape during a drag on the dock (an icon lifted, the dock dragged or
+        // "Move dock"): everything goes back, and no program hears the key.
+        if pressed && self.shelf_busy() && crate::keys::seat_key(key.sym, code.raw()) == vergence_seat::keyboard::Key::Escape {
+            if let Some(k) = self.seat.get_keyboard() {
+                k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| FilterResult::Intercept(()));
+            }
+            self.shelf_cancel();
+            return;
+        }
         let out = self.input.seat.key(crate::keys::seat_key(key.sym, code.raw()), pressed, mods);
         let native = match out {
             KeyOut::Forward(Some(id)) => self.input.window(id).filter(|w| w.native().is_some()),

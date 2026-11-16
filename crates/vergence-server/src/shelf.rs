@@ -194,6 +194,8 @@ pub enum Act {
     ForgetPlaces(String),
     /// A launcher for the application in ~/Desktop (desktop.rs).
     AddToDesktop(String),
+    /// The dock follows the pointer until a press sets it down (dock milestone 1).
+    MoveDock,
 }
 
 /// How long a started application's icon says it is starting, if no window
@@ -282,7 +284,36 @@ pub struct Held {
     start: Point<f64, Logical>,
     dock: Rectangle<i32, Logical>,
     dragging: bool,
+    grip: Grip,
 }
+
+/// What a press on the dock took hold of (dock milestone 1): the dock itself
+/// (Alt held, or "Move dock"), an item (by its place), or the apps button or
+/// an empty part, which a drag does nothing with.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Grip {
+    Dock,
+    Item(usize),
+    Head,
+}
+
+/// An item lifted off the dock by a drag: where it was, which application,
+/// whether it is pinned, where the pointer is, and the place it would land
+/// on (None: held off the dock, where letting go removes a pinned one).
+#[derive(Clone, Debug)]
+pub struct Lift {
+    from: usize,
+    key: String,
+    name: String,
+    icon: String,
+    pinned: bool,
+    at: Point<f64, Logical>,
+    to: Option<usize>,
+}
+
+/// How far from the dock a lifted item must be held for letting go to
+/// remove it, in points.
+const OFF_DOCK: i32 = 24;
 
 #[derive(Debug, Default, Deserialize)]
 struct DesktopFile {
@@ -342,6 +373,12 @@ pub struct Shelf {
     /// and, while it is being dragged, where the dock is.
     pub held: Option<(u32, Held)>,
     dragged: Option<Rectangle<i32, Logical>>,
+    /// An item being dragged (dock milestone 1), and its picture under the
+    /// pointer for a scale (with the Remove mark or without).
+    lift: Option<Lift>,
+    ghost: Option<((String, u64, bool, bool, bool), MemoryRenderBuffer, i32, i32)>,
+    /// "Move dock" was chosen: the dock follows the pointer until a press.
+    moving: bool,
     /// The item the pointer is over, and whether it has rested there long
     /// enough for the application's name to be shown beside it.
     hover: Option<usize>,
@@ -591,7 +628,7 @@ impl Server {
     /// The dock hides itself now: `hide` is set, it is at an edge, and it is
     /// not being held or dragged.
     fn shelf_hides(&self) -> bool {
-        self.shelf.config.hide.mode() != Hide::Never && matches!(self.shelf.config.placement().place, Place::Edge(_)) && self.shelf.held.is_none() && self.shelf.dragged.is_none()
+        self.shelf.config.hide.mode() != Hide::Never && matches!(self.shelf.config.placement().place, Place::Edge(_)) && self.shelf.held.is_none() && self.shelf.dragged.is_none() && !self.shelf.moving
     }
 
     /// Whether the dock should be out now, standing at `full` when it is.
@@ -721,15 +758,33 @@ impl Server {
         self.shelf_hide_follow(at);
         // A press on the dock that moves far enough is a drag: the dock goes with
         // the pointer until it is let go.
+        // "Move dock": the dock follows the pointer, its middle under it.
+        if self.shelf.moving && self.shelf.held.is_none() {
+            if let Some(dock) = self.shelf.dock {
+                let to = Rectangle::new((at.x.round() as i32 - dock.size.w / 2, at.y.round() as i32 - dock.size.h / 2).into(), dock.size);
+                if self.shelf.dragged != Some(to) {
+                    self.shelf.dragged = Some(to);
+                    self.redraw_all();
+                }
+            }
+            return;
+        }
         if let Some((_, held)) = self.shelf.held.as_mut() {
             let (dx, dy) = (at.x - held.start.x, at.y - held.start.y);
             held.dragging |= dx.abs() > 6.0 || dy.abs() > 6.0;
+            let held = *held;
             if held.dragging {
-                let to = Rectangle::new((held.dock.loc.x + dx.round() as i32, held.dock.loc.y + dy.round() as i32).into(), held.dock.size);
-                if self.shelf.dragged != Some(to) {
-                    self.shelf.dragged = Some(to);
-                    self.shelf.named = false;
-                    self.redraw_all();
+                match held.grip {
+                    Grip::Dock => {
+                        let to = Rectangle::new((held.dock.loc.x + dx.round() as i32, held.dock.loc.y + dy.round() as i32).into(), held.dock.size);
+                        if self.shelf.dragged != Some(to) {
+                            self.shelf.dragged = Some(to);
+                            self.shelf.named = false;
+                            self.redraw_all();
+                        }
+                    }
+                    Grip::Item(index) => self.shelf_lift_follow(index, at),
+                    Grip::Head => {}
                 }
                 return;
             }
@@ -914,9 +969,78 @@ impl Server {
             self.shelf_slide(true);
             return;
         }
-        if let Some(dock) = self.shelf.dock {
-            self.shelf.held = Some((button, Held { start: at, dock, dragging: false }));
+        let Some(dock) = self.shelf.dock else { return };
+        // After "Move dock" the press sets it down where it is (on its release),
+        // and a finger may still drag it from there.
+        if std::mem::take(&mut self.shelf.moving) {
+            let dock = self.shelf.dragged.unwrap_or(dock);
+            self.shelf.held = Some((button, Held { start: at, dock, dragging: true, grip: Grip::Dock }));
+            return;
         }
+        // Alt+drag moves the dock, as it moves any window (Dave, 2026-11-16);
+        // a plain drag moves what was pressed.
+        let alt = self.input.keys.as_ref().is_some_and(|k| k.mods().alt);
+        let upright = self.shelf.config.placement().upright();
+        let grip = if alt {
+            Grip::Dock
+        } else {
+            match running::item_at(rect(dock), self.shelf.names.len(), upright, at.x.floor() as i32, at.y.floor() as i32) {
+                Some(i) => Grip::Item(i),
+                None => Grip::Head,
+            }
+        };
+        self.shelf.held = Some((button, Held { start: at, dock, dragging: false, grip }));
+    }
+
+    /// An item is dragged: lifted off the dock on the first move past the
+    /// threshold, then following the pointer; the place it would land on is
+    /// worked out from where the pointer is along the dock, or none while it
+    /// is held off the dock.
+    fn shelf_lift_follow(&mut self, index: usize, at: Point<f64, Logical>) {
+        if self.shelf.lift.is_none() {
+            let items = self.shelf_items();
+            let Some((item, _)) = items.get(index) else { return };
+            self.shelf.lift = Some(Lift { from: index, key: item.key.clone(), name: item.name.clone(), icon: item.icon.clone(), pinned: item.pinned, at, to: Some(index) });
+            self.shelf.named = false;
+            tracing::info!("shelf: {} lifted", item.name);
+        }
+        let Some(dock) = self.shelf.dock else { return };
+        let count = self.shelf.names.len();
+        let upright = self.shelf.config.placement().upright();
+        let near = Rectangle::new((dock.loc.x - OFF_DOCK, dock.loc.y - OFF_DOCK).into(), (dock.size.w + 2 * OFF_DOCK, dock.size.h + 2 * OFF_DOCK).into());
+        let to = near.to_f64().contains(at).then(|| running::gap_at(rect(dock), count, upright, at.x.floor() as i32, at.y.floor() as i32));
+        if let Some(lift) = self.shelf.lift.as_mut() {
+            lift.at = at;
+            lift.to = to;
+        }
+        self.redraw_all();
+    }
+
+    /// Whether a drag on the dock is under way (an item lifted, the dock
+    /// dragged, or "Move dock"): Escape puts it all back.
+    pub fn shelf_busy(&self) -> bool {
+        self.shelf.moving || self.shelf.lift.is_some() || self.shelf.held.is_some_and(|(_, h)| h.dragging)
+    }
+
+    /// Escape during a drag on the dock: everything goes back where it was.
+    pub fn shelf_cancel(&mut self) {
+        tracing::info!("shelf: drag given up");
+        self.shelf.moving = false;
+        self.shelf.held = None;
+        self.shelf.lift = None;
+        self.shelf.dragged = None;
+        self.shelf.picture = None;
+        self.redraw_all();
+    }
+
+    /// "Move dock": the dock's middle goes under the pointer and follows it
+    /// until a press sets it down.
+    fn shelf_move_start(&mut self) {
+        let Some(dock) = self.shelf.dock else { return };
+        let at = self.pointer_location();
+        self.shelf.moving = true;
+        self.shelf.dragged = Some(Rectangle::new((at.x.round() as i32 - dock.size.w / 2, at.y.round() as i32 - dock.size.h / 2).into(), dock.size));
+        self.redraw_all();
     }
 
     /// The press on the dock was let go. After a drag: the dock settles along
@@ -928,6 +1052,14 @@ impl Server {
     /// With several: a list of them opens beside the icon.
     pub fn shelf_release(&mut self, at: Point<f64, Logical>) {
         let Some((_, held)) = self.shelf.held.take() else { return };
+        // An item let go: moved, pinned or removed (dock milestone 1).
+        if let Some(lift) = self.shelf.lift.take() {
+            self.shelf_drop(lift);
+            return;
+        }
+        if held.dragging && held.grip != Grip::Dock {
+            return;
+        }
         if held.dragging {
             let dropped = self.shelf.dragged.take().unwrap_or(held.dock);
             let outputs = self.bus_outputs();
@@ -995,6 +1127,32 @@ impl Server {
         }
     }
 
+    /// A lifted item let go: on the dock it takes the place it was over (a
+    /// running application not pinned becomes pinned there, if that is among
+    /// the pinned); off the dock a pinned one is unpinned, and stays on the
+    /// dock as running while it has windows.
+    fn shelf_drop(&mut self, lift: Lift) {
+        let items = self.shelf_items();
+        let keys: Vec<(String, bool)> = items.iter().map(|(i, _)| (i.key.clone(), i.pinned)).collect();
+        // Only an application with a desktop entry can be pinned.
+        let known = self.shelf.apps.iter().any(|e| e.id == lift.key);
+        let pinned = match lift.to {
+            Some(to) if known && keys.get(lift.from).is_some_and(|(k, _)| *k == lift.key) => running::dropped(&self.shelf.config.pinned, &keys, lift.from, to),
+            None if lift.pinned => {
+                tracing::info!("shelf: {} removed from the dock", lift.name);
+                Some(self.shelf.config.pinned.iter().filter(|p| **p != lift.key).cloned().collect())
+            }
+            _ => None,
+        };
+        if let Some(pinned) = pinned {
+            tracing::info!("shelf: pinned now {pinned:?}");
+            self.shelf.config.pinned = pinned;
+            self.shelf_save_pinned();
+        }
+        self.shelf.picture = None;
+        self.redraw_all();
+    }
+
     /// The applications that are running and could be started again: those
     /// with a window and a desktop entry that needs no terminal, by entry id.
     pub fn shelf_running(&mut self) -> Vec<String> {
@@ -1021,7 +1179,13 @@ impl Server {
         let items = self.shelf_items();
         let Some(dock) = self.shelf_dock(items.len()) else { return };
         let upright = self.shelf.config.placement().upright();
-        let Some(index) = running::item_at(rect(dock), items.len(), upright, at.x.floor() as i32, at.y.floor() as i32) else { return };
+        let towards = self.shelf_side(dock);
+        let Some(index) = running::item_at(rect(dock), items.len(), upright, at.x.floor() as i32, at.y.floor() as i32) else {
+            // The apps button or an empty part: the dock's own menu.
+            let head = Rectangle::new(dock.loc, (running::SLOT, running::SLOT).into());
+            self.open_shelf_menu(head, towards, vec![(Act::MoveDock, "Move dock".to_string())]);
+            return;
+        };
         let (item, windows) = &items[index];
         // Only an application with a desktop entry can be started or pinned.
         let known = self.shelf.apps.iter().any(|e| e.id == item.key);
@@ -1040,8 +1204,8 @@ impl Server {
             1 => acts.push((Act::Close(windows.clone()), "Close".to_string())),
             n => acts.push((Act::Close(windows.clone()), format!("Close all {n} windows"))),
         }
+        acts.push((Act::MoveDock, "Move dock".to_string()));
         let slot = running::slot(rect(dock), index, upright).map_or(dock, rectangle);
-        let towards = self.shelf_side(dock);
         self.open_shelf_menu(slot, towards, acts);
     }
 
@@ -1071,6 +1235,7 @@ impl Server {
                 }
             }
             Act::AddToDesktop(id) => self.add_to_desktop(&id),
+            Act::MoveDock => self.shelf_move_start(),
             Act::ForgetPlaces(app) => {
                 if let Err(e) = crate::spawn(std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", &app])) {
                     tracing::warn!("shelf: the settings app could not be started: {e}");
@@ -1216,6 +1381,18 @@ impl Server {
         }
         starting.hash(&mut hasher);
         asking.hash(&mut hasher);
+        // What stands in each place: with an item lifted, the others close up
+        // round an empty place where it would land (or where it was, while it
+        // is held off the dock).
+        let order: Vec<Option<usize>> = match &self.shelf.lift {
+            Some(lift) if lift.from < items.len() => {
+                let mut o: Vec<Option<usize>> = (0..items.len()).filter(|i| *i != lift.from).map(Some).collect();
+                o.insert(lift.to.unwrap_or(lift.from).min(o.len()), None);
+                o
+            }
+            _ => (0..items.len()).map(Some).collect(),
+        };
+        order.hash(&mut hasher);
         // The frost behind the dock (look milestone 1, step 5): its ground is then
         // the frost, drawn under the picture; Reduce transparency (or no frost
         // on this renderer) leaves the dock as its own setting says, solid if that.
@@ -1245,8 +1422,10 @@ impl Server {
                 scene.fill_rounded(SceneRect::new(14.0 + column * 8.0, 14.0 + row * 8.0, 4.0, 4.0), 1.0, color(s.mark));
             }
             let local = Rect::new(0, 0, strip.size.w, strip.size.h);
-            for (index, ((item, windows), icon)) in items.iter().zip(&icons).enumerate() {
-                let Some(slot) = running::slot(local, index, upright) else { break };
+            for (place, shown) in order.iter().enumerate() {
+                let Some(slot) = running::slot(local, place, upright) else { break };
+                let Some(index) = *shown else { continue };
+                let ((item, windows), icon) = (&items[index], &icons[index]);
                 let at = running::icon_in(slot);
                 let square = SceneRect::new(at.x as f32, at.y as f32, at.w as f32, at.h as f32);
                 // The mark: short and gray for an application that
@@ -1312,7 +1491,7 @@ impl Server {
         // The name of the application the pointer rests on, beside its icon on the
         // side the windows are.
         let mut elements = Vec::new();
-        let named = self.shelf.hover.filter(|_| self.shelf.named && !self.menu_is_open() && self.shelf.dragged.is_none()).and_then(|i| Some((running::slot(rect(strip), i, upright)?, self.shelf.names.get(i)?.clone())));
+        let named = self.shelf.hover.filter(|_| self.shelf.named && !self.menu_is_open() && self.shelf.dragged.is_none() && self.shelf.lift.is_none()).and_then(|i| Some((running::slot(rect(strip), i, upright)?, self.shelf.names.get(i)?.clone())));
         if let Some((slot, name)) = named {
             let key = (name.clone(), scale.to_bits(), light);
             if self.shelf.label.as_ref().map(|(k, _, _)| k) != Some(&key) {
@@ -1352,6 +1531,10 @@ impl Server {
                     elements.push(SceneElement::Memory(el));
                 }
             }
+        }
+        // The lifted item under the pointer, in front of everything.
+        if let Some(e) = self.shelf_ghost(renderer, out, scale, light) {
+            elements.insert(0, e);
         }
         let Some((_, buffer)) = &self.shelf.picture else { return elements };
         // Placed on whole pixels, as everything the server draws is.
@@ -1393,6 +1576,66 @@ impl Server {
 }
 
 impl Server {
+    /// The picture of a lifted item, its icon's middle under the pointer:
+    /// its icon (or letter), and while it is held off the dock and pinned,
+    /// "Remove" beside it.
+    fn shelf_ghost(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64, light: bool) -> Option<SceneElement> {
+        let lift = self.shelf.lift.clone()?;
+        if !out.to_f64().contains(lift.at) {
+            return None;
+        }
+        let removing = lift.to.is_none() && lift.pinned;
+        // "Remove" on the side the windows are, away from the dock.
+        let left = self.shelf.dock.is_some_and(|d| self.shelf_side(d) == Edge::Left);
+        let key = (lift.key.clone(), scale.to_bits(), removing, light, left);
+        if self.shelf.ghost.as_ref().map(|(k, ..)| k) != Some(&key) {
+            let pixels = (running::ICON as f64 * scale).round() as u32;
+            let icon = self.shelf_icon(&lift.icon, pixels);
+            let s = vergence_look::shelf_look(light);
+            let color = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
+            let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
+            let side = running::ICON as f32;
+            let words = "Remove";
+            let (label_w, face) = match fonts.face("sans-serif", 400, false) {
+                Some(face) if removing => (fonts.layout(face, 13.5, words).1 + 20.0, Some(face)),
+                _ => (0.0, None),
+            };
+            let (w, h) = ((side + if removing { 8.0 + label_w } else { 0.0 }).ceil(), 28f32.max(side));
+            let mut scene = Scene::new(w, h);
+            let icon_x = if removing && left { w - side } else { 0.0 };
+            let square = SceneRect::new(icon_x, (h - side) / 2.0, side, side);
+            match &icon {
+                Some(icon) => {
+                    let (iw, ih) = (icon.width as f32 / scale as f32, icon.height as f32 / scale as f32);
+                    let picture = scene.image(Image { width: icon.width, height: icon.height, rgba: icon.rgba.clone() });
+                    scene.draw_image(picture, SceneRect::new(square.x + (side - iw) / 2.0, square.y + (side - ih) / 2.0, iw, ih), if removing { 0.5 } else { 0.85 });
+                }
+                None => {
+                    scene.fill_rounded(square, vergence_look::RADIUS, color(s.tile));
+                }
+            }
+            if let Some(face) = face {
+                let m = fonts.metrics(face, 13.5);
+                let at = SceneRect::new(if left { 0.0 } else { side + 8.0 }, (h - 28.0) / 2.0, label_w, 28.0);
+                scene.fill_rounded(at, vergence_look::RADIUS, color(s.menu));
+                scene.stroke(at, vergence_look::RADIUS, vergence_look::EDGE, color(s.edge));
+                vergence_render::text(&mut scene, fonts, face, 13.5, color(s.menu_ink), ScenePoint::new(at.x + 10.0, (at.y + (28.0 - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), words);
+            }
+            let p = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)).ok()?;
+            let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+            self.shelf.ghost = Some((key, buffer, w as i32, h as i32));
+        }
+        let (_, buffer, w, h) = self.shelf.ghost.as_ref()?;
+        let half = running::ICON / 2;
+        let removing = self.shelf.ghost.as_ref().is_some_and(|(k, ..)| k.2 && k.4);
+        let x = if removing { lift.at.x.round() as i32 + half - w } else { lift.at.x.round() as i32 - half };
+        let area: Rectangle<i32, Logical> = Rectangle::new((x, lift.at.y.round() as i32 - h / 2).into(), (*w, *h).into());
+        let a = (area.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+        let b = (area.loc + area.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+        let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
+        MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(area.size), Kind::Unspecified).ok().map(SceneElement::Memory)
+    }
+
     /// Starts an application from its desktop entry, with files or links
     /// for it (files milestone 1: opened by type) or none (the dock, the
     /// launcher): its own arguments, with no shell between; one that wants

@@ -15,6 +15,21 @@ NUT server, plus a `vtile` demo script that can fake a problem; the time
 source, rack temperatures and Proxmox later), "5 a" (named actions in this
 milestone: the list and the launcher only).
 
+## Progress
+
+- **Step 1 done** (2026-11-16): icons lift after 6 pt and the others close
+  up round the place they would land (vergence-shell running.rs `gap_at`,
+  `dropped`, with tests); a running application dropped among the pinned is
+  pinned there; held 24 pt off the dock a pinned icon shows "Remove" on the
+  windows' side and is unpinned when let go (Unpin stays in its menu);
+  Escape puts everything back; Alt+drag moves the dock; "Move dock" in
+  every dock menu (and a menu of its own on the apps button and empty parts)
+  carries the dock's middle under the pointer until a press sets it down. A
+  plain drag on the apps button does nothing. Seen on kepler with vctl:
+  reorder, remove, pin Calculator by dropping, Escape, Alt+drag to the
+  bottom, "Move dock" back to the right. Tests 638 Hubble/Techbench, 631
+  kepler. By hand still: a mouse and a finger on kepler.
+
 ## Where things stand
 
 - The dock (shelf milestones 1 and 2): the apps button, pinned and running
