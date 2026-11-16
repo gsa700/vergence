@@ -236,6 +236,19 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   SIGTERM, then after 3 s SIGKILL (C6), and the PAM session is closed and
   credentials deleted. vergence-dm's sessions.rs reads Exec lines
   (field codes left out); pam.rs's `authenticate_then` and `Handle`.
+  Seen on kepler (2026-11-16 13:17-13:19, Dave): logged in at the login
+  screen, Vergence started on VT 10 (server <- vergence-session <- vdm's
+  worker; pam_xdg made /var/run/xdg/derickson), Super+L locked and vdm
+  unlocked, Log Out ended it: vdm ended 3 processes the session had left,
+  closed the PAM session (pam_xdg removed the runtime directory), and the
+  login screen came back. Found on the way: `vdm greeter stop` left the
+  screen on the empty VT 9 (vdm now switches back to the VT it was asked
+  from), and the server tried a frame ten times a second while paused
+  (it now draws nothing until its VT is back). Not yet: Hubble (Void,
+  vdm's own /run/user/<uid>) and Techbench (logind; the greeter's own
+  logind session, I4). One session per user for now: a second login as
+  the same user would share its runtime directory and single-instance
+  app sockets (to be refused or given its own, step 6).
 
 ## Design
 
