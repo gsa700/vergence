@@ -7,6 +7,7 @@
 
 pub mod pam;
 pub mod paths;
+pub mod power;
 pub mod proto;
 pub mod secret;
 pub mod sessions;

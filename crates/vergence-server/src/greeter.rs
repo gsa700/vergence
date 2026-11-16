@@ -8,6 +8,9 @@
 //! and press is the login screen's: the seat is in its lock state for the
 //! whole time (Ctrl+Alt+Backspace and the rest do nothing). No paste.
 //!
+//! Sleep, Restart and Shut Down along the bottom (step 6), carried out by
+//! vdm; Restart and Shut Down ask for a second press within five seconds.
+//!
 //! Keys: Up and Down choose the person; typing goes into the field (the name
 //! for Other…, then the password); Enter answers; Escape clears; F2 changes
 //! the session. A press on a person chooses them; on the session line,
@@ -86,6 +89,8 @@ pub struct Greeter {
     sessions: Vec<vergence_dm::sessions::Session>,
     session: usize,
     talk: Option<std::sync::mpsc::Sender<Option<Secret>>>,
+    /// vdm or PAM said why during this conversation: a "no" keeps its words.
+    told_why: bool,
     asked: bool,
     submit: bool,
     waiting: bool,
@@ -94,6 +99,9 @@ pub struct Greeter {
     /// Where the people's rows and the session line are, as last drawn.
     rows: Vec<(usize, Rectangle<i32, Logical>)>,
     session_line: Rectangle<i32, Logical>,
+    power: Vec<(vergence_dm::power::Power, Rectangle<i32, Logical>)>,
+    /// Restart or Shut Down pressed once: a second press within 5 s does it.
+    confirm: Option<(vergence_dm::power::Power, Instant)>,
     dim: Option<(Id, CommitCounter)>,
     picture: Option<(u64, MemoryRenderBuffer, i32, i32)>,
 }
@@ -246,12 +254,37 @@ impl Server {
         if self.greeter.waiting {
             return;
         }
-        if let Some(&(i, _)) = self.greeter.rows.iter().find(|(_, r)| r.to_f64().contains(at)) {
+        if let Some(&(p, _)) = self.greeter.power.iter().find(|(_, r)| r.to_f64().contains(at)) {
+            self.greeter_power(p);
+        } else if let Some(&(i, _)) = self.greeter.rows.iter().find(|(_, r)| r.to_f64().contains(at)) {
             self.greeter_choose(i);
         } else if self.greeter.session_line.to_f64().contains(at) && !self.greeter.sessions.is_empty() {
             self.greeter.session = (self.greeter.session + 1) % self.greeter.sessions.len();
         }
         self.redraw_all();
+    }
+
+    /// Sleep at once; Restart and Shut Down on a second press.
+    fn greeter_power(&mut self, p: vergence_dm::power::Power) {
+        use vergence_dm::power::Power;
+        let confirmed = matches!(self.greeter.confirm, Some((q, at)) if q == p && at.elapsed() < Duration::from_secs(5));
+        if p != Power::Sleep && !confirmed {
+            self.greeter.confirm = Some((p, Instant::now()));
+            let what = if p == Power::Restart { "Restart" } else { "Shut Down" };
+            self.greeter.message = Some((format!("Press {what} again to {}", what.to_lowercase()), false));
+            return;
+        }
+        self.greeter.confirm = None;
+        match vergence_dm::power::ask(p) {
+            Ok(()) => {
+                tracing::info!("greeter: vdm will {}", p.word());
+                self.greeter.message = Some((if p == Power::Sleep { "Going to sleep…" } else if p == Power::Restart { "Restarting…" } else { "Shutting down…" }.into(), false));
+            }
+            Err(e) => {
+                tracing::warn!("greeter: {}: {e}", p.word());
+                self.greeter.message = Some((e, true));
+            }
+        }
     }
 
     /// A conversation with vdm for the chosen person, in a thread of its own.
@@ -260,6 +293,7 @@ impl Server {
         let session = self.greeter.session.min(u8::MAX as usize) as u8;
         let (tx, rx) = std::sync::mpsc::channel();
         self.greeter.talk = Some(tx);
+        self.greeter.told_why = false;
         let first = vec![ToVdm::Hello { version: proto::VERSION, service: Service::Login }, ToVdm::Login { user, session }];
         if let Err(e) = std::thread::Builder::new().name("greeter".into()).spawn(move || crate::lock::converse(heard, rx, vergence_dm::paths::GREETER_SOCKET, first)) {
             tracing::warn!("greeter: {e}");
@@ -293,7 +327,10 @@ impl Server {
                 self.greeter_answer();
             }
             Heard::Info(t) => self.greeter.message = Some((t, false)),
-            Heard::Error(t) => self.greeter.message = Some((t, true)),
+            Heard::Error(t) => {
+                self.greeter.message = Some((t, true));
+                self.greeter.told_why = true;
+            }
             Heard::Done { ok: true, .. } => {
                 tracing::info!("greeter: vdm said yes");
                 let g = &mut self.greeter;
@@ -314,7 +351,9 @@ impl Server {
                 if wait > 0 {
                     g.pause_until = Some(Instant::now() + Duration::from_secs(wait as u64));
                 }
-                g.message = Some(("That was not right. Try again.".into(), true));
+                if !g.told_why {
+                    g.message = Some(("That was not right. Try again.".into(), true));
+                }
             }
             Heard::Gone(why) => {
                 tracing::warn!("greeter: {why}");
@@ -364,7 +403,7 @@ impl Server {
         let (w, row_h) = (420.0f32, 34.0f32);
         let list_top = 120.0f32;
         let field_top = list_top + n_rows as f32 * row_h + 18.0;
-        let h = field_top + 120.0;
+        let h = field_top + 160.0;
         let (wi, hi) = (w as i32, h as i32);
         let at = (out.loc.x + (out.size.w - wi) / 2, out.loc.y + (out.size.h - hi) / 2);
         let mut hsh = std::collections::hash_map::DefaultHasher::new();
@@ -373,6 +412,16 @@ impl Server {
         let key = hsh.finish();
         self.greeter.rows = (0..n_rows).map(|i| (i, Rectangle::new((at.0 + 30, at.1 + (list_top + i as f32 * row_h) as i32).into(), (wi - 60, row_h as i32).into()))).collect();
         self.greeter.session_line = Rectangle::new((at.0 + 30, at.1 + (field_top + 86.0) as i32).into(), (wi - 60, 22).into());
+        // Sleep, Restart, Shut Down: three buttons in a row along the bottom.
+        let (pw, ph, pgap) = (100.0f32, 28.0f32, 12.0f32);
+        let power_y = field_top + 120.0;
+        let power_x0 = (w - 3.0 * pw - 2.0 * pgap) / 2.0;
+        let power_local: Vec<(vergence_dm::power::Power, &str, f32)> = [(vergence_dm::power::Power::Sleep, "Sleep"), (vergence_dm::power::Power::Restart, "Restart"), (vergence_dm::power::Power::ShutDown, "Shut Down")]
+            .into_iter()
+            .enumerate()
+            .map(|(i, (p, l))| (p, l, power_x0 + i as f32 * (pw + pgap)))
+            .collect();
+        self.greeter.power = power_local.iter().map(|(p, _, x)| (*p, Rectangle::new((at.0 + *x as i32, at.1 + power_y as i32).into(), (pw as i32, ph as i32).into()))).collect();
         if self.greeter.picture.as_ref().map(|(k, ..)| *k) != Some(key) {
             let s = vergence_look::shelf_look(false);
             let ink = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
@@ -444,6 +493,13 @@ impl Server {
             let color = if bad { Color::rgb(0xff, 0x8a, 0x80) } else { ink(s.menu_ink_off) };
             centered(fonts, &mut scene, face, 12.0, color, field_top + 62.0, &msg);
             centered(fonts, &mut scene, face, 12.0, ink(s.menu_ink_off), field_top + 88.0, &format!("Session: {session_name}  (F2 to change)"));
+            for (_, label, x) in &power_local {
+                let r = SceneRect::new(*x, power_y, pw, ph);
+                scene.fill_rounded(r, vergence_look::RADIUS, ink(s.tile));
+                let lw = fonts.layout(face, 12.5, label).1;
+                let lm = fonts.metrics(face, 12.5);
+                vergence_render::text(&mut scene, fonts, face, 12.5, ink(s.tile_ink), ScenePoint::new((r.x + (r.w - lw) / 2.0).round(), (r.y + (r.h - lm.ascent - lm.descent) / 2.0 + lm.ascent).round()), label);
+            }
             let p = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)).ok()?;
             let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
             self.greeter.picture = Some((key, buffer, wi, hi));

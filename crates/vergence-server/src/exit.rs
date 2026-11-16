@@ -47,6 +47,8 @@ impl Server {
                 let names: Vec<String> = left.iter().map(|w| format!("“{}”", state.window_title(w).trim_end_matches(" •"))).take(3).collect();
                 tracing::info!("exit: stopped; still open: {names:?}");
                 state.resume.exiting = false;
+                // A restart or shut down waiting for the exit does not happen either.
+                state.session_dialog.after_exit = None;
                 let req = crate::notify::Request {
                     app: String::new(),
                     replaces: 0,

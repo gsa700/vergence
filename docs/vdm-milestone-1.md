@@ -251,6 +251,23 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   the same user would share its runtime directory and single-instance
   app sockets (to be refused or given its own, step 6).
 
+- **Step 6, part 6a** (2026-11-16): Sleep, Restart and Shut Down, and one
+  session per person. vergence-dm's power.rs: the power socket (0666; a
+  line "sleep", "restart" or "shut-down", answered "ok" or "no: why").
+  vdm carries them out for root, for the login screen while no one is
+  logged in, and for anyone with a session here (a registered server or a
+  vdm login); Restart and Shut Down not while someone else has one (M2).
+  The commands: systemctl suspend/reboot/poweroff where systemd runs;
+  Void's zzz, reboot, poweroff; FreeBSD's zzz, shutdown -r/-p now. Sleep
+  goes through the system's sleep hooks, so every session locks first
+  (step 2). The log out dialog: Sleep, Restart, Shut Down at the left
+  (Restart and Shut Down close the apps as Log Out does, then the server
+  asks vdm as it ends; an exit that stops cancels them); the login
+  screen: the three along the bottom, Restart and Shut Down on a second
+  press within 5 s. A second login of a person already logged in (a vdm
+  session or a registered console session) is refused before PAM with
+  the reason shown, until each can have its own runtime directory.
+
 ## Design
 
 ### The parts

@@ -140,6 +140,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     event_loop.run(None, &mut state, move |_| {
         // Server is running
     })?;
+    // Restart or Shut Down from the log out dialog: the apps have closed;
+    // vdm does it (while this session is still registered with it).
+    if let Some(p) = state.session_dialog.after_exit.take() {
+        match vergence_dm::power::ask(p) {
+            Ok(()) => tracing::info!("session: vdm will {}", p.word()),
+            Err(e) => tracing::warn!("session: {}: {e}", p.word()),
+        }
+    }
 
     if let Some(p) = crate::control::socket_path().filter(|_| state.control_owned) {
         let _ = std::fs::remove_file(p);

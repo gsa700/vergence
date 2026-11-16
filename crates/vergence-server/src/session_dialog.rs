@@ -4,8 +4,10 @@
 //! whether to log out, with Lock, Cancel and Log Out (the default: Enter).
 //! Escape, Cancel or a press outside the panel closes it. Opened by the
 //! desktop menu's "Exit Vergence…" and the named action. Log Out asks every
-//! app to close as its close button would (exit.rs). Sleep, Restart and Shut
-//! Down join it with VDM step 6, when vdm can carry them out.
+//! app to close as its close button would (exit.rs). On the left, Sleep,
+//! Restart and Shut Down (VDM step 6), carried out by vdm: Sleep at once
+//! (the lock comes on first, by vdm's sleep hook); Restart and Shut Down
+//! after the apps have closed as for Log Out, the session's last act.
 
 use std::hash::{Hash, Hasher};
 
@@ -31,13 +33,20 @@ use crate::{Server, decor::SceneElement};
 /// The buttons, left to right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Button {
+    Sleep,
+    Restart,
+    ShutDown,
     Lock,
     Cancel,
     LogOut,
 }
 
-const BUTTONS: [(Button, &str); 3] = [(Button::Lock, "Lock"), (Button::Cancel, "Cancel"), (Button::LogOut, "Log Out")];
-const W: i32 = 440;
+const BUTTONS: [(Button, &str); 6] = [(Button::Sleep, "Sleep"), (Button::Restart, "Restart"), (Button::ShutDown, "Shut Down"), (Button::Lock, "Lock"), (Button::Cancel, "Cancel"), (Button::LogOut, "Log Out")];
+/// The default: Log Out.
+const DEFAULT: usize = 5;
+/// The power buttons come first, a gap after them.
+const POWER_BUTTONS: usize = 3;
+const W: i32 = 720;
 const H: i32 = 176;
 const BUTTON_W: i32 = 104;
 const BUTTON_H: i32 = 32;
@@ -45,6 +54,8 @@ const BUTTON_H: i32 = 32;
 #[derive(Default)]
 pub struct SessionDialog {
     pub open: bool,
+    /// Restart or Shut Down, once the apps have closed (main.rs asks vdm).
+    pub after_exit: Option<vergence_dm::power::Power>,
     /// The button Enter presses (the pointer over one makes it so).
     focus: usize,
     /// Where the panel and its buttons are, as last drawn.
@@ -66,7 +77,7 @@ impl Server {
         self.card_close();
         self.drawer_close();
         self.session_dialog.open = true;
-        self.session_dialog.focus = 2;
+        self.session_dialog.focus = DEFAULT;
         tracing::info!("session: the log out dialog");
         self.redraw_all();
     }
@@ -85,6 +96,21 @@ impl Server {
             }
             Some(Button::LogOut) => {
                 tracing::info!("session: log out, the apps asked to close first");
+                self.session_dialog.after_exit = None;
+                self.begin_exit();
+            }
+            Some(Button::Sleep) => {
+                tracing::info!("session: sleep, by vdm");
+                std::thread::spawn(|| {
+                    if let Err(e) = vergence_dm::power::ask(vergence_dm::power::Power::Sleep) {
+                        tracing::warn!("session: sleep: {e}");
+                    }
+                });
+            }
+            Some(b @ (Button::Restart | Button::ShutDown)) => {
+                let p = if b == Button::Restart { vergence_dm::power::Power::Restart } else { vergence_dm::power::Power::ShutDown };
+                tracing::info!("session: {}, the apps asked to close first", p.word());
+                self.session_dialog.after_exit = Some(p);
                 self.begin_exit();
             }
             Some(Button::Cancel) | None => {}
@@ -157,11 +183,15 @@ impl Server {
         let accent = self.accent();
         let at = (out.loc.x + (out.size.w - W) / 2, out.loc.y + (out.size.h - H) / 2);
         let panel: Rectangle<i32, Logical> = Rectangle::new(at.into(), (W, H).into());
-        // The buttons, right-aligned, Log Out last (the default).
+        // Sleep, Restart and Shut Down at the left; Lock, Cancel and Log Out
+        // (the default) at the right.
         let (pad, gap) = (20, 10);
         let row_y = H - pad - BUTTON_H;
-        let first_x = W - pad - BUTTONS.len() as i32 * BUTTON_W - (BUTTONS.len() as i32 - 1) * gap;
-        let local: Vec<(usize, i32)> = (0..BUTTONS.len()).map(|i| (i, first_x + i as i32 * (BUTTON_W + gap))).collect();
+        let right = BUTTONS.len() - POWER_BUTTONS;
+        let first_right = W - pad - right as i32 * BUTTON_W - (right as i32 - 1) * gap;
+        let local: Vec<(usize, i32)> = (0..BUTTONS.len())
+            .map(|i| (i, if i < POWER_BUTTONS { pad + i as i32 * (BUTTON_W + gap) } else { first_right + (i - POWER_BUTTONS) as i32 * (BUTTON_W + gap) }))
+            .collect();
         self.session_dialog.panel = panel;
         self.session_dialog.buttons = local.iter().map(|(i, x)| (*i, Rectangle::new((at.0 + x, at.1 + row_y).into(), (BUTTON_W, BUTTON_H).into()))).collect();
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -179,7 +209,7 @@ impl Server {
             scene.stroke(SceneRect::new(0.0, 0.0, w, hh), vergence_look::RADIUS * 2.0, vergence_look::EDGE, ink(s.edge));
             let m = fonts.metrics(bold, 17.0);
             vergence_render::text(&mut scene, fonts, bold, 17.0, ink(s.menu_ink), ScenePoint::new(pad as f32, (22.0 + m.ascent).round()), "Log out of Vergence?");
-            let body = ["Your apps are asked to close, as their own close buttons would;", "one with unsaved work asks you first."];
+            let body = ["Your apps are asked to close, as their own close buttons would (for Restart", "and Shut Down too); one with unsaved work asks you first."];
             let m = fonts.metrics(face, 13.0);
             for (k, line) in body.iter().enumerate() {
                 vergence_render::text(&mut scene, fonts, face, 13.0, ink(s.menu_ink_off), ScenePoint::new(pad as f32, (58.0 + k as f32 * 19.0 + m.ascent).round()), line);

@@ -14,6 +14,13 @@ pub const SESSION_SOCKET: &str = "/run/vdm/session";
 #[cfg(not(target_os = "linux"))]
 pub const SESSION_SOCKET: &str = "/var/run/vdm/session";
 
+/// The power socket (step 6): Sleep, Restart, Shut Down; any local account
+/// may connect, vdm decides by who it is (power.rs).
+#[cfg(target_os = "linux")]
+pub const POWER_SOCKET: &str = "/run/vdm/power";
+#[cfg(not(target_os = "linux"))]
+pub const POWER_SOCKET: &str = "/var/run/vdm/power";
+
 /// The greeter socket: the login screen's (_vdm's) only.
 #[cfg(target_os = "linux")]
 pub const GREETER_SOCKET: &str = "/run/vdm/greeter";

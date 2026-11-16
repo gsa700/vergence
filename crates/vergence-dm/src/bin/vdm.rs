@@ -716,6 +716,8 @@ fn main() {
     let listener = bind(&socket, 0o666);
     let session_listener = bind(paths::SESSION_SOCKET, 0o666);
     let control = bind(paths::CONTROL_SOCKET, 0o600);
+    // Sleep, Restart, Shut Down (step 6): anyone may ask; vdm decides by who.
+    let power = bind(paths::POWER_SOCKET, 0o666);
     // The login screen's socket: its account's only (threat model T9).
     let greeter_account = account(paths::GREETER_USER);
     let greeter_uid = greeter_account.as_ref().map(|a| a.uid);
@@ -859,7 +861,7 @@ fn main() {
             let wait = pauses.wait(uid).min(u16::MAX as u64) as u16;
             let _ = proto::send_from_vdm(&mut client, &FromVdm::Done { ok: code == 0, wait });
         }
-        let mut fds: Vec<PollFd> = [Some(&listener), Some(&session_listener), Some(&control), greeter.as_ref()].into_iter().flatten().map(|l| PollFd { fd: l.as_raw_fd(), events: 1, revents: 0 }).collect();
+        let mut fds: Vec<PollFd> = [Some(&listener), Some(&session_listener), Some(&control), Some(&power), greeter.as_ref()].into_iter().flatten().map(|l| PollFd { fd: l.as_raw_fd(), events: 1, revents: 0 }).collect();
         let first_session = fds.len();
         fds.extend(sessions.iter().map(|(_, s)| PollFd { fd: s.as_raw_fd(), events: 1, revents: 0 }));
         // SAFETY: pollfds we own. A check running: look again in 50 ms, so its
@@ -926,6 +928,55 @@ fn main() {
                 let _ = s.write_all(format!("{answer}\n").as_bytes());
             }
         }
+        // Sleep, Restart, Shut Down (step 6): for root, the login screen
+        // when no one is logged in, and anyone with a session here; restart
+        // and shut down not while someone else has one (review M2).
+        if let Ok((mut s, _)) = power.accept() {
+            use std::io::{BufRead, BufReader};
+            let _ = s.set_nonblocking(false);
+            let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
+            let _ = s.set_write_timeout(Some(Duration::from_secs(2)));
+            let mut line = String::new();
+            let _ = BufReader::new((&s).take(64)).read_line(&mut line);
+            let uid = sys::peer_uid(&s);
+            let has_session = |u: u32| sessions.iter().any(|(x, _)| *x == u) || logins.values().any(|l| l.yes && l.uid == u);
+            let others = |u: u32| sessions.iter().any(|(x, _)| *x != u) || logins.values().any(|l| l.yes && l.uid != u);
+            let who = uid.map(|u| user_name(u).unwrap_or_else(|| u.to_string())).unwrap_or_else(|| "?".into());
+            let answer = match (vergence_dm::power::Power::from_word(line.trim()), uid) {
+                (None, _) | (_, None) => "no: not understood".to_string(),
+                (Some(p), Some(u)) => {
+                    let allowed = u == 0 || (Some(u) == greeter_uid && !logins.values().any(|l| l.yes)) || (u >= paths::MIN_UID && has_session(u));
+                    if !allowed {
+                        log(&format!("power: {} for {who}: refused (no session here)", p.word()));
+                        "no: only someone logged in at this machine can do that".to_string()
+                    } else if p != vergence_dm::power::Power::Sleep && u != 0 && others(u) {
+                        log(&format!("power: {} for {who}: refused (someone else is logged in)", p.word()));
+                        "no: someone else is logged in".to_string()
+                    } else {
+                        let (cmd, args) = p.command();
+                        let started = std::process::Command::new(cmd)
+                            .args(args)
+                            .env_clear()
+                            .env("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null())
+                            .spawn();
+                        match started {
+                            Ok(_) => {
+                                log(&format!("power: {} for {who} ({cmd})", p.word()));
+                                "ok".to_string()
+                            }
+                            Err(e) => {
+                                log(&format!("power: {} for {who}: {cmd}: {e}", p.word()));
+                                format!("no: {cmd}: {e}")
+                            }
+                        }
+                    }
+                }
+            };
+            let _ = s.write_all(format!("{answer}\n").as_bytes());
+        }
         // The login screen asking to log someone in (step 4).
         if let Some(Ok((mut g, _))) = greeter.as_ref().map(|l| l.accept()) {
             let _ = g.set_nonblocking(false);
@@ -947,7 +998,14 @@ fn main() {
                         // The session the login screen chose, by vdm's own reading of the list (review M2).
                         let exec = vergence_dm::sessions::list().get(session as usize).and_then(|e| std::fs::read_to_string(&e.file).ok()).and_then(|t| vergence_dm::sessions::entry_exec(&t));
                         let vt = (0..MAX_SESSIONS).map(|k| vergence_dm::vt::GREETER_VT + 1 + k).find(|vt| !logins.values().any(|l| l.vt == *vt));
-                        if running.values().any(|(u, ..)| *u == uid) || logins.values().any(|l| l.uid == uid && !l.yes) {
+                        // One session per person for now: a second would share the
+                        // first's runtime directory and its apps' sockets (step 6).
+                        let elsewhere = sessions.iter().any(|(u, _)| *u == uid) || logins.values().any(|l| l.uid == uid && l.yes);
+                        if elsewhere {
+                            log(&format!("login for {user}: refused (already logged in)"));
+                            let _ = proto::send_from_vdm(&mut g, &FromVdm::Error("You are already logged in on another console. Log out there first.".into()));
+                            refuse(g, 0);
+                        } else if running.values().any(|(u, ..)| *u == uid) || logins.values().any(|l| l.uid == uid && !l.yes) {
                             refuse(g, 1);
                         } else if wait > 0 {
                             log(&format!("login for {user}: refused, {wait} s of its pause left"));
@@ -963,6 +1021,7 @@ fn main() {
                                         drop(listener);
                                         drop(session_listener);
                                         drop(control);
+                                        drop(power);
                                         drop(sessions);
                                         drop(running);
                                         drop(said_parent);
@@ -1027,6 +1086,7 @@ fn main() {
             drop(listener);
             drop(session_listener);
             drop(control);
+            drop(power);
             drop(sessions);
             drop(running);
             drop(greeter);
