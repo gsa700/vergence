@@ -32,8 +32,10 @@ impl SeatHandler for Server {
     }
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: smithay::input::pointer::CursorImageStatus) {
-        // Locked: the desktop's own cursor only (a program's could look like a dialog).
-        if self.lock.on {
+        // Locked, or a dialog of the desktop's up (the elevation prompt, the
+        // log out dialog): the desktop's own cursor only (a program's could
+        // look like a dialog, or cover one: elevation review, finding 1).
+        if self.lock.on || self.elevating() || self.session_dialog.open {
             return;
         }
         self.pointer_image.status = image;

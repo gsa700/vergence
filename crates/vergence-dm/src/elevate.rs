@@ -55,21 +55,94 @@ fn valid_name(n: &str) -> bool {
     !n.is_empty() && n.len() <= 64 && !n.starts_with('-') && n.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
 }
 
-/// A program's name for the prompt, from the kernel's pid: what it runs as
-/// (Linux /proc/<pid>/comm; FreeBSD ps), our own tools by their names.
-pub fn program_name(pid: u32) -> String {
-    let comm = if cfg!(target_os = "linux") {
-        std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()
-    } else {
-        std::process::Command::new("/bin/ps").args(["-o", "comm=", "-p", &pid.to_string()]).env_clear().output().ok().map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-    };
-    let comm = comm.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).unwrap_or_else(|| format!("process {pid}"));
-    match comm.as_str() {
-        // The kernel keeps 15 characters of a name.
-        "vergence-settin" | "vergence-settings" => "System Settings".into(),
-        "vdm-elevate" => "vdm-elevate (a terminal)".into(),
-        other => other.to_string(),
+/// The program file a process runs (Linux /proc/<pid>/exe; FreeBSD the
+/// kern.proc.pathname sysctl: CTL_KERN 1, KERN_PROC 14, KERN_PROC_PATHNAME 12).
+pub fn program_path(pid: u32) -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_link(format!("/proc/{pid}/exe")).ok()
     }
+    #[cfg(not(target_os = "linux"))]
+    {
+        unsafe extern "C" {
+            fn sysctl(name: *const i32, namelen: u32, old: *mut u8, oldlen: *mut usize, new: *const u8, newlen: usize) -> i32;
+        }
+        let mib = [1i32, 14, 12, pid as i32];
+        let mut buf = vec![0u8; 1024];
+        let mut len = buf.len();
+        // SAFETY: a mib of 4 and a buffer of len bytes, ours.
+        if unsafe { sysctl(mib.as_ptr(), 4, buf.as_mut_ptr(), &mut len, std::ptr::null(), 0) } != 0 {
+            return None;
+        }
+        buf.truncate(len);
+        let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+        Some(std::path::PathBuf::from(String::from_utf8_lossy(&buf[..end]).into_owned()))
+    }
+}
+
+/// Whether a program file is one root installed: the file and its
+/// directory root's, and neither writable by anyone else.
+fn installed_by_root(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let ok = |p: &std::path::Path| std::fs::metadata(p).is_ok_and(|m| m.uid() == 0 && m.mode() & 0o022 == 0);
+    ok(path) && path.parent().is_some_and(ok)
+}
+
+/// Who asks, as the prompt shows it, read from the kernel before anything
+/// the program sends is read (elevation review, finding 2: a program's own
+/// name is its to choose). One of the desktop's own programs, installed by
+/// root, by its name; anything else by its file's name, said to be another
+/// program. The words are what the person decides on; this is a hint.
+pub fn program_shown(pid: u32) -> String {
+    match program_path(pid) {
+        Some(p) if installed_by_root(&p) && p.file_name().is_some_and(|n| n == "vergence-settings") => "System Settings".into(),
+        Some(p) => format!("A program ({})", crate::proto::clean(&p.display().to_string())),
+        None => format!("A program (process {pid})"),
+    }
+}
+
+/// Whether a process runs the installed vergence-server (root's file).
+pub fn is_server(pid: u32) -> bool {
+    program_path(pid).is_some_and(|p| installed_by_root(&p) && p.file_name().is_some_and(|n| n == "vergence-server"))
+}
+
+/// A process's parent (Linux /proc/<pid>/stat; FreeBSD ps).
+pub fn parent_of(pid: u32) -> Option<u32> {
+    if cfg!(target_os = "linux") {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        stat[stat.rfind(')')? + 1..].split_whitespace().nth(1)?.parse().ok()
+    } else {
+        let o = std::process::Command::new("/bin/ps").args(["-o", "ppid=", "-p", &pid.to_string()]).env_clear().output().ok()?;
+        String::from_utf8_lossy(&o.stdout).trim().parse().ok()
+    }
+}
+
+/// Whether `pid` is one of `ancestors` or runs below one of them (at most 64
+/// steps up): a program started from the person's own session (finding 3).
+pub fn descends_from(pid: u32, ancestors: &[u32]) -> bool {
+    let mut p = pid;
+    for _ in 0..64 {
+        if ancestors.contains(&p) {
+            return true;
+        }
+        match parent_of(p) {
+            Some(q) if q > 1 && q != p => p = q,
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// 128 random bits for a prompt's id (the kernel's random device).
+pub fn random_id() -> u128 {
+    use std::io::Read;
+    let mut b = [0u8; 16];
+    if std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut b)).is_err() {
+        // No random device: the time's nanoseconds and the pid, not guessable at a glance.
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        return t ^ ((std::process::id() as u128) << 64);
+    }
+    u128::from_ne_bytes(b)
 }
 
 #[cfg(test)]
@@ -98,7 +171,8 @@ mod tests {
 pub fn request(words: &[&str]) -> Result<String, String> {
     use crate::proto::{self, FromVdm, Service, ToVdm};
     let mut s = std::os::unix::net::UnixStream::connect(crate::paths::ELEVATE_SOCKET).map_err(|_| "vdm is not running here".to_string())?;
-    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(150)));
+    // The prompt waits 120 s, and a check after it may take as long again.
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(260)));
     proto::send_to_vdm(&mut s, &ToVdm::Hello { version: proto::VERSION, service: Service::Elevate }).map_err(|e| e.to_string())?;
     proto::send_to_vdm(&mut s, &ToVdm::Act(words.iter().map(|w| w.to_string()).collect())).map_err(|e| e.to_string())?;
     let mut said = String::new();

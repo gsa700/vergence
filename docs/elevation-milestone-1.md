@@ -36,8 +36,9 @@ So: a button that asks, in a way no program can fake, read or skip.
    the lock: every screen dimmed, a panel in front of everything, the seat
    taking every key and press until it is answered or cancelled; it says
    **what** is asked in vdm's words ("Turn on automatic login for
-   derickson") and **who** asks (the program's name, from the kernel's pid,
-   not from the program); the password goes into the server's locked,
+   derickson") and **who** asks (read from the kernel: root's installed
+   System Settings by its name, any other program by its file's path; a
+   hint, the action's words being what the person decides on); the password goes into the server's locked,
    wiped memory as at the lock; no paste.
 3. **vdm checks the answer through PAM** (its own service, `vdm-elevate`,
    in a forked worker with a time limit, as every check), with the same
@@ -108,7 +109,49 @@ login's Turn Off today, may skip it: question 4).
 - **Seen on kepler** (Dave, 15:55-15:57): Turn On… approved, Cancel
   declined, a wrong password refused with the pause, Turn Off… approved;
   each logged by vdm.
-- Next: step 4's independent review of the code.
+- **Step 4: an independent review of the code** (2026-11-16; given the
+  code and this plan): 11 findings, none critical, all fixed:
+  1. *A program's own cursor could be drawn over the prompt* (covering its
+     words while the password went into the real field): the prompt takes
+     the keyboard and the pointer from every program when it comes up, the
+     desktop's cursor only while it (or the log out dialog) shows, the
+     keyboard given back when it closes.
+  2. *The "who" line was the program's to choose* (its process name): who
+     asks is read before anything the program sends, from its program
+     file (Linux /proc/<pid>/exe, FreeBSD kern.proc.pathname); "System
+     Settings" only for root's installed vergence-settings, anything else
+     "A program (its path)". The words of the action are what the person
+     decides on; the name is a hint (this plan said otherwise before).
+  3. *The asker need not be at the machine* (an ssh login or cron job of
+     the person's could raise the prompt): it must run below one of the
+     person's registered servers (their pids kept at registration) or the
+     worker vdm runs their session in.
+  4. *Keys typed elsewhere could land in a prompt that just came up*, and a
+     program could raise one every 10 s: the prompt takes nothing for
+     750 ms; after a decline or a prompt left to run out the next request
+     waits 10 s, then 20, 40 ... up to 5 minutes, a yes clearing it.
+  5. *Answering and declining were weakly tied to the prompt* (a
+     sequential id, a process name): a prompt's id is 128 random bits only
+     vdm and the asked server know; the answer must come from a process on
+     a console running root's installed vergence-server; the Ask goes to
+     every server of the person's. The energy sleep command is started
+     with no terminal (it could otherwise have registered as a server).
+  6. *The check's worker kept vdm's connections*: it closes them.
+  7. *A request outlived its program and its session*: it is withdrawn when
+     the asking program goes away or the person's last server does.
+  8. *The control socket could type into the prompt*: it refuses input
+     while the prompt shows.
+  9. *A missing /etc/pam.d/vdm-elevate* would have fallen back to PAM's
+     "other": requests are refused while it is missing; uninstall removes it.
+  10. *A program's name could forge log lines*: the name shown and logged
+      is cleaned.
+  11. Smaller: Super+L locks while the prompt shows; the client waits up
+      to 260 s (120 s at the prompt and a check after it).
+  Found sound: the parsers, the actions and their checks, the files'
+  places (root's 0700 state directory), the password being the asker's own
+  and answered only by the same account, ids spent after a yes, the
+  pause, the admin check, the lock in front of the prompt, the server's
+  dialing and the Secret.
 
 ## Questions
 

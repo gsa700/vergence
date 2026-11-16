@@ -170,6 +170,11 @@ impl Server {
         if self.lock.on && !matches!(cmd, "shot" | "lock") {
             return "locked".into();
         }
+        // The elevation prompt is answered by the person at the machine only
+        // (elevation review, finding 8): no typing or pressing into it.
+        if self.elevating() && matches!(cmd, "pointer" | "press" | "release" | "key" | "type" | "touch") {
+            return "an elevation prompt is up".into();
+        }
         if matches!(cmd, "pointer" | "press" | "release" | "key" | "type" | "touch") {
             self.energy_activity();
         }

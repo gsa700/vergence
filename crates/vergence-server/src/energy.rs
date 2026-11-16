@@ -234,10 +234,19 @@ impl Server {
             }
             // The command may block until the machine wakes (zzz does); its
             // result is only logged, the wake comes through input like any other.
-            std::thread::spawn(move || match std::process::Command::new("sh").args(["-c", &cmd]).stdin(std::process::Stdio::null()).output() {
+            // In a session of its own, with no terminal (review C6; elevation
+            // review, finding 5: started from the console's session, it could
+            // register with vdm as if it were the server).
+            std::thread::spawn(move || {
+                let mut c = std::process::Command::new("sh");
+                c.args(["-c", &cmd]).stdin(std::process::Stdio::null());
+                crate::no_terminal(&mut c);
+                let res = c.output();
+                match res {
                 Ok(o) if o.status.success() => tracing::info!("energy: back from sleep ({cmd})"),
                 Ok(o) => tracing::warn!("energy: {cmd}: {} {}", o.status, String::from_utf8_lossy(&o.stderr).trim()),
                 Err(e) => tracing::warn!("energy: {cmd}: {e}"),
+                }
             });
         }
     }

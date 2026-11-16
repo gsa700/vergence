@@ -142,6 +142,15 @@ pub fn close_fds(fds: &[c_int], keep: &[c_int]) {
     }
 }
 
+/// Whether the other end of a connection has gone (or sent something,
+/// which a connection that should only listen counts the same): POLLIN 1,
+/// POLLHUP 0x10, at once.
+pub fn hung_up(stream: &UnixStream) -> bool {
+    let mut p = [stream.as_raw_fd(), 1 | 0x10];
+    // SAFETY: one pollfd we own; no waiting.
+    unsafe { poll(&mut p, 1, 0) > 0 }
+}
+
 /// A reader that gives up when a deadline passes, however slowly the bytes
 /// come (security review, finding 3: a byte every 1.9 s held vdm for minutes).
 pub struct Deadline<'a> {

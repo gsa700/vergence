@@ -62,9 +62,9 @@ pub(crate) enum Heard {
     /// vdm, on the session socket: the machine is about to sleep (step 2).
     LockNow,
     /// vdm, on the session socket: show the elevation prompt (elevate.rs).
-    Ask { id: u32, what: String, who: String },
+    Ask { id: u128, what: String, who: String },
     /// vdm: that prompt is over.
-    Withdrawn(u32),
+    Withdrawn(u128),
 }
 
 /// What the server answers vdm before sleep.

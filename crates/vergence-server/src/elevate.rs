@@ -36,7 +36,7 @@ use crate::{Server, decor::SceneElement, lock::Heard};
 /// What vdm asked to show.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Ask {
-    pub id: u32,
+    pub id: u128,
     pub what: String,
     pub who: String,
 }
@@ -58,7 +58,15 @@ pub struct Elevate {
     buttons: [Rectangle<i32, Logical>; 2],
     dim: Option<(Id, CommitCounter)>,
     picture: Option<(u64, MemoryRenderBuffer, i32, i32)>,
+    /// When it came up: keys and presses are taken only after a moment
+    /// (review finding 4: typing meant for another window ran into it).
+    shown_at: Option<Instant>,
+    /// The window that had the keyboard, given it back when it closes.
+    before: Option<crate::win::Win>,
 }
+
+/// How long the prompt takes nothing after it comes up.
+const SETTLE: Duration = Duration::from_millis(750);
 
 const W: f32 = 480.0;
 
@@ -92,7 +100,26 @@ impl Server {
                 self.close_menu();
                 self.launcher_close();
                 self.session_dialog_close();
+                self.card_close();
+                self.drawer_close();
+                // No program keeps the keyboard or the pointer while it shows,
+                // nor draws its own cursor over it (finding 1: a program's
+                // cursor could have covered the panel's words).
+                self.elevate.before = self.keyboard_window();
+                if let Some(k) = self.seat.get_keyboard() {
+                    k.set_focus(self, None, smithay::utils::SERIAL_COUNTER.next_serial());
+                }
+                if let Some(old) = self.input.keyboard_native.take() {
+                    self.native_keyboard_leave(&old);
+                }
+                if let Some(p) = self.seat.get_pointer() {
+                    let pos = self.pointer_location();
+                    p.motion(self, None, &smithay::input::pointer::MotionEvent { location: pos, serial: smithay::utils::SERIAL_COUNTER.next_serial(), time: smithay::backend::input::InputTime::now() });
+                    p.frame(self);
+                }
+                self.pointer_image.status = smithay::input::pointer::CursorImageStatus::default_named();
                 let e = &mut self.elevate;
+                e.shown_at = Some(Instant::now());
                 e.ask = Some(Ask { id, what, who });
                 e.field = Secret::new();
                 e.prompt = "Password".into();
@@ -117,7 +144,18 @@ impl Server {
             let _ = t.send(None);
         }
         e.picture = None;
+        // The keyboard back where it was.
+        if let Some(w) = self.elevate.before.take().filter(smithay::utils::IsAlive::alive)
+            && !self.lock.on
+        {
+            self.focus_window(&w, smithay::utils::SERIAL_COUNTER.next_serial());
+        }
         self.redraw_all();
+    }
+
+    /// Still settling: it takes no key or press yet.
+    fn elevate_settling(&self) -> bool {
+        self.elevate.shown_at.is_some_and(|t| t.elapsed() < SETTLE)
     }
 
     fn elevate_decline(&mut self) {
@@ -139,7 +177,7 @@ impl Server {
     /// (declines), Enter (answers).
     pub fn elevate_key(&mut self, sym: u32, typed: Option<char>, pressed: bool) {
         use xkbcommon::xkb::keysyms as k;
-        if !pressed {
+        if !pressed || self.elevate_settling() {
             return;
         }
         match sym {
@@ -165,6 +203,9 @@ impl Server {
 
     /// A press: Cancel or Allow; elsewhere nothing.
     pub fn elevate_press(&mut self, at: Point<f64, Logical>) {
+        if self.elevate_settling() {
+            return;
+        }
         if self.elevate.buttons[0].to_f64().contains(at) {
             return self.elevate_decline();
         }
@@ -377,7 +418,7 @@ impl Server {
 }
 
 /// Tell vdm the person said no to prompt `id` (in a thread: vdm answers nothing).
-fn decline(id: u32) {
+fn decline(id: u128) {
     let _ = std::thread::Builder::new().name("elevate-no".into()).spawn(move || {
         if let Ok(mut s) = std::os::unix::net::UnixStream::connect(vergence_dm::paths::ELEVATE_SOCKET) {
             let _ = proto::send_to_vdm(&mut s, &ToVdm::Hello { version: proto::VERSION, service: Service::Elevate });

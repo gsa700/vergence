@@ -939,7 +939,7 @@ fn spawn_greeter_server(uid: u32, gid: u32, server: &std::path::Path, home: &std
 
 /// An elevation request waiting for its prompt (docs/elevation-milestone-1.md).
 struct Elevation {
-    id: u32,
+    id: u128,
     uid: u32,
     name: String,
     action: vergence_dm::elevate::Action,
@@ -1225,10 +1225,14 @@ fn main() {
     let mut allowed_cache: Option<(std::time::Instant, Result<String, String>)> = None;
     // Elevation requests waiting for their prompt's answer, one per person.
     let mut elevations: Vec<Elevation> = Vec::new();
-    let mut next_elevation: u32 = 1;
-    // When a person last said no to a prompt: a new request waits (finding: a
-    // program asking again and again).
-    let mut declined: HashMap<u32, std::time::Instant> = HashMap::new();
+    // When a person last said no to a prompt (or let it run out), and how
+    // many times in a row: a new request waits 10 s, then 20, 40 ... up to
+    // 5 minutes (elevation review, finding 4: a program asking again and
+    // again); a yes clears it.
+    let mut declined: HashMap<u32, (std::time::Instant, u32)> = HashMap::new();
+    // Each registered server's pid, by its connection's descriptor (an
+    // asker must run below one of its person's: finding 3).
+    let mut session_pids: HashMap<c_int, u32> = HashMap::new();
     let mut greeter_run = Greeter { on: at_boot, pid: 0, started: std::time::Instant::now(), quick: 0, next: first, came_from: None, back_to: None };
     loop {
         if STOPPING.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1335,6 +1339,7 @@ fn main() {
                 let uid = elevations[i].uid;
                 if code == 0 {
                     pauses.succeeded(uid);
+                    declined.remove(&uid);
                     let e = elevations.remove(i);
                     let _ = proto::send_from_vdm(&mut server, &FromVdm::Done { ok: true, wait: 0 });
                     let outcome = carry_out(&e.action);
@@ -1427,6 +1432,9 @@ fn main() {
                         && let Some(oldest) = sessions.iter().position(|(u, _)| *u == uid)
                     {
                         sessions.remove(oldest);
+                    }
+                    if let Some(p) = sys::peer_pid(&s) {
+                        session_pids.insert(s.as_raw_fd(), p);
                     }
                     sessions.push((uid, s));
                 }
@@ -1566,11 +1574,23 @@ fn main() {
         while let Some(i) = elevations.iter().position(|e| e.checking.is_none() && now.duration_since(e.since) > ELEVATION_LIMIT) {
             let e = elevations.remove(i);
             log(&format!("elevation: {} by {} through {}: no answer in {} s", e.action.name(), e.name, e.who, ELEVATION_LIMIT.as_secs()));
+            let n = declined.get(&e.uid).map_or(0, |d| d.1);
+            declined.insert(e.uid, (std::time::Instant::now(), n + 1));
             for (_, st) in sessions.iter_mut().filter(|(u, _)| *u == e.uid) {
                 let _ = st.set_write_timeout(Some(Duration::from_secs(1)));
                 let _ = proto::send_from_vdm(st, &FromVdm::Withdrawn(e.id));
             }
             finish(e.program, Err("no answer at the prompt".into()));
+        }
+        // A request whose program went away, or whose person has no session
+        // left, is over (finding 7): it is not carried out for no one.
+        while let Some(i) = elevations.iter().position(|e| e.checking.is_none() && (sys::hung_up(&e.program) || !sessions.iter().any(|(u, _)| *u == e.uid))) {
+            let e = elevations.remove(i);
+            log(&format!("elevation: {} by {} through {}: withdrawn (the program or the session went away)", e.action.name(), e.name, e.who));
+            for (_, st) in sessions.iter_mut().filter(|(u, _)| *u == e.uid) {
+                let _ = st.set_write_timeout(Some(Duration::from_secs(1)));
+                let _ = proto::send_from_vdm(st, &FromVdm::Withdrawn(e.id));
+            }
         }
         // Elevation (docs/elevation-milestone-1.md): a program asking for a
         // named action, or the person's server answering or declining.
@@ -1579,6 +1599,8 @@ fn main() {
             let _ = c.set_write_timeout(Some(Duration::from_secs(1)));
             let until = std::time::Instant::now() + Duration::from_secs(1);
             let (uid, pid) = (sys::peer_uid(&c), sys::peer_pid(&c));
+            // Who asks, from the kernel, before anything it sends is read (finding 2).
+            let who = pid.map(vergence_dm::elevate::program_shown).unwrap_or_default();
             let first = {
                 let mut r = sys::Deadline { stream: &c, until };
                 match (proto::read_to_vdm(&mut r), proto::read_to_vdm(&mut r)) {
@@ -1594,8 +1616,12 @@ fn main() {
                 (Some(ToVdm::Act(words)), Some(uid), Some(pid)) => {
                     let acct = user_name(uid).and_then(|n| account(&n));
                     let action = vergence_dm::elevate::Action::parse(&words);
-                    let who = vergence_dm::elevate::program_name(pid);
-                    let at_console = sessions.iter().any(|(u, _)| *u == uid);
+                    // Started from the person's own session at the machine: below
+                    // its server, or below the worker vdm runs it in (finding 3).
+                    let ancestors: Vec<u32> = sessions.iter().filter(|(u, _)| *u == uid).filter_map(|(_, st)| session_pids.get(&st.as_raw_fd()).copied()).chain(logins.iter().filter(|(_, l)| l.uid == uid && l.yes).map(|(p, _)| *p as u32)).collect();
+                    let at_console = !ancestors.is_empty() && vergence_dm::elevate::descends_from(pid, &ancestors);
+                    let pam_file = std::path::Path::new(paths::PAM_DIR).join(paths::ELEVATE_SERVICE).is_file();
+                    let wait_declined = declined.get(&uid).map_or(0, |(t, n)| (10u64 << (n.saturating_sub(1)).min(5)).min(300).saturating_sub(t.elapsed().as_secs()));
                     match (acct, action) {
                         (_, Err(why)) => refuse_with(c, &why),
                         (None, _) => refuse_with(c, "no such account"),
@@ -1605,17 +1631,18 @@ fn main() {
                             refuse_with(c, &format!("only an administrator (the {} group) can do that", paths::ADMIN_GROUP));
                         }
                         (Some(_), Ok(_)) if elevations.iter().any(|e| e.uid == uid) => refuse_with(c, "another request is waiting at the prompt"),
-                        (Some(_), Ok(_)) if declined.get(&uid).is_some_and(|t| t.elapsed() < Duration::from_secs(10)) => refuse_with(c, "the last request was declined a moment ago"),
+                        (Some(_), Ok(_)) if wait_declined > 0 => refuse_with(c, &format!("the last request was declined; wait {wait_declined} s")),
+                        (Some(_), Ok(_)) if !pam_file => refuse_with(c, &format!("{}/{} is missing (tools/install.sh writes it)", paths::PAM_DIR, paths::ELEVATE_SERVICE)),
                         (Some(_), Ok(_)) if pauses.wait(uid) > 0 => refuse_with(c, &format!("wait {} s after a wrong password", pauses.wait(uid))),
                         (Some(a), Ok(action)) => {
-                            let id = next_elevation;
-                            next_elevation = next_elevation.wrapping_add(1).max(1);
+                            let id = vergence_dm::elevate::random_id();
                             let what = action.describe();
-                            // The person's server: the one that registered last.
-                            let sent = sessions.iter_mut().rev().find(|(u, _)| *u == uid).is_some_and(|(_, st)| {
+                            // Every server of the person's (finding 5: not only the last to register).
+                            let mut sent = false;
+                            for (_, st) in sessions.iter_mut().filter(|(u, _)| *u == uid) {
                                 let _ = st.set_write_timeout(Some(Duration::from_secs(1)));
-                                proto::send_from_vdm(st, &FromVdm::Ask { id, what: what.clone(), who: who.clone() }).is_ok()
-                            });
+                                sent |= proto::send_from_vdm(st, &FromVdm::Ask { id, what: what.clone(), who: who.clone() }).is_ok();
+                            }
                             if sent {
                                 log(&format!("elevation: {} asks for {} ({})", who, action.name(), a.name));
                                 elevations.push(Elevation { id, uid, name: a.name, action, who, program: c, checking: None, since: std::time::Instant::now() });
@@ -1626,16 +1653,25 @@ fn main() {
                     }
                 }
                 // The person's server answers prompt `id`: its PAM check, in a worker.
-                (Some(ToVdm::Answering(id)), Some(uid), Some(pid)) if sys::on_console(pid) && vergence_dm::elevate::program_name(pid) == "vergence-server" => {
+                (Some(ToVdm::Answering(id)), Some(uid), Some(pid)) if sys::on_console(pid) && vergence_dm::elevate::is_server(pid) => {
+                    let elevation_fds: Vec<c_int> = elevations.iter().flat_map(|e| [Some(e.program.as_raw_fd()), e.checking.as_ref().map(|(_, st)| st.as_raw_fd())]).flatten().collect();
                     match elevations.iter_mut().find(|e| e.id == id && e.uid == uid && e.checking.is_none()) {
                         Some(e) if pauses.wait(uid) == 0 => {
                             let _ = c.set_read_timeout(Some(IO_LIMIT));
                             let _ = c.set_write_timeout(Some(IO_LIMIT));
                             let name = e.name.clone();
                             if let Ok(theirs) = c.try_clone() {
+                                // vdm's sockets and connections, closed in the worker (finding 6).
+                                let mut ours: Vec<c_int> = [Some(&listener), Some(&session_listener), Some(&control), Some(&power), Some(&elevate), greeter.as_ref()].into_iter().flatten().map(|l| l.as_raw_fd()).collect();
+                                ours.extend(sessions.iter().map(|(_, st)| st.as_raw_fd()));
+                                ours.extend(running.values().map(|(_, st, _)| st.as_raw_fd()));
+                                ours.extend(logins.values().flat_map(|l| [Some(l.said.as_raw_fd()), l.client.as_ref().map(|x| x.as_raw_fd())]).flatten());
+                                ours.extend(&elevation_fds);
+                                ours.push(c.as_raw_fd());
                                 // SAFETY: vdm is single-threaded; the child runs check() and exits.
                                 let pid = unsafe { fork() };
                                 if pid == 0 {
+                                    sys::close_fds(&ours, &[theirs.as_raw_fd()]);
                                     reset_sigterm();
                                     // SAFETY: the check's own limit.
                                     unsafe { alarm(TIME_LIMIT) };
@@ -1658,11 +1694,12 @@ fn main() {
                         }
                     }
                 }
-                (Some(ToVdm::Decline(id)), Some(uid), Some(pid)) if sys::on_console(pid) => {
+                (Some(ToVdm::Decline(id)), Some(uid), Some(pid)) if sys::on_console(pid) && vergence_dm::elevate::is_server(pid) => {
                     if let Some(i) = elevations.iter().position(|e| e.id == id && e.uid == uid && e.checking.is_none()) {
                         let e = elevations.remove(i);
                         log(&format!("elevation: {} by {} through {}: declined", e.action.name(), e.name, e.who));
-                        declined.insert(uid, std::time::Instant::now());
+                        let n = declined.get(&uid).map_or(0, |d| d.1);
+                        declined.insert(uid, (std::time::Instant::now(), n + 1));
                         finish(e.program, Err("declined at the prompt".into()));
                     }
                 }

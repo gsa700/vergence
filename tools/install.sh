@@ -79,7 +79,7 @@ if [ -n "$uninstall" ]; then
     # vdm's PAM files and the login screen at boot (the service itself is the
     # init system's to stop: vdm will not start without its binary).
     if [ -z "$destdir" ]; then
-        rm -f /etc/pam.d/vdm /etc/pam.d/vdm-unlock /etc/pam.d/vdm-greeter /etc/pam.d/vdm-autologin \
+        rm -f /etc/pam.d/vdm /etc/pam.d/vdm-unlock /etc/pam.d/vdm-greeter /etc/pam.d/vdm-autologin /etc/pam.d/vdm-elevate \
             /var/lib/vdm/login-screen /var/db/vdm/login-screen /var/lib/vdm/autologin /var/db/vdm/autologin
     fi
     rm -f "$sessions/vergence.desktop"

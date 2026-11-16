@@ -65,10 +65,12 @@ pub enum ToVdm {
     /// A named action and its arguments (elevation): 1 to 8 words of
     /// letters, digits, '.', '_' and '-', 256 bytes at most in all.
     Act(Vec<String>),
-    /// The server answers prompt `id` (the conversation follows).
-    Answering(u32),
+    /// The server answers prompt `id` (the conversation follows). A prompt's
+    /// id is 128 random bits only vdm and the server it asked know (elevation
+    /// review, finding 5: a sequential id could be answered by another).
+    Answering(u128),
     /// The person said no to prompt `id`.
-    Decline(u32),
+    Decline(u128),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,9 +82,9 @@ pub enum FromVdm {
     LockNow,
     /// Show the elevation prompt: what is asked, in vdm's words, and who
     /// asks (the program's name, from the kernel's pid).
-    Ask { id: u32, what: String, who: String },
+    Ask { id: u128, what: String, who: String },
     /// Prompt `id` is over: close it.
-    Withdrawn(u32),
+    Withdrawn(u128),
 }
 
 #[derive(Debug)]
@@ -194,11 +196,11 @@ pub fn send_to_vdm(w: &mut impl Write, m: &ToVdm) -> io::Result<()> {
             w.write_all(b.as_bytes())?;
         }
         ToVdm::Answering(id) => {
-            header(w, kind::ANSWERING, 4)?;
+            header(w, kind::ANSWERING, 16)?;
             w.write_all(&id.to_be_bytes())?;
         }
         ToVdm::Decline(id) => {
-            header(w, kind::DECLINE, 4)?;
+            header(w, kind::DECLINE, 16)?;
             w.write_all(&id.to_be_bytes())?;
         }
     }
@@ -249,9 +251,9 @@ pub fn read_to_vdm(r: &mut impl Read) -> Result<ToVdm, ProtoError> {
             }
             Ok(ToVdm::Act(words))
         }
-        kind::ANSWERING | kind::DECLINE if len == 4 => {
+        kind::ANSWERING | kind::DECLINE if len == 16 => {
             let b = read_body(r, len)?;
-            let id = u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+            let id = u128::from_be_bytes(b.as_slice().try_into().map_err(|_| ProtoError::Bad("id"))?);
             Ok(if k == kind::ANSWERING { ToVdm::Answering(id) } else { ToVdm::Decline(id) })
         }
         kind::CANNOT_LOCK if len <= MAX_TEXT => {
@@ -281,14 +283,14 @@ pub fn send_from_vdm(w: &mut impl Write, m: &FromVdm) -> io::Result<()> {
         FromVdm::LockNow => header(w, kind::LOCK_NOW, 0)?,
         FromVdm::Ask { id, what, who } => {
             let (what, who) = (clean(what), clean(who));
-            header(w, kind::ASK, 6 + what.len() + who.len())?;
+            header(w, kind::ASK, 18 + what.len() + who.len())?;
             w.write_all(&id.to_be_bytes())?;
             w.write_all(&(what.len() as u16).to_be_bytes())?;
             w.write_all(what.as_bytes())?;
             w.write_all(who.as_bytes())?;
         }
         FromVdm::Withdrawn(id) => {
-            header(w, kind::WITHDRAWN, 4)?;
+            header(w, kind::WITHDRAWN, 16)?;
             w.write_all(&id.to_be_bytes())?;
         }
     }
@@ -311,14 +313,16 @@ pub fn read_from_vdm(r: &mut impl Read) -> Result<FromVdm, ProtoError> {
         (kind::ERROR, rest) => Ok(FromVdm::Error(text(rest)?)),
         (kind::DONE, [ok @ (0 | 1), hi, lo]) => Ok(FromVdm::Done { ok: *ok == 1, wait: u16::from_be_bytes([*hi, *lo]) }),
         (kind::LOCK_NOW, []) => Ok(FromVdm::LockNow),
-        (kind::ASK, [a, b, c, d, wh, wl, rest @ ..]) => {
-            let n = u16::from_be_bytes([*wh, *wl]) as usize;
+        (kind::ASK, b) if b.len() >= 18 => {
+            let id = u128::from_be_bytes(b[..16].try_into().map_err(|_| ProtoError::Bad("ask"))?);
+            let n = u16::from_be_bytes([b[16], b[17]]) as usize;
+            let rest = &b[18..];
             if n > rest.len() {
                 return Err(ProtoError::Bad("ask"));
             }
-            Ok(FromVdm::Ask { id: u32::from_be_bytes([*a, *b, *c, *d]), what: text(&rest[..n])?, who: text(&rest[n..])? })
+            Ok(FromVdm::Ask { id, what: text(&rest[..n])?, who: text(&rest[n..])? })
         }
-        (kind::WITHDRAWN, [a, b, c, d]) => Ok(FromVdm::Withdrawn(u32::from_be_bytes([*a, *b, *c, *d]))),
+        (kind::WITHDRAWN, b) if b.len() == 16 => Ok(FromVdm::Withdrawn(u128::from_be_bytes(b.try_into().map_err(|_| ProtoError::Bad("withdrawn"))?))),
         _ => Err(ProtoError::Bad("kind")),
     }
 }
@@ -338,8 +342,8 @@ mod tests {
             FromVdm::Done { ok: true, wait: 0 },
             FromVdm::Done { ok: false, wait: 64 },
             FromVdm::LockNow,
-            FromVdm::Ask { id: 7, what: "Turn on automatic login for derickson".into(), who: "System Settings".into() },
-            FromVdm::Withdrawn(7),
+            FromVdm::Ask { id: 0x0123_4567_89ab_cdef_0011_2233_4455_6677, what: "Turn on automatic login for derickson".into(), who: "System Settings".into() },
+            FromVdm::Withdrawn(u128::MAX - 7),
         ] {
             let mut b = Vec::new();
             send_from_vdm(&mut b, &m).unwrap();

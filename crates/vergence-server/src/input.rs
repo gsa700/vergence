@@ -39,6 +39,11 @@ impl Server {
             if let Some(k) = self.seat.get_keyboard() {
                 k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| FilterResult::Intercept(()));
             }
+            // Super+L still locks (the lock is in front of the prompt).
+            if pressed && mods.logo && matches!(key.sym, xkbcommon::xkb::keysyms::KEY_l | xkbcommon::xkb::keysyms::KEY_L) {
+                self.lock_request("Super+L");
+                return;
+            }
             return self.elevate_key(key.sym, key.typed, pressed);
         }
         // The log out dialog takes every key while it is open (session_dialog.rs).
