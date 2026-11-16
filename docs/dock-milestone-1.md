@@ -171,6 +171,16 @@ card on Hubble's battery; Techbench once Dave frees it (look at its
 ~/.config/autostart first: GNOME's entries there would now start under
 Vergence unless they say OnlyShowIn or NotShowIn).
 
+- **After the steps** (2026-11-16): a finger's first tap on a tile (on the
+  dock or in the drawer) opens its card, as the design says (a finger has no
+  hover); a tap on the tile again, or on the card's title, goes. Cards and
+  the drawer stand on the frost, as menus do (`panel_frost`; solid without
+  it). Tiles on the dock are in `[shelf] tiles` order, a tile out only for
+  its trouble first beside the drawer; one dropped on another tile of the
+  dock takes its place (after it moving down, before it moving up). Seen on
+  kepler: the clock dragged onto Sound went before it; a simulated finger's
+  tap on Sound opened its card and no settings window; the frosted card.
+
 ## Where things stand
 
 - The dock (shelf milestones 1 and 2): the apps button, pinned and running

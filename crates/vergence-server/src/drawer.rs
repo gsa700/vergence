@@ -167,6 +167,11 @@ impl Server {
             return self.tile_drop(at);
         }
         if let Some(p) = self.tiles.pending.take() {
+            // A finger's first tap opens the card (the drawer stays); a
+            // click, or a tap on an open card's tile, goes.
+            if self.tile_card_first(p.index) {
+                return;
+            }
             self.drawer_close();
             self.tile_go(p.index);
         }
@@ -210,7 +215,20 @@ impl Server {
             Some(d) => d.clone(),
             None => tiles::DOCKED.iter().map(|s| s.to_string()).collect(),
         };
-        let changed = if lift.from_drawer && on_dock && !into_drawer {
+        // Dropped on another tile of the dock: it takes that tile's place.
+        let onto = match self.tile_under(at) {
+            Some(Place::Tile(j)) => self.tiles.list.get(j).map(|q| q.tile.id.clone()).filter(|id| *id != p.tile.id),
+            _ => None,
+        };
+        let changed = if let Some(target) = onto.filter(|_| !into_drawer) {
+            let from = docked.iter().position(|d| *d == p.tile.id);
+            docked.retain(|d| *d != p.tile.id);
+            let at = docked.iter().position(|d| *d == target).unwrap_or(docked.len());
+            // Moving down the dock it goes after the tile it was dropped on, up before it.
+            let to = docked.len().min(match from { Some(f) if f <= at => at + 1, _ => at });
+            docked.insert(to, p.tile.id.clone());
+            true
+        } else if lift.from_drawer && on_dock && !into_drawer {
             if !docked.contains(&p.tile.id) {
                 docked.push(p.tile.id.clone());
             }
@@ -256,6 +274,7 @@ impl Server {
         }
         // Placed again each frame: tiles come, go and change their state.
         self.drawer_place();
+        let frost = self.frost_program(renderer);
         let Some(d) = self.tiles.drawer.as_ref() else { return elements };
         if !d.rect.overlaps(out) {
             return elements;
@@ -266,6 +285,7 @@ impl Server {
         let (headings, cells, _) = tiles::drawer_layout(&what);
         let light = self.light_style();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        frost.is_some().hash(&mut hasher);
         for i in &inside {
             self.tiles.list[*i].tile.hash(&mut hasher);
         }
@@ -278,7 +298,9 @@ impl Server {
             let (Some(face), Some(bold)) = (fonts.face("sans-serif", 400, false), fonts.face("sans-serif", 700, false).or_else(|| fonts.face("sans-serif", 600, false))) else { return elements };
             let (w, h) = (area.size.w as f32, area.size.h as f32);
             let mut scene = Scene::new(w, h);
-            scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, ink(s.menu));
+            if frost.is_none() {
+                scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, ink(s.menu));
+            }
             scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, ink(s.edge));
             for (name, y) in &headings {
                 let m = fonts.metrics(bold, 10.5);
@@ -307,6 +329,18 @@ impl Server {
         let Some((_, buffer)) = self.tiles.drawer.as_ref().and_then(|d| d.picture.as_ref()) else { return elements };
         if let Some(e) = place(renderer, buffer, area, out, scale) {
             elements.push(e);
+        }
+        // Behind it, the frost (look milestone 1), as under a card.
+        if let Some(program) = frost {
+            let a = (area.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+            let b = (area.loc + area.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+            let dst = Rectangle::<i32, smithay::utils::Physical>::new(a, (b.x - a.x, b.y - a.y).into());
+            let look = self.panel_frost(scale);
+            let mut slot = self.tiles.drawer_frost.take();
+            if let Some(e) = crate::backdrop::element(renderer, &mut slot, dst, program, &look) {
+                elements.push(SceneElement::Backdrop(e));
+            }
+            self.tiles.drawer_frost = slot;
         }
         elements
     }

@@ -101,6 +101,9 @@ pub struct Tiles {
     /// Every applet this desktop has seen, by tile id: its name and who
     /// supplies it (read from and written to applets.toml once known).
     known: Option<std::collections::BTreeMap<String, (String, String)>>,
+    /// The frost behind the open card and behind the open drawer (look milestone 1).
+    pub card_frost: crate::backdrop::Slot,
+    pub drawer_frost: crate::backdrop::Slot,
 }
 
 /// ~/.local/state/vergence/applets.toml: every applet seen, for the settings
@@ -330,7 +333,16 @@ impl Server {
         if self.tiles.list.iter().any(|p| self.tile_visible(p) && !self.tile_docked(p)) {
             out.push(Place::Drawer);
         }
-        out.extend((0..self.tiles.list.len()).filter(|i| self.tile_visible(&self.tiles.list[*i]) && self.tile_docked(&self.tiles.list[*i])).map(Place::Tile));
+        // In the order of [shelf] tiles (the user's, by dragging; else the
+        // desktop's own order); a tile out only for its trouble comes first,
+        // beside the drawer it came out of.
+        let chosen: Vec<String> = match &self.shelf.config.tiles {
+            Some(d) => d.clone(),
+            None => tiles::DOCKED.iter().map(|s| s.to_string()).collect(),
+        };
+        let mut docked: Vec<usize> = (0..self.tiles.list.len()).filter(|i| self.tile_visible(&self.tiles.list[*i]) && self.tile_docked(&self.tiles.list[*i])).collect();
+        docked.sort_by_key(|i| chosen.iter().position(|c| *c == self.tiles.list[*i].tile.id).map_or(-1, |p| p as i64));
+        out.extend(docked.into_iter().map(Place::Tile));
         out
     }
 
@@ -446,6 +458,28 @@ impl Server {
             tracing::info!("tiles: card {} closed", c.id);
             self.tile_tell(&c.id, |id| vergence_protocol::bus::ServerMsg::CardClosed { id });
             self.redraw_all();
+        }
+    }
+
+    /// A finger has no hover (whitepaper §6.9): its first tap on a tile opens
+    /// the tile's card; a tap on a tile whose card is open, or any click,
+    /// goes where the tile lives. Whether the card was opened instead.
+    pub fn tile_card_first(&mut self, index: usize) -> bool {
+        if !self.touch.fingers_last {
+            return false;
+        }
+        let Some(key) = self.tiles.list.get(index).map(|p| p.key()) else { return false };
+        if self.tiles.card.as_ref().is_some_and(|c| c.id == key) {
+            return false;
+        }
+        self.card_open(&key);
+        true
+    }
+
+    /// A click or tap on a tile on the dock (shelf.rs).
+    pub fn tile_tap_or_go(&mut self, index: usize) {
+        if !self.tile_card_first(index) {
+            self.tile_go(index);
         }
     }
 
@@ -567,8 +601,11 @@ impl Server {
         let tile = self.tiles.list[index].tile.clone();
         let light = self.light_style();
         let accent = self.accent();
+        // Frosted as the menus are (look milestone 1); solid without the frost.
+        let frost = self.frost_program(renderer);
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         tile.hash(&mut hasher);
+        frost.is_some().hash(&mut hasher);
         let key = (hasher.finish(), scale.to_bits(), light);
         let s = vergence_look::shelf_look(light);
         let ink = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
@@ -615,7 +652,9 @@ impl Server {
             .collect();
         if open.picture.as_ref().map(|(k, _)| *k) != Some(key) {
             let mut scene = Scene::new(w, h);
-            scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, ink(s.menu));
+            if frost.is_none() {
+                scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, ink(s.menu));
+            }
             scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, ink(s.edge));
             let baseline = |fonts: &vergence_text::Fonts, top: f32, line: f32, size: f32| {
                 let m = fonts.metrics(face, size);
@@ -695,10 +734,29 @@ impl Server {
         let a = (area.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let b = (area.loc + area.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
-        MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(area.size), Kind::Unspecified)
-            .ok()
-            .map(SceneElement::Memory)
-            .into_iter()
-            .collect()
+        let mut out: Vec<SceneElement> = MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(area.size), Kind::Unspecified).ok().map(SceneElement::Memory).into_iter().collect();
+        if let Some(program) = frost {
+            let dst = Rectangle::<i32, smithay::utils::Physical>::new(a, (b.x - a.x, b.y - a.y).into());
+            let mut slot = self.tiles.card_frost.take();
+            if let Some(e) = crate::backdrop::element(renderer, &mut slot, dst, program, &self.panel_frost(scale)) {
+                out.push(SceneElement::Backdrop(e));
+            }
+            self.tiles.card_frost = slot;
+        }
+        out
+    }
+
+    /// The frost under a card or the drawer: as a menu's, with the panel's corners.
+    pub fn panel_frost(&self, scale: f64) -> crate::backdrop::Look {
+        let look = vergence_look::shelf_look(self.light_style());
+        crate::backdrop::Look {
+            tint: crate::backdrop::unit(look.menu),
+            strength: vergence_look::frost_strength(self.look_setting("frost")),
+            ink: crate::backdrop::unit(look.menu_ink),
+            need: 5.0,
+            radius: vergence_look::frost_radius(self.look_setting("frost")) * scale as f32,
+            corner: vergence_look::RADIUS * scale as f32,
+            bottom: false,
+        }
     }
 }

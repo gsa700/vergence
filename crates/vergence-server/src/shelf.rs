@@ -1140,7 +1140,7 @@ impl Server {
         }
         // A click on a tile: to where it lives (tiles.rs); on the drawer's: it opens.
         match held.grip {
-            Grip::Tile(crate::tiles::Place::Tile(index)) => return self.tile_go(index),
+            Grip::Tile(crate::tiles::Place::Tile(index)) => return self.tile_tap_or_go(index),
             Grip::Tile(crate::tiles::Place::Drawer) => return self.drawer_toggle(),
             _ => {}
         }
