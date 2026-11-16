@@ -214,6 +214,8 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   ends in a row. `vdm greeter stop` ends it. Seen on kepler: it starts
   as _vdm on ttyv8, one person and one session (Vergence), no Xwayland.
   From step 7 vdm starts it at boot.
+  Dave logged in at it on kepler (2026-11-16 12:55: "it works, welcome
+  showed up"; vdm logged the login as yes). Step 4 is done.
 
 ## Design
 
