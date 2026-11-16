@@ -139,6 +139,58 @@ the order when its turn is near:
   shot already captures a screen); recording needs a video encoder, which
   is the video milestone's question.
 
+## From Dave's list, 2026-11-15 evening
+
+New above the line in ~/vergence-app-ideas; what each touches, and how far
+it is today:
+
+- **Our own display manager ("VDM"), the lock screen with it, and other
+  ways in: YubiKey, fingerprint.** The lock screen belongs in the server
+  (only the server can be sure nothing else draws or reads keys while
+  locked), and a login screen is the same picture before a session
+  exists, so one piece of work: a greeter run by the server on the seat,
+  password through PAM (FreeBSD's and Linux's, an OS interface, not
+  borrowing), YubiKey through PAM's U2F module, fingerprint through fprintd
+  on Linux (FreeBSD has no common one). On Fedora it takes GDM's place,
+  which systemd's logind expects to be told about; on Void and FreeBSD it
+  replaces logging in on the text console. There is no lock screen today:
+  the lock comes first.
+- **Syntax highlighting in the Text Editor**, common languages. The text
+  area already draws colored runs (spelling waves, marks); what is needed is
+  a highlighter per language. Our own small tokenizers (keywords, strings,
+  comments, numbers) cover most of the value; tree-sitter would be
+  borrowing, so it would need Dave's word.
+- **A mouse cursor set of our own**: the cursors are Adwaita's today
+  (borrowed, whitepaper §8). Goes with our own fonts and icons as the
+  look's own assets.
+- **Our native apps first in the app picker**: done on 15 November
+  (00eacae, the launcher's "Vergence" row at the top). If "app picker"
+  also means File Viewer's "Open with" list: our own apps are already first
+  among those that open a type, after the user's own choices.
+- **The terminal's settings window a little larger**, so all of it shows
+  without scrolling. Small.
+- **A terminal setting to scroll on output** (jump to the bottom when a
+  program writes, or stay where you scrolled to). Small.
+- **Terminal programs as default apps** (nano, vi, emacs, ed for text
+  files). Opening already runs a desktop entry with `Terminal=true` in our
+  terminal (`vergence-term -e`); what is missing is that nano and the others
+  ship no desktop entry on Fedora or Void. Settings > Apps would offer the
+  terminal editors found on the system and write a small entry of our own
+  for the chosen one (`vergence-term-nano.desktop`, `Terminal=true`) plus
+  the line in vergence-mimeapps.list.
+- **The Text Editor's right-click menu as full as the terminal's.** The text
+  area gained a standard menu on 15 November at about 15:10 (Undo, Redo,
+  Cut, Copy, Paste, Select all, spelling suggestions above); a session
+  started before then does not have it. The terminal's also has New tab,
+  the splits and moving a pane: the editor's equivalents (New tab, New
+  window, Find) can join it.
+- **Snapshots for the backup app on Linux, as ZFS gives on FreeBSD**: Btrfs
+  has them (read-only subvolume snapshots, `btrfs send` to another
+  machine), and Fedora installs on Btrfs (Techbench's / and /home are
+  Btrfs); Hubble's ext4 has none, so rsync stays the fallback there. The
+  backup app would work through one interface with three back ends: ZFS,
+  Btrfs, rsync.
+
 ## Questions for Dave (when each app's turn comes)
 
 1. **Spellchecking**: dictionaries are data from other projects (Hunspell's
