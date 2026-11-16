@@ -202,6 +202,21 @@ if [ "$(uname -s)" = FreeBSD ]; then
     echo "drives: the automounter is enabled (rc.conf autofs_enable) and running"
 elif command -v udisksctl >/dev/null || [ -x /usr/libexec/udisks2/udisksd ] || [ -x /usr/lib/udisks2/udisksd ]; then
     echo "drives: udisks2 is installed; the session mounts drives through it"
+    # Without logind polkit cannot see who sits at the machine and udisks2
+    # refuses every mount: a rule lets the seat group mount, eject and power
+    # off removable drives (docs/packaging.md). polkitd runs as a service,
+    # and the system bus reloads its configuration so polkitd can claim its
+    # name (it starts and exits every second until then).
+    if [ ! -d /run/systemd/system ] && [ -n "${group:-}" ] && [ -d /etc/polkit-1/rules.d ]; then
+        sed "s/\"_seatd\"/\"$group\"/" "$here/linux/50-vergence-drives.rules" > /etc/polkit-1/rules.d/50-vergence-drives.rules
+        chmod 644 /etc/polkit-1/rules.d/50-vergence-drives.rules
+        echo "drives: polkit lets the $group group mount removable drives (/etc/polkit-1/rules.d/50-vergence-drives.rules)"
+        dbus-send --system --type=method_call --dest=org.freedesktop.DBus / org.freedesktop.DBus.ReloadConfig 2>/dev/null || true
+        if [ -d /etc/sv/polkitd ] && [ ! -e /var/service/polkitd ]; then
+            ln -s /etc/sv/polkitd /var/service/polkitd
+            echo "drives: polkitd enabled (runit, /var/service/polkitd)"
+        fi
+    fi
 else
     echo "drives: udisks2 is not installed, so drives plugged in are not mounted (Void: xbps-install udisks2)" >&2
 fi

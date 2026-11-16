@@ -6,7 +6,8 @@
 //! Linux: the udisks2 system daemon, over the system bus (our own client,
 //! vergence-dbus): [`automount`] watches for new file systems and mounts
 //! those udisks says are meant to be (HintAuto, not HintIgnore or
-//! HintSystem), under /run/media/<user>; [`eject`] unmounts and powers the
+//! HintSystem), under /run/media/<user>, noexec (and udisks's nosuid,
+//! nodev); [`eject`] unmounts and powers the
 //! drive off. Permission is udisks's (polkit: the active local session may).
 //! FreeBSD: the base system's automounter (autofs, the `-media` map under
 //! /media); see freebsd.rs.

@@ -12,6 +12,8 @@ const ROOT: &str = "/org/freedesktop/UDisks2";
 const FS: &str = "org.freedesktop.UDisks2.Filesystem";
 const BLOCK: &str = "org.freedesktop.UDisks2.Block";
 const DRIVE: &str = "org.freedesktop.UDisks2.Drive";
+/// How often a failed mount is tried again when nothing else happens.
+const RETRY: Duration = Duration::from_secs(60);
 
 /// Every object udisks has: (path, its interfaces' properties).
 fn objects(c: &mut Client) -> Result<Vec<(String, Value)>, String> {
@@ -32,7 +34,18 @@ fn objects(c: &mut Client) -> Result<Vec<(String, Value)>, String> {
 
 /// Options that keep udisks from asking for a password (polkit says yes or no).
 fn quiet() -> Value {
-    Value::Array("{sv}".into(), vec![Value::Entry(Box::new(Value::Str("auth.no_user_interaction".into())), Box::new(Value::Variant(Box::new(Value::Bool(true)))))])
+    Value::Array("{sv}".into(), vec![opt("auth.no_user_interaction", Value::Bool(true))])
+}
+
+fn opt(key: &str, v: Value) -> Value {
+    Value::Entry(Box::new(Value::Str(key.into())), Box::new(Value::Variant(Box::new(v))))
+}
+
+/// Mount options: as quiet, and noexec (Dave, 2026-11-15: "noexec on
+/// sticks"): nothing on a drive runs as a program. udisks adds its own
+/// nosuid and nodev, and allows noexec for any file system by default.
+fn mount_options() -> Value {
+    Value::Array("{sv}".into(), vec![opt("auth.no_user_interaction", Value::Bool(true)), opt("options", Value::Str("noexec".into()))])
 }
 
 fn flag(dict: &Value, key: &str) -> bool {
@@ -58,23 +71,29 @@ fn label(ifaces: &Value) -> String {
 }
 
 /// Mounts the file systems that are new since `seen` (and, the first time,
-/// those already there), and returns what is there now.
+/// those already there), and returns what is there now, less those whose
+/// mount failed: they are tried again next time (a mount refused because
+/// polkit was not up yet, Hubble 2026-11-15, must not be given up on).
 fn mount_new(c: &mut Client, seen: Option<&HashSet<String>>, told: &dyn Fn(&str)) -> Result<HashSet<String>, String> {
     let all = objects(c)?;
+    let mut failed = HashSet::new();
     for (path, ifaces) in &all {
         if seen.is_some_and(|s| s.contains(path)) || !wants_mount(ifaces) {
             continue;
         }
-        let m = Message::method_call(DEST, path, FS, "Mount", &[quiet()]);
+        let m = Message::method_call(DEST, path, FS, "Mount", &[mount_options()]);
         match c.call(m, super::CALL) {
             Ok(r) => {
                 let at = r.args().ok().and_then(|a| a.first().and_then(|v| v.as_str().map(str::to_string))).unwrap_or_default();
                 told(&format!("media: {} mounted at {at}", label(ifaces)));
             }
-            Err(e) => told(&format!("media: {} could not be mounted: {e}", label(ifaces))),
+            Err(e) => {
+                told(&format!("media: {} could not be mounted: {e}", label(ifaces)));
+                failed.insert(path.clone());
+            }
         }
     }
-    Ok(all.into_iter().map(|(p, _)| p).collect())
+    Ok(all.into_iter().map(|(p, _)| p).filter(|p| !failed.contains(p)).collect())
 }
 
 pub fn automount(told: &dyn Fn(&str)) {
@@ -95,7 +114,11 @@ fn watch(told: &dyn Fn(&str)) -> Result<(), String> {
     let mut seen = mount_new(&mut c, None, told)?;
     told(&format!("media: watching udisks2 ({} objects)", seen.len()));
     loop {
-        let Some(sig) = c.next_signal(Duration::from_secs(300)).map_err(|e| e.to_string())? else { continue };
+        // Quiet for a minute: look again anyway, for a mount that failed.
+        let Some(sig) = c.next_signal(RETRY).map_err(|e| e.to_string())? else {
+            seen = mount_new(&mut c, Some(&seen), told)?;
+            continue;
+        };
         if sig.member.as_deref() == Some("InterfacesAdded") || sig.member.as_deref() == Some("InterfacesRemoved") {
             // A drive's partitions and file systems come one after another.
             std::thread::sleep(Duration::from_millis(400));
@@ -160,6 +183,13 @@ mod tests {
         assert!(!wants_mount(&ifaces(true, false, Some("/run/media/u/STICK"))), "mounted already");
         assert_eq!(mount_points(&ifaces(true, false, Some("/run/media/u/STICK"))), vec!["/run/media/u/STICK"]);
         assert_eq!(label(&ifaces(true, false, None)), "STICK");
+    }
+
+    #[test]
+    fn drives_are_mounted_noexec_without_asking() {
+        let o = mount_options();
+        assert_eq!(lookup(&o, "options").and_then(|v| v.as_str()), Some("noexec"));
+        assert_eq!(lookup(&o, "auth.no_user_interaction"), Some(&Value::Bool(true)));
     }
 
     /// Against the real daemon where it runs: its objects can be listed.

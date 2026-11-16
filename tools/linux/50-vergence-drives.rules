@@ -1,0 +1,17 @@
+// Vergence (tools/install.sh, installed as
+// /etc/polkit-1/rules.d/50-vergence-drives.rules on a Linux with no logind,
+// such as Void with seatd): polkit cannot tell the person at the machine
+// from anyone else there, so udisks2 would refuse every mount. The seat's
+// users (the group seatd gives the seat to) may mount, eject and power off
+// removable drives. Internal disks (udisks2's *-system actions) and other
+// users' mounts still need an administrator.
+polkit.addRule(function(action, subject) {
+    var removable = [
+        "org.freedesktop.udisks2.filesystem-mount",
+        "org.freedesktop.udisks2.eject-media",
+        "org.freedesktop.udisks2.power-off-drive"
+    ];
+    if (removable.indexOf(action.id) >= 0 && subject.isInGroup("_seatd")) {
+        return polkit.Result.YES;
+    }
+});

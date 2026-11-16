@@ -12,6 +12,10 @@
 #   internal disks are da (SAS/SCSI) would need this list changed.
 # - FAT drives mounted for the seat's users to write: group video, files
 #   664, folders 775 (install.sh puts the seat's users in video).
+# - Every drive mounted noexec and nosuid (Dave, 2026-11-15: "noexec on
+#   sticks"): nothing on a stick runs as a program, whatever its file
+#   system keeps (a UFS or ext2 stick's execute bits). Added to each entry,
+#   so it holds whatever auto_master says.
 #
 # Installed as /etc/autofs/special_vergence_media (a special map: the
 # automounter asks those, and only those, for the list of what is there);
@@ -37,7 +41,8 @@ entry() {
     "$SPECIAL" "$1" | while IFS= read -r line; do
         dev=${line##*:/dev/}
         [ "$dev" != "$line" ] && removable "$dev" && printf '%s\n' "$line"
-    done | sed -e 's/^-fstype=msdosfs,/-fstype=msdosfs,-g=video,-m=664,-M=775,/'
+    done | sed -e 's/^-fstype=msdosfs,/-fstype=msdosfs,-g=video,-m=664,-M=775,/' \
+               -e 's/^\(-[^[:space:]]*\)/\1,noexec,nosuid/'
 }
 
 if [ $# -eq 0 ]; then
