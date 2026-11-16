@@ -153,9 +153,31 @@ fn init_logging() {
     }
 }
 
+/// The program `cmd` starts runs in a session of its own, with no
+/// controlling terminal (review C6): it cannot open /dev/tty to reach the
+/// console the session was started on.
+pub fn no_terminal(cmd: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt;
+    unsafe extern "C" {
+        fn setsid() -> i32;
+    }
+    // SAFETY: setsid is async-signal-safe and touches nothing of the parent's;
+    // it cannot fail in a freshly forked child that is not a group leader.
+    unsafe {
+        cmd.pre_exec(|| {
+            setsid();
+            Ok(())
+        });
+    }
+}
+
 /// Start an app in the session: stdin from /dev/null (the server's is the console:
-/// a .NET app blocked reading it and froze, 2026-11-07), reaped when it exits.
+/// a .NET app blocked reading it and froze, 2026-11-07), in a session of its own
+/// with no controlling terminal (VDM milestone 1, review C6: found on kepler, every
+/// app had the console as its controlling terminal and could open /dev/tty, which
+/// a lock screen must not allow), reaped when it exits.
 pub fn spawn(cmd: &mut std::process::Command) -> std::io::Result<u32> {
+    no_terminal(cmd);
     let mut child = cmd.stdin(std::process::Stdio::null()).spawn()?;
     let pid = child.id();
     std::thread::spawn(move || {

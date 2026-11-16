@@ -131,6 +131,21 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   the countdown starts at once everywhere; a child closes the connections
   of other checks it inherited.
 
+- **A real suspend on kepler** (Dave at the machine, 2026-11-16): `zzz` →
+  /etc/rc.suspend → vdm's rc.d suspend → the session locked ("the machine
+  is going to sleep", "shown on every screen") before FreeBSD slept;
+  resumed at 12:24:05 to the lock; unlocked. Earlier: vdm's "no" now comes
+  in about 60 ms on Linux too (PAM_FAIL_DELAY taken over by vdm, which
+  keeps its own pause; finished checks reaped every 50 ms while one runs;
+  Dave: FreeBSD had been "smoother and more consistent").
+- **Step 3, C6** (2026-11-16): on kepler the server's children held no
+  input or display device (only their own GPU render node), but every one
+  had the console the session started on as its controlling terminal (so
+  could open /dev/tty). Every program the server starts, and the portal's
+  file dialog, now runs in a session of its own (setsid) with no
+  controlling terminal (main.rs `no_terminal`). Checked on kepler: none
+  left. Revoking input devices at a session's end is step 5's reaper.
+
 ## Design
 
 ### The parts

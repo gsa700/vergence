@@ -255,6 +255,7 @@ impl Server {
         cmd.args(["--app", &app]);
         let parent = self.caller_window(conn, &parent_window);
         let sender = self.portal_channel();
+        crate::no_terminal(&mut cmd);
         let mut child = cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).spawn().map_err(|e| format!("the file dialog could not be started: {e}"))?;
         let pid = child.id();
         std::thread::spawn(move || {
