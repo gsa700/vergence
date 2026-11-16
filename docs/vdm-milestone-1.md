@@ -177,7 +177,7 @@ nothing on the network, and §7.4's honest limit.
 | T3 | P | Seeing the session while locked: a frame of the desktop shown on waking, after sleep, on a new monitor, in a notification | The lock is drawn and **presented on every screen before** sleep proceeds or the screens go off; notifications held back; a new monitor's first frame is the lock | tests with vctl and by hand: sleep, wake, hot-plug |
 | T4 | U | Unlocking its own session: telling the server to unlock (bus, D-Bus edge, vctl), injecting keys, drawing over the lock | The server unlocks **only** on vdm's yes to the request the lock dialog sent; no bus, D-Bus or control-socket command unlocks; while locked the control socket refuses everything but reports; input goes to the lock only; nothing is drawn above it | tests: each command while locked |
 | T5 | U | Reading the lock's password as it is typed (keylogging the server, a look-alike dialog) | Keys while locked reach no client (native, Wayland, X11); the dialog is drawn by the server, and no window can stand above it | tests: a client listening while locked hears nothing |
-| T6 | U | Attaching a debugger to the server (or the greeter) and unlocking in memory | The server and the greeter forbid it: `PR_SET_DUMPABLE` 0 on Linux, `procctl(PROC_TRACE_CTL)` on FreeBSD, so a process of the same user cannot ptrace them; what remains (root, a kernel bug) is §7.4's limit | a test that ptrace is refused |
+| T6 | U | Attaching a debugger to the server (or the greeter) and unlocking in memory | The server and the greeter forbid it: `PR_SET_DUMPABLE` 0 on Linux, `procctl(PROC_TRACE_CTL_DISABLE_EXEC)` on FreeBSD; this stops an opportunist, not a program that controls the user's files (it can change the login shell's startup files and so the next server): §7.4, review I1 | a test that ptrace is refused |
 | T7 | U, L | Using the lock socket to guess **another** account's password | vdm checks only the caller's own account, by the uid the kernel gives for the socket (`SO_PEERCRED` on Linux, `getpeereid` on FreeBSD), never a name sent in the request | a test from a second account |
 | T8 | U | Using the lock socket to guess **its own** user's password faster than `su` allows | The same growing pause per account as T1, kept by vdm; so it gains nothing over `su`/`sudo` attempts it can already make | a test of the pause |
 | T9 | L | Reaching the greeter's socket (start sessions, power off) | The greeter socket is in a directory only root and `_vdm` may enter, and vdm checks the peer is `_vdm` | a test from another account |
@@ -221,6 +221,7 @@ nothing on the network, and §7.4's honest limit.
 - **Cold boot, DMA over Thunderbolt, a keyboard that logs**: physical
   attacks on the hardware are out of scope.
 - **The greeter sees typed passwords** (T10): contained, not prevented.
+- **A text console the user is logged in on** gets around the lock by switching to it (review M5; Dave: VT switching stays); every other console asks for its own login.
 
 ### Open points, settled (Dave, 2026-11-16: "1 yes, 2 refuse, 3 yes")
 
@@ -231,23 +232,181 @@ nothing on the network, and §7.4's honest limit.
 3. **Initials** at the greeter in this milestone; users' pictures later,
    from a copy vdm keeps itself, never read from a home by root.
 
+## Design review, 2026-11-16: findings and how each is handled
+
+An independent reviewer read this design, whitepaper §7, the session
+script and the server and seat code (nothing built or changed). Every
+finding is accepted; the most serious were checked against the code here
+(the session script's restart loop, the modifiers sent to the focused
+native window, client cursor surfaces drawn on top). Dave's decisions on
+the three it raised: "1 a, 2 a, 3 a".
+
+### Critical
+
+- **C1. A server restarted by the session script comes back unlocked**
+  (tools/vergence-session restarts on status 75 and on a quick failure).
+  *Handled:* a locked server tells vdm; a session that was locked never
+  restarts (the script asks vdm before each restart), and if one does start
+  again it starts **locked** because vdm says the session was. A test
+  crashes the server while locked.
+- **C2. Step 1 alone would be a lock that is not one** for a session
+  started from a text console: a crash a person at the machine can cause
+  (a USB device, a monitor's EDID, memory) returns to the logged-in shell.
+  *Handled (Dave: "1 a"):* the server locks only when the session cannot
+  fall back to a shell: started by vdm, or by `exec vergence` (the login's
+  own process, checked by the server: no shell above it). Otherwise Super+L
+  says the screen cannot be locked and how to start so that it can (T18).
+  Hubble and kepler start with `exec vergence` until the greeter exists.
+- **C3. The greeter could start programs**: vergence-server starts them
+  from about twenty places (Force Quit's keys, the launcher, the dock,
+  actions, menus, the portal, autostart, session restore, the D-Bus edge).
+  *Handled:* a **greeter mode** in which `crate::spawn` refuses everything
+  but vergence-greeter, and the launcher, dock, drawer, tiles, session
+  restore, autostart, Xwayland, the portal, the D-Bus edge and the control
+  socket are off. A test goes through every key and pointer path in greeter
+  mode.
+- **C4. Sleep the server did not start is not locked** (the lid, the power
+  button, `zzz`, `systemctl suspend`, `acpiconf`), and after resume a CRTC
+  may still show the last frame. *Handled:* vdm locks every session before
+  any sleep and waits (with a time limit) until each server says the lock
+  is **presented**: on Fedora a logind sleep-delay inhibitor (and logind's
+  Lock/LockedHint followed); on Void an /etc/zzz.d/suspend hook; on FreeBSD
+  /etc/rc.suspend. Both ask vdm.
+- **C5. PAM in the root daemon itself**: pam_systemd would move vdm into the
+  user's session scope; pam_fprintd and pam_u2f block; NSS can hang; copies
+  of the password inside modules cannot be wiped. *Handled:* every PAM
+  transaction runs in **its own forked worker** with a time limit, killed if
+  it overruns; a login's worker opens the PAM session and forks the user's
+  processes (as greetd and GDM do); at most one request in flight per uid.
+- **C6. FreeBSD may not revoke input devices from a session that ended**
+  (seatd's revoke may do nothing there; seat descriptors may be inherited by
+  apps), so a leftover program could read keys typed at the greeter or in
+  the next session. *Handled:* verified on kepler before step 3; every seat
+  descriptor close-on-exec; at a session's end vdm kills all of it through a
+  reaper (`procctl(PROC_REAP_ACQUIRE)` on FreeBSD, `PR_SET_CHILD_SUBREAPER`
+  on Linux) before the greeter starts.
+
+### Important
+
+- **I1. T6 cannot hold against U**: the session starts through the user's
+  login shell, whose files U can change (LD_PRELOAD, PATH). *Handled:* T6
+  is reworded as §7.4: the ptrace block stops an opportunist, not a program
+  that controls the user's files. FreeBSD uses `PROC_TRACE_CTL_DISABLE_EXEC`
+  (plain DISABLE would follow every app the server starts); `RLIMIT_CORE` 0
+  as well; password buffers locked in memory (`mlock`) and kept out of core
+  files (MADV_DONTDUMP, MADV_NOCORE).
+- **I2. PAM modules read users' files as root** (pam_u2f's
+  ~/.config/Yubico/u2f_keys, pam_env, pam_mkhomedir). *Handled:* our own
+  /etc/pam.d/vdm, vdm-greeter and vdm-unlock (pam_u2f with an authfile in
+  /etc, or openasuser); vdm refuses to run if they are missing rather than
+  fall back to "other". T12 says PAM's reads are governed by those files.
+- **I3. XDG_RUNTIME_DIR.** *Handled:* pam_xdg on FreeBSD (/var/run/xdg/<user>,
+  today's path) where it is there, logind's on Fedora, vdm's own only on
+  Void; removed only when the user's **last** session ends (an SSH session
+  may still use it); vctl and the session script follow the same rule.
+- **I4. logind's needs.** *Handled:* PAM_TTY, XDG_SEAT, XDG_VTNR and
+  XDG_SESSION_CLASS set before the session opens; the greeter has a logind
+  session of its own (class greeter, PAM service vdm-greeter) so libseat
+  gives `_vdm` the devices; **each user session runs on a VT of its own**
+  (as GDM does), which also ends the handover race between the greeter's
+  server and the user's.
+- **I5. FreeBSD's setuid helpers are run by the seat group** (video), which
+  `_vdm` would join. *Handled:* sound-default and media-eject get a group of
+  their own (`vergence`), the user is in it and `_vdm` is not.
+- **I6. The lock's input has holes in today's code**: modifiers go to the
+  focused native window whatever the seat decides; Escape for the dock is
+  handled before the seat; Ctrl+Alt+Backspace, Force Quit, menus and Alt+Tab
+  are decided before any lock check could be; new windows take focus; a
+  client's own cursor surface is drawn above everything. *Handled:* **the
+  lock is a seat state checked first** in keys, pointer and touch (only
+  volume, brightness and VT keys pass); locking ends grabs, menus, Alt+Tab
+  and drags, clears every client's keyboard and pointer focus, and goes back
+  to the desktop's own cursor; while locked only the lock and the wallpaper
+  are drawn (no windows under the frost, no direct scanout of a client).
+- **I7. The idle timer stops while another VT is shown**, so coming back
+  could show the desktop. *Handled:* on returning to the session's VT, if
+  the idle time is past "lock after", the lock is drawn before the first
+  frame.
+- **I8. vdm going away while a session is locked.** *Handled:* the session
+  stays locked, the dialog says it is waiting for vdm and reconnects;
+  sessions outlive a vdm restart (their workers do not depend on it).
+- **I9. Unlock and PAM.** *Handled:* unlock runs `pam_authenticate`, and
+  `pam_acct_mgmt` tolerating an expired password (so it never shuts a user
+  out of a running session); step 1 already speaks the whole conversation
+  (prompts with and without echo, messages), so a stack that asks for a
+  YubiKey can unlock; a fingerprint runs as a second PAM service beside the
+  password (as GDM), so fprintd's wait never holds the field.
+- **I10. The greeter's state and abuse.** *Handled:* `_vdm` has a home it
+  cannot write and its state on a tmpfs wiped at each start; vdm refuses
+  root and system accounts at login (Dave: "3 a"; including FreeBSD's
+  `toor`, which shares uid 0, and nologin shells); a greeter that keeps
+  failing is backed off and after a few tries leaves a text console; a
+  greeter gone in the middle of PAM has its worker killed.
+
+### Minor
+
+- **M1.** The pause after failures is per uid, kept across connections and
+  vdm restarts; requests in parallel do not get around it.
+- **M2.** "vdm asks first" before a restart with others logged in is the
+  greeter's courtesy, not a control; the session chosen is an id from vdm's
+  own list, and its Exec line is read after vdm has dropped to the user.
+- **M3.** The control socket's blocking read on the server's main loop
+  (2 s) could delay presenting the lock; it moves off the main loop or is
+  closed while locking.
+- **M4.** While locked, the portal's file chooser and OpenURI and the bus's
+  ContextMenu and Activate are deferred until unlock.
+- **M5.** Another VT where the user is logged in at a text console gets
+  around the lock (Dave: "2 a": VT switching stays, every other console
+  asks for its own login, and this is said plainly in the accepted list);
+  Void's `kernel.sysrq` is set deliberately.
+- **M6.** Any LUKS, ZFS or GELI encryption counts, even unlocked by a TPM;
+  checked at every boot, not only when automatic login is turned on.
+- **M7.** Elevation, later, gets its own socket and PAM service, never the
+  lock socket any local user can reach.
+
+### Found sound by the review
+
+The peer uid from SO_PEERCRED and getpeereid (as the control socket uses
+it); FreeBSD's pam_unix checking any user's password as root; screens off
+clearing the CRTCs; keys that wake the screens swallowed; the control
+socket off on installed sessions and the bus checking its peer's uid; no
+screencopy, virtual-keyboard or keyboard-grab protocol offered to clients;
+Linux's PR_SET_DUMPABLE blocking same-uid ptrace.
+
 ## Steps
 
-1. The lock screen in the server (drawing, input, Super+L, idle and sleep,
-   a named action), checking passwords through a small `vdm` that does only
-   that at first. Usable at once on all three.
-2. vdm runs the PAM conversation with its prompts (u2f, fingerprint, codes);
-   tried with Dave's YubiKey where pam_u2f is set up.
-3. The greeter: `_vdm`, vergence-server as the greeter's session, the
-   greeter app, its socket.
-4. Starting and ending the user's session from vdm (PAM session, groups,
-   XDG_RUNTIME_DIR, seat handover on one VT).
-5. Sleep, Restart, Shut down; text size and keyboard layout.
-6. Service files and `install.sh --vdm` for runit, rc.d, systemd.
-7. Settings: a Lock Screen part (lock after, lock on sleep, show the
-   user's picture) and a Login part (autologin, by question 4).
-8. Security pass over vdm, the sockets, the lock screen; fuzz tests of the
-   protocol; whitepaper (VDM in §6.9 and §7) and its PDF.
+(Revised after the design review.)
+
+1. **The lock screen and the first vdm.** The lock as a seat state checked
+   first (I6), drawn and presented before sleep and on every screen and VT
+   return (C4 by the server's own sleep and I7), Super+L, idle, a named
+   action, no paste; vdm as a system service doing only the unlock check, a
+   forked PAM worker per request with a time limit (C5), the whole PAM
+   conversation (I9), the pause per uid (M1), our own /etc/pam.d/vdm-unlock
+   (I2), the lock socket by peer uid (T7); the server locks only when the
+   session cannot fall back to a shell (C2) and never restarts while locked
+   (C1); ptrace and core protection, password buffers that wipe and stay out
+   of swap and core files (I1, T16). Started with `exec vergence` on Hubble
+   and kepler.
+2. **Sleep from anywhere** (C4): logind's inhibitor on Fedora, zzz.d on
+   Void, rc.suspend on FreeBSD, each waiting for the lock to be presented.
+3. **Before the greeter:** C6 checked on kepler (input revoked after a
+   session); the setuid helpers' own group (I5); `_vdm` with a home it
+   cannot write and its state on a tmpfs (I10).
+4. **The greeter:** greeter mode (C3), `_vdm`'s logind session (I4),
+   vergence-greeter, the greeter socket (T9), refusing root and system
+   accounts (I10), backing off a failing greeter.
+5. **Starting and ending sessions** on a VT of their own (I4): the login
+   worker opening the PAM session (C5), environment from nothing (T17),
+   XDG_RUNTIME_DIR by platform (I3), the reaper at the end (C6).
+6. Sleep, Restart, Shut down; text size and keyboard layout; the session
+   list (M2).
+7. Service files and `install.sh --vdm` for runit, rc.d, systemd (vdm
+   itself always enabled: question 3); Techbench's GDM replaced (2 b).
+8. Settings: Lock Screen (lock after, lock on sleep) and Login (automatic
+   login, by 4 a and M6).
+9. Security pass over vdm, the sockets, the lock and the greeter; fuzz tests
+   of both protocols; whitepaper (VDM in §6.9 and §7) and its PDF.
 
 ## Acceptance
 
