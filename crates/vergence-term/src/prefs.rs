@@ -71,6 +71,7 @@ impl Rows for TermRows {
                         control: Control::Choose { choices: vec![Choice::number("1,000", 1000), Choice::number("5,000", 5000), Choice::number("10,000", 10000), Choice::number("50,000", 50000), Choice::number("100,000", 100000)], desktop: None, app_default: 2 },
                         locked: None,
                     },
+                    Row { key: "scroll-on-output".into(), name: "Scroll on output".into(), help: "While scrolled back, new output brings the view down to it. Off: the view stays on what you are reading.".into(), control: Control::Switch { default: false } , locked: None },
                     Row { key: "cursor".into(), name: "Cursor".into(), help: String::new(), control: Control::Choose { choices: vec![Choice::text("Block", "block"), Choice::text("Bar", "bar"), Choice::text("Underline", "underline")], desktop: None, app_default: 0 } , locked: None },
                     Row { key: "blink".into(), name: "Cursor blinks".into(), help: String::new(), control: Control::Switch { default: true } , locked: None },
                     Row { key: "ask-close".into(), name: "Ask before closing".into(), help: "When a window has several tabs, or a program running in one.".into(), control: Control::Switch { default: true } , locked: None },

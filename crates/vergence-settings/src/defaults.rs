@@ -6,6 +6,14 @@
 // covers every type of it (Pictures: PNG, JPEG, GIF, ...); its menu offers
 // the apps that open its first type, and "Not chosen here" forgets
 // Vergence's choice so the shared list's counts again.
+//
+// Text can also be opened by a terminal editor (Dave's list, 2026-11-15:
+// "nano in the terminal to edit text files in Vergence"): the ones on the
+// PATH are offered as "nano (in Terminal)" and so on. Choosing one writes a
+// small desktop entry of our own, ~/.local/share/applications/
+// vergence-term-<program>.desktop (Terminal=true, so opening runs it in
+// our terminal; NoDisplay, so the launcher does not list it), and makes it
+// the default like any other app.
 
 use super::*;
 
@@ -28,10 +36,67 @@ pub const KINDS: &[Kind] = &[
     Kind { name: "Folders", detail: "The app that opens a folder.", types: || vec![vergence_types::FOLDER] },
 ];
 
+/// Terminal programs that edit text: (program, name shown, its command
+/// line for files). Offered for Text when on the PATH.
+pub const TERMINAL_EDITORS: &[(&str, &str, &str)] = &[
+    ("nano", "nano", "nano %F"),
+    ("micro", "micro", "micro %F"),
+    ("vim", "Vim", "vim %F"),
+    ("nvim", "Neovim", "nvim %F"),
+    ("vi", "vi", "vi %F"),
+    ("emacs", "Emacs", "emacs -nw %F"),
+    ("mg", "mg", "mg %F"),
+    ("ed", "ed", "ed %f"),
+];
+
+/// The desktop id of our entry for a terminal program.
+fn terminal_entry_id(program: &str) -> String {
+    format!("vergence-term-{program}.desktop")
+}
+
+/// The entry's text: run in our terminal, not listed, opens text.
+fn terminal_entry_text(name: &str, exec: &str) -> String {
+    format!(
+        "[Desktop Entry]\nType=Application\nName={name} (in Terminal)\nComment=Made by Vergence's Settings > Default apps\nExec={exec}\nTerminal=true\nNoDisplay=true\nMimeType=text/plain;\n"
+    )
+}
+
+/// Writes our entry for a terminal program (owner-writable, readable, as
+/// desktop entries are), by a temporary file renamed over.
+fn write_terminal_entry(program: &str) -> std::io::Result<()> {
+    let Some(&(_, name, exec)) = TERMINAL_EDITORS.iter().find(|(p, _, _)| *p == program) else {
+        return Err(std::io::Error::other("not a terminal editor this knows"));
+    };
+    let data = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))).ok_or_else(|| std::io::Error::other("no home folder"))?;
+    let dir = data.join("applications");
+    std::fs::create_dir_all(&dir)?;
+    let to = dir.join(terminal_entry_id(program));
+    let tmp = to.with_extension("desktop.new");
+    std::fs::write(&tmp, terminal_entry_text(name, exec))?;
+    std::fs::rename(&tmp, &to)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_terminal_editor_entry_runs_in_the_terminal_unlisted() {
+        let t = terminal_entry_text("nano", "nano %F");
+        let e = vergence_shell::desktop::parse("vergence-term-nano", &t).expect("parses");
+        assert!(e.terminal && e.no_display);
+        assert_eq!(e.name, "nano (in Terminal)");
+        assert!(e.mime_types.iter().any(|m| m == "text/plain"));
+        assert_eq!(terminal_entry_id("nano"), "vergence-term-nano.desktop");
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum DefaultsMsg {
     /// A kind (index in KINDS) and the app chosen (a desktop id), or None to forget the choice.
     Choose(usize, Option<String>),
+    /// A kind and a terminal program to open it with (its entry made first).
+    ChooseTerminal(usize, String),
 }
 
 impl App {
@@ -47,6 +112,17 @@ impl App {
                 if let Err(e) = vergence_types::choose_defaults(&(kind.types)(), app.as_deref()) {
                     eprintln!("vergence-settings: {}: {e}", vergence_types::own_list_path().display());
                 }
+                self.defaults_read();
+            }
+            DefaultsMsg::ChooseTerminal(k, program) => {
+                let Some(kind) = KINDS.get(k) else { return };
+                if let Err(e) = write_terminal_entry(&program) {
+                    return eprintln!("vergence-settings: the entry for {program}: {e}");
+                }
+                if let Err(e) = vergence_types::choose_defaults(&(kind.types)(), Some(&terminal_entry_id(&program))) {
+                    eprintln!("vergence-settings: {}: {e}", vergence_types::own_list_path().display());
+                }
+                self.apps = vergence_shell::apps::installed();
                 self.defaults_read();
             }
         }
@@ -79,6 +155,16 @@ impl App {
                 // default), and last "Not chosen here" while Vergence's list chooses.
                 let here = self.chosen_here(first);
                 let mut names: Vec<String> = apps.iter().map(|a| self.entry_name(a)).collect();
+                // Text: terminal editors on the PATH not yet made into entries.
+                let terminals: Vec<String> = if first == "text/plain" {
+                    TERMINAL_EDITORS.iter().filter(|(p, _, _)| vergence_shell::apps::on_path(p) && !apps.contains(&terminal_entry_id(p))).map(|(p, _, _)| p.to_string()).collect()
+                } else {
+                    Vec::new()
+                };
+                for p in &terminals {
+                    let name = TERMINAL_EDITORS.iter().find(|(q, _, _)| q == p).map_or(p.as_str(), |(_, n, _)| n);
+                    names.push(format!("{name} (in Terminal)"));
+                }
                 if here {
                     names.push("Not chosen here (the shared list's)".into());
                 }
@@ -86,9 +172,17 @@ impl App {
                 setting(
                     kind.name,
                     kind.detail,
-                    choice(names, Some(0), move |i| Message::Defaults(DefaultsMsg::Choose(k, ids.get(i).cloned())))
-                        .width(Length::Fixed(230.0))
-                        .name(kind.name),
+                    choice(names, Some(0), move |i| {
+                        if i < ids.len() {
+                            Message::Defaults(DefaultsMsg::Choose(k, Some(ids[i].clone())))
+                        } else if let Some(p) = terminals.get(i - ids.len()) {
+                            Message::Defaults(DefaultsMsg::ChooseTerminal(k, p.clone()))
+                        } else {
+                            Message::Defaults(DefaultsMsg::Choose(k, None))
+                        }
+                    })
+                    .width(Length::Fixed(230.0))
+                    .name(kind.name),
                 )
             })
             .collect();

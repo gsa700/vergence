@@ -524,6 +524,9 @@ impl Session {
                         // A full reset: the line numbers started again.
                         s.selection = None;
                         s.scroll = 0;
+                    } else if s.scroll > 0 && SCROLL_ON_OUTPUT.load(Ordering::Relaxed) && s.grid.pushed != before {
+                        // Scrolled back, with "Scroll on output" on: new lines bring the view back down.
+                        s.scroll = 0;
                     } else if s.scroll > 0 {
                         // Scrolled back: stay on the same text as new lines arrive.
                         s.scroll += s.grid.pushed - before;
@@ -1730,6 +1733,15 @@ impl CursorShape {
 }
 
 /// A switch of the terminal's settings (absent: `default`).
+/// The settings' "Scroll on output" (Dave's list, 2026-11-15): while
+/// scrolled back, new output brings the view down to it. Off by default:
+/// the view stays on the text being read. Read by every tab's parse thread.
+static SCROLL_ON_OUTPUT: AtomicBool = AtomicBool::new(false);
+
+fn set_scroll_on_output(desktop: &str) {
+    SCROLL_ON_OUTPUT.store(term_flag(desktop, "scroll-on-output", false), Ordering::Relaxed);
+}
+
 fn term_flag(desktop: &str, key: &str, default: bool) -> bool {
     vergence_ui::table_value(desktop, "[terminal]", key).map_or(default, |v| v == "true")
 }
@@ -2101,6 +2113,7 @@ impl App for Terminal {
             self.cursor_shape = CursorShape::of(&desktop);
             (self.blink, self.ask_close) = (term_flag(&desktop, "blink", true), term_flag(&desktop, "ask-close", true));
             grid::set_scrollback(scrollback_of(&desktop));
+            set_scroll_on_output(&desktop);
             if self.blink && self.focused {
                 window.wake_after(TIMER_BLINK, BLINK);
             }
@@ -2565,6 +2578,7 @@ fn main() {
         return;
     }
     grid::set_scrollback(scrollback_of(&config("desktop.toml")));
+    set_scroll_on_output(&config("desktop.toml"));
     let mut terminal = Terminal::new();
     let mut args: Vec<String> = std::env::args().collect();
     // Everything after -e is the program and its arguments, ours or not.
