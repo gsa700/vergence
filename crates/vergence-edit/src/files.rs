@@ -40,10 +40,19 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
     if meta.is_dir() {
         return Err(format!("{} is a folder.", name(path)));
     }
-    if meta.len() > MAX_BYTES {
-        return Err(format!("{} is too large to open ({} MB; the most is {} MB).", name(path), meta.len() / (1024 * 1024), MAX_BYTES / (1024 * 1024)));
+    if !meta.is_file() {
+        return Err(format!("{} is not a file the editor can open (a pipe, a device or a socket).", name(path)));
     }
-    let bytes = fs::read(path).map_err(|e| format!("{} could not be read: {}", name(path), plain(&e)))?;
+    let too_large = |len: u64| format!("{} is too large to open ({} MB; the most is {} MB).", name(path), len / (1024 * 1024), MAX_BYTES / (1024 * 1024));
+    if meta.len() > MAX_BYTES {
+        return Err(too_large(meta.len()));
+    }
+    // Checked again on what is opened: the path could have changed since.
+    let bytes = match vergence_types::read_regular(path, MAX_BYTES) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::FileTooLarge => return Err(too_large(MAX_BYTES + 1)),
+        Err(e) => return Err(format!("{} could not be read: {}", name(path), plain(&e))),
+    };
     let writable = !meta.permissions().readonly() && writable(path);
     match String::from_utf8(bytes) {
         Ok(mut text) => {

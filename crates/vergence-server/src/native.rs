@@ -1021,8 +1021,7 @@ impl Server {
     /// from the background).
     fn native_copy(&mut self, client: u32, kinds: Vec<String>) {
         use smithay::wayland::selection::{SelectionTarget, data_device::set_data_device_selection};
-        let focused = self.keyboard_window().is_some_and(|w| w.native().is_some_and(|n| n.client == client));
-        if !focused {
+        if !self.native_has_keyboard(client) {
             return tracing::debug!("native: client {client} copied without the keyboard; ignored");
         }
         tracing::info!("native: client {client} copied {kinds:?}");
@@ -1033,10 +1032,22 @@ impl Server {
         self.native_clipboard_offer(kinds);
     }
 
+    /// Whether native client `client` owns the window with the keyboard: the
+    /// rule for both ends of the clipboard (§7.3, read only on the user's
+    /// paste or by the focused app).
+    fn native_has_keyboard(&self, client: u32) -> bool {
+        clipboard_allowed(self.keyboard_window().and_then(|w| w.native().map(|n| n.client)), client)
+    }
+
     /// A native client pastes: it gets the read end of a pipe whose write end
-    /// goes to whoever has the clipboard.
+    /// goes to whoever has the clipboard. Only the client with the keyboard
+    /// may (security pass 2026-11-15, finding 1).
     fn native_paste(&mut self, client: u32, serial: u32, kind: String) {
         use smithay::wayland::selection::{SelectionTarget, data_device::{current_data_device_selection_userdata, request_data_device_client_selection}};
+        if !self.native_has_keyboard(client) {
+            tracing::debug!("native: client {client} pasted without the keyboard; refused");
+            return self.native_refuse(client, serial, ErrorCode::Denied, "paste is for the window with the keyboard".into());
+        }
         let (read, write) = match vergence_protocol::sock::pipe() {
             Ok(p) => p,
             Err(e) => return self.native_refuse(client, serial, ErrorCode::BadMessage, format!("no pipe: {e}")),
@@ -1087,6 +1098,12 @@ impl Server {
     }
 }
 
+/// The clipboard rule as a plain function: `keyboard` is the native client
+/// whose window has the keyboard, if any.
+fn clipboard_allowed(keyboard: Option<u32>, client: u32) -> bool {
+    keyboard == Some(client)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1098,6 +1115,13 @@ mod tests {
         f.write_all(bytes).unwrap();
         let _ = std::fs::remove_file(&path);
         f
+    }
+
+    #[test]
+    fn clipboard_is_only_for_the_client_with_the_keyboard() {
+        assert!(clipboard_allowed(Some(7), 7));
+        assert!(!clipboard_allowed(Some(7), 8), "another client's window has the keyboard");
+        assert!(!clipboard_allowed(None, 7), "a Wayland or X window, or none, has the keyboard");
     }
 
     #[test]

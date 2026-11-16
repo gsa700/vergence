@@ -92,7 +92,7 @@ fn helper() -> Option<PathBuf> {
 /// enlarge) so that it is still at least this wide and this tall (what a
 /// preview filling that box needs); None for every pixel.
 pub fn decode_file(path: &Path, at_least: Option<(u32, u32)>) -> Result<Picture, Error> {
-    let file = std::fs::File::open(path).map_err(Error::Io)?;
+    let file = vergence_types::open_regular(path).map_err(Error::Io)?;
     let helper = helper().ok_or(Error::NoHelper)?;
     let mut cmd = std::process::Command::new(helper);
     if let Some((w, h)) = at_least {

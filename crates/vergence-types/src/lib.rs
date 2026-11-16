@@ -22,6 +22,43 @@ pub mod table;
 
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "freebsd")]
+const O_NONBLOCK: i32 = 0x0004;
+#[cfg(not(target_os = "freebsd"))]
+const O_NONBLOCK: i32 = 0o4000;
+#[cfg(target_os = "freebsd")]
+const O_NOCTTY: i32 = 0x8000;
+#[cfg(not(target_os = "freebsd"))]
+const O_NOCTTY: i32 = 0o400;
+
+/// Opens `path` for reading only if it is a regular file (links followed).
+/// A named pipe, a device or a socket is refused without waiting: the open
+/// does not block (a pipe with no writer would hang it), a terminal does not
+/// become ours, and what was opened is checked with fstat before anything is
+/// read. Every "read the file the user named" goes through here (security
+/// pass 2026-11-15, finding 5).
+pub fn open_regular(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let f = std::fs::OpenOptions::new().read(true).custom_flags(O_NONBLOCK | O_NOCTTY).open(path)?;
+    if !f.metadata()?.is_file() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file"));
+    }
+    // O_NONBLOCK means nothing to a regular file's reads; it stays set.
+    Ok(f)
+}
+
+/// Reads a regular file whole ([`open_regular`]), refusing one longer than
+/// `max` bytes (counted as read, not believed from its length).
+pub fn read_regular(path: &Path, max: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    open_regular(path)?.take(max + 1).read_to_end(&mut out)?;
+    if out.len() as u64 > max {
+        return Err(std::io::Error::new(std::io::ErrorKind::FileTooLarge, "file too large"));
+    }
+    Ok(out)
+}
+
 pub use table::Row;
 
 /// A folder's type.
@@ -211,7 +248,8 @@ pub fn is_text(head: &[u8]) -> bool {
 
 /// A file's type: a folder; else what its name says; else what its first
 /// bytes say; else a binary file. Follows links; a file that cannot be read
-/// goes by its name alone.
+/// goes by its name alone, and one that is not a regular file (a pipe, a
+/// device) by its name or else as a binary file, without being opened.
 pub fn of_file(path: &Path) -> &'static str {
     if path.is_dir() {
         return FOLDER;
@@ -220,9 +258,14 @@ pub fn of_file(path: &Path) -> &'static str {
         return m;
     }
     let mut head = Vec::with_capacity(HEAD);
-    if let Ok(f) = std::fs::File::open(path) {
-        use std::io::Read;
-        let _ = f.take(HEAD as u64).read_to_end(&mut head);
+    match open_regular(path) {
+        Ok(f) => {
+            use std::io::Read;
+            let _ = f.take(HEAD as u64).read_to_end(&mut head);
+        }
+        // A pipe, a device or a socket: nothing to open it with.
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => return BINARY,
+        Err(_) => {}
     }
     of_bytes(&head).unwrap_or(BINARY)
 }
@@ -556,6 +599,35 @@ pub fn of_kind(top: &str) -> Vec<&'static str> {
 
 #[cfg(test)]
 mod tests {
+
+    fn fifo(tag: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("vergence-types-fifo-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        let ok = std::process::Command::new("mkfifo").arg(&p).status().is_ok_and(|s| s.success());
+        assert!(ok, "mkfifo");
+        p
+    }
+
+    #[test]
+    fn a_named_pipe_is_refused_without_waiting() {
+        let p = fifo("open");
+        let started = std::time::Instant::now();
+        assert_eq!(open_regular(&p).map(|_| ()).unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(of_file(&p), BINARY, "a pipe with no type in its name is a binary file");
+        let _ = std::fs::remove_file(&p);
+        assert!(started.elapsed() < std::time::Duration::from_secs(2), "returned at once");
+    }
+
+    #[test]
+    fn devices_are_refused_and_files_are_read_up_to_the_limit() {
+        assert!(open_regular(Path::new("/dev/zero")).is_err(), "a device reports length 0 and never ends");
+        assert!(open_regular(Path::new("/dev/null")).is_err());
+        let p = std::env::temp_dir().join(format!("vergence-types-reg-{}", std::process::id()));
+        std::fs::write(&p, b"hello").unwrap();
+        assert_eq!(read_regular(&p, 5).unwrap(), b"hello");
+        assert_eq!(read_regular(&p, 4).unwrap_err().kind(), std::io::ErrorKind::FileTooLarge);
+        let _ = std::fs::remove_file(&p);
+    }
     use super::*;
 
     #[test]

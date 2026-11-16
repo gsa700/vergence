@@ -32,6 +32,8 @@ pub const SIZE: u32 = 256;
 /// Pictures larger than this are not made into thumbnails (the helper's
 /// limits would stop them anyway; this spares it the try).
 const MAX_FILE: u64 = 200 * 1024 * 1024;
+/// The most read of a file in the cache itself (a 256 x 256 PNG is far less).
+const MAX_CACHED: u64 = 16 * 1024 * 1024;
 
 /// The file's URI as the spec (and GLib's g_filename_to_uri) writes it:
 /// `file://` and the path, every byte but letters, digits and
@@ -112,7 +114,7 @@ fn decoded(p: vergence_decode::Picture) -> Option<Image> {
 /// The file's thumbnail if the cache has a fresh one (never made here).
 pub fn cached(path: &Path) -> Option<Image> {
     let (large, _) = places(path)?;
-    let bytes = std::fs::read(&large).ok()?;
+    let bytes = vergence_types::read_regular(&large, MAX_CACHED).ok()?;
     if !fresh(&bytes, &uri(path), mtime(path)?) {
         return None;
     }
@@ -199,13 +201,13 @@ pub fn get(path: &Path) -> Option<Image> {
         return None;
     }
     let (link, time) = (uri(path), mtime(path)?);
-    if let Ok(bytes) = std::fs::read(&large)
+    if let Ok(bytes) = vergence_types::read_regular(&large, MAX_CACHED)
         && fresh(&bytes, &link, time)
         && let Some(img) = vergence_decode::decode_file(&large, None).ok().and_then(decoded)
     {
         return Some(img);
     }
-    if std::fs::read(&fail).is_ok_and(|b| fresh(&b, &link, time)) {
+    if vergence_types::read_regular(&fail, MAX_CACHED).is_ok_and(|b| fresh(&b, &link, time)) {
         return None;
     }
     let made = std::fs::metadata(path).ok().filter(|m| m.is_file() && m.len() <= MAX_FILE).and_then(|_| vergence_decode::decode_file(path, Some((SIZE, SIZE))).ok()).and_then(decoded).map(|img| shrink(&img, SIZE));

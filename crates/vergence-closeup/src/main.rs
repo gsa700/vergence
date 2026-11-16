@@ -134,7 +134,7 @@ fn load(path: PathBuf, id: u32, shared: &Shared, waker: Option<Waker>) {
         } else if vergence_types::is_a(mime, vergence_types::TEXT) {
             use std::io::Read;
             let mut bytes = Vec::new();
-            match std::fs::File::open(&path).and_then(|f| f.take(MAX_TEXT as u64 + 1).read_to_end(&mut bytes)) {
+            match vergence_types::open_regular(&path).and_then(|f| f.take(MAX_TEXT as u64 + 1).read_to_end(&mut bytes)) {
                 Ok(_) => {
                     let cut = bytes.len() > MAX_TEXT;
                     bytes.truncate(MAX_TEXT);

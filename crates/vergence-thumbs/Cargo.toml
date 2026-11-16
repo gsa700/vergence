@@ -11,5 +11,6 @@ description = "Thumbnails by the freedesktop thumbnail spec, shared with other d
 # png writes only pictures we made.
 [dependencies]
 vergence-decode.workspace = true
+vergence-types.workspace = true
 vergence-scene.workspace = true
 png = "0.18"

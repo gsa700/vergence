@@ -218,7 +218,10 @@ pub fn copy_tree(from: &Path, to: &Path, progress: &Progress) -> io::Result<()> 
     if let Some(n) = from.file_name() {
         *progress.now.lock().unwrap_or_else(|e| e.into_inner()) = n.to_string_lossy().into_owned();
     }
-    let mut src = fs::File::open(from)?;
+    if !m.is_file() {
+        return Err(io::Error::other("only files, folders and links are copied (not a pipe, a device or a socket)"));
+    }
+    let mut src = vergence_types::open_regular(from)?;
     let mut dst = fs::OpenOptions::new().write(true).create_new(true).open(to)?;
     let mut buf = vec![0u8; 1 << 20];
     loop {
