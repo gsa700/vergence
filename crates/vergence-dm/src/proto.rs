@@ -35,6 +35,8 @@ pub const MAX_TEXT: usize = 512;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Service {
     Unlock,
+    /// The login screen (step 4), on the greeter socket only.
+    Login,
 }
 
 pub enum ToVdm {
@@ -43,6 +45,9 @@ pub enum ToVdm {
     Cancel,
     Presented,
     CannotLock(String),
+    /// The login screen: who logs in, and which session (an index into the
+    /// list vdm and the greeter both read, the system's own files).
+    Login { user: String, session: u8 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +87,7 @@ mod kind {
     pub const CANCEL: u8 = 3;
     pub const PRESENTED: u8 = 4;
     pub const CANNOT_LOCK: u8 = 5;
+    pub const LOGIN: u8 = 6;
     pub const PROMPT: u8 = 16;
     pub const INFO: u8 = 17;
     pub const ERROR: u8 = 18;
@@ -131,6 +137,7 @@ pub fn send_to_vdm(w: &mut impl Write, m: &ToVdm) -> io::Result<()> {
             header(w, kind::HELLO, 2)?;
             w.write_all(&[*version, match service {
                 Service::Unlock => 1,
+                Service::Login => 2,
             }])?;
         }
         ToVdm::Answer(s) => {
@@ -139,6 +146,11 @@ pub fn send_to_vdm(w: &mut impl Write, m: &ToVdm) -> io::Result<()> {
         }
         ToVdm::Cancel => header(w, kind::CANCEL, 0)?,
         ToVdm::Presented => header(w, kind::PRESENTED, 0)?,
+        ToVdm::Login { user, session } => {
+            header(w, kind::LOGIN, 1 + user.len())?;
+            w.write_all(&[*session])?;
+            w.write_all(user.as_bytes())?;
+        }
         ToVdm::CannotLock(t) => {
             let t = clean(t);
             header(w, kind::CANNOT_LOCK, t.len())?;
@@ -156,6 +168,7 @@ pub fn read_to_vdm(r: &mut impl Read) -> Result<ToVdm, ProtoError> {
             let b = read_body(r, len)?;
             match b.as_slice() {
                 [version, 1] => Ok(ToVdm::Hello { version: *version, service: Service::Unlock }),
+                [version, 2] => Ok(ToVdm::Hello { version: *version, service: Service::Login }),
                 [_, _] => Err(ProtoError::Bad("service")),
                 _ => Err(ProtoError::Bad("hello")),
             }
@@ -171,6 +184,15 @@ pub fn read_to_vdm(r: &mut impl Read) -> Result<ToVdm, ProtoError> {
         }
         kind::CANCEL if len == 0 => Ok(ToVdm::Cancel),
         kind::PRESENTED if len == 0 => Ok(ToVdm::Presented),
+        // A user name: 1 to 64 bytes of letters, digits, '.', '_' and '-' (no other byte reaches PAM).
+        kind::LOGIN if (2..=65).contains(&len) => {
+            let b = read_body(r, len)?;
+            let user = std::str::from_utf8(&b[1..]).map_err(|_| ProtoError::Bad("user"))?;
+            if !user.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-')) || user.starts_with('-') {
+                return Err(ProtoError::Bad("user"));
+            }
+            Ok(ToVdm::Login { user: user.to_string(), session: b[0] })
+        }
         kind::CANNOT_LOCK if len <= MAX_TEXT => {
             let b = read_body(r, len)?;
             std::str::from_utf8(&b).map(|t| ToVdm::CannotLock(clean(t))).map_err(|_| ProtoError::Bad("text"))
@@ -252,6 +274,7 @@ mod tests {
         send_to_vdm(&mut b, &ToVdm::Cancel).unwrap();
         send_to_vdm(&mut b, &ToVdm::Presented).unwrap();
         send_to_vdm(&mut b, &ToVdm::CannotLock("no shell\nhere".into())).unwrap();
+        send_to_vdm(&mut b, &ToVdm::Login { user: "derickson".into(), session: 2 }).unwrap();
         let mut r = Cursor::new(b);
         assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Hello { version: VERSION, service: Service::Unlock }));
         match read_to_vdm(&mut r).unwrap() {
@@ -261,6 +284,13 @@ mod tests {
         assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Cancel));
         assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Presented));
         assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::CannotLock(t) if t == "no shell here"));
+        assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Login { user, session: 2 } if user == "derickson"));
+        // A name that could be read as an option, or with other bytes, is refused.
+        for bad in ["-root", "a b", "x\n", ""] {
+            let mut b = Vec::new();
+            send_to_vdm(&mut b, &ToVdm::Login { user: bad.into(), session: 0 }).unwrap();
+            assert!(read_to_vdm(&mut Cursor::new(b)).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

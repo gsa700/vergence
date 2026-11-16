@@ -217,6 +217,25 @@ if [ -n "$stack" ]; then
 else
     echo "vdm: no system PAM stack found (password-auth, system-auth or system); write /etc/pam.d/vdm-unlock by hand" >&2
 fi
+# And for logging in at the login screen (VDM step 4): the system's own
+# login stack, so whatever it asks (a password, a security key, a code) the
+# login screen asks too.
+if [ -f /etc/pam.d/password-auth ]; then
+    printf '%s\n' "# vdm: logging in at the Vergence login screen (tools/install.sh writes it)" \
+        "auth		substack	password-auth" "auth		include		postlogin" \
+        "account		required	pam_nologin.so" "account		include		password-auth" \
+        "password	include		password-auth" \
+        "session		required	pam_loginuid.so" "session		include		password-auth" "session		include		postlogin" > /etc/pam.d/vdm
+elif [ -f /etc/pam.d/system-local-login ]; then
+    printf '%s\n' "# vdm: logging in at the Vergence login screen (tools/install.sh writes it)" \
+        "auth		include		system-local-login" "account		include		system-local-login" \
+        "password	include		system-local-login" "session		include		system-local-login" > /etc/pam.d/vdm
+elif [ "$(uname -s)" = FreeBSD ] && [ -f /etc/pam.d/login ]; then
+    printf '%s\n' "# vdm: logging in at the Vergence login screen (tools/install.sh writes it)" \
+        "auth		include		login" "account		include		login" \
+        "password	include		login" "session		include		login" > /etc/pam.d/vdm
+fi
+[ -f /etc/pam.d/vdm ] && chmod 644 /etc/pam.d/vdm && echo "vdm: /etc/pam.d/vdm written for the login screen"
 # The service, by init system; started now and at every boot.
 if [ -d /run/systemd/system ]; then
     printf '%s\n' "[Unit]" "Description=VDM, the Vergence display manager (unlock checks)" "" "[Service]" \

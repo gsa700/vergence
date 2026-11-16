@@ -183,6 +183,23 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   socket stays as it is (off unless VERGENCE_CONTROL=1, and owner-only:
   _vdm's).
 
+- **Step 4, part 4b** (2026-11-16): logging in. The protocol's Login
+  (Hello for Login, then the user and the session's index; a user name of
+  letters, digits, . _ - only, never starting with -); vergence-dm's
+  sessions list (the system's wayland-sessions entries, Vergence first,
+  shared by the greeter and vdm); vdm's greeter socket (0600, owned by
+  _vdm, peer checked), which refuses root, system accounts, accounts with
+  no real shell and unknown ones before PAM runs, applies the same pause
+  per account, and runs PAM service `vdm` in a forked child (install.sh
+  writes /etc/pam.d/vdm on the system's login stack: password-auth with
+  postlogin and pam_loginuid on Fedora, system-local-login on Void, login on
+  FreeBSD). The server's greeter.rs: the people from /etc/passwd (same
+  rules) with initials, Other… (a name typed first), the password in a
+  `Secret`, PAM's prompts, the pause counting down, the session line (F2 or
+  a press changes it), the clock and the host's name; the seat in its lock
+  state the whole time. A "yes" says so; starting the session is step 5.
+  Not yet seen: vdm starting the greeter on a VT of its own (4c).
+
 ## Design
 
 ### The parts

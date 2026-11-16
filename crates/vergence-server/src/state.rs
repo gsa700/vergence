@@ -128,6 +128,8 @@ pub struct Server {
     pub lock: crate::lock::Lock,
     /// The log out dialog (session_dialog.rs).
     pub session_dialog: crate::session_dialog::SessionDialog,
+    /// The login screen, in greeter mode (greeter.rs).
+    pub greeter: crate::greeter::Greeter,
     /// How each output's scale was found (displays.rs), by output name, and the
     /// [displays] settings last applied.
     pub scale_notes: std::collections::HashMap<String, crate::displays::Scales>,
@@ -304,6 +306,7 @@ impl Server {
             tiles: Default::default(),
             lock: Default::default(),
             session_dialog: Default::default(),
+            greeter: Default::default(),
             scale_notes: Default::default(),
             displays: crate::displays::load(),
             shelf: crate::shelf::Shelf::load(),

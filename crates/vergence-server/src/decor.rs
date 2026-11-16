@@ -646,6 +646,10 @@ impl Server {
         if self.lock.on {
             return self.lock_elements(renderer, output, out, scale);
         }
+        // The login screen: its dialog and the wallpaper, nothing else (greeter.rs).
+        if crate::greeter() {
+            return self.greeter_elements(renderer, output, out, scale);
+        }
         let focused = self.keyboard_window();
         // What of a bar the pointer is over, for its hover look (the scene is
         // built again whenever the pointer moves).

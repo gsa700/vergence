@@ -9,4 +9,5 @@ pub mod pam;
 pub mod paths;
 pub mod proto;
 pub mod secret;
+pub mod sessions;
 pub mod sys;

@@ -14,6 +14,18 @@ pub const SESSION_SOCKET: &str = "/run/vdm/session";
 #[cfg(not(target_os = "linux"))]
 pub const SESSION_SOCKET: &str = "/var/run/vdm/session";
 
+/// The greeter socket: the login screen's (_vdm's) only.
+#[cfg(target_os = "linux")]
+pub const GREETER_SOCKET: &str = "/run/vdm/greeter";
+#[cfg(not(target_os = "linux"))]
+pub const GREETER_SOCKET: &str = "/var/run/vdm/greeter";
+
+/// The PAM service logging in runs (our own file, review I2).
+pub const LOGIN_SERVICE: &str = "vdm";
+
+/// The greeter's account.
+pub const GREETER_USER: &str = "_vdm";
+
 /// The control socket: root's only (`vdm before-sleep`, from the system's
 /// sleep hooks).
 #[cfg(target_os = "linux")]

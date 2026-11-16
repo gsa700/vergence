@@ -36,6 +36,7 @@ mod shelf;
 mod tiles;
 mod lock;
 mod session_dialog;
+mod greeter;
 mod actions;
 mod drawer;
 mod applets;
@@ -96,6 +97,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     state.start_settings();
     state.start_energy();
+    if greeter() {
+        state.start_greeter();
+    }
 
     // --drm: the real monitors (from a text console, through libseat); else nested.
     if std::env::args().any(|a| a == "--drm") {

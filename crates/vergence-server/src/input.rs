@@ -117,6 +117,7 @@ impl Server {
             KeyOut::Lock => {
                 self.lock_request("Super+L");
             }
+            KeyOut::Locked if crate::greeter() => self.greeter_key(key.sym, key.typed, pressed),
             KeyOut::Locked => self.lock_key(key.sym, key.typed, pressed),
             KeyOut::Swallow => {}
         }

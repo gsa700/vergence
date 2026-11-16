@@ -52,7 +52,7 @@ use vergence_scene::{Color, Point as ScenePoint, Rect as SceneRect, Scene};
 use crate::{Server, decor::SceneElement, win::Win};
 
 /// What the thread talking to vdm heard.
-enum Heard {
+pub(crate) enum Heard {
     Prompt { echo: bool, text: String },
     Info(String),
     Error(String),
@@ -176,7 +176,14 @@ fn session(heard: channel::Sender<Heard>, replies: std::sync::mpsc::Receiver<Rep
 }
 
 fn talk(heard: channel::Sender<Heard>, answers: std::sync::mpsc::Receiver<Option<Secret>>) {
-    let mut s = match UnixStream::connect(vergence_dm::paths::UNLOCK_SOCKET) {
+    converse(heard, answers, vergence_dm::paths::UNLOCK_SOCKET, vec![ToVdm::Hello { version: proto::VERSION, service: Service::Unlock }]);
+}
+
+/// One PAM conversation with vdm on `socket`, opened with `first` (the lock's
+/// Hello; the login screen's Hello and Login): PAM's prompts and messages go
+/// to the main loop through `heard`, the answers come back through `answers`.
+pub(crate) fn converse(heard: channel::Sender<Heard>, answers: std::sync::mpsc::Receiver<Option<Secret>>, socket: &str, first: Vec<ToVdm>) {
+    let mut s = match UnixStream::connect(socket) {
         Ok(s) => s,
         Err(e) => {
             let _ = heard.send(Heard::Gone(format!("vdm: {e}")));
@@ -185,9 +192,11 @@ fn talk(heard: channel::Sender<Heard>, answers: std::sync::mpsc::Receiver<Option
     };
     let _ = s.set_read_timeout(Some(Duration::from_secs(150)));
     let _ = s.set_write_timeout(Some(Duration::from_secs(10)));
-    if proto::send_to_vdm(&mut s, &ToVdm::Hello { version: proto::VERSION, service: Service::Unlock }).is_err() {
-        let _ = heard.send(Heard::Gone("vdm closed the connection".into()));
-        return;
+    for m in &first {
+        if proto::send_to_vdm(&mut s, m).is_err() {
+            let _ = heard.send(Heard::Gone("vdm closed the connection".into()));
+            return;
+        }
     }
     loop {
         match proto::read_from_vdm(&mut s) {
