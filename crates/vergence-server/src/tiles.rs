@@ -16,11 +16,20 @@ use smithay::{
     utils::{Logical, Point, Rectangle, Transform},
 };
 use smithay::backend::allocator::Fourcc;
-use vergence_protocol::tile::{Tile, TileState};
+use vergence_protocol::tile::{ControlKind, Tile, TileState};
 use vergence_scene::{Color, Point as ScenePoint, Rect as SceneRect, Scene};
 use vergence_shell::{Edge, Rect, tiles};
 
 use crate::{Server, decor::SceneElement};
+
+/// desktop.toml [clock]: a 24-hour clock and the date under it, both on
+/// unless set off (the settings app's Date & Time page).
+fn clock_look() -> tiles::ClockLook {
+    let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let table = text.parse::<toml::Table>().ok();
+    let get = |k: &str| table.as_ref().and_then(|t| t.get("clock")).and_then(|c| c.get(k)).and_then(|v| v.as_bool()).unwrap_or(true);
+    tiles::ClockLook { h24: get("24-hour"), date: get("date") }
+}
 
 /// Who published a tile: the desktop itself, or a client of the bus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +61,10 @@ struct Open {
     rect: Rectangle<i32, Logical>,
     title: Rectangle<i32, Logical>,
     picture: Option<((u64, u64, bool), MemoryRenderBuffer)>,
+    /// Where each of its controls is (by its place in the card's list), and
+    /// the slider being dragged, if one is.
+    controls: Vec<(usize, Rectangle<i32, Logical>)>,
+    sliding: Option<usize>,
 }
 
 #[derive(Default)]
@@ -62,6 +75,8 @@ pub struct Tiles {
     card: Option<Open>,
     /// The minute the clock last showed.
     minute: Option<i64>,
+    /// Whether the network card is open, for the reading thread (applets.rs).
+    pub live: crate::applets::Live,
 }
 
 /// How long the pointer rests on a tile before its card opens, and how long
@@ -71,6 +86,9 @@ const AWAY: std::time::Duration = std::time::Duration::from_millis(200);
 const CARD_W: i32 = 280;
 /// From the dock to a card, in points.
 const OFF: i32 = 8;
+/// The height of a control's row in a card, and where a slider's track starts.
+const CONTROL_H: f32 = 30.0;
+const TRACK_X: f32 = 92.0;
 
 fn rect(r: Rectangle<i32, Logical>) -> Rect {
     Rect::new(r.loc.x, r.loc.y, r.size.w, r.size.h)
@@ -97,7 +115,13 @@ impl Server {
         }
         self.tiles.minute = Some(secs / 60);
         let Some((local, utc)) = tiles::now_at(secs) else { return };
-        self.tile_set(Owner::Desktop, tiles::clock(local, utc));
+        self.tile_set(Owner::Desktop, tiles::clock(local, utc, clock_look()));
+    }
+
+    /// desktop.toml changed (settings.rs): the clock is drawn again at the
+    /// next tick, as its [clock] table now says.
+    pub fn tiles_reload(&mut self) {
+        self.tiles.minute = None;
     }
 
     /// Put up a tile, or change one its owner already has.
@@ -108,6 +132,17 @@ impl Server {
             None => {
                 tracing::info!("tiles: {} from {owner:?}", tile.id);
                 self.tiles.list.push(Placed { owner, tile });
+                // The desktop's in a fixed order, programs' after them in the
+                // order they came, the clock last (the end of the dock).
+                self.tiles.list.sort_by_key(|p| match (p.owner, p.tile.id.as_str()) {
+                    (Owner::Desktop, "sound") => 0,
+                    (Owner::Desktop, "network") => 1,
+                    (Owner::Desktop, "power") => 2,
+                    (Owner::Desktop, "clock") => 9,
+                    (Owner::Desktop, _) => 3,
+                    (Owner::Client(_), _) => 5,
+                });
+                // A card open on a tile that moved keeps its tile (by key).
             }
         }
         if let Some(open) = self.tiles.card.as_mut() {
@@ -201,7 +236,18 @@ impl Server {
     /// The pointer moved (shelf.rs passes it on): resting on a tile opens its
     /// card; away from the tile and its card a moment, the card closes.
     pub fn tiles_hover(&mut self, at: Point<f64, Logical>, busy: bool) {
-        let over = if busy { None } else { self.tile_under(at).and_then(|i| self.tiles.list.get(i)).map(|p| p.key()) };
+        // A slider held: it follows the pointer, wherever the pointer goes.
+        if let Some(i) = self.tiles.card.as_ref().and_then(|c| c.sliding) {
+            self.card_slide(i, at);
+            return;
+        }
+        // A press held on the dock (a click on its way, a drag): nothing
+        // changes; after a click the card does not open again under the
+        // pointer that is still there.
+        if busy {
+            return;
+        }
+        let over = self.tile_under(at).and_then(|i| self.tiles.list.get(i)).map(|p| p.key());
         if self.card_at(at) || (over.is_some() && over == self.tiles.card.as_ref().map(|c| c.id.clone())) {
             self.tiles.hover = over;
             return;
@@ -223,7 +269,8 @@ impl Server {
                 let _ = self.loop_handle.insert_source(Timer::from_duration(AWAY), |_, _, st| {
                     let at = st.pointer_location();
                     let on_tile = st.tile_under(at).and_then(|i| st.tiles.list.get(i)).map(|p| p.key()) == st.tiles.card.as_ref().map(|c| c.id.clone());
-                    if !st.card_at(at) && !on_tile {
+                    let sliding = st.tiles.card.as_ref().is_some_and(|c| c.sliding.is_some());
+                    if !st.card_at(at) && !on_tile && !sliding {
                         st.card_close();
                     }
                     TimeoutAction::Drop
@@ -240,12 +287,14 @@ impl Server {
         }
         self.card_close();
         tracing::info!("tiles: card {id} open");
-        self.tiles.card = Some(Open { id: id.to_string(), rect: Rectangle::default(), title: Rectangle::default(), picture: None });
+        self.tiles.card = Some(Open { id: id.to_string(), rect: Rectangle::default(), title: Rectangle::default(), picture: None, controls: Vec::new(), sliding: None });
+        self.tiles.live.set(id == "network");
         self.tile_tell(id, |id| vergence_protocol::bus::ServerMsg::CardOpened { id });
         self.redraw_all();
     }
 
     pub fn card_close(&mut self) {
+        self.tiles.live.set(false);
         if let Some(c) = self.tiles.card.take() {
             tracing::info!("tiles: card {} closed", c.id);
             self.tile_tell(&c.id, |id| vergence_protocol::bus::ServerMsg::CardClosed { id });
@@ -268,13 +317,74 @@ impl Server {
         }
     }
 
-    /// A press on the open card: its title goes where the tile does.
+    /// A press on the open card: its title goes where the tile does; a
+    /// button is pressed, a switch turns over, a slider takes the value
+    /// under the pointer and follows it until the press ends.
     pub fn card_press(&mut self, at: Point<f64, Logical>) {
         let Some(c) = self.tiles.card.as_ref() else { return };
-        if c.title.to_f64().contains(at)
-            && let Some(i) = self.tiles.list.iter().position(|p| p.key() == c.id)
-        {
-            self.tile_go(i);
+        let Some(index) = self.tiles.list.iter().position(|p| p.key() == c.id) else { return };
+        if c.title.to_f64().contains(at) {
+            return self.tile_go(index);
+        }
+        let Some(&(i, _)) = c.controls.iter().find(|(_, r)| r.to_f64().contains(at)) else { return };
+        let Some(control) = self.tiles.list[index].tile.card.controls.get(i).cloned() else { return };
+        match control.kind {
+            ControlKind::Button => self.card_act(index, i, 1.0),
+            ControlKind::Switch(on) => self.card_act(index, i, if on { 0.0 } else { 1.0 }),
+            ControlKind::Slider { .. } => {
+                if let Some(c) = self.tiles.card.as_mut() {
+                    c.sliding = Some(i);
+                }
+                self.card_slide(i, at);
+            }
+        }
+    }
+
+    /// The press on a card ended (a slider let go).
+    pub fn card_release(&mut self) {
+        if let Some(c) = self.tiles.card.as_mut() {
+            c.sliding = None;
+        }
+    }
+
+    /// A slider held at `at`: the value there, to its step.
+    fn card_slide(&mut self, i: usize, at: Point<f64, Logical>) {
+        let Some(c) = self.tiles.card.as_ref() else { return };
+        let Some(index) = self.tiles.list.iter().position(|p| p.key() == c.id) else { return };
+        let Some(&(_, r)) = c.controls.iter().find(|(j, _)| *j == i) else { return };
+        let Some(ControlKind::Slider { value, min, max, step }) = self.tiles.list[index].tile.card.controls.get(i).map(|k| k.kind) else { return };
+        // The track as drawn: from 14 + TRACK_X to 14 short of the card's edge,
+        // the knob's middle 7 in from each end.
+        let (x0, x1) = (r.loc.x as f64 + 14.0 + TRACK_X as f64 + 7.0, (r.loc.x + r.size.w) as f64 - 14.0 - 7.0);
+        let f = ((at.x - x0) / (x1 - x0).max(1.0)).clamp(0.0, 1.0);
+        let mut v = min + f * (max - min);
+        if step > 0.0 {
+            v = (min + ((v - min) / step).round() * step).clamp(min, max);
+        }
+        if v != value {
+            self.card_act(index, i, v);
+        }
+    }
+
+    /// A control was used: shown at once as the card's new state, and told
+    /// to the tile's owner (the desktop carries out its own: applets.rs).
+    fn card_act(&mut self, index: usize, i: usize, value: f64) {
+        let Some(p) = self.tiles.list.get_mut(index) else { return };
+        let Some(control) = p.tile.card.controls.get_mut(i) else { return };
+        control.kind = match control.kind {
+            ControlKind::Switch(_) => ControlKind::Switch(value >= 0.5),
+            ControlKind::Slider { min, max, step, .. } => ControlKind::Slider { value, min, max, step },
+            k => k,
+        };
+        let (owner, tile, name) = (p.owner, p.tile.id.clone(), control.id.clone());
+        if let Some(c) = self.tiles.card.as_mut() {
+            c.picture = None;
+        }
+        self.redraw_all();
+        tracing::info!("tiles: {tile} {name} = {value}");
+        match owner {
+            Owner::Desktop => self.desktop_tile_action(&tile, &name, value),
+            Owner::Client(client) => self.bus_send(client, vergence_protocol::bus::ServerMsg::TileAction { id: tile, control: name, value }),
         }
     }
 
@@ -315,6 +425,11 @@ impl Server {
         if card.chart.len() > 1 {
             h += 44.0;
         }
+        let controls_top = h;
+        h += card.controls.len() as f32 * CONTROL_H;
+        if !card.controls.is_empty() {
+            h += 4.0;
+        }
         if !card.note.is_empty() {
             h += 18.0;
         }
@@ -333,6 +448,10 @@ impl Server {
         let open = self.tiles.card.as_mut().expect("open");
         open.rect = area;
         open.title = Rectangle::new((x, y).into(), (wi, (pad + 18.0) as i32).into());
+        open.controls = (0..card.controls.len())
+            // Across the whole card, so a press just past a slider's end still takes it.
+            .map(|i| (i, Rectangle::new((x, y + (controls_top + i as f32 * CONTROL_H) as i32).into(), (wi, CONTROL_H as i32).into())))
+            .collect();
         if open.picture.as_ref().map(|(k, _)| *k) != Some(key) {
             let mut scene = Scene::new(w, h);
             scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, ink(s.menu));
@@ -369,6 +488,40 @@ impl Server {
                     scene.line(pt(i, card.chart[i]), pt(i + 1, card.chart[i + 1]), 1.5, accent);
                 }
                 top += 44.0;
+            }
+            // The controls, one row each: a button across the card; a label
+            // with a switch at the end; a label with a slider's track after it.
+            for k in &card.controls {
+                let mid = top + CONTROL_H / 2.0;
+                match k.kind {
+                    ControlKind::Button => {
+                        let r = SceneRect::new(14.0, top + 3.0, w - 28.0, CONTROL_H - 6.0);
+                        scene.fill_rounded(r, vergence_look::RADIUS, ink(s.hover));
+                        let lw = fonts.layout(face, 13.0, &k.label).1;
+                        vergence_render::text(&mut scene, fonts, face, 13.0, ink(s.menu_ink), ScenePoint::new((w - lw) / 2.0, baseline(fonts, top, CONTROL_H, 13.0)), &k.label);
+                    }
+                    ControlKind::Switch(on) => {
+                        vergence_render::text(&mut scene, fonts, face, 13.0, ink(s.menu_ink), ScenePoint::new(14.0, baseline(fonts, top, CONTROL_H, 13.0)), &k.label);
+                        let pill = SceneRect::new(w - 14.0 - 36.0, mid - 10.0, 36.0, 20.0);
+                        scene.fill_rounded(pill, 10.0, if on { accent } else { ink(s.field) });
+                        let knob = SceneRect::new(if on { pill.x + 18.0 } else { pill.x + 2.0 }, mid - 8.0, 16.0, 16.0);
+                        scene.fill_rounded(knob, 8.0, Color::rgb(0xff, 0xff, 0xff));
+                    }
+                    ControlKind::Slider { value, min, max, .. } => {
+                        vergence_render::text(&mut scene, fonts, face, 13.0, ink(s.menu_ink), ScenePoint::new(14.0, baseline(fonts, top, CONTROL_H, 13.0)), &k.label);
+                        let (x0, x1) = (14.0 + TRACK_X, w - 14.0);
+                        let f = ((value - min) / (max - min)).clamp(0.0, 1.0) as f32;
+                        let at = x0 + 7.0 + (x1 - x0 - 14.0) * f;
+                        scene.fill_rounded(SceneRect::new(x0, mid - 2.0, x1 - x0, 4.0), 2.0, ink(s.field));
+                        scene.fill_rounded(SceneRect::new(x0, mid - 2.0, at - x0, 4.0), 2.0, accent);
+                        scene.fill_rounded(SceneRect::new(at - 7.0, mid - 7.0, 14.0, 14.0), 7.0, Color::rgb(0xff, 0xff, 0xff));
+                        scene.stroke(SceneRect::new(at - 7.0, mid - 7.0, 14.0, 14.0), 7.0, 1.0, ink(s.edge));
+                    }
+                }
+                top += CONTROL_H;
+            }
+            if !card.controls.is_empty() {
+                top += 4.0;
             }
             if !card.note.is_empty() {
                 vergence_render::text(&mut scene, fonts, face, 11.0, ink(s.menu_ink_off), ScenePoint::new(14.0, baseline(fonts, top, 18.0, 11.0)), &card.note);

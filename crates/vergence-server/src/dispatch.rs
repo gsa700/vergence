@@ -525,6 +525,7 @@ impl Server {
             Target::Server(Part::Popup) => self.launcher_release(pos),
             Target::Server(Part::Note) if pressed => self.notify_press(pos),
             Target::Server(Part::Card) if pressed && button == vergence_seat::BTN_LEFT => self.card_press(pos),
+            Target::Server(Part::Card) if !pressed => self.card_release(),
             // The dock: a left press is a click or the start of a drag, let go where
             // it ends; a right press is an icon's menu.
             Target::Server(Part::Dock) if pressed && button == vergence_seat::BTN_LEFT => self.shelf_press(pos, button),

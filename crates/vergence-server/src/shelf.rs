@@ -313,6 +313,10 @@ pub struct Lift {
     to: Option<usize>,
 }
 
+/// A lifted item's picture: what it was drawn for (key, scale, removing,
+/// light, label on the left), the picture, its size in points.
+type Ghost = ((String, u64, bool, bool, bool), MemoryRenderBuffer, i32, i32);
+
 /// How far from the dock a lifted item must be held for letting go to
 /// remove it, in points.
 const OFF_DOCK: i32 = 24;
@@ -378,7 +382,7 @@ pub struct Shelf {
     /// An item being dragged (dock milestone 1), and its picture under the
     /// pointer for a scale (with the Remove mark or without).
     lift: Option<Lift>,
-    ghost: Option<((String, u64, bool, bool, bool), MemoryRenderBuffer, i32, i32)>,
+    ghost: Option<Ghost>,
     /// "Move dock" was chosen: the dock follows the pointer until a press.
     moving: bool,
     /// The item the pointer is over, and whether it has rested there long

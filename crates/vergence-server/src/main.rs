@@ -34,6 +34,7 @@ mod displays;
 mod energy;
 mod shelf;
 mod tiles;
+mod applets;
 mod session;
 mod launcher;
 mod touch;
@@ -78,6 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state = Server::new(&mut event_loop, display);
     state.start_wallpaper();
     state.start_network();
+    state.start_applets();
     state.start_battery_history();
     state.start_settings();
     state.start_energy();

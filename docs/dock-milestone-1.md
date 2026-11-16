@@ -57,6 +57,27 @@ milestone: the list and the launcher only).
   Installed and restarted on all three (Hubble, Techbench's dev session,
   kepler). Tests 644 Hubble/Techbench, 637 kepler.
 
+- **Step 4 done** (2026-11-16): vergence-shell tiles.rs builds the
+  desktop's tiles from what was read (`sound`, `network` with
+  `main_iface`/`rate_text`, `power`; the clock with `ClockLook`), with
+  tests; the server's applets.rs reads them on a thread of its own (the
+  network every second while its card is open, else every two; sound and
+  power every four, sent only when changed) and carries out the desktop's
+  card controls (volume, mute; a volume key updates the tile at once).
+  Cards draw and work their controls: a button across the card, a switch,
+  a slider (pressed or dragged, to its step; the hit area spans the card);
+  the change shows at once and goes to the owner (`TileAction`) or to
+  applets.rs. Tiles keep a fixed order: Sound, Network, Power, programs'
+  tiles, the clock last. The settings app's **Date & Time** page
+  (datetime.rs: `[clock] 24-hour`, `date`, the time zone from $TZ,
+  /etc/localtime or /var/db/zoneinfo); the clock follows [clock] as soon as
+  desktop.toml changes. After a click the card does not open again under
+  the pointer. Seen on kepler: Sound, Network and clock tiles; the volume
+  slider (90 %, then past its end to 100 %), mute on and off; the clock's
+  click opening Date & Time (America/Chicago). Power is only on a machine
+  with a battery (Hubble's Mobilenode): not yet seen. Tests 648
+  Hubble/Techbench, 641 kepler.
+
 ## Where things stand
 
 - The dock (shelf milestones 1 and 2): the apps button, pinned and running
@@ -137,6 +158,21 @@ milestone: the list and the launcher only).
     chart, live; click opens Network.
 17. **Power**: battery or UPS runtime where there is one; card with charge,
     time left, mains; click opens Power.
+
+### Applets for later (Dave, 2026-11-16: "some initial ideas")
+
+- **Weather**: a publisher of its own (a network client, never the
+  server), the temperature on the dock and the next hours in its card. Its
+  source and the place it asks about are the user's choice and need Dave's
+  word (the forecast service, and whether a location leaves the machine).
+- **Calendar**: a month in the clock's card (the mock-up had one) needs a
+  card part the protocol does not have yet (a grid of days), so a later bus
+  version; events from a calendar file (ICS) later still.
+- **System log**: the server's own log and the system's (dmesg, the
+  journal or syslog), the newest lines in its card; a warning when an error
+  has come in since it was last looked at.
+- More from the mock-ups: CPU, memory, disk, NAS, firewall, Nextcloud,
+  KeePassXC (the drawer's sample tiles).
 
 ### The drawer
 

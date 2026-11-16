@@ -35,6 +35,7 @@ mod wall;
 mod battery;
 mod modes;
 mod notify;
+mod datetime;
 use notify::NotifyMsg;
 mod places;
 use places::PlacesMsg;
@@ -179,6 +180,7 @@ enum Icon {
     About,
     Notifications,
     Apps,
+    Clock,
 }
 
 impl Icon {
@@ -195,6 +197,7 @@ impl Icon {
             Icon::Energy | Icon::Battery => Color::rgb(0x3f, 0x9a, 0x3a),
             Icon::About => Color::rgb(0x70, 0x74, 0x7c),
             Icon::Notifications => Color::rgb(0xe5, 0x48, 0x3a),
+            Icon::Clock => Color::rgb(0x70, 0x74, 0x7c),
         }
     }
 }
@@ -334,6 +337,12 @@ fn icon_mark<M: 'static>(icon: Icon) -> Element<M> {
                 line(scene, (6.5, 9.5), (11.0, 9.5));
                 line(scene, (6.5, 12.3), (12.5, 12.3));
             }
+            // A clock face with its hands.
+            Icon::Clock => {
+                scene.stroke(Rect::new(x + 3.5, y + 3.5, 13.0, 13.0), 6.5, 1.4, w);
+                line(scene, (10.0, 10.0), (10.0, 6.0));
+                line(scene, (10.0, 10.0), (13.0, 11.5));
+            }
             // An i.
             Icon::About => {
                 scene.fill_rounded(Rect::new(x + 9.1, y + 4.5, 1.8, 1.8), 0.9, w);
@@ -376,6 +385,8 @@ enum Page {
     Energy,
     /// Do not disturb, how long, which corner (notify.rs).
     Notifications,
+    /// The dock's clock and the time zone (datetime.rs; dock milestone 1).
+    DateTime,
     /// The battery and the GPUs (battery.rs); only where there is a battery.
     Battery,
     Sound,
@@ -402,6 +413,7 @@ enum Page {
 enum Message {
     /// The Notifications page (notify.rs).
     Notify(NotifyMsg),
+    Clock(datetime::ClockMsg),
     /// Window places on the Windows page (places.rs).
     Places(PlacesMsg),
     /// The Apps page (apps.rs).
@@ -987,6 +999,7 @@ impl App {
             Message::Wifi(m) => self.wifi_handle(m),
             Message::BatterySample => self.battery_sample(),
             Message::Notify(m) => self.notify_message(m),
+            Message::Clock(m) => self.clock_message(m),
             Message::Places(m) => self.places_message(m),
             Message::Apps(m) => self.apps_message(m),
             Message::Defaults(m) => self.defaults_message(m),
@@ -1610,6 +1623,7 @@ impl App {
             ("Accessibility", vec![("Accessibility".into(), Page::Accessibility, Icon::Accessibility, "accessibility contrast motion transparency size")]),
             ("System", vec![
                 ("Energy".into(), Page::Energy, Icon::Energy, "energy power sleep screens off idle"),
+                ("Date & Time".into(), Page::DateTime, Icon::Clock, "date time clock zone timezone 24 hour am pm calendar"),
             ]
             .into_iter()
             .chain(self.has_battery().then(|| ("Battery".into(), Page::Battery, Icon::Battery, "battery charge power watts time left health gpu graphics nvidia")))
@@ -2913,6 +2927,7 @@ impl Program for App {
             Page::Sound => "Sound".into(),
             Page::Energy => "Energy".into(),
             Page::Notifications => "Notifications".into(),
+            Page::DateTime => "Date & Time".into(),
             Page::Apps => "Apps".into(),
             Page::DefaultApps => "Default apps".into(),
             Page::AppPage => self.app_open.as_deref().map(|a| self.known_app_name(a)).unwrap_or_else(|| "Apps".into()),
@@ -2972,6 +2987,7 @@ impl Program for App {
             Page::Touchscreen => self.touchscreen_page(),
             Page::Energy => self.energy(),
             Page::Notifications => self.notifications_page(),
+            Page::DateTime => self.datetime_page(),
             Page::Apps => self.apps_page(),
             Page::DefaultApps => self.defaults_page(),
             Page::AppPage => self.app_page(),

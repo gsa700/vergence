@@ -49,6 +49,8 @@ impl Server {
         };
         let req = Request { app: "Sound".into(), replaces: self.volume_note, summary, body: now.name.clone(), urgency: 0, timeout_ms: SHOWN_MS, actions: Vec::new() };
         self.volume_note = self.notify(Origin::Server, req);
+        // The Sound tile says so at once (applets.rs).
+        self.sound_tile_now();
     }
 }
 

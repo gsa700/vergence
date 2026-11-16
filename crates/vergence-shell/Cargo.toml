@@ -11,5 +11,7 @@ publish.workspace = true
 # worked out here, and tested on every platform.
 [dependencies]
 vergence-look.workspace = true
+vergence-net.workspace = true
+vergence-power.workspace = true
 vergence-protocol.workspace = true
 vergence-types.workspace = true

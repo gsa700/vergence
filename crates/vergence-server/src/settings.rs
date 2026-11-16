@@ -319,6 +319,8 @@ impl Server {
                 state.energy_reload();
                 // The shelf's settings and the primary screen (shelf.rs).
                 state.shelf_reload();
+                // The clock's [clock] (tiles.rs).
+                state.tiles_reload();
                 // Snapping's choices (snap.rs).
                 state.snap_reload();
                 // Title bar styles of apps not ours (decor.rs).
