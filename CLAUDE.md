@@ -110,15 +110,16 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   Techbench** (Fedora 45, Intel UHD 770), replacing Debian 13, which had been
   picked for hosting the X11 daemon. Techbench is Dave's workstation, not a
   project machine: Rust and -devel packages only (dnf needs his sudo), build
-  in ~/src/vergence (`tools/sync-hubble.sh techbench`). Start it from GDM:
-  "Vergence (dev)" in the gear menu runs this checkout (tools/install-session.sh,
-  /usr/share/wayland-sessions/vergence-dev.desktop; renamed 2026-11-12), plain
-  "Vergence" the installed build (tools/install.sh, run there 2026-11-12: no
-  control socket, so no `vctl`); log out of
-  GNOME first, GDM won't start a second session for the same user. NOT from a
-  text console: Fedora 45's consoles are kmscon, which holds the GPU (the
-  server fails "Device or resource busy"); the kernel console is a dummy.
-  Ctrl+Alt+Backspace ends it, back to GDM. Log ~/.local/state/vergence/server.log, `vctl` as on
+  in ~/src/vergence (`tools/sync-hubble.sh techbench`). GNOME and GDM were
+  removed 2026-11-16 (Dave): log in on a text console and `exec vergence`
+  (the installed build) until the VDM login screen takes over (step 7).
+  Fedora 45's consoles were kmscon, which holds the GPU (the server failed
+  "Device or resource busy", and kmscon kept its picture on screen after a
+  switch away); since 2026-11-16 kmscon is off (kmsconvt@tty1 disabled,
+  /etc/systemd/system/autovt@.service links getty@.service) and every
+  console is agetty on the kernel's frame buffer console. To put kmscon
+  back: link autovt@.service to kmsconvt@.service and enable kmsconvt@tty1.
+  Its disk is LUKS-encrypted: no autologin there, ever (Dave's rule). Log ~/.local/state/vergence/server.log, `vctl` as on
   Hubble (socket in /run/user/1000). Techbench is normally headless: the two
   monitors move between it and Hubble. Keep
   Linux-only interfaces (udev, systemd, logind, /sys) out of the core; where

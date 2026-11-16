@@ -200,6 +200,26 @@ if [ -n "${group:-}" ]; then
         echo "seat: $user added to $group (takes effect at the next login)"
     fi
 fi
+# ---- system setup: _vdm, the greeter's account (VDM milestone 1, review I10) ----
+# (Before vdm starts: vdm looks for it once, when it starts.)
+# The login screen runs as _vdm: a system account that owns nothing, logs in
+# nowhere (nologin) and has a home it cannot write (/var/empty); its state
+# lives on a tmpfs vdm makes fresh at each start (step 4). It may use the
+# seat (seatd's group where there is no logind), never the setuid helpers.
+if ! id _vdm >/dev/null 2>&1; then
+    if [ "$(uname -s)" = FreeBSD ]; then
+        u=900
+        while id "$u" >/dev/null 2>&1 || pw groupshow -g "$u" >/dev/null 2>&1; do u=$((u + 1)); done
+        pw useradd _vdm -u "$u" -c "Vergence display manager (greeter)" -d /var/empty -s /usr/sbin/nologin
+    else
+        useradd -r -M -d /var/empty -s "$(command -v nologin || echo /sbin/nologin)" -c "Vergence display manager (greeter)" _vdm
+    fi
+    echo "vdm: the greeter's account _vdm made (uid $(id -u _vdm))"
+fi
+if [ -n "${group:-}" ] && ! id -Gn _vdm | tr ' ' '\n' | grep -qx "$group"; then
+    if [ "$(uname -s)" = FreeBSD ]; then pw groupmod "$group" -m _vdm; else usermod -aG "$group" _vdm; fi
+    echo "vdm: _vdm may use the seat ($group)"
+fi
 # ---- system setup: vdm (VDM milestone 1) ----
 # Our own PAM service for unlocking (review I2): the system's usual password
 # stack, never "other". Fedora's system-auth asks for a fingerprint first and
@@ -270,25 +290,6 @@ elif [ -d /etc/sv ] && [ -d /var/service ]; then
     echo "vdm: enabled and started (runit, /var/service/vdm)"
 else
     echo "vdm: no known init system; start $prefix/sbin/vdm as root at boot" >&2
-fi
-# ---- system setup: _vdm, the greeter's account (VDM milestone 1, review I10) ----
-# The login screen runs as _vdm: a system account that owns nothing, logs in
-# nowhere (nologin) and has a home it cannot write (/var/empty); its state
-# lives on a tmpfs vdm makes fresh at each start (step 4). It may use the
-# seat (seatd's group where there is no logind), never the setuid helpers.
-if ! id _vdm >/dev/null 2>&1; then
-    if [ "$(uname -s)" = FreeBSD ]; then
-        u=900
-        while id "$u" >/dev/null 2>&1 || pw groupshow -g "$u" >/dev/null 2>&1; do u=$((u + 1)); done
-        pw useradd _vdm -u "$u" -c "Vergence display manager (greeter)" -d /var/empty -s /usr/sbin/nologin
-    else
-        useradd -r -M -d /var/empty -s "$(command -v nologin || echo /sbin/nologin)" -c "Vergence display manager (greeter)" _vdm
-    fi
-    echo "vdm: the greeter's account _vdm made (uid $(id -u _vdm))"
-fi
-if [ -n "${group:-}" ] && ! id -Gn _vdm | tr ' ' '\n' | grep -qx "$group"; then
-    if [ "$(uname -s)" = FreeBSD ]; then pw groupmod "$group" -m _vdm; else usermod -aG "$group" _vdm; fi
-    echo "vdm: _vdm may use the seat ($group)"
 fi
 # ---- system setup: removable drives (files milestone 1; Dave, 2026-11-15) ----
 # Linux: udisks2 mounts a drive plugged in when the session asks (the
