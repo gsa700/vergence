@@ -1521,11 +1521,14 @@ impl Server {
             scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, color(s.dock_edge));
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             let face = fonts.face("sans-serif", 700, false).or_else(|| fonts.face("sans-serif", 400, false));
-            // The apps button at its head: four squares, two by two (the
-            // mock-up's; Dave, 2026-11-16: the nine dots are the drawer's now).
-            for i in 0..4 {
-                let (column, row) = ((i % 2) as f32, (i / 2) as f32);
-                scene.fill_rounded(SceneRect::new(14.0 + column * 12.0, 14.0 + row * 12.0, 8.0, 8.0), 2.0, color(s.mark));
+            // The apps button at its head, saying the apps live there (Dave,
+            // 2026-11-16, after macOS's Apps icon): a search field across the
+            // top and six apps under it, two rows of three, in the dock's own
+            // colors (the nine dots are the drawer's).
+            scene.stroke(SceneRect::new(12.5, 12.5, 23.0, 5.0), 2.5, 1.2, color(s.mark));
+            for i in 0..6 {
+                let (column, row) = ((i % 3) as f32, (i / 3) as f32);
+                scene.fill_rounded(SceneRect::new(12.0 + column * 9.0, 21.0 + row * 9.0, 6.0, 6.0), 1.6, color(s.mark));
             }
             let local = Rect::new(0, 0, strip.size.w, strip.size.h);
             for (place, shown) in order.iter().enumerate() {
