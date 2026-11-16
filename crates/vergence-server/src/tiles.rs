@@ -437,7 +437,7 @@ impl Server {
 
     /// A control was used: shown at once as the card's new state, and told
     /// to the tile's owner (the desktop carries out its own: applets.rs).
-    fn card_act(&mut self, index: usize, i: usize, value: f64) {
+    pub fn card_act(&mut self, index: usize, i: usize, value: f64) {
         let Some(p) = self.tiles.list.get_mut(index) else { return };
         let Some(control) = p.tile.card.controls.get_mut(i) else { return };
         control.kind = match control.kind {

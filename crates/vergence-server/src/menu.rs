@@ -235,6 +235,12 @@ impl Server {
     }
 
     /// A menu of these entries at `pos`, kept on its screen.
+    /// "Exit Vergence…" asked for by name (actions.rs): the same question as
+    /// the desktop menu's, at `pos`.
+    pub fn ask_exit(&mut self, pos: Point<f64, Logical>) {
+        self.open_entries(pos, vec![Entry::ExitNow, Entry::Cancel]);
+    }
+
     fn open_entries(&mut self, pos: Point<f64, Logical>, entries: Vec<Entry>) {
         let ids = (0..6 + entries.len()).map(|_| Id::new()).collect();
         let icons = (0..5 * entries.len()).map(|_| Id::new()).collect();

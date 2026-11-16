@@ -136,6 +136,22 @@ milestone: the list and the launcher only).
   before; Techbench's (GNOME) must be looked at before it gets this build.
   Tests 652 Hubble, 645 kepler.
 
+- **Step 8 done** (2026-11-16): named actions. vergence-shell actions.rs
+  (the desktop's: mute, unmute, volume up and down, screens off, show the
+  desktop, open the drawer, Exit Vergence… (asks first, as the desktop
+  menu does), and each settings page; `matches`/`search`: every word typed
+  begins a word of the name or its other words; with tests); the server's
+  actions.rs adds one for each switch and button on a program's tile card
+  ("UPS (rack): Self-test"; the desktop's own tiles' controls are actions
+  already) and runs them (`action_run` by id or name). The launcher shows
+  the actions found after the applications, in the same grid with a mark
+  for an icon, while something is typed and the tab is All; Enter, the
+  arrows and a click run them. `vctl actions`, `vctl action <id or name>`.
+  Also (Dave, 2026-11-16): the apps button is four squares two by two, as
+  in the mock-up, so the nine dots are the drawer's alone. Seen on kepler:
+  "mute" typed in the launcher, Enter muted, `vctl action sound.unmute`
+  back. Tests 654 Hubble, 647 kepler.
+
 ## Where things stand
 
 - The dock (shelf milestones 1 and 2): the apps button, pinned and running

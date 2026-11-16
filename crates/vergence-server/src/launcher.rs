@@ -175,8 +175,34 @@ impl Server {
         self.launcher.open.as_ref().map(|o| vergence_shell::launcher::search_in(&self.shelf.apps, &o.typed, o.tab)).unwrap_or_default()
     }
 
+    /// The named actions found by what was typed (dock milestone 1, step 8),
+    /// shown after the applications; none while nothing is typed or a tab
+    /// other than All is chosen.
+    fn launcher_actions(&self) -> Vec<vergence_shell::actions::Action> {
+        let Some(open) = self.launcher.open.as_ref() else { return Vec::new() };
+        if open.typed.trim().is_empty() || open.tab.is_some() {
+            return Vec::new();
+        }
+        let all = self.actions_all();
+        vergence_shell::actions::search(&all, &open.typed).into_iter().map(|i| all[i].clone()).collect()
+    }
+
+    /// How many cells the grid has: the applications found, then the actions.
+    fn launcher_count(&self) -> usize {
+        self.launcher_found().len() + self.launcher_actions().len()
+    }
+
     fn launcher_start(&mut self, index: usize) {
         let found = self.launcher_found();
+        // Past the applications: an action, run by name.
+        if index >= found.len() {
+            let Some(a) = self.launcher_actions().get(index - found.len()).cloned() else { return };
+            self.launcher_close();
+            if let Err(e) = self.action_run(&a.id) {
+                tracing::warn!("apps: {e}");
+            }
+            return;
+        }
         let Some(id) = found.get(index).map(|i| self.shelf.apps[*i].id.clone()) else { return };
         self.launcher_close();
         self.shelf_act(Act::Start(id));
@@ -184,7 +210,7 @@ impl Server {
 
     /// A key pressed while the popup is open: a keysym, and the character it types if any.
     pub fn launcher_key(&mut self, sym: u32, typed: Option<char>) {
-        let count = self.launcher_found().len();
+        let count = self.launcher_count();
         let Some(open) = self.launcher.open.as_mut() else { return };
         let columns = open.grid().columns;
         let arrow = match sym {
@@ -285,7 +311,7 @@ impl Server {
     /// A click (or a tap) at `at` on the launcher: a tab is chosen, an
     /// application started.
     fn launcher_activate(&mut self, at: Point<f64, Logical>) {
-        let count = self.launcher_found().len();
+        let count = self.launcher_count();
         let Some(open) = self.launcher.open.as_ref() else { return };
         let (x, y) = (at.x.floor() as i32, at.y.floor() as i32);
         if let Some(app) = open.own_at(x, y) {
@@ -354,7 +380,7 @@ impl Server {
         if self.launcher.open.is_none() {
             return;
         }
-        let count = self.launcher_found().len();
+        let count = self.launcher_count();
         let Some(open) = self.launcher.open.as_mut() else { return };
         // A finger held: past a few points it drags the grid with it.
         if let Some((from, scroll, moved)) = open.held {
@@ -385,7 +411,7 @@ impl Server {
 
     /// The wheel, in points: the grid scrolls.
     pub fn launcher_scroll(&mut self, amount: f64) {
-        let count = self.launcher_found().len();
+        let count = self.launcher_count();
         let Some(open) = self.launcher.open.as_mut() else { return };
         let to = (open.scroll + (amount * 3.0).round() as i32).clamp(0, open.grid().max_scroll(count));
         if to != open.scroll {
@@ -398,7 +424,8 @@ impl Server {
     pub fn launcher_report(&self) -> String {
         let Some(open) = self.launcher.open.as_ref() else { return "closed".into() };
         let found = self.launcher_found();
-        let names: Vec<&str> = found.iter().take(12).map(|i| self.shelf.apps[*i].name.as_str()).collect();
+        let actions = self.launcher_actions();
+        let names: Vec<&str> = found.iter().take(12).map(|i| self.shelf.apps[*i].name.as_str()).chain(actions.iter().map(|a| a.name.as_str())).collect();
         format!(
             "open at {},{} {}x{}; typed {:?}; {} found; selected {} {:?}; scroll {}\n{}",
             open.at.loc.x, open.at.loc.y, open.at.size.w, open.at.size.h, open.typed, found.len(), open.selected,
@@ -441,7 +468,17 @@ impl Server {
             }
             let (name, icon) = (self.shelf.apps[*app].name.clone(), self.shelf.apps[*app].icon.clone());
             let icon = self.shelf_icon(&icon, pixels);
-            cells.push((index, cell, name, icon));
+            cells.push((index, cell, name, icon, false));
+        }
+        // After them, the named actions found (step 8): a mark for an icon.
+        let actions = self.launcher_actions();
+        for (k, a) in actions.iter().enumerate() {
+            let index = found.len() + k;
+            let cell = grid.cell(index);
+            if cell.bottom() <= grid.area.y || cell.y >= grid.area.bottom() {
+                continue;
+            }
+            cells.push((index, cell, a.name.clone(), None, true));
         }
         // Light or dark (look milestone 1).
         let light = self.light_style();
@@ -451,8 +488,8 @@ impl Server {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         (&typed, selected, grid.scroll, scale.to_bits(), at.size.w, at.size.h, found.len(), light, frost.is_some(), tab, tab_rects.len()).hash(&mut hasher);
         let counts = vergence_shell::launcher::tabs(&self.shelf.apps, &found);
-        for (index, _, name, icon) in &cells {
-            (index, name, icon.is_some()).hash(&mut hasher);
+        for (index, _, name, icon, action) in &cells {
+            (index, name, icon.is_some(), action).hash(&mut hasher);
         }
         for (r, name, icon, hover) in &own_cells {
             (r.x, name, icon.is_some(), hover).hash(&mut hasher);
@@ -555,12 +592,13 @@ impl Server {
             // The grid, cut off at its area's edges.
             scene.push_clip(local(grid.area), 0.0);
             if found.is_empty()
+                && actions.is_empty()
                 && let Some(face) = face
             {
                 let g = local(grid.area);
                 vergence_render::text(&mut scene, fonts, face, 14.0, color(s.menu_ink_off), ScenePoint::new(g.x + 2.0, g.y + 24.0), "No application of that name");
             }
-            for (index, cell, name, icon) in &cells {
+            for (index, cell, name, icon, action) in &cells {
                 let c = local(*cell);
                 if *index == selected {
                     scene.fill_rounded(SceneRect::new(c.x + 2.0, c.y + 2.0, c.w - 4.0, c.h - 4.0), vergence_look::RADIUS, color(s.hover));
@@ -574,7 +612,7 @@ impl Server {
                     }
                     None => {
                         scene.fill_rounded(square, vergence_look::RADIUS, color(if *index == selected { s.field } else { s.tile }));
-                        let letter: String = name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into());
+                        let letter: String = if *action { "\u{203a}".into() } else { name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into()) };
                         if let Some(face) = bold {
                             let size = 18.0;
                             let m = fonts.metrics(face, size);
