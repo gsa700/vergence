@@ -267,6 +267,15 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   press within 5 s. A second login of a person already logged in (a vdm
   session or a registered console session) is refused before PAM with
   the reason shown, until each can have its own runtime directory.
+  Found installing it on kepler: `service vdm restart` hung while a
+  session vdm had started was running, because daemon(8) -S read vdm's
+  output until every process holding it had closed it, the session's
+  worker among them; vdm now writes to syslog itself on FreeBSD and the rc
+  script uses daemon -f. A restarted vdm does not know the sessions the
+  old one started: they run on, but the login screen does not come back
+  by itself when they end (`vdm greeter` brings it). `vdm greeter` now
+  refuses while someone is logged in (it had taken the screen from Dave's
+  session for 8 s).
 
 ## Design
 

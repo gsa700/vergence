@@ -6,7 +6,7 @@
 #
 # vdm, VDM's root daemon (docs/vdm-milestone-1.md): the lock screen's
 # password check. tools/install.sh installs this as /usr/local/etc/rc.d/vdm
-# and sets vdm_enable=YES. Its messages go to syslog (auth), restarted if it ends.
+# and sets vdm_enable=YES. It logs to syslog (auth) itself; restarted if it ends.
 # /etc/rc.suspend runs every rc.d script with the suspend keyword before the
 # machine sleeps (the lid, the power button, acpiconf, zzz): vdm then locks
 # every Vergence session and waits until each shows the lock (VDM step 2).
@@ -17,7 +17,10 @@ name=vdm
 rcvar=vdm_enable
 pidfile=/var/run/vdm.pid
 command=/usr/sbin/daemon
-command_args="-P ${pidfile} -r -S -T vdm -l auth @PREFIX@/sbin/vdm"
+# -f: standard output and error to /dev/null; vdm writes to syslog itself
+# (with -S daemon read vdm's output and waited for every process holding it,
+# a running session's among them, so a restart hung while one ran).
+command_args="-P ${pidfile} -r -f @PREFIX@/sbin/vdm"
 
 extra_commands="suspend"
 suspend_cmd="vdm_suspend"

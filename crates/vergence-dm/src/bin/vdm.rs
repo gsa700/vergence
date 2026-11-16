@@ -72,9 +72,27 @@ struct PollFd {
 
 const WNOHANG: c_int = 1;
 
-/// One line to standard error, which the service hands to the system log
-/// (syslog or vlogger add the time, the name and the pid).
+/// One line to the system log. Linux: standard error, which the service
+/// hands on (runit's vlogger, systemd's journal). FreeBSD: syslog(3) itself
+/// (auth.notice), with standard error /dev/null: daemon(8) reading vdm's
+/// output waited for every process holding it, a running session's worker
+/// among them, so `service vdm restart` hung (kepler, 2026-11-16).
 fn log(msg: &str) {
+    #[cfg(target_os = "freebsd")]
+    {
+        unsafe extern "C" {
+            fn openlog(ident: *const c_char, option: c_int, facility: c_int);
+            fn syslog(priority: c_int, fmt: *const c_char, ...);
+        }
+        static OPEN: std::sync::Once = std::sync::Once::new();
+        // SAFETY: a static NUL-terminated name; LOG_PID 1, LOG_AUTH 4<<3.
+        OPEN.call_once(|| unsafe { openlog(c"vdm".as_ptr(), 1, 4 << 3) });
+        if let Ok(m) = std::ffi::CString::new(msg.replace('\0', "")) {
+            // SAFETY: "%s" with one NUL-terminated string; LOG_AUTH | LOG_NOTICE 5.
+            unsafe { syslog((4 << 3) | 5, c"%s".as_ptr(), m.as_ptr()) };
+        }
+    }
+    #[cfg(not(target_os = "freebsd"))]
     eprintln!("{msg}");
 }
 
@@ -899,6 +917,11 @@ fn main() {
                 let answer = match line.trim() {
                     "before-sleep" => lock_all(&mut sessions),
                     "greeter" if greeter_account.is_none() => format!("no {} account (tools/install.sh makes it)", paths::GREETER_USER),
+                    // Not over someone's session: the login screen would take the screen
+                    // from it (kepler, 2026-11-16: started over Dave's session by mistake).
+                    "greeter" if !greeter_run.on && (!sessions.is_empty() || logins.values().any(|l| l.yes)) => {
+                        "not started: someone is logged in (log out first; it comes back by itself after a login screen's session)".to_string()
+                    }
                     "greeter" => {
                         if !greeter_run.on {
                             greeter_run.came_from = vergence_dm::vt::active().filter(|v| *v != vergence_dm::vt::GREETER_VT);
