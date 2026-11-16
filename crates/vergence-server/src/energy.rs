@@ -56,6 +56,11 @@ pub struct Config {
     /// [lock] (VDM step 8): lock when the screens go off (default on), after
     /// this long with no input (zero: not on its own), before sleep (default on).
     pub lock_on_screens_off: bool,
+    /// After the screens went off by their timeout, how long before the
+    /// lock comes on (Dave's list, 2026-11-16: 10 s, 30 s, 1 minute): a
+    /// touch within it brings them back with no password. A lock asked for,
+    /// and the lock before sleep, are immediate whatever this says.
+    pub lock_grace: Duration,
     pub lock_after: Duration,
     pub lock_before_sleep: bool,
 }
@@ -69,6 +74,7 @@ impl Default for Config {
             battery_screens_off: None,
             battery_sleep: None,
             lock_on_screens_off: true,
+            lock_grace: Duration::ZERO,
             lock_after: Duration::ZERO,
             lock_before_sleep: true,
         }
@@ -125,6 +131,7 @@ pub fn parse(text: &str) -> Config {
     let on = |k: &str| lock.get(k).and_then(|v| v.as_bool()).unwrap_or(true);
     Config {
         lock_on_screens_off: on("screens-off"),
+        lock_grace: Duration::from_secs(lock.get("grace").and_then(|v| v.as_integer()).unwrap_or(0).clamp(0, 300) as u64),
         lock_after: read(&lock, "after").unwrap_or_default(),
         lock_before_sleep: on("before-sleep"),
         screens_off: read(&table, "screens-off").unwrap_or_default(),
@@ -209,10 +216,15 @@ impl Server {
         if !c.lock_after.is_zero() && idle >= c.lock_after && !self.lock.on {
             self.lock_for_idle("no input for the lock's time");
         }
+        // The grace after the screens went off has passed with no input: locked.
+        if c.lock_on_screens_off && !c.lock_grace.is_zero() && self.energy.screens_off && !screens_off.is_zero() && idle >= screens_off + c.lock_grace && !self.lock.on {
+            self.lock_for_idle("the screens went off, and the grace passed");
+        }
         if !screens_off.is_zero() && !self.energy.screens_off && idle >= screens_off {
             tracing::info!("energy: no input for {}; screens off", minutes(idle));
-            // Locked first (VDM milestone 1): the screens come back to the lock.
-            if c.lock_on_screens_off {
+            // Locked first (VDM milestone 1): the screens come back to the lock;
+            // or, with a grace set, once it has passed (below).
+            if c.lock_on_screens_off && c.lock_grace.is_zero() {
                 self.lock_for_idle("the screens went off");
             }
             self.energy.screens_off = true;

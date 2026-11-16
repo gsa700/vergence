@@ -32,6 +32,10 @@ use vergence_widgets::{Align, AreaOptions, ButtonLook, Element, Input, Length, P
 const APP_ID: &str = "vergence-edit";
 const SECTION: &str = "[editor]";
 
+/// The text size's range for now, as the terminal's.
+const ZOOM_MIN: f32 = 0.5;
+const ZOOM_MAX: f32 = 3.0;
+
 mod cmd {
     pub const NEW_WINDOW: u32 = 1;
     pub const NEW_TAB: u32 = 2;
@@ -806,7 +810,7 @@ impl EditWindow {
     }
 
     fn set_zoom(&mut self, z: f32) {
-        self.zoom = z.clamp(0.5, 4.0);
+        self.zoom = z.clamp(ZOOM_MIN, ZOOM_MAX);
         self.apply_options();
     }
 
@@ -1262,9 +1266,12 @@ impl Program for EditWindow {
                 C::own(cmd::FIND_PREV, "Edit", "Find previous", "Ctrl+Shift+G"),
                 C::role(cmd::REPLACE, Role::Replace).enabled(editable),
                 C::own(cmd::GO_TO_LINE, "Edit", "Go to line…", "Ctrl+L"),
-                C::role(cmd::ZOOM_IN, Role::ZoomIn),
-                C::role(cmd::ZOOM_OUT, Role::ZoomOut),
-                C::role(cmd::ZOOM_RESET, Role::ZoomReset),
+                // The app menu's "− 100% +" Text size row, as the terminal's
+                // (Dave's list, 2026-11-16): for now, this window; the lasting
+                // size is the editor's own settings window's.
+                C::role(cmd::ZOOM_OUT, Role::ZoomOut).enabled(self.zoom > ZOOM_MIN + 0.001).featured(),
+                C { label: format!("{}%", (self.zoom * 100.0).round()), ..C::role(cmd::ZOOM_RESET, Role::ZoomReset).featured() },
+                C::role(cmd::ZOOM_IN, Role::ZoomIn).enabled(self.zoom < ZOOM_MAX - 0.001).featured(),
                 C::own(cmd::LINE_NUMBERS, "View", "Line numbers", "").checked(self.flag("line-numbers", true)).featured(),
                 C::own(cmd::WRAP, "View", "Wrap lines", "").checked(self.flag("wrap", true)),
                 C::role(cmd::NEXT_TAB, Role::NextTab),

@@ -363,7 +363,8 @@ impl Server {
         let (off, _) = self.energy.config.times(battery);
         let after = self.energy.config.lock_after;
         let idle = self.energy.last_input.elapsed();
-        if (self.energy.config.lock_on_screens_off && !off.is_zero() && idle >= off) || (!after.is_zero() && idle >= after) {
+        let grace = self.energy.config.lock_grace;
+        if (self.energy.config.lock_on_screens_off && !off.is_zero() && idle >= off + grace) || (!after.is_zero() && idle >= after) {
             self.lock_for_idle("back after the idle time");
         }
     }

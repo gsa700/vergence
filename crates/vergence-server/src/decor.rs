@@ -481,6 +481,7 @@ impl Server {
                     UniformName::new("corner", UniformType::_1f),
                     UniformName::new("bottom", UniformType::_1f),
                     UniformName::new("invert", UniformType::_1f),
+                    UniformName::new("split", UniformType::_1f),
                 ];
                 match renderer.compile_custom_texture_shader(vergence_render::blur::FROST_SHADER, &uniforms) {
                     Ok(p) => {
@@ -854,7 +855,10 @@ impl Server {
                     let dragged = preview.map(|(from, _)| from).filter(|&i| i < titles.len());
                     // The program's own buttons (icons, pressable): part of what the picture shows.
                     let tools: Vec<(vergence_bar::ToolIcon, bool)> = tools_of(&w).map(|(_, t)| t.into_iter().map(|(i, e, _)| (i, e)).collect()).unwrap_or_default();
-                    let key = (title.clone(), width, active, hover, format!("{layout_text}{tools:?}{menu_open}{}", app_icon.is_some()), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded, dragged, edited.clone(), root));
+                    // The bar's height is part of it too (Dave, 2026-11-16: with
+                    // kepler's touch panel unplugged the bars got shorter but kept
+                    // the touch size's wide buttons, the old picture squeezed).
+                    let key = (title.clone(), width, active, hover, format!("{layout_text}{tools:?}{menu_open}{} h{}", app_icon.is_some(), f.title.size.h), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded, dragged, edited.clone(), root));
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
                         key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, (false, false, Vec::new(), false, false, None, Vec::new(), false)),
@@ -984,6 +988,9 @@ impl Server {
                             // light text under a light bar is a dark shadow on it, not a
                             // pale smudge (Dave, 2026-11-14).
                             Uniform::new("invert", UniformValue::_1f(if accent.is_some_and(|c| page_light(c) != light) { 1.0 } else { 0.0 })),
+                            // A sidebar window's sidebar ends where its bar's title would
+                            // start: the frost does not blur across that edge.
+                            Uniform::new("split", UniformValue::_1f(tools_of(&w).map_or(0.0, |(from, _)| ((from as f64 - 1.0) * per_point / px.w.max(1) as f64) as f32))),
                         ];
                         elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(&mut d.frost, dst, strip, texture.clone(), program.clone(), uniforms)));
                     }

@@ -89,6 +89,9 @@ use vergence_ui::{App, Button, Cursor, Edges, Frame, Input, Modifiers, Waker, Wi
 
 /// Space around the cells, in reference units.
 const PAD: f32 = 4.0;
+/// The room at the right edge kept for the scrollbar (its width, its margin
+/// from the edge, and a little air before the text).
+const RIGHT_GUTTER: f32 = scrollbar::WIDTH + 2.0 + 4.0;
 /// Two presses on the bar within this are a double click.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
@@ -2501,7 +2504,10 @@ impl App for Terminal {
         let Some(mt) = &self.metrics else { return scene };
         let (cw, ch) = (mt.cell_w, mt.cell_h);
         // The grid that fits a room: the whole of it for a new tab, a pane's for its terminal.
-        let fit = |w: f32, h: f32| ((((w - 2.0 * PAD) / cw).floor().max(2.0) as usize).min(2000), (((h - 2.0 * PAD) / ch).floor().max(1.0) as usize).min(1000));
+        // Columns stop short of the scrollbar at the right edge (Dave's list,
+        // 2026-11-16: the text ran under it), always, so a terminal's width
+        // does not change when its first line scrolls away.
+        let fit = |w: f32, h: f32| ((((w - PAD - RIGHT_GUTTER) / cw).floor().max(2.0) as usize).min(2000), (((h - 2.0 * PAD) / ch).floor().max(1.0) as usize).min(1000));
         // The server draws the bar on the native road: the room starts at the top
         // then, or below the strip we draw under its bar.
         self.own_bar = !frame.bar_by_server;

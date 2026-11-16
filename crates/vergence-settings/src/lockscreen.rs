@@ -24,10 +24,18 @@ pub fn lock_settings(d: &toml::Table) -> (bool, i64, bool) {
     (on("screens-off"), after, on("before-sleep"))
 }
 
+/// The grace after the screens' timeout (Dave's list, 2026-11-16).
+const GRACE_CHOICES: [(&str, i64); 4] = [("At once", 0), ("After 10 seconds", 10), ("After 30 seconds", 30), ("After 1 minute", 60)];
+
+fn lock_grace(d: &toml::Table) -> i64 {
+    d.get("lock").and_then(|n| n.get("grace")).and_then(|v| v.as_integer()).unwrap_or(0)
+}
+
 #[derive(Clone, Debug)]
 pub enum LockMsg {
     ScreensOff(bool),
     After(String),
+    Grace(String),
     BeforeSleep(bool),
     AutologinOff,
     AutologinOn(String),
@@ -108,6 +116,12 @@ impl App {
             LockMsg::BeforeSleep(on) => self.save_table("lock", |t| {
                 t.insert("before-sleep".into(), on.into());
             }),
+            LockMsg::Grace(label) => {
+                let n = GRACE_CHOICES.iter().find(|(l, _)| *l == label).map(|(_, n)| *n).unwrap_or(0);
+                self.save_table("lock", |t| {
+                    t.insert("grace".into(), n.into());
+                })
+            }
             LockMsg::After(label) => {
                 let m = LOCK_CHOICES.iter().find(|(l, _)| *l == label).map(|(_, m)| *m).unwrap_or(0);
                 self.save_table("lock", |t| {
@@ -132,12 +146,20 @@ impl App {
         let list: Vec<String> = LOCK_CHOICES.iter().map(|(l, _)| l.to_string()).collect();
         let at = LOCK_CHOICES.iter().position(|(_, m)| *m == after);
         let options = list.clone();
+        let grace_list: Vec<String> = GRACE_CHOICES.iter().map(|(l, _)| l.to_string()).collect();
+        let grace_at = GRACE_CHOICES.iter().position(|(_, n)| *n == lock_grace(&self.desktop));
+        let grace_options = grace_list.clone();
         self.page_layout(
             "Lock Screen",
             "The lock covers every screen and asks for your password; your apps keep running behind it. Super+L locks at once, as does Lock in the log out dialog.",
             vec![
                 self.group(Some("Lock the screen"), vec![
                     setting("When the screens go off", "After the time on the Energy page, and when you come back to this console after it.", switch(screens_off, |on| Message::Lock(LockMsg::ScreensOff(on))).name("Lock when the screens go off")),
+                    setting(
+                        "Require the password",
+                        "After the screens went off by themselves: a touch within this brings them back without it. Super+L, Lock and sleep always lock at once.",
+                        choice(grace_options, grace_at, move |i| Message::Lock(LockMsg::Grace(grace_list[i].clone()))).width(Length::Fixed(160.0)).name("Require the password"),
+                    ),
                     setting("After no input", "Even with the screens on.", choice(options, at, move |i| Message::Lock(LockMsg::After(list[i].clone()))).width(Length::Fixed(160.0)).name("Lock after no input")),
                     setting(
                         "Before the machine sleeps",

@@ -444,6 +444,7 @@ impl Server {
                             }
                         }
                         Target::Server(Part::Popup) => self.launcher_scroll(*dy),
+                        Target::Server(Part::Dock | Part::Card) => self.tile_scroll(pos, *dy, *v120y),
                         Target::Server(_) => {}
                     }
                 }
@@ -511,6 +512,21 @@ impl Server {
         // A press anywhere but the drawer, its card or the dock puts the drawer away (drawer.rs).
         if pressed && self.tiles.drawer.is_some() && !matches!(t, Target::Server(Part::Drawer | Part::Card | Part::Dock)) {
             self.drawer_close();
+        }
+        // A press on the desktop (its icons' window or the bare wallpaper)
+        // puts away whatever of the dock's or the desktop's is open: a
+        // docket's card, the drawer, the menus, the launcher (Dave's list,
+        // 2026-11-16).
+        let on_desktop = match &t {
+            Target::Native(id) => self.input.wins.get(id).is_some_and(|w| self.is_desktop(w)),
+            _ => false,
+        };
+        if pressed && on_desktop {
+            self.card_close();
+            self.drawer_close();
+            self.close_menu();
+            self.app_menu_close();
+            self.launcher_close();
         }
         // A tab held: the left button's release ends it, wherever the seat sends it.
         if !pressed && button == vergence_seat::BTN_LEFT && self.input.tab_hold.is_some() && !matches!(t, Target::Server(Part::Tab(..))) {

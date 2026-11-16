@@ -208,7 +208,7 @@ it is today:
 
 ## From Dave, 2026-11-16 afternoon (wish list)
 
-- **Text size up and down in the Text Editor as in the terminal.** The
+- *Done 2026-11-16 (polish batch 2).* - **Text size up and down in the Text Editor as in the terminal.** The
   editor has Zoom in, Zoom out and Actual size (Ctrl+=, Ctrl+-, Ctrl+0),
   but they are not featured, so its app menu shows no "− 100% +" Text size
   row as the terminal's does; featuring them (and limiting them at the
@@ -222,19 +222,33 @@ it is today:
   the folder's own menu on empty ground (New Folder, New File, Paste,
   Sort by, Show hidden). To be drafted against what files milestone 1's
   menus already hold.
-- **Room for the scroll bar at the right margin** in the terminal and
+- *Done 2026-11-16 (polish batch 2): the terminal keeps its columns clear of the bar (the Text Editor already did).* - **Room for the scroll bar at the right margin** in the terminal and
   probably other apps: when a scroll bar shows, the content stops short of
   it instead of running under it. A toolkit fix (vergence-widgets keeps a
   gutter already for some views: settings milestone 2), then the terminal.
-- **A click on the desktop closes any open menu or dock applet card**
+- *Done 2026-11-16 (polish batch 2).* - **A click on the desktop closes any open menu or dock applet card**
   ("dockets", Dave's name for the dock's applets and tiles): today a click
   on the wallpaper leaves a tile's card or a menu open.
-- **The volume docket: the mouse wheel over it changes the volume** (as
+- *Done 2026-11-16 (polish batch 2).* - **The volume docket: the mouse wheel over it changes the volume** (as
   the volume keys do, 5% a notch), on the dock's Sound tile and in its card.
+
+- *Done 2026-11-16 (polish batch 2).* **Settings' sidebar under the title bar** (Dave: "the gray
+  background on the left panel shows through the title bar"): kept, as
+  macOS does, but with a crisp edge: the frost shader takes a split line it
+  does not blur across (vergence-render blur.rs `split`), a sidebar
+  window's from its bar's `Tools { from }`.
+- *Done 2026-11-16 (polish batch 2).* **kepler without its touch panel: shorter bars, wide buttons**:
+  the bar's picture was kept when only its height changed (the touch
+  size's buttons squeezed into the standard bar); its height is part of
+  the picture's key now, and a touch panel leaving redraws.
+- **kepler's picture looking slightly taller than wide**: Vergence drives
+  3840x2160 on a 310x174 mm panel (both 16:9), square pixels; a test
+  picture (/tmp/aspect-test.png on kepler, a 1600-pixel square) for Dave
+  to measure; if it is not square on the glass, the monitor's own scaling.
 
 ## VDM follow-ups (Dave, 2026-11-16)
 
-- **A delay between the screens going off and the lock coming on**
+- *Done 2026-11-16 (polish batch 2): the Lock Screen page's "Require the password", `[lock] grace`.* - **A delay between the screens going off and the lock coming on**
   (10 s, 30 s, 1 minute): a touch within it brings the screens back with
   no password. The Lock Screen page gains "Require the password: at once,
   after 10 s, 30 s, 1 minute" (desktop.toml `[lock] grace`). Dave: it

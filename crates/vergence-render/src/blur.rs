@@ -34,7 +34,9 @@ const GOLDEN_ANGLE: f32 = 2.399_963_2;
 /// (float: 1 rounds the bottom corners too, a dock's or a menu's) and
 /// `invert` (float: 1 shows what is under inverted, for a bar of the other
 /// style than its window: light text under a light bar is shown dark, Dave,
-/// 2026-11-14).
+/// 2026-11-14) and `split` (float, a line across the picture in texture
+/// coordinates the blur does not reach over, so a sidebar's edge stays crisp
+/// in the bar above it: Dave, 2026-11-16; 0 for none).
 pub const FROST_SHADER: &str = r#"#version 100
 
 //_DEFINES_
@@ -60,6 +62,7 @@ uniform float need;
 uniform float corner;
 uniform float bottom;
 uniform float invert;
+uniform float split;
 
 float lin(float c) {
     return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
@@ -84,7 +87,12 @@ void main() {
         float a = f * 2.3999632;
         vec2 offset = vec2(cos(a), sin(a)) * (r * radius);
         float w = exp(-2.0 * r * r);
-        vec4 c = texture2D(tex, v_coords + offset * texel);
+        vec2 at = v_coords + offset * texel;
+        // Samples stay on the fragment's own side of the split line.
+        if (split > 0.0) {
+            at.x = v_coords.x < split ? min(at.x, split - 0.5 * texel.x) : max(at.x, split + 0.5 * texel.x);
+        }
+        vec4 c = texture2D(tex, at);
 #if defined(NO_ALPHA)
         c.a = 1.0;
 #endif

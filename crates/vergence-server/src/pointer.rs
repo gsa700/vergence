@@ -84,6 +84,8 @@ impl Server {
         if d.has_capability(DeviceCapability::Touch) {
             let name = d.name().to_string();
             self.touch_panels.retain(|n| *n != name);
+            // The controls' size on its screen goes back from Large: drawn again.
+            self.redraw_all();
         }
         self.pointer_devices.retain(|k| k != d);
     }

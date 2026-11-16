@@ -89,6 +89,8 @@ pub struct Tiles {
     /// The tile the pointer is over (by id) and the card that is open.
     pub hover: Option<String>,
     card: Option<Open>,
+    /// The wheel's travel over the Sound tile not yet a whole step.
+    wheel: f64,
     /// The minute the clock last showed.
     minute: Option<i64>,
     /// Whether the network card is open, for the reading thread (applets.rs).
@@ -377,6 +379,27 @@ impl Server {
             None => self.drawer_cell_at(at),
         }?;
         self.tiles.list.get(i).map(|p| p.key())
+    }
+
+    /// The mouse wheel over the dock or an open card (Dave's list,
+    /// 2026-11-16: the wheel over the volume docket changes the volume): over
+    /// the desktop's Sound tile, or its open card, each notch (a touchpad's
+    /// travel, 15 points a step) is a volume key's 5%; up louder.
+    pub fn tile_scroll(&mut self, at: Point<f64, Logical>, dy: f64, v120y: i32) {
+        let over_sound = self.key_under(at).as_deref() == Some("sound") || self.tiles.card.as_ref().is_some_and(|c| c.id == "sound" && c.rect.to_f64().contains(at));
+        if !over_sound {
+            return;
+        }
+        let travel = if v120y != 0 { v120y as f64 / 120.0 } else { dy / 15.0 };
+        self.tiles.wheel += travel;
+        while self.tiles.wheel <= -1.0 {
+            self.tiles.wheel += 1.0;
+            self.volume_key(5);
+        }
+        while self.tiles.wheel >= 1.0 {
+            self.tiles.wheel -= 1.0;
+            self.volume_key(-5);
+        }
     }
 
     /// Whether the open card is at a point.
