@@ -246,8 +246,7 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   it at the end, 1 leftover process ended. Found on the way: `vdm greeter stop` left the
   screen on the empty VT 9 (vdm now switches back to the VT it was asked
   from), and the server tried a frame ten times a second while paused
-  (it now draws nothing until its VT is back). Not yet: Techbench (logind; the greeter's own
-  logind session, I4). One session per user for now: a second login as
+  (it now draws nothing until its VT is back). Techbench: see step 7. One session per user for now: a second login as
   the same user would share its runtime directory and single-instance
   app sockets (to be refused or given its own, step 6).
 
@@ -300,6 +299,15 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   look older than it and cargo skips it (kepler ran a vdm without the
   "never over a session" rule, and took Dave's screen for 15 s);
   `touch` the changed files there when in doubt.
+  Seen on all three (2026-11-16, Dave): kepler and Techbench rebooted to
+  the login screen; Hubble installed with --vdm. Techbench (Fedora,
+  logind): the login screen is logind session class greeter on seat0
+  tty7; a login is a logind user session on tty8 led by vdm's worker,
+  with logind's /run/user/1000; lock, unlock, log out and the login
+  screen's return all worked. Found there: under systemd vdm is a session
+  leader, so opening the login screen's VT made it vdm's controlling
+  terminal and the login screen's TIOCSCTTY failed (EPERM); every VT is
+  opened O_NOCTTY now. Steps 5 to 7 are done on FreeBSD, Void and Fedora.
 
 ## Design
 
