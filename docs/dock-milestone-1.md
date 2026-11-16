@@ -171,8 +171,8 @@ it lands; Hubble on Dave's word (restart only when needed).
    freely; (b) everything mixed in any order. *Suggested: (a).*
 4. **Which lab tiles first**, and where each one's figures are reached
    from Control, kepler and Hubble: UPS (NUT server host?), time (chrony on
-   which host?), rack temperatures (from what?), Proxmox (API token on
-   10.0.1.6?).
+   which host?), rack temperatures (from what?), Proxmox (an API token on
+   the Proxmox host?).
 5. **Named actions** in this milestone (step 8), or kept for the next core
    milestone so this one ends at the drawer and the lab? *Suggested: in
    this one, the list and the launcher only.*
