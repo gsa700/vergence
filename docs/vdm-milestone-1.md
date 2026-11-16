@@ -156,6 +156,18 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   Its state on a tmpfs made fresh at each start is step 4's. Seen on kepler
   and Hubble.
 
+- **The log out dialog** (Dave, 2026-11-16: "dim the screen and have a
+  proper dialog prompt", in place of the second small menu "Exit: close all
+  apps / Cancel"; built now, "a"): session_dialog.rs. Every screen dimmed,
+  a panel on the pointer's screen: "Log out of Vergence?", Lock, Cancel and
+  Log Out (the default, in the accent; Enter); Escape, Cancel or a press
+  outside closes it; Tab and the arrows move; the pointer over a button
+  makes it the default. Every key and press is its while open (seat
+  `Part::Session`). Opened by the desktop menu's "Exit Vergence…" and the
+  named action. Log Out is exit.rs's: every app asked to close as its close
+  button would. Sleep, Restart and Shut Down join it in step 6. Seen on
+  kepler.
+
 ## Design
 
 ### The parts

@@ -35,6 +35,7 @@ mod energy;
 mod shelf;
 mod tiles;
 mod lock;
+mod session_dialog;
 mod actions;
 mod drawer;
 mod applets;

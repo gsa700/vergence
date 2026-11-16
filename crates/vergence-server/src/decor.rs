@@ -1045,6 +1045,12 @@ impl Server {
         {
             elements.push(SceneElement::Memory(e));
         }
+        // The log out dialog, over all of it (session_dialog.rs).
+        if self.session_dialog.open {
+            let mut front = self.session_dialog_elements(renderer, out, scale);
+            front.extend(elements);
+            return front;
+        }
         elements
     }
 

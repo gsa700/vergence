@@ -57,10 +57,7 @@ impl Server {
                     self.drawer_toggle();
                 }
             }
-            "session.exit" => {
-                let at = self.pointer_location();
-                self.ask_exit(at);
-            }
+            "session.exit" => self.session_dialog_open(),
             _ if id.starts_with("settings.") => {
                 let page = &id["settings.".len()..];
                 if let Err(e) = crate::spawn(std::process::Command::new("vergence-settings").args(["--page", page])) {

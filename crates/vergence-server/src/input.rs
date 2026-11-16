@@ -34,6 +34,13 @@ impl Server {
         let Some(keys) = self.input.keys.as_mut() else { return };
         let key = keys.feed(code, pressed);
         let mods = keys.mods();
+        // The log out dialog takes every key while it is open (session_dialog.rs).
+        if self.session_dialog.open && !self.lock.on {
+            if let Some(k) = self.seat.get_keyboard() {
+                k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| FilterResult::Intercept(()));
+            }
+            return self.session_dialog_key(key.sym, pressed);
+        }
         // Escape during a drag on the dock (an icon lifted, the dock dragged or
         // "Move dock"): everything goes back, and no program hears the key.
         if pressed && !self.lock.on && self.shelf_busy() && crate::keys::seat_key(key.sym, code.raw()) == vergence_seat::keyboard::Key::Escape {

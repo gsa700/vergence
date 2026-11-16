@@ -69,11 +69,9 @@ enum Entry {
     Command(crate::win::Win, u32, String),
     /// A program to start (Settings at a page, the Terminal), and its name.
     Run(String, Vec<String>),
-    /// "Exit Vergence…": asks first (Dave, 2026-11-15: "confirm on logout").
+    /// "Exit Vergence…": asks first (Dave, 2026-11-15: "confirm on logout"),
+    /// in the log out dialog (session_dialog.rs; Dave, 2026-11-16).
     Exit,
-    /// The answer: every app asked to close, then the session ends (exit.rs).
-    ExitNow,
-    Cancel,
 }
 
 /// What a window's menu does.
@@ -235,12 +233,6 @@ impl Server {
     }
 
     /// A menu of these entries at `pos`, kept on its screen.
-    /// "Exit Vergence…" asked for by name (actions.rs): the same question as
-    /// the desktop menu's, at `pos`.
-    pub fn ask_exit(&mut self, pos: Point<f64, Logical>) {
-        self.open_entries(pos, vec![Entry::ExitNow, Entry::Cancel]);
-    }
-
     fn open_entries(&mut self, pos: Point<f64, Logical>, entries: Vec<Entry>) {
         let ids = (0..6 + entries.len()).map(|_| Id::new()).collect();
         let icons = (0..5 * entries.len()).map(|_| Id::new()).collect();
@@ -451,16 +443,9 @@ impl Server {
                     }
                 }
             }
-            Entry::Exit => {
-                // Asked first: the same place, the answer.
-                let at = m.at.to_f64();
-                self.open_entries(at, vec![Entry::ExitNow, Entry::Cancel]);
-            }
-            Entry::ExitNow => {
-                tracing::info!("menu: exit, the apps asked to close first");
-                self.begin_exit();
-            }
-            Entry::Separator | Entry::Cancel => {}
+            // Asked first, in the log out dialog over the dimmed screens (session_dialog.rs).
+            Entry::Exit => self.session_dialog_open(),
+            Entry::Separator => {}
         }
     }
 
@@ -503,8 +488,6 @@ impl Server {
                 Entry::Command(_, _, label) => label.clone(),
                 Entry::Run(label, _) => label.clone(),
                 Entry::Exit => "Exit Vergence…".into(),
-                Entry::ExitNow => "Exit: close all apps".into(),
-                Entry::Cancel => "Cancel".into(),
                 Entry::Separator => continue,
             };
             let Some(font) = font else { continue };

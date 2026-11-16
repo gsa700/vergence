@@ -95,6 +95,8 @@ pub enum Part {
     /// The lock screen (VDM milestone 1): while locked, every pointer and
     /// finger is its, whatever is under it.
     Lock,
+    /// The log out dialog over the dimmed screens (the server's session_dialog.rs).
+    Session,
     /// Alt+Tab's list of windows (windows milestone 1, step 5).
     Switcher,
     /// A window a modal dialog blocks (window styles milestone 1): every press
