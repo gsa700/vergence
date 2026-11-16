@@ -188,11 +188,14 @@ impl Server {
         let (screens_off, sleep) = c.times(battery);
         if !screens_off.is_zero() && !self.energy.screens_off && idle >= screens_off {
             tracing::info!("energy: no input for {}; screens off", minutes(idle));
+            // Locked first (VDM milestone 1): the screens come back to the lock.
+            self.lock_for_idle("the screens went off");
             self.energy.screens_off = true;
             crate::drm::screens_off(self);
             self.input_screens_off();
         }
         if !sleep.is_zero() && !self.energy.slept && idle >= sleep {
+            self.lock_for_idle("sleep");
             self.energy.slept = true;
             let cmd = sleep_command(&c).to_string();
             tracing::info!("energy: no input for {}; sleep: {cmd}", minutes(idle));

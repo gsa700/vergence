@@ -34,6 +34,7 @@ mod displays;
 mod energy;
 mod shelf;
 mod tiles;
+mod lock;
 mod actions;
 mod drawer;
 mod applets;
@@ -82,6 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     state.start_wallpaper();
     state.start_network();
     state.start_applets();
+    state.start_lock();
     state.start_battery_history();
     state.start_settings();
     state.start_energy();

@@ -102,6 +102,11 @@ export RUST_LOG=${RUST_LOG:-info,smithay=warn}
 # beside vergd's; the previous run's is kept as server.log.1 (a `vctl restart`
 # after a GPU hang used to wipe the evidence, 2026-11-08).
 STATE=${XDG_STATE_HOME:-$HOME/.local/state}/vergence
+# The lock screen's marker (VDM milestone 1, review C1): the server writes it
+# while the session is locked. A fresh login has just proved who it is, so a
+# marker left by a crash is stale; but a server that ends while it is there
+# ended locked, and is not started again unlocked: the session ends instead.
+rm -f "$XDG_RUNTIME_DIR/vergence-locked"
 mkdir -p "$STATE" && chmod 700 "$STATE"
 LOG=$STATE/server.log
 # A quick failure at start is retried: when the user logs out of an X session and
@@ -115,6 +120,10 @@ while :; do
     VERGENCE_CLEAN=$clean "$BIN" --drm > "$LOG" 2>&1
     status=$?
     clean=
+    if [ -e "$XDG_RUNTIME_DIR/vergence-locked" ]; then
+        echo "vergence: the server ended while the screen was locked; the session ends rather than start again unlocked" >&2
+        break
+    fi
     if [ "$status" -eq 75 ]; then
         tries=0
         sleep 1

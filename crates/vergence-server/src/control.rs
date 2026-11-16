@@ -165,6 +165,11 @@ impl Server {
         let args: Vec<&str> = words.collect();
         // Input made by vctl counts as input: it wakes screens that went off
         // while idle (a test on an idle machine clicked into nothing).
+        // Locked, the control socket takes nothing but a picture of the
+        // screens (which show only the lock) and the lock's report (threat model T4).
+        if self.lock.on && !matches!(cmd, "shot" | "lock") {
+            return "locked".into();
+        }
         if matches!(cmd, "pointer" | "press" | "release" | "key" | "type" | "touch") {
             self.energy_activity();
         }
@@ -204,6 +209,13 @@ impl Server {
             "tree" => self.native_tree_report(),
             "shelf" => self.shelf_report(),
             "tiles" => self.tiles_report(),
+            // The lock: `lock` alone reports; `lock now` asks to lock, as Super+L does.
+            "lock" => {
+                if args.first() == Some(&"now") {
+                    self.lock_request("vctl");
+                }
+                if self.lock.on { "locked".into() } else { "unlocked".into() }
+            }
             // Named actions (actions.rs): `actions` lists them, `action <id or name>` runs one.
             "actions" => self.actions_report(),
             "action" => match self.action_run(&args.join(" ")) {

@@ -46,6 +46,7 @@ pub fn builtin() -> Vec<Action> {
         Action::new("sound.down", "Volume down", "quieter sound lower"),
         Action::new("screens.off", "Turn the screens off", "monitors displays blank dark sleep"),
         Action::new("desktop.show", "Show the desktop", "minimize all windows hide"),
+        Action::new("lock.screen", "Lock the screen", "lock away secure password super l"),
         Action::new("dock.drawer", "Open the drawer", "applets tiles status dock"),
         Action::new("session.exit", "Exit Vergence…", "log out logout quit session end"),
     ];

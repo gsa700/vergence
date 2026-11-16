@@ -36,7 +36,7 @@ impl Server {
         let mods = keys.mods();
         // Escape during a drag on the dock (an icon lifted, the dock dragged or
         // "Move dock"): everything goes back, and no program hears the key.
-        if pressed && self.shelf_busy() && crate::keys::seat_key(key.sym, code.raw()) == vergence_seat::keyboard::Key::Escape {
+        if pressed && !self.lock.on && self.shelf_busy() && crate::keys::seat_key(key.sym, code.raw()) == vergence_seat::keyboard::Key::Escape {
             if let Some(k) = self.seat.get_keyboard() {
                 k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| FilterResult::Intercept(()));
             }
@@ -59,7 +59,9 @@ impl Server {
             let at = self.pointer_location();
             self.snap_track(at);
         }
+        // Locked, no window is told the modifiers either (review I6).
         if key.mods_changed
+            && !self.lock.on
             && let Some(n) = self.input.keyboard_native.clone()
         {
             self.native_modifiers(&n);
@@ -104,6 +106,11 @@ impl Server {
             // Super with an arrow (snap.rs).
             KeyOut::Window(k) => self.window_key(k),
             KeyOut::ShowDesktop => self.show_desktop(),
+            // The lock screen (lock.rs).
+            KeyOut::Lock => {
+                self.lock_request("Super+L");
+            }
+            KeyOut::Locked => self.lock_key(key.sym, key.typed, pressed),
             KeyOut::Swallow => {}
         }
     }
@@ -249,6 +256,10 @@ impl Server {
     /// keyboard; a native window from us (native.rs), Smithay's focus being
     /// none then. The seat is told either way.
     pub fn focus_window(&mut self, window: &crate::win::Win, serial: smithay::utils::Serial) {
+        // Locked, no window takes the keyboard (review I6); the lock gives it back.
+        if self.lock.on {
+            return;
+        }
         // A parent a modal dialog blocks gives the keyboard to the dialog (dialogs.rs).
         if let Some(modal) = self.modal_of(window)
             && modal != *window

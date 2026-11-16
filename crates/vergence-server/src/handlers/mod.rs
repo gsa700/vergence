@@ -32,6 +32,10 @@ impl SeatHandler for Server {
     }
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: smithay::input::pointer::CursorImageStatus) {
+        // Locked: the desktop's own cursor only (a program's could look like a dialog).
+        if self.lock.on {
+            return;
+        }
         self.pointer_image.status = image;
     }
 

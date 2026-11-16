@@ -75,6 +75,34 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   passwords refused with the growing pause, in the auth log. Tests (9) on
   all three. The right password waits for Dave's own hand (`vdm-try`).
 
+- **Step 1, parts 1b and 1c** (2026-11-16): the lock in the server
+  (lock.rs). The seat's lock state checked before every other decision
+  (`Seat::lock`/`unlock`, `KeyOut::Lock`/`Locked`, `Part::Lock`; while
+  locked every key but volume and console switching, every press, motion,
+  wheel and finger is the lock's; tests); locking ends grabs, menus, the
+  launcher, cards, the drawer and dock drags, takes the keyboard from every
+  window (Smithay's focus and native windows told) and goes back to the
+  desktop's cursor; no program's cursor is taken while locked, no window
+  takes focus, no window is told modifiers; each screen's scene is only the
+  lock (on the pointer's screen), a dimming and the wallpaper. The dialog
+  talks to vdm in a thread (vergence-dm's protocol), shows PAM's prompts and
+  messages, takes typed keys only, honours vdm's pause, and stays locked
+  saying it waits if vdm goes (I8). Locks on Super+L, Ctrl+Super+Q, the
+  named action "Lock the screen", `vctl lock now`, when the screens go off
+  for idle, before the server's own sleep, and on coming back to the
+  console after the idle time (I7). It refuses honestly (a notification;
+  once only for idle) when vdm's socket is not there or the session could
+  fall back to a shell: the session script's parent must be login(1), vdm
+  or a display manager's session runner (C2). The marker
+  $XDG_RUNTIME_DIR/vergence-locked: the session script does not start a
+  server again after one that ended locked, removes a stale one at a fresh
+  login, and a server that finds it starts locked (C1). The session's
+  server refuses debuggers and core files (T6, I1). While locked vctl
+  answers only `shot` and `lock` (T4). Seen on kepler: asked to lock in a
+  session started from zsh, it stayed unlocked and said why. Tests 666
+  Hubble, 659 kepler. Next: Dave starts kepler with `exec vergence` and
+  tries the lock by hand.
+
 ## Design
 
 ### The parts

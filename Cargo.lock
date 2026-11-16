@@ -2340,6 +2340,7 @@ dependencies = [
  "vergence-bar",
  "vergence-dbus",
  "vergence-decode",
+ "vergence-dm",
  "vergence-edid",
  "vergence-look",
  "vergence-media",

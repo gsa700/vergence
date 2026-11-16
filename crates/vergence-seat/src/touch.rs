@@ -59,6 +59,8 @@ impl Touch {
 impl Seat {
     /// A finger came down at (x, y); `under` is what the server decided it meant.
     pub fn touch_down(&mut self, slot: Slot, x: f64, y: f64, under: Option<Target>, now_ms: u64) -> Vec<Out> {
+        // Locked: every finger is the lock's.
+        let under = if self.locked { Some(Target::Server(Part::Lock)) } else { under };
         let mut out = Vec::new();
         self.keyboard.super_alone = false;
         let ours = self.menu.is_some() || matches!(under, Some(Target::Server(Part::Note | Part::Card | Part::Drawer)));
@@ -89,6 +91,8 @@ impl Seat {
 
     /// A finger moved to (x, y).
     pub fn touch_motion(&mut self, slot: Slot, x: f64, y: f64, under: Option<Target>) -> Vec<Out> {
+        // Locked: every finger is the lock's.
+        let under = if self.locked { Some(Target::Server(Part::Lock)) } else { under };
         let mut out = Vec::new();
         if self.touch.pointing == Some(slot) {
             if self.touch.resting.is_some_and(|(rx, ry)| (x - rx).abs() > STILL || (y - ry).abs() > STILL) {

@@ -49,6 +49,9 @@ impl Server {
                 });
             }
             "desktop.show" => self.show_desktop(),
+            "lock.screen" => {
+                self.lock_request("the named action");
+            }
             "dock.drawer" => {
                 if self.tiles.drawer.is_none() {
                     self.drawer_toggle();

@@ -92,6 +92,9 @@ pub enum Part {
     Card,
     /// The dock's drawer of tiles (dock milestone 1).
     Drawer,
+    /// The lock screen (VDM milestone 1): while locked, every pointer and
+    /// finger is its, whatever is under it.
+    Lock,
     /// Alt+Tab's list of windows (windows milestone 1, step 5).
     Switcher,
     /// A window a modal dialog blocks (window styles milestone 1): every press
@@ -225,9 +228,37 @@ pub struct Seat {
     pub(crate) touch: touch::Touch,
     pub(crate) grab: Option<Grab>,
     pub(crate) menu: Option<Menu>,
+    /// The screen is locked (VDM milestone 1, review I6): checked before
+    /// anything else for every key, button, motion, wheel and finger.
+    pub(crate) locked: bool,
 }
 
 impl Seat {
+    /// Lock: no grab, menu, Alt+Tab, held button or finger outlives it, and
+    /// from now on every pointer and finger goes to the lock and every key
+    /// but volume and console switching to the lock's dialog.
+    pub fn lock(&mut self) -> Vec<Out> {
+        let mut out = self.screens_off();
+        self.locked = true;
+        self.pointer.refocus(Some(Target::Server(Part::Lock)), &mut out);
+        out
+    }
+
+    /// Unlock (only on vdm's yes to the lock's own request: the server's
+    /// lock.rs): input goes where it went before.
+    pub fn unlock(&mut self) -> Vec<Out> {
+        self.locked = false;
+        let mut out = Vec::new();
+        if let Some(t) = self.pointer.focus.take() {
+            out.push(Out::Leave(t));
+        }
+        out
+    }
+
+    pub fn locked(&self) -> bool {
+        self.locked
+    }
+
     pub fn new() -> Seat {
         Seat::default()
     }

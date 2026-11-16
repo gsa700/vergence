@@ -59,6 +59,8 @@ impl Pointer {
 impl Seat {
     /// The pointer moved; `under` is what is under it now.
     pub fn motion(&mut self, under: Option<Target>) -> Vec<Out> {
+        // Locked: whatever is under it, the pointer is the lock's.
+        let under = if self.locked { Some(Target::Server(Part::Lock)) } else { under };
         let mut out = Vec::new();
         match self.grab {
             Some(Grab::Edge) => out.push(Out::ToEdge),
@@ -85,6 +87,8 @@ impl Seat {
     /// A button went down or up; `under` is what is under the pointer,
     /// `now_ms` a clock in milliseconds (for the title bar's double-click).
     pub fn button(&mut self, button: u32, pressed: bool, under: Option<Target>, mods: Mods, now_ms: u64) -> Vec<Out> {
+        // Locked: whatever is under it, the pointer is the lock's.
+        let under = if self.locked { Some(Target::Server(Part::Lock)) } else { under };
         let mut out = Vec::new();
         // A button with Super held is not a tap of Super.
         self.keyboard.super_alone = false;
@@ -278,6 +282,8 @@ impl Seat {
 
     /// A wheel turned (or a finger scrolled): who scrolls.
     pub fn axis(&mut self, under: Option<Target>) -> Vec<Out> {
+        // Locked: whatever is under it, the pointer is the lock's.
+        let under = if self.locked { Some(Target::Server(Part::Lock)) } else { under };
         let mut out = Vec::new();
         match self.grab {
             Some(Grab::Edge) => out.push(Out::ToEdge),
@@ -465,6 +471,19 @@ mod tests {
         let out = seat.button(BTN_RIGHT, true, Some(desk), Default::default(), 6);
         assert!(!out.contains(&Out::Unfocus));
         assert_eq!(seat.keyboard_focus(), Some(W1));
+    }
+
+    #[test]
+    fn locked_the_pointer_is_the_locks() {
+        let mut seat = Seat::new();
+        seat.motion(Some(s1()));
+        let out = seat.lock();
+        assert!(out.contains(&Out::Leave(s1())), "the window under the pointer is left");
+        let lock = Target::Server(Part::Lock);
+        assert!(seat.motion(Some(s2())).iter().all(|o| !matches!(o, Out::Enter(t) | Out::Motion(t) if *t == s2())), "no window hears the pointer");
+        assert!(seat.button(BTN_LEFT, true, Some(s2()), alt(), 0).iter().all(|o| !matches!(o, Out::Press(t, _) if *t != lock)), "Alt+drag moves nothing");
+        assert_eq!(seat.grab(), None);
+        assert!(seat.axis(Some(s2())).iter().all(|o| matches!(o, Out::Axis(t) if *t == lock) || !matches!(o, Out::Axis(_))));
     }
 
     #[test]

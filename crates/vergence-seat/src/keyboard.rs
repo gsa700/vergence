@@ -52,6 +52,9 @@ pub enum Key {
     Space,
     /// The D key (Super+D: show the desktop).
     D,
+    /// The L key (Super+L: lock the screen), and Q (Ctrl+Super+Q, the Mac's).
+    L,
+    Q,
     Other,
 }
 
@@ -116,6 +119,10 @@ pub enum KeyOut {
     ShowDesktop,
     /// Kept from every program, with nothing else to do.
     Swallow,
+    /// Lock the screen: Super+L, or Ctrl+Super+Q (VDM milestone 1).
+    Lock,
+    /// The screen is locked: the key is the lock dialog's, and nobody else's.
+    Locked,
     /// To the window with the keyboard (None: no window has it; the key is
     /// still fed to Smithay's keyboard so its state stays right).
     Forward(Option<WinId>),
@@ -158,6 +165,22 @@ impl Seat {
     /// A key went down or up.
     pub fn key(&mut self, key: Key, pressed: bool, mods: Mods) -> KeyOut {
         let is_super = key == Key::Super;
+        // Locked (review I6): before any other key of the server's, the
+        // session's end and Force Quit among them. Only the volume and
+        // console switching pass; everything else is the lock dialog's.
+        if self.locked {
+            return match key {
+                Key::VolumeUp if pressed => KeyOut::Volume(5),
+                Key::VolumeDown if pressed => KeyOut::Volume(-5),
+                Key::Mute if pressed => KeyOut::Volume(0),
+                Key::Vt(n) if pressed && (1..=12).contains(&n) => KeyOut::Vt(n),
+                _ => KeyOut::Locked,
+            };
+        }
+        if pressed && mods.logo && !mods.alt && !mods.shift && ((key == Key::L && !mods.ctrl) || (key == Key::Q && mods.ctrl)) {
+            self.keyboard.super_alone = false;
+            return KeyOut::Lock;
+        }
         if pressed {
             if mods.ctrl && mods.alt && key == Key::BackSpace {
                 return KeyOut::Quit;
@@ -298,6 +321,28 @@ mod tests {
 
     fn none() -> Mods {
         Mods::default()
+    }
+
+    #[test]
+    fn locked_every_key_is_the_locks_but_volume_and_consoles() {
+        let mut seat = Seat::new();
+        let ctrl_alt = Mods { ctrl: true, alt: true, ..none() };
+        let logo = Mods { logo: true, ..none() };
+        assert_eq!(seat.key(Key::L, true, logo), KeyOut::Lock, "Super+L locks");
+        assert_eq!(seat.key(Key::Q, true, Mods { ctrl: true, ..logo }), KeyOut::Lock, "Ctrl+Super+Q too");
+        assert_eq!(seat.key(Key::L, true, Mods { shift: true, ..logo }), KeyOut::Forward(None), "not with Shift");
+        seat.lock();
+        assert!(seat.locked());
+        assert_eq!(seat.key(Key::BackSpace, true, ctrl_alt), KeyOut::Locked, "no ending the session from the lock");
+        assert_eq!(seat.key(Key::Escape, true, ctrl_alt), KeyOut::Locked, "no Force Quit");
+        assert_eq!(seat.key(Key::Tab, true, Mods { alt: true, ..none() }), KeyOut::Locked, "no Alt+Tab");
+        assert_eq!(seat.key(Key::Super, true, none()), KeyOut::Locked);
+        assert_eq!(seat.key(Key::Super, false, none()), KeyOut::Locked, "no launcher on Super's tap");
+        assert_eq!(seat.key(Key::Other, true, none()), KeyOut::Locked);
+        assert_eq!(seat.key(Key::VolumeUp, true, none()), KeyOut::Volume(5));
+        assert_eq!(seat.key(Key::Vt(2), true, ctrl_alt), KeyOut::Vt(2), "consoles still switch (Dave: 2 a)");
+        seat.unlock();
+        assert_eq!(seat.key(Key::Other, true, none()), KeyOut::Forward(None));
     }
 
     #[test]

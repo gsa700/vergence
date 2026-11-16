@@ -367,6 +367,8 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
         }
         SessionEvent::ActivateSession => {
             tracing::info!("session active");
+            // Away past the idle time: locked before anything is drawn (lock.rs).
+            state.lock_if_idle();
             let _ = libinput.resume();
             let crtcs: Vec<Key> = state
                 .backend

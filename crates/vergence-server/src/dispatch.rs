@@ -216,6 +216,10 @@ impl Server {
 
     /// What is under `pos`, for the seat; and the pointer's picture there.
     pub fn target_at(&mut self, pos: Point<f64, Logical>) -> Option<Target> {
+        // Locked: everything is the lock's (lock.rs).
+        if self.lock.on {
+            return Some(Target::Server(Part::Lock));
+        }
         if self.app_menu_contains(pos) {
             return Some(Target::Server(Part::AppList));
         }

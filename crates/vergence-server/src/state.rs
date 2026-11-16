@@ -124,6 +124,8 @@ pub struct Server {
     pub notes: crate::notify::Notifications,
     /// Live tiles on the dock and the open card (tiles.rs).
     pub tiles: crate::tiles::Tiles,
+    /// The lock screen (lock.rs; VDM milestone 1).
+    pub lock: crate::lock::Lock,
     /// How each output's scale was found (displays.rs), by output name, and the
     /// [displays] settings last applied.
     pub scale_notes: std::collections::HashMap<String, crate::displays::Scales>,
@@ -298,6 +300,7 @@ impl Server {
             settings: Default::default(),
             notes: Default::default(),
             tiles: Default::default(),
+            lock: Default::default(),
             scale_notes: Default::default(),
             displays: crate::displays::load(),
             shelf: crate::shelf::Shelf::load(),

@@ -642,6 +642,10 @@ impl Server {
     /// Everything on `output`, front to back: each window with its title bar.
     pub fn scene(&mut self, renderer: &mut GlesRenderer, output: &Output, scale: f64) -> Vec<SceneElement> {
         let Some(out) = self.space.output_geometry(output) else { return Vec::new() };
+        // Locked: the lock and the wallpaper, nothing of the session (lock.rs).
+        if self.lock.on {
+            return self.lock_elements(renderer, output, out, scale);
+        }
         let focused = self.keyboard_window();
         // What of a bar the pointer is over, for its hover look (the scene is
         // built again whenever the pointer moves).

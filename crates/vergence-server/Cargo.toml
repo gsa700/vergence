@@ -24,6 +24,7 @@ vergence-sysinfo.workspace = true
 vergence-types.workspace = true
 vergence-decode.workspace = true
 vergence-shell.workspace = true
+vergence-dm.workspace = true
 vergence-seat.workspace = true
 vergence-bar.workspace = true
 vergence-scene.workspace = true
