@@ -11,6 +11,11 @@
 //! Sleep, Restart and Shut Down along the bottom (step 6), carried out by
 //! vdm; Restart and Shut Down ask for a second press within five seconds.
 //!
+//! The machine's keyboard layout (vdm hands it over as XKB_DEFAULT_LAYOUT,
+//! from the system's own files) is named under the field; the "Aa" button
+//! at the top right (or F3) makes the text 100, 125 or 150 %, kept in
+//! VDM_KEEP for the next start (step 6).
+//!
 //! Keys: Up and Down choose the person; typing goes into the field (the name
 //! for Other…, then the password); Enter answers; Escape clears; F2 changes
 //! the session. A press on a person chooses them; on the session line,
@@ -41,6 +46,11 @@ use vergence_dm::secret::Secret;
 use vergence_scene::{Color, Point as ScenePoint, Rect as SceneRect, Scene};
 
 use crate::{Server, decor::SceneElement, lock::Heard};
+
+/// Where the login screen keeps its text size (vdm's VDM_KEEP, _vdm's own).
+fn keep_file() -> Option<std::path::PathBuf> {
+    std::env::var_os("VDM_KEEP").map(|d| std::path::PathBuf::from(d).join("text-size"))
+}
 
 /// A person who may log in here: their account's name and what to call them.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -100,6 +110,11 @@ pub struct Greeter {
     rows: Vec<(usize, Rectangle<i32, Logical>)>,
     session_line: Rectangle<i32, Logical>,
     power: Vec<(vergence_dm::power::Power, Rectangle<i32, Logical>)>,
+    size_button: Rectangle<i32, Logical>,
+    /// The text size: 100, 125 or 150 (%).
+    text_size: u32,
+    /// The keyboard layout's name, as vdm handed it over.
+    layout: String,
     /// Restart or Shut Down pressed once: a second press within 5 s does it.
     confirm: Option<(vergence_dm::power::Power, Instant)>,
     dim: Option<(Id, CommitCounter)>,
@@ -126,6 +141,8 @@ impl Server {
         g.field = Secret::new();
         g.prompt = "Password".into();
         g.naming = g.people.is_empty();
+        g.text_size = keep_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| t.trim().parse().ok()).filter(|n| [100, 125, 150].contains(n)).unwrap_or(100);
+        g.layout = std::env::var("XKB_DEFAULT_LAYOUT").ok().filter(|l| !l.is_empty()).unwrap_or_else(|| "us".into());
         tracing::info!("greeter: {} people, {} sessions", g.people.len(), g.sessions.len());
         let out = self.input.seat.lock();
         let pos = self.pointer_location();
@@ -197,6 +214,7 @@ impl Server {
         match sym {
             k::KEY_Up if !self.greeter.waiting => self.greeter_choose((self.greeter.chosen + n - 1) % n),
             k::KEY_Down if !self.greeter.waiting => self.greeter_choose((self.greeter.chosen + 1) % n),
+            k::KEY_F3 => self.greeter_text_size(),
             k::KEY_F2 if !self.greeter.sessions.is_empty() => self.greeter.session = (self.greeter.session + 1) % self.greeter.sessions.len(),
             k::KEY_Escape => {
                 self.greeter_drop_talk();
@@ -254,7 +272,9 @@ impl Server {
         if self.greeter.waiting {
             return;
         }
-        if let Some(&(p, _)) = self.greeter.power.iter().find(|(_, r)| r.to_f64().contains(at)) {
+        if self.greeter.size_button.to_f64().contains(at) {
+            self.greeter_text_size();
+        } else if let Some(&(p, _)) = self.greeter.power.iter().find(|(_, r)| r.to_f64().contains(at)) {
             self.greeter_power(p);
         } else if let Some(&(i, _)) = self.greeter.rows.iter().find(|(_, r)| r.to_f64().contains(at)) {
             self.greeter_choose(i);
@@ -262,6 +282,16 @@ impl Server {
             self.greeter.session = (self.greeter.session + 1) % self.greeter.sessions.len();
         }
         self.redraw_all();
+    }
+
+    /// The next text size (100, 125, 150 %), kept for the next start.
+    fn greeter_text_size(&mut self) {
+        let g = &mut self.greeter;
+        g.text_size = match g.text_size { 100 => 125, 125 => 150, _ => 100 };
+        if let Some(p) = keep_file() {
+            let _ = std::fs::write(p, format!("{}\n", g.text_size));
+        }
+        tracing::info!("greeter: text at {} %", g.text_size);
     }
 
     /// Sleep at once; Restart and Shut Down on a second press.
@@ -404,14 +434,20 @@ impl Server {
         let list_top = 120.0f32;
         let field_top = list_top + n_rows as f32 * row_h + 18.0;
         let h = field_top + 160.0;
-        let (wi, hi) = (w as i32, h as i32);
+        // Laid out in the panel's own points, shown at the text size.
+        let f = g.text_size as f32 / 100.0;
+        let (wi, hi) = ((w * f).round() as i32, (h * f).round() as i32);
         let at = (out.loc.x + (out.size.w - wi) / 2, out.loc.y + (out.size.h - hi) / 2);
+        let lr = |x: f32, y: f32, rw: f32, rh: f32| -> Rectangle<i32, Logical> { Rectangle::new((at.0 + (x * f).round() as i32, at.1 + (y * f).round() as i32).into(), ((rw * f).round() as i32, (rh * f).round() as i32).into()) };
+        let layout = g.layout.clone();
         let mut hsh = std::collections::hash_map::DefaultHasher::new();
         (&time, &host, &g.people, g.chosen, dots, &shown).hash(&mut hsh);
         (&g.prompt, &g.message, g.waiting, paused, &session_name, g.naming, scale.to_bits()).hash(&mut hsh);
+        (g.text_size, &g.layout).hash(&mut hsh);
         let key = hsh.finish();
-        self.greeter.rows = (0..n_rows).map(|i| (i, Rectangle::new((at.0 + 30, at.1 + (list_top + i as f32 * row_h) as i32).into(), (wi - 60, row_h as i32).into()))).collect();
-        self.greeter.session_line = Rectangle::new((at.0 + 30, at.1 + (field_top + 86.0) as i32).into(), (wi - 60, 22).into());
+        self.greeter.rows = (0..n_rows).map(|i| (i, lr(30.0, list_top + i as f32 * row_h, w - 60.0, row_h))).collect();
+        self.greeter.session_line = lr(30.0, field_top + 86.0, w - 60.0, 22.0);
+        self.greeter.size_button = lr(w - 52.0, 14.0, 38.0, 26.0);
         // Sleep, Restart, Shut Down: three buttons in a row along the bottom.
         let (pw, ph, pgap) = (100.0f32, 28.0f32, 12.0f32);
         let power_y = field_top + 120.0;
@@ -421,7 +457,7 @@ impl Server {
             .enumerate()
             .map(|(i, (p, l))| (p, l, power_x0 + i as f32 * (pw + pgap)))
             .collect();
-        self.greeter.power = power_local.iter().map(|(p, _, x)| (*p, Rectangle::new((at.0 + *x as i32, at.1 + power_y as i32).into(), (pw as i32, ph as i32).into()))).collect();
+        self.greeter.power = power_local.iter().map(|(p, _, x)| (*p, lr(*x, power_y, pw, ph))).collect();
         if self.greeter.picture.as_ref().map(|(k, ..)| *k) != Some(key) {
             let s = vergence_look::shelf_look(false);
             let ink = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
@@ -492,7 +528,12 @@ impl Server {
             };
             let color = if bad { Color::rgb(0xff, 0x8a, 0x80) } else { ink(s.menu_ink_off) };
             centered(fonts, &mut scene, face, 12.0, color, field_top + 62.0, &msg);
-            centered(fonts, &mut scene, face, 12.0, ink(s.menu_ink_off), field_top + 88.0, &format!("Session: {session_name}  (F2 to change)"));
+            centered(fonts, &mut scene, face, 12.0, ink(s.menu_ink_off), field_top + 88.0, &format!("Session: {session_name} (F2)  ·  Keyboard: {layout}"));
+            // The text size button.
+            let sb = SceneRect::new(w - 52.0, 14.0, 38.0, 26.0);
+            scene.fill_rounded(sb, vergence_look::RADIUS, ink(s.tile));
+            let (aw, am) = (fonts.layout(face, 13.0, "Aa").1, fonts.metrics(face, 13.0));
+            vergence_render::text(&mut scene, fonts, face, 13.0, ink(s.tile_ink), ScenePoint::new((sb.x + (sb.w - aw) / 2.0).round(), (sb.y + (sb.h - am.ascent - am.descent) / 2.0 + am.ascent).round()), "Aa");
             for (_, label, x) in &power_local {
                 let r = SceneRect::new(*x, power_y, pw, ph);
                 scene.fill_rounded(r, vergence_look::RADIUS, ink(s.tile));
@@ -500,7 +541,7 @@ impl Server {
                 let lm = fonts.metrics(face, 12.5);
                 vergence_render::text(&mut scene, fonts, face, 12.5, ink(s.tile_ink), ScenePoint::new((r.x + (r.w - lw) / 2.0).round(), (r.y + (r.h - lm.ascent - lm.descent) / 2.0 + lm.ascent).round()), label);
             }
-            let p = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)).ok()?;
+            let p = vergence_render::Cpu::new().render(&scene, fonts, (scale * f as f64) as f32, Color::rgba(0, 0, 0, 0)).ok()?;
             let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
             self.greeter.picture = Some((key, buffer, wi, hi));
         }

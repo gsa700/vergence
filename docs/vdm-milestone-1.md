@@ -309,6 +309,20 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   terminal and the login screen's TIOCSCTTY failed (EPERM); every VT is
   opened O_NOCTTY now. Steps 5 to 7 are done on FreeBSD, Void and Fedora.
 
+- **Step 6, part 6b** (2026-11-16): the login screen's keyboard and text
+  size. vergence-dm's keyboard.rs reads the machine's layout (Fedora's
+  /etc/vconsole.conf XKBLAYOUT/XKBVARIANT/XKBOPTIONS from localectl, else
+  the console keymap in vconsole.conf or rc.conf, Void's KEYMAP and
+  FreeBSD's keymap=, turned into an xkb layout: "en" and "us.kbd" are us,
+  "uk" gb, "de-latin1" de); vdm hands it to the login screen as
+  XKB_DEFAULT_LAYOUT/VARIANT/OPTIONS, which xkbcommon reads as the server
+  names no layout, and the panel says "Keyboard: us". An "Aa" button (or
+  F3) makes the panel's text 100, 125 or 150 %, kept in
+  /var/lib/vdm-greeter (/var/db/vdm-greeter), the one directory _vdm may
+  write that lasts. Sessions still get no layout from vdm (the session's
+  own settings are the place, later): Techbench's caps:none is the
+  login screen's only.
+
 ## Design
 
 ### The parts

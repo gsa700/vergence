@@ -592,6 +592,13 @@ fn start_greeter(uid: u32, gid: u32) -> std::io::Result<c_int> {
         std::fs::DirBuilder::new().mode(0o700).create(d)?;
         std::os::unix::fs::chown(d, Some(uid), Some(gid))?;
     }
+    // What the login screen keeps from one start to the next (its text size):
+    // its own small directory under vdm's state, the one thing that lasts.
+    let keep = std::path::Path::new(paths::GREETER_KEEP);
+    if keep.symlink_metadata().is_err() {
+        std::fs::DirBuilder::new().mode(0o700).create(keep)?;
+    }
+    std::os::unix::fs::chown(keep, Some(uid), Some(gid))?;
     let tty = vergence_dm::vt::open(vergence_dm::vt::GREETER_VT)?;
     let out = std::fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(std::path::Path::new(paths::STATE_DIR).join("greeter.log"))?;
     // A worker holds the login screen's PAM session (logind's seat goes only
@@ -697,6 +704,7 @@ fn spawn_greeter_server(uid: u32, gid: u32, server: &std::path::Path, home: &std
         .envs(pam_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .env("HOME", home)
         .env("XDG_RUNTIME_DIR", &runtime)
+        .env("VDM_KEEP", paths::GREETER_KEEP)
         .env("USER", paths::GREETER_USER)
         .env("LOGNAME", paths::GREETER_USER)
         .env("PATH", "/usr/local/bin:/usr/bin:/bin")
@@ -724,6 +732,14 @@ fn spawn_greeter_server(uid: u32, gid: u32, server: &std::path::Path, home: &std
             Ok(())
         })
     };
+    // The machine's keyboard layout (step 6), which xkbcommon takes from these.
+    if let Some(k) = vergence_dm::keyboard::system() {
+        for (name, v) in [("XKB_DEFAULT_LAYOUT", k.layout), ("XKB_DEFAULT_VARIANT", k.variant), ("XKB_DEFAULT_OPTIONS", k.options)] {
+            if !v.is_empty() {
+                cmd.env(name, v);
+            }
+        }
+    }
     cmd.spawn()
 }
 

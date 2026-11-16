@@ -40,6 +40,13 @@ pub fn login_screen_file() -> std::path::PathBuf {
     std::path::Path::new(STATE_DIR).join("login-screen")
 }
 
+/// What the login screen keeps between starts (its text size), _vdm's own:
+/// beside vdm's state directory, which is root's alone.
+#[cfg(target_os = "linux")]
+pub const GREETER_KEEP: &str = "/var/lib/vdm-greeter";
+#[cfg(not(target_os = "linux"))]
+pub const GREETER_KEEP: &str = "/var/db/vdm-greeter";
+
 /// The greeter's account.
 pub const GREETER_USER: &str = "_vdm";
 
