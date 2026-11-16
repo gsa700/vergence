@@ -15,7 +15,7 @@
 //     color = "#000000"
 //
 // Each monitor gets the image rendered at its own native pixels, once per size:
-// PNG/JPEG resampled from the source (Catmull-Rom), SVG drawn at that size by resvg,
+// PNG/JPEG resampled from the source (Catmull-Rom), SVG drawn at that size by the decode helper,
 // so it is sharp at any density. Rendering happens on a worker thread; until a
 // monitor's picture is ready it shows the one before. The file is checked every
 // second and changes apply at once.
@@ -477,8 +477,8 @@ impl Source {
         };
         let (fw, fh) = placement(sw, sh, w as f64, h as f64, mode);
         let (x, y) = ((w as f64 - fw) / 2.0, (h as f64 - fh) / 2.0);
-        let mut canvas = resvg::tiny_skia::Pixmap::new(w, h).expect("non-empty output");
-        canvas.fill(resvg::tiny_skia::Color::from_rgba(color[0], color[1], color[2], 1.0).unwrap());
+        let mut canvas = tiny_skia::Pixmap::new(w, h).expect("non-empty output");
+        canvas.fill(tiny_skia::Color::from_rgba(color[0], color[1], color[2], 1.0).unwrap());
         match self {
             Source::Raster(img) => {
                 let scaled = image::imageops::resize(img, fw.round().max(1.0) as u32, fh.round().max(1.0) as u32, image::imageops::FilterType::CatmullRom);
@@ -491,10 +491,10 @@ impl Source {
                     }
                 }
                 let (iw, ih) = (fw.round().max(1.0) as u32, fh.round().max(1.0) as u32);
-                if let Some(size) = resvg::tiny_skia::IntSize::from_wh(iw, ih)
-                    && let Some(src) = resvg::tiny_skia::Pixmap::from_vec(pm, size)
+                if let Some(size) = tiny_skia::IntSize::from_wh(iw, ih)
+                    && let Some(src) = tiny_skia::Pixmap::from_vec(pm, size)
                 {
-                    canvas.draw_pixmap(x.round() as i32, y.round() as i32, src.as_ref(), &resvg::tiny_skia::PixmapPaint::default(), resvg::tiny_skia::Transform::identity(), None);
+                    canvas.draw_pixmap(x.round() as i32, y.round() as i32, src.as_ref(), &tiny_skia::PixmapPaint::default(), tiny_skia::Transform::identity(), None);
                 }
             }
         }

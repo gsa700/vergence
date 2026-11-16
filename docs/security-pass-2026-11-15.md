@@ -133,3 +133,80 @@ to keep, not as holes someone outside can use.
 
 A full audit stays where the 8 November report put it: before someone
 other than Dave runs the desktop, or before the repository goes public.
+
+---
+
+## Fixed on Control, 15 November (evening)
+
+| # | Commit | What was done |
+|---|---|---|
+| 1 | e03908e | `native_paste` refused (`Denied`) unless the client's window has the keyboard; one `native_has_keyboard` check for copy and paste. |
+| 5 | e03908e | `vergence_types::open_regular` / `read_regular` (open with `O_NONBLOCK`, `O_NOCTTY`; `fstat`; regular files only), used by `of_file` (a pipe or device is a binary file, never opened), `decode_file`, the editor's `load`, Close-Up's text, `copy_tree` (pipes, devices, sockets not copied), the thumbnail cache and the wallpaper cache. `vergence-open --type` on a FIFO returns at once on Hubble and kepler. |
+| 6 | 6678331 | `vergence-session` makes `/tmp/xdg-<uid>` with `mkdir -m 700` and checks it (a directory, not a link, ours), else uses a fresh `mktemp -d`; tested with dash and FreeBSD sh. The server refuses a runtime directory that is unset, a link, not ours, or open to others. |
+| 2, 3 | f282f82 | Linux: a seccomp allow-list after the file is read (x86_64; another processor is refused, not left unconfined). `RLIMIT_NOFILE` 3 on both systems. Every limit checked: exit 3 before decoding if one cannot be set. Tests run the real helper on PNG, JPEG, WebP, animated GIF, BMP and SVG, and `--check-confined` shows an open after the limits is refused (SIGSYS on Linux, exit 4 on FreeBSD). 28 real pictures on Hubble, 8K JPEGs among them, decode under the filter. |
+| 4 | f282f82 | Wallpaper (pictures and SVG) and dock and launcher icons decoded by the helper; the server only resizes, and its `image` dependency has no decoders. Settings' preview cache read through the helper. |
+| 12 | f282f82 | Narrow, Dave's choice (no session-wide `umask`): at start the server makes `~/.config/vergence` and `~/.local/state/vergence` 0700 and the files directly in them owner-only, and warns if `desktop.toml` can be changed by another user. The started programs' output going into `server.log` is still open. |
+
+## Control's pass: thumbnails, removable drives, the eject helper
+
+The code Hubble's tree did not have, reviewed on Control at c905bc6 plus
+the fixes above. The questions the report asked, answered:
+
+- **What the root helper accepts.** `media-eject` (FreeBSD, setuid root,
+  group video, 4750) takes one argument, `/media/<name>` with a plain name
+  (letters, digits, `._- `; no `/`, no `..`), checks it is a mount point in
+  `mount -p` now, and runs `/sbin/umount` on it with an empty environment.
+  It cannot be made to unmount anything outside `/media`, and only root (the
+  automounter) can mount there (`vfs.usermount` is 0). Any member of video
+  may eject any drive under `/media`, someone else's on a shared machine
+  included: by design for one seat. Sound.
+- **Mount options for sticks.** FreeBSD: `-nosuid,noatime,autoro` from
+  `auto_master`, FAT files 664 with no execute bit; other file systems keep
+  their own modes, so a UFS or ext2 stick can carry programs that run (not
+  setuid). Linux: udisks2's defaults, `nosuid,nodev`, and `showexec` for
+  FAT. Neither has `noexec`; whether sticks should is Dave's question (see
+  below).
+- **Whether a stick's thumbnails are decoded before it is opened.** No.
+  Thumbnails are asked for only by File Viewer's icon view of a folder (and
+  the desktop's own files); plugging a stick in shows its icon, nothing
+  inside it is read.
+- **What the shared thumbnail cache believes.** A cached PNG is read with
+  `read_regular` (16 MB at most), its text chunks walked by our own code
+  without inflating anything, and its pixels decoded by the helper. A
+  thumbnail another program of the user planted with the right `Thumb::URI`
+  and `Thumb::MTime` is shown: the spec's trust, same uid.
+
+| # | Severity | Where | Finding | Done |
+|---|---|---|---|---|
+| C1 | Medium on FreeBSD machines with an unmounted internal FAT partition, none on kepler | `tools/freebsd/media-map` | **Internal partitions could show in /media, FAT ones writable by video.** FreeBSD's `special_media` offers every GEOM provider nobody has open, internal disks' included: an EFI partition not mounted, another system's partitions on a dual boot. Our map then mounted FAT ones with `-g=video,-m=664`, so the video group could write the EFI partition. kepler is not affected (its EFI partition is mounted, the boot partition has no file system). | Fixed: the map passes on only removable devices (`da`, `mmcsd`, `sdda`, `cd`), checked on each entry's device, whether asked by device name or by label; tested on kepler with a stand-in `special_media`. A machine whose internal disks are `da` (SAS) would need the list changed. |
+| C2 | Low, same uid | `vergence-thumbs` `write_private` | The temporary file had one name per process (two workers could write the same one) and was opened with `create` and `truncate`, following a link left in its place. | Fixed: a name per write, `create_new` (never an existing file or a link), removed on failure. |
+| C3 | Low (robustness) | `vergence-thumbs` `Thumbnailer`, File Viewer | Every thumbnail made stays in memory for the life of File Viewer, and the icon view asks for a whole folder's pictures, not those on screen: a folder of 10 000 photos holds about 2 GB. | Open: ask only for what is on screen, and bound what is kept. |
+| C4 | Info | FreeBSD `special_media` (base system) | It writes a drive's label with an unquoted `echo ${_label}`, so a label holding `*` is expanded as a file name pattern (in automountd's working directory, as root). Only the listed name changes; no command runs. Upstream's. | Not ours to change; noted. |
+| C5 | Info | `vergence-dbus` client, `vergence-media` udisks | Signals are taken from the system bus by a match on udisks's name (the bus enforces the sender); any other signal only causes a fresh look at udisks's objects. Mounting asks udisks with `auth.no_user_interaction`; drives udisks marks as system or ignored are skipped. Sound. | — |
+
+## Dependencies
+
+`cargo audit` (cargo-audit on Hubble, RustSec database of 15 November,
+1509 advisories) over the 341 packages in `Cargo.lock`: **no
+vulnerabilities**. Two warnings, both unmaintained crates that parse fonts:
+`rustybuzz` 0.20.1 (RUSTSEC-2026-0206) and `ttf-parser` 0.25.1
+(RUSTSEC-2026-0192), with no fixed release. Both come in through usvg's text
+support (and ttf-parser also through ab_glyph). usvg now runs only in the
+confined decode helper: the server's last use of resvg (its canvas) is
+tiny-skia used directly. The server still links vergence-decode's library
+(for `decode_file`), which depends on usvg and the image decoders, but never
+calls them: `nm` on the release server finds none of their code (one stray
+generic `RawVec` helper of usvg's). To watch: a usvg release that drops them, or our own text through
+vergence-text in the helper.
+
+## Still open after the evening
+
+- Findings 7 to 11 and 13 (launcher trust, the hand-over sockets,
+  ContextMenu and identity, `copy_tree`/`restore`, portal caps, stale wpa
+  sockets), and 12's second half (started programs write into
+  `server.log`).
+- C3 (thumbnails kept in memory).
+- Mount options: `noexec` for sticks on both systems, if Dave wants it.
+- Fuzz tests listed under "Tests" above.
+- From 8 November: the control socket's blocking I/O, `set_var` after
+  threads, `Message::big`, identity by pid.

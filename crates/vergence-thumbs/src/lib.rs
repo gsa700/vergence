@@ -182,13 +182,21 @@ fn write_private(to: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(dir) = to.parent() {
         std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
     }
-    let tmp = to.with_extension(format!("png.{}", std::process::id()));
-    {
+    // A name of its own per write (two workers may write at once), made
+    // new: never an existing file or a link someone left there.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = to.with_extension(format!("png.{}.{n}", std::process::id()));
+    let written = (|| {
         use std::io::Write;
-        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
         f.write_all(bytes)?;
+        std::fs::rename(&tmp, to)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
-    std::fs::rename(&tmp, to)
+    written
 }
 
 /// The file's thumbnail: the cache's if fresh, else made (decoded apart,

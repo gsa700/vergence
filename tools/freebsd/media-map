@@ -1,16 +1,50 @@
 #!/bin/sh
 #
 # Vergence's map for /media (files milestone 1; Dave, 2026-11-15: "automounter
-# on kepler"): FreeBSD's own -media map (/etc/autofs/special_media), with FAT
-# drives mounted for the seat's users to write: group video, files 664,
-# folders 775 (install.sh puts the seat's users in video). Everything else
-# is as special_media says. Installed as /etc/autofs/special_vergence_media
-# (a special map: the automounter asks those, and only those, for the list
-# of what is there); auto_master:
+# on kepler"): FreeBSD's own -media map (/etc/autofs/special_media), with two
+# changes:
+#
+# - Removable drives only: USB sticks and disks (da), SD cards (mmcsd, sdda)
+#   and discs (cd). special_media offers every partition nobody has open,
+#   internal disks' too (an EFI partition not mounted, another system's
+#   partitions on a dual boot), and this map makes FAT ones writable for the
+#   video group (security pass 2026-11-15, Control's part). A machine whose
+#   internal disks are da (SAS/SCSI) would need this list changed.
+# - FAT drives mounted for the seat's users to write: group video, files
+#   664, folders 775 (install.sh puts the seat's users in video).
+#
+# Installed as /etc/autofs/special_vergence_media (a special map: the
+# automounter asks those, and only those, for the list of what is there);
+# auto_master:
 #
 #   /media  -vergence_media  -nosuid,noatime,autoro
 #
 # Called with no argument it lists the drives; with one, it gives that
-# drive's entry.
+# drive's entry. Runs as root, from automountd.
 
-/etc/autofs/special_media "$@" | sed -e 's/^-fstype=msdosfs,/-fstype=msdosfs,-g=video,-m=664,-M=775,/'
+SPECIAL=/etc/autofs/special_media
+
+# Whether a GEOM provider (da0s1, mmcsd0s1, cd0) is on a removable drive.
+removable() {
+    case "$1" in
+    da[0-9]*|mmcsd[0-9]*|sdda[0-9]*|cd[0-9]*) return 0 ;;
+    esac
+    return 1
+}
+
+# One name's map entries, only those whose device is removable.
+entry() {
+    "$SPECIAL" "$1" | while IFS= read -r line; do
+        dev=${line##*:/dev/}
+        [ "$dev" != "$line" ] && removable "$dev" && printf '%s\n' "$line"
+    done | sed -e 's/^-fstype=msdosfs,/-fstype=msdosfs,-g=video,-m=664,-M=775,/'
+}
+
+if [ $# -eq 0 ]; then
+    "$SPECIAL" | while IFS= read -r name; do
+        [ -n "$name" ] && [ -n "$(entry "$name")" ] && printf '%s\n' "$name"
+    done
+    exit 0
+fi
+entry "$1"
+exit 0
