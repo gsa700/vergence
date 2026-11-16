@@ -91,6 +91,7 @@ if [ -n "$uninstall" ]; then
     [ -z "$destdir" ] && [ "$(uname -s)" = FreeBSD ] && rm -f /etc/autofs/special_vergence_media
     rm -f "$libexec/ups-tile" "$libexec/vtile-demo"
     rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
+    [ -z "$destdir" ] && rm -f /etc/fonts/conf.d/90-vergence-fonts.conf /usr/local/etc/fonts/conf.d/90-vergence-fonts.conf
     rm -f "$fonts"/InterVariable*.ttf "$fonts"/JetBrainsMono-Variable*.ttf "$fonts"/Inter-OFL.txt "$fonts"/JetBrainsMono-OFL.txt
     rmdir "$words" "$fonts" "$destdir$prefix/share/vergence" 2>/dev/null || true
     rmdir "$libexec" 2>/dev/null || true
@@ -129,6 +130,19 @@ install -m 644 "$root/data/words/SCOWL-COPYRIGHT.txt" "$words/SCOWL-COPYRIGHT.tx
 # the system's copy, these the fallback (vergence-text db.rs).
 install -d -m 755 "$fonts"
 for f in "$root"/data/fonts/*; do install -m 644 "$f" "$fonts/"; done
+# Every app on the machine may use them (GTK, Qt, Firefox find fonts through
+# fontconfig): its conf.d gets our directory, after the system's own.
+if [ -z "$destdir" ]; then
+    for conf in /etc/fonts/conf.d /usr/local/etc/fonts/conf.d; do
+        [ -d "$conf" ] || continue
+        printf '%s\n' '<?xml version="1.0"?>' '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">' \
+            "<!-- Vergence's own fonts, Inter and JetBrains Mono (tools/install.sh writes it) -->" \
+            "<fontconfig><dir>$prefix/share/vergence/fonts</dir></fontconfig>" > "$conf/90-vergence-fonts.conf"
+        chmod 644 "$conf/90-vergence-fonts.conf"
+        command -v fc-cache >/dev/null 2>&1 && fc-cache -f "$prefix/share/vergence/fonts" >/dev/null 2>&1
+        echo "fonts: Inter and JetBrains Mono registered with fontconfig ($conf/90-vergence-fonts.conf)"
+    done
+fi
 install -m 755 "$here/vctl" "$bin/vctl"
 # Lab tiles (dock milestone 1): a NUT UPS and a demonstration tile, scripts on vtile.
 install -d -m 755 "$libexec"

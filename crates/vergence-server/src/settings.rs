@@ -202,6 +202,14 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
             put(INTERFACE, key, SettingValue::Str(v));
         }
     }
+    // Unset, Vergence's own fonts (Dave, 2026-11-16: a uniform look), which
+    // install.sh ships and registers with fontconfig for every app.
+    if xstr("Gtk/FontName").is_none() {
+        put(INTERFACE, "font-name", SettingValue::Str(DEFAULT_FONT.into()));
+    }
+    if xstr("Gtk/MonospaceFontName").is_none() {
+        put(INTERFACE, "monospace-font-name", SettingValue::Str(DEFAULT_MONO.into()));
+    }
     // Which window buttons, and on which side ("close,minimize:" or
     // ":minimize,maximize,close"): the server's own title bars follow it too.
     // Unset, the default (on the left) is published, so apps follow it as well.
@@ -217,6 +225,10 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
     }
     m
 }
+
+/// The desktop's fonts when settings.toml names none.
+pub const DEFAULT_FONT: &str = "Inter Variable 10";
+pub const DEFAULT_MONO: &str = "JetBrains Mono 10";
 
 fn load() -> Map {
     let read = |n: &str| config(n).and_then(|p| std::fs::read_to_string(p).ok());
