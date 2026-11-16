@@ -203,6 +203,7 @@ impl Server {
             // Native windows' meaning (Contract 3, native.rs).
             "tree" => self.native_tree_report(),
             "shelf" => self.shelf_report(),
+            "tiles" => self.tiles_report(),
             "session" => self.session_report(),
             "apps" => self.launcher_report(),
             // A finger: `touch down|move <x> <y> [finger]`, `touch up [finger]`; alone, a report.
@@ -377,7 +378,7 @@ impl Server {
                 self.loop_signal.stop();
                 "quitting".into()
             }
-            _ => "commands: shot, windows, gpus, shelf, session, apps, key <name> (chords: ctrl+v), type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
+            _ => "commands: shot, windows, gpus, shelf, tiles, session, apps, key <name> (chords: ctrl+v), type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
         }
     }
 

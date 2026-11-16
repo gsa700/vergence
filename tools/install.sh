@@ -10,7 +10,7 @@
 #   cargo build --release
 #
 # What goes where (PREFIX=/usr/local):
-#   bin/vergence-server, vergence-term, vergence-settings, vergence-calc, vergence-quit, vergence-hw, vergence-edit, vergence-closeup, vergence-files, vergence-open, vbus, vnative, vsound, vshell, vctl   the programs
+#   bin/vergence-server, vergence-term, vergence-settings, vergence-calc, vergence-quit, vergence-hw, vergence-edit, vergence-closeup, vergence-files, vergence-open, vbus, vtile, vnative, vsound, vshell, vctl   the programs
 #   bin/vergence-session                     the session launcher (tools/vergence-session)
 #   bin/vergence -> vergence-session         start the session from a text console
 #   share/wayland-sessions/vergence.desktop  "Vergence" at a display manager's login screen
@@ -59,7 +59,7 @@ applications=$destdir$prefix/share/applications
 icons=$destdir$prefix/share/icons/hicolor/scalable/apps
 docs=$destdir$prefix/share/doc/vergence       # license and notices (the settings app's About page names it)
 docfiles="LICENSE-APACHE LICENSE-GPL THIRD-PARTY-NOTICES.md"
-programs="vergence-server vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit vergence-closeup vergence-files vergence-open vbus vnative vsound vshell"
+programs="vergence-server vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit vergence-closeup vergence-files vergence-open vbus vtile vnative vsound vshell"
 tools="vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit vergence-closeup vergence-files"
 libexec=$destdir$prefix/libexec/vergence
 words=$destdir$prefix/share/vergence/words

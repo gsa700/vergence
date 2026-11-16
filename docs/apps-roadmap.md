@@ -109,7 +109,7 @@ the order when its turn is near:
   layout (fonts, spacing) on FreeBSD and Linux**.
 - **The Sound page picks up a card's extra features**: "mostly things like
   IO and loopback, midi, etc."
-- **The dock's icons by drag and drop**, while the dock itself is moved
+- **The dock's icons by drag and drop** (dock milestone 1, step 1, 2026-11-16), while the dock itself is moved
   "with its menu or a modifier and drag".
 - **The dark title bar's color chosen**, "maybe something like the accent
   color picker".
@@ -190,6 +190,16 @@ it is today:
   Btrfs); Hubble's ext4 has none, so rsync stays the fallback there. The
   backup app would work through one interface with three back ends: ZFS,
   Btrfs, rsync.
+
+## From Dave, 2026-11-16
+
+- **Only one System Settings at a time** (Dave: "there should only ever
+  be one copy of System Settings at any one time"). Starting
+  vergence-settings while one is running (a dock tile's click, `--page`,
+  `--app`, `--forget`, an app menu's Settings…) brings the running window
+  forward and turns it to the page asked for, instead of opening a second
+  window. Seen when the clock tile's click opened a new one (dock milestone
+  1, step 2).
 
 ## Questions for Dave (when each app's turn comes)
 

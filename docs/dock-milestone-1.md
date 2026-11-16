@@ -43,6 +43,20 @@ milestone: the list and the launcher only).
   its card, a click opening the settings app (no Date & Time page yet: it
   comes with step 4). Tests 641 Hubble/Techbench, 634 kepler.
 
+- **Step 3 done** (2026-11-16): bus **v19**: `SetTile` (publish or change
+  one of this client's tiles; checked by `Tile::check`: id, lengths, at most
+  32 tiles, 16 rows, 240 chart values, 8 controls) and `RemoveTile`; events
+  to the owner `CardOpened`, `CardClosed`, `TileClicked` (a tile with no
+  page), `TileAction` (a card's control: button, switch or slider, defined
+  now so step 4 needs no second bump). A client's tiles go when it leaves.
+  Tiles are keyed by owner and id. `vtile show|run <id> [options]` in
+  vergence-protocol (installed by install.sh); `vctl tiles`. Charts scale
+  to their values' range. Seen on kepler: a vtile demo tile put up,
+  changed to a warning (amber on the dock), its card opened, a click and
+  the card's open and close printed by vtile, gone when vtile ended.
+  Installed and restarted on all three (Hubble, Techbench's dev session,
+  kepler). Tests 644 Hubble/Techbench, 637 kepler.
+
 ## Where things stand
 
 - The dock (shelf milestones 1 and 2): the apps button, pinned and running

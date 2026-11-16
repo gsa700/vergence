@@ -259,6 +259,18 @@ impl Server {
                     self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message: format!("no notification {nid} of yours") });
                 }
             }
+            // Live tiles (tiles.rs).
+            ClientMsg::SetTile { serial, tile } => match self.tile_from_client(id, tile) {
+                Ok(()) => self.bus_send(id, ServerMsg::Done { serial }),
+                Err(message) => self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message }),
+            },
+            ClientMsg::RemoveTile { serial, id: tile } => {
+                if self.tile_remove(crate::tiles::Owner::Client(id), &tile) {
+                    self.bus_send(id, ServerMsg::Done { serial });
+                } else {
+                    self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message: format!("no tile {tile:?} of yours") });
+                }
+            }
             ClientMsg::ListPlaces { serial } => {
                 let apps = self.places_apps();
                 self.bus_send(id, ServerMsg::Places { serial, apps });
@@ -443,8 +455,9 @@ impl Server {
             }
             tracing::debug!("bus: client {id} ({:?}) left", c.app_id);
         }
-        // Its native windows go with it (native.rs).
+        // Its native windows go with it (native.rs), and its tiles (tiles.rs).
         self.native_forget(id);
+        self.tiles_forget(id);
     }
 
     /// The monitors as the bus describes them, left to right.

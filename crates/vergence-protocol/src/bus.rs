@@ -49,7 +49,7 @@
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 18;
+pub const VERSION: u32 = 19;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -315,6 +315,13 @@ pub enum ClientMsg {
     /// for its type (files milestone 1). The server starts them as the dock
     /// does. Reply: Done, or an error naming what could not be opened.
     Open { serial: u32, items: Vec<String>, app: String },
+    /// Put up a live tile on the dock, or change one of this client's with
+    /// the same id (dock milestone 1; tile.rs). It stays until removed or
+    /// until this connection ends. Reply: Done, or an error saying why the
+    /// tile was refused.
+    SetTile { serial: u32, tile: crate::tile::Tile },
+    /// Take down one of this client's tiles. Reply: Done, or an error.
+    RemoveTile { serial: u32, id: String },
     /// Windows (window.rs).
     Window(crate::window::WinRequest),
 }
@@ -374,6 +381,14 @@ pub enum ServerMsg {
     /// toolkit does, from its loop): a client that has not answered for a
     /// few seconds is "not responding" in Force Quit.
     Alive { serial: u32 },
+    /// One of this client's tiles: its card opened (a live card may now
+    /// publish about once a second) or closed (back to quiet).
+    CardOpened { id: String },
+    CardClosed { id: String },
+    /// A click on one of this client's tiles that names no settings page.
+    TileClicked { id: String },
+    /// A control on one of this client's cards was used (tile.rs `Control`).
+    TileAction { id: String, control: String, value: f64 },
     /// Windows (window.rs).
     Window(crate::window::WinEvent),
 }
@@ -394,6 +409,8 @@ mod op {
     pub const FORCE_QUIT: u16 = 12;
     pub const ALIVE_REPLY: u16 = 13;
     pub const OPEN: u16 = 14;
+    pub const SET_TILE: u16 = 15;
+    pub const REMOVE_TILE: u16 = 16;
     // Server to client.
     pub const WELCOME: u16 = 1;
     pub const PONG: u16 = 2;
@@ -408,6 +425,10 @@ mod op {
     pub const PLACES: u16 = 11;
     pub const APPS: u16 = 12;
     pub const ALIVE: u16 = 13;
+    pub const CARD_OPENED: u16 = 14;
+    pub const CARD_CLOSED: u16 = 15;
+    pub const TILE_CLICKED: u16 = 16;
+    pub const TILE_ACTION: u16 = 17;
 }
 
 fn put_setting_value(e: &mut Encoder, v: &SettingValue) {
@@ -524,6 +545,17 @@ impl ClientMsg {
                 e.u32(*serial);
                 e
             }
+            ClientMsg::SetTile { serial, tile } => {
+                let mut e = Encoder::frame(op::SET_TILE);
+                e.u32(*serial);
+                tile.encode(&mut e);
+                e
+            }
+            ClientMsg::RemoveTile { serial, id } => {
+                let mut e = Encoder::frame(op::REMOVE_TILE);
+                e.u32(*serial).str(id);
+                e
+            }
             // Its descriptors are lost here: send it with encode_with_fds.
             ClientMsg::Window(w) => return w.encode().map(|(bytes, _)| bytes),
         };
@@ -612,6 +644,16 @@ impl ClientMsg {
                 Ok(ClientMsg::ForceQuit { serial, app })
             }
             op::ALIVE_REPLY => Ok(ClientMsg::Alive { serial: d.u32().map_err(|e| bad(0, e))? }),
+            op::SET_TILE => {
+                let serial = d.u32().map_err(|e| bad(0, e))?;
+                let tile = crate::tile::Tile::decode(&mut d).map_err(|e| bad(serial, e))?;
+                Ok(ClientMsg::SetTile { serial, tile })
+            }
+            op::REMOVE_TILE => {
+                let serial = d.u32().map_err(|e| bad(0, e))?;
+                let id = d.str().map_err(|e| bad(serial, e))?;
+                Ok(ClientMsg::RemoveTile { serial, id })
+            }
             op::OPEN => {
                 let serial = d.u32().map_err(|e| bad(0, e))?;
                 let rest = (|| -> Result<ClientMsg, WireError> {
@@ -697,6 +739,21 @@ impl ServerMsg {
             ServerMsg::Alive { serial } => {
                 let mut e = Encoder::frame(op::ALIVE);
                 e.u32(*serial);
+                e
+            }
+            ServerMsg::CardOpened { id } | ServerMsg::CardClosed { id } | ServerMsg::TileClicked { id } => {
+                let opcode = match self {
+                    ServerMsg::CardOpened { .. } => op::CARD_OPENED,
+                    ServerMsg::CardClosed { .. } => op::CARD_CLOSED,
+                    _ => op::TILE_CLICKED,
+                };
+                let mut e = Encoder::frame(opcode);
+                e.str(id);
+                e
+            }
+            ServerMsg::TileAction { id, control, value } => {
+                let mut e = Encoder::frame(op::TILE_ACTION);
+                e.str(id).str(control).f64(*value);
                 e
             }
             ServerMsg::Apps { serial, apps } => {
@@ -808,6 +865,10 @@ impl ServerMsg {
             op::NOTIFICATION_CLOSED => ServerMsg::NotificationClosed { id: d.u32()?, reason: d.u32()? },
             op::ACTION_INVOKED => ServerMsg::ActionInvoked { id: d.u32()?, key: d.str()? },
             op::ALIVE => ServerMsg::Alive { serial: d.u32()? },
+            op::CARD_OPENED => ServerMsg::CardOpened { id: d.str()? },
+            op::CARD_CLOSED => ServerMsg::CardClosed { id: d.str()? },
+            op::TILE_CLICKED => ServerMsg::TileClicked { id: d.str()? },
+            op::TILE_ACTION => ServerMsg::TileAction { id: d.str()?, control: d.str()?, value: d.f64()? },
             op::APPS => {
                 let serial = d.u32()?;
                 let n = d.count(14)?;
@@ -870,6 +931,49 @@ mod tests {
         ]
     }
 
+    fn sample_tile() -> crate::tile::Tile {
+        use crate::tile::{Card, Control, ControlKind, Tile, TileState};
+        Tile {
+            id: "ups".into(),
+            value: "23 m".into(),
+            label: "UPS".into(),
+            state: TileState::Warning,
+            group: "Lab".into(),
+            page: String::new(),
+            card: Card {
+                title: "UPS (rack)".into(),
+                big: String::new(),
+                rows: vec![("Load".into(), "27 %".into()), ("On".into(), "battery".into())],
+                chart: vec![25.0, 26.5, 27.25],
+                controls: vec![
+                    Control { id: "test".into(), label: "Self-test".into(), kind: ControlKind::Button },
+                    Control { id: "beep".into(), label: "Beeper".into(), kind: ControlKind::Switch(true) },
+                    Control { id: "x".into(), label: "X".into(), kind: ControlKind::Slider { value: 0.5, min: 0.0, max: 1.0, step: 0.05 } },
+                ],
+                note: "sample".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn a_tile_is_checked_before_it_is_taken() {
+        use crate::tile::{Control, ControlKind};
+        assert!(sample_tile().check().is_ok());
+        assert!(crate::tile::Tile::default().check().is_err(), "no id");
+        let mut t = sample_tile();
+        t.value = "x".repeat(25);
+        assert!(t.check().is_err(), "a value too long for the dock");
+        let mut t = sample_tile();
+        t.card.chart.push(f32::NAN);
+        assert!(t.check().is_err());
+        let mut t = sample_tile();
+        t.card.controls.push(Control { id: "s".into(), label: String::new(), kind: ControlKind::Slider { value: 0.0, min: 1.0, max: 1.0, step: 0.0 } });
+        assert!(t.check().is_err(), "a slider with no range");
+        let mut t = sample_tile();
+        t.id = "a\nb".into();
+        assert!(t.check().is_err());
+    }
+
     #[test]
     fn client_messages_round_trip() {
         for m in [
@@ -898,6 +1002,9 @@ mod tests {
             ClientMsg::Alive { serial: 25 },
             ClientMsg::Open { serial: 26, items: vec!["/home/u/a b.png".into(), "https://example.org".into()], app: String::new() },
             ClientMsg::Open { serial: 27, items: vec![], app: "firefox.desktop".into() },
+            ClientMsg::SetTile { serial: 28, tile: crate::tile::Tile::default() },
+            ClientMsg::SetTile { serial: 29, tile: sample_tile() },
+            ClientMsg::RemoveTile { serial: 30, id: "ups".into() },
         ] {
             assert_eq!(ClientMsg::decode(&frame(&m.encode().unwrap())).unwrap(), m);
         }
@@ -929,6 +1036,10 @@ mod tests {
             ServerMsg::Places { serial: 20, apps: vec![("vergence-term".into(), 3), ("firefox".into(), 1)] },
             ServerMsg::Places { serial: 21, apps: Vec::new() },
             ServerMsg::Alive { serial: 26 },
+            ServerMsg::CardOpened { id: "ups".into() },
+            ServerMsg::CardClosed { id: "ups".into() },
+            ServerMsg::TileClicked { id: "ups".into() },
+            ServerMsg::TileAction { id: "sound".into(), control: "volume".into(), value: 0.66 },
             ServerMsg::Apps {
                 serial: 24,
                 apps: vec![

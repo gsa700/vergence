@@ -26,7 +26,6 @@ use crate::{Server, decor::SceneElement};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Owner {
     Desktop,
-    #[allow(dead_code)] // step 3
     Client(u32),
 }
 
@@ -36,7 +35,18 @@ pub struct Placed {
     pub tile: Tile,
 }
 
-/// The card that is open: its tile, where it was put, and its picture.
+impl Placed {
+    /// The tile's key on this desktop: its id, after its owner's (two
+    /// programs may both name a tile "status").
+    pub fn key(&self) -> String {
+        match self.owner {
+            Owner::Desktop => self.tile.id.clone(),
+            Owner::Client(c) => format!("{c}:{}", self.tile.id),
+        }
+    }
+}
+
+/// The card that is open: its tile (by key), where it was put, and its picture.
 struct Open {
     id: String,
     rect: Rectangle<i32, Logical>,
@@ -106,6 +116,71 @@ impl Server {
         self.redraw_all();
     }
 
+    /// A tile a client of the bus put up (or changed), if it may.
+    pub fn tile_from_client(&mut self, client: u32, tile: Tile) -> Result<(), String> {
+        tile.check()?;
+        let owner = Owner::Client(client);
+        let mine = self.tiles.list.iter().filter(|p| p.owner == owner).count();
+        let known = self.tiles.list.iter().any(|p| p.owner == owner && p.tile.id == tile.id);
+        if !known && mine >= vergence_protocol::tile::MAX_TILES {
+            return Err(format!("no more than {} tiles", vergence_protocol::tile::MAX_TILES));
+        }
+        self.tile_set(owner, tile);
+        Ok(())
+    }
+
+    /// Take down one of an owner's tiles; whether it had it.
+    pub fn tile_remove(&mut self, owner: Owner, id: &str) -> bool {
+        let before = self.tiles.list.len();
+        self.tiles.list.retain(|p| !(p.owner == owner && p.tile.id == id));
+        let gone = self.tiles.list.len() != before;
+        if gone {
+            tracing::info!("tiles: {id} from {owner:?} taken down");
+            self.tiles_after_removal();
+        }
+        gone
+    }
+
+    /// A client of the bus left: its tiles go with it.
+    pub fn tiles_forget(&mut self, client: u32) {
+        let before = self.tiles.list.len();
+        self.tiles.list.retain(|p| p.owner != Owner::Client(client));
+        if self.tiles.list.len() != before {
+            tracing::info!("tiles: client {client}'s tiles taken down");
+            self.tiles_after_removal();
+        }
+    }
+
+    /// After tiles went: a card left without its tile closes; the dock is
+    /// shorter.
+    fn tiles_after_removal(&mut self) {
+        if let Some(c) = self.tiles.card.as_ref()
+            && !self.tiles.list.iter().any(|p| p.key() == c.id)
+        {
+            self.tiles.card = None;
+        }
+        self.redraw_all();
+    }
+
+    /// Tell a tile's owner something about it, if the owner is a client.
+    fn tile_tell(&mut self, key: &str, make: impl FnOnce(String) -> vergence_protocol::bus::ServerMsg) {
+        if let Some((Owner::Client(client), id)) = self.tiles.list.iter().find(|p| p.key() == key).map(|p| (p.owner, p.tile.id.clone())) {
+            self.bus_send(client, make(id));
+        }
+    }
+
+    /// For `vctl tiles`: each tile, its owner, what it shows, and its card's state.
+    pub fn tiles_report(&self) -> String {
+        let mut out: Vec<String> = self
+            .tiles
+            .list
+            .iter()
+            .map(|p| format!("{} {:?} {:?} {:?} {:?} group {:?} page {:?} rows {} chart {} controls {}", p.key(), p.owner, p.tile.value, p.tile.label, p.tile.state, p.tile.group, p.tile.page, p.tile.card.rows.len(), p.tile.card.chart.len(), p.tile.card.controls.len()))
+            .collect();
+        out.push(format!("card: {}", self.tiles.card.as_ref().map_or("none".to_string(), |c| format!("{} at {},{} {}x{}", c.id, c.rect.loc.x, c.rect.loc.y, c.rect.size.w, c.rect.size.h))));
+        out.join("\n")
+    }
+
     /// The tiles the dock shows, in order.
     pub fn tiles_on_dock(&self) -> Vec<Tile> {
         self.tiles.list.iter().map(|p| p.tile.clone()).collect()
@@ -126,7 +201,7 @@ impl Server {
     /// The pointer moved (shelf.rs passes it on): resting on a tile opens its
     /// card; away from the tile and its card a moment, the card closes.
     pub fn tiles_hover(&mut self, at: Point<f64, Logical>, busy: bool) {
-        let over = if busy { None } else { self.tile_under(at).and_then(|i| self.tiles.list.get(i)).map(|p| p.tile.id.clone()) };
+        let over = if busy { None } else { self.tile_under(at).and_then(|i| self.tiles.list.get(i)).map(|p| p.key()) };
         if self.card_at(at) || (over.is_some() && over == self.tiles.card.as_ref().map(|c| c.id.clone())) {
             self.tiles.hover = over;
             return;
@@ -147,7 +222,7 @@ impl Server {
             None if self.tiles.card.is_some() => {
                 let _ = self.loop_handle.insert_source(Timer::from_duration(AWAY), |_, _, st| {
                     let at = st.pointer_location();
-                    let on_tile = st.tile_under(at).and_then(|i| st.tiles.list.get(i)).map(|p| &p.tile.id) == st.tiles.card.as_ref().map(|c| &c.id);
+                    let on_tile = st.tile_under(at).and_then(|i| st.tiles.list.get(i)).map(|p| p.key()) == st.tiles.card.as_ref().map(|c| c.id.clone());
                     if !st.card_at(at) && !on_tile {
                         st.card_close();
                     }
@@ -163,14 +238,17 @@ impl Server {
         if self.tiles.card.as_ref().is_some_and(|c| c.id == id) {
             return;
         }
+        self.card_close();
         tracing::info!("tiles: card {id} open");
         self.tiles.card = Some(Open { id: id.to_string(), rect: Rectangle::default(), title: Rectangle::default(), picture: None });
+        self.tile_tell(id, |id| vergence_protocol::bus::ServerMsg::CardOpened { id });
         self.redraw_all();
     }
 
     pub fn card_close(&mut self) {
         if let Some(c) = self.tiles.card.take() {
             tracing::info!("tiles: card {} closed", c.id);
+            self.tile_tell(&c.id, |id| vergence_protocol::bus::ServerMsg::CardClosed { id });
             self.redraw_all();
         }
     }
@@ -180,8 +258,8 @@ impl Server {
         let Some(p) = self.tiles.list.get(index).cloned() else { return };
         self.card_close();
         if p.tile.page.is_empty() {
-            // Step 3: the owner hears of the click.
             tracing::info!("tiles: {} clicked (owner {:?})", p.tile.id, p.owner);
+            self.tile_tell(&p.key(), |id| vergence_protocol::bus::ServerMsg::TileClicked { id });
             return;
         }
         tracing::info!("tiles: {} opens the settings page {:?}", p.tile.id, p.tile.page);
@@ -194,7 +272,7 @@ impl Server {
     pub fn card_press(&mut self, at: Point<f64, Logical>) {
         let Some(c) = self.tiles.card.as_ref() else { return };
         if c.title.to_f64().contains(at)
-            && let Some(i) = self.tiles.list.iter().position(|p| p.tile.id == c.id)
+            && let Some(i) = self.tiles.list.iter().position(|p| p.key() == c.id)
         {
             self.tile_go(i);
         }
@@ -204,7 +282,7 @@ impl Server {
     /// the dock's screen.
     pub fn card_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
         let Some(id) = self.tiles.card.as_ref().map(|c| c.id.clone()) else { return Vec::new() };
-        let Some(index) = self.tiles.list.iter().position(|p| p.tile.id == id) else {
+        let Some(index) = self.tiles.list.iter().position(|p| p.key() == id) else {
             self.tiles.card = None;
             return Vec::new();
         };
@@ -280,9 +358,13 @@ impl Server {
             }
             if card.chart.len() > 1 {
                 let (cx, cy, cw, ch) = (14.0, top + 4.0, w - 28.0, 36.0);
-                let max = card.chart.iter().cloned().fold(f32::MIN, f32::max).max(1e-6) * 1.1;
+                // Scaled to the values' own range, with a little room above and below.
+                let lo = card.chart.iter().cloned().fold(f32::MAX, f32::min);
+                let hi = card.chart.iter().cloned().fold(f32::MIN, f32::max);
+                let room = ((hi - lo) * 0.1).max(hi.abs().max(1.0) * 0.01);
+                let (lo, span) = (lo - room, hi - lo + 2.0 * room);
                 let n = card.chart.len() - 1;
-                let pt = |i: usize, v: f32| ScenePoint::new(cx + cw * i as f32 / n as f32, cy + ch - (v / max).clamp(0.0, 1.0) * ch);
+                let pt = |i: usize, v: f32| ScenePoint::new(cx + cw * i as f32 / n as f32, cy + ch - ((v - lo) / span).clamp(0.0, 1.0) * ch);
                 for i in 0..n {
                     scene.line(pt(i, card.chart[i]), pt(i + 1, card.chart[i + 1]), 1.5, accent);
                 }
