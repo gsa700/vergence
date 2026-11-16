@@ -1,0 +1,26 @@
+//! Where vdm's sockets and state are, by platform.
+
+/// The unlock socket: any local user may connect; vdm answers only for the
+/// caller's own account (threat model T7).
+#[cfg(target_os = "linux")]
+pub const UNLOCK_SOCKET: &str = "/run/vdm/unlock";
+#[cfg(not(target_os = "linux"))]
+pub const UNLOCK_SOCKET: &str = "/var/run/vdm/unlock";
+
+/// vdm's own state: the pause after failures per uid, kept across restarts (review M1).
+#[cfg(target_os = "linux")]
+pub const STATE_DIR: &str = "/var/lib/vdm";
+#[cfg(not(target_os = "linux"))]
+pub const STATE_DIR: &str = "/var/db/vdm";
+
+/// The PAM service the unlock check runs (our own file, review I2): vdm
+/// refuses to start without it rather than fall back to "other".
+pub const UNLOCK_SERVICE: &str = "vdm-unlock";
+
+/// Where PAM's service files are.
+pub const PAM_DIR: &str = "/etc/pam.d";
+
+/// Below this uid an account is a system account: no unlock, no login
+/// (review I10; root is refused by uid 0 and by name, FreeBSD's `toor`
+/// shares uid 0).
+pub const MIN_UID: u32 = 1000;

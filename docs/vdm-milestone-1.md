@@ -54,6 +54,27 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
 - Nothing of ours runs as root except two small setuid helpers on FreeBSD
   (sound-default, media-eject), each built for one task and reviewed.
 
+## Progress
+
+- **Step 1, part 1a** (2026-11-16): crates/vergence-dm. `sys` (the peer's
+  uid; a locked page out of swap and core files; no core files; no
+  debugger: PR_SET_DUMPABLE, procctl PROC_TRACE_CTL_DISABLE_EXEC), `secret`
+  (a password in such a page, wiped, no Debug or Display), `proto` (the
+  unlock protocol, lengths checked first, a fuzz test), `pam` (our own
+  declarations; OpenPAM's and Linux-PAM's result numbers apart, checked by
+  asking each system's PAM to name them), and **vdm**: root, refuses to
+  start without /etc/pam.d/vdm-unlock, the unlock socket (0666, the caller
+  by its uid), root and system accounts refused, one check per uid at a
+  time, each in a forked child with a 120 s limit, the pause after
+  failures (1, 2, 4 ... 300 s) kept in /var/lib/vdm or /var/db/vdm,
+  everything to the system log. `vdm-try` asks from a terminal.
+  tools/install.sh installs vdm in sbin, writes /etc/pam.d/vdm-unlock on
+  the system's stack (password-auth on Fedora, system-auth on Void, system
+  on FreeBSD) and enables the service (systemd, rc.d through daemon(8) to
+  syslog, runit with vlogger). Seen on kepler and Hubble: running, wrong
+  passwords refused with the growing pause, in the auth log. Tests (9) on
+  all three. The right password waits for Dave's own hand (`vdm-try`).
+
 ## Design
 
 ### The parts

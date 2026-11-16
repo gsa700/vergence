@@ -2210,6 +2210,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "vergence-dm"
+version = "0.1.0"
+
+[[package]]
 name = "vergence-edid"
 version = "0.1.0"
 
@@ -2385,6 +2389,8 @@ name = "vergence-shell"
 version = "0.1.0"
 dependencies = [
  "vergence-look",
+ "vergence-net",
+ "vergence-power",
  "vergence-protocol",
  "vergence-types",
 ]

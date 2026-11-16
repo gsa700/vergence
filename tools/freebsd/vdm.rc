@@ -1,0 +1,22 @@
+#!/bin/sh
+#
+# PROVIDE: vdm
+# REQUIRE: LOGIN
+# KEYWORD: shutdown
+#
+# vdm, VDM's root daemon (docs/vdm-milestone-1.md): the lock screen's
+# password check. tools/install.sh installs this as /usr/local/etc/rc.d/vdm
+# and sets vdm_enable=YES. Its messages go to syslog (auth), restarted if it ends.
+
+. /etc/rc.subr
+
+name=vdm
+rcvar=vdm_enable
+pidfile=/var/run/vdm.pid
+command=/usr/sbin/daemon
+command_args="-P ${pidfile} -r -S -T vdm -l auth @PREFIX@/sbin/vdm"
+
+load_rc_config $name
+: ${vdm_enable:=NO}
+
+run_rc_command "$1"

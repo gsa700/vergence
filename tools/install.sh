@@ -60,13 +60,15 @@ applications=$destdir$prefix/share/applications
 icons=$destdir$prefix/share/icons/hicolor/scalable/apps
 docs=$destdir$prefix/share/doc/vergence       # license and notices (the settings app's About page names it)
 docfiles="LICENSE-APACHE LICENSE-GPL THIRD-PARTY-NOTICES.md"
-programs="vergence-server vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit vergence-closeup vergence-files vergence-open vbus vtile vnative vsound vshell"
+programs="vergence-server vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit vergence-closeup vergence-files vergence-open vbus vtile vnative vsound vshell vdm-try"
 tools="vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit vergence-closeup vergence-files"
 libexec=$destdir$prefix/libexec/vergence
+sbin=$destdir$prefix/sbin
 words=$destdir$prefix/share/vergence/words
 
 if [ -n "$uninstall" ]; then
     for p in $programs vctl vergence-session vergence; do rm -f "$bin/$p"; done
+    rm -f "$sbin/vdm"
     rm -f "$sessions/vergence.desktop"
     for t in $tools; do rm -f "$applications/$t.desktop" "$icons/$t.svg"; done
     for d in $docfiles; do rm -f "$docs/$d"; done
@@ -97,6 +99,11 @@ for t in $tools; do
     install -m 644 "$root/data/icons/$t.svg" "$icons/$t.svg"
 done
 for p in $programs; do install -m 755 "$release/$p" "$bin/$p"; done
+# vdm, VDM's root daemon (docs/vdm-milestone-1.md): it checks the lock
+# screen's password for the account that asks, and always runs (question 3).
+[ -x "$release/vdm" ] || { echo "install.sh: $release/vdm is missing; run cargo build --release first" >&2; exit 1; }
+install -d -m 755 "$sbin"
+install -m 755 "$release/vdm" "$sbin/vdm"
 # The spelling list every native app checks with (vergence-spell finds it beside bin/).
 install -d -m 755 "$words"
 install -m 644 "$root/data/words/en_US.txt" "$words/en_US.txt"
@@ -181,6 +188,47 @@ if [ -n "${group:-}" ]; then
         if [ "$(uname -s)" = FreeBSD ]; then pw groupmod "$group" -m "$user"; else usermod -aG "$group" "$user"; fi
         echo "seat: $user added to $group (takes effect at the next login)"
     fi
+fi
+# ---- system setup: vdm (VDM milestone 1) ----
+# Our own PAM service for unlocking (review I2): the system's usual password
+# stack, never "other". Fedora's system-auth asks for a fingerprint first and
+# waits for it, so there it is password-auth (a fingerprint becomes a second
+# service of its own later, review I9). vdm refuses to start without this file.
+if [ -f /etc/pam.d/password-auth ]; then stack=password-auth
+elif [ -f /etc/pam.d/system-auth ]; then stack=system-auth
+elif [ -f /etc/pam.d/system ]; then stack=system
+else stack=; fi
+if [ -n "$stack" ]; then
+    printf '%s\n' "# vdm-unlock: the Vergence lock screen's password check (tools/install.sh writes it)" \
+        "auth		include		$stack" "account		include		$stack" > /etc/pam.d/vdm-unlock
+    chmod 644 /etc/pam.d/vdm-unlock
+    echo "vdm: /etc/pam.d/vdm-unlock uses the $stack stack"
+else
+    echo "vdm: no system PAM stack found (password-auth, system-auth or system); write /etc/pam.d/vdm-unlock by hand" >&2
+fi
+# The service, by init system; started now and at every boot.
+if [ -d /run/systemd/system ]; then
+    printf '%s\n' "[Unit]" "Description=VDM, the Vergence display manager (unlock checks)" "" "[Service]" \
+        "ExecStart=$prefix/sbin/vdm" "Restart=always" "" "[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/vdm.service
+    systemctl daemon-reload
+    systemctl enable vdm >/dev/null 2>&1 || true
+    systemctl restart vdm
+    echo "vdm: enabled and started (systemd)"
+elif [ "$(uname -s)" = FreeBSD ]; then
+    install -m 555 "$here/freebsd/vdm.rc" /usr/local/etc/rc.d/vdm
+    sed -i '' "s|@PREFIX@|$prefix|" /usr/local/etc/rc.d/vdm
+    sysrc vdm_enable=YES >/dev/null
+    service vdm restart >/dev/null 2>&1 || service vdm start >/dev/null 2>&1 || true
+    echo "vdm: enabled in rc.conf and started"
+elif [ -d /etc/sv ] && [ -d /var/service ]; then
+    mkdir -p /etc/sv/vdm/log
+    printf '%s\n' "#!/bin/sh" "exec 2>&1" "exec $prefix/sbin/vdm" > /etc/sv/vdm/run
+    printf '%s\n' "#!/bin/sh" "exec vlogger -t vdm -p auth" > /etc/sv/vdm/log/run
+    chmod 755 /etc/sv/vdm/run /etc/sv/vdm/log/run
+    if [ -e /var/service/vdm ]; then sv restart vdm >/dev/null 2>&1 || true; else ln -s /etc/sv/vdm /var/service/vdm; fi
+    echo "vdm: enabled and started (runit, /var/service/vdm)"
+else
+    echo "vdm: no known init system; start $prefix/sbin/vdm as root at boot" >&2
 fi
 # ---- system setup: removable drives (files milestone 1; Dave, 2026-11-15) ----
 # Linux: udisks2 mounts a drive plugged in when the session asks (the

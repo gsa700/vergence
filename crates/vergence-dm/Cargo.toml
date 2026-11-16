@@ -1,0 +1,9 @@
+[package]
+name = "vergence-dm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "VDM: the Vergence display manager's root daemon (vdm), its unlock protocol, and the password buffer the lock screen and the greeter share"
+
+[dependencies]
