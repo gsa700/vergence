@@ -206,6 +206,42 @@ it is today:
   with an icon that tells the user their apps live there". The four squares
   stay until then.
 
+## From Dave, 2026-11-16 afternoon (wish list)
+
+- **Text size up and down in the Text Editor as in the terminal.** The
+  editor has Zoom in, Zoom out and Actual size (Ctrl+=, Ctrl+-, Ctrl+0),
+  but they are not featured, so its app menu shows no "− 100% +" Text size
+  row as the terminal's does; featuring them (and limiting them at the
+  ends, as the terminal does) is likely all it takes. Small.
+- **A context menu for File Viewer's items**, "a blend of macOS and
+  Windows with Linux flavoring": Open, Open With ▸, Show in Folder; Cut,
+  Copy, Paste, Duplicate, Make Alias/Link; Rename, Move to Trash; Compress,
+  Get Info/Properties; Copy Path and Open in Terminal (the Linux flavor);
+  the folder's own menu on empty ground (New Folder, New File, Paste,
+  Sort by, Show hidden). To be drafted against what files milestone 1's
+  menus already hold.
+- **Room for the scroll bar at the right margin** in the terminal and
+  probably other apps: when a scroll bar shows, the content stops short of
+  it instead of running under it. A toolkit fix (vergence-widgets keeps a
+  gutter already for some views: settings milestone 2), then the terminal.
+- **A click on the desktop closes any open menu or dock applet card**
+  ("dockets", Dave's name for the dock's applets and tiles): today a click
+  on the wallpaper leaves a tile's card or a menu open.
+- **The volume docket: the mouse wheel over it changes the volume** (as
+  the volume keys do, 5% a notch), on the dock's Sound tile and in its card.
+
+## VDM follow-ups (Dave, 2026-11-16)
+
+- **A delay between the screens going off and the lock coming on**
+  (10 s, 30 s, 1 minute): a touch within it brings the screens back with
+  no password. The Lock Screen page gains "Require the password: at once,
+  after 10 s, 30 s, 1 minute" (desktop.toml `[lock] grace`), applying to
+  the screens-off lock only; Super+L, sleep and the after-no-input lock
+  stay immediate.
+- Open by hand from VDM milestone 1: a YubiKey at the login screen, a
+  screenshot while locked, the login screen on several monitors,
+  `--no-vdm`.
+
 ## Questions for Dave (when each app's turn comes)
 
 1. **Spellchecking**: dictionaries are data from other projects (Hunspell's
