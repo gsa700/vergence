@@ -93,6 +93,23 @@ login's Turn Off today, may skip it: question 4).
 4. Tests (the protocol fuzzed; each action's argument checks), all three
    machines, then an independent review of the code as VDM's was.
 
+## Progress
+
+- **Steps 1-3 built** (2026-11-16, 9aef151, 47ee773): vergence-dm's
+  elevate.rs (the actions, their checks and words; `request` for
+  programs), proto's Act/Answering/Decline and Ask/Withdrawn, vdm's elevate
+  socket (0666; only an administrator in wheel with a console session may
+  ask; one request per person; 120 s; a decline makes the next wait 10 s;
+  the check in a forked worker with PAM service vdm-elevate and the lock's
+  pause; the server's Answering accepted only from a process on a console
+  named vergence-server), the server's elevate.rs (the prompt, drawn and
+  answered as the lock is), the Login page's Turn On…, Turn Off… and the
+  login screen's switch. Tests 676/676/669.
+- **Seen on kepler** (Dave, 15:55-15:57): Turn On… approved, Cancel
+  declined, a wrong password refused with the pause, Turn Off… approved;
+  each logged by vdm.
+- Next: step 4's independent review of the code.
+
 ## Questions
 
 1. **Who may elevate:** (a) only members of the system's administrators'
