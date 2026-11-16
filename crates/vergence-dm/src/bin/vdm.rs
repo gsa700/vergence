@@ -610,6 +610,15 @@ fn start_greeter(uid: u32, gid: u32) -> std::io::Result<c_int> {
     unsafe { _exit(code) }
 }
 
+/// vdm was asked to stop (SIGTERM from its service): it stops the login
+/// screen first, so a restarted vdm never finds an old one still on its VT.
+/// Sessions it started run on (their workers end them when they end).
+static STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+extern "C" fn note_stop(_sig: c_int) {
+    STOPPING.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The server the login screen's worker started, for SIGTERM to reach it.
 static GREETER_SERVER: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
@@ -866,11 +875,37 @@ fn main() {
     if at_boot {
         log(&format!("the login screen starts with vdm ({} is there)", paths::login_screen_file().display()));
     }
-    // A first start after 6 s: servers already running (vdm restarted under
-    // them) have registered by then, and the login screen waits for them.
-    let first = at_boot.then(|| std::time::Instant::now() + Duration::from_secs(6));
+    // At boot (the machine up less than 3 minutes): at once, so the text
+    // console shows only for a moment (Techbench, 2026-11-16). Otherwise (vdm
+    // restarted under running servers) after 6 s: they have registered by
+    // then, and the login screen waits for them.
+    let first = (at_boot && sys::uptime() >= 180).then(|| std::time::Instant::now() + Duration::from_secs(6));
+    {
+        unsafe extern "C" {
+            fn signal(sig: c_int, handler: extern "C" fn(c_int)) -> usize;
+        }
+        // SAFETY: a handler that only sets an atomic; SIGTERM 15.
+        unsafe { signal(15, note_stop) };
+    }
     let mut greeter_run = Greeter { on: at_boot, pid: 0, started: std::time::Instant::now(), quick: 0, next: first, came_from: None, back_to: None };
     loop {
+        if STOPPING.load(std::sync::atomic::Ordering::Relaxed) {
+            if greeter_run.pid > 0 {
+                // SAFETY: our own child (the worker passes it on to the server).
+                unsafe { kill(greeter_run.pid, 15) };
+                let until = std::time::Instant::now() + Duration::from_secs(3);
+                while std::time::Instant::now() < until {
+                    let mut status: c_int = 0;
+                    // SAFETY: an out-parameter we own.
+                    if unsafe { waitpid(greeter_run.pid, &mut status, WNOHANG) } == greeter_run.pid {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+            log("stopping (asked to); the login screen stopped, sessions run on");
+            std::process::exit(0);
+        }
         // The login screen, when wanted and not running, once its pause is over.
         // A yes: answer the login screen, which then gives way to the session.
         for l in logins.values_mut().filter(|l| !l.yes) {

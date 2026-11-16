@@ -274,6 +274,21 @@ pub fn descendants(root: u32) -> Vec<u32> {
     out
 }
 
+/// Seconds since the machine started: Linux CLOCK_BOOTTIME 7, FreeBSD
+/// CLOCK_UPTIME 5.
+pub fn uptime() -> u64 {
+    unsafe extern "C" {
+        fn clock_gettime(clock: c_int, ts: *mut [i64; 2]) -> c_int;
+    }
+    let clock = if cfg!(target_os = "linux") { 7 } else { 5 };
+    let mut ts = [0i64; 2];
+    // SAFETY: a struct timespec (two 64-bit fields on both) we own.
+    if unsafe { clock_gettime(clock, &mut ts) } != 0 {
+        return u64::MAX;
+    }
+    ts[0].max(0) as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
