@@ -6,7 +6,16 @@ days"). The app side of the alternating order, after dock milestone 1. VDM,
 the Vergence Display Manager, is on the apps roadmap (2026-11-15: "VDM
 display manager + lock screen first; YubiKey/fingerprint via PAM/fprintd").
 
-Questions for Dave are at the end; nothing is built until they are answered.
+**Answers 2026-11-16** (Dave): "1 a" (a list of the machine's people, with
+Other…), "2 b (I plan to remove gnome)" (VDM replaces GDM on Techbench
+too), "3 discuss" (below), "4 a but also not allowed with any encrypted FS"
+(automatic login offered, off by default, never with more than one person,
+and never on a machine with an encrypted file system: autologin would
+hand the machine to whoever powers it on, undoing the encryption's point),
+"5 b" (Vergence and the installed Wayland sessions), "6 a" (the lock screen
+first). "Let's make sure we get this right, it's really important."
+
+Question 3 is open; nothing is built until it is settled.
 This is security code: a part of it runs as root and it handles passwords,
 so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
 
