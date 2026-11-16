@@ -7,7 +7,13 @@ core-vision milestone under the alternating order (docs/vision-check-2026-11-15.
 ~/vergence-app-ideas (14 November): **drag and drop the dock's icons and
 tiles**, the dock itself moved by its menu or a modifier and drag.
 
-Questions for Dave are at the end; nothing is built until they are answered.
+**Accepted 2026-11-16** (Dave): "1 a" (Alt+drag and "Move dock"), "2
+both" (dragging off removes, and Unpin stays in the icon's menu), "3 a"
+(applications and tiles keep their own parts), "4 kept to a minimum enough
+to develop and prove the concept" (one real lab tile, the rack UPS from the
+NUT server, plus a `vtile` demo script that can fake a problem; the time
+source, rack temperatures and Proxmox later), "5 a" (named actions in this
+milestone: the list and the launcher only).
 
 ## Where things stand
 
@@ -104,12 +110,12 @@ Questions for Dave are at the end; nothing is built until they are answered.
 
 ### Dave's lab as the first publishers
 
-21. Small publishers in tools/lab/ (shell scripts with `vtile run`, or one
-    small Rust program if that proves neater): **UPS** through NUT (`upsc`),
-    **time source** through chrony (`chronyc tracking`), **rack
-    temperatures**, **Proxmox** (hosts up, guests running). Each is a
-    separate script started by the session, so a lab without one simply
-    lacks that tile.
+21. Kept to a minimum (Dave): **the rack UPS** through NUT (`upsc`), a
+    shell script in tools/lab/ with `vtile run`, and **tools/lab/vtile-demo**,
+    which publishes a tile and can put it in trouble and out again. Each is
+    a separate script, so a lab without one simply lacks that tile. The time
+    source (chrony), rack temperatures and Proxmox come later on the same
+    road.
 
 ### Named desktop actions (the start)
 
@@ -137,7 +143,7 @@ Questions for Dave are at the end; nothing is built until they are answered.
 4. The desktop's own tiles: clock, sound, network, power (14-17).
 5. The drawer, trouble coming out, tiles dragged between dock and drawer (4, 18-20).
 6. Dragging from the launcher onto the dock (5).
-7. Lab publishers (21).
+7. The rack UPS and the demo publisher (21).
 8. Named actions and the launcher (22).
 9. The Dock page's Tiles part (23); whitepaper §6.9 and its PDF; CLAUDE.md.
 
