@@ -52,6 +52,10 @@ const OWN_HEAD: i32 = 20;
 #[derive(Default)]
 pub struct Launcher {
     open: Option<Open>,
+    /// A mouse press on an application (dock milestone 1, step 6): where,
+    /// and which (its place in the shelf's list). Let go there, it starts;
+    /// moved 6 points, the launcher closes and it is dragged to the dock.
+    pick: Option<(Point<f64, Logical>, usize)>,
     picture: Option<(u64, MemoryRenderBuffer)>,
     /// The frost behind it (look milestone 1, step 5).
     backdrop: crate::backdrop::Slot,
@@ -154,6 +158,11 @@ impl Server {
         self.redraw_all();
     }
 
+    /// Escape during a drag out of the launcher (shelf.rs): the press is forgotten.
+    pub fn launcher_pick_clear(&mut self) {
+        self.launcher.pick = None;
+    }
+
     pub fn launcher_close(&mut self) {
         if self.launcher.open.take().is_some() {
             tracing::info!("apps: closed");
@@ -235,11 +244,35 @@ impl Server {
             open.held = Some((at, open.scroll, false));
             return;
         }
+        // On an application: a click when let go, a drag to the dock when moved.
+        if let Some(app) = self.launcher_app_at(at) {
+            self.launcher.pick = Some((at, app));
+            return;
+        }
         self.launcher_activate(at);
+    }
+
+    /// The application (its place in the shelf's list) under a point of the launcher.
+    fn launcher_app_at(&self, at: Point<f64, Logical>) -> Option<usize> {
+        let open = self.launcher.open.as_ref()?;
+        let (x, y) = (at.x.floor() as i32, at.y.floor() as i32);
+        if let Some(app) = open.own_at(x, y) {
+            return Some(app);
+        }
+        let found = self.launcher_found();
+        open.grid().at(found.len(), x, y).and_then(|i| found.get(i).copied())
     }
 
     /// A finger lifted from the launcher: a tap if it did not move.
     pub fn launcher_release(&mut self, at: Point<f64, Logical>) {
+        // An application dragged out of the launcher: pinned if let go on the dock.
+        if self.shelf_lifting_new() {
+            self.launcher.pick = None;
+            return self.shelf_drop_lifted();
+        }
+        if let Some((from, _)) = self.launcher.pick.take() {
+            return self.launcher_activate(from);
+        }
         let Some(open) = self.launcher.open.as_mut() else { return };
         if let Some((from, _, moved)) = open.held.take()
             && !moved
@@ -305,6 +338,19 @@ impl Server {
 
     /// The pointer moved: the application under it is the selected one.
     pub fn launcher_hover(&mut self, at: Point<f64, Logical>) {
+        // A press on an application that moves: the launcher makes way and
+        // the application goes with the pointer, to be let go on the dock.
+        if let Some((from, app)) = self.launcher.pick {
+            if self.shelf_lifting_new() {
+                return self.shelf_lift_at(at);
+            }
+            if (at.x - from.x).abs() > 6.0 || (at.y - from.y).abs() > 6.0 {
+                let Some(e) = self.shelf.apps.get(app).cloned() else { return };
+                self.launcher_close();
+                return self.shelf_lift_new(e.id, e.name, e.icon, at);
+            }
+            return;
+        }
         if self.launcher.open.is_none() {
             return;
         }

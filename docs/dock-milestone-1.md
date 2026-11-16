@@ -102,6 +102,19 @@ milestone: the list and the launcher only).
   lab's tiles if they grow past twelve), reordering tiles on the dock.
   Tests 650 Hubble/Techbench, 643 kepler.
 
+- **Step 6 done** (2026-11-16): a mouse press on an application in the
+  launcher (its grid or the Vergence row) waits: let go there, it starts as
+  before; moved 6 points, the launcher closes and the application goes
+  with the pointer as a dock item does (shelf.rs `shelf_lift_new`,
+  `FROM_LAUNCHER`), the dock making a place where it would land; let go on
+  the dock it is pinned there, anywhere else nothing happens; Escape
+  cancels. A finger in the launcher still scrolls (pin with its menu). The
+  dragged icon shows the name's first letter until its icon is decoded at
+  the dock's size, then the icon. Seen on kepler: Calculator dragged from
+  the launcher's grid between Terminal and Firefox and pinned there;
+  Hardware dragged and given up with Escape; kepler's pins put back.
+  Tests 650 Hubble, 643 kepler (Techbench left alone at Dave's word).
+
 ## Where things stand
 
 - The dock (shelf milestones 1 and 2): the apps button, pinned and running

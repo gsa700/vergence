@@ -329,7 +329,11 @@ pub struct Lift {
 
 /// A lifted item's picture: what it was drawn for (key, scale, removing,
 /// light, label on the left), the picture, its size in points.
-type Ghost = ((String, u64, bool, bool, bool), MemoryRenderBuffer, i32, i32);
+type Ghost = ((String, u64, bool, bool, bool, bool), MemoryRenderBuffer, i32, i32);
+
+/// A lifted item's `from` when it came from the launcher (step 6): not on
+/// the dock yet, so the dock makes room for it.
+const FROM_LAUNCHER: usize = usize::MAX;
 
 /// How far from the dock a lifted item must be held for letting go to
 /// remove it, in points.
@@ -605,8 +609,10 @@ impl Server {
     /// it; while it is being dragged, where the pointer has taken it.
     fn shelf_dock(&mut self, items: usize) -> Option<Rectangle<i32, Logical>> {
         let at = self.shelf.config.placement();
-        // The live tiles stand after the applications (tiles.rs).
-        let items = items + self.dock_places().len();
+        // The live tiles stand after the applications (tiles.rs); an
+        // application dragged from the launcher over the dock has a place too.
+        let new = self.shelf.lift.as_ref().is_some_and(|l| l.from == FROM_LAUNCHER && l.to.is_some());
+        let items = items + self.dock_places().len() + usize::from(new);
         let mut dock = self.shelf.dragged.or_else(|| self.shelf_screen().and_then(|s| vergence_shell::dock(rect(s), &at, items)).map(rectangle));
         // Hidden: moved out past its edge as far as it is slid away.
         // Out or away as the mode says, judged where the dock stands when out.
@@ -1037,8 +1043,37 @@ impl Server {
             self.shelf.named = false;
             tracing::info!("shelf: {} lifted", item.name);
         }
+        self.shelf_lift_at(at);
+    }
+
+    /// An application dragged out of the launcher (step 6): it is lifted
+    /// as if it came off the dock, and the dock makes room where it would land.
+    pub fn shelf_lift_new(&mut self, key: String, name: String, icon: String, at: Point<f64, Logical>) {
+        tracing::info!("shelf: {name} lifted from the launcher");
+        self.shelf.lift = Some(Lift { from: FROM_LAUNCHER, key, name, icon, pinned: false, at, to: None });
+        self.shelf.named = false;
+        self.shelf_lift_at(at);
+    }
+
+    /// The item lifted from the launcher let go (launcher.rs): on the dock it
+    /// is pinned there, anywhere else nothing happens.
+    pub fn shelf_drop_lifted(&mut self) {
+        if let Some(lift) = self.shelf.lift.take() {
+            self.shelf_drop(lift);
+        }
+    }
+
+    /// Whether an item is lifted from the launcher.
+    pub fn shelf_lifting_new(&self) -> bool {
+        self.shelf.lift.as_ref().is_some_and(|l| l.from == FROM_LAUNCHER)
+    }
+
+    /// The lifted item follows the pointer; where it would land is worked out
+    /// along the dock, or none off it.
+    pub fn shelf_lift_at(&mut self, at: Point<f64, Logical>) {
         let Some(dock) = self.shelf.dock else { return };
-        let count = self.shelf.names.len();
+        // One from the launcher has a place of its own to land in.
+        let count = self.shelf.names.len() + usize::from(self.shelf_lifting_new());
         let upright = self.shelf.config.placement().upright();
         let near = Rectangle::new((dock.loc.x - OFF_DOCK, dock.loc.y - OFF_DOCK).into(), (dock.size.w + 2 * OFF_DOCK, dock.size.h + 2 * OFF_DOCK).into());
         let to = near.to_f64().contains(at).then(|| running::gap_at(rect(dock), count, upright, at.x.floor() as i32, at.y.floor() as i32));
@@ -1061,6 +1096,7 @@ impl Server {
         self.shelf.moving = false;
         self.shelf.held = None;
         self.shelf.lift = None;
+        self.launcher_pick_clear();
         self.tile_lift_cancel();
         self.shelf.dragged = None;
         self.shelf.picture = None;
@@ -1181,6 +1217,14 @@ impl Server {
         // Only an application with a desktop entry can be pinned.
         let known = self.shelf.apps.iter().any(|e| e.id == lift.key);
         let pinned = match lift.to {
+            // From the launcher: pinned where it was let go, among the pinned.
+            Some(to) if known && lift.from == FROM_LAUNCHER => {
+                let mut p: Vec<String> = self.shelf.config.pinned.iter().filter(|k| **k != lift.key).cloned().collect();
+                let shown = keys.iter().filter(|(k, pinned)| *pinned && *k != lift.key).count();
+                p.insert(to.min(shown).min(p.len()), lift.key.clone());
+                tracing::info!("shelf: {} pinned from the launcher", lift.name);
+                Some(p)
+            }
             Some(to) if known && keys.get(lift.from).is_some_and(|(k, _)| *k == lift.key) => running::dropped(&self.shelf.config.pinned, &keys, lift.from, to),
             None if lift.pinned => {
                 tracing::info!("shelf: {} removed from the dock", lift.name);
@@ -1429,6 +1473,12 @@ impl Server {
         // round an empty place where it would land (or where it was, while it
         // is held off the dock).
         let order: Vec<Option<usize>> = match &self.shelf.lift {
+            // From the launcher: an empty place where it would land.
+            Some(lift) if lift.from == FROM_LAUNCHER && lift.to.is_some() => {
+                let mut o: Vec<Option<usize>> = (0..items.len()).map(Some).collect();
+                o.insert(lift.to.unwrap_or(0).min(o.len()), None);
+                o
+            }
             Some(lift) if lift.from < items.len() => {
                 let mut o: Vec<Option<usize>> = (0..items.len()).filter(|i| *i != lift.from).map(Some).collect();
                 o.insert(lift.to.unwrap_or(lift.from).min(o.len()), None);
@@ -1679,10 +1729,12 @@ impl Server {
         let removing = lift.to.is_none() && lift.pinned;
         // "Remove" on the side the windows are, away from the dock.
         let left = self.shelf.dock.is_some_and(|d| self.shelf_side(d) == Edge::Left);
-        let key = (lift.key.clone(), scale.to_bits(), removing, light, left);
+        // Drawn again once its icon has been decoded (one from the launcher
+        // may not have been at the dock's size).
+        let pixels = (running::ICON as f64 * scale).round() as u32;
+        let icon = self.shelf_icon(&lift.icon, pixels);
+        let key = (lift.key.clone(), scale.to_bits(), removing, light, left, icon.is_some());
         if self.shelf.ghost.as_ref().map(|(k, ..)| k) != Some(&key) {
-            let pixels = (running::ICON as f64 * scale).round() as u32;
-            let icon = self.shelf_icon(&lift.icon, pixels);
             let s = vergence_look::shelf_look(light);
             let color = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
@@ -1702,8 +1754,15 @@ impl Server {
                     let picture = scene.image(Image { width: icon.width, height: icon.height, rgba: icon.rgba.clone() });
                     scene.draw_image(picture, SceneRect::new(square.x + (side - iw) / 2.0, square.y + (side - ih) / 2.0, iw, ih), if removing { 0.5 } else { 0.85 });
                 }
+                // No icon yet: a tile with the name's first letter, as on the dock.
                 None => {
                     scene.fill_rounded(square, vergence_look::RADIUS, color(s.tile));
+                    let letter: String = lift.name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into());
+                    if let Some(bold) = fonts.face("sans-serif", 700, false) {
+                        let m = fonts.metrics(bold, 18.0);
+                        let lw = fonts.layout(bold, 18.0, &letter).1;
+                        vergence_render::text(&mut scene, fonts, bold, 18.0, color(s.tile_ink), ScenePoint::new(square.x + (side - lw) / 2.0, (square.y + (side - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), &letter);
+                    }
                 }
             }
             if let Some(face) = face {
