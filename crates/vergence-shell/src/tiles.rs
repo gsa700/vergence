@@ -221,7 +221,14 @@ pub fn power(p: &vergence_power::Power) -> Option<Tile> {
     Some(Tile {
         id: "power".into(),
         value: format!("{percent}%"),
-        label: if draining { "Battery".into() } else { "Charging".into() },
+        label: match b.state {
+            State::Discharging => "Battery",
+            State::Charging => "Charging",
+            State::Full => "Full",
+            State::NotCharging => "Plugged in",
+            State::Unknown => "Battery",
+        }
+        .into(),
         state: match (draining, percent) {
             (true, p) if p < 10 => TileState::Problem,
             (true, p) if p < 20 => TileState::Warning,
@@ -231,6 +238,76 @@ pub fn power(p: &vergence_power::Power) -> Option<Tile> {
         card: Card { title: "Battery".into(), rows, ..Card::default() },
         page: "battery".into(),
     })
+}
+
+/// The tiles that stand on the dock when the user has not said: the
+/// desktop's own. Every other tile starts in the drawer.
+pub const DOCKED: [&str; 4] = ["sound", "network", "power", "clock"];
+
+/// Whether a tile stands on the dock: the user put it there (`docked`,
+/// desktop.toml [shelf] tiles, else [`DOCKED`]), or it is in trouble and
+/// tiles in trouble come out (`trouble_out`).
+pub fn on_dock(docked: Option<&[String]>, id: &str, state: TileState, trouble_out: bool) -> bool {
+    let chosen = match docked {
+        Some(d) => d.iter().any(|x| x == id),
+        None => DOCKED.contains(&id),
+    };
+    chosen || (trouble_out && state != TileState::Fine)
+}
+
+/// The drawer's groups in their order; a group not named here comes after
+/// them, by name.
+pub const GROUPS: [&str; 3] = ["System", "Lab", "Background apps"];
+
+/// The drawer's grid: four tiles a row, each 60 by 52 points, 4 apart,
+/// 10 in from the drawer's edge, a heading of 18 over each section.
+pub const DRAWER_COLS: usize = 4;
+pub const CELL_W: i32 = 60;
+pub const CELL_H: i32 = 52;
+const CELL_GAP: i32 = 4;
+const DRAWER_PAD: i32 = 10;
+const HEADING: i32 = 20;
+pub const DRAWER_W: i32 = 2 * DRAWER_PAD + DRAWER_COLS as i32 * CELL_W + (DRAWER_COLS as i32 - 1) * CELL_GAP;
+
+/// The drawer's headings (name, top), cells (tile, place) and height.
+pub type DrawerLayout = (Vec<(String, i32)>, Vec<(usize, Rect)>, i32);
+
+/// Where everything in the drawer stands, from its top-left corner: each
+/// section's heading and where it is written, each tile's cell (by its
+/// place in the list given), and the drawer's height. Tiles needing
+/// attention come first under their own heading, then each group in
+/// [`GROUPS`]'s order, then the others by name; within a section, in the
+/// order given.
+pub fn drawer_layout(tiles: &[(String, TileState)]) -> DrawerLayout {
+    let mut sections: Vec<(String, Vec<usize>)> = Vec::new();
+    let trouble: Vec<usize> = (0..tiles.len()).filter(|i| tiles[*i].1 != TileState::Fine).collect();
+    if !trouble.is_empty() {
+        sections.push(("Needs attention".into(), trouble));
+    }
+    let mut names: Vec<String> = GROUPS.iter().map(|g| g.to_string()).collect();
+    let mut others: Vec<String> = tiles.iter().map(|(g, _)| if g.is_empty() { "Other".to_string() } else { g.clone() }).filter(|g| !GROUPS.contains(&g.as_str())).collect();
+    others.sort();
+    others.dedup();
+    names.extend(others);
+    for name in names {
+        let these: Vec<usize> = (0..tiles.len()).filter(|i| tiles[*i].1 == TileState::Fine && (tiles[*i].0 == name || (tiles[*i].0.is_empty() && name == "Other"))).collect();
+        if !these.is_empty() {
+            sections.push((name, these));
+        }
+    }
+    let (mut headings, mut cells) = (Vec::new(), Vec::new());
+    let mut y = DRAWER_PAD;
+    for (name, these) in sections {
+        headings.push((name, y));
+        y += HEADING;
+        for (k, i) in these.iter().enumerate() {
+            let (col, row) = ((k % DRAWER_COLS) as i32, (k / DRAWER_COLS) as i32);
+            cells.push((*i, Rect::new(DRAWER_PAD + col * (CELL_W + CELL_GAP), y + row * (CELL_H + CELL_GAP), CELL_W, CELL_H)));
+        }
+        let rows = these.len().div_ceil(DRAWER_COLS) as i32;
+        y += rows * (CELL_H + CELL_GAP) + 4;
+    }
+    (headings, cells, y + DRAWER_PAD - 4)
 }
 
 #[repr(C)]
@@ -350,5 +427,35 @@ mod tests {
         assert_eq!(power(&p(8, State::Discharging)).unwrap().state, TileState::Problem);
         assert_eq!(power(&p(8, State::Charging)).unwrap().state, TileState::Fine, "charging is no problem");
         assert!(power(&Power { on_mains: Some(true), batteries: vec![] }).is_none());
+    }
+
+    #[test]
+    fn what_stands_on_the_dock() {
+        assert!(on_dock(None, "clock", TileState::Fine, true));
+        assert!(!on_dock(None, "ups", TileState::Fine, true), "a program's tile starts in the drawer");
+        assert!(on_dock(None, "ups", TileState::Warning, true), "until it is in trouble");
+        assert!(!on_dock(None, "ups", TileState::Problem, false), "unless trouble stays in the drawer");
+        let mine = vec!["ups".to_string()];
+        assert!(on_dock(Some(&mine), "ups", TileState::Fine, true));
+        assert!(!on_dock(Some(&mine), "clock", TileState::Fine, true), "the user's list, not the default");
+    }
+
+    #[test]
+    fn the_drawer_puts_trouble_first_then_groups() {
+        let t = |g: &str, s: TileState| (g.to_string(), s);
+        let tiles = vec![t("Lab", TileState::Fine), t("System", TileState::Fine), t("Lab", TileState::Problem), t("", TileState::Fine), t("Lab", TileState::Fine), t("Zoo", TileState::Fine)];
+        let (headings, cells, h) = drawer_layout(&tiles);
+        let names: Vec<&str> = headings.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["Needs attention", "System", "Lab", "Other", "Zoo"]);
+        let order: Vec<usize> = cells.iter().map(|(i, _)| *i).collect();
+        assert_eq!(order, [2, 1, 0, 4, 3, 5]);
+        assert_eq!(cells[0].1, Rect::new(10, 30, CELL_W, CELL_H));
+        assert_eq!(cells[3].1.x, 10 + CELL_W + 4, "the second in its section stands beside the first");
+        assert!(h > cells.last().unwrap().1.bottom());
+        assert_eq!(DRAWER_W, 272);
+        let five: Vec<_> = (0..5).map(|_| t("System", TileState::Fine)).collect();
+        let (_, cells, _) = drawer_layout(&five);
+        assert_eq!((cells[4].1.x, cells[4].1.y), (10, 30 + CELL_H + 4), "a fifth starts the next row");
+        assert_eq!(drawer_layout(&[]).1.len(), 0);
     }
 }

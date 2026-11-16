@@ -78,6 +78,30 @@ milestone: the list and the launcher only).
   with a battery (Hubble's Mobilenode): not yet seen. Tests 648
   Hubble/Techbench, 641 kepler.
 
+- **Step 5 done** (2026-11-16): the drawer (the server's drawer.rs;
+  vergence-shell tiles.rs `on_dock`, `DOCKED`, `drawer_layout` with tests).
+  Which tiles stand on the dock is desktop.toml `[shelf] tiles` (unset: the
+  desktop's Sound, Network, Power, clock); every other tile is in the
+  drawer, whose tile stands first among the tiles with nine dots and how
+  many it holds in the color of the worst state. A click opens it beside
+  the dock: "Needs attention" first, then System, Lab, Background apps, the
+  rest by name; four 60 x 52 cells a row. Each cell has its card (beside
+  the drawer) and its click. It closes 500 ms after the pointer leaves it,
+  its tile and the card, or on a press anywhere else. A tile in trouble
+  comes out onto the dock while it lasts (`[shelf] trouble-out`, on unless
+  set off). Dragging: out of the drawer onto the dock puts a tile on the
+  dock; off the dock onto the drawer's tile or into the open drawer puts it
+  in the drawer; Escape cancels; the tile is drawn under the pointer. No
+  card opens during a press or a drag. Seat `Part::Drawer`. Power's label
+  says Full or Plugged in when not charging. Seen on kepler with two vtile
+  demo tiles (Lab): the drawer, a cell's card, UPS dragged out onto the
+  dock and back off it into the drawer, NAS put in warning coming out by
+  itself; kepler's desktop.toml put back afterwards. Seen on Hubble: the
+  Power tile (100 %, Charging, before the label fix). Not yet: the filter
+  field past twelve tiles (the drawer has no text field; it comes with the
+  lab's tiles if they grow past twelve), reordering tiles on the dock.
+  Tests 650 Hubble/Techbench, 643 kepler.
+
 ## Where things stand
 
 - The dock (shelf milestones 1 and 2): the apps button, pinned and running

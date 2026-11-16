@@ -61,7 +61,7 @@ impl Seat {
     pub fn touch_down(&mut self, slot: Slot, x: f64, y: f64, under: Option<Target>, now_ms: u64) -> Vec<Out> {
         let mut out = Vec::new();
         self.keyboard.super_alone = false;
-        let ours = self.menu.is_some() || matches!(under, Some(Target::Server(Part::Note | Part::Card)));
+        let ours = self.menu.is_some() || matches!(under, Some(Target::Server(Part::Note | Part::Card | Part::Drawer)));
         if self.touch.on_windows.iter().any(|(s, _)| *s == slot) || self.touch.pointing == Some(slot) {
             // A slot already down (the panel lost an up): ignore the repeat.
             return out;

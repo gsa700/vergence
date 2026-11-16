@@ -34,6 +34,7 @@ mod displays;
 mod energy;
 mod shelf;
 mod tiles;
+mod drawer;
 mod applets;
 mod session;
 mod launcher;

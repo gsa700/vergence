@@ -239,6 +239,9 @@ impl Server {
         if self.card_at(pos) {
             return Some(Target::Server(Part::Card));
         }
+        if self.drawer_at(pos) {
+            return Some(Target::Server(Part::Drawer));
+        }
         if self.notify_at(pos) {
             return Some(Target::Server(Part::Note));
         }
@@ -495,6 +498,10 @@ impl Server {
     /// A press or release, to whatever the seat said.
     fn deliver_button(&mut self, t: Target, button: u32, pressed: bool, pos: Point<f64, Logical>, time: InputTime) {
         let serial = SERIAL_COUNTER.next_serial();
+        // A press anywhere but the drawer, its card or the dock puts the drawer away (drawer.rs).
+        if pressed && self.tiles.drawer.is_some() && !matches!(t, Target::Server(Part::Drawer | Part::Card | Part::Dock)) {
+            self.drawer_close();
+        }
         // A tab held: the left button's release ends it, wherever the seat sends it.
         if !pressed && button == vergence_seat::BTN_LEFT && self.input.tab_hold.is_some() && !matches!(t, Target::Server(Part::Tab(..))) {
             tracing::info!("tab: let go over {t:?}, not the tab's bar");
@@ -526,6 +533,8 @@ impl Server {
             Target::Server(Part::Note) if pressed => self.notify_press(pos),
             Target::Server(Part::Card) if pressed && button == vergence_seat::BTN_LEFT => self.card_press(pos),
             Target::Server(Part::Card) if !pressed => self.card_release(),
+            Target::Server(Part::Drawer) if pressed && button == vergence_seat::BTN_LEFT => self.drawer_press(pos),
+            Target::Server(Part::Drawer) if !pressed => self.drawer_release(pos),
             // The dock: a left press is a click or the start of a drag, let go where
             // it ends; a right press is an icon's menu.
             Target::Server(Part::Dock) if pressed && button == vergence_seat::BTN_LEFT => self.shelf_press(pos, button),

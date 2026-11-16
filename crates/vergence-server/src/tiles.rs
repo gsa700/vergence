@@ -55,6 +55,22 @@ impl Placed {
     }
 }
 
+/// What stands in one of the dock's tile places: the drawer's tile (first,
+/// when the drawer holds any), or a tile by its place in the list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    Drawer,
+    Tile(usize),
+}
+
+/// What the dock draws in a tile place.
+#[derive(Debug, Clone, PartialEq, Hash)]
+pub enum Shown {
+    /// The drawer: how many it holds, and the worst state among them.
+    Drawer(usize, TileState),
+    Tile(Box<Tile>),
+}
+
 /// The card that is open: its tile (by key), where it was put, and its picture.
 struct Open {
     id: String,
@@ -71,12 +87,17 @@ struct Open {
 pub struct Tiles {
     pub list: Vec<Placed>,
     /// The tile the pointer is over (by id) and the card that is open.
-    hover: Option<String>,
+    pub hover: Option<String>,
     card: Option<Open>,
     /// The minute the clock last showed.
     minute: Option<i64>,
     /// Whether the network card is open, for the reading thread (applets.rs).
     pub live: crate::applets::Live,
+    /// The drawer, when it is open, and a tile being dragged (drawer.rs).
+    pub drawer: Option<crate::drawer::DrawerOpen>,
+    pub lift: Option<crate::drawer::TileLift>,
+    /// A press on a tile in the drawer that may yet become a drag.
+    pub pending: Option<crate::drawer::Pending>,
 }
 
 /// How long the pointer rests on a tile before its card opens, and how long
@@ -216,16 +237,56 @@ impl Server {
         out.join("\n")
     }
 
-    /// The tiles the dock shows, in order.
-    pub fn tiles_on_dock(&self) -> Vec<Tile> {
-        self.tiles.list.iter().map(|p| p.tile.clone()).collect()
+    /// Whether a tile stands on the dock (else it is in the drawer):
+    /// desktop.toml [shelf] tiles, and trouble coming out ([shelf]
+    /// trouble-out, on unless set off).
+    pub fn tile_docked(&self, p: &Placed) -> bool {
+        let c = &self.shelf.config;
+        tiles::on_dock(c.tiles.as_deref(), &p.tile.id, p.tile.state, c.trouble_out.unwrap_or(true))
     }
 
-    /// Which tile is at a point on the dock, if any (the dock as last drawn).
-    pub fn tile_under(&self, at: Point<f64, Logical>) -> Option<usize> {
+    /// The dock's tile places in order: the drawer's tile when it holds any,
+    /// then the tiles that stand on the dock.
+    pub fn dock_places(&self) -> Vec<Place> {
+        let mut out = Vec::new();
+        if self.tiles.list.iter().any(|p| !self.tile_docked(p)) {
+            out.push(Place::Drawer);
+        }
+        out.extend((0..self.tiles.list.len()).filter(|i| self.tile_docked(&self.tiles.list[*i])).map(Place::Tile));
+        out
+    }
+
+    /// What the dock draws in its tile places.
+    pub fn tiles_on_dock(&self) -> Vec<Shown> {
+        self.dock_places()
+            .into_iter()
+            .map(|place| match place {
+                Place::Drawer => {
+                    let inside: Vec<&Placed> = self.tiles.list.iter().filter(|p| !self.tile_docked(p)).collect();
+                    let worst = inside.iter().map(|p| p.tile.state).max_by_key(|s| *s as u8).unwrap_or_default();
+                    Shown::Drawer(inside.len(), worst)
+                }
+                Place::Tile(i) => Shown::Tile(Box::new(self.tiles.list[i].tile.clone())),
+            })
+            .collect()
+    }
+
+    /// Which tile place is at a point on the dock, if any (the dock as last drawn).
+    pub fn tile_under(&self, at: Point<f64, Logical>) -> Option<Place> {
         let dock = self.shelf.dock?;
         let upright = self.shelf.config.placement().upright();
-        tiles::tile_at(rect(dock), self.shelf.names.len(), self.tiles.list.len(), upright, at.x.floor() as i32, at.y.floor() as i32)
+        let places = self.dock_places();
+        tiles::tile_at(rect(dock), self.shelf.names.len(), places.len(), upright, at.x.floor() as i32, at.y.floor() as i32).map(|i| places[i])
+    }
+
+    /// The key of the tile at a point, on the dock or in the open drawer.
+    fn key_under(&self, at: Point<f64, Logical>) -> Option<String> {
+        let i = match self.tile_under(at) {
+            Some(Place::Tile(i)) => Some(i),
+            Some(Place::Drawer) => None,
+            None => self.drawer_cell_at(at),
+        }?;
+        self.tiles.list.get(i).map(|p| p.key())
     }
 
     /// Whether the open card is at a point.
@@ -241,13 +302,19 @@ impl Server {
             self.card_slide(i, at);
             return;
         }
+        // A tile dragged out of the drawer or off the dock (drawer.rs).
+        if self.tiles.lift.is_some() || self.tiles.pending.is_some() {
+            self.tile_lift_follow(at);
+            return;
+        }
         // A press held on the dock (a click on its way, a drag): nothing
         // changes; after a click the card does not open again under the
         // pointer that is still there.
         if busy {
             return;
         }
-        let over = self.tile_under(at).and_then(|i| self.tiles.list.get(i)).map(|p| p.key());
+        self.drawer_hover(at);
+        let over = self.key_under(at);
         if self.card_at(at) || (over.is_some() && over == self.tiles.card.as_ref().map(|c| c.id.clone())) {
             self.tiles.hover = over;
             return;
@@ -259,7 +326,9 @@ impl Server {
         match over {
             Some(id) => {
                 let _ = self.loop_handle.insert_source(Timer::from_duration(REST), move |_, _, st| {
-                    if st.tiles.hover.as_ref() == Some(&id) {
+                    // Not if a press or a drag began meanwhile.
+                    let busy = st.tiles.lift.is_some() || st.tiles.pending.is_some() || st.shelf.held.is_some();
+                    if st.tiles.hover.as_ref() == Some(&id) && !busy {
                         st.card_open(&id);
                     }
                     TimeoutAction::Drop
@@ -268,7 +337,7 @@ impl Server {
             None if self.tiles.card.is_some() => {
                 let _ = self.loop_handle.insert_source(Timer::from_duration(AWAY), |_, _, st| {
                     let at = st.pointer_location();
-                    let on_tile = st.tile_under(at).and_then(|i| st.tiles.list.get(i)).map(|p| p.key()) == st.tiles.card.as_ref().map(|c| c.id.clone());
+                    let on_tile = st.key_under(at) == st.tiles.card.as_ref().map(|c| c.id.clone());
                     let sliding = st.tiles.card.as_ref().is_some_and(|c| c.sliding.is_some());
                     if !st.card_at(at) && !on_tile && !sliding {
                         st.card_close();
@@ -398,7 +467,21 @@ impl Server {
         };
         let Some(dock) = self.shelf.dock else { return Vec::new() };
         let upright = self.shelf.config.placement().upright();
-        let Some(slot) = tiles::slot(rect(dock), self.shelf.names.len(), index, upright) else { return Vec::new() };
+        // Beside its tile on the dock, or beside the drawer at its cell.
+        let (slot, beside) = match self.dock_places().iter().position(|p| *p == Place::Tile(index)) {
+            Some(at) => match tiles::slot(rect(dock), self.shelf.names.len(), at, upright) {
+                Some(slot) => (slot, dock),
+                None => return Vec::new(),
+            },
+            // In the drawer, which is closed: the card goes too.
+            None => match self.drawer_cell_of(index) {
+                Some(cell) => cell,
+                None => {
+                    self.card_close();
+                    return Vec::new();
+                }
+            },
+        };
         let screen = self.shelf_screen().unwrap_or(out);
         if !screen.overlaps(out) {
             return Vec::new();
@@ -438,10 +521,10 @@ impl Server {
         let (wi, hi) = (CARD_W, h as i32);
         let middle = (slot.y + slot.h / 2 - hi / 2, slot.x + slot.w / 2 - wi / 2);
         let (x, y) = match side {
-            Edge::Left => (dock.loc.x - OFF - wi, middle.0),
-            Edge::Right => (dock.loc.x + dock.size.w + OFF, middle.0),
-            Edge::Top => (middle.1, dock.loc.y - OFF - hi),
-            Edge::Bottom => (middle.1, dock.loc.y + dock.size.h + OFF),
+            Edge::Left => (beside.loc.x - OFF - wi, middle.0),
+            Edge::Right => (beside.loc.x + beside.size.w + OFF, middle.0),
+            Edge::Top => (middle.1, beside.loc.y - OFF - hi),
+            Edge::Bottom => (middle.1, beside.loc.y + beside.size.h + OFF),
         };
         let (x, y) = (x.min(screen.loc.x + screen.size.w - wi).max(screen.loc.x), y.min(screen.loc.y + screen.size.h - hi).max(screen.loc.y));
         let area: Rectangle<i32, Logical> = Rectangle::new((x, y).into(), (wi, hi).into());

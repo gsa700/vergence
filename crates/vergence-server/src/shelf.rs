@@ -140,6 +140,13 @@ pub struct ShelfConfig {
     /// Pinned applications, by desktop entry id, in their order on the dock.
     #[serde(default)]
     pub pinned: Vec<String>,
+    /// The live tiles that stand on the dock, by id; the rest are in the
+    /// drawer. Unset: the desktop's own (tiles.rs, vergence-shell `DOCKED`).
+    pub tiles: Option<Vec<String>>,
+    /// A tile in trouble comes out of the drawer onto the dock while the
+    /// trouble lasts (true).
+    #[serde(rename = "trouble-out")]
+    pub trouble_out: Option<bool>,
 }
 
 /// How `hide` is written: a word, or true and false (true is "windows").
@@ -227,6 +234,13 @@ fn save_place(screen: Option<&str>, place: Place) -> std::io::Result<()> {
 }
 
 /// Write the pinned applications there, the same way.
+/// Which tiles stand on the dock (drawer.rs).
+pub fn save_tiles(ids: &[String]) -> std::io::Result<()> {
+    save(|shelf| {
+        shelf.insert("tiles".into(), toml::Value::Array(ids.iter().map(|s| toml::Value::String(s.clone())).collect()));
+    })
+}
+
 fn save_pinned(pinned: &[String]) -> std::io::Result<()> {
     save(|shelf| {
         shelf.insert("pinned".into(), toml::Value::Array(pinned.iter().map(|p| p.as_str().into()).collect()));
@@ -294,8 +308,8 @@ pub struct Held {
 pub enum Grip {
     Dock,
     Item(usize),
-    /// A live tile, by its place among the tiles (tiles.rs).
-    Tile(usize),
+    /// A live tile's place, or the drawer's (tiles.rs).
+    Tile(crate::tiles::Place),
     Head,
 }
 
@@ -592,7 +606,7 @@ impl Server {
     fn shelf_dock(&mut self, items: usize) -> Option<Rectangle<i32, Logical>> {
         let at = self.shelf.config.placement();
         // The live tiles stand after the applications (tiles.rs).
-        let items = items + self.tiles.list.len();
+        let items = items + self.dock_places().len();
         let mut dock = self.shelf.dragged.or_else(|| self.shelf_screen().and_then(|s| vergence_shell::dock(rect(s), &at, items)).map(rectangle));
         // Hidden: moved out past its edge as far as it is slid away.
         // Out or away as the mode says, judged where the dock stands when out.
@@ -795,8 +809,15 @@ impl Server {
                         }
                     }
                     Grip::Item(index) => self.shelf_lift_follow(index, at),
-                    // Tiles move between the dock and the drawer in step 5.
-                    Grip::Tile(_) | Grip::Head => {}
+                    // A tile dragged off the dock (drawer.rs).
+                    Grip::Tile(crate::tiles::Place::Tile(i)) => {
+                        if self.tiles.lift.is_none() {
+                            self.tile_lift(i, false, at);
+                        } else {
+                            self.tile_lift_follow(at);
+                        }
+                    }
+                    Grip::Tile(crate::tiles::Place::Drawer) | Grip::Head => {}
                 }
                 return;
             }
@@ -1031,7 +1052,7 @@ impl Server {
     /// Whether a drag on the dock is under way (an item lifted, the dock
     /// dragged, or "Move dock"): Escape puts it all back.
     pub fn shelf_busy(&self) -> bool {
-        self.shelf.moving || self.shelf.lift.is_some() || self.shelf.held.is_some_and(|(_, h)| h.dragging)
+        self.shelf.moving || self.shelf.lift.is_some() || self.tiles.lift.is_some() || self.shelf.held.is_some_and(|(_, h)| h.dragging)
     }
 
     /// Escape during a drag on the dock: everything goes back where it was.
@@ -1040,6 +1061,7 @@ impl Server {
         self.shelf.moving = false;
         self.shelf.held = None;
         self.shelf.lift = None;
+        self.tile_lift_cancel();
         self.shelf.dragged = None;
         self.shelf.picture = None;
         self.redraw_all();
@@ -1069,13 +1091,18 @@ impl Server {
             self.shelf_drop(lift);
             return;
         }
+        // A tile dragged off the dock, let go (drawer.rs).
+        if self.tiles.lift.is_some() {
+            return self.tile_drop(at);
+        }
         if held.dragging && held.grip != Grip::Dock {
             return;
         }
-        // A click on a tile: to where it lives (tiles.rs).
-        if let Grip::Tile(index) = held.grip {
-            self.tile_go(index);
-            return;
+        // A click on a tile: to where it lives (tiles.rs); on the drawer's: it opens.
+        match held.grip {
+            Grip::Tile(crate::tiles::Place::Tile(index)) => return self.tile_go(index),
+            Grip::Tile(crate::tiles::Place::Drawer) => return self.drawer_toggle(),
+            _ => {}
         }
         if held.dragging {
             let dropped = self.shelf.dragged.take().unwrap_or(held.dock);
@@ -1326,7 +1353,7 @@ impl Server {
         let w = self.work_area(s);
         let items = self.shelf_items();
         let hidden = if self.shelf_hides() && self.shelf_shown() <= 0.0 { " (away now)" } else { "" };
-        let Some(dock) = self.shelf_dock(items.len()).or_else(|| vergence_shell::dock(rect(s), &at, items.len() + self.tiles.list.len()).map(rectangle)) else {
+        let Some(dock) = self.shelf_dock(items.len()).or_else(|| vergence_shell::dock(rect(s), &at, items.len() + self.dock_places().len()).map(rectangle)) else {
             return "no shelf: its screen is too small for it".into();
         };
         let mut out = format!(
@@ -1501,7 +1528,7 @@ impl Server {
             // The tiles: a line between them and the applications, then each
             // one's value with its label under it, in its state's color.
             let small = fonts.face("sans-serif", 400, false);
-            for (j, tile) in tiles.iter().enumerate() {
+            for (j, shown) in tiles.iter().enumerate() {
                 let Some(slot) = vergence_shell::tiles::slot(local, order.len(), j, upright) else { break };
                 if j == 0 {
                     let (a, b) = if upright {
@@ -1511,8 +1538,26 @@ impl Server {
                     };
                     scene.line(a, b, 1.0, color(s.separator));
                 }
-                let ink = crate::tiles::state_ink(tile.state, light, s.tile_ink);
                 let (Some(big), Some(small)) = (face, small) else { continue };
+                let tile = match shown {
+                    crate::tiles::Shown::Tile(t) => t,
+                    // The drawer: nine dots, and how many it holds in the
+                    // color of the worst state among them.
+                    crate::tiles::Shown::Drawer(count, worst) => {
+                        let (cx, cy) = (slot.x as f32 + slot.w as f32 / 2.0, slot.y as f32 + slot.h as f32 / 2.0 - 4.0);
+                        for k in 0..9 {
+                            let (col, row) = ((k % 3) as f32 - 1.0, (k / 3) as f32 - 1.0);
+                            scene.fill_rounded(SceneRect::new(cx + col * 7.0 - 1.75, cy + row * 7.0 - 1.75, 3.5, 3.5), 1.75, color(s.mark));
+                        }
+                        let n = count.to_string();
+                        let ink = crate::tiles::state_ink(*worst, light, s.tile_ink);
+                        let lm = fonts.metrics(small, 9.5);
+                        let lw = fonts.layout(small, 9.5, &n).1;
+                        vergence_render::text(&mut scene, fonts, small, 9.5, ink, ScenePoint::new(slot.x as f32 + (slot.w as f32 - lw) / 2.0, (cy + 12.0 + lm.ascent).round()), &n);
+                        continue;
+                    }
+                };
+                let ink = crate::tiles::state_ink(tile.state, light, s.tile_ink);
                 let (vs, ls) = (13.0, 9.5);
                 let (vm, lm) = (fonts.metrics(big, vs), fonts.metrics(small, ls));
                 let (vh, lh) = (vm.ascent + vm.descent, if tile.label.is_empty() { 0.0 } else { lm.ascent + lm.descent });
