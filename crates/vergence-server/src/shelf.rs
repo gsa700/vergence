@@ -147,6 +147,10 @@ pub struct ShelfConfig {
     /// trouble lasts (true).
     #[serde(rename = "trouble-out")]
     pub trouble_out: Option<bool>,
+    /// Applets switched off in the settings app's Dock page, by tile id:
+    /// not on the dock, not in the drawer, not out when in trouble.
+    #[serde(rename = "applets-off")]
+    pub applets_off: Option<Vec<String>>,
 }
 
 /// How `hide` is written: a word, or true and false (true is "windows").

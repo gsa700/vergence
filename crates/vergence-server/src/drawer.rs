@@ -61,7 +61,7 @@ fn rect(r: Rectangle<i32, Logical>) -> Rect {
 impl Server {
     /// The tiles in the drawer, by their place in the list.
     fn drawer_tiles(&self) -> Vec<usize> {
-        (0..self.tiles.list.len()).filter(|i| !self.tile_docked(&self.tiles.list[*i])).collect()
+        (0..self.tiles.list.len()).filter(|i| self.tile_visible(&self.tiles.list[*i]) && !self.tile_docked(&self.tiles.list[*i])).collect()
     }
 
     /// The drawer tile's place on the dock, if the dock shows one.

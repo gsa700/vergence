@@ -10,7 +10,7 @@
 // applies at once.
 //
 // Pages: Appearance; Theme and fonts; Windows (title bar controls, either side,
-// chosen buttons); Dock (place, gap, hiding, opacity, pinned applications);
+// chosen buttons); Dock (place, gap, hiding, opacity, applets);
 // Keyboard (key repeat: on, delay, rate, a box to try it); Mouse (speed,
 // acceleration, scrolling lines, natural scrolling, primary button, middle
 // click, double-click speed); Touchpad (tapping, scrolling, right click) and
@@ -491,9 +491,10 @@ enum Message {
     DockSave,
     DockKeepClear(bool),
     DockHide(usize),
-    PinAdd(usize),
-    PinMove(usize, bool),
-    PinRemove(usize),
+    /// An applet switched on or off (by its tile id), and whether applets in
+    /// trouble come out of the drawer (dock milestone 1, step 9).
+    Applet(String, bool),
+    TroubleOut(bool),
     // Keyboard.
     Repeat(bool),
     RepeatDelay(f32),
@@ -600,6 +601,9 @@ struct App {
     battery: battery::BatteryPage,
     /// Apps that have sent cards, newest first (notify.rs, read when the page opens).
     notify_apps: Vec<(String, u64)>,
+    /// Every applet the desktop has seen: tile id, name, who supplies it
+    /// (the server's applets.toml), read when the Dock page opens.
+    applets: Vec<(String, String, String)>,
     /// A new mode waiting to be kept, and whether to ask about it now (modes.rs).
     mode_pending: Option<modes::Pending>,
     mode_ask: bool,
@@ -809,6 +813,7 @@ impl App {
             wifi: Default::default(),
             battery: Default::default(),
             notify_apps: Vec::new(),
+            applets: Vec::new(),
             mode_pending: None,
             mode_ask: false,
             places: None,
@@ -977,6 +982,9 @@ impl App {
         }
         if p == Page::Notifications {
             self.notify_apps = notify::read_apps();
+        }
+        if p == Page::Dock {
+            self.applets = read_applets();
         }
         if p == Page::DefaultApps {
             self.defaults_read();
@@ -1193,29 +1201,24 @@ impl App {
                     t.insert("hide".into(), word.into());
                 });
             }
-            Message::PinAdd(i) => {
-                let unpinned = self.unpinned();
-                if let Some(id) = unpinned.get(i).map(|e| e.id.clone()) {
-                    let mut pinned = self.pinned();
-                    pinned.push(id);
-                    self.save_pinned(pinned);
+            Message::Applet(id, on) => {
+                let mut off: Vec<String> = self.shelf().and_then(|t| t.get("applets-off")).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
+                off.retain(|x| *x != id);
+                if !on {
+                    off.push(id);
                 }
+                off.sort();
+                self.save_table("shelf", |t| {
+                    if off.is_empty() {
+                        t.remove("applets-off");
+                    } else {
+                        t.insert("applets-off".into(), toml::Value::Array(off.into_iter().map(toml::Value::String).collect()));
+                    }
+                });
             }
-            Message::PinMove(i, up) => {
-                let mut pinned = self.pinned();
-                let j = if up { i.checked_sub(1) } else { Some(i + 1).filter(|j| *j < pinned.len()) };
-                if let Some(j) = j.filter(|_| i < pinned.len()) {
-                    pinned.swap(i, j);
-                    self.save_pinned(pinned);
-                }
-            }
-            Message::PinRemove(i) => {
-                let mut pinned = self.pinned();
-                if i < pinned.len() {
-                    pinned.remove(i);
-                    self.save_pinned(pinned);
-                }
-            }
+            Message::TroubleOut(on) => self.save_table("shelf", |t| {
+                t.insert("trouble-out".into(), on.into());
+            }),
             Message::SameSize(on) => self.save(|d| disp::set_same_size(d, on)),
             Message::Size(v) => self.size = if (v - 1.0).abs() < 0.035 { 1.0 } else { v },
             Message::Repeat(on) => self.save_keyboard(|t| {
@@ -2279,27 +2282,6 @@ impl App {
         DOCK_HIDE.iter().position(|h| h.1 == word).unwrap_or(0)
     }
 
-    /// The pinned applications' entry ids, in their order on the dock.
-    fn pinned(&self) -> Vec<String> {
-        self.shelf().and_then(|t| t.get("pinned")).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default()
-    }
-
-    fn save_pinned(&mut self, pinned: Vec<String>) {
-        self.save_table("shelf", |t| {
-            t.insert("pinned".into(), toml::Value::Array(pinned.into_iter().map(toml::Value::String).collect()));
-        });
-    }
-
-    /// Installed applications not pinned, by name.
-    fn unpinned(&self) -> Vec<&vergence_shell::desktop::Entry> {
-        let pinned = self.pinned();
-        self.apps.iter().filter(|e| !e.no_display && !e.hidden && !pinned.contains(&e.id)).collect()
-    }
-
-    fn app_name(&self, id: &str) -> String {
-        self.apps.iter().find(|e| e.id == id).map(|e| e.name.clone()).unwrap_or_else(|| id.to_string())
-    }
-
     fn dock(&self) -> Element<Message> {
         let shelf = self.shelf();
         let text = |k: &str| shelf.and_then(|t| t.get(k)).and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -2357,39 +2339,26 @@ impl App {
                 .align(Align::Center),
             ),
         ];
-        let pinned = self.pinned();
-        let n = pinned.len();
-        let mut pins: Vec<Element<Message>> = Vec::new();
-        for (i, id) in pinned.iter().enumerate() {
-            let small = |text: &str, m: Message, can: bool, name: String| {
-                let b = button(label(text).size(12.0)).padding(Padding::hv(3.0, 9.0)).name(name);
-                if can { b.on_press(m) } else { b }
-            };
-            let name = self.app_name(id);
-            pins.push(
-                setting(
-                    &name,
-                    id,
-                    row(vec![
-                        small("\u{2191}", Message::PinMove(i, true), i > 0, format!("Move {name} up")),
-                        small("\u{2193}", Message::PinMove(i, false), i + 1 < n, format!("Move {name} down")),
-                        small("Unpin", Message::PinRemove(i), true, format!("Unpin {name}")),
-                    ])
-                    .spacing(6.0),
-                )
-                .key(i as u64),
-            );
+        let off: Vec<String> = shelf.and_then(|t| t.get("applets-off")).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
+        let mut applets: Vec<Element<Message>> = vec![setting(
+            "Out of the drawer when in trouble",
+            "An applet with a problem or a warning stands on the dock until it clears.",
+            switch(flag("trouble-out", true), Message::TroubleOut).name("Out of the drawer when in trouble"),
+        )];
+        if self.applets.is_empty() {
+            applets.push(setting("No applets yet", "The clock, sound, network and power, and those programs put up, are listed here once the dock has shown them.", space()));
         }
-        let names: Vec<String> = self.unpinned().iter().map(|e| e.name.clone()).collect();
-        pins.push(setting(
-            if n == 0 { "Pin an application" } else { "Pin another" },
-            "Pinned applications stay on the dock when they are not running. Right-click an icon on the dock to pin it too.",
-            choice(names, None, Message::PinAdd).placeholder("Choose one\u{2026}").width(Length::Fixed(200.0)).name("Pin an application"),
-        ));
+        for (i, (id, name, from)) in self.applets.iter().enumerate() {
+            let on = !off.contains(id);
+            let what = if from == "the desktop" { "From the desktop.".to_string() } else { format!("From {from}.") };
+            let id = id.clone();
+            let shown = if name.is_empty() { id.clone() } else { name.clone() };
+            applets.push(setting(&shown, &what, switch(on, move |on| Message::Applet(id.clone(), on)).name(&format!("Show {shown}"))).key(i as u64 + 1));
+        }
         self.page_layout(
             "Dock",
-            "Where the dock sits and how it looks, and the applications pinned to it. It follows at once.",
-            vec![self.group(Some("Place"), place), self.group(Some("Look"), look), self.group(Some("Pinned"), pins), self.desktop_group(), self.session_group(), self.status_line()],
+            "Where the dock sits and how it looks, and its applets. Drag an icon to move it, onto the dock to pin it, off the dock to remove it. It follows at once.",
+            vec![self.group(Some("Place"), place), self.group(Some("Look"), look), self.group(Some("Applets"), applets), self.desktop_group(), self.session_group(), self.status_line()],
         )
     }
 
@@ -3415,5 +3384,41 @@ impl vergence_widgets::prefs::Rows for OwnRows {
         {
             eprintln!("vergence-settings: {e}");
         }
+    }
+}
+
+/// The applets the desktop has seen (the server's
+/// ~/.local/state/vergence/applets.toml): tile id, name, who supplies it;
+/// the desktop's first, then by name.
+fn read_applets() -> Vec<(String, String, String)> {
+    let Some(state) = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state"))) else {
+        return Vec::new();
+    };
+    let text = std::fs::read_to_string(state.join("vergence/applets.toml")).unwrap_or_default();
+    parse_applets(&text)
+}
+
+fn parse_applets(text: &str) -> Vec<(String, String, String)> {
+    let Some(a) = text.parse::<toml::Table>().ok().and_then(|t| t.get("applets").and_then(|a| a.as_table()).cloned()) else { return Vec::new() };
+    let mut out: Vec<(String, String, String)> = a
+        .iter()
+        .filter_map(|(id, v)| {
+            let v = v.as_table()?;
+            let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+            Some((id.clone(), s("name"), s("from")))
+        })
+        .collect();
+    out.sort_by(|a, b| (a.2 != "the desktop").cmp(&(b.2 != "the desktop")).then_with(|| a.1.to_lowercase().cmp(&b.1.to_lowercase())));
+    out
+}
+
+#[cfg(test)]
+mod applets_tests {
+    #[test]
+    fn the_desktops_applets_come_first_then_by_name() {
+        let text = "[applets.ups]\nname = \"UPS (rack)\"\nfrom = \"vtile\"\n[applets.clock]\nname = \"Monday\"\nfrom = \"the desktop\"\n[applets.nas]\nname = \"NAS\"\nfrom = \"vtile\"\n";
+        let ids: Vec<String> = super::parse_applets(text).into_iter().map(|(id, ..)| id).collect();
+        assert_eq!(ids, ["clock", "nas", "ups"]);
+        assert!(super::parse_applets("not toml [").is_empty());
     }
 }

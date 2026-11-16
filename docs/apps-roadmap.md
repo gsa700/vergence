@@ -201,6 +201,11 @@ it is today:
   window. Seen when the clock tile's click opened a new one (dock milestone
   1, step 2).
 
+- **An apps button that says what it is** (Dave, 2026-11-16, after it became
+  four squares in dock milestone 1): "I suspect we will want to replace it
+  with an icon that tells the user their apps live there". The four squares
+  stay until then.
+
 ## Questions for Dave (when each app's turn comes)
 
 1. **Spellchecking**: dictionaries are data from other projects (Hunspell's

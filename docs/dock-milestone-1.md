@@ -152,6 +152,25 @@ milestone: the list and the launcher only).
   "mute" typed in the launcher, Enter muted, `vctl action sound.unmute`
   back. Tests 654 Hubble, 647 kepler.
 
+- **Step 9 done** (2026-11-16): the settings app's Dock page has
+  **Applets** in place of Pinned (pinning is done on the dock): "Out of the
+  drawer when in trouble" (`[shelf] trouble-out`) and a switch for every
+  applet the desktop has seen, the desktop's first (Clock, Sound, Network,
+  Battery by fixed names), then programs' by name, each saying who supplies
+  it; off is `[shelf] applets-off` by tile id (not on the dock, not in the
+  drawer, not out in trouble). The server writes every applet it sees to
+  ~/.local/state/vergence/applets.toml (0600) for the page. Whitepaper
+  Draft 0.22: §6.9 "Built on 16 November 2026", §9's status and order of
+  work; PDF rebuilt (42 pages, checked). CLAUDE.md. Seen on kepler: the
+  Dock page; `applets-off = ["network"]` took the Network tile off the dock
+  and back (kepler's desktop.toml put back). Tests 655 Hubble, 648 kepler.
+
+**All nine steps are in.** Left for acceptance: icons and tiles dragged by
+hand with a mouse and a finger (Dave, kepler and Hubble); the Power tile's
+card on Hubble's battery; Techbench once Dave frees it (look at its
+~/.config/autostart first: GNOME's entries there would now start under
+Vergence unless they say OnlyShowIn or NotShowIn).
+
 ## Where things stand
 
 - The dock (shelf milestones 1 and 2): the apps button, pinned and running

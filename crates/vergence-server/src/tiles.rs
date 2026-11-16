@@ -98,6 +98,52 @@ pub struct Tiles {
     pub lift: Option<crate::drawer::TileLift>,
     /// A press on a tile in the drawer that may yet become a drag.
     pub pending: Option<crate::drawer::Pending>,
+    /// Every applet this desktop has seen, by tile id: its name and who
+    /// supplies it (read from and written to applets.toml once known).
+    known: Option<std::collections::BTreeMap<String, (String, String)>>,
+}
+
+/// ~/.local/state/vergence/applets.toml: every applet seen, for the settings
+/// app's Dock page (its Applets list, each with a switch).
+fn applets_path() -> Option<std::path::PathBuf> {
+    let state = std::env::var_os("XDG_STATE_HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))?;
+    Some(state.join("vergence/applets.toml"))
+}
+
+/// `[applets.<id>] name, from`.
+pub fn parse_applets(text: &str) -> std::collections::BTreeMap<String, (String, String)> {
+    let Ok(t) = text.parse::<toml::Table>() else { return Default::default() };
+    let Some(a) = t.get("applets").and_then(|a| a.as_table()) else { return Default::default() };
+    a.iter()
+        .filter_map(|(id, v)| {
+            let v = v.as_table()?;
+            let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+            Some((id.clone(), (s("name"), s("from"))))
+        })
+        .collect()
+}
+
+/// Written beside and moved into place, readable by its owner only.
+fn write_applets(known: &std::collections::BTreeMap<String, (String, String)>) -> std::io::Result<()> {
+    use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt}};
+    let Some(path) = applets_path() else { return Ok(()) };
+    if let Some(dir) = path.parent() {
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    }
+    let mut all = toml::Table::new();
+    for (id, (name, from)) in known {
+        let mut t = toml::Table::new();
+        t.insert("name".into(), name.clone().into());
+        t.insert("from".into(), from.clone().into());
+        all.insert(id.clone(), toml::Value::Table(t));
+    }
+    let mut table = toml::Table::new();
+    table.insert("applets".into(), toml::Value::Table(all));
+    let text = toml::to_string(&table).map_err(std::io::Error::other)?;
+    let beside = path.with_extension("toml.new");
+    let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&beside)?;
+    file.write_all(text.as_bytes())?;
+    std::fs::rename(beside, path)
 }
 
 /// How long the pointer rests on a tile before its card opens, and how long
@@ -152,6 +198,7 @@ impl Server {
             Some(p) => p.tile = tile,
             None => {
                 tracing::info!("tiles: {} from {owner:?}", tile.id);
+                self.applet_seen(owner, &tile);
                 self.tiles.list.push(Placed { owner, tile });
                 // The desktop's in a fixed order, programs' after them in the
                 // order they came, the clock last (the end of the dock).
@@ -237,6 +284,37 @@ impl Server {
         out.join("\n")
     }
 
+    /// An applet's first appearance this session: written down for the
+    /// settings app if it is new (its name: the card's title, else its label).
+    fn applet_seen(&mut self, owner: Owner, tile: &Tile) {
+        // The desktop's by fixed names (the clock's card title is the date).
+        let name = match (owner, tile.id.as_str()) {
+            (Owner::Desktop, "clock") => "Clock".to_string(),
+            (Owner::Desktop, "sound") => "Sound".to_string(),
+            (Owner::Desktop, "network") => "Network".to_string(),
+            (Owner::Desktop, "power") => "Battery".to_string(),
+            _ if !tile.card.title.is_empty() => tile.card.title.clone(),
+            _ => tile.label.clone(),
+        };
+        let from = match owner {
+            Owner::Desktop => "the desktop".to_string(),
+            Owner::Client(c) => Some(self.bus_app_id(c)).filter(|a| !a.is_empty()).unwrap_or_else(|| "a program".into()),
+        };
+        let known = self.tiles.known.get_or_insert_with(|| applets_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse_applets(&t)).unwrap_or_default());
+        if known.get(&tile.id) == Some(&(name.clone(), from.clone())) {
+            return;
+        }
+        known.insert(tile.id.clone(), (name, from));
+        if let Err(e) = write_applets(known) {
+            tracing::warn!("tiles: applets.toml could not be written: {e}");
+        }
+    }
+
+    /// Whether an applet is switched on (desktop.toml [shelf] applets-off).
+    pub fn tile_visible(&self, p: &Placed) -> bool {
+        !self.shelf.config.applets_off.as_ref().is_some_and(|off| off.contains(&p.tile.id))
+    }
+
     /// Whether a tile stands on the dock (else it is in the drawer):
     /// desktop.toml [shelf] tiles, and trouble coming out ([shelf]
     /// trouble-out, on unless set off).
@@ -249,10 +327,10 @@ impl Server {
     /// then the tiles that stand on the dock.
     pub fn dock_places(&self) -> Vec<Place> {
         let mut out = Vec::new();
-        if self.tiles.list.iter().any(|p| !self.tile_docked(p)) {
+        if self.tiles.list.iter().any(|p| self.tile_visible(p) && !self.tile_docked(p)) {
             out.push(Place::Drawer);
         }
-        out.extend((0..self.tiles.list.len()).filter(|i| self.tile_docked(&self.tiles.list[*i])).map(Place::Tile));
+        out.extend((0..self.tiles.list.len()).filter(|i| self.tile_visible(&self.tiles.list[*i]) && self.tile_docked(&self.tiles.list[*i])).map(Place::Tile));
         out
     }
 
@@ -262,7 +340,7 @@ impl Server {
             .into_iter()
             .map(|place| match place {
                 Place::Drawer => {
-                    let inside: Vec<&Placed> = self.tiles.list.iter().filter(|p| !self.tile_docked(p)).collect();
+                    let inside: Vec<&Placed> = self.tiles.list.iter().filter(|p| self.tile_visible(p) && !self.tile_docked(p)).collect();
                     let worst = inside.iter().map(|p| p.tile.state).max_by_key(|s| *s as u8).unwrap_or_default();
                     Shown::Drawer(inside.len(), worst)
                 }
