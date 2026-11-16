@@ -241,11 +241,12 @@ so it ends with a security pass of its own (as 2026-11-08 and 2026-11-15).
   worker; pam_xdg made /var/run/xdg/derickson), Super+L locked and vdm
   unlocked, Log Out ended it: vdm ended 3 processes the session had left,
   closed the PAM session (pam_xdg removed the runtime directory), and the
-  login screen came back. Found on the way: `vdm greeter stop` left the
+  login screen came back. Seen on Hubble the same way (13:22-13:24):
+  VT 8, vdm made /run/user/1000 (Void has no PAM module for it) and left
+  it at the end, 1 leftover process ended. Found on the way: `vdm greeter stop` left the
   screen on the empty VT 9 (vdm now switches back to the VT it was asked
   from), and the server tried a frame ten times a second while paused
-  (it now draws nothing until its VT is back). Not yet: Hubble (Void,
-  vdm's own /run/user/<uid>) and Techbench (logind; the greeter's own
+  (it now draws nothing until its VT is back). Not yet: Techbench (logind; the greeter's own
   logind session, I4). One session per user for now: a second login as
   the same user would share its runtime directory and single-instance
   app sockets (to be refused or given its own, step 6).
