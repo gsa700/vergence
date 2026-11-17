@@ -666,8 +666,7 @@ const GIVE_UP: u32 = 5;
 /// kept), its output to STATE_DIR/greeter.log. Every descriptor of vdm's is
 /// close-on-exec (Rust opens them so), so it inherits none.
 fn start_greeter(uid: u32, gid: u32, close: &[c_int]) -> std::io::Result<c_int> {
-    let exe = std::env::current_exe()?;
-    let server = exe.parent().and_then(|d| d.parent()).map(|p| p.join("bin/vergence-server")).filter(|p| p.is_file()).ok_or_else(|| std::io::Error::other("no vergence-server beside vdm ($prefix/bin)"))?;
+    let server = SERVER.get().cloned().flatten().filter(|p| p.is_file()).ok_or_else(|| std::io::Error::other("no vergence-server beside vdm ($prefix/bin)"))?;
     let base = std::path::Path::new(paths::GREETER_SOCKET).parent().ok_or_else(|| std::io::Error::other("no run directory"))?;
     let home = base.join("greeter-home");
     let run = home.join("run");
@@ -1081,7 +1080,15 @@ fn lock_all(sessions: &mut Vec<(u32, UnixStream)>) -> String {
     said
 }
 
+/// The display server the login screen runs, beside vdm ($prefix/bin), found
+/// once at the start: an install that replaces vdm's file while it runs (a
+/// session up, its restart left for later) leaves the running vdm unable to
+/// name its own file on FreeBSD, and every login screen after the next
+/// log out failed to start (kepler, 2026-11-16).
+static SERVER: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+
 fn main() {
+    let _ = SERVER.set(std::env::current_exe().ok().and_then(|exe| exe.parent().and_then(|d| d.parent()).map(|p| p.join("bin/vergence-server"))));
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("before-sleep") {
         before_sleep();
