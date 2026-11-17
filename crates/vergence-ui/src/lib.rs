@@ -311,6 +311,8 @@ pub enum Cursor {
     Grab,
     /// Resizing from these edges ([`Edges`]).
     Resize(Edges),
+    /// ↔ between two columns, pulled to change a column's width.
+    ColResize,
 }
 
 /// Sides of the window, for resizing.
@@ -336,6 +338,7 @@ impl Cursor {
             Cursor::Text => wl::SHAPE_TEXT,
             Cursor::Move => wl::SHAPE_MOVE,
             Cursor::Grab => wl::SHAPE_GRAB,
+            Cursor::ColResize => wl::SHAPE_COL_RESIZE,
             Cursor::Resize(e) => match (e.top, e.bottom, e.left, e.right) {
                 (true, _, true, _) => wl::SHAPE_NW_RESIZE,
                 (true, _, _, true) => wl::SHAPE_NE_RESIZE,

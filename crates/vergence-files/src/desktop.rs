@@ -29,7 +29,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime};
 
 use vergence_scene::{Color, Image, Point, Rect};
-use vergence_ui::Modifiers;
+use vergence_ui::{MenuLine, Modifiers};
 use vergence_widgets::files::{self, Entry, Kind};
 use vergence_widgets::{Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Touch, Waker, Window, button, column, drawing, field, label, panel, row, space, stack};
 
@@ -157,6 +157,7 @@ mod cmd {
     pub const BY_DATE: u32 = 24;
     pub const OPEN_FOLDER: u32 = 25;
     pub const TERMINAL: u32 = 26;
+    pub const PROPERTIES: u32 = 27;
 }
 
 /// The order icons not placed by hand take.
@@ -508,6 +509,63 @@ impl Desktop {
         let card = panel(row(items).spacing(8.0).align(Align::Center)).color(t.card).radius(10.0).edge(t.line, 1.0).padding(Padding::hv(8.0, 12.0));
         Some(column(vec![space().height(Length::Fixed(16.0)), row(vec![space().width(Length::FILL), card, space().width(Length::FILL)]).width(Length::FILL)]).width(Length::FILL))
     }
+
+    /// The right-click menu (bus v20, drawn by the server): for the icons
+    /// chosen, or for the desktop itself when none is.
+    fn menu_lines(&self) -> Vec<MenuLine> {
+        let chosen: Vec<&Entry> = self.entries.iter().filter(|e| self.chosen.contains(&e.path)).collect();
+        if chosen.is_empty() {
+            return vec![
+                MenuLine::item(cmd::NEW_FOLDER, "New Folder", ""),
+                MenuLine::item(cmd::PASTE, "Paste", ""),
+                MenuLine::Separator,
+                MenuLine::Sub {
+                    label: "Arrange By".into(),
+                    lines: vec![
+                        MenuLine::item(cmd::BY_NAME, "Name", "").checked(self.order == Order::Name),
+                        MenuLine::item(cmd::BY_KIND, "Kind", "").checked(self.order == Order::Kind),
+                        MenuLine::item(cmd::BY_DATE, "Date Changed", "").checked(self.order == Order::Date),
+                    ],
+                },
+                MenuLine::Separator,
+                MenuLine::item(cmd::OPEN_FOLDER, "Open Desktop in File Viewer", ""),
+                MenuLine::item(cmd::TERMINAL, "Open in Terminal", ""),
+                MenuLine::Separator,
+                MenuLine::item(cmd::PROPERTIES, "Properties", ""),
+            ];
+        }
+        let fixed: Vec<Fixed> = chosen.iter().filter_map(|e| self.fixed_of(e)).collect();
+        let files = chosen.len() - fixed.len();
+        let mut l = vec![MenuLine::item(cmd::OPEN, "Open", "Enter")];
+        if let [one] = chosen.as_slice()
+            && !one.dir
+            && !Desktop::launcher(one)
+        {
+            l.push(MenuLine::item(cmd::CLOSE_UP, "Open in Close-Up", ""));
+        }
+        if files > 0 {
+            l.push(MenuLine::item(cmd::SHOW, "Show in File Viewer", ""));
+            l.push(MenuLine::Separator);
+            l.push(MenuLine::item(cmd::COPY, "Copy", ""));
+            l.push(MenuLine::item(cmd::DUPLICATE, "Duplicate", ""));
+            l.push(MenuLine::Separator);
+            l.push(MenuLine::item(cmd::RENAME, "Rename…", "F2").enabled(files == 1 && fixed.is_empty()));
+            l.push(MenuLine::item(cmd::TRASH, "Move to the Trash", "Delete"));
+        }
+        if fixed.contains(&Fixed::Trash) {
+            l.push(MenuLine::Separator);
+            l.push(MenuLine::item(cmd::EMPTY_TRASH, "Empty Trash…", ""));
+        }
+        if fixed.contains(&Fixed::Volume) {
+            l.push(MenuLine::Separator);
+            l.push(MenuLine::item(cmd::EJECT, "Eject", ""));
+        }
+        if files > 0 {
+            l.push(MenuLine::Separator);
+            l.push(MenuLine::item(cmd::PROPERTIES, "Properties", ""));
+        }
+        l
+    }
 }
 
 impl Program for Desktop {
@@ -668,8 +726,8 @@ impl Program for Desktop {
         window.redraw();
     }
 
-    /// A right press: the icon under it chosen (or none), then the server's
-    /// menu with the commands for what is chosen. The clipboard's text, asked
+    /// A right press: the icon under it chosen (or none), then the
+    /// right-click menu for what is chosen ([`Desktop::menu_lines`]). The clipboard's text, asked
     /// for by Paste: its files copied here.
     fn input(&mut self, input: &Input, window: &mut Window) -> bool {
         match input {
@@ -685,7 +743,7 @@ impl Program for Desktop {
                 }
                 self.menu_cell = Some(self.cell_at(*x, *y));
                 window.redraw();
-                window.context_menu(*x, *y);
+                window.menu(*x, *y, self.menu_lines());
                 true
             }
             Input::Paste(text) => {
@@ -826,6 +884,14 @@ impl Program for Desktop {
             }
             cmd::TERMINAL => {
                 let _ = std::process::Command::new("vergence-term").current_dir(&self.dir).spawn();
+            }
+            // Its own window, as File Viewer's (one per item, at most eight);
+            // the Desktop folder's own when nothing is chosen.
+            cmd::PROPERTIES => {
+                let items = if paths.is_empty() { vec![self.dir.clone()] } else { paths.clone() };
+                for p in items.into_iter().take(8) {
+                    window.open_window(vergence_widgets::window(crate::props::Properties::new(p, crate::lone_shared(), crate::files_theme(&self.desktop_text))));
+                }
             }
             _ => {}
         }

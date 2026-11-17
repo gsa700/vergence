@@ -133,6 +133,7 @@ pub const SHAPE_S_RESIZE: u32 = 22;
 pub const SHAPE_SE_RESIZE: u32 = 23;
 pub const SHAPE_SW_RESIZE: u32 = 24;
 pub const SHAPE_W_RESIZE: u32 = 25;
+pub const SHAPE_COL_RESIZE: u32 = 30;
 
 /// What the server told us.
 #[derive(Debug, Clone, PartialEq)]

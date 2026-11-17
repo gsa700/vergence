@@ -1375,11 +1375,21 @@ impl<M: Clone> Ui<M> {
         }
         let what = t.and_then(|id| self.node(id)).map(|n| &n.what);
         let on_bar = matches!(what, Some(What::Area { doc, .. }) if doc.borrow().bar_hit(x, y).is_some());
+        // A drawing pulled keeps its shape wherever the pointer goes.
+        let pulled = match self.drag {
+            Some(Drag::Drawing { id, .. }) => self.node(id).and_then(|n| match n.what {
+                What::Drawing { cursor, .. } => cursor,
+                _ => None,
+            }),
+            _ => None,
+        };
         r.cursor = Some(match (what, self.drag) {
+            _ if pulled.is_some() => pulled.unwrap_or(Cursor::Default),
             (_, Some(Drag::AreaBar { .. })) => Cursor::Default,
             (Some(What::Area { .. }), None) if on_bar => Cursor::Default,
             (_, Some(Drag::Select { .. } | Drag::AreaSelect { .. })) | (Some(What::Field { .. } | What::Area { .. }), _) => Cursor::Text,
-            (Some(What::Drawing { .. }), _) | (None, _) => Cursor::Default,
+            (Some(What::Drawing { cursor, .. }), _) => cursor.unwrap_or(Cursor::Default),
+            (None, _) => Cursor::Default,
             (Some(_), _) => Cursor::Pointer,
         });
         // A drawing hears the pointer pass over it.

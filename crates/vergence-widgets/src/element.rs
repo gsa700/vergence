@@ -138,7 +138,7 @@ pub(crate) enum Kind<M> {
     Choice { options: Vec<String>, selected: Option<usize>, placeholder: String, on_select: Option<Box<dyn Fn(usize) -> M>> },
     Scroll { child: Box<Element<M>> },
     Picture { image: Arc<Image>, fit: Fit, radius: f32, opacity: f32 },
-    Drawing { draw: Draw, on_touch: Option<OnTouch<M>> },
+    Drawing { draw: Draw, on_touch: Option<OnTouch<M>>, cursor: Option<vergence_ui::Cursor> },
     Area { doc: crate::textarea::TextDoc, on_change: Option<M>, autofocus: bool },
 }
 
@@ -543,7 +543,7 @@ pub fn picture<M>(image: Arc<Image>) -> Element<M> {
 /// (for `vergence_render::text`), the place, and the theme; `on_touch`, if
 /// any, is told of the pointer and fingers in the place's own coordinates.
 pub fn drawing<M>(draw: impl Fn(&mut Scene, &mut Fonts, Rect, &Theme) + 'static) -> Element<M> {
-    Element::new(Kind::Drawing { draw: Box::new(draw), on_touch: None }, Length::FILL, Length::Fixed(100.0))
+    Element::new(Kind::Drawing { draw: Box::new(draw), on_touch: None, cursor: None }, Length::FILL, Length::Fixed(100.0))
 }
 
 impl<M> Element<M> {
@@ -559,6 +559,15 @@ impl<M> Element<M> {
     pub fn on_touch(mut self, f: impl Fn(Touch) -> Option<M> + 'static) -> Self {
         if let Kind::Drawing { on_touch, .. } = &mut self.kind {
             *on_touch = Some(Box::new(f));
+        }
+        self
+    }
+
+    /// The pointer's shape over a drawing, and while it is pulled (a
+    /// column's grip: [`vergence_ui::Cursor::ColResize`]). None: the arrow.
+    pub fn cursor(mut self, c: vergence_ui::Cursor) -> Self {
+        if let Kind::Drawing { cursor, .. } = &mut self.kind {
+            *cursor = Some(c);
         }
         self
     }

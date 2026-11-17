@@ -66,6 +66,10 @@ Viewer", with Finder's list view as the picture of what he likes.*
    over their application's windows), in the dock and Alt+Tab, not going
    with the File Viewer window that opened it.
 4. Tests green on Hubble, kepler, Techbench 2026-11-16 evening; installed.
-   Not yet: a ↔ pointer over the column grips; folder sizes in the Size
-   sort after a folder is read again (the sizes are put back only when new
-   ones arrive).
+5. Loose ends (2026-11-16 night). **Done**: a ↔ pointer over the column
+   grips and while one is pulled (`Cursor::ColResize`, a drawing's own
+   `Element::cursor`); counted folder sizes put into the entries each time a
+   folder is read (`Tab::put_sizes`), and a folder counted again after it
+   changed noticed (it used to wait for a count of a new folder); the
+   desktop's icons on the bus v20 right-click menu (File Viewer's words, an
+   Arrange By submenu, Properties for icons and for the Desktop folder).

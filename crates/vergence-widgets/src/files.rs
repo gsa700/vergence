@@ -338,7 +338,7 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
         }).width(Length::Fixed(GAP)).height(Length::Fixed(20.0));
         if let Some(grip) = v.grip {
             let f = move |t: crate::Touch| grip(c, t);
-            g = g.on_touch(f).name(format!("Width of {text}"));
+            g = g.on_touch(f).cursor(vergence_ui::Cursor::ColResize).name(format!("Width of {text}"));
         }
         head_items.push(g);
         head_items.push(heading(text, s, Length::Fixed(look.widths[c]), s == SortBy::Size));

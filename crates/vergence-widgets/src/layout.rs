@@ -50,7 +50,7 @@ pub(crate) enum What<M> {
     /// `content`: the height of what is in it.
     Scroll { content: f32 },
     Picture { image: Arc<Image>, fit: Fit, radius: f32, opacity: f32 },
-    Drawing { draw: Draw, on_touch: Option<OnTouch<M>> },
+    Drawing { draw: Draw, on_touch: Option<OnTouch<M>>, cursor: Option<vergence_ui::Cursor> },
     Area { doc: crate::textarea::TextDoc, on_change: Option<M>, autofocus: bool },
 }
 
@@ -491,7 +491,7 @@ impl Layout<'_> {
                 push(out, What::Choice { options, selected, placeholder, on_select, size: self.text_size, baseline, step });
             }
             Kind::Picture { image, fit, radius, opacity } => push(out, What::Picture { image, fit, radius, opacity }),
-            Kind::Drawing { draw, on_touch } => push(out, What::Drawing { draw, on_touch }),
+            Kind::Drawing { draw, on_touch, cursor } => push(out, What::Drawing { draw, on_touch, cursor }),
             Kind::Area { doc, on_change, autofocus } => push(out, What::Area { doc, on_change, autofocus }),
             Kind::Scroll { child } => {
                 push(out, What::Scroll { content: rect.h });

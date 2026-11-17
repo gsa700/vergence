@@ -156,13 +156,32 @@ struct Tab {
     cursor: Option<PathBuf>,
     /// Bumped when the cursor moves, so its row is scrolled to.
     turn: u64,
+    /// The window's counted folder sizes, put into the entries as they are read.
+    sizes: Sizes,
 }
 
 impl Tab {
-    fn new(id: u32, showing: Showing) -> Tab {
-        let mut t = Tab { id, showing, back: Vec::new(), forward: Vec::new(), entries: Vec::new(), problem: None, stamp: None, chosen: Vec::new(), cursor: None, turn: 0 };
+    fn new(id: u32, showing: Showing, sizes: Sizes) -> Tab {
+        let mut t = Tab { id, showing, back: Vec::new(), forward: Vec::new(), entries: Vec::new(), problem: None, stamp: None, chosen: Vec::new(), cursor: None, turn: 0, sizes };
         t.read();
         t
+    }
+
+    /// Counted sizes into the folders' entries, where the folder has not
+    /// changed since; true if any entry's size changed.
+    fn put_sizes(&mut self) -> bool {
+        let all = self.sizes.lock().unwrap_or_else(|x| x.into_inner());
+        let mut changed = false;
+        for e in self.entries.iter_mut().filter(|e| e.dir) {
+            if let Some((when, Some(n))) = all.get(&e.path)
+                && *when == e.changed
+                && e.size != *n
+            {
+                e.size = *n;
+                changed = true;
+            }
+        }
+        changed
     }
 
     fn dir(&self) -> Option<&Path> {
@@ -193,6 +212,8 @@ impl Tab {
             }
             Showing::Recent => files::recent(),
         };
+        // Folders already counted keep their sizes (the Size sort uses them).
+        self.put_sizes();
         // What was chosen and is gone is chosen no more.
         let here: std::collections::HashSet<&PathBuf> = self.entries.iter().map(|e| &e.path).collect();
         self.chosen.retain(|p| here.contains(p));
@@ -225,6 +246,18 @@ struct Shared {
 }
 
 type SharedRef = Rc<RefCell<Shared>>;
+
+/// A Shared of its own, for a Properties window opened from the desktop's
+/// icons (its renames' undo is nobody's).
+fn lone_shared() -> SharedRef {
+    Rc::new(RefCell::new(Shared { inbox: Arc::default(), next_tab: 0, clip: None, undo: Vec::new() }))
+}
+
+/// File Viewer's look (and its Properties windows'), from the desktop file's
+/// text. Names and paths are not prose: no spelling marks in the fields.
+fn files_theme(desktop: &str) -> Theme {
+    Theme { spell: false, ..Theme::from_desktop(desktop, false, SECTION) }
+}
 
 struct Viewer {
     shared: SharedRef,
@@ -476,7 +509,7 @@ impl Viewer {
             s.next_tab += 1;
             s.next_tab
         };
-        self.tabs.push(Tab::new(id, showing));
+        self.tabs.push(Tab::new(id, showing, self.sizes.clone()));
         self.front = id;
         self.clear_narrow();
     }
@@ -1596,8 +1629,7 @@ impl Program for Viewer {
     }
 
     fn theme(&self) -> Theme {
-        // Names and paths are not prose: no spelling marks in the fields.
-        Theme { spell: false, ..Theme::from_desktop(&self.desktop, false, SECTION) }
+        files_theme(&self.desktop)
     }
 
     fn bar_style(&self) -> Option<BarStyle> {
@@ -1911,26 +1943,16 @@ impl Program for Viewer {
             self.search_done = s.done();
             changed = true;
         }
-        // Folders counted: their sizes into the entries (sorting by size uses them).
-        let sizes: Vec<(PathBuf, u64)> = {
-            let all = self.sizes.lock().unwrap_or_else(|x| x.into_inner());
-            if all.len() != self.sizes_seen {
-                self.sizes_seen = all.len();
-                changed = true;
-                all.iter().filter_map(|(p, (_, n))| n.map(|n| (p.clone(), n))).collect()
-            } else {
-                Vec::new()
-            }
-        };
-        if !sizes.is_empty() {
-            let known: std::collections::HashMap<PathBuf, u64> = sizes.into_iter().collect();
-            for t in &mut self.tabs {
-                for e in t.entries.iter_mut().filter(|e| e.dir) {
-                    if let Some(n) = known.get(&e.path) {
-                        e.size = *n;
-                    }
-                }
-            }
+        // Folders counted: their sizes into the entries (sorting by size uses
+        // them). A folder counted again after it changed counts too.
+        for t in &mut self.tabs {
+            changed |= t.put_sizes();
+        }
+        let n = self.sizes.lock().unwrap_or_else(|x| x.into_inner()).len();
+        if n != self.sizes_seen {
+            // A count that came to no size (a folder that can't be read) shows as such.
+            self.sizes_seen = n;
+            changed = true;
         }
         let made = self.thumbs.made();
         if made != self.thumbs_made {
@@ -2096,7 +2118,7 @@ mod tests {
     use super::*;
 
     fn shared() -> SharedRef {
-        Rc::new(RefCell::new(Shared { inbox: Arc::default(), next_tab: 0, clip: None, undo: Vec::new() }))
+        lone_shared()
     }
 
     #[test]
@@ -2128,6 +2150,33 @@ mod tests {
         assert_eq!(v.pending, vec![dir.clone()]);
         v.narrow = "zzz".into();
         assert!(v.visible().is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_folder_read_again_keeps_its_counted_size() {
+        let dir = std::env::temp_dir().join(format!("vergence-files-s-{}", std::process::id()));
+        let (big, small) = (dir.join("big"), dir.join("small"));
+        std::fs::create_dir_all(&big).unwrap();
+        std::fs::create_dir_all(&small).unwrap();
+        let mut v = Viewer::new(shared());
+        v.open_paths(std::slice::from_ref(&dir));
+        let when = |p: &Path| std::fs::metadata(p).unwrap().modified().ok();
+        v.sizes.lock().unwrap().insert(big.clone(), (when(&big), Some(9_000)));
+        v.sizes.lock().unwrap().insert(small.clone(), (when(&small), Some(10)));
+        v.sort = (files::SortBy::Size, false);
+        let names = |v: &Viewer| v.visible().iter().map(|e| e.name.clone()).collect::<Vec<_>>();
+        assert!(v.front_mut().unwrap().put_sizes(), "counted sizes go into the entries");
+        assert_eq!(names(&v), vec!["big", "small"], "largest first");
+        // Read again (a change in the folder): the sizes are there at once.
+        v.front_mut().unwrap().read();
+        assert_eq!(names(&v), vec!["big", "small"]);
+        assert!(!v.front_mut().unwrap().put_sizes(), "nothing more to put");
+        // A folder changed since it was counted is not given the old size.
+        std::fs::write(small.join("x"), "x").unwrap();
+        v.front_mut().unwrap().read();
+        let e = v.front_tab().unwrap().entries.iter().find(|e| e.name == "small").unwrap().size;
+        assert_ne!(e, 10);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
