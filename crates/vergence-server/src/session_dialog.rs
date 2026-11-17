@@ -47,10 +47,19 @@ const BUTTONS: [(Button, &str); 6] = [(Button::Sleep, "Sleep"), (Button::Restart
 const DEFAULT: usize = 5;
 /// The power buttons come first, a gap after them.
 const POWER_BUTTONS: usize = 3;
-const W: i32 = 720;
-const H: i32 = 176;
-const BUTTON_W: i32 = 104;
-const BUTTON_H: i32 = 32;
+// As the mock-up Dave chose (2026-11-16: "make ours match your mockup
+// exactly"): a 600-point panel, 24 inside, the heading and a line under it,
+// then the buttons, each as wide as its word, 8 apart, the power group well
+// apart from Lock, Cancel and Log Out.
+const W: i32 = 600;
+const H: i32 = 150;
+const PAD: i32 = 24;
+const BUTTON_H: i32 = 34;
+const BUTTON_GAP: i32 = 8;
+/// The room either side of a button's word (the default's a little more).
+const BUTTON_SIDE: f32 = 14.0;
+const DEFAULT_SIDE: f32 = 16.0;
+const TEXT: f32 = 13.5;
 
 #[derive(Default)]
 pub struct SessionDialog {
@@ -184,17 +193,34 @@ impl Server {
         let accent = self.accent();
         let at = (out.loc.x + (out.size.w - W) / 2, out.loc.y + (out.size.h - H) / 2);
         let panel: Rectangle<i32, Logical> = Rectangle::new(at.into(), (W, H).into());
-        // Sleep, Restart and Shut Down at the left; Lock, Cancel and Log Out
-        // (the default) at the right.
-        let (pad, gap) = (20, 10);
-        let row_y = H - pad - BUTTON_H;
-        let right = BUTTONS.len() - POWER_BUTTONS;
-        let first_right = W - pad - right as i32 * BUTTON_W - (right as i32 - 1) * gap;
-        let local: Vec<(usize, i32)> = (0..BUTTONS.len())
-            .map(|i| (i, if i < POWER_BUTTONS { pad + i as i32 * (BUTTON_W + gap) } else { first_right + (i - POWER_BUTTONS) as i32 * (BUTTON_W + gap) }))
+        let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
+        let face = fonts.face("sans-serif", 400, false)?;
+        let bold = fonts.face("sans-serif", 600, false).unwrap_or(face);
+        // Each button as wide as its word; Sleep, Restart and Shut Down from
+        // the left, Lock, Cancel and Log Out (the default) to the right.
+        let widths: Vec<i32> = BUTTONS
+            .iter()
+            .map(|(b, label)| {
+                let (f, side) = if *b == Button::LogOut { (bold, DEFAULT_SIDE) } else { (face, BUTTON_SIDE) };
+                (fonts.layout(f, TEXT, label).1 + 2.0 * side).ceil() as i32
+            })
             .collect();
+        let row_y = H - PAD - BUTTON_H;
+        let mut local: Vec<(usize, i32, i32)> = Vec::new();
+        let mut x = PAD;
+        for (i, w) in widths.iter().enumerate().take(POWER_BUTTONS) {
+            local.push((i, x, *w));
+            x += w + BUTTON_GAP;
+        }
+        let mut x = W - PAD;
+        for i in (POWER_BUTTONS..BUTTONS.len()).rev() {
+            x -= widths[i];
+            local.push((i, x, widths[i]));
+            x -= BUTTON_GAP;
+        }
+        local.sort_by_key(|(i, _, _)| *i);
         self.session_dialog.panel = panel;
-        self.session_dialog.buttons = local.iter().map(|(i, x)| (*i, Rectangle::new((at.0 + x, at.1 + row_y).into(), (BUTTON_W, BUTTON_H).into()))).collect();
+        self.session_dialog.buttons = local.iter().map(|(i, x, w)| (*i, Rectangle::new((at.0 + x, at.1 + row_y).into(), (*w, BUTTON_H).into()))).collect();
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (focus, light, scale.to_bits(), accent.r, accent.g, accent.b).hash(&mut h);
         let key = h.finish();
@@ -202,32 +228,32 @@ impl Server {
             let s = vergence_look::shelf_look(light);
             let ink = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
-            let face = fonts.face("sans-serif", 400, false)?;
-            let bold = fonts.face("sans-serif", 600, false).unwrap_or(face);
             let (w, hh) = (W as f32, H as f32);
             let mut scene = Scene::new(w, hh);
-            scene.fill_rounded(SceneRect::new(0.0, 0.0, w, hh), vergence_look::RADIUS * 2.0, ink(s.menu));
-            scene.stroke(SceneRect::new(0.0, 0.0, w, hh), vergence_look::RADIUS * 2.0, vergence_look::EDGE, ink(s.edge));
-            let m = fonts.metrics(bold, 17.0);
-            vergence_render::text(&mut scene, fonts, bold, 17.0, ink(s.menu_ink), ScenePoint::new(pad as f32, (22.0 + m.ascent).round()), "Log out of Vergence?");
-            let body = ["Your apps are asked to close, as their own close buttons would (for Restart", "and Shut Down too); one with unsaved work asks you first."];
-            let m = fonts.metrics(face, 13.0);
-            for (k, line) in body.iter().enumerate() {
-                vergence_render::text(&mut scene, fonts, face, 13.0, ink(s.menu_ink_off), ScenePoint::new(pad as f32, (58.0 + k as f32 * 19.0 + m.ascent).round()), line);
-            }
-            for (i, x) in &local {
-                let r = SceneRect::new(*x as f32, row_y as f32, BUTTON_W as f32, BUTTON_H as f32);
+            scene.fill_rounded(SceneRect::new(0.0, 0.0, w, hh), 14.0, ink(s.menu));
+            scene.stroke(SceneRect::new(0.0, 0.0, w, hh), 14.0, vergence_look::EDGE, ink(s.edge));
+            let m = fonts.metrics(bold, 18.0);
+            vergence_render::text(&mut scene, fonts, bold, 18.0, ink(s.menu_ink), ScenePoint::new(PAD as f32, (PAD as f32 + m.ascent).round()), "Log out of Vergence?");
+            let m = fonts.metrics(face, TEXT);
+            // The line under the heading: between the menus' two inks.
+            let (a, b) = (s.menu_ink, s.menu_ink_off);
+            let soft = Color::rgb(((a.0 as u16 + b.0 as u16) / 2) as u8, ((a.1 as u16 + b.1 as u16) / 2) as u8, ((a.2 as u16 + b.2 as u16) / 2) as u8);
+            vergence_render::text(&mut scene, fonts, face, TEXT, soft, ScenePoint::new(PAD as f32, (PAD as f32 + 28.0 + m.ascent).round()), "Your apps will be asked to close first.");
+            // A plain button: the menu's ink, faint, over the panel.
+            let plain = Color::rgba(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2, 20);
+            for (i, x, bw) in &local {
+                let r = SceneRect::new(*x as f32, row_y as f32, *bw as f32, BUTTON_H as f32);
                 let default = BUTTONS[*i].0 == Button::LogOut;
                 // Only the default in the accent; the others plain.
-                let (ground, text) = if default { (accent, Color::rgb(0xff, 0xff, 0xff)) } else { (ink(s.tile), ink(s.tile_ink)) };
-                scene.fill_rounded(r, vergence_look::RADIUS, ground);
+                let (ground, text, f) = if default { (accent, Color::rgb(0xff, 0xff, 0xff), bold) } else { (plain, ink(s.menu_ink), face) };
+                scene.fill_rounded(r, 8.0, ground);
                 if *i == focus {
-                    scene.stroke(SceneRect::new(r.x - 2.0, r.y - 2.0, r.w + 4.0, r.h + 4.0), vergence_look::RADIUS + 2.0, 2.0, ink(s.menu_ink));
+                    scene.stroke(SceneRect::new(r.x - 2.0, r.y - 2.0, r.w + 4.0, r.h + 4.0), 10.0, 2.0, ink(s.menu_ink));
                 }
                 let label = BUTTONS[*i].1;
-                let lw = fonts.layout(face, 13.5, label).1;
-                let lm = fonts.metrics(face, 13.5);
-                vergence_render::text(&mut scene, fonts, face, 13.5, text, ScenePoint::new((r.x + (r.w - lw) / 2.0).round(), (r.y + (r.h - lm.ascent - lm.descent) / 2.0 + lm.ascent).round()), label);
+                let lw = fonts.layout(f, TEXT, label).1;
+                let lm = fonts.metrics(f, TEXT);
+                vergence_render::text(&mut scene, fonts, f, TEXT, text, ScenePoint::new((r.x + (r.w - lw) / 2.0).round(), (r.y + (r.h - lm.ascent - lm.descent) / 2.0 + lm.ascent).round()), label);
             }
             let p = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)).ok()?;
             let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);

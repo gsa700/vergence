@@ -54,3 +54,10 @@ of three boards) settled it.*
    `menu_ground` and `menu_separator`. The toolkit's field menu and choice
    list take the same measures and the server's colors (light or dark as the
    window), highlight in the menus' hover color.
+5. The session dialog as the mock-up (Dave: "make ours match your mockup
+   exactly": the power buttons were only 16 points from the others, no
+   apart at all). **Done**: a 600 by 150 panel, 24 inside, corners 14; the
+   heading at 18 points and "Your apps will be asked to close first." under
+   it; buttons 34 high, each as wide as its word (14 either side, Log Out 16
+   and semibold), 8 apart, Sleep, Restart and Shut Down from the left, Lock,
+   Cancel and Log Out from the right, all the room between them.
