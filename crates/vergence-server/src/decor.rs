@@ -707,8 +707,6 @@ impl Server {
         elements.extend(self.card_elements(renderer, out, scale));
         // Behind the card, the drawer, with a tile being dragged in front of all (drawer.rs).
         elements.extend(self.drawer_elements(renderer, out, scale));
-        // Then the applications popup, if open (launcher.rs).
-        elements.extend(self.launcher_elements(renderer, out, scale));
         // Then Alt+Tab's list, once Alt has been held a moment (switch.rs).
         elements.extend(self.switcher_elements(renderer, out, scale));
         // Then the shelf's strip, which no window covers (shelf.rs).

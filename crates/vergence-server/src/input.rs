@@ -113,7 +113,8 @@ impl Server {
                 }
             }
             KeyOut::Apps => self.launcher_toggle(),
-            KeyOut::Popup => self.launcher_key(key.sym, key.typed),
+            // The launcher is the app menu's panel now (launcher.rs).
+            KeyOut::Popup => {}
             KeyOut::AppMenu => self.app_menu_key(key.sym, key.typed),
             KeyOut::OpenAppMenu(id) => {
                 if let Some(w) = self.input.window(id) {

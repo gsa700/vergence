@@ -231,9 +231,6 @@ impl Server {
         if self.menu_contains(pos) {
             return Some(Target::Server(Part::Menu));
         }
-        if self.launcher_contains(pos) {
-            return Some(Target::Server(Part::Popup));
-        }
         if self.switcher_contains(pos) {
             return Some(Target::Server(Part::Switcher));
         }
@@ -313,7 +310,6 @@ impl Server {
         self.notify_hover(pos);
         self.session_dialog_hover(pos);
         self.shelf_hover(pos);
-        self.launcher_hover(pos);
     }
 
     /// The pointer's picture, and Smithay's pointer where the pointer is.
@@ -443,7 +439,6 @@ impl Server {
                                 self.native_axis(&w, time.millis(), *source, *dx, *dy, *v120x, *v120y);
                             }
                         }
-                        Target::Server(Part::Popup) => self.launcher_scroll(*dy),
                         Target::Server(Part::Dock | Part::Card) => self.tile_scroll(pos, *dy, *v120y),
                         Target::Server(_) => {}
                     }
@@ -553,9 +548,6 @@ impl Server {
             }
             Target::Server(Part::Menu) if pressed => self.menu_press(pos),
             Target::Server(Part::AppList) if pressed => self.app_menu_press(pos, button),
-            Target::Server(Part::Popup) if pressed && button == vergence_seat::BTN_RIGHT => self.launcher_menu(pos),
-            Target::Server(Part::Popup) if pressed => self.launcher_press(pos),
-            Target::Server(Part::Popup) => self.launcher_release(pos),
             Target::Server(Part::Note) if pressed => self.notify_press(pos),
             Target::Server(Part::Card) if pressed && button == vergence_seat::BTN_LEFT => self.card_press(pos),
             Target::Server(Part::Card) if !pressed => self.card_release(),

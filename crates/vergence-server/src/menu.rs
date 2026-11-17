@@ -70,6 +70,10 @@ pub(crate) enum Entry {
     Command(crate::win::Win, u32, String),
     /// A program to start (Settings at a page, the Terminal), and its name.
     Run(String, Vec<String>),
+    /// The launcher's last lines: lock the screen; ask about the session
+    /// (Log Out, Sleep, Restart, Shut Down: session_dialog.rs).
+    Lock,
+    LogOut,
 }
 
 /// What a window's menu does.
@@ -474,6 +478,10 @@ impl Server {
                     }
                 }
             }
+            Entry::Lock => {
+                self.lock_request("the launcher");
+            }
+            Entry::LogOut => self.session_dialog_open(),
             Entry::Separator => {}
         }
     }
@@ -497,6 +505,8 @@ impl Server {
             Entry::Layout(_, _, label) => label.clone(),
             Entry::Command(_, _, label) => label.clone(),
             Entry::Run(label, _) => label.clone(),
+            Entry::Lock => "Lock Screen".into(),
+            Entry::LogOut => "Log Out…".into(),
             Entry::Separator => String::new(),
         };
         let mut hasher = std::collections::hash_map::DefaultHasher::new();

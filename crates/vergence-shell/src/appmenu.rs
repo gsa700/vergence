@@ -121,6 +121,9 @@ pub struct Model {
     /// A window's own right-click menu (bus v20 `WinRequest::Menu`): these
     /// lines are the whole menu, with no skeleton, search or pins.
     pub given: Option<Vec<MenuLine>>,
+    /// Given lines with a search field over them (the launcher, menus
+    /// milestone 1): typing finds items in every submenu.
+    pub searchable: bool,
 }
 
 /// A given line as the menu draws it.
@@ -202,7 +205,8 @@ impl Model {
     /// The top level.
     pub fn top(&self) -> Vec<Line> {
         if let Some(given) = &self.given {
-            return tidy(given.iter().map(given_line).collect());
+            let search = self.searchable.then_some(Line::Search);
+            return tidy(search.into_iter().chain(given.iter().map(given_line)).collect());
         }
         let mut lines = Vec::new();
         if self.native && self.menu_commands().count() > SMALL {
@@ -272,6 +276,30 @@ impl Model {
             return Vec::new();
         }
         let mut all: Vec<(Line, String)> = Vec::new();
+        // Given lines: every item, those in submenus labeled with the submenu.
+        if let Some(given) = &self.given {
+            for l in given {
+                match l {
+                    MenuLine::Sub { label, lines } => all.extend(lines.iter().map(|l| (given_line(l), label.clone()))),
+                    l => all.push((given_line(l), String::new())),
+                }
+            }
+            all.retain(|(l, _)| match l {
+                Line::Item { label, enabled: true, .. } => {
+                    let label = label.to_lowercase();
+                    words.iter().all(|w| label.contains(w.as_str()))
+                }
+                _ => false,
+            });
+            // The same item in two submenus (an app in two categories) once.
+            let mut seen = std::collections::HashSet::new();
+            all.retain(|(l, _)| match l {
+                Line::Item { label, .. } => seen.insert(label.clone()),
+                _ => true,
+            });
+            all.truncate(MAX_FOUND);
+            return all;
+        }
         if self.native {
             for m in self.menus() {
                 all.extend(self.menu(&m).into_iter().map(|l| (l, m.clone())));
@@ -374,7 +402,7 @@ impl State {
     /// The lines the top panel shows now: the top level, or the search field
     /// and what it found.
     pub fn shown(&self, m: &Model) -> Vec<Line> {
-        if self.typed.trim().is_empty() || m.given.is_some() {
+        if self.typed.trim().is_empty() || (m.given.is_some() && !m.searchable) {
             m.top()
         } else {
             std::iter::once(Line::Search).chain(m.search(&self.typed).into_iter().map(|(l, _)| l)).collect()
@@ -444,7 +472,7 @@ impl State {
             }
             Key::Escape => Did::Close,
             // A right-click menu has no search.
-            Key::Char(_) | Key::Back if m.given.is_some() => Did::Nothing,
+            Key::Char(_) | Key::Back if m.given.is_some() && !m.searchable => Did::Nothing,
             Key::Back => {
                 self.typed.pop();
                 self.after_typing(m);
@@ -537,6 +565,7 @@ mod tests {
             window: Vec::new(),
             pins: Vec::new(),
             given: None,
+            searchable: false,
         }
     }
 
@@ -565,6 +594,28 @@ mod tests {
             m.commands.push(Command::own(100 + i, "Shell", &format!("Thing {i}"), ""));
         }
         m
+    }
+
+    #[test]
+    fn the_launcher_searches_its_submenus() {
+        use vergence_protocol::window::MenuLine;
+        let mut m = big();
+        m.given = Some(vec![
+            MenuLine::item(1, "File Viewer", ""),
+            MenuLine::Separator,
+            MenuLine::Sub { label: "Internet".into(), lines: vec![MenuLine::item(2, "Firefox", ""), MenuLine::item(3, "Mail", "")] },
+            MenuLine::Sub { label: "Office".into(), lines: vec![MenuLine::item(3, "Mail", "")] },
+        ]);
+        m.searchable = true;
+        assert_eq!(m.top()[0], Line::Search, "a search field first");
+        let mut s = State::default();
+        assert_eq!(s.key(&m, Key::Char('f')), Did::Moved);
+        let names: Vec<String> = s.shown(&m).iter().filter_map(|l| if let Line::Item { label, .. } = l { Some(label.clone()) } else { None }).collect();
+        assert_eq!(names, vec!["File Viewer", "Firefox"], "from the top and from a submenu");
+        s.key(&m, Key::Back);
+        s.key(&m, Key::Char('m'));
+        assert_eq!(m.search("mail").len(), 1, "an app in two categories found once");
+        assert_eq!(s.key(&m, Key::Enter), Did::Chosen(Action::Command(3)));
     }
 
     #[test]
@@ -646,7 +697,7 @@ mod tests {
 
     #[test]
     fn a_foreign_app_gets_the_skeleton_and_a_note() {
-        let m = Model { app: "Firefox".into(), commands: vec![], terminal: false, native: false, window: Vec::new(), pins: Vec::new(), given: None };
+        let m = Model { app: "Firefox".into(), commands: vec![], terminal: false, native: false, window: Vec::new(), pins: Vec::new(), given: None, searchable: false };
         assert_eq!(labels(&m.top()), ["[note]", "---", "Settings…", "About Firefox", "Quit Firefox"]);
     }
 

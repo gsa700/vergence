@@ -37,7 +37,8 @@ pub struct AppMenu {
 }
 
 struct Open {
-    win: Win,
+    /// The window it is of (None: the launcher, which is the desktop's).
+    win: Option<Win>,
     /// The app, as its pins are kept (its windows' class).
     app_key: String,
     model: Model,
@@ -55,30 +56,44 @@ struct Open {
     /// The desktop's own lines in its right-click menu, by id, and what each
     /// does (menu.rs): carried out here, not sent to the desktop's program.
     own: Vec<(u32, crate::menu::Entry)>,
+    /// The launcher (launcher.rs): the desktop's own menu of applications.
+    launcher: bool,
+    /// Where its bottom stays (the launcher over a dock at the bottom: it
+    /// grows upward as what it shows changes).
+    bottom: Option<i32>,
 }
 
 impl Open {
+    /// The top panel's top left: `at`, or, held by its bottom (the launcher
+    /// over a dock at the bottom), as high as its lines are now.
+    fn origin(&self) -> Point<i32, Logical> {
+        match self.bottom {
+            Some(b) => (self.at.x, (b - appmenu::height(&self.top_lines())).max(self.screen.loc.y)).into(),
+            None => self.at,
+        }
+    }
+
     fn top_lines(&self) -> Vec<Line> {
         self.state.shown(&self.model)
     }
 
     fn top_rect(&self) -> Rectangle<i32, Logical> {
-        Rectangle::new(self.at, (appmenu::WIDTH, appmenu::height(&self.top_lines())).into())
+        Rectangle::new(self.origin(), (appmenu::WIDTH, appmenu::height(&self.top_lines())).into())
     }
 
     /// The open submenu's panel, beside the line it hangs from, kept on the screen.
     fn sub_rect(&self) -> Option<Rectangle<i32, Logical>> {
         let i = self.state.open?;
         let lines = self.top_lines();
-        let row = *appmenu::rows((self.at.x, self.at.y), &lines).get(i)?;
+        let row = *appmenu::rows((self.origin().x, self.origin().y), &lines).get(i)?;
         let sub = self.state.sub_lines(&self.model);
         if sub.is_empty() {
             return None;
         }
         let h = appmenu::height(&sub);
-        let mut x = if self.leftward { self.at.x - appmenu::WIDTH + 4 } else { self.at.x + appmenu::WIDTH - 4 };
+        let mut x = if self.leftward { self.origin().x - appmenu::WIDTH + 4 } else { self.origin().x + appmenu::WIDTH - 4 };
         if x < self.screen.loc.x || x + appmenu::WIDTH > self.screen.loc.x + self.screen.size.w {
-            x = if self.leftward { self.at.x + appmenu::WIDTH - 4 } else { self.at.x - appmenu::WIDTH + 4 };
+            x = if self.leftward { self.origin().x + appmenu::WIDTH - 4 } else { self.origin().x - appmenu::WIDTH + 4 };
         }
         let y = (row.y - appmenu::PAD).min(self.screen.loc.y + self.screen.size.h - h).max(self.screen.loc.y);
         Some(Rectangle::new((x, y).into(), (appmenu::WIDTH, h).into()))
@@ -92,7 +107,7 @@ impl Open {
         {
             return Some((true, find(s.loc, &self.state.sub_lines(&self.model))));
         }
-        self.top_rect().to_f64().contains(pos).then(|| (false, find(self.at, &self.top_lines())))
+        self.top_rect().to_f64().contains(pos).then(|| (false, find(self.origin(), &self.top_lines())))
     }
 }
 
@@ -103,7 +118,7 @@ impl Server {
 
     /// The window whose app menu is open (its button stays lit).
     pub fn app_menu_window(&self) -> Option<&Win> {
-        self.app_menu.open.as_ref().filter(|o| !o.context).map(|o| &o.win)
+        self.app_menu.open.as_ref().filter(|o| !o.context).and_then(|o| o.win.as_ref())
     }
 
     pub fn app_menu_contains(&self, pos: Point<f64, Logical>) -> bool {
@@ -120,7 +135,7 @@ impl Server {
     /// The app button was pressed, or Alt+Space: open the window's app menu
     /// under its button (closed if it was already open).
     pub fn app_menu_toggle(&mut self, w: &Win, by_key: bool) {
-        if self.app_menu.open.as_ref().is_some_and(|o| o.win == *w) {
+        if self.app_menu.open.as_ref().is_some_and(|o| o.win.as_ref() == Some(w)) {
             return self.app_menu_close();
         }
         self.close_menu();
@@ -147,7 +162,7 @@ impl Server {
             state.key(&model, appmenu::Key::Down);
         }
         tracing::info!("app menu: opened for {:?} ({} commands)", model.app, model.commands.len());
-        self.app_menu.open = Some(Open { win: w.clone(), app_key, model, state, at: (x, y).into(), leftward, screen, context: false, own: Vec::new() });
+        self.app_menu.open = Some(Open { win: Some(w.clone()), app_key, model, state, at: (x, y).into(), leftward, screen, context: false, own: Vec::new(), launcher: false, bottom: None });
         self.app_menu.pictures = [None, None];
         self.redraw_all();
     }
@@ -191,7 +206,7 @@ impl Server {
         if lines.is_empty() {
             return;
         }
-        let model = Model { app: String::new(), commands: Vec::new(), terminal: false, native: true, window: Vec::new(), pins: Vec::new(), given: Some(lines) };
+        let model = Model { app: String::new(), commands: Vec::new(), terminal: false, native: true, window: Vec::new(), pins: Vec::new(), given: Some(lines), searchable: false };
         let state = State::default();
         let at = pos.to_i32_round::<i32>();
         let screen = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|g| g.contains(at)).or_else(|| self.output_at_pointer()).unwrap_or(Rectangle::new(at, (appmenu::WIDTH, 1).into()));
@@ -201,9 +216,38 @@ impl Server {
         let y = if at.y + h <= screen.loc.y + screen.size.h { at.y } else { (at.y - h).max(screen.loc.y) };
         let leftward = x + appmenu::WIDTH * 2 > screen.loc.x + screen.size.w;
         tracing::info!("right-click menu: {} lines", model.given.as_ref().map_or(0, Vec::len));
-        self.app_menu.open = Some(Open { win: w.clone(), app_key: String::new(), model, state, at: (x, y).into(), leftward, screen, context: true, own });
+        self.app_menu.open = Some(Open { win: Some(w.clone()), app_key: String::new(), model, state, at: (x, y).into(), leftward, screen, context: true, own, launcher: false, bottom: None });
         self.app_menu.pictures = [None, None];
         self.redraw_all();
+    }
+
+    /// The launcher (menus milestone 1, Dave 2026-11-16: a text menu pinned
+    /// to the dock's button, as a start menu): these lines with a search
+    /// field, at `at` (its top left, kept on `screen`), every line carried
+    /// out here (`own`).
+    pub(crate) fn app_menu_launcher(&mut self, at: Point<i32, Logical>, bottom: Option<i32>, screen: Rectangle<i32, Logical>, lines: Vec<MenuLine>, own: Vec<(u32, crate::menu::Entry)>) {
+        if lines.is_empty() || crate::greeter() {
+            return;
+        }
+        self.close_menu();
+        let model = Model { app: String::new(), commands: Vec::new(), terminal: false, native: true, window: Vec::new(), pins: Vec::new(), given: Some(lines), searchable: true };
+        let state = State::default();
+        let x = at.x.min(screen.loc.x + screen.size.w - appmenu::WIDTH).max(screen.loc.x);
+        let leftward = x + appmenu::WIDTH * 2 > screen.loc.x + screen.size.w;
+        self.app_menu.open = Some(Open { win: None, app_key: String::new(), model, state, at: (x, at.y).into(), leftward, screen, context: true, own, launcher: true, bottom });
+        self.app_menu.pictures = [None, None];
+        self.redraw_all();
+    }
+
+    /// Whether the open menu is the launcher.
+    pub fn app_menu_is_launcher(&self) -> bool {
+        self.app_menu.open.as_ref().is_some_and(|o| o.launcher)
+    }
+
+    /// The launcher's height for these lines (its search field included), to place it.
+    pub fn launcher_height(lines: &[MenuLine]) -> i32 {
+        let model = Model { app: String::new(), commands: Vec::new(), terminal: false, native: true, window: Vec::new(), pins: Vec::new(), given: Some(lines.to_vec()), searchable: true };
+        appmenu::height(&model.top())
     }
 
     /// The app a window belongs to, as pins and the settings app name it.
@@ -221,13 +265,13 @@ impl Server {
         // title bar (right click, long press) and its maximize button, and
         // Super with the arrows; the app menu is the app's.
         let window: Vec<(WindowAct, String)> = Vec::new();
-        Model { app, commands, terminal, native: w.native().is_some(), window, pins: Vec::new(), given: None }
+        Model { app, commands, terminal, native: w.native().is_some(), window, pins: Vec::new(), given: None, searchable: false }
     }
 
     /// A window sent new commands: an open menu of it shows them (the Text
     /// size row's percentage after a press).
     pub fn app_menu_refresh(&mut self, w: &Win) {
-        let Some(o) = self.app_menu.open.as_mut().filter(|o| o.win == *w) else { return };
+        let Some(o) = self.app_menu.open.as_mut().filter(|o| o.win.as_ref() == Some(w)) else { return };
         if let Some(n) = w.native() {
             (o.model.commands, o.model.terminal) = n.commands();
             self.redraw_all();
@@ -263,7 +307,7 @@ impl Server {
                 Some(Line::Item { action, enabled: true, .. }) => Some(*action),
                 // The Text size row: whichever of its buttons is under the pointer.
                 Some(Line::Zoom { out, reset, grow, .. }) => {
-                    let row = appmenu::rows((o.at.x, o.at.y), &o.top_lines())[i];
+                    let row = { let at = o.origin(); appmenu::rows((at.x, at.y), &o.top_lines()) }[i];
                     let inside = |r: vergence_shell::Rect| (r.x as f64..(r.x + r.w) as f64).contains(&pos.x);
                     let [a, b, c] = appmenu::zoom_parts(row);
                     [(a, *out), (b, *reset), (c, *grow)].into_iter().find(|(r, id)| *id != 0 && inside(*r)).map(|(_, id)| Action::Command(id))
@@ -336,7 +380,7 @@ impl Server {
         if let (Action::Command(id), Some(o)) = (action, self.app_menu.open.as_ref())
             && o.model.commands.iter().any(|c| c.id == id && matches!(c.role, vergence_protocol::commands::Role::ZoomIn | vergence_protocol::commands::Role::ZoomOut | vergence_protocol::commands::Role::ZoomReset))
         {
-            if let Some(n) = o.win.native() {
+            if let Some(n) = o.win.as_ref().and_then(|w| w.native()) {
                 self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::Command { window: n.id, id }));
             }
             return;
@@ -344,10 +388,6 @@ impl Server {
         let Some(o) = self.app_menu.open.take() else { return };
         self.app_menu.pictures = [None, None];
         self.redraw_all();
-        let w = o.win;
-        if !smithay::utils::IsAlive::alive(&w) {
-            return;
-        }
         tracing::info!("app menu: {action:?} for {:?}", o.model.app);
         // One of the desktop's own lines: done here, the program told nothing.
         if let Action::Command(id) = action
@@ -355,6 +395,10 @@ impl Server {
         {
             let e = e.clone();
             self.menu_run(&e);
+            return;
+        }
+        let Some(w) = o.win else { return };
+        if !smithay::utils::IsAlive::alive(&w) {
             return;
         }
         match action {

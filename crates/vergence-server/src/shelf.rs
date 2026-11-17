@@ -612,7 +612,7 @@ impl Server {
 
     /// The dock itself, as long as the apps button's place and `items` after
     /// it; while it is being dragged, where the pointer has taken it.
-    fn shelf_dock(&mut self, items: usize) -> Option<Rectangle<i32, Logical>> {
+    pub(crate) fn shelf_dock(&mut self, items: usize) -> Option<Rectangle<i32, Logical>> {
         // No dock at the login screen (review C3).
         if crate::greeter() {
             return None;
@@ -1105,7 +1105,6 @@ impl Server {
         self.shelf.moving = false;
         self.shelf.held = None;
         self.shelf.lift = None;
-        self.launcher_pick_clear();
         self.tile_lift_cancel();
         self.shelf.dragged = None;
         self.shelf.picture = None;

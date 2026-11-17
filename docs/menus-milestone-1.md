@@ -61,3 +61,18 @@ of three boards) settled it.*
    it; buttons 34 high, each as wide as its word (14 either side, Log Out 16
    and semibold), 8 apart, Sleep, Restart and Shut Down from the left, Lock,
    Cancel and Log Out from the right, all the room between them.
+6. The launcher as a start menu (Dave, 2026-11-16: the grid in the middle
+   of the screen "feels disconnected"; of two mock-ups, B, a text menu,
+   "pinned right to the button as would be the norm"). The dock stands on
+   the bottom edge by default now (c05c284). **Done**: launcher.rs is the
+   app menu's panel (appmenu.rs `app_menu_launcher`, no window of its own)
+   with given lines and a search field (vergence-shell `Model::searchable`:
+   typing finds an application in any submenu, each once): Vergence's own
+   applications, the categories that have one as submenus (Other last), Lock
+   Screen, Log Out…, each carried out by menu.rs (`Entry::Shelf`, `Lock`,
+   `LogOut`). Above the dock's button on a dock at the bottom, held by its
+   bottom as it grows; below it at the top; beside it at a side. The grid's
+   footer (step 2) went with it: Lock Screen and Log Out… are its last
+   lines. *Lost for now*: dragging an application from the launcher to the
+   dock, its right click (Pin to the dock), and finding the named actions
+   by typing (Sound settings, Mute...).
