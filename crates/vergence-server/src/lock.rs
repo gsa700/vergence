@@ -65,6 +65,9 @@ pub(crate) enum Heard {
     Ask { id: u128, what: String, who: String },
     /// vdm: that prompt is over.
     Withdrawn(u128),
+    /// vdm, on the session socket: the power button was pressed where it is
+    /// no key of ours (FreeBSD's ACPI): the session dialog.
+    PowerKey,
 }
 
 /// What the server answers vdm before sleep.
@@ -191,6 +194,11 @@ fn session(heard: channel::Sender<Heard>, replies: std::sync::mpsc::Receiver<Rep
                         return;
                     }
                 }
+                Ok(FromVdm::PowerKey) => {
+                    if heard.send(Heard::PowerKey).is_err() {
+                        return;
+                    }
+                }
                 Ok(_) | Err(_) => break,
             }
         }
@@ -251,7 +259,7 @@ pub(crate) fn converse(heard: channel::Sender<Heard>, answers: std::sync::mpsc::
                 return;
             }
             // Only on the session socket; here it breaks the protocol.
-            Ok(FromVdm::LockNow | FromVdm::Ask { .. } | FromVdm::Withdrawn(_)) => {
+            Ok(FromVdm::LockNow | FromVdm::Ask { .. } | FromVdm::Withdrawn(_) | FromVdm::PowerKey) => {
                 let _ = heard.send(Heard::Gone("vdm: a session's message on the unlock socket".into()));
                 return;
             }
@@ -579,6 +587,15 @@ impl Server {
         if let Heard::LockNow = h {
             return self.lock_for_sleep();
         }
+        // The power button, as the power key is (input.rs): not while locked.
+        if let Heard::PowerKey = h {
+            if !self.lock.on && !crate::greeter() {
+                self.app_menu_close();
+                self.close_menu();
+                self.session_dialog_open();
+            }
+            return;
+        }
         if matches!(h, Heard::Ask { .. } | Heard::Withdrawn(_)) {
             return self.elevate_from_vdm(h);
         }
@@ -597,7 +614,7 @@ impl Server {
             }
             Heard::Info(t) => self.lock.message = Some((t, false)),
             Heard::Error(t) => self.lock.message = Some((t, true)),
-            Heard::LockNow | Heard::Ask { .. } | Heard::Withdrawn(_) => {}
+            Heard::LockNow | Heard::Ask { .. } | Heard::Withdrawn(_) | Heard::PowerKey => {}
             Heard::Done { ok: true, .. } => return self.unlock_now(),
             Heard::Done { ok: false, wait } => {
                 self.lock.talk = None;

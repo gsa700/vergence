@@ -40,11 +40,17 @@ of three boards) settled it.*
    The grid gives up `FOOT_H` (46 points).
 3. The keys. **Done**: the seat's `Key::Delete` and `Key::Power`
    (XF86PowerOff) give `KeyOut::SessionDialog` whatever has the keyboard,
-   not while locked, not at the login screen. *Not yet*: logind (Fedora,
-   elogind on Void) and FreeBSD's ACPI act on the power key themselves (a
-   shutdown or suspend by default); the server needs logind's
-   handle-power-key inhibitor, and on FreeBSD `hw.acpi.power_button_state`
-   set to NONE, before the key reaches the dialog alone.
+   not while locked, not at the login screen. The system's own handling
+   of the power key is held off while a session is registered with vdm
+   (vergence-dm `powerkey`, Dave 2026-11-16 "do the power key"): logind's
+   handle-power-key inhibitor (a `systemd-inhibit` or `elogind-inhibit`
+   child); on Void's acpid, install.sh's guard in /etc/acpi/handler.sh
+   that leaves the button alone while /run/vdm/power-key is there; on
+   FreeBSD `hw.acpi.power_button_state` NONE (the old state kept in
+   STATE_DIR/power-button-state, given back by a vdm that starts after one
+   died holding it), and devd's button event sent to the servers as
+   `FromVdm::PowerKey`, since the server never sees it as a key. At the
+   login screen and the console the system's way stands.
 4. The look. **Done**: vergence-look's `MENU_RADIUS` (10), `MENU_ROW_RADIUS`
    (6), `MENU_PAD` (6), `MENU_ROW` (28), `MENU_SEP` (9, its rule
    `MENU_SEP_INSET` from the sides), `MENU_TEXT`, and the dark menu ground

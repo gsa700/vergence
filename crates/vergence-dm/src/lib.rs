@@ -11,6 +11,7 @@ pub mod keyboard;
 pub mod pam;
 pub mod paths;
 pub mod power;
+pub mod powerkey;
 pub mod proto;
 pub mod secret;
 pub mod sessions;

@@ -17,6 +17,8 @@
 //! the connection is the registration (vdm knows its uid from the kernel):
 //!
 //!   vdm -> server   LockNow                      the machine is about to sleep
+//!                   PowerKey                     the power button was pressed (FreeBSD:
+//!                                                devd's; menus milestone 1): ask about the session
 //!   server -> vdm   Presented                    the lock is on every screen
 //!                   CannotLock { text }          and why (it says so to the user too)
 //!
@@ -85,6 +87,9 @@ pub enum FromVdm {
     Ask { id: u128, what: String, who: String },
     /// Prompt `id` is over: close it.
     Withdrawn(u128),
+    /// The power button was pressed where the server cannot see it as a key
+    /// (FreeBSD: ACPI, through devd): the session dialog.
+    PowerKey,
 }
 
 #[derive(Debug)]
@@ -126,6 +131,7 @@ mod kind {
     pub const LOCK_NOW: u8 = 20;
     pub const ASK: u8 = 21;
     pub const WITHDRAWN: u8 = 22;
+    pub const POWER_KEY: u8 = 23;
 }
 
 /// Text from PAM as it may be shown: no control characters, at most
@@ -281,6 +287,7 @@ pub fn send_from_vdm(w: &mut impl Write, m: &FromVdm) -> io::Result<()> {
             w.write_all(&[u8::from(*ok), (*wait >> 8) as u8, *wait as u8])?;
         }
         FromVdm::LockNow => header(w, kind::LOCK_NOW, 0)?,
+        FromVdm::PowerKey => header(w, kind::POWER_KEY, 0)?,
         FromVdm::Ask { id, what, who } => {
             let (what, who) = (clean(what), clean(who));
             header(w, kind::ASK, 18 + what.len() + who.len())?;
@@ -313,6 +320,7 @@ pub fn read_from_vdm(r: &mut impl Read) -> Result<FromVdm, ProtoError> {
         (kind::ERROR, rest) => Ok(FromVdm::Error(text(rest)?)),
         (kind::DONE, [ok @ (0 | 1), hi, lo]) => Ok(FromVdm::Done { ok: *ok == 1, wait: u16::from_be_bytes([*hi, *lo]) }),
         (kind::LOCK_NOW, []) => Ok(FromVdm::LockNow),
+        (kind::POWER_KEY, []) => Ok(FromVdm::PowerKey),
         (kind::ASK, b) if b.len() >= 18 => {
             let id = u128::from_be_bytes(b[..16].try_into().map_err(|_| ProtoError::Bad("ask"))?);
             let n = u16::from_be_bytes([b[16], b[17]]) as usize;
@@ -344,6 +352,7 @@ mod tests {
             FromVdm::LockNow,
             FromVdm::Ask { id: 0x0123_4567_89ab_cdef_0011_2233_4455_6677, what: "Turn on automatic login for derickson".into(), who: "System Settings".into() },
             FromVdm::Withdrawn(u128::MAX - 7),
+            FromVdm::PowerKey,
         ] {
             let mut b = Vec::new();
             send_from_vdm(&mut b, &m).unwrap();

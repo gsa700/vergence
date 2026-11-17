@@ -1241,8 +1241,20 @@ fn main() {
     // asker must run below one of its person's: finding 3).
     let mut session_pids: HashMap<c_int, u32> = HashMap::new();
     let mut greeter_run = Greeter { on: at_boot, pid: 0, started: std::time::Instant::now(), quick: 0, next: first, came_from: None, back_to: None };
+    // The power key, held from the system while a session is registered
+    // (menus milestone 1: it opens the session dialog); one a vdm before
+    // this one never gave back, given back first.
+    vergence_dm::powerkey::recover();
+    let mut power_hold: Option<vergence_dm::powerkey::Hold> = None;
+    // FreeBSD: devd's pipe, for the power button the server cannot see, and
+    // what of a line has come; tried again every 10 s while it is not there.
+    let mut devd: Option<(UnixStream, Vec<u8>)> = None;
+    let mut devd_next = std::time::Instant::now();
     loop {
         if STOPPING.load(std::sync::atomic::Ordering::Relaxed) {
+            if let Some(h) = power_hold.take() {
+                vergence_dm::powerkey::release(h);
+            }
             if greeter_run.pid > 0 {
                 // SAFETY: our own child (the worker passes it on to the server).
                 unsafe { kill(greeter_run.pid, 15) };
@@ -1411,13 +1423,74 @@ fn main() {
             let wait = pauses.wait(uid).min(u16::MAX as u64) as u16;
             let _ = proto::send_from_vdm(&mut client, &FromVdm::Done { ok: code == 0, wait });
         }
+        // The power key: the session's while one is registered, else the system's.
+        if !sessions.is_empty() && power_hold.is_none() {
+            let (h, done) = vergence_dm::powerkey::hold();
+            log(&format!("power key: the session's ({})", if done.is_empty() { "nothing to hold it from" } else { &done }));
+            power_hold = Some(h);
+        } else if sessions.is_empty()
+            && let Some(h) = power_hold.take()
+        {
+            vergence_dm::powerkey::release(h);
+            log("power key: the system's again");
+        }
+        if cfg!(target_os = "freebsd") && devd.is_none() && std::time::Instant::now() >= devd_next {
+            devd_next = std::time::Instant::now() + Duration::from_secs(10);
+            if let Ok(s) = UnixStream::connect(vergence_dm::powerkey::DEVD_PIPE)
+                && s.set_nonblocking(true).is_ok()
+            {
+                devd = Some((s, Vec::new()));
+            }
+        }
         let mut fds: Vec<PollFd> = [Some(&listener), Some(&session_listener), Some(&control), Some(&power), Some(&elevate), greeter.as_ref()].into_iter().flatten().map(|l| PollFd { fd: l.as_raw_fd(), events: 1, revents: 0 }).collect();
+        if let Some((d, _)) = &devd {
+            fds.push(PollFd { fd: d.as_raw_fd(), events: 1, revents: 0 });
+        }
         let first_session = fds.len();
         fds.extend(sessions.iter().map(|(_, s)| PollFd { fd: s.as_raw_fd(), events: 1, revents: 0 }));
         // SAFETY: pollfds we own. A check running: look again in 50 ms, so its
         // answer goes out as soon as it ends; none: a second's wait.
         let wait = if running.is_empty() && greeter_run.next.is_none() && greeter_run.back_to.is_none() && logins.values().all(|l| l.yes) { 1000 } else { 50 };
         unsafe { poll(fds.as_mut_ptr(), fds.len() as u64, wait) };
+        // devd's lines: the power button pressed, while the key is the
+        // session's, goes to every registered server (FreeBSD).
+        if let Some((d, pending)) = devd.as_mut() {
+            let mut buf = [0u8; 4096];
+            let mut gone = false;
+            loop {
+                match d.read(&mut buf) {
+                    Ok(0) => {
+                        gone = true;
+                        break;
+                    }
+                    Ok(n) => pending.extend_from_slice(&buf[..n]),
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Err(_) => {
+                        gone = true;
+                        break;
+                    }
+                }
+            }
+            let mut pressed = false;
+            while let Some(i) = pending.iter().position(|b| *b == b'\n') {
+                let line: Vec<u8> = pending.drain(..=i).collect();
+                pressed |= vergence_dm::powerkey::is_power_button(&String::from_utf8_lossy(&line));
+            }
+            // A line that never ends is not kept for ever.
+            if pending.len() > 16 * 1024 {
+                pending.clear();
+            }
+            if pressed && power_hold.is_some() {
+                log("power key: pressed; the session asks");
+                for (_, s) in sessions.iter_mut() {
+                    let _ = s.set_write_timeout(Some(Duration::from_secs(1)));
+                    let _ = proto::send_from_vdm(s, &FromVdm::PowerKey);
+                }
+            }
+            if gone {
+                devd = None;
+            }
+        }
         // A registered server that went away (or said something out of turn): dropped.
         let gone: Vec<usize> = fds[first_session..].iter().enumerate().filter(|(_, f)| f.revents != 0).map(|(i, _)| i).collect();
         for i in gone.into_iter().rev() {

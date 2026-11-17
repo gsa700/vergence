@@ -89,6 +89,8 @@ if [ -n "$uninstall" ]; then
     for d in $docfiles; do rm -f "$docs/$d"; done
     rm -f "$libexec/media-eject"
     [ -z "$destdir" ] && [ "$(uname -s)" = FreeBSD ] && rm -f /etc/autofs/special_vergence_media
+    # acpid's handler as it was (the power key's guard taken out).
+    [ -z "$destdir" ] && [ -f /etc/acpi/handler.sh.vergence-orig ] && mv -f /etc/acpi/handler.sh.vergence-orig /etc/acpi/handler.sh
     rm -f "$libexec/ups-tile" "$libexec/vtile-demo"
     rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
     [ -z "$destdir" ] && rm -f /etc/fonts/conf.d/90-vergence-fonts.conf /usr/local/etc/fonts/conf.d/90-vergence-fonts.conf
@@ -407,6 +409,23 @@ elif [ -d /etc/sv ] && [ -d /var/service ]; then
     echo "vdm: enabled and started (runit, /var/service/vdm)"
 else
     echo "vdm: no known init system; start $prefix/sbin/vdm as root at boot" >&2
+fi
+# ---- system setup: the power key (menus milestone 1; Dave, 2026-11-16) ----
+# While a Vergence session runs, vdm holds the power key from the system so
+# it opens the session dialog: logind's inhibitor on systemd and elogind,
+# hw.acpi.power_button_state on FreeBSD (both vdm's at run time). acpid
+# (Void without elogind) shuts down from its handler whatever runs, so the
+# handler is taught to leave the button alone while vdm's flag is there
+# (the original kept beside it, once).
+handler=/etc/acpi/handler.sh
+if [ -f "$handler" ] && ! grep -q 'vdm/power-key' "$handler"; then
+    if grep -q 'PowerButton pressed' "$handler"; then
+        [ -f "$handler.vergence-orig" ] || cp -p "$handler" "$handler.vergence-orig"
+        sed -i '/logger "PowerButton pressed/i\                [ -e /run/vdm/power-key ] \&\& { logger "PowerButton: the Vergence session asks"; exit 0; }' "$handler"
+        echo "power key: acpid leaves it to a running session ($handler; the original is $handler.vergence-orig)"
+    else
+        echo "power key: $handler not as expected; acpid still shuts down on it" >&2
+    fi
 fi
 # ---- system setup: removable drives (files milestone 1; Dave, 2026-11-15) ----
 # Linux: udisks2 mounts a drive plugged in when the session asks (the
