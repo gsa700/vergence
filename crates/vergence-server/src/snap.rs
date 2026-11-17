@@ -277,6 +277,14 @@ impl Server {
         if max {
             if !self.restore.contains_key(w) {
                 self.toggle_maximize(w);
+                // Dragged to the top edge: back later to where the drag took
+                // it from, not where it was let go (its bar above the screen;
+                // Hubble, 2026-11-16).
+                if let Some(from) = from
+                    && self.restore.contains_key(w)
+                {
+                    self.restore.insert(w.clone(), from);
+                }
             }
             return;
         }
