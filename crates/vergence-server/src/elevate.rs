@@ -290,6 +290,12 @@ impl Server {
                 e.waiting = false;
                 e.message = Some(("vdm could not be reached".into(), true));
             }
+            Heard::Idle => {
+                let e = &mut self.elevate;
+                e.talk = None;
+                e.waiting = false;
+                e.asked = false;
+            }
             _ => {}
         }
         self.redraw_all();

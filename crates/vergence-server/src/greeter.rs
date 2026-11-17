@@ -392,6 +392,13 @@ impl Server {
                 g.waiting = false;
                 g.message = Some(("Waiting for vdm…".into(), true));
             }
+            // Timed out unanswered: the next Enter starts again.
+            Heard::Idle => {
+                let g = &mut self.greeter;
+                g.talk = None;
+                g.waiting = false;
+                g.asked = false;
+            }
             Heard::LockNow | Heard::Ask { .. } | Heard::Withdrawn(_) | Heard::PowerKey => {}
         }
         self.redraw_all();

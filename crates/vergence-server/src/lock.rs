@@ -59,6 +59,9 @@ pub(crate) enum Heard {
     Done { ok: bool, wait: u16 },
     /// vdm could not be reached, or the connection broke.
     Gone(String),
+    /// No answer came in time, so the conversation was ended before vdm
+    /// would give up on it. Nothing is wrong: the next key starts a new one.
+    Idle,
     /// vdm, on the session socket: the machine is about to sleep (step 2).
     LockNow,
     /// vdm, on the session socket: show the elevation prompt (elevate.rs).
@@ -206,6 +209,10 @@ fn session(heard: channel::Sender<Heard>, replies: std::sync::mpsc::Receiver<Rep
     }
 }
 
+/// How long a prompt waits for its answer. Less than vdm's IO_LIMIT (90 s,
+/// vdm.rs), so the server, not vdm, ends a conversation nobody is in.
+const ANSWER_LIMIT: Duration = Duration::from_secs(75);
+
 fn talk(heard: channel::Sender<Heard>, answers: std::sync::mpsc::Receiver<Option<Secret>>) {
     converse(heard, answers, vergence_dm::paths::UNLOCK_SOCKET, vec![ToVdm::Hello { version: proto::VERSION, service: Service::Unlock }]);
 }
@@ -235,12 +242,20 @@ pub(crate) fn converse(heard: channel::Sender<Heard>, answers: std::sync::mpsc::
                 if heard.send(Heard::Prompt { echo, text }).is_err() {
                     return;
                 }
-                match answers.recv() {
+                match answers.recv_timeout(ANSWER_LIMIT) {
                     Ok(Some(secret)) => {
                         if proto::send_to_vdm(&mut s, &ToVdm::Answer(secret)).is_err() {
                             let _ = heard.send(Heard::Gone("vdm closed the connection".into()));
                             return;
                         }
+                    }
+                    // Nobody answered (a key woke the screen, then nothing):
+                    // end it ourselves, or vdm drops it unseen and the next
+                    // Enter meets a dead connection (Hubble 2026-11-17).
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        let _ = proto::send_to_vdm(&mut s, &ToVdm::Cancel);
+                        let _ = heard.send(Heard::Idle);
+                        return;
                     }
                     _ => {
                         let _ = proto::send_to_vdm(&mut s, &ToVdm::Cancel);
@@ -630,6 +645,13 @@ impl Server {
                 } else {
                     self.lock.message = Some(("That was not right. Try again.".into(), true));
                 }
+            }
+            // Timed out with nobody there: what is typed stays; the next key
+            // (or Enter) starts a new conversation, and Enter's answer waits
+            // for its prompt.
+            Heard::Idle => {
+                self.lock.talk = None;
+                self.lock.waiting = false;
             }
             // vdm went away (review I8): still locked; the next key tries again.
             Heard::Gone(why) => {
