@@ -100,7 +100,8 @@ pub struct Placement {
 
 impl Default for Placement {
     fn default() -> Placement {
-        Placement { place: Place::Edge(Edge::Right), gap: GAP, keep_clear: true }
+        // The bottom edge by default (Dave, 2026-11-16, with the launcher as a start menu).
+        Placement { place: Place::Edge(Edge::Bottom), gap: GAP, keep_clear: true }
     }
 }
 
@@ -244,7 +245,7 @@ mod tests {
 
     #[test]
     fn the_band_runs_along_its_edge_and_is_the_same_depth_everywhere() {
-        assert_eq!(Placement::default(), Placement { gap: GAP, ..RIGHT });
+        assert_eq!(Placement::default(), Placement { gap: GAP, ..at(Edge::Bottom) }, "the bottom edge by default");
         assert_eq!(column(SMALL, &RIGHT), Some(Rect::new(1280 - 60, 180, 60, 720)));
         assert_eq!(column(LARGE, &RIGHT), Some(Rect::new(1280 + 1920 - 60, 0, 60, 1080)));
         assert_eq!(column(LARGE, &at(Edge::Left)), Some(Rect::new(1280, 0, 60, 1080)));

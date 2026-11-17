@@ -117,7 +117,8 @@ const FITS: [&str; 4] = ["Fill", "Fit", "Center", "Stretch"];
 const SWATCHES: [&str; 8] = ["#3b82f6", "#8b5cf6", "#ec4899", "#ef4444", "#e05a00", "#eab308", "#22c55e", "#6b7280"];
 /// The accent where the user names none: the settings app's own blue.
 /// The dock's edges: as shown, and as desktop.toml writes them.
-const DOCK_EDGES: [(&str, &str); 4] = [("Right edge", "right"), ("Left edge", "left"), ("Top edge", "top"), ("Bottom edge", "bottom")];
+/// The dock's edges, the default (bottom, 2026-11-16) first.
+const DOCK_EDGES: [(&str, &str); 4] = [("Bottom edge", "bottom"), ("Left edge", "left"), ("Top edge", "top"), ("Right edge", "right")];
 /// When the dock hides: as shown, and as desktop.toml writes it.
 const DOCK_HIDE: [(&str, &str); 3] = [("Never", "never"), ("When a window covers it", "windows"), ("Always", "always")];
 /// Snapping and switching (windows milestone 1), as shown and as desktop.toml

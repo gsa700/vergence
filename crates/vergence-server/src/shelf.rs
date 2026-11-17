@@ -28,8 +28,8 @@
 //                      # press on it, brings it out (step 6)
 //     pinned = ["firefox", "vergence-term"]   # entry ids, in their order
 //     opacity = 1.0    # the panel's, 0.3 to 1
-//     place = "edge"   # or "free", with x, y and upright; edge = "right",
-//                      # "left", "top", "bottom"; screen = "<id>"; gap = 1;
+//     place = "edge"   # or "free", with x, y and upright; edge = "bottom",
+//                      # "left", "top", "right"; screen = "<id>"; gap = 1;
 //                      # keep-clear = true
 //
 // The screen is the primary one ([displays] primary, else the first in
@@ -120,7 +120,7 @@ pub struct ShelfConfig {
     pub hide: HideSetting,
     /// "edge" (along an edge, the default) or "free" (where it was put).
     pub place: Option<String>,
-    /// "right" (the default), "left", "top" or "bottom".
+    /// "bottom" (the default), "left", "top" or "right".
     pub edge: Option<String>,
     /// The screen it is on, by its id; else the primary one.
     pub screen: Option<String>,
@@ -221,8 +221,9 @@ impl ShelfConfig {
             _ => Place::Edge(match self.edge.as_deref() {
                 Some("left") => Edge::Left,
                 Some("top") => Edge::Top,
-                Some("bottom") => Edge::Bottom,
-                _ => Edge::Right,
+                Some("right") => Edge::Right,
+                // The bottom edge by default (Dave, 2026-11-16).
+                _ => Edge::Bottom,
             }),
         };
         Placement { place, gap: self.gap.unwrap_or(vergence_shell::GAP), keep_clear: self.keep_clear.unwrap_or(true) }
