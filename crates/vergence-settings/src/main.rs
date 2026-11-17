@@ -547,6 +547,11 @@ enum Message {
     Scale(f32),
     ScaleDone,
     ScaleDefault,
+    /// The Screens overview's scale slider of screen `i`.
+    ScaleOf(usize, f32),
+    ScaleOfDone(usize),
+    /// Make screen `i` the main screen (the overview's choice).
+    MainScreen(usize),
     /// The pointer or a finger on the arrangement: the overview's (drag,
     /// double-click) or a screen page's map (a press opens that screen).
     Arrange(Touch),
@@ -659,6 +664,8 @@ struct App {
     setup: String,
     size: f32,
     scale: f32,
+    /// A scale slider on the Screens overview being dragged: which screen, the value.
+    scale_drag: Option<(usize, f32)>,
     arrange_drag: Option<ArrangeDrag>,
     arrange_click: Option<(usize, Instant)>,
     /// The size the arrangement was last drawn at (its drawing sets it).
@@ -857,6 +864,7 @@ impl App {
             inputs_seen: Vec::new(),
             setup: String::new(),
             scale: 1.0,
+            scale_drag: None,
             arrange_drag: None,
             arrange_click: None,
             arrange_size: Rc::new(Cell::new((1.0, 1.0))),
@@ -977,6 +985,21 @@ impl App {
     fn primary(&self) -> Option<String> {
         let ids: Vec<String> = self.outputs.iter().map(|o| o.id.clone()).collect();
         wall::primary(&self.desktop, &ids)
+    }
+
+    /// Make `new` the main screen (desktop.toml `[displays] primary`): the
+    /// default wallpaper moves without anything on screen changing, and the
+    /// dock, if it was put on a screen by name, goes back to following the
+    /// main screen (Techbench, 2026-11-17: the dock named the ASUS from long
+    /// before, and nothing on the Screens page could move it).
+    fn make_main(&mut self, new: &str) {
+        let old = self.primary().and_then(|p| self.outputs.iter().find(|o| o.id == p).map(|o| (o.id.clone(), screen_label(o))));
+        self.save(|d| {
+            wall::make_primary(d, old.as_ref().map(|(i, l)| (i.as_str(), l.as_str())), new);
+            if let Some(shelf) = d.get_mut("shelf").and_then(|s| s.as_table_mut()) {
+                shelf.remove("screen");
+            }
+        });
     }
 
     /// Where the open screen page's wallpaper is kept: None for the primary
@@ -1376,6 +1399,28 @@ impl App {
                     self.save(|d| disp::set_scale(d, &id, &label, choice));
                 }
             }
+            Message::ScaleOf(i, v) => {
+                if let Some(o) = self.outputs.get(i) {
+                    let marks = disp::detents(o.default_scale, scale_max(o));
+                    let v = disp::stick(v as f64, &marks, 0.06).map(|m| m as f32).unwrap_or(v);
+                    self.scale_drag = Some((i, v));
+                }
+            }
+            Message::ScaleOfDone(i) => {
+                if let (Some((j, v)), Some(o)) = (self.scale_drag.take(), self.outputs.get(i))
+                    && j == i
+                {
+                    let v = (v as f64 * 120.0).round() / 120.0;
+                    let choice = ((v - o.default_scale).abs() > 1e-6).then_some(v);
+                    let (id, label) = (o.id.clone(), screen_label(o));
+                    self.save(|d| disp::set_scale(d, &id, &label, choice));
+                }
+            }
+            Message::MainScreen(i) => {
+                if let Some(new) = self.outputs.get(i).map(|o| o.id.clone()) {
+                    self.make_main(&new);
+                }
+            }
             Message::ScaleDefault => {
                 if let Some(o) = self.current_output() {
                     let (id, label, d) = (o.id.clone(), screen_label(o), o.default_scale);
@@ -1419,9 +1464,8 @@ impl App {
                 }
             }
             Message::MakePrimary => {
-                if let Some(new) = self.wall_output().map(|o| o.id.clone()) {
-                    let old = self.primary().and_then(|p| self.outputs.iter().find(|o| o.id == p).map(|o| (o.id.clone(), screen_label(o))));
-                    self.save(|d| wall::make_primary(d, old.as_ref().map(|(i, l)| (i.as_str(), l.as_str())), &new));
+                if let Some(new) = self.wall_output().or_else(|| self.current_output()).map(|o| o.id.clone()) {
+                    self.make_main(&new);
                 }
             }
             Message::Thumb(p, t) => {
@@ -1650,7 +1694,7 @@ impl App {
             ("Look", vec![
                 ("Appearance".into(), Page::Appearance, Icon::Appearance, "style light dark accent color frost tab tint controls size"),
                 ("Theme and fonts".into(), Page::Theme, Icon::Fonts, "theme font fonts monospace interface icons cursor"),
-                ("Wallpaper".into(), Page::Wallpaper(self.primary_index()), Icon::Wallpaper, "wallpaper picture pictures background image photo fit color primary"),
+                ("Wallpaper".into(), Page::Wallpaper(self.primary_index()), Icon::Wallpaper, "wallpaper picture pictures background image photo fit color primary main screen"),
             ]),
             ("Desktop", vec![
                 ("Windows".into(), Page::Windows, Icon::Windows, "window title bar buttons controls minimize maximize close snap snapping alt tab keys x11"),
@@ -1766,7 +1810,7 @@ impl App {
                 self.group(Some("Seeing"), vec![
                     setting("High contrast", "Apps that support it draw stronger edges and text. The desktop's bars are solid.", switch(contrast, Message::Contrast).name("High contrast")),
                     setting("Reduce transparency", "Bars, the dock and menus are solid: nothing shows through them.", switch(transparency, Message::Transparency).name("Reduce transparency")),
-                    setting("Size", &format!("How big everything is, on every screen: {}%.", (self.size * 100.0).round()), size_slider(self.size)),
+                    setting("Size", &format!("Everything bigger on every screen, on top of each screen's own scale (Screens): {}%.", (self.size * 100.0).round()), size_slider(self.size)),
                 ]),
                 self.group(Some("Motion"), vec![setting("Reduce motion", "Apps that support it turn off animations.", switch(motion, Message::Motion).name("Reduce motion"))]),
                 self.group(None, vec![setting("Fonts", "The interface and monospace fonts and their sizes are in Theme and fonts.", button(label("Theme and fonts")).on_press(Message::Go(Page::Theme)).name("Open Theme and fonts"))]),
@@ -2084,7 +2128,7 @@ impl App {
             items.push(self.group(None, vec![setting("No touch screen is connected now", "Its settings come back when it is.", space())]));
         }
         for name in &panels {
-            let mut names = vec!["The primary screen".to_string()];
+            let mut names = vec!["The main screen".to_string()];
             names.extend(self.outputs.iter().map(screen_label));
             let at = tied(name).and_then(|id| self.outputs.iter().position(|o| o.id == id)).map_or(0, |i| i + 1);
             let ids: Vec<String> = self.outputs.iter().map(|o| o.id.clone()).collect();
@@ -2349,7 +2393,7 @@ impl App {
             choice(edges, at, Message::DockEdge).width(Length::Fixed(180.0)).name("Where"),
         )];
         if self.outputs.len() > 1 {
-            let mut screens = vec!["The primary screen".to_string()];
+            let mut screens = vec!["The main screen".to_string()];
             screens.extend(self.outputs.iter().map(screen_label));
             let id = text("screen");
             let at = self.outputs.iter().position(|o| o.id == id).map_or(0, |i| i + 1);
@@ -2561,22 +2605,56 @@ impl App {
     }
 
     fn overview(&self) -> Element<Message> {
+        // Every screen's scale here, each on its own (Dave, 2026-11-17: "we
+        // need to be able to scale each monitor separately"), and the main
+        // screen; the size of everything is Accessibility's.
+        let primary = self.primary();
+        let mut scales: Vec<Element<Message>> = Vec::new();
+        for (i, o) in self.outputs.iter().enumerate() {
+            let v = match self.scale_drag {
+                Some((j, v)) if j == i => v,
+                _ => o.base_scale as f32,
+            };
+            let marks = disp::detents(o.default_scale, scale_max(o));
+            let note = if (v as f64 - o.default_scale).abs() < 1e-6 { format!("{:.0}%, the sharpest for it.", o.default_scale * 100.0) } else { format!("Its default is {:.0}%.", o.default_scale * 100.0) };
+            scales.push(setting(&screen_label(o), &note, scale_slider_of(i, v, o, &marks)));
+        }
+        let mut screens_group = scales;
+        if self.outputs.len() > 1 {
+            let names: Vec<String> = self.outputs.iter().map(screen_label).collect();
+            let at = primary.as_ref().and_then(|p| self.outputs.iter().position(|o| &o.id == p));
+            screens_group.push(setting(
+                "Main screen",
+                "The dock stands on it, and its wallpaper is the default for the others.",
+                choice(names, at, Message::MainScreen).width(Length::Fixed(200.0)).name("Main screen"),
+            ));
+        }
+        let mut items = vec![
+            self.group(None, vec![panel(self.arrangement(None, true, 240.0)).padding(8.0).width(Length::FILL)]),
+            label("Double-click a screen for its own settings.").size(11.0).dim(),
+            self.group(Some("Scale"), screens_group),
+        ];
+        if (self.size - 1.0).abs() > 0.004 {
+            items.push(self.group(None, vec![setting(
+                "Size in Accessibility",
+                &format!("Everything is {}% bigger on every screen, on top of these scales.", ((self.size - 1.0) * 100.0).round()),
+                button(label("Accessibility")).on_press(Message::Go(Page::Accessibility)).name("Open Accessibility"),
+            )]));
+        }
         self.page_layout(
             "Screens",
-            "Drag the screens to where they sit on your desk. Each one's scale is worked out from its size and how far away it is.",
-            vec![
-                self.group(None, vec![panel(self.arrangement(None, true, 240.0)).padding(8.0).width(Length::FILL)]),
-                label("Double-click a screen for its own settings.").size(11.0).dim(),
-                self.group(None, vec![
-                    setting("Size", &format!("How big everything is, on every screen: {}%.", (self.size * 100.0).round()), size_slider(self.size)),
+            "Drag the screens to where they sit on your desk. Each one's scale is worked out from its size and how far away it is, or chosen here.",
+            {
+                items.push(self.group(None, vec![
                     setting(
                         "Windows the same size on every screen",
                         "Each screen at its exact calculated scale, so a window looks the same size moving between them. Off: the nearest whole scale where it is close, the sharpest; on, apps that draw only at whole scales may look a little soft.",
                         switch(disp::same_size(&self.desktop), Message::SameSize).name("Windows the same size on every screen"),
                     ),
-                ]),
-                self.status_line(),
-            ],
+                ]));
+                items.push(self.status_line());
+                items
+            },
         )
     }
 
@@ -2610,7 +2688,7 @@ impl App {
                 setting(
                     "Shown at",
                     &format!(
-                        "The scale with Size applied: it looks like {} \u{d7} {} ({} \u{d7} {} pixels).",
+                        "With Accessibility's Size: it looks like {} \u{d7} {} ({} \u{d7} {} pixels).",
                         o.width,
                         o.height,
                         (o.width as f64 * o.scale).round() as i64,
@@ -2620,8 +2698,14 @@ impl App {
                 ),
                 setting("Size of controls", "Automatic: Large with a touch panel, else the desktop's (Appearance).", choice(screen_controls, Some(disp::controls(&self.desktop, &o.id)), Message::ScreenControls).width(Length::Fixed(160.0)).name("Size of controls")),
             ];
-            if !multi {
-                rows.push(setting("Size", &format!("How big everything is: {}%.", (self.size * 100.0).round()), size_slider(self.size)));
+            if multi {
+                let is_main = self.primary().as_deref() == Some(o.id.as_str());
+                rows.push(setting(
+                    "Main screen",
+                    if is_main { "The dock stands on it, and its wallpaper is the default for the others." } else { "Make it the main screen: the dock moves to it, and its wallpaper becomes the default." },
+                    if is_main { label("Main screen").dim() } else { button(label("Make main screen").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::MakePrimary) },
+                ));
+            } else {
                 // With one screen it still decides for the screens it meets later.
                 rows.push(setting(
                     "Windows the same size on every screen",
@@ -2677,9 +2761,9 @@ impl App {
         let description = if !multi {
             "The picture behind your windows, drawn at the screen's own pixels.".to_string()
         } else if is_primary {
-            "The primary screen's wallpaper is the default, shown on every other screen that has none of its own.".to_string()
+            "The main screen's wallpaper is the default, shown on every other screen that has none of its own.".to_string()
         } else {
-            format!("Shows the primary screen's wallpaper ({primary_label}) unless it has its own.")
+            format!("Shows the main screen's wallpaper ({primary_label}) unless it has its own.")
         };
         let (accent, card) = (self.accent(), self.card_color());
         let mut items: Vec<Element<Message>> = Vec::new();
@@ -2700,7 +2784,7 @@ impl App {
                 };
                 let mut name = screen_label(o);
                 if primary.as_deref() == Some(o.id.as_str()) {
-                    name.push_str(" (primary)");
+                    name.push_str(" (main)");
                 }
                 let caption = label(short_name(&name, 25)).size(11.0).width(Length::Fixed(thumbs::GRID_W));
                 screens_out.push(
@@ -2717,13 +2801,13 @@ impl App {
         let mut wp: Vec<Element<Message>> = Vec::new();
         if multi && !is_primary {
             let detail = if shown.own { "Off: this screen has its own.".to_string() } else { format!("Shows {primary_label}'s wallpaper.") };
-            wp.push(setting("Same as the primary screen", &detail, switch(!shown.own, Message::SameAsPrimary).name("Same as the primary screen")));
+            wp.push(setting("Same as the main screen", &detail, switch(!shown.own, Message::SameAsPrimary).name("Same as the main screen")));
         }
         if multi {
             wp.push(setting(
-                "Primary screen",
-                if is_primary { "Its wallpaper is the default for the others." } else { "Make this the primary: its wallpaper becomes the default." },
-                if is_primary { label("Primary").dim() } else { button(label("Make primary").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::MakePrimary) },
+                "Main screen",
+                if is_primary { "The dock stands on it, and its wallpaper is the default for the others." } else { "Make it the main screen: the dock moves to it, and its wallpaper becomes the default." },
+                if is_primary { label("Main screen").dim() } else { button(label("Make main screen").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::MakePrimary) },
             ));
         }
         let fit = wall::MODES.iter().position(|m| *m == shown.mode).unwrap_or(0);
@@ -3234,6 +3318,13 @@ fn scale_slider(v: f32, o: &OutputInfo, marks: &[f64]) -> Element<Message> {
     let max = scale_max(o) as f32;
     let marks: Vec<f32> = marks.iter().map(|m| *m as f32).collect();
     row(vec![slider(0.75, max, v, Message::Scale).step(0.01).marks(marks).on_release(Message::ScaleDone).width(Length::Fixed(260.0)).name("Scale"), percent(v)]).spacing(8.0).align(Align::Center)
+}
+
+/// Screen `i`'s scale slider on the Screens overview.
+fn scale_slider_of(i: usize, v: f32, o: &OutputInfo, marks: &[f64]) -> Element<Message> {
+    let max = scale_max(o) as f32;
+    let marks: Vec<f32> = marks.iter().map(|m| *m as f32).collect();
+    row(vec![slider(0.75, max, v, move |x| Message::ScaleOf(i, x)).step(0.01).marks(marks).on_release(Message::ScaleOfDone(i)).width(Length::Fixed(220.0)).name("Scale"), percent(v)]).spacing(8.0).align(Align::Center)
 }
 
 /// A preview of a title bar in the chosen layout, in the server's colors.

@@ -221,7 +221,11 @@ impl Server {
         if let Some(open) = self.tiles.card.as_mut() {
             open.picture = None;
         }
-        self.redraw_all();
+        // No redraw_all: it throws away every screen's damage history, so the
+        // network tile's reading every 2 s redrew whole screens (Techbench's
+        // 4K: 22 ms frames, every 2 s, 2026-11-17). The dock's and the
+        // drawer's pictures are keyed by the tiles they show, and the card's
+        // was dropped above, so the next frame draws just what changed.
     }
 
     /// A tile a client of the bus put up (or changed), if it may.

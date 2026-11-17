@@ -79,21 +79,34 @@ fn slot_of(path: &std::path::Path) -> Option<String> {
     }
 }
 
+/// What an EGL context renders to and imports (the drawing GPU's, from drm.rs).
+pub fn formats_of(context: &EGLContext) -> Formats {
+    let render = context.dmabuf_render_formats().iter().copied().collect::<smithay::backend::allocator::format::FormatSet>();
+    let texture = context.dmabuf_texture_formats().iter().copied().collect::<smithay::backend::allocator::format::FormatSet>();
+    Formats { render_count: render.iter().count(), texture_count: texture.iter().count(), render_linear: linear_xrgb(&render), texture_linear: linear_xrgb(&texture) }
+}
+
 fn linear_xrgb(formats: &smithay::backend::allocator::format::FormatSet) -> bool {
     formats.iter().any(|f| matches!(f.code, Fourcc::Xrgb8888 | Fourcc::Argb8888) && f.modifier == Modifier::Linear)
 }
 
-/// Probe one GPU: open it, ask, close it.
-fn probe_one(session: &mut smithay::backend::session::libseat::LibSeatSession, path: &std::path::Path, primary: bool) -> GpuInfo {
-    let mut info = GpuInfo { path: path.display().to_string(), slot: slot_of(path), primary, ..Default::default() };
-    let fd = match session.open(path, OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK) {
-        Ok(fd) => fd,
-        Err(e) => {
-            info.error = Some(format!("open: {e}"));
-            return info;
-        }
+/// Probe one GPU: open it, ask, close it. The one drm.rs draws with comes
+/// open (`drawing`: its descriptor and its renderer's formats): a second open
+/// through logind fails, "Invalid argument" (Techbench, Fedora, 2026-11-17:
+/// its only GPU showed no driver and no screens), and a second EGL display
+/// on it would share, and on drop could end, the session's own.
+fn probe_one(session: &mut smithay::backend::session::libseat::LibSeatSession, path: &std::path::Path, drawing: Option<(&DrmDeviceFd, &Formats)>) -> GpuInfo {
+    let mut info = GpuInfo { path: path.display().to_string(), slot: slot_of(path), primary: drawing.is_some(), ..Default::default() };
+    let fd = match drawing {
+        Some((fd, _)) => fd.clone(),
+        None => match session.open(path, OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK) {
+            Ok(fd) => DrmDeviceFd::new(DeviceFd::from(fd)),
+            Err(e) => {
+                info.error = Some(format!("open: {e}"));
+                return info;
+            }
+        },
     };
-    let fd = DrmDeviceFd::new(DeviceFd::from(fd));
     if let Ok(d) = fd.get_driver() {
         info.driver = d.name().to_string_lossy().into_owned();
     }
@@ -122,6 +135,10 @@ fn probe_one(session: &mut smithay::backend::session::libseat::LibSeatSession, p
         info.scanout = seen;
     }
     // Rendering: EGL on the GPU's own GBM device (a display-only GPU has none).
+    if let Some((_, formats)) = drawing {
+        info.render = Some(formats.clone());
+        return info;
+    }
     let rendered = (|| -> Result<Formats, String> {
         let gbm = GbmDevice::new(fd.clone()).map_err(|e| format!("gbm: {e}"))?;
         let display = unsafe { EGLDisplay::new(gbm) }.map_err(|e| format!("egl: {e}"))?;
@@ -137,14 +154,13 @@ fn probe_one(session: &mut smithay::backend::session::libseat::LibSeatSession, p
     info
 }
 
-/// Probe every GPU on the seat; `primary` is the path drm.rs draws with.
-pub fn probe(session: &mut smithay::backend::session::libseat::LibSeatSession, seat: &str, primary: &std::path::Path) -> Vec<GpuInfo> {
+/// Probe every GPU on the seat; `primary` is the path drm.rs draws with,
+/// `fd` its open descriptor and `formats` what its renderer offers.
+pub fn probe(session: &mut smithay::backend::session::libseat::LibSeatSession, seat: &str, primary: &std::path::Path, fd: &DrmDeviceFd, formats: &Formats) -> Vec<GpuInfo> {
     let paths = all_gpus(seat).unwrap_or_default();
     let mut out = Vec::new();
     for path in paths {
-        // The primary is open already in drm.rs; a second open of it is fine
-        // (no mode is set here, and no master is taken).
-        let info = probe_one(session, &path, path == primary);
+        let info = probe_one(session, &path, (path == primary).then_some((fd, formats)));
         log(&info);
         out.push(info);
     }

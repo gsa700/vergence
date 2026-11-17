@@ -113,7 +113,13 @@ struct Surface {
     mode: u32,
     /// Its connector, to set it up again in another mode.
     handle: connector::Handle,
+    /// When it was connected, in order: screens a setup has no places for
+    /// are laid out in this order, so a new one goes on the right.
+    since: u64,
 }
+
+/// The order screens were connected in (Surface::since).
+static CONNECTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// "Drawn here, shown there" (GPUs milestone 1, step 3): the primary draws
 /// the screen into one linear buffer in its own memory, and the showing GPU
@@ -204,7 +210,8 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
     tracing::info!("gpu: {} draws with {name}", path.display());
     let render_formats: FormatSet = renderer.egl_context().dmabuf_render_formats().iter().copied().collect();
     // Every GPU on the seat, probed and logged (GPUs milestone 1, step 1).
-    state.gpus = crate::gpus::probe(&mut session_handle, &seat, &path);
+    let formats = crate::gpus::formats_of(renderer.egl_context());
+    state.gpus = crate::gpus::probe(&mut session_handle, &seat, &path, drm.device_fd(), &formats);
     state.shm_formats_from(&renderer);
 
     // GPU buffers from apps (linux-dmabuf v4): Xwayland's glamor and GL apps draw on
@@ -686,7 +693,9 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     // The monitor's identity first: a mode chosen for it in the settings app
     // (desktop.toml, by its EDID id) decides the mode; else the preferred one.
     let edid = edid_of(b.devices[gpu].manager.device(), conn.handle());
-    let identity = edid.clone().unwrap_or_else(|| name.clone().into_bytes());
+    // The same monitor on another of its inputs keeps its identity (monitors.rs).
+    let others: Vec<Vec<u8>> = b.surfaces.values().map(|s| s.edid.clone()).collect();
+    let identity = edid.as_deref().map(|e| crate::monitors::identity(e, &others)).unwrap_or_else(|| name.clone().into_bytes());
     let id = vergence_profile::monitor_id(&identity);
     let preferred = conn.modes().iter().position(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED)).unwrap_or(0);
     let wanted = crate::displays::load().mode_for(&id);
@@ -773,7 +782,7 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     if gpu > 0 {
         tracing::info!("{name}: shown by {}, drawn by {} and copied there", b.devices[gpu].path, b.devices[0].path);
     }
-    b.surfaces.insert((gpu, crtc), Surface { output, drm_output, connector: name, last: std::time::Instant::now(), scale, id, px: (w as u32, h as u32), mm, edid: identity, global, relay, modes, mode: mode_index, handle: conn.handle() });
+    b.surfaces.insert((gpu, crtc), Surface { output, drm_output, connector: name, last: std::time::Instant::now(), scale, id, px: (w as u32, h as u32), mm, edid: identity, global, relay, modes, mode: mode_index, handle: conn.handle(), since: CONNECTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) });
 }
 
 /// The GL renderer's name ("Mesa Intel(R) UHD Graphics (CML GT2)", "llvmpipe ...").
@@ -833,10 +842,15 @@ fn edid_of(dev: &DrmDevice, conn: connector::Handle) -> Option<Vec<u8>> {
 /// left to right in connector order, tops aligned.
 fn lay_out(state: &mut Server) {
     let Some(b) = state.backend.as_ref() else { return };
-    let order = std::env::var("VERGENCE_LEFT_TO_RIGHT").unwrap_or_else(|_| "HDMI-A-2,HDMI-A-1".into());
-    let rank = |c: &str| order.split(',').position(|o| o.trim() == c).unwrap_or(usize::MAX);
+    // Screens the arrangement has no place for go on the right in the order
+    // they were connected: a screen plugged in joins at the right and moves
+    // nothing (Techbench, 2026-11-17: a fixed "HDMI-A-2 first" order from
+    // Hubble's first days put a new ASUS on the left and pushed the LG over).
+    // VERGENCE_LEFT_TO_RIGHT="DP-1,HDMI-A-1" still puts connectors first by hand.
+    let order = std::env::var("VERGENCE_LEFT_TO_RIGHT").unwrap_or_default();
+    let rank = |c: &str| order.split(',').position(|o| !o.trim().is_empty() && o.trim() == c).unwrap_or(usize::MAX);
     let mut list: Vec<&Surface> = b.surfaces.values().filter(|s| s.output.current_mode().is_some()).collect();
-    list.sort_by_key(|s| (rank(&s.connector), s.connector.clone()));
+    list.sort_by_key(|s| (rank(&s.connector), s.since));
     let sizes: Vec<(String, i32, i32)> = list
         .iter()
         .map(|s| {

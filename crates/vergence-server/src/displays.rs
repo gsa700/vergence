@@ -4,8 +4,8 @@
 // ~/.config/vergence/desktop.toml:
 //
 //     [displays]
-//     primary = "<id>"        # the settings app's: whose wallpaper is the default
-//     size = 1.0              # "how big I like things", for every screen
+//     primary = "<id>"        # the main screen: the dock's, and the default wallpaper's
+//     size = 1.0              # Accessibility's "how big I like things", for every screen
 //
 //     [[displays.screen]]     # per screen, by its EDID id (any port)
 //     id = "a48cece3b53cb939"
@@ -25,9 +25,11 @@
 // to the nearest whole number when that is within 25%: whole numbers are sharp
 // in every toolkit and need no resampling, and most single monitors get 1x,
 // their native pixels. A scale chosen on the screen's page replaces the
-// default. The size preference (the Screens overview) multiplies every screen.
+// default. The size preference (Accessibility; until 2026-11-17 also on the
+// Screens overview, where it read as a scale) multiplies every screen.
 // Positions are in points. A setup without an arrangement is laid out left to
-// right, tops aligned; screens the arrangement doesn't name go on the right.
+// right, tops aligned, in the order they were connected; screens the
+// arrangement doesn't name go on the right (drm.rs lay_out).
 
 use serde::Deserialize;
 use vergence_profile::scaling::{Distance, derive};

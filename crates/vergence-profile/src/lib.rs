@@ -45,6 +45,29 @@ pub fn monitor_id(edid: &[u8]) -> String {
     d.iter().take(8).map(|x| format!("{x:02x}")).collect()
 }
 
+/// The monitor itself, whichever of its inputs it is on: maker, product code
+/// and serial number from the EDID's base block, plus the serial string
+/// (descriptor 0xFF) if it has one. A monitor gives each input its own EDID
+/// (Techbench, 2026-11-17: the LG Ultra HD's HDMI and DisplayPort EDIDs
+/// differ, so it became two monitors with two scales), but these fields stay
+/// the same. None when it can't be told apart from another of its model: no
+/// serial number and no serial string.
+pub fn model_key(edid: &[u8]) -> Option<String> {
+    if edid.len() < 128 || edid[..8] != [0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0] {
+        return None;
+    }
+    let serial = u32::from_le_bytes([edid[12], edid[13], edid[14], edid[15]]);
+    let text = (0..4)
+        .map(|i| &edid[54 + 18 * i..72 + 18 * i])
+        .find(|d| d[..3] == [0, 0, 0] && d[3] == 0xff)
+        .map(|d| String::from_utf8_lossy(&d[5..18]).split('\n').next().unwrap_or("").trim().to_string())
+        .filter(|s| !s.is_empty() && s.chars().any(|c| c.is_ascii_alphanumeric() && c != '0'));
+    if serial == 0 && text.is_none() {
+        return None;
+    }
+    Some(format!("{:02x}{:02x}-{:02x}{:02x}-{serial}-{}", edid[8], edid[9], edid[11], edid[10], text.unwrap_or_default()))
+}
+
 /// Version of the key format, hashed first so a future change of format
 /// never collides with an old key.
 const KEY_FORMAT: &[u8] = b"vergence-profile-key-v1";
@@ -134,6 +157,43 @@ mod tests {
         assert_eq!(canonical(&b).len(), 256);
         assert_eq!(canonical(&b[..200]).len(), 200); // short: used whole
         assert_eq!(canonical(&b[..10]).len(), 10);
+    }
+
+    fn edid(serial: u32, text: Option<&str>, ext: u8) -> Vec<u8> {
+        let mut b = vec![0u8; 256];
+        b[..8].copy_from_slice(&[0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0]);
+        b[8..10].copy_from_slice(&[0x1e, 0x6d]); // GSM
+        b[10..12].copy_from_slice(&[0x09, 0x5b]);
+        b[12..16].copy_from_slice(&serial.to_le_bytes());
+        if let Some(t) = text {
+            b[54..59].copy_from_slice(&[0, 0, 0, 0xff, 0]);
+            let mut field = [b' '; 13];
+            field[..t.len()].copy_from_slice(t.as_bytes());
+            field[t.len().min(12)] = b'\n';
+            b[59..72].copy_from_slice(&field);
+        }
+        b[126] = 1;
+        b[200] = ext; // the extension block differs between inputs
+        b
+    }
+
+    #[test]
+    fn one_monitor_on_two_inputs() {
+        // The LG Ultra HD: serial number only, no serial string; its HDMI and
+        // DisplayPort EDIDs differ (here in the extension block).
+        let (hdmi, dp) = (edid(52074, None, 1), edid(52074, None, 2));
+        assert_ne!(monitor_id(&hdmi), monitor_id(&dp));
+        assert_eq!(model_key(&hdmi), model_key(&dp));
+        assert_eq!(model_key(&hdmi).as_deref(), Some("1e6d-5b09-52074-"));
+        // Another of the same model is another monitor.
+        assert_ne!(model_key(&hdmi), model_key(&edid(52075, None, 1)));
+        // A serial string alone is enough (the ASUS VS229).
+        assert_eq!(model_key(&edid(0, Some("DCLMTF102508"), 1)).as_deref(), Some("1e6d-5b09-0-DCLMTF102508"));
+        // Neither: can't be told from its twin.
+        assert_eq!(model_key(&edid(0, None, 1)), None);
+        assert_eq!(model_key(&edid(0, Some("0000000"), 1)), None);
+        // Not an EDID (a connector name stands in for a missing one).
+        assert_eq!(model_key(b"HDMI-A-1"), None);
     }
 
     #[test]
