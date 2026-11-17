@@ -495,6 +495,7 @@ impl Server {
     fn app_menu_draw(&mut self, rect: Rectangle<i32, Logical>, lines: &[Line], chosen: Option<usize>, typed: &str, results: bool, menus: &[String], open_sub: Option<usize>, light: bool, scale: f64) -> Option<MemoryRenderBuffer> {
         // The launcher finds applications; an app's menu, its commands.
         let placeholder = if self.app_menu_is_launcher() { "Search applications…" } else { "Search commands…" };
+        let accent = self.accent();
         let s = vergence_look::shelf_look(light);
         let color = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
         let (w, h) = (rect.size.w as f32, rect.size.h as f32);
@@ -514,6 +515,10 @@ impl Server {
                 Line::Search => {
                     let f = SceneRect::new(r.x, r.y + 2.0, r.w, r.h - 6.0);
                     scene.fill_rounded(f, vergence_look::MENU_ROW_RADIUS, color(s.field));
+                    // The menu has the keyboard, so the field always shows it
+                    // has: an outline in the accent, and a caret (Dave: it
+                    // looked as if it could not be typed in until typed in).
+                    scene.stroke(f, vergence_look::MENU_ROW_RADIUS, vergence_look::EDGE, Color::rgb(accent.r, accent.g, accent.b));
                     // A magnifier.
                     let (cx, cy) = (f.x + 14.0, f.y + f.h / 2.0 - 1.0);
                     scene.stroke(SceneRect::new(cx - 4.5, cy - 4.5, 9.0, 9.0), 4.5, 1.25, color(s.menu_ink_off));
@@ -524,7 +529,8 @@ impl Server {
                         let base = (f.y + (f.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round();
                         scene.push_clip(SceneRect::new(f.x + 26.0, f.y, f.w - 34.0, f.h), 0.0);
                         if typed.is_empty() {
-                            vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink_off), ScenePoint::new(f.x + 28.0, base), placeholder);
+                            scene.fill(SceneRect::new(f.x + 28.0, f.y + 7.0, 1.0, f.h - 14.0), color(s.menu_ink));
+                            vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink_off), ScenePoint::new(f.x + 32.0, base), placeholder);
                         } else {
                             let (_, width) = fonts.layout(face, size, typed);
                             vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink), ScenePoint::new(f.x + 28.0, base), typed);
