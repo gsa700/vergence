@@ -51,6 +51,16 @@ of three boards) settled it.*
    died holding it), and devd's button event sent to the servers as
    `FromVdm::PowerKey`, since the server never sees it as a key. At the
    login screen and the console the system's way stands.
+   Tried 2026-11-16: the dialog opens on Hubble (acpid) and Techbench
+   (logind). On kepler the hold works (no shutdown) but nothing tells of
+   the press: its power button is ACPI's fixed one, and FreeBSD 15 drops a
+   fixed-button press at NONE without a devd event or an evdev key
+   (recorded at devd's pipe and /dev/input/event3 over four presses). So
+   there the key does nothing during a session; devd's watch stays for
+   machines whose button is a control-method one. *Not done* (Dave: leave
+   kepler as it is for now): the way that would work there, the button at
+   S3 and vdm vetoing that suspend through /dev/acpi (ACPIIO_ACKSLPSTATE
+   with an error), telling the server, except for suspends vdm asked for.
 4. The look. **Done**: vergence-look's `MENU_RADIUS` (10), `MENU_ROW_RADIUS`
    (6), `MENU_PAD` (6), `MENU_ROW` (28), `MENU_SEP` (9, its rule
    `MENU_SEP_INSET` from the sides), `MENU_TEXT`, and the dark menu ground
