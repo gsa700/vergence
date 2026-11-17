@@ -86,6 +86,13 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   did not write, for later review and possible rewrite: docs/borrowed-review.md
   (Dave, 2026-11-11); add to it when anything borrowed comes in. OS interfaces (DRM/KMS,
   evdev, GBM, EGL, Vulkan) are not borrowing.
+- **Planned platform change** (Dave, 2026-11-17; not done yet, see
+  docs/freebsd-workstation.md): Hambench's ATX hardware (i9-13900K, UHD 770,
+  Intel SFP+ card) becomes a FreeBSD workstation and the primary development
+  platform, with an NVIDIA card (GTX 960 on the legacy 580 driver first).
+  Techbench's ITX hardware becomes the hamshack's Windows PC, so Fedora
+  leaves Techbench; a Lenovo Tiny gets Fedora for the systemd/logind side.
+  Hubble (Void) stays. Until the swap, the paragraph below holds.
 - **Three platforms, one code base** (Dave, 2026-11-09; replaces "FreeBSD
   first" of 2026-11-06). The primary development platform is **Linux without
   systemd: Void (glibc) on Hubble**, reinstalled from FreeBSD on 2026-11-09
