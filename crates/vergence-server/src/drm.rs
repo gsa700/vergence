@@ -869,6 +869,9 @@ fn lay_out(state: &mut Server) {
         state.space.map_output(&o, p);
     }
     state.bus_outputs_changed();
+    if crate::greeter() {
+        state.greeter_start_screen();
+    }
 }
 
 fn render(state: &mut Server, crtc: Key) {

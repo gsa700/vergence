@@ -888,6 +888,46 @@ fn greeter_worker(uid: u32, gid: u32, server: &std::path::Path, home: &std::path
 /// The login screen's server: as the greeter account, on its VT, in a
 /// session of its own with the VT as its terminal, the environment from
 /// nothing (PAM's session's, then ours).
+/// The last session's main screen (ToVdm::MainScreen), for the login
+/// screen to start on: STATE_DIR/main-screen, root's, a monitor id only.
+fn main_screen_file() -> std::path::PathBuf {
+    std::path::Path::new(paths::STATE_DIR).join("main-screen")
+}
+
+fn main_screen() -> Option<String> {
+    std::fs::read_to_string(main_screen_file()).ok().map(|t| t.trim().to_string()).filter(|t| proto::is_monitor_id(t))
+}
+
+/// O_NOFOLLOW: a link planted where the file is written is refused, not followed.
+const fn libc_o_nofollow() -> i32 {
+    #[cfg(target_os = "linux")]
+    return 0o400000;
+    #[cfg(not(target_os = "linux"))]
+    return 0x0100;
+}
+
+/// Kept for the next login screen (written beside, moved into place).
+fn keep_main_screen(id: &str) {
+    use std::io::Write;
+    if !proto::is_monitor_id(id) || main_screen().as_deref() == Some(id) {
+        return;
+    }
+    let path = main_screen_file();
+    let beside = path.with_extension("new");
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o644)
+        .custom_flags(libc_o_nofollow())
+        .open(&beside)
+        .and_then(|mut f| f.write_all(format!("{id}\n").as_bytes()))
+        .and_then(|_| std::fs::rename(&beside, &path));
+    if let Err(e) = written {
+        log(&format!("main screen: could not keep it: {e}"));
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn spawn_greeter_server(uid: u32, gid: u32, server: &std::path::Path, home: &std::path::Path, run: &std::path::Path, tty: std::fs::File, out: std::fs::File, pam_env: Vec<(String, String)>) -> std::io::Result<std::process::Child> {
     use std::os::unix::process::CommandExt;
@@ -925,6 +965,10 @@ fn spawn_greeter_server(uid: u32, gid: u32, server: &std::path::Path, home: &std
             drop_to(uid, gid, &groups)
         })
     };
+    // The screen to start on: the last session's main screen.
+    if let Some(id) = main_screen() {
+        cmd.env("VDM_MAIN_SCREEN", id);
+    }
     // The machine's keyboard layout (step 6), which xkbcommon takes from these.
     if let Some(k) = vergence_dm::keyboard::system() {
         for (name, v) in [("XKB_DEFAULT_LAYOUT", k.layout), ("XKB_DEFAULT_VARIANT", k.variant), ("XKB_DEFAULT_OPTIONS", k.options)] {
@@ -1063,6 +1107,11 @@ fn lock_all(sessions: &mut Vec<(u32, UnixStream)>) -> String {
                 Ok(ToVdm::CannotLock(why)) => {
                     cannot += 1;
                     log(&format!("before sleep: {who}'s session cannot lock: {why}"));
+                }
+                // Its main screen, said just then: kept; its answer is still to come.
+                Ok(ToVdm::MainScreen(id)) => {
+                    keep_main_screen(&id);
+                    waiting.push(i);
                 }
                 _ => dead.push(i),
             }
@@ -1491,8 +1540,25 @@ fn main() {
                 devd = None;
             }
         }
-        // A registered server that went away (or said something out of turn): dropped.
-        let gone: Vec<usize> = fds[first_session..].iter().enumerate().filter(|(_, f)| f.revents != 0).map(|(i, _)| i).collect();
+        // A registered server that went away (or said something out of turn):
+        // dropped. Its main screen is the one thing it may say unasked.
+        let gone: Vec<usize> = fds[first_session..]
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.revents != 0)
+            .map(|(i, _)| i)
+            .filter(|&i| {
+                let s = &sessions[i].1;
+                let until = std::time::Instant::now() + Duration::from_secs(1);
+                match proto::read_to_vdm(&mut sys::Deadline { stream: s, until }) {
+                    Ok(ToVdm::MainScreen(id)) => {
+                        keep_main_screen(&id);
+                        false
+                    }
+                    _ => true,
+                }
+            })
+            .collect();
         for i in gone.into_iter().rev() {
             sessions.remove(i);
         }

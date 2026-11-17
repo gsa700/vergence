@@ -318,6 +318,8 @@ impl Server {
         self.settings.stamps = stamps();
         self.apply_key_repeat();
         let res = self.loop_handle.insert_source(Timer::from_duration(std::time::Duration::from_secs(1)), |_, _, state| {
+            // vdm hears the main screen once it can (lock.rs; a no-op when told).
+            state.tell_vdm_main_screen();
             let now = stamps();
             if now != state.settings.stamps {
                 state.settings.stamps = now;

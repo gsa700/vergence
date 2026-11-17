@@ -73,6 +73,15 @@ pub enum ToVdm {
     Answering(u128),
     /// The person said no to prompt `id`.
     Decline(u128),
+    /// On the session socket: the session's main screen, by its monitor id
+    /// (16 lowercase hex digits), for the login screen to start on
+    /// (2026-11-17). Sent at the start and when it changes.
+    MainScreen(String),
+}
+
+/// A monitor id as vergence_profile makes them: 16 lowercase hex digits.
+pub fn is_monitor_id(s: &str) -> bool {
+    s.len() == 16 && s.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,6 +133,7 @@ mod kind {
     pub const ACT: u8 = 7;
     pub const ANSWERING: u8 = 8;
     pub const DECLINE: u8 = 9;
+    pub const MAIN_SCREEN: u8 = 10;
     pub const PROMPT: u8 = 16;
     pub const INFO: u8 = 17;
     pub const ERROR: u8 = 18;
@@ -209,6 +219,10 @@ pub fn send_to_vdm(w: &mut impl Write, m: &ToVdm) -> io::Result<()> {
             header(w, kind::DECLINE, 16)?;
             w.write_all(&id.to_be_bytes())?;
         }
+        ToVdm::MainScreen(id) => {
+            header(w, kind::MAIN_SCREEN, id.len())?;
+            w.write_all(id.as_bytes())?;
+        }
     }
     w.flush()
 }
@@ -261,6 +275,14 @@ pub fn read_to_vdm(r: &mut impl Read) -> Result<ToVdm, ProtoError> {
             let b = read_body(r, len)?;
             let id = u128::from_be_bytes(b.as_slice().try_into().map_err(|_| ProtoError::Bad("id"))?);
             Ok(if k == kind::ANSWERING { ToVdm::Answering(id) } else { ToVdm::Decline(id) })
+        }
+        kind::MAIN_SCREEN if len == 16 => {
+            let b = read_body(r, len)?;
+            let id = std::str::from_utf8(&b).map_err(|_| ProtoError::Bad("main screen"))?;
+            if !is_monitor_id(id) {
+                return Err(ProtoError::Bad("main screen"));
+            }
+            Ok(ToVdm::MainScreen(id.to_string()))
         }
         kind::CANNOT_LOCK if len <= MAX_TEXT => {
             let b = read_body(r, len)?;
@@ -375,6 +397,7 @@ mod tests {
         send_to_vdm(&mut b, &ToVdm::Act(vec!["autologin.on".into(), "derickson".into()])).unwrap();
         send_to_vdm(&mut b, &ToVdm::Answering(9)).unwrap();
         send_to_vdm(&mut b, &ToVdm::Decline(9)).unwrap();
+        send_to_vdm(&mut b, &ToVdm::MainScreen("7955bc13189b466b".into())).unwrap();
         let mut r = Cursor::new(b);
         assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Hello { version: VERSION, service: Service::Unlock }));
         match read_to_vdm(&mut r).unwrap() {
@@ -389,6 +412,14 @@ mod tests {
         assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Act(w) if w == ["autologin.on", "derickson"]));
         assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Answering(9)));
         assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::Decline(9)));
+        assert!(matches!(read_to_vdm(&mut r).unwrap(), ToVdm::MainScreen(id) if id == "7955bc13189b466b"));
+        // Anything but a monitor id is refused.
+        for bad in ["7955BC13189B466B", "7955bc13189b466", "../../etc/passw", "7955bc13189b466g"] {
+            let mut b = Vec::new();
+            header(&mut b, kind::MAIN_SCREEN, bad.len()).unwrap();
+            b.extend_from_slice(bad.as_bytes());
+            assert!(read_to_vdm(&mut &b[..]).is_err(), "{bad}");
+        }
         // An action's words: nothing a shell or a path could take.
         for bad in [vec!["a b".to_string()], vec!["-rf".into()], vec!["x/y".into()], vec![String::new()], vec!["w".into(); 9]] {
             let mut b = Vec::new();

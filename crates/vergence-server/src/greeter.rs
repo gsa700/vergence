@@ -86,6 +86,8 @@ fn people() -> Vec<Person> {
 
 #[derive(Default)]
 pub struct Greeter {
+    /// The pointer was put on the start screen (greeter_start_screen).
+    placed: bool,
     people: Vec<Person>,
     /// The chosen person; `people.len()` is Other….
     chosen: usize,
@@ -401,6 +403,30 @@ impl Server {
             }
             Heard::LockNow | Heard::Ask { .. } | Heard::Withdrawn(_) | Heard::PowerKey => {}
         }
+        self.redraw_all();
+    }
+
+    /// Once the screens are laid out: the pointer, and with it the dialog,
+    /// starts on the main screen of the last session (vdm's VDM_MAIN_SCREEN,
+    /// 2026-11-17), if that screen is here; else where it is (the first).
+    pub fn greeter_start_screen(&mut self) {
+        if self.greeter.placed {
+            return;
+        }
+        let Some(want) = std::env::var("VDM_MAIN_SCREEN").ok().filter(|v| vergence_dm::proto::is_monitor_id(v)) else {
+            self.greeter.placed = true;
+            return;
+        };
+        let outputs: Vec<smithay::output::Output> = self.space.outputs().cloned().collect();
+        if outputs.is_empty() {
+            return;
+        }
+        self.greeter.placed = true;
+        let Some(o) = outputs.iter().find(|o| o.user_data().get::<crate::memory::MonitorId>().is_some_and(|m| m.0 == want)) else { return };
+        let Some(r) = self.space.output_geometry(o) else { return };
+        let centre = smithay::utils::Point::<f64, smithay::utils::Logical>::from((r.loc.x as f64 + r.size.w as f64 / 2.0, r.loc.y as f64 + r.size.h as f64 / 2.0));
+        tracing::info!("greeter: starting on {} (the last session's main screen)", o.name());
+        self.pointer_to(centre, smithay::backend::input::InputTime::now());
         self.redraw_all();
     }
 

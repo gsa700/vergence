@@ -73,6 +73,9 @@ pub(crate) enum Heard {
     PowerKey,
 }
 
+/// The writing half of the session's connection to vdm, while there is one.
+type VdmOut = std::sync::Arc<std::sync::Mutex<Option<UnixStream>>>;
+
 /// What the server answers vdm before sleep.
 enum Reply {
     Presented,
@@ -110,6 +113,11 @@ pub struct Lock {
     replies: Option<std::sync::mpsc::Sender<Reply>>,
     /// vdm waits to hear the lock is on every screen.
     awaiting: bool,
+    /// The session's connection to vdm, for telling it the main screen, and
+    /// the main screen last told (once each change: a vdm from before
+    /// 2026-11-17 drops a registration that says it, and is not told again).
+    vdm_out: VdmOut,
+    main_told: Option<String>,
     /// Since it locked: the screens a frame was queued for, and those it was
     /// shown on (their VBlank came); when all have, the lock is presented.
     queued: std::collections::HashSet<String>,
@@ -164,13 +172,18 @@ fn no_shell_above() -> Result<(), String> {
 /// the account from the kernel; when the machine is about to sleep it says
 /// LockNow, and this answers once the lock is on every screen. Reconnects
 /// when vdm restarts.
-fn session(heard: channel::Sender<Heard>, replies: std::sync::mpsc::Receiver<Reply>) {
+fn session(heard: channel::Sender<Heard>, replies: std::sync::mpsc::Receiver<Reply>, out: VdmOut) {
     loop {
         let Ok(mut s) = UnixStream::connect(vergence_dm::paths::SESSION_SOCKET) else {
             std::thread::sleep(Duration::from_secs(5));
             continue;
         };
         tracing::info!("lock: registered with vdm for sleep");
+        // The main thread's way to tell vdm the main screen (tell_vdm_main_screen).
+        if let Ok(w) = s.try_clone() {
+            let _ = w.set_write_timeout(Some(Duration::from_secs(1)));
+            *out.lock().unwrap_or_else(|e| e.into_inner()) = Some(w);
+        }
         loop {
             match proto::read_from_vdm(&mut s) {
                 Ok(FromVdm::LockNow) => {
@@ -183,7 +196,9 @@ fn session(heard: channel::Sender<Heard>, replies: std::sync::mpsc::Receiver<Rep
                         Ok(Reply::Cannot(why)) => ToVdm::CannotLock(why),
                         Err(_) => continue,
                     };
-                    if proto::send_to_vdm(&mut s, &msg).is_err() {
+                    // Through the shared writer, so it never interleaves with the main thread's.
+                    let sent = out.lock().unwrap_or_else(|e| e.into_inner()).as_mut().is_some_and(|w| proto::send_to_vdm(w, &msg).is_ok());
+                    if !sent {
                         break;
                     }
                 }
@@ -205,6 +220,7 @@ fn session(heard: channel::Sender<Heard>, replies: std::sync::mpsc::Receiver<Rep
                 Ok(_) | Err(_) => break,
             }
         }
+        *out.lock().unwrap_or_else(|e| e.into_inner()) = None;
         std::thread::sleep(Duration::from_secs(2));
     }
 }
@@ -303,8 +319,9 @@ impl Server {
         let (rtx, rrx) = std::sync::mpsc::channel();
         self.lock.replies = Some(rtx);
         let heard = tx.clone();
+        let out = self.lock.vdm_out.clone();
         if std::env::args().any(|a| a == "--drm")
-            && let Err(e) = std::thread::Builder::new().name("lock-session".into()).spawn(move || session(heard, rrx))
+            && let Err(e) = std::thread::Builder::new().name("lock-session".into()).spawn(move || session(heard, rrx, out))
         {
             tracing::warn!("lock: {e}");
         }
@@ -320,6 +337,24 @@ impl Server {
                 tracing::warn!("lock: the session was locked when its server ended; it starts locked");
                 self.lock_now();
             }
+        }
+    }
+
+    /// Tell vdm the main screen in use (the recorded one if connected, else
+    /// the first), for the login screen to start on, when it changed.
+    pub fn tell_vdm_main_screen(&mut self) {
+        if crate::greeter() {
+            return;
+        }
+        let ids: Vec<String> = self.bus_outputs().iter().map(|o| o.id.clone()).collect();
+        let Some(main) = vergence_profile::primary(self.shelf.primary.as_deref(), &ids).map(str::to_string) else { return };
+        if self.lock.main_told.as_deref() == Some(main.as_str()) || !vergence_dm::proto::is_monitor_id(&main) {
+            return;
+        }
+        let sent = self.lock.vdm_out.lock().unwrap_or_else(|e| e.into_inner()).as_mut().is_some_and(|w| proto::send_to_vdm(w, &ToVdm::MainScreen(main.clone())).is_ok());
+        if sent {
+            tracing::info!("lock: told vdm the main screen is {main}");
+            self.lock.main_told = Some(main);
         }
     }
 
