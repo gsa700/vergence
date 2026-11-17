@@ -25,6 +25,8 @@ use smithay::{
 use vergence_scene::{Color, Point as ScenePoint, Rect as SceneRect, Scene};
 use vergence_shell::appmenu::{self, Action, Did, Line, Model, State, WindowAct};
 
+use vergence_protocol::window::{self, MenuLine};
+
 use crate::{Server, decor::SceneElement, win::Win};
 
 #[derive(Default)]
@@ -50,6 +52,9 @@ struct Open {
     /// A window's right-click menu (bus v20), not its app button's: the
     /// button is not lit and nothing is pinned.
     context: bool,
+    /// The desktop's own lines in its right-click menu, by id, and what each
+    /// does (menu.rs): carried out here, not sent to the desktop's program.
+    own: Vec<(u32, crate::menu::Entry)>,
 }
 
 impl Open {
@@ -142,7 +147,7 @@ impl Server {
             state.key(&model, appmenu::Key::Down);
         }
         tracing::info!("app menu: opened for {:?} ({} commands)", model.app, model.commands.len());
-        self.app_menu.open = Some(Open { win: w.clone(), app_key, model, state, at: (x, y).into(), leftward, screen, context: false });
+        self.app_menu.open = Some(Open { win: w.clone(), app_key, model, state, at: (x, y).into(), leftward, screen, context: false, own: Vec::new() });
         self.app_menu.pictures = [None, None];
         self.redraw_all();
     }
@@ -158,6 +163,34 @@ impl Server {
         }
         self.close_menu();
         self.launcher_close();
+        // The desktop's own lines where its menu marks them; elsewhere the mark is dropped.
+        let mut own = Vec::new();
+        let mut lines = lines;
+        if let Some(i) = lines.iter().position(|l| matches!(l, MenuLine::Item { id, .. } if *id == window::MENU_DESKTOP_LINES)) {
+            lines.remove(i);
+            if self.is_desktop(w) {
+                let (mine, acts) = crate::menu::desktop_own_lines(window::MENU_SERVER_IDS);
+                own = acts;
+                lines.splice(i..i, mine);
+            }
+            lines.retain(|l| !matches!(l, MenuLine::Item { id, .. } if *id == window::MENU_DESKTOP_LINES));
+            // No separator first, last or twice running.
+            let mut tidy: Vec<MenuLine> = Vec::new();
+            for l in lines {
+                if l == MenuLine::Separator && tidy.last().is_none_or(|p| *p == MenuLine::Separator) {
+                    continue;
+                }
+                tidy.push(l);
+            }
+            if tidy.last() == Some(&MenuLine::Separator) {
+                tidy.pop();
+            }
+            tidy.truncate(window::MAX_MENU_LINES);
+            lines = tidy;
+        }
+        if lines.is_empty() {
+            return;
+        }
         let model = Model { app: String::new(), commands: Vec::new(), terminal: false, native: true, window: Vec::new(), pins: Vec::new(), given: Some(lines) };
         let state = State::default();
         let at = pos.to_i32_round::<i32>();
@@ -168,7 +201,7 @@ impl Server {
         let y = if at.y + h <= screen.loc.y + screen.size.h { at.y } else { (at.y - h).max(screen.loc.y) };
         let leftward = x + appmenu::WIDTH * 2 > screen.loc.x + screen.size.w;
         tracing::info!("right-click menu: {} lines", model.given.as_ref().map_or(0, Vec::len));
-        self.app_menu.open = Some(Open { win: w.clone(), app_key: String::new(), model, state, at: (x, y).into(), leftward, screen, context: true });
+        self.app_menu.open = Some(Open { win: w.clone(), app_key: String::new(), model, state, at: (x, y).into(), leftward, screen, context: true, own });
         self.app_menu.pictures = [None, None];
         self.redraw_all();
     }
@@ -316,6 +349,14 @@ impl Server {
             return;
         }
         tracing::info!("app menu: {action:?} for {:?}", o.model.app);
+        // One of the desktop's own lines: done here, the program told nothing.
+        if let Action::Command(id) = action
+            && let Some((_, e)) = o.own.iter().find(|(i, _)| *i == id)
+        {
+            let e = e.clone();
+            self.menu_run(&e);
+            return;
+        }
         match action {
             Action::Command(id) => {
                 if let Some(n) = w.native() {

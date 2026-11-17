@@ -49,7 +49,7 @@ pub struct Item {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum Entry {
+pub(crate) enum Entry {
     App(Item),
     /// One of an application's windows, by its title: the list a click on the
     /// application's icon opens beside the shelf (shelf.rs).
@@ -142,6 +142,41 @@ fn desktop_entries() -> Vec<Entry> {
         Entry::Run(label.into(), argv)
     };
     vec![Entry::Separator, settings("Change wallpaper…", Some("wallpaper")), settings("Display settings…", Some("screens")), settings("Settings…", None), Entry::Separator, Entry::Exit]
+}
+
+/// The desktop menu's own lines (the settings, "Exit Vergence…", the
+/// apps desktop.toml names) for the desktop's right-click menu on the
+/// bare desktop (bus v20, appmenu.rs): the lines, numbered from `first`,
+/// and what each does, carried out here (`Server::menu_run`), never
+/// sent to the desktop's program.
+pub(crate) fn desktop_own_lines(first: u32) -> (Vec<vergence_protocol::window::MenuLine>, Vec<(u32, Entry)>) {
+    use vergence_protocol::window::MenuLine;
+    let mut entries: Vec<Entry> = configured_apps().into_iter().map(Entry::App).collect();
+    entries.extend(desktop_entries());
+    let (mut lines, mut own) = (Vec::new(), Vec::new());
+    for e in entries {
+        let label = match &e {
+            Entry::App(item) => item.name.clone(),
+            Entry::Run(label, _) => label.clone(),
+            Entry::Exit => "Exit Vergence…".into(),
+            Entry::Separator => {
+                if lines.last().is_some_and(|l| *l != MenuLine::Separator) {
+                    lines.push(MenuLine::Separator);
+                }
+                continue;
+            }
+            _ => continue,
+        };
+        // A name the menu would refuse (empty, too long, control characters) is left out.
+        let label: String = label.chars().filter(|c| !c.is_control()).take(60).collect();
+        if label.trim().is_empty() {
+            continue;
+        }
+        let id = first + own.len() as u32;
+        lines.push(MenuLine::item(id, &label, ""));
+        own.push((id, e));
+    }
+    (lines, own)
 }
 
 /// Applications desktop.toml's [[menu.item]] puts on the desktop menu (none by default).
@@ -394,7 +429,13 @@ impl Server {
     pub fn menu_press(&mut self, pos: Point<f64, Logical>) {
         let Some(m) = self.menu.take() else { return };
         let Some(i) = m.entry_at(pos) else { return };
-        match &m.entries[i] {
+        let e = m.entries[i].clone();
+        self.menu_run(&e);
+    }
+
+    /// Carries out a menu entry.
+    pub(crate) fn menu_run(&mut self, e: &Entry) {
+        match e {
             Entry::App(item) => {
                 tracing::info!("menu: {} ({})", item.name, item.exec);
                 if let Err(e) = crate::spawn(std::process::Command::new("sh").args(["-c", &item.exec])) {
@@ -579,5 +620,22 @@ impl Server {
             els.push(SceneElement::Solid(SolidColorRenderElement::new(id, phys(side), m.commit, look.edge.floats(), Kind::Unspecified)));
         }
         els
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vergence_protocol::window::MenuLine;
+
+    #[test]
+    fn the_desktop_menu_keeps_its_own_lines() {
+        let first = vergence_protocol::window::MENU_SERVER_IDS;
+        let (lines, own) = desktop_own_lines(first);
+        assert_eq!(own.last().map(|(_, e)| e), Some(&Entry::Exit), "Exit Vergence… last");
+        assert!(own.iter().enumerate().all(|(i, (id, _))| *id == first + i as u32), "numbered from the server's ids");
+        assert_eq!(lines.iter().filter(|l| matches!(l, MenuLine::Item { .. })).count(), own.len());
+        assert!(lines.iter().any(|l| matches!(l, MenuLine::Item { label, .. } if label == "Settings…")));
+        assert_ne!(lines.first(), Some(&MenuLine::Separator), "no separator first");
     }
 }

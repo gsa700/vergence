@@ -326,6 +326,17 @@ impl MenuLine {
 /// The most lines a right-click menu, or one of its submenus, may have.
 pub const MAX_MENU_LINES: usize = 64;
 
+/// A line's id in a right-click menu of the desktop's (the Desktop kind)
+/// that marks where the desktop's own lines go (the settings, "Exit
+/// Vergence…", apps desktop.toml names): the server puts them in its place
+/// and carries them out itself, sending the program nothing. In any other
+/// window's menu the line is left out.
+pub const MENU_DESKTOP_LINES: u32 = u32::MAX;
+
+/// Ids from here up are the server's own lines in a right-click menu (the
+/// desktop's, [`MENU_DESKTOP_LINES`]); a program's lines keep below.
+pub const MENU_SERVER_IDS: u32 = 0xFFFF_0000;
+
 fn put_menu_lines(e: &mut Encoder, lines: &[MenuLine]) {
     e.count(lines.len());
     for l in lines {

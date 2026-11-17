@@ -532,6 +532,10 @@ impl Desktop {
                 MenuLine::item(cmd::TERMINAL, "Open in Terminal", ""),
                 MenuLine::Separator,
                 MenuLine::item(cmd::PROPERTIES, "Properties", ""),
+                // The desktop's own lines, the server's: Change wallpaper…,
+                // Settings…, Exit Vergence…
+                MenuLine::Separator,
+                MenuLine::item(vergence_protocol::window::MENU_DESKTOP_LINES, "Desktop", ""),
             ];
         }
         let fixed: Vec<Fixed> = chosen.iter().filter_map(|e| self.fixed_of(e)).collect();
