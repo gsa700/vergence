@@ -493,6 +493,8 @@ impl Server {
     /// One panel's picture.
     #[allow(clippy::too_many_arguments)]
     fn app_menu_draw(&mut self, rect: Rectangle<i32, Logical>, lines: &[Line], chosen: Option<usize>, typed: &str, results: bool, menus: &[String], open_sub: Option<usize>, light: bool, scale: f64) -> Option<MemoryRenderBuffer> {
+        // The launcher finds applications; an app's menu, its commands.
+        let placeholder = if self.app_menu_is_launcher() { "Search applications…" } else { "Search commands…" };
         let s = vergence_look::shelf_look(light);
         let color = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
         let (w, h) = (rect.size.w as f32, rect.size.h as f32);
@@ -522,7 +524,7 @@ impl Server {
                         let base = (f.y + (f.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round();
                         scene.push_clip(SceneRect::new(f.x + 26.0, f.y, f.w - 34.0, f.h), 0.0);
                         if typed.is_empty() {
-                            vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink_off), ScenePoint::new(f.x + 28.0, base), "Search commands…");
+                            vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink_off), ScenePoint::new(f.x + 28.0, base), placeholder);
                         } else {
                             let (_, width) = fonts.layout(face, size, typed);
                             vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink), ScenePoint::new(f.x + 28.0, base), typed);
