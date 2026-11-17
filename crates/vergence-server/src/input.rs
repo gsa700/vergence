@@ -129,6 +129,15 @@ impl Server {
             KeyOut::Lock => {
                 self.lock_request("Super+L");
             }
+            // Log Out, Sleep, Restart, Shut Down: asked (session_dialog.rs);
+            // not at the login screen.
+            KeyOut::SessionDialog if crate::greeter() => {}
+            KeyOut::SessionDialog => {
+                self.app_menu_close();
+                self.close_menu();
+                self.launcher_close();
+                self.session_dialog_open();
+            }
             KeyOut::Locked if crate::greeter() => self.greeter_key(key.sym, key.typed, pressed),
             KeyOut::Locked => self.lock_key(key.sym, key.typed, pressed),
             KeyOut::Swallow => {}

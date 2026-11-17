@@ -3,7 +3,8 @@
 //! screen dimmed, a panel in the middle of the pointer's screen asking
 //! whether to log out, with Lock, Cancel and Log Out (the default: Enter).
 //! Escape, Cancel or a press outside the panel closes it. Opened by the
-//! desktop menu's "Exit Vergence…" and the named action. Log Out asks every
+//! launcher's power button, the power key, Ctrl+Alt+Delete and the named
+//! action ("Log Out…"). Log Out asks every
 //! app to close as its close button would (exit.rs). On the left, Sleep,
 //! Restart and Shut Down (VDM step 6), carried out by vdm: Sleep at once
 //! (the lock comes on first, by vdm's sleep hook); Restart and Shut Down

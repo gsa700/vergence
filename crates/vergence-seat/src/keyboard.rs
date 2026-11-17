@@ -55,6 +55,10 @@ pub enum Key {
     /// The L key (Super+L: lock the screen), and Q (Ctrl+Super+Q, the Mac's).
     L,
     Q,
+    /// Delete (Ctrl+Alt+Delete: the session dialog).
+    Delete,
+    /// The power key (XF86PowerOff): the session dialog too.
+    Power,
     Other,
 }
 
@@ -121,6 +125,9 @@ pub enum KeyOut {
     Swallow,
     /// Lock the screen: Super+L, or Ctrl+Super+Q (VDM milestone 1).
     Lock,
+    /// The session dialog (Log Out, Sleep, Restart, Shut Down): the power
+    /// key, or Ctrl+Alt+Delete (Dave, 2026-11-16).
+    SessionDialog,
     /// The screen is locked: the key is the lock dialog's, and nobody else's.
     Locked,
     /// To the window with the keyboard (None: no window has it; the key is
@@ -184,6 +191,12 @@ impl Seat {
         if pressed {
             if mods.ctrl && mods.alt && key == Key::BackSpace {
                 return KeyOut::Quit;
+            }
+            // Whatever has the keyboard, as Force Quit: what ends the session asks first.
+            if key == Key::Power || (mods.ctrl && mods.alt && !mods.logo && key == Key::Delete) {
+                self.keyboard.super_alone = false;
+                self.menu = None;
+                return KeyOut::SessionDialog;
             }
             // Force Quit (tools milestone 1), as macOS has Cmd+Option+Esc: whatever has the keyboard.
             if mods.ctrl && mods.alt && !mods.logo && key == Key::Escape {
@@ -404,6 +417,21 @@ mod tests {
         // Super tapped again closes it.
         seat.key(Key::Super, true, none());
         assert_eq!(seat.key(Key::Super, false, none()), KeyOut::Apps);
+    }
+
+    #[test]
+    fn the_power_key_and_ctrl_alt_delete_ask_about_the_session() {
+        let mut seat = Seat::new();
+        seat.focus(Some(W1));
+        let m = Mods { ctrl: true, alt: true, ..none() };
+        assert_eq!(seat.key(Key::Delete, true, m), KeyOut::SessionDialog);
+        assert_eq!(seat.key(Key::Delete, true, Mods { ctrl: true, ..none() }), KeyOut::Forward(Some(W1)), "Ctrl+Delete is the program's");
+        seat.menu_opened(Menu::Popup);
+        assert_eq!(seat.key(Key::Power, true, none()), KeyOut::SessionDialog, "over the launcher too");
+        assert_eq!(seat.menu(), None);
+        seat.lock();
+        assert_eq!(seat.key(Key::Power, true, none()), KeyOut::Locked, "not from the lock screen");
+        assert_eq!(seat.key(Key::Delete, true, m), KeyOut::Locked);
     }
 
     #[test]

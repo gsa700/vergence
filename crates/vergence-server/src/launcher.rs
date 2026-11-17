@@ -48,6 +48,18 @@ const OWN_H: i32 = 96;
 const OWN_CELL: i32 = 96;
 const OWN_ICON: i32 = 40;
 const OWN_HEAD: i32 = 20;
+/// The footer (Dave, 2026-11-16: the launcher is where the session ends,
+/// as a start menu): the person's name, then Lock and the power button,
+/// which opens the session dialog (Log Out, Sleep, Restart, Shut Down).
+const FOOT_H: i32 = 46;
+const FOOT_BUTTON: i32 = 36;
+
+/// A button of the footer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Foot {
+    Lock,
+    Power,
+}
 
 #[derive(Default)]
 pub struct Launcher {
@@ -78,6 +90,9 @@ struct Open {
     /// whether it has moved far enough to be a drag (a tap starts or
     /// chooses when the finger lifts; a drag scrolls).
     held: Option<(Point<f64, Logical>, i32, bool)>,
+    /// The footer's button under the pointer, and the person's name in it.
+    foot_hover: Option<Foot>,
+    person: String,
 }
 
 impl Open {
@@ -120,9 +135,20 @@ impl Open {
         std::iter::once(None).chain(self.tabs.iter().map(|t| Some(*t))).enumerate().map(|(i, t)| (t, Rect::new(self.at.loc.x + PAD + i as i32 * w, y, w - 4, TABS_H))).collect()
     }
 
+    /// The footer's buttons, at its right: Lock, then the power button last.
+    fn foot_rects(&self) -> [(Foot, Rect); 2] {
+        let y = self.at.loc.y + self.at.size.h - PAD - FOOT_BUTTON;
+        let right = self.at.loc.x + self.at.size.w - PAD;
+        [(Foot::Lock, Rect::new(right - 2 * FOOT_BUTTON - 6, y, FOOT_BUTTON, FOOT_BUTTON)), (Foot::Power, Rect::new(right - FOOT_BUTTON, y, FOOT_BUTTON, FOOT_BUTTON))]
+    }
+
+    fn foot_at(&self, x: i32, y: i32) -> Option<Foot> {
+        self.foot_rects().into_iter().find(|(_, r)| x >= r.x && x < r.right() && y >= r.y && y < r.bottom()).map(|(f, _)| f)
+    }
+
     fn grid(&self) -> Grid {
         let top = PAD + FIELD_H + 10 + self.own_room() + TABS_H + 12;
-        let mut g = Grid::new(Rect::new(self.at.loc.x + PAD, self.at.loc.y + top, self.at.size.w - 2 * PAD, self.at.size.h - top - PAD), CELL_W, CELL_H);
+        let mut g = Grid::new(Rect::new(self.at.loc.x + PAD, self.at.loc.y + top, self.at.size.w - 2 * PAD, self.at.size.h - top - PAD - FOOT_H), CELL_W, CELL_H);
         g.scroll = self.scroll;
         g
     }
@@ -158,7 +184,7 @@ impl Server {
         let own = vergence_shell::launcher::own(&self.shelf.apps);
         tracing::info!("apps: opened");
         self.close_menu();
-        self.launcher.open = Some(Open { at: Rectangle::new((x, y).into(), (w, h).into()), typed: String::new(), selected: 0, scroll: 0, tab: None, tabs, own, own_hover: None, held: None });
+        self.launcher.open = Some(Open { at: Rectangle::new((x, y).into(), (w, h).into()), typed: String::new(), selected: 0, scroll: 0, tab: None, tabs, own, own_hover: None, held: None, foot_hover: None, person: person_name() });
         self.redraw_all();
     }
 
@@ -323,6 +349,19 @@ impl Server {
             self.launcher_close();
             return self.shelf_act(Act::Start(id));
         }
+        // The footer: the screen locked, or the session dialog asked.
+        match open.foot_at(x, y) {
+            Some(Foot::Lock) => {
+                self.launcher_close();
+                self.lock_request("the launcher's Lock button");
+                return;
+            }
+            Some(Foot::Power) => {
+                self.launcher_close();
+                return self.session_dialog_open();
+            }
+            None => {}
+        }
         if let Some((tab, _)) = open.tab_rects().into_iter().find(|(_, r)| x >= r.x && x < r.right() && y >= r.y && y < r.bottom()) {
             let open = self.launcher.open.as_mut().unwrap();
             if open.tab != tab {
@@ -402,6 +441,9 @@ impl Server {
         let hover = open.own_at(at.x.floor() as i32, at.y.floor() as i32);
         let mut changed = hover != open.own_hover;
         open.own_hover = hover;
+        let foot = open.foot_at(at.x.floor() as i32, at.y.floor() as i32);
+        changed |= foot != open.foot_hover;
+        open.foot_hover = foot;
         if let Some(index) = open.grid().at(count, at.x.floor() as i32, at.y.floor() as i32)
             && index != open.selected
         {
@@ -452,6 +494,7 @@ impl Server {
         let (grid, field) = (open.grid(), open.field());
         let (tab, tab_rects) = (open.tab, open.tab_rects());
         let (own_rects, own_hover, own_list) = (open.own_rects(), open.own_hover, open.own.clone());
+        let (foot_rects, foot_hover, person) = (open.foot_rects(), open.foot_hover, open.person.clone());
         let own_pixels = (OWN_ICON as f64 * scale).round() as u32;
         let own_cells: Vec<(Rect, String, Option<_>, bool)> = own_rects
             .iter()
@@ -491,6 +534,7 @@ impl Server {
         let frost = self.frost_program(renderer);
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         (&typed, selected, grid.scroll, scale.to_bits(), at.size.w, at.size.h, found.len(), light, frost.is_some(), tab, tab_rects.len()).hash(&mut hasher);
+        (foot_hover, &person).hash(&mut hasher);
         let counts = vergence_shell::launcher::tabs(&self.shelf.apps, &found);
         for (index, _, name, icon, action) in &cells {
             (index, name, icon.is_some(), action).hash(&mut hasher);
@@ -670,6 +714,45 @@ impl Server {
                 }
             }
             scene.pop_clip();
+            // The footer: a line over it, the person, Lock and the power button.
+            let fy = h - PAD as f32 - FOOT_H as f32 + 2.0;
+            scene.fill(SceneRect::new(PAD as f32, fy, w - 2.0 * PAD as f32, 1.0), color(s.edge));
+            let mid = h - PAD as f32 - FOOT_BUTTON as f32 / 2.0;
+            if let Some(face) = face {
+                let initial: String = person.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default();
+                let d = 30.0;
+                let disc = SceneRect::new(PAD as f32 + 4.0, mid - d / 2.0, d, d);
+                scene.fill_rounded(disc, d / 2.0, color(vergence_look::ACCENT));
+                let b = bold.unwrap_or(face);
+                let m = fonts.metrics(b, 13.0);
+                let iw = fonts.layout(b, 13.0, &initial).1;
+                vergence_render::text(&mut scene, fonts, b, 13.0, Color::rgb(0xff, 0xff, 0xff), ScenePoint::new((disc.x + (d - iw) / 2.0).round(), (mid - (m.ascent + m.descent) / 2.0 + m.ascent).round()), &initial);
+                let m = fonts.metrics(face, 13.5);
+                vergence_render::text(&mut scene, fonts, face, 13.5, color(s.menu_ink), ScenePoint::new(disc.x + d + 10.0, (mid - (m.ascent + m.descent) / 2.0 + m.ascent).round()), &person);
+            }
+            for (f, r) in &foot_rects {
+                let r = local(*r);
+                if foot_hover == Some(*f) {
+                    scene.fill_rounded(r, vergence_look::RADIUS, color(s.hover));
+                }
+                let ink = color(s.menu_ink);
+                let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+                match f {
+                    Foot::Lock => {
+                        scene.stroke(SceneRect::new(cx - 7.0, cy - 1.0, 14.0, 10.0), 2.0, 1.8, ink);
+                        // The shackle: a half ring over the body.
+                        arc(&mut scene, cx, cy - 4.0, 4.5, std::f32::consts::PI, 2.0 * std::f32::consts::PI, ink);
+                        scene.line(ScenePoint::new(cx - 4.5, cy - 4.0), ScenePoint::new(cx - 4.5, cy - 1.0), 1.8, ink);
+                        scene.line(ScenePoint::new(cx + 4.5, cy - 4.0), ScenePoint::new(cx + 4.5, cy - 1.0), 1.8, ink);
+                    }
+                    Foot::Power => {
+                        // A ring open at the top, a bar through the gap.
+                        let gap = 0.75;
+                        arc(&mut scene, cx, cy + 1.0, 7.5, -std::f32::consts::FRAC_PI_2 + gap, 1.5 * std::f32::consts::PI - gap, ink);
+                        scene.line(ScenePoint::new(cx, cy - 8.0), ScenePoint::new(cx, cy + 0.5), 1.8, ink);
+                    }
+                }
+            }
             match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) {
                 Ok(p) => {
                     let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
@@ -713,4 +796,26 @@ impl Server {
 /// The bottom of the row's cells, in global points.
 fn c_bottom<T>(cells: &[(Rect, String, Option<T>, bool)]) -> f32 {
     cells.iter().map(|(r, ..)| r.bottom()).max().unwrap_or(0) as f32
+}
+
+/// An arc of a circle at (cx, cy), from angle `a` to `b` (radians, y down),
+/// as short lines.
+fn arc(scene: &mut Scene, cx: f32, cy: f32, r: f32, a: f32, b: f32, ink: Color) {
+    let steps = 24;
+    let at = |t: f32| ScenePoint::new(cx + r * t.cos(), cy + r * t.sin());
+    for i in 0..steps {
+        let (t0, t1) = (a + (b - a) * i as f32 / steps as f32, a + (b - a) * (i + 1) as f32 / steps as f32);
+        scene.line(at(t0), at(t1), 1.8, ink);
+    }
+}
+
+/// The person's name for the footer: the first part of their full name in
+/// the password file, else their login.
+fn person_name() -> String {
+    let login = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_default();
+    let full = std::fs::read_to_string("/etc/passwd").ok().and_then(|t| {
+        t.lines().map(|l| l.split(':').collect::<Vec<_>>()).find(|f| f.len() > 4 && f[0] == login).map(|f| f[4].split(',').next().unwrap_or("").trim().to_string())
+    });
+    let name = full.filter(|n| !n.is_empty()).unwrap_or(login);
+    name.chars().filter(|c| !c.is_control()).take(40).collect()
 }

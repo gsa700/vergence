@@ -533,7 +533,7 @@ impl Desktop {
                 MenuLine::Separator,
                 MenuLine::item(cmd::PROPERTIES, "Properties", ""),
                 // The desktop's own lines, the server's: Change wallpaper…,
-                // Settings…, Exit Vergence…
+                // Display settings… (Log Out is the launcher's power button).
                 MenuLine::Separator,
                 MenuLine::item(vergence_protocol::window::MENU_DESKTOP_LINES, "Desktop", ""),
             ];

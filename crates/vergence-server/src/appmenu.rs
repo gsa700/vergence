@@ -453,8 +453,7 @@ impl Server {
         let color = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
         let (w, h) = (rect.size.w as f32, rect.size.h as f32);
         let mut scene = Scene::new(w, h);
-        scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, color(s.menu));
-        scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, color(s.edge));
+        crate::menu::menu_ground(&mut scene, w, h, light);
         let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
         let face = fonts.face("sans-serif", 400, false);
         let rows = appmenu::rows((0, 0), lines);
@@ -464,11 +463,11 @@ impl Server {
             let lit = chosen == Some(i) || (open_sub == Some(i) && matches!(line, Line::Sub(_)));
             match line {
                 Line::Separator => {
-                    scene.fill(SceneRect::new(r.x + 6.0, r.y + (r.h / 2.0).floor(), r.w - 12.0, 1.0), color(s.separator));
+                    crate::menu::menu_separator(&mut scene, r, light);
                 }
                 Line::Search => {
                     let f = SceneRect::new(r.x, r.y + 2.0, r.w, r.h - 6.0);
-                    scene.fill_rounded(f, vergence_look::RADIUS, color(s.field));
+                    scene.fill_rounded(f, vergence_look::MENU_ROW_RADIUS, color(s.field));
                     // A magnifier.
                     let (cx, cy) = (f.x + 14.0, f.y + f.h / 2.0 - 1.0);
                     scene.stroke(SceneRect::new(cx - 4.5, cy - 4.5, 9.0, 9.0), 4.5, 1.25, color(s.menu_ink_off));
@@ -513,13 +512,13 @@ impl Server {
                 }
                 Line::Zoom { now, .. } => {
                     if lit {
-                        scene.fill_rounded(r, vergence_look::RADIUS, color(s.hover));
+                        scene.fill_rounded(r, vergence_look::MENU_ROW_RADIUS, color(s.hover));
                     }
                     let parts = appmenu::zoom_parts(vergence_shell::Rect::new(r.x as i32, r.y as i32, r.w as i32, r.h as i32));
                     for (k, p) in parts.iter().enumerate() {
                         let p = SceneRect::new(p.x as f32, p.y as f32, p.w as f32, p.h as f32);
                         if k != 1 {
-                            scene.fill_rounded(p, vergence_look::RADIUS, color(s.field));
+                            scene.fill_rounded(p, vergence_look::MENU_ROW_RADIUS, color(s.field));
                             let (cx, cy) = (p.x + p.w / 2.0, p.y + p.h / 2.0);
                             scene.line(ScenePoint::new(cx - 4.5, cy), ScenePoint::new(cx + 4.5, cy), 1.5, color(s.menu_ink));
                             if k == 2 {
@@ -547,7 +546,7 @@ impl Server {
                 }
                 Line::Item { label, keys, enabled, checked, pinned, .. } => {
                     if lit && *enabled {
-                        scene.fill_rounded(r, vergence_look::RADIUS, color(s.hover));
+                        scene.fill_rounded(r, vergence_look::MENU_ROW_RADIUS, color(s.hover));
                     }
                     let ink = if *enabled { s.menu_ink } else { s.menu_ink_off };
                     if let Some(face) = face {
@@ -581,7 +580,7 @@ impl Server {
                 }
                 Line::Sub(name) => {
                     if lit {
-                        scene.fill_rounded(r, vergence_look::RADIUS, color(s.hover));
+                        scene.fill_rounded(r, vergence_look::MENU_ROW_RADIUS, color(s.hover));
                     }
                     if let Some(face) = face {
                         let size = 13.0;

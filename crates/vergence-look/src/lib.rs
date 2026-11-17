@@ -29,9 +29,25 @@ impl Rgb {
 }
 
 /// **The one corner radius**: of a button's shape, a tab's top corners, a
-/// menu and its lines, a label, a scrollbar's ends as far as its width
+/// label, a scrollbar's ends as far as its width
 /// allows, and a window's own corners when the server rounds them.
 pub const RADIUS: f32 = 5.0;
+
+/// **Menus** (Dave, 2026-11-16: "the black rounded design", a standard for
+/// every right-click menu, light where the look is light): the server's
+/// (the desktop's, the dock's, a title bar's, an app's own) and the
+/// toolkit's in a window (a field's, a choice's list) alike. Their colors
+/// are [`ShelfLook`]'s `menu`, `edge`, `separator`, `hover` and inks. The
+/// panel's corners, a line's (its highlight), the room inside the panel, a
+/// line's height, a separator's height and how far its rule stays from the
+/// sides, and the text size.
+pub const MENU_RADIUS: f32 = 10.0;
+pub const MENU_ROW_RADIUS: f32 = 6.0;
+pub const MENU_PAD: f32 = 6.0;
+pub const MENU_ROW: f32 = 28.0;
+pub const MENU_SEP: f32 = 9.0;
+pub const MENU_SEP_INSET: f32 = 8.0;
+pub const MENU_TEXT: f32 = 13.5;
 
 /// The height of the title bar the server draws over a window that has none.
 pub const TITLE_H: f32 = 24.0;
@@ -288,7 +304,8 @@ pub const SHELF_DARK: ShelfLook = ShelfLook {
     tile: Rgb(70, 78, 98),
     tile_ink: Rgb(235, 235, 235),
     mark: BAR_DARK.ink_off,
-    menu: Rgb(43, 46, 59),
+    // Near black, hardly blue (the menus' standard, 2026-11-16).
+    menu: Rgb(42, 44, 51),
     menu_ink: Rgb(235, 235, 235),
     menu_ink_off: Rgb(128, 128, 134),
     edge: Rgb(64, 68, 80),

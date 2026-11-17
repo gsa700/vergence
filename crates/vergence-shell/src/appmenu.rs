@@ -88,9 +88,9 @@ impl Line {
 
 /// Sizes in points.
 pub const WIDTH: i32 = 280;
-pub const ITEM_H: i32 = 28;
+pub const ITEM_H: i32 = vergence_look::MENU_ROW as i32;
 pub const SEARCH_H: i32 = 36;
-pub const SEP_H: i32 = 9;
+pub const SEP_H: i32 = vergence_look::MENU_SEP as i32;
 pub const NOTE_H: i32 = 40;
 pub const HEADER_H: i32 = 24;
 /// The submenu of every command, with its keys.
@@ -98,7 +98,7 @@ pub const ALL: &str = "Keyboard shortcuts";
 /// An app with more commands than this has a search field at the top (the
 /// terminal's 14 do not need one; typing searches anyway).
 pub const SMALL: usize = 24;
-pub const PAD: i32 = 6;
+pub const PAD: i32 = vergence_look::MENU_PAD as i32;
 /// At most this many results while searching.
 pub const MAX_FOUND: usize = 12;
 

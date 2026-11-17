@@ -48,7 +48,7 @@ pub fn builtin() -> Vec<Action> {
         Action::new("desktop.show", "Show the desktop", "minimize all windows hide"),
         Action::new("lock.screen", "Lock the screen", "lock away secure password super l"),
         Action::new("dock.drawer", "Open the drawer", "applets tiles status dock"),
-        Action::new("session.exit", "Exit Vergence…", "log out logout quit session end"),
+        Action::new("session.exit", "Log Out…", "log out logout exit vergence quit session end sleep restart shut down power off"),
     ];
     for (page, name, words) in PAGES {
         out.push(Action::new(&format!("settings.{page}"), &format!("{name} settings"), &format!("open preferences {words}")));
@@ -87,7 +87,8 @@ mod tests {
         assert_eq!(names("mute"), ["Mute sound"], "\"unmute\" does not begin with \"mute\"");
         assert_eq!(names("unm"), ["Unmute sound"]);
         assert!(names("screens off").contains(&"Turn the screens off".to_string()));
-        assert!(names("log out").contains(&"Exit Vergence…".to_string()));
+        assert!(names("log out").contains(&"Log Out…".to_string()));
+        assert!(names("shut down").contains(&"Log Out…".to_string()), "the dialog holds Shut Down too");
         assert_eq!(names("sound set"), ["Sound settings"], "every word must be found");
         assert!(names("").is_empty(), "nothing typed, nothing found");
         assert!(names("zzz").is_empty());

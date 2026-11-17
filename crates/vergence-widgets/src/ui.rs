@@ -655,7 +655,7 @@ impl<M: Clone> Ui<M> {
         let at = self.shown(i);
         let item = (step + 2.0 * ITEM_PAD).ceil();
         let (w, h) = self.size;
-        let full = options.len() as f32 * item + 8.0;
+        let full = options.len() as f32 * item + 2.0 * vergence_look::MENU_PAD;
         let below = h - (at.y + at.h) - 8.0;
         let above = at.y - 8.0;
         let (y, lh) = if full <= below || below >= above {
@@ -675,7 +675,7 @@ impl<M: Clone> Ui<M> {
         if !inside(&r, x, y) {
             return None;
         }
-        let k = ((y - r.y - 4.0 + self.open?.offset) / item).floor();
+        let k = ((y - r.y - vergence_look::MENU_PAD + self.open?.offset) / item).floor();
         (k >= 0.0 && (k as usize) < n).then_some(k as usize)
     }
 
@@ -810,9 +810,9 @@ impl<M: Clone> Ui<M> {
         }
         self.focus = Some(id);
         // Its size from its words (measured again when drawn), kept on the window.
-        let row = 24.0;
-        let w = items.iter().map(|(l, _)| l.chars().count()).max().unwrap_or(4) as f32 * 7.5 + 28.0;
-        let h = items.len() as f32 * row + 8.0;
+        let row = vergence_look::MENU_ROW;
+        let w = (items.iter().map(|(l, _)| l.chars().count()).max().unwrap_or(4) as f32 * 7.5 + 40.0).max(160.0);
+        let h = items.len() as f32 * row + 2.0 * vergence_look::MENU_PAD;
         let rx = x.min(self.size.0 - w - 4.0).max(4.0);
         let ry = if y + h <= self.size.1 - 4.0 { y } else { (y - h).max(4.0) };
         self.field_menu = Some(FieldMenu { id, items, hl: 0, rect: Rect::new(rx, ry, w, h), row });
@@ -1104,7 +1104,7 @@ impl<M: Clone> Ui<M> {
         if let Some(menu) = self.field_menu.clone() {
             let row_at = |x: f32, y: f32| -> Option<usize> {
                 let m = &menu;
-                (inside(&m.rect, x, y) && y >= m.rect.y + 4.0).then(|| (((y - m.rect.y - 4.0) / m.row) as usize).min(m.items.len() - 1))
+                (inside(&m.rect, x, y) && y >= m.rect.y + vergence_look::MENU_PAD).then(|| (((y - m.rect.y - vergence_look::MENU_PAD) / m.row) as usize).min(m.items.len() - 1))
             };
             match *input {
                 Input::PointerMoved { x, y } => {
@@ -2007,20 +2007,18 @@ impl<M: Clone> Ui<M> {
     fn draw_field_menu(&self, scene: &mut Scene, fonts: &mut Fonts, theme: &Theme) {
         let Some(m) = &self.field_menu else { return };
         let r = m.rect;
-        let ground = if theme.dark { over(theme.card, alpha(Color::rgb(255, 255, 255), 10)) } else { Color::rgb(255, 255, 255) };
-        scene.fill_rounded(Rect::new(r.x - 1.0, r.y + 1.0, r.w + 2.0, r.h + 2.0), vergence_look::RADIUS + 1.0, alpha(Color::rgb(0, 0, 0), 50));
-        scene.fill_rounded(r, vergence_look::RADIUS, ground);
-        scene.stroke(r, vergence_look::RADIUS, 1.0, if theme.high_contrast { theme.text } else { theme.line });
+        let look = menu_ground(scene, r, theme);
         let Some(face) = fonts.face(&theme.font, 400, false).or_else(|| fonts.face("sans-serif", 400, false)) else { return };
         let size = theme.text_size;
         let ascent = fonts.metrics(face, size).ascent;
+        let pad = vergence_look::MENU_PAD;
         for (k, (label, act)) in m.items.iter().enumerate() {
-            let row = Rect::new(r.x + 4.0, r.y + 4.0 + k as f32 * m.row, r.w - 8.0, m.row);
+            let row = Rect::new(r.x + pad, r.y + pad + k as f32 * m.row, r.w - 2.0 * pad, m.row);
             let hl = k == m.hl && *act != FieldAct::Nothing;
             if hl {
-                scene.fill_rounded(row, vergence_look::RADIUS, theme.accent);
+                scene.fill_rounded(row, vergence_look::MENU_ROW_RADIUS, look.hover);
             }
-            let col = if hl { Color::rgb(255, 255, 255) } else if *act == FieldAct::Nothing { theme.dim } else { theme.text };
+            let col = if *act == FieldAct::Nothing { look.ink_off } else { look.ink };
             text(scene, fonts, face, size, col, Point::new(row.x + 8.0, (row.y + (m.row - size * 1.2) / 2.0 + ascent).round()), label);
         }
     }
@@ -2037,15 +2035,12 @@ impl<M: Clone> Ui<M> {
         let Some(o) = self.open else { return };
         let Some((r, item, _)) = self.list_rect() else { return };
         let Some(Node { what: What::Choice { options, selected, size, step, .. }, .. }) = self.node(o.id) else { return };
-        let ground = if theme.dark { over(theme.card, alpha(Color::rgb(255, 255, 255), 10)) } else { Color::rgb(255, 255, 255) };
-        // A shadow, then the list.
-        scene.fill_rounded(Rect::new(r.x - 1.0, r.y + 1.0, r.w + 2.0, r.h + 2.0), vergence_look::RADIUS + 1.0, alpha(Color::rgb(0, 0, 0), 50));
-        scene.fill_rounded(r, vergence_look::RADIUS, ground);
-        scene.stroke(r, vergence_look::RADIUS, 1.0, if theme.high_contrast { theme.text } else { theme.line });
+        let look = menu_ground(scene, r, theme);
         let face: Option<FaceId> = fonts.face(&theme.font, 400, false).or_else(|| fonts.face("sans-serif", 400, false));
         let bold: Option<FaceId> = fonts.face(&theme.font, 600, false).or(face);
         let ascent = face.map_or(size * 0.8, |f| fonts.metrics(f, *size).ascent);
-        let inner = Rect::new(r.x + 4.0, r.y + 4.0, r.w - 8.0, r.h - 8.0);
+        let pad = vergence_look::MENU_PAD;
+        let inner = Rect::new(r.x + pad, r.y + pad, r.w - 2.0 * pad, r.h - 2.0 * pad);
         scene.push_clip(inner, 0.0);
         for (k, opt) in options.iter().enumerate() {
             let y = inner.y + k as f32 * item - o.offset;
@@ -2055,9 +2050,9 @@ impl<M: Clone> Ui<M> {
             let row = Rect::new(inner.x, y, inner.w, item);
             let hl = o.hl == Some(k);
             if hl {
-                scene.fill_rounded(row, vergence_look::RADIUS, theme.accent);
+                scene.fill_rounded(row, vergence_look::MENU_ROW_RADIUS, look.hover);
             }
-            let col = if hl { Color::rgb(255, 255, 255) } else { theme.text };
+            let col = look.ink;
             // The chosen one in semibold.
             if let Some(f) = if *selected == Some(k) { bold } else { face } {
                 text(scene, fonts, f, *size, col, Point::new(row.x + FIELD_PAD_H, (y + (item - step) / 2.0 + ascent).round()), opt);
@@ -2209,4 +2204,24 @@ impl<M> Node<M> {
     pub(crate) fn focusable(&self) -> bool {
         self.active() && !matches!(self.what, What::Drawing { .. })
     }
+}
+
+/// A menu's colors in a window (vergence-look's menus: the server's, so a
+/// field's menu and a choice's list look as the right-click menus do).
+struct MenuInk {
+    hover: Color,
+    ink: Color,
+    ink_off: Color,
+}
+
+/// A menu's panel at `r` in a window: a soft shadow, the rounded ground and
+/// its edge, light or dark as the window is; its colors.
+fn menu_ground(scene: &mut Scene, r: Rect, theme: &Theme) -> MenuInk {
+    let s = vergence_look::shelf_look(!theme.dark);
+    let c = |k: vergence_look::Rgb| Color::rgb(k.0, k.1, k.2);
+    let radius = vergence_look::MENU_RADIUS;
+    scene.fill_rounded(Rect::new(r.x - 1.0, r.y + 1.0, r.w + 2.0, r.h + 2.0), radius + 1.0, alpha(Color::rgb(0, 0, 0), 60));
+    scene.fill_rounded(r, radius, c(s.menu));
+    scene.stroke(r, radius, vergence_look::EDGE, if theme.high_contrast { theme.text } else { c(s.edge) });
+    MenuInk { hover: c(s.hover), ink: c(s.menu_ink), ink_off: c(s.menu_ink_off) }
 }

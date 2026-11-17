@@ -1,7 +1,7 @@
 // The desktop menu (server milestone 1, 2026-11-07; reshaped 2026-11-15,
 // files milestone 1): right-click on the bare desktop, or on the desktop's
-// icons, for Open Terminal, the settings' pages, and "Exit Vergence…", which
-// asks first and closes the apps before ending (exit.rs); a window's right
+// icons, for Open Terminal and the desktop's settings (wallpaper, screens;
+// Log Out moved to the launcher's power button, Dave 2026-11-16); a window's right
 // click it asks the server to answer (WinRequest::ContextMenu) shows the
 // window's commands first (the desktop's icons: New folder, Open, Rename...). Drawn by the server like the
 // title bars (solid colors, text rasterized per monitor at its own pixels), sized
@@ -16,7 +16,7 @@
 // (none by default: applications are the dock's and the launcher's). Re-read
 // each time the menu opens.
 
-use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 use serde::Deserialize;
 use smithay::{
@@ -24,23 +24,24 @@ use smithay::{
         allocator::Fourcc,
         renderer::{
             element::{
-                Id, Kind,
+                Kind,
                 memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-                solid::SolidColorRenderElement,
             },
             gles::GlesRenderer,
-            utils::CommitCounter,
         },
     },
-    utils::{Logical, Point, Rectangle, Size, Transform},
+    utils::{Logical, Point, Rectangle, Transform},
 };
+
+use vergence_scene::{Color, Point as ScenePoint, Rect as SceneRect, Scene};
 
 use crate::{Server, decor::SceneElement};
 
 const WIDTH: i32 = 220;
-const ITEM_H: i32 = 26;
-const SEP_H: i32 = 9;
-const PAD: i32 = 4;
+/// The menus' measurements (vergence-look): rows, separators, the room inside.
+const ITEM_H: i32 = vergence_look::MENU_ROW as i32;
+const SEP_H: i32 = vergence_look::MENU_SEP as i32;
+const PAD: i32 = vergence_look::MENU_PAD as i32;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Item {
@@ -69,9 +70,6 @@ pub(crate) enum Entry {
     Command(crate::win::Win, u32, String),
     /// A program to start (Settings at a page, the Terminal), and its name.
     Run(String, Vec<String>),
-    /// "Exit Vergence…": asks first (Dave, 2026-11-15: "confirm on logout"),
-    /// in the log out dialog (session_dialog.rs; Dave, 2026-11-16).
-    Exit,
 }
 
 /// What a window's menu does.
@@ -114,25 +112,16 @@ pub struct OpenMenu {
     at: Point<i32, Logical>,
     entries: Vec<Entry>,
     hover: Option<usize>,
-    /// Damage ids: background, edge, hover, separators..., then the edge's
-    /// other three sides.
-    ids: Vec<Id>,
-    commit: CommitCounter,
-    /// Label rasters per (entry, scale bits, light).
-    labels: HashMap<(usize, u64, bool), MemoryRenderBuffer>,
-    /// The style it was last drawn in (its solid parts' damage follows it).
-    light: bool,
-    /// The frost behind it (look milestone 1, step 5).
-    backdrop: crate::backdrop::Slot,
-    /// Damage ids for the layouts' pictures: five per entry (four lines, the part).
-    icons: Vec<Id>,
+    /// Its picture (one, as the app menu's: rounded, the menus' look in
+    /// vergence-look), and what it was drawn from.
+    picture: Option<(u64, MemoryRenderBuffer)>,
     /// Opened by the pointer resting on a maximize button: it closes when the
     /// pointer has left both (snap.rs, `layouts_tick`).
     pub by_hover: bool,
 }
 
 /// The apps for the menu: desktop.toml's, else the usual ones that are installed.
-/// The desktop's own entries, after a window's or the Terminal: settings, then Exit.
+/// The desktop's own entries, after a window's or the Terminal: its settings.
 fn desktop_entries() -> Vec<Entry> {
     let settings = |label: &str, page: Option<&str>| {
         let mut argv = vec!["vergence-settings".to_string()];
@@ -141,11 +130,11 @@ fn desktop_entries() -> Vec<Entry> {
         }
         Entry::Run(label.into(), argv)
     };
-    vec![Entry::Separator, settings("Change wallpaper…", Some("wallpaper")), settings("Display settings…", Some("screens")), settings("Settings…", None), Entry::Separator, Entry::Exit]
+    vec![Entry::Separator, settings("Change wallpaper…", Some("wallpaper")), settings("Display settings…", Some("screens"))]
 }
 
-/// The desktop menu's own lines (the settings, "Exit Vergence…", the
-/// apps desktop.toml names) for the desktop's right-click menu on the
+/// The desktop menu's own lines (Change wallpaper…, Display settings…,
+/// the apps desktop.toml names) for the desktop's right-click menu on the
 /// bare desktop (bus v20, appmenu.rs): the lines, numbered from `first`,
 /// and what each does, carried out here (`Server::menu_run`), never
 /// sent to the desktop's program.
@@ -158,7 +147,6 @@ pub(crate) fn desktop_own_lines(first: u32) -> (Vec<vergence_protocol::window::M
         let label = match &e {
             Entry::App(item) => item.name.clone(),
             Entry::Run(label, _) => label.clone(),
-            Entry::Exit => "Exit Vergence…".into(),
             Entry::Separator => {
                 if lines.last().is_some_and(|l| *l != MenuLine::Separator) {
                     lines.push(MenuLine::Separator);
@@ -177,6 +165,20 @@ pub(crate) fn desktop_own_lines(first: u32) -> (Vec<vergence_protocol::window::M
         own.push((id, e));
     }
     (lines, own)
+}
+
+/// A menu's panel (vergence-look's menus): rounded, its ground and edge.
+pub(crate) fn menu_ground(scene: &mut Scene, w: f32, h: f32, light: bool) {
+    let s = vergence_look::shelf_look(light);
+    scene.fill_rounded(SceneRect::new(0.0, 0.0, w, h), vergence_look::MENU_RADIUS, Color::rgb(s.menu.0, s.menu.1, s.menu.2));
+    scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::MENU_RADIUS, vergence_look::EDGE, Color::rgb(s.edge.0, s.edge.1, s.edge.2));
+}
+
+/// A separator line's rule, in its row `r`.
+pub(crate) fn menu_separator(scene: &mut Scene, r: SceneRect, light: bool) {
+    let s = vergence_look::shelf_look(light);
+    let inset = vergence_look::MENU_SEP_INSET;
+    scene.fill(SceneRect::new(r.x + inset, r.y + (r.h / 2.0).floor(), r.w - 2.0 * inset, 1.0), Color::rgb(s.separator.0, s.separator.1, s.separator.2));
 }
 
 /// Applications desktop.toml's [[menu.item]] puts on the desktop menu (none by default).
@@ -273,20 +275,7 @@ impl Server {
 
     /// A menu of these entries at `pos`, kept on its screen.
     fn open_entries(&mut self, pos: Point<f64, Logical>, entries: Vec<Entry>) {
-        let ids = (0..6 + entries.len()).map(|_| Id::new()).collect();
-        let icons = (0..5 * entries.len()).map(|_| Id::new()).collect();
-        let mut m = OpenMenu {
-            at: pos.to_i32_round(),
-            entries,
-            hover: None,
-            ids,
-            commit: CommitCounter::default(),
-            labels: HashMap::new(),
-            light: false,
-            backdrop: None,
-            icons,
-            by_hover: false,
-        };
+        let mut m = OpenMenu { at: pos.to_i32_round(), entries, hover: None, picture: None, by_hover: false };
         if let Some(out) = self.output_at_pointer().map(|o| self.work_area(o)) {
             let (w, h) = (WIDTH, m.height());
             m.at.x = m.at.x.min(out.loc.x + out.size.w - w).max(out.loc.x);
@@ -328,9 +317,7 @@ impl Server {
         if entries.is_empty() {
             return;
         }
-        let ids = (0..6 + entries.len()).map(|_| Id::new()).collect();
-        let icons = (0..5 * entries.len()).map(|_| Id::new()).collect();
-        let mut m = OpenMenu { at: slot.loc, entries, hover: None, ids, commit: CommitCounter::default(), labels: HashMap::new(), light: false, backdrop: None, icons, by_hover: false };
+        let mut m = OpenMenu { at: slot.loc, entries, hover: None, picture: None, by_hover: false };
         // Beside the icon, on the side `towards` names, a little off the dock.
         let off = vergence_look::SHELF_POPUP_GAP as i32;
         m.at = match towards {
@@ -420,7 +407,6 @@ impl Server {
             let h = m.entry_at(pos);
             if h != m.hover {
                 m.hover = h;
-                m.commit.increment();
             }
         }
     }
@@ -488,138 +474,103 @@ impl Server {
                     }
                 }
             }
-            // Asked first, in the log out dialog over the dimmed screens (session_dialog.rs).
-            Entry::Exit => self.session_dialog_open(),
             Entry::Separator => {}
         }
     }
 
-    /// The menu's elements for an output, front to back (empty if closed or elsewhere).
+    /// The menu's elements for an output (empty if closed or elsewhere):
+    /// one picture, drawn again when what it shows changes.
     pub fn menu_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
         // Light or dark (look milestone 1): the dock's and menus' look.
         let light = self.light_style();
-        let look = vergence_look::shelf_look(light);
-        let frost = self.frost_program(renderer);
-        let strength = vergence_look::frost_strength(self.look_setting("frost"));
-        let frost_r = vergence_look::frost_radius(self.look_setting("frost"));
-        let accent = {
-            let a = self.accent();
-            [a.r as f32 / 255.0, a.g as f32 / 255.0, a.b as f32 / 255.0, 1.0]
-        };
-        let Some(m) = self.menu.as_mut() else { return Vec::new() };
-        if m.light != light {
-            m.light = light;
-            m.commit.increment();
-        }
-        if !m.rect().overlaps(out) {
+        let accent = self.accent();
+        let Some(m) = self.menu.as_ref() else { return Vec::new() };
+        let rect = m.rect();
+        if !rect.overlaps(out) {
             return Vec::new();
         }
-        let phys = |r: Rectangle<i32, Logical>| {
-            let a = (r.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-            let b = (r.loc + r.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-            Rectangle::new(a, (b.x - a.x, b.y - a.y).into())
+        let label = |e: &Entry| match e {
+            Entry::App(item) => item.name.clone(),
+            Entry::Window(_, title) => title.clone(),
+            Entry::Shelf(_, label) => label.clone(),
+            Entry::Tab(_, _, _, label) => label.clone(),
+            Entry::Layout(_, _, label) => label.clone(),
+            Entry::Command(_, _, label) => label.clone(),
+            Entry::Run(label, _) => label.clone(),
+            Entry::Separator => String::new(),
         };
-        let mut els = Vec::new();
-        let rows = m.rows();
-        // Labels (front).
-        let font = self.title_font.as_ref();
-        for (i, e) in m.entries.iter().enumerate() {
-            let label = match e {
-                Entry::App(item) => item.name.clone(),
-                Entry::Window(_, title) => title.clone(),
-                Entry::Shelf(_, label) => label.clone(),
-                Entry::Tab(_, _, _, label) => label.clone(),
-                Entry::Layout(_, _, label) => label.clone(),
-                Entry::Command(_, _, label) => label.clone(),
-                Entry::Run(label, _) => label.clone(),
-                Entry::Exit => "Exit Vergence…".into(),
-                Entry::Separator => continue,
-            };
-            let Some(font) = font else { continue };
-            let r = rows[i];
-            // A layout's picture takes the row's start (drawn below with the solids).
-            let indent = if matches!(e, Entry::Layout(_, LayoutAct::Snap(_) | LayoutAct::Maximize, _)) { 8 + ICON_W } else { 0 };
-            let text = Rectangle::new((r.loc.x + 8 + indent, r.loc.y).into(), (r.size.w - 16 - indent, r.size.h).into());
-            let (pw, ph) = ((text.size.w as f64 * scale).round() as i32, (text.size.h as f64 * scale).round() as i32);
-            let buf = m.labels.entry((i, scale.to_bits(), light)).or_insert_with(|| {
-                let rgba = font.render(&label, pw as usize, ph as usize, scale, look.menu_ink.floats3());
-                MemoryRenderBuffer::from_slice(&rgba, Fourcc::Abgr8888, (pw, ph), 1, Transform::Normal, None)
-            });
-            let at = (text.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>().to_f64();
-            let src = Rectangle::<f64, Logical>::from_size((pw as f64, ph as f64).into());
-            let size: Size<i32, Logical> = text.size;
-            if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(renderer, at, buf, None, Some(src), Some(size), Kind::Unspecified) {
-                els.push(SceneElement::Memory(el));
-            }
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for e in &m.entries {
+            label(e).hash(&mut hasher);
+            matches!(e, Entry::Separator).hash(&mut hasher);
         }
-        // The layouts' pictures: a small screen, its part filled in the accent.
-        for (i, e) in m.entries.iter().enumerate() {
-            let zone = match e {
-                Entry::Layout(_, LayoutAct::Snap(z), _) => Some(*z),
-                Entry::Layout(_, LayoutAct::Maximize, _) => None,
-                _ => continue,
-            };
-            let r = rows[i];
-            let (x, y) = (r.loc.x + 8, r.loc.y + (r.size.h - ICON_H) / 2);
-            let screen = vergence_shell::Rect::new(x, y, ICON_W, ICON_H);
-            let part = match zone {
-                Some(z) => vergence_shell::snap::zone_rect(z, screen, true).0,
-                None => screen,
-            };
-            let lines = [
-                Rectangle::new((x, y).into(), (ICON_W, 1).into()),
-                Rectangle::new((x, y + ICON_H - 1).into(), (ICON_W, 1).into()),
-                Rectangle::new((x, y).into(), (1, ICON_H).into()),
-                Rectangle::new((x + ICON_W - 1, y).into(), (1, ICON_H).into()),
-            ];
-            for (k, l) in lines.into_iter().enumerate() {
-                els.push(SceneElement::Solid(SolidColorRenderElement::new(m.icons[5 * i + k].clone(), phys(l), m.commit, look.menu_ink.floats(), Kind::Unspecified)));
-            }
-            // Inside the picture's line, a point of room round the part.
-            let fill = Rectangle::new((part.x + 2, part.y + 2).into(), ((part.w - 3).max(1), (part.h - 3).max(1)).into());
-            els.push(SceneElement::Solid(SolidColorRenderElement::new(m.icons[5 * i + 4].clone(), phys(fill), m.commit, accent, Kind::Unspecified)));
-        }
-        // Hover, separators, edge and background (back).
-        if let Some(h) = m.hover {
-            els.push(SceneElement::Solid(SolidColorRenderElement::new(m.ids[2].clone(), phys(rows[h]), m.commit, look.hover.floats(), Kind::Unspecified)));
-        }
-        for (i, e) in m.entries.iter().enumerate() {
-            if *e == Entry::Separator {
-                let r = rows[i];
-                let line = Rectangle::new((r.loc.x + 6, r.loc.y + SEP_H / 2).into(), (r.size.w - 12, 1).into());
-                els.push(SceneElement::Solid(SolidColorRenderElement::new(m.ids[3 + i].clone(), phys(line), m.commit, look.separator.floats(), Kind::Unspecified)));
-            }
-        }
-        let rect = m.rect();
-        let inner = Rectangle::new((rect.loc.x + 1, rect.loc.y + 1).into(), (rect.size.w - 2, rect.size.h - 2).into());
-        // Its ground: the frost of what is behind it, or solid.
-        match frost {
-            Some(program) => {
-                let fl = crate::backdrop::Look {
-                    tint: crate::backdrop::unit(look.menu),
-                    strength,
-                    ink: crate::backdrop::unit(look.menu_ink),
-                    need: 5.0,
-                    radius: frost_r * scale as f32,
-                    corner: 0.0,
-                    bottom: false,
+        (m.hover, light, scale.to_bits(), accent.r, accent.g, accent.b, rect.size.w, rect.size.h).hash(&mut hasher);
+        let stamp = hasher.finish();
+        if m.picture.as_ref().map(|(k, _)| *k) != Some(stamp) {
+            let look = vergence_look::shelf_look(light);
+            let color = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
+            let (w, h) = (rect.size.w as f32, rect.size.h as f32);
+            let mut scene = Scene::new(w, h);
+            menu_ground(&mut scene, w, h, light);
+            let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
+            let face = fonts.face("sans-serif", 400, false);
+            let local: Vec<SceneRect> = m.rows().iter().map(|r| SceneRect::new((r.loc.x - rect.loc.x) as f32, (r.loc.y - rect.loc.y) as f32, r.size.w as f32, r.size.h as f32)).collect();
+            for (i, e) in m.entries.iter().enumerate() {
+                let r = local[i];
+                if *e == Entry::Separator {
+                    menu_separator(&mut scene, r, light);
+                    continue;
+                }
+                if m.hover == Some(i) {
+                    scene.fill_rounded(r, vergence_look::MENU_ROW_RADIUS, color(look.hover));
+                }
+                // A layout's picture: a small screen, its part filled in the accent.
+                let zone = match e {
+                    Entry::Layout(_, LayoutAct::Snap(z), _) => Some(Some(*z)),
+                    Entry::Layout(_, LayoutAct::Maximize, _) => Some(None),
+                    _ => None,
                 };
-                if let Some(e) = crate::backdrop::element(renderer, &mut m.backdrop, phys(inner), program, &fl) {
-                    els.push(SceneElement::Backdrop(e));
+                let mut indent = 0.0;
+                if let Some(zone) = zone {
+                    let (x, y) = (r.x as i32 + 8, r.y as i32 + (r.h as i32 - ICON_H) / 2);
+                    let screen = vergence_shell::Rect::new(x, y, ICON_W, ICON_H);
+                    let part = match zone {
+                        Some(z) => vergence_shell::snap::zone_rect(z, screen, true).0,
+                        None => screen,
+                    };
+                    scene.stroke(SceneRect::new(x as f32 + 0.5, y as f32 + 0.5, ICON_W as f32 - 1.0, ICON_H as f32 - 1.0), 1.0, 1.0, color(look.menu_ink));
+                    scene.fill(SceneRect::new(part.x as f32 + 2.0, part.y as f32 + 2.0, (part.w - 3).max(1) as f32, (part.h - 3).max(1) as f32), Color::rgb(accent.r, accent.g, accent.b));
+                    indent = 8.0 + ICON_W as f32;
+                }
+                if let Some(face) = face {
+                    let size = vergence_look::MENU_TEXT;
+                    let mt = fonts.metrics(face, size);
+                    scene.push_clip(SceneRect::new(r.x + 10.0 + indent, r.y, r.w - 20.0 - indent, r.h), 0.0);
+                    vergence_render::text(&mut scene, fonts, face, size, color(look.menu_ink), ScenePoint::new(r.x + 10.0 + indent, (r.y + (r.h - mt.ascent - mt.descent) / 2.0 + mt.ascent).round()), &label(e));
+                    scene.pop_clip();
                 }
             }
-            None => els.push(SceneElement::Solid(SolidColorRenderElement::new(m.ids[0].clone(), phys(inner), m.commit, look.menu.floats(), Kind::Unspecified))),
+            match vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) {
+                Ok(p) => {
+                    let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+                    if let Some(m) = self.menu.as_mut() {
+                        m.picture = Some((stamp, buffer));
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("menu: could not be drawn: {e}");
+                    return Vec::new();
+                }
+            }
         }
-        // The edge: four lines round it, not a rectangle behind the ground (the
-        // frost would show that instead of what is behind the menu).
-        let (x, y, w, h) = (rect.loc.x, rect.loc.y, rect.size.w, rect.size.h);
-        let sides = [Rectangle::new((x, y).into(), (w, 1).into()), Rectangle::new((x, y + h - 1).into(), (w, 1).into()), Rectangle::new((x, y + 1).into(), (1, h - 2).into()), Rectangle::new((x + w - 1, y + 1).into(), (1, h - 2).into())];
-        let n = m.ids.len();
-        for (i, side) in sides.into_iter().enumerate() {
-            let id = if i == 0 { m.ids[1].clone() } else { m.ids[n - 4 + i].clone() };
-            els.push(SceneElement::Solid(SolidColorRenderElement::new(id, phys(side), m.commit, look.edge.floats(), Kind::Unspecified)));
+        let Some((_, buffer)) = self.menu.as_ref().and_then(|m| m.picture.as_ref()) else { return Vec::new() };
+        let a = (rect.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+        let b = (rect.loc + rect.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+        let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
+        match MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(rect.size), Kind::Unspecified) {
+            Ok(el) => vec![SceneElement::Memory(el)],
+            Err(_) => Vec::new(),
         }
-        els
     }
 }
 
@@ -632,10 +583,10 @@ mod tests {
     fn the_desktop_menu_keeps_its_own_lines() {
         let first = vergence_protocol::window::MENU_SERVER_IDS;
         let (lines, own) = desktop_own_lines(first);
-        assert_eq!(own.last().map(|(_, e)| e), Some(&Entry::Exit), "Exit Vergence… last");
+        assert!(matches!(own.last().map(|(_, e)| e), Some(Entry::Run(l, _)) if l == "Display settings…"), "the screens' settings last");
+        assert!(!lines.iter().any(|l| matches!(l, MenuLine::Item { label, .. } if label.contains("Log Out") || label == "Settings…")), "Log Out is the launcher's");
         assert!(own.iter().enumerate().all(|(i, (id, _))| *id == first + i as u32), "numbered from the server's ids");
         assert_eq!(lines.iter().filter(|l| matches!(l, MenuLine::Item { .. })).count(), own.len());
-        assert!(lines.iter().any(|l| matches!(l, MenuLine::Item { label, .. } if label == "Settings…")));
         assert_ne!(lines.first(), Some(&MenuLine::Separator), "no separator first");
     }
 }
