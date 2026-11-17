@@ -75,4 +75,5 @@ of three boards) settled it.*
    footer (step 2) went with it: Lock Screen and Log Out… are its last
    lines. *Lost for now*: dragging an application from the launcher to the
    dock, its right click (Pin to the dock), and finding the named actions
-   by typing (Sound settings, Mute...).
+   by typing (Sound settings, Mute...). Dave (2026-11-16): left out until
+   real use shows they are missed.
