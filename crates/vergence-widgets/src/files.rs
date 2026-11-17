@@ -24,6 +24,128 @@ pub enum SortBy {
     Name,
     Size,
     Changed,
+    /// By what the type is called ("Plain Text Document"), then by name.
+    Kind,
+}
+
+/// How tall the list's rows are (files milestone 2: Finder's View Options).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum RowSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+impl RowSize {
+    /// From a setting's words ("small", "medium", "large"); Medium otherwise.
+    pub fn parse(s: &str) -> RowSize {
+        match s.trim().trim_matches('"') {
+            "small" => RowSize::Small,
+            "large" => RowSize::Large,
+            _ => RowSize::Medium,
+        }
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            RowSize::Small => "small",
+            RowSize::Medium => "medium",
+            RowSize::Large => "large",
+        }
+    }
+
+    /// A row's height in points (one line of name).
+    pub fn height(self) -> f32 {
+        match self {
+            RowSize::Small => 24.0,
+            RowSize::Medium => 30.0,
+            RowSize::Large => 38.0,
+        }
+    }
+
+    /// The mark's size, times the small one.
+    fn mark(self) -> f32 {
+        match self {
+            RowSize::Small => 1.0,
+            RowSize::Medium => 1.2,
+            RowSize::Large => 1.5,
+        }
+    }
+
+    /// The name's text size; the other columns' a point less.
+    fn text(self) -> f32 {
+        match self {
+            RowSize::Small => 12.0,
+            RowSize::Medium => 12.5,
+            RowSize::Large => 13.5,
+        }
+    }
+}
+
+/// The list's columns after the name, in order.
+pub const COLUMNS: [(&str, SortBy); 3] = [("Date Changed", SortBy::Changed), ("Size", SortBy::Size), ("Kind", SortBy::Kind)];
+/// Their widths unless changed, and the narrowest and widest they may be.
+pub const COLUMN_WIDTHS: [f32; 3] = [140.0, 80.0, 150.0];
+pub const COLUMN_MIN: f32 = 50.0;
+pub const COLUMN_MAX: f32 = 420.0;
+
+/// How the list looks (files milestone 2): row size, the columns' widths
+/// (as [`COLUMNS`]), whether the Kind column shows, striped rows, and the
+/// entries grouped by their family under headings.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListLook {
+    pub rows: RowSize,
+    pub widths: [f32; 3],
+    pub kind: bool,
+    pub stripes: bool,
+    pub group: bool,
+}
+
+impl Default for ListLook {
+    fn default() -> ListLook {
+        ListLook { rows: RowSize::Medium, widths: COLUMN_WIDTHS, kind: true, stripes: true, group: false }
+    }
+}
+
+/// The widths from a setting's words ("140,80,150"), each kept in bounds;
+/// the usual ones for any that are missing or wrong.
+pub fn parse_widths(s: &str) -> [f32; 3] {
+    let mut w = COLUMN_WIDTHS;
+    for (i, part) in s.trim().trim_matches('"').split(',').take(3).enumerate() {
+        if let Ok(v) = part.trim().parse::<f32>()
+            && v.is_finite()
+        {
+            w[i] = v.clamp(COLUMN_MIN, COLUMN_MAX);
+        }
+    }
+    w
+}
+
+/// What an entry's type is called, for the Kind column.
+pub fn kind_words(e: &Entry) -> String {
+    if e.dir {
+        return "Folder".into();
+    }
+    match e.mime {
+        Some(m) => vergence_types::describe(m),
+        None => "Document".into(),
+    }
+}
+
+/// The heading an entry is grouped under, and the groups' order.
+pub fn group_of(e: &Entry) -> (u8, &'static str) {
+    match e.kind() {
+        Kind::Folder => (0, "Folders"),
+        Kind::Document => (1, "Documents"),
+        Kind::Text => (2, "Text"),
+        Kind::Picture => (3, "Pictures"),
+        Kind::Sound => (4, "Sounds"),
+        Kind::Video => (5, "Videos"),
+        Kind::Archive => (6, "Archives"),
+        Kind::Program => (7, "Programs"),
+        Kind::Other => (8, "Other"),
+    }
 }
 
 /// One file or folder as listed.
@@ -66,16 +188,22 @@ pub fn recent() -> Vec<Entry> {
 }
 
 /// Entries in order: folders first, then by `by` (names naturally), up or
-/// down; `keep` keeps the order they came in for names (the recent files).
-pub fn sort(v: &mut [&Entry], by: SortBy, up: bool, keep: bool) {
+/// down; `keep` keeps the order they came in for names (the recent files);
+/// `group`: by their family first ([`group_of`]), each group sorted so.
+pub fn sort(v: &mut [&Entry], by: SortBy, up: bool, keep: bool, group: bool) {
     v.sort_by(|a, b| {
-        let o = b.dir.cmp(&a.dir).then_with(|| match by {
+        let first = if group { group_of(a).0.cmp(&group_of(b).0) } else { b.dir.cmp(&a.dir) };
+        if first != std::cmp::Ordering::Equal {
+            return first;
+        }
+        let o = match by {
             SortBy::Name if keep => std::cmp::Ordering::Equal,
             SortBy::Name => natural(&a.name, &b.name),
             SortBy::Size => a.size.cmp(&b.size),
             SortBy::Changed => a.changed.cmp(&b.changed),
-        });
-        if up || b.dir != a.dir { o } else { o.reverse() }
+            SortBy::Kind => kind_words(a).to_lowercase().cmp(&kind_words(b).to_lowercase()).then_with(|| natural(&a.name, &b.name)),
+        };
+        if up { o } else { o.reverse() }
     });
 }
 
@@ -154,6 +282,9 @@ pub fn sidebar<M: Clone + 'static>(places: &[Place], here: Option<&Path>, go: im
     panel(scroll(column(items).spacing(1.0).width(Length::FILL))).color(t.card).radius(8.0).padding(6.0).width(Length::Fixed(160.0)).height(Length::FILL)
 }
 
+/// A folder's size once counted, for the list's Size column.
+pub type FolderSize<'a> = &'a dyn Fn(&Entry) -> Option<u64>;
+
 /// How the list or icon view shows its entries.
 pub struct View<'a, M> {
     pub entries: &'a [&'a Entry],
@@ -171,40 +302,100 @@ pub struct View<'a, M> {
     pub thumb: Option<&'a dyn Fn(&Entry) -> Option<std::sync::Arc<vergence_scene::Image>>>,
     /// What a right click on a row sends (its menu), if rows have one.
     pub menu: Option<&'a dyn Fn(usize) -> M>,
+    /// How the list looks.
+    pub look: &'a ListLook,
+    /// A folder's size, once counted (shown as "—" until then).
+    pub folder_size: Option<FolderSize<'a>>,
+    /// A column's edge pulled (its place in [`COLUMNS`], the touch), if the
+    /// widths can be changed.
+    pub grip: Option<fn(usize, crate::Touch) -> Option<M>>,
 }
 
-/// The list: headings that sort (`sort`, the one now and its direction),
-/// then a row per entry: its mark, name, size and when it changed.
+/// The list (Details): headings that sort, with grips between them that
+/// change the columns' widths, then a row per entry: its mark, name, when it
+/// changed, its size and its kind; striped, grouped under headings if the
+/// look says, the stripes carried on into the room below the last row.
 pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(SortBy) -> M) -> (Element<M>, Vec<Element<M>>) {
+    let look = v.look;
+    let rs = look.rows;
+    let shown: Vec<usize> = (0..COLUMNS.len()).filter(|&c| COLUMNS[c].1 != SortBy::Kind || look.kind).collect();
     let heading = |text: &str, s: SortBy, w: Length, end: bool| -> Element<M> {
         let mark = if sort.0 == s { if sort.1 { " ▲" } else { " ▼" } } else { "" };
-        button(label(format!("{text}{mark}")).size(11.0).dim().align(if end { Align::End } else { Align::Start }).width(Length::FILL)).look(ButtonLook::Plain).padding(Padding::hv(2.0, 6.0)).on_press(by(s)).width(w).name(format!("Sort by {text}"))
+        button(label(format!("{text}{mark}")).size(11.0).dim().align(if end { Align::End } else { Align::Start }).width(Length::FILL)).look(ButtonLook::Plain).padding(Padding::hv(2.0, 0.0)).on_press(by(s)).width(w).name(format!("Sort by {text}"))
     };
-    let size_w = Length::Fixed(80.0);
-    let when_w = Length::Fixed(130.0);
-    let head = row(vec![space().width(Length::Fixed(22.0)), heading("Name", SortBy::Name, Length::FILL, false), heading("Size", SortBy::Size, size_w, true), heading("Changed", SortBy::Changed, when_w, false)]).spacing(4.0).align(Align::Center).width(Length::FILL);
-    let mut rows = Vec::with_capacity(v.entries.len());
+    // Headings and rows are built alike, so each column's words sit under its
+    // heading: the mark's room, the name, then for each column an edge's room
+    // (GAP) and the column; the rows' side padding (PAD) on the headings too.
+    const GAP: f32 = 14.0;
+    const PAD: f32 = 6.0;
+    let icon_w = 20.0 * rs.mark() + 6.0;
+    let mut head_items: Vec<Element<M>> = vec![space().width(Length::Fixed(icon_w)), heading("Name", SortBy::Name, Length::FILL, false)];
+    for &c in &shown {
+        let (text, s) = COLUMNS[c];
+        // The edge before the column: pulled, the column grows or shrinks.
+        let mut g = drawing(|scene, _, r: Rect, t: &Theme| {
+            scene.fill(Rect::new(r.x + r.w / 2.0 - 0.5, r.y + 4.0, 1.0, (r.h - 8.0).max(0.0)), t.line);
+        }).width(Length::Fixed(GAP)).height(Length::Fixed(20.0));
+        if let Some(grip) = v.grip {
+            let f = move |t: crate::Touch| grip(c, t);
+            g = g.on_touch(f).name(format!("Width of {text}"));
+        }
+        head_items.push(g);
+        head_items.push(heading(text, s, Length::Fixed(look.widths[c]), s == SortBy::Size));
+    }
+    let head = panel(row(head_items).spacing(0.0).align(Align::Center).width(Length::FILL)).padding(Padding::hv(0.0, PAD)).width(Length::FILL);
+    // A gray that darkens a light ground and lightens a dark one alike.
+    const STRIPE: Color = Color { r: 128, g: 128, b: 128, a: 18 };
+    let mut rows = Vec::with_capacity(v.entries.len() + 8);
+    let mut odd = false;
+    let mut group: Option<u8> = None;
+    let row_h = if v.folders { rs.height().max(36.0) } else { rs.height() };
     for (k, e) in v.entries.iter().enumerate() {
-        let mut name_col: Vec<Element<M>> = vec![label(e.name.clone()).size(12.0).elide().width(Length::FILL)];
+        if look.group {
+            let (g, name) = group_of(e);
+            if group != Some(g) {
+                group = Some(g);
+                odd = false;
+                rows.push(panel(label(name).size(11.0).weight(600).dim()).padding(Padding { top: if k == 0 { 2.0 } else { 12.0 }, bottom: 4.0, left: 10.0, right: 0.0 }).width(Length::FILL));
+            }
+        }
+        let mut name_col: Vec<Element<M>> = vec![label(e.name.clone()).size(rs.text()).elide().width(Length::FILL)];
         if v.folders && let Some(p) = e.path.parent() {
             name_col.push(label(tilde(p)).size(10.0).dim().elide().width(Length::FILL));
         }
-        let mut b = button(
-            row(vec![
-                kind_icon(e.kind()),
-                column(name_col).width(Length::FILL),
-                label(if e.dir { String::new() } else { size_words(e.size) }).size(11.0).dim().align(Align::End).width(size_w),
-                label(e.changed.map(when).unwrap_or_default()).size(11.0).dim().width(when_w),
-            ])
-            .spacing(4.0)
-            .align(Align::Center)
-            .width(Length::FILL),
-        )
-        .look(if (v.chosen)(k, e) { ButtonLook::Chosen } else { ButtonLook::Plain })
-        .padding(Padding::hv(3.0, 6.0))
-        .on_press((v.click)(k))
-        .width(Length::FILL)
-        .name(e.name.clone());
+        let small = rs.text() - 1.0;
+        let mut cells: Vec<Element<M>> = vec![
+            kind_icon_sized(e.kind(), rs.mark()).width(Length::Fixed(icon_w)).height(Length::Fixed(18.0 * rs.mark())),
+            column(name_col).width(Length::FILL),
+        ];
+        for &c in &shown {
+            let w = Length::Fixed(look.widths[c]);
+            cells.push(space().width(Length::Fixed(GAP)));
+            cells.push(match COLUMNS[c].1 {
+                SortBy::Changed => label(e.changed.map(when).unwrap_or_default()).size(small).dim().elide().width(w),
+                SortBy::Size => {
+                    let words = if e.dir { v.folder_size.and_then(|f| f(e)).map_or_else(|| "—".to_string(), size_words) } else { size_words(e.size) };
+                    label(words).size(small).dim().align(Align::End).width(w)
+                }
+                _ => label(kind_words(e)).size(small).dim().elide().width(w),
+            });
+        }
+        let chosen = (v.chosen)(k, e);
+        let ground = if chosen {
+            ButtonLook::Chosen
+        } else if look.stripes && odd {
+            ButtonLook::Custom { fill: Some(STRIPE), edge: None, radius: 6.0 }
+        } else {
+            ButtonLook::Plain
+        };
+        let mut b = button(row(cells).spacing(0.0).align(Align::Center).width(Length::FILL))
+            .look(ground)
+            .padding(Padding::hv(0.0, PAD))
+            .on_press((v.click)(k))
+            .width(Length::FILL)
+            .height(Length::Fixed(row_h))
+            .name(e.name.clone());
+        odd = !odd;
         if let Some(d) = v.drag {
             b = b.on_drag(d(k));
         }
@@ -218,6 +409,26 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
             b = b.key(key).keep_in_view();
         }
         rows.push(b);
+    }
+    // The stripes go on below the last row, through the room that is left.
+    if look.stripes {
+        let pitch = row_h + 1.0;
+        let first_odd = odd;
+        rows.push(
+            drawing(move |scene, _, r: Rect, _: &Theme| {
+                let mut y = r.y;
+                let mut on = first_odd;
+                while y < r.y + r.h {
+                    if on {
+                        scene.fill_rounded(Rect::new(r.x, y, r.w, row_h.min(r.y + r.h - y)), 6.0, STRIPE);
+                    }
+                    on = !on;
+                    y += pitch;
+                }
+            })
+            .width(Length::FILL)
+            .height(Length::FILL),
+        );
     }
     (head, rows)
 }
@@ -757,11 +968,37 @@ mod tests {
         let e = |name: &str, dir: bool, size: u64| Entry { name: name.into(), path: PathBuf::from(format!("/x/{name}")), dir, mime: kind_of(dir, name), size, changed: None };
         let all = [e("b10.txt", false, 5), e("b2.txt", false, 50), e("zeta", true, 0), e("Alpha", true, 0)];
         let mut v: Vec<&Entry> = all.iter().collect();
-        sort(&mut v, SortBy::Name, true, false);
+        sort(&mut v, SortBy::Name, true, false, false);
         assert_eq!(v.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["Alpha", "zeta", "b2.txt", "b10.txt"]);
-        sort(&mut v, SortBy::Size, false, false);
+        sort(&mut v, SortBy::Size, false, false, false);
         assert_eq!(v.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["Alpha", "zeta", "b2.txt", "b10.txt"], "folders stay first; biggest first");
         assert_eq!(all[2].kind(), Kind::Folder);
         assert_eq!(all[0].kind(), Kind::Text);
+    }
+
+    #[test]
+    fn details_sort_by_kind_group_and_keep_their_widths() {
+        let e = |name: &str, dir: bool| Entry { name: name.into(), path: PathBuf::from(format!("/x/{name}")), dir, mime: kind_of(dir, name), size: 0, changed: None };
+        let all = [e("notes.txt", false), e("photo.png", false), e("Music", true), e("a.png", false), e("letter.odt", false)];
+        let mut v: Vec<&Entry> = all.iter().collect();
+        // By kind: folders first, then by what the type is called, then by name.
+        sort(&mut v, SortBy::Kind, true, false, false);
+        assert_eq!(v[0].name, "Music");
+        let kinds: Vec<String> = v[1..].iter().map(|e| kind_words(e).to_lowercase()).collect();
+        let mut sorted = kinds.clone();
+        sorted.sort();
+        assert_eq!(kinds, sorted);
+        let pngs: Vec<&str> = v.iter().filter(|e| e.name.ends_with(".png")).map(|e| e.name.as_str()).collect();
+        assert_eq!(pngs, ["a.png", "photo.png"], "the same kind by name");
+        // Grouped: Folders, Documents, Text, Pictures, each by name.
+        sort(&mut v, SortBy::Name, true, false, true);
+        assert_eq!(v.iter().map(|e| group_of(e).1).collect::<Vec<_>>(), ["Folders", "Documents", "Text", "Pictures", "Pictures"]);
+        assert_eq!(kind_words(&all[2]), "Folder");
+        // Widths from a setting, kept in bounds; the usual for what is missing.
+        assert_eq!(parse_widths("\"200,90,160\""), [200.0, 90.0, 160.0]);
+        assert_eq!(parse_widths("5,9999"), [COLUMN_MIN, COLUMN_MAX, COLUMN_WIDTHS[2]]);
+        assert_eq!(parse_widths("x"), COLUMN_WIDTHS);
+        assert_eq!(RowSize::parse("\"large\""), RowSize::Large);
+        assert_eq!(RowSize::parse("huge"), RowSize::Medium);
     }
 }

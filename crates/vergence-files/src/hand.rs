@@ -1,7 +1,7 @@
 //! One File Viewer process for all its windows (files milestone 1, as the
 //! editor's hand.rs): the first `vergence-files` listens on a socket of
 //! its own (owner-only, in the runtime directory); starting it again hands
-//! its files to that one, which opens their folders in tabs, and exits.
+//! its files to that one, which opens their folders in windows, and exits.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;

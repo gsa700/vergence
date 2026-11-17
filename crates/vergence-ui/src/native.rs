@@ -403,9 +403,15 @@ impl<'a> Native<'a> {
                     if let Some((terminal, commands)) = self.windows[i].app.get().commands() {
                         self.send(WinRequest::Commands { window: id, terminal, commands })?;
                     }
-                    self.send(WinRequest::ContextMenu { window: id, x: x as f64, y: y as f64 })?;
+                    // Back from the scene's points to the window's: the scene
+                    // starts below the strip under the bar (PointerMotion adds it).
+                    let y = y as f64 - self.windows[i].inset as f64;
+                    self.send(WinRequest::ContextMenu { window: id, x: x as f64, y })?;
                 }
-                Command::Menu(x, y, lines) => self.send(WinRequest::Menu { window: id, x: x as f64, y: y as f64, lines })?,
+                Command::Menu(x, y, lines) => {
+                    let y = y as f64 - self.windows[i].inset as f64;
+                    self.send(WinRequest::Menu { window: id, x: x as f64, y, lines })?
+                }
                 Command::Minimize => self.send(WinRequest::Minimize { window: id })?,
                 Command::Copy(text) => {
                     self.send(WinRequest::Copy { input_serial: self.input_serial, kinds: TEXT_KINDS.iter().map(|k| k.to_string()).collect() })?;

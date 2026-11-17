@@ -7,7 +7,8 @@
 //!   List or Icons, the preview pane, hidden files, a field that narrows the
 //!   folder as you type), the places sidebar, the folder as a list or icons
 //!   (vergence-widgets files.rs, shared with the Open dialog), the preview
-//!   pane at the right. A folder a tab in the bar; one process (hand.rs).
+//!   pane at the right. One folder a window, no tabs (Dave, 2026-11-16;
+//!   docs/files-milestone-2.md); one process for all of them (hand.rs).
 //! - **Preview**: Space shows the chosen file large over the list (pictures
 //!   decoded apart by vergence-decode, the start of text, else its mark and
 //!   facts); the arrows move on and it follows; Space or Escape closes it.
@@ -26,6 +27,7 @@
 mod desktop;
 mod hand;
 mod ops;
+mod props;
 mod search;
 
 use std::cell::{Cell, RefCell};
@@ -35,8 +37,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime};
 
 use vergence_scene::{Color, Image, Rect};
-use vergence_ui::{AppCommand as C, Bar, BarStyle, BarTab, MenuLine, Modifiers, Role, TabEvent};
-use vergence_widgets::files::{self, Entry, Kind, Place, SortBy};
+use vergence_ui::{AppCommand as C, Bar, BarStyle, MenuLine, Modifiers, Role};
+use vergence_widgets::files::{self, Entry, Kind, ListLook, Place, RowSize, SortBy};
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
 use vergence_widgets::toolbar::{Icon, flexible, group, tool, toggle, toolbar};
 use vergence_widgets::{Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Waker, Window, button, column, drawing, field, label, panel, row, rule, scroll, space, stack};
@@ -52,8 +54,7 @@ const PANE_W: f32 = 260.0;
 
 mod cmd {
     pub const NEW_WINDOW: u32 = 1;
-    pub const NEW_TAB: u32 = 2;
-    pub const CLOSE_TAB: u32 = 3;
+    pub const CLOSE: u32 = 3;
     pub const BACK: u32 = 4;
     pub const FORWARD: u32 = 5;
     pub const UP: u32 = 6;
@@ -64,8 +65,6 @@ mod cmd {
     pub const PREVIEW: u32 = 11;
     pub const OPEN: u32 = 12;
     pub const SELECT_ALL: u32 = 13;
-    pub const NEXT_TAB: u32 = 14;
-    pub const PREV_TAB: u32 = 15;
     pub const RELOAD: u32 = 16;
     pub const CUT: u32 = 20;
     pub const COPY: u32 = 21;
@@ -93,6 +92,11 @@ mod cmd {
     pub const SORT_NAME: u32 = 58;
     pub const SORT_SIZE: u32 = 59;
     pub const SORT_CHANGED: u32 = 60;
+    pub const SORT_KIND: u32 = 61;
+    pub const ROWS_SMALL: u32 = 62;
+    pub const ROWS_MEDIUM: u32 = 63;
+    pub const ROWS_LARGE: u32 = 64;
+    pub const GROUP: u32 = 65;
     /// Open With's applications: this, plus their place in the list.
     pub const OPEN_WITH: u32 = 1000;
     pub const MAX_OPEN_WITH: usize = 16;
@@ -264,8 +268,66 @@ struct Viewer {
     menu_at: (f32, f32),
     /// The applications the open menu's Open With lists (desktop ids), by place.
     open_with: Vec<String>,
-    /// Get Info's item, shown in a strip above the folder.
-    info: Option<PathBuf>,
+    /// Folders to open in windows of their own (woken() has the window).
+    pending: Vec<PathBuf>,
+    /// The list's columns' widths (files::COLUMNS), and a pull on an edge:
+    /// which column, where it began, the width then.
+    widths: [f32; 3],
+    pulling: Option<(usize, f32, f32)>,
+    /// Folders' sizes counted by a worker (by path: the folder's own time
+    /// when counted, the size or None if it was too big to count), what was
+    /// asked, and the worker's queue.
+    sizes: Sizes,
+    sizes_seen: usize,
+    size_asked: RefCell<std::collections::HashSet<(PathBuf, Option<SystemTime>)>>,
+    size_queue: std::sync::mpsc::Sender<(PathBuf, Option<SystemTime>)>,
+}
+
+/// Folders' sizes as counted: by path, the folder's own time then and the
+/// size (None: too much to count).
+type Sizes = Arc<Mutex<std::collections::HashMap<PathBuf, (Option<SystemTime>, Option<u64>)>>>;
+
+/// The most entries counted for one folder's size (more: not shown).
+const COUNT_MOST: u32 = 400_000;
+
+/// Everything in a folder, on its own file system only (as `du -x`), not
+/// following links; None past [`COUNT_MOST`] entries.
+fn count_tree(p: &Path, dev: u64, budget: &mut u32) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(m) = p.symlink_metadata() else { return Some(0) };
+    if m.dev() != dev {
+        return Some(0);
+    }
+    if !m.is_dir() {
+        return Some(m.len());
+    }
+    let mut total = 0u64;
+    if let Ok(rd) = std::fs::read_dir(p) {
+        for e in rd.flatten() {
+            *budget = budget.checked_sub(1)?;
+            total += count_tree(&e.path(), dev, budget)?;
+        }
+    }
+    Some(total)
+}
+
+/// The worker that counts folders' sizes, one at a time, waking the window
+/// with each.
+fn size_worker(sizes: Sizes, wake: Arc<Mutex<Option<Waker>>>) -> std::sync::mpsc::Sender<(PathBuf, Option<SystemTime>)> {
+    use std::os::unix::fs::MetadataExt;
+    let (tx, rx) = std::sync::mpsc::channel::<(PathBuf, Option<SystemTime>)>();
+    let _ = std::thread::Builder::new().name("folder-sizes".into()).spawn(move || {
+        for (p, when) in rx {
+            let Ok(m) = p.symlink_metadata() else { continue };
+            let mut budget = COUNT_MOST;
+            let n = count_tree(&p, m.dev(), &mut budget);
+            sizes.lock().unwrap_or_else(|x| x.into_inner()).insert(p, (when, n));
+            if let Some(w) = wake.lock().unwrap_or_else(|x| x.into_inner()).as_ref() {
+                w.wake();
+            }
+        }
+    });
+    tx
 }
 
 #[derive(Debug, Clone)]
@@ -292,9 +354,10 @@ enum Msg {
     ClosePreview,
     /// A right click on a row: its menu (the row chosen first, unless it is).
     RowMenu(usize),
+    /// An edge between the list's headings pulled: the column and the touch.
+    Grip(usize, vergence_widgets::Touch),
     /// A right click on the ground around the rows: the folder's menu.
     GroundMenu,
-    CloseInfo,
 }
 
 /// desktop.toml's text.
@@ -316,49 +379,6 @@ pub(crate) fn notify(summary: &str, body: &str) {
         return;
     }
     eprintln!("vergence-files: {summary}: {body}");
-}
-
-/// Get Info's lines: name, kind, size, where, when changed, owner and
-/// permissions (what `ls -l` says, in words).
-fn info_lines(p: &Path) -> Vec<Element<Msg>> {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
-    let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string_lossy().into_owned());
-    let mut lines = vec![label(name).size(13.0).weight(600).wrap().width(Length::FILL)];
-    let small = |t: String| label(t).size(11.0).dim().wrap().width(Length::FILL);
-    let Ok(m) = p.symlink_metadata() else {
-        lines.push(small("It is not there any more.".into()));
-        return lines;
-    };
-    let kind = if m.file_type().is_symlink() {
-        format!("Link to {}", std::fs::read_link(p).map(|t| t.to_string_lossy().into_owned()).unwrap_or_default())
-    } else if m.is_dir() {
-        let n = std::fs::read_dir(p).map(|r| r.count()).unwrap_or(0);
-        format!("Folder, {n} item{}", if n == 1 { "" } else { "s" })
-    } else {
-        format!("{}, {}", vergence_types::describe(vergence_types::of_file(p)), files::size_words(m.len()))
-    };
-    lines.push(small(kind));
-    if let Some(dir) = p.parent() {
-        lines.push(small(format!("In {}", files::tilde(dir))));
-    }
-    if let Ok(t) = m.modified() {
-        lines.push(small(format!("Changed {}", files::when(t))));
-    }
-    let mode = m.permissions().mode();
-    let who = |bits: u32| match (bits & 4 != 0, bits & 2 != 0) {
-        (true, true) => "read and write",
-        (true, false) => "read only",
-        (false, true) => "write only",
-        (false, false) => "no access",
-    };
-    // The owner's name from the password file (local accounts), else the number.
-    let owner = std::fs::read_to_string("/etc/passwd").ok().and_then(|t| t.lines().find_map(|l| {
-        let mut f = l.split(':');
-        let (name, _, uid) = (f.next()?, f.next()?, f.next()?);
-        (uid.parse::<u32>().ok()? == m.uid()).then(|| name.to_string())
-    })).unwrap_or_else(|| m.uid().to_string());
-    lines.push(small(format!("Owner {owner}: {}; group: {}; others: {}", who(mode >> 6 & 7), who(mode >> 3 & 7), who(mode & 7))));
-    lines
 }
 
 /// Opens files with the apps chosen for their types: the server's Open in a
@@ -398,7 +418,10 @@ impl Viewer {
         let view = if vergence_ui::table_value(&desktop, SECTION, "view").as_deref() == Some("icons") { ViewKind::Icons } else { ViewKind::List };
         let pane = vergence_ui::table_value(&desktop, SECTION, "preview-pane").as_deref() == Some("true");
         let hidden = vergence_ui::table_value(&desktop, SECTION, "hidden").as_deref() == Some("true");
+        let desktop_now = desktop.clone();
         let thumb_waker: Arc<std::sync::Mutex<Option<Waker>>> = Arc::default();
+        let sizes: Sizes = Arc::default();
+        let size_queue = size_worker(sizes.clone(), thumb_waker.clone());
         let w = thumb_waker.clone();
         let thumbs = vergence_thumbs::Thumbnailer::new(move || {
             if let Some(w) = w.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
@@ -437,7 +460,13 @@ impl Viewer {
             search_done: false,
             menu_at: (0.0, 0.0),
             open_with: Vec::new(),
-            info: None,
+            pending: Vec::new(),
+            widths: vergence_ui::table_value(&desktop_now, SECTION, "columns").map_or(files::COLUMN_WIDTHS, |v| files::parse_widths(&v)),
+            pulling: None,
+            sizes,
+            sizes_seen: 0,
+            size_asked: RefCell::new(std::collections::HashSet::new()),
+            size_queue,
         }
     }
 
@@ -452,14 +481,20 @@ impl Viewer {
         self.clear_narrow();
     }
 
-    /// Paths handed over or given at the start: a folder opens in a tab; a
-    /// file opens its folder with the file chosen.
+    /// Paths handed over or given at the start: a folder opens, or a file's
+    /// folder with the file chosen; the first in this window if it shows
+    /// nothing yet, the rest in windows of their own (`pending`, opened by
+    /// woken()). None: the home folder.
     fn open_paths(&mut self, paths: &[PathBuf]) {
-        if paths.is_empty() {
-            self.new_tab(Showing::Folder(files::home().unwrap_or_else(|| PathBuf::from("/"))));
+        let home = || files::home().unwrap_or_else(|| PathBuf::from("/"));
+        let mut all: Vec<PathBuf> = if paths.is_empty() { vec![home()] } else { paths.to_vec() };
+        if !self.tabs.is_empty() {
+            self.pending.append(&mut all);
             return;
         }
-        for p in paths {
+        let rest = all.split_off(1);
+        self.pending.extend(rest);
+        for p in &all {
             let p = std::path::absolute(p).unwrap_or_else(|_| p.clone());
             if p.is_dir() {
                 self.new_tab(Showing::Folder(p));
@@ -489,7 +524,8 @@ impl Viewer {
         let n = self.narrow.to_lowercase();
         let source = if self.search.is_some() { &self.search_entries } else { &t.entries };
         let mut v: Vec<&Entry> = source.iter().filter(|e| self.hidden || !e.name.starts_with('.')).filter(|e| n.is_empty() || e.name.to_lowercase().contains(&n)).collect();
-        files::sort(&mut v, self.sort.0, self.sort.1, t.showing == Showing::Recent && self.search.is_none());
+        let group = self.view == ViewKind::List && self.list_look().group;
+        files::sort(&mut v, self.sort.0, self.sort.1, t.showing == Showing::Recent && self.search.is_none(), group);
         v.truncate(files::MAX_ROWS);
         v
     }
@@ -679,6 +715,40 @@ impl Viewer {
             let beside = path.with_extension("toml.new");
             let _ = std::fs::write(&beside, &new).and_then(|_| std::fs::rename(&beside, &path));
         }
+        // Seen at once, not at the next look at the file.
+        self.desktop = new;
+    }
+
+    /// How the list looks, from the settings (and the widths being pulled).
+    fn list_look(&self) -> ListLook {
+        let key = |k: &str| vergence_ui::table_value(&self.desktop, SECTION, k);
+        ListLook {
+            rows: key("row-size").map(|v| RowSize::parse(&v)).unwrap_or_default(),
+            widths: self.widths,
+            kind: true,
+            stripes: true,
+            group: key("group-by-kind").as_deref() == Some("true"),
+        }
+    }
+
+    /// A folder's size if counted (asked for if not, unless it is where
+    /// counting does not belong: a network mount, the Trash, the system's
+    /// own trees).
+    fn folder_size(&self, e: &Entry) -> Option<u64> {
+        if let Some((when, n)) = self.sizes.lock().unwrap_or_else(|x| x.into_inner()).get(&e.path)
+            && *when == e.changed
+        {
+            return *n;
+        }
+        // Asked once per folder and time (the mount table read only then).
+        if !self.size_asked.borrow_mut().insert((e.path.clone(), e.changed)) {
+            return None;
+        }
+        let skip = self.in_trash() || ["/proc", "/sys", "/dev", "/run"].iter().any(|r| e.path.starts_with(r)) || files::network_mounts().iter().any(|m| e.path.starts_with(m));
+        if !skip {
+            let _ = self.size_queue.send((e.path.clone(), e.changed));
+        }
+        None
     }
 
     fn open_settings(&mut self, window: &mut Window) {
@@ -702,14 +772,7 @@ impl Viewer {
                 w.new_tab(at);
                 window.open_window(vergence_widgets::window(w));
             }
-            cmd::NEW_TAB => {
-                let at = self.front_tab().map(|t| t.showing.clone()).unwrap_or(Showing::Recent);
-                self.new_tab(at);
-            }
-            cmd::CLOSE_TAB => {
-                let f = self.front;
-                self.close_tab(f, window);
-            }
+            cmd::CLOSE => window.close(),
             cmd::BACK => self.back(),
             cmd::FORWARD => self.forward(),
             cmd::UP => self.up(),
@@ -735,14 +798,6 @@ impl Viewer {
                 let all: Vec<PathBuf> = self.visible().iter().map(|e| e.path.clone()).collect();
                 if let Some(t) = self.front_mut() {
                     t.chosen = all;
-                }
-            }
-            cmd::NEXT_TAB | cmd::PREV_TAB => {
-                let n = self.tabs.len() as isize;
-                if n > 1 {
-                    let i = self.tabs.iter().position(|t| t.id == self.front).unwrap_or(0) as isize;
-                    self.front = self.tabs[(i + if id == cmd::NEXT_TAB { 1 } else { -1 }).rem_euclid(n) as usize].id;
-                    self.clear_narrow();
                 }
             }
             cmd::RELOAD => {
@@ -831,11 +886,14 @@ impl Viewer {
             cmd::MAKE_LINK => self.make_link(),
             cmd::COMPRESS => self.compress(),
             cmd::INFO => {
-                self.info = match self.chosen_paths().as_slice() {
-                    [one] => Some(one.clone()),
-                    [] => self.here(),
-                    _ => None,
+                // A Properties window for each chosen (a few at most), or the folder's.
+                let paths = match self.chosen_paths() {
+                    none if none.is_empty() => self.here().into_iter().collect(),
+                    some => some,
                 };
+                for p in paths.into_iter().take(8) {
+                    window.open_window(vergence_widgets::window(props::Properties::new(p, self.shared.clone(), self.theme())));
+                }
             }
             cmd::COPY_PATH => {
                 let paths = self.chosen_paths();
@@ -871,6 +929,21 @@ impl Viewer {
             cmd::SORT_NAME => self.sort = (SortBy::Name, true),
             cmd::SORT_SIZE => self.sort = (SortBy::Size, false),
             cmd::SORT_CHANGED => self.sort = (SortBy::Changed, false),
+            cmd::SORT_KIND => self.sort = (SortBy::Kind, true),
+            cmd::ROWS_SMALL | cmd::ROWS_MEDIUM | cmd::ROWS_LARGE => {
+                let size = match id {
+                    cmd::ROWS_SMALL => RowSize::Small,
+                    cmd::ROWS_LARGE => RowSize::Large,
+                    _ => RowSize::Medium,
+                };
+                // Medium is the default: no key.
+                let words = format!("\"{}\"", size.word());
+                self.write_key("row-size", (size != RowSize::Medium).then_some(words.as_str()));
+            }
+            cmd::GROUP => {
+                let on = !self.list_look().group;
+                self.write_key("group-by-kind", on.then_some("true"));
+            }
             id if (cmd::OPEN_WITH..cmd::OPEN_WITH + cmd::MAX_OPEN_WITH as u32).contains(&id) => {
                 if let Some(app) = self.open_with.get((id - cmd::OPEN_WITH) as usize).cloned()
                     && let Err(e) = open_files_with(&self.chosen_paths(), Some(&app))
@@ -935,7 +1008,7 @@ impl Viewer {
         }
         lines.push(MenuLine::Separator);
         lines.push(MenuLine::item(cmd::COMPRESS, "Compress", "").enabled(any && !trash));
-        lines.push(MenuLine::item(cmd::INFO, "Get Info", "Ctrl+I").enabled(one));
+        lines.push(MenuLine::item(cmd::INFO, "Properties", "Ctrl+I").enabled(any));
         // Backup milestone 1, step 4: versions from snapshots and the backup copy.
         lines.push(MenuLine::item(cmd::VERSIONS, "Earlier Versions…", "").enabled(false));
         lines.push(MenuLine::Separator);
@@ -960,8 +1033,10 @@ impl Viewer {
                     MenuLine::item(cmd::SORT_NAME, "Name", "").checked(by == SortBy::Name),
                     MenuLine::item(cmd::SORT_SIZE, "Size", "").checked(by == SortBy::Size),
                     MenuLine::item(cmd::SORT_CHANGED, "Date Changed", "").checked(by == SortBy::Changed),
+                    MenuLine::item(cmd::SORT_KIND, "Kind", "").checked(by == SortBy::Kind),
                 ],
             },
+            MenuLine::item(cmd::GROUP, "Group by Kind", "").checked(self.list_look().group),
             MenuLine::item(cmd::HIDDEN, "Show Hidden Files", "Ctrl+H").checked(self.hidden),
         ];
         if trash {
@@ -970,7 +1045,7 @@ impl Viewer {
         }
         lines.push(MenuLine::Separator);
         lines.push(MenuLine::item(cmd::TERMINAL, "Open in Terminal", "").enabled(here));
-        lines.push(MenuLine::item(cmd::INFO, "Get Info", "Ctrl+I").enabled(here));
+        lines.push(MenuLine::item(cmd::INFO, "Properties", "Ctrl+I").enabled(here));
         lines
     }
 
@@ -1027,18 +1102,6 @@ impl Viewer {
             t.chosen = vec![p.clone()];
             t.cursor = Some(p);
             t.turn += 1;
-        }
-    }
-
-    fn close_tab(&mut self, id: u32, window: &mut Window) {
-        if let Some(i) = self.tabs.iter().position(|t| t.id == id) {
-            self.tabs.remove(i);
-            if self.front == id {
-                self.front = self.tabs.get(i.min(self.tabs.len().saturating_sub(1))).map_or(0, |t| t.id);
-            }
-        }
-        if self.tabs.is_empty() {
-            window.close();
         }
     }
 
@@ -1282,9 +1345,6 @@ impl Viewer {
                 b(if n.rename.is_some() { "Rename" } else { "Make" }, Msg::NameDone, true),
             ]));
         }
-        if let Some(p) = &self.info {
-            out.push(strip(vec![column(info_lines(p)).spacing(2.0).width(Length::FILL), b("Close", Msg::CloseInfo, true)]));
-        }
         if let Some(job) = &self.job {
             use std::sync::atomic::Ordering::Relaxed;
             let (done, total) = (job.progress.done.load(Relaxed), job.progress.total.load(Relaxed).max(1));
@@ -1393,6 +1453,9 @@ impl Viewer {
         let in_view = tab.cursor.as_ref().and_then(|c| visible.iter().position(|e| &e.path == c)).map(|k| (k, tab.turn << 32 | k as u64));
         let drag = |k: usize| Msg::DragRow(k);
         let menu = |k: usize| Msg::RowMenu(k);
+        let look = self.list_look();
+        let folder_size = |e: &Entry| self.folder_size(e);
+        let grip: fn(usize, vergence_widgets::Touch) -> Option<Msg> = |c, t| Some(Msg::Grip(c, t));
         // The icon view's thumbnails: this folder's pictures asked for, in
         // their order; what other folders asked and has not begun is dropped.
         if self.view == ViewKind::Icons {
@@ -1402,7 +1465,7 @@ impl Viewer {
             }
         }
         let thumb = |e: &Entry| self.thumbs.get(&e.path, e.changed).flatten();
-        let v = files::View { entries: &visible, chosen: &chosen, in_view, click: &click, drag: Some(&drag), folders: tab.showing == Showing::Recent || self.search.is_some(), thumb: if self.view == ViewKind::Icons { Some(&thumb) } else { None }, menu: Some(&menu) };
+        let v = files::View { entries: &visible, chosen: &chosen, in_view, click: &click, drag: Some(&drag), folders: tab.showing == Showing::Recent || self.search.is_some(), thumb: if self.view == ViewKind::Icons { Some(&thumb) } else { None }, menu: Some(&menu), look: &look, folder_size: Some(&folder_size), grip: Some(grip) };
         let mut body: Vec<Element<Msg>> = Vec::new();
         if let Some(p) = &tab.problem {
             body.push(label(p.clone()).size(12.0).wrap().width(Length::FILL));
@@ -1533,7 +1596,8 @@ impl Program for Viewer {
     }
 
     fn theme(&self) -> Theme {
-        Theme::from_desktop(&self.desktop, false, SECTION)
+        // Names and paths are not prose: no spelling marks in the fields.
+        Theme { spell: false, ..Theme::from_desktop(&self.desktop, false, SECTION) }
     }
 
     fn bar_style(&self) -> Option<BarStyle> {
@@ -1544,9 +1608,9 @@ impl Program for Viewer {
         true
     }
 
+    /// A plain title bar, the folder's name: one folder a window.
     fn bar(&self) -> Option<Bar> {
-        let tabs = self.tabs.iter().map(|t| BarTab { id: t.id, title: t.name(), closable: true, alert: false, edited: false }).collect();
-        Some(Bar::Tabs { tabs, front: self.front_tab().map_or(0, |t| t.id), plus: true, accent: None, menu: Vec::new() })
+        Some(Bar::Plain)
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
@@ -1634,7 +1698,24 @@ impl Program for Viewer {
                 let lines = self.ground_menu();
                 window.menu(self.menu_at.0, self.menu_at.1, lines);
             }
-            Msg::CloseInfo => self.info = None,
+            Msg::Grip(c, touch) => {
+                use vergence_widgets::Touch;
+                match touch {
+                    Touch::Press { x, .. } => self.pulling = Some((c, x, self.widths[c])),
+                    Touch::Move { x, pressed: true, .. } => {
+                        // The edge is the column's left: pulled right, it narrows.
+                        if let Some((c, x0, w0)) = self.pulling {
+                            self.widths[c] = (w0 - (x - x0)).clamp(files::COLUMN_MIN, files::COLUMN_MAX).round();
+                        }
+                    }
+                    // Let go: the widths kept.
+                    Touch::Release { .. } | Touch::Leave if self.pulling.take().is_some() => {
+                        let words = format!("\"{}\"", self.widths.iter().map(|w| format!("{w:.0}")).collect::<Vec<_>>().join(","));
+                        self.write_key("columns", Some(&words));
+                    }
+                    _ => {}
+                }
+            }
             Msg::ClosePreview => self.preview = false,
             Msg::DragRow(k) => self.drag_row(k, window),
             Msg::Answer(a) => {
@@ -1759,9 +1840,9 @@ impl Program for Viewer {
             BACKSPACE if !typing => self.run(cmd::UP, window),
             s if m.ctrl && (s == 0x61 || s == 0x41) && !typing => self.run(cmd::SELECT_ALL, window),
             s if m.ctrl && !m.shift && (s == 0x6e || s == 0x4e) => self.run(cmd::NEW_WINDOW, window),
-            s if m.ctrl && (s == 0x74 || s == 0x54) => self.run(cmd::NEW_TAB, window),
-            s if m.ctrl && (s == 0x77 || s == 0x57) => self.run(cmd::CLOSE_TAB, window),
+            s if m.ctrl && (s == 0x77 || s == 0x57) => self.run(cmd::CLOSE, window),
             s if m.ctrl && (s == 0x68 || s == 0x48) => self.run(cmd::HIDDEN, window),
+            s if m.ctrl && (s == 0x69 || s == 0x49) && !typing => self.run(cmd::INFO, window),
             s if m.ctrl && s == 0x2c => self.run(cmd::SETTINGS, window),
             s if m.ctrl && (s == 0x31) => self.run(cmd::LIST, window),
             s if m.ctrl && (s == 0x32) => self.run(cmd::ICONS, window),
@@ -1830,6 +1911,27 @@ impl Program for Viewer {
             self.search_done = s.done();
             changed = true;
         }
+        // Folders counted: their sizes into the entries (sorting by size uses them).
+        let sizes: Vec<(PathBuf, u64)> = {
+            let all = self.sizes.lock().unwrap_or_else(|x| x.into_inner());
+            if all.len() != self.sizes_seen {
+                self.sizes_seen = all.len();
+                changed = true;
+                all.iter().filter_map(|(p, (_, n))| n.map(|n| (p.clone(), n))).collect()
+            } else {
+                Vec::new()
+            }
+        };
+        if !sizes.is_empty() {
+            let known: std::collections::HashMap<PathBuf, u64> = sizes.into_iter().collect();
+            for t in &mut self.tabs {
+                for e in t.entries.iter_mut().filter(|e| e.dir) {
+                    if let Some(n) = known.get(&e.path) {
+                        e.size = *n;
+                    }
+                }
+            }
+        }
         let made = self.thumbs.made();
         if made != self.thumbs_made {
             self.thumbs_made = made;
@@ -1846,6 +1948,12 @@ impl Program for Viewer {
             // Handed over by a start the person just made: forward (the server judges).
             window.activate();
             changed = true;
+        }
+        // Folders for windows of their own.
+        for p in std::mem::take(&mut self.pending) {
+            let mut w = Viewer::new(self.shared.clone());
+            w.open_paths(&[p]);
+            window.open_window(vergence_widgets::window(w));
         }
         // A copy or move running (its ticks) or ended.
         if self.job.is_some() {
@@ -1880,8 +1988,7 @@ impl Program for Viewer {
             false,
             vec![
                 C::role(cmd::NEW_WINDOW, Role::NewWindow).featured(),
-                C::role(cmd::NEW_TAB, Role::NewTab),
-                C::role(cmd::CLOSE_TAB, Role::CloseTab),
+                C::role(cmd::CLOSE, Role::CloseWindow),
                 C::own(cmd::OPEN, "File", "Open", "Enter").featured(),
                 C::own(cmd::PREVIEW, "File", "Preview", "Space").checked(self.preview),
                 C::role(cmd::SELECT_ALL, Role::SelectAll),
@@ -1892,6 +1999,7 @@ impl Program for Viewer {
                 C::own(cmd::DUPLICATE, "Edit", "Duplicate", "Ctrl+D"),
                 C::own(cmd::RENAME, "Edit", "Rename…", "F2"),
                 C::own(cmd::NEW_FOLDER, "File", "New folder", "Ctrl+Shift+N").featured(),
+                C::own(cmd::INFO, "File", "Properties", "Ctrl+I"),
                 C::own(cmd::TRASH, "File", "Move to the Trash", "Delete"),
                 C::own(cmd::DELETE, "File", "Delete for good…", "Shift+Delete"),
                 C::own(cmd::EMPTY_TRASH, "File", "Empty Trash…", ""),
@@ -1900,12 +2008,14 @@ impl Program for Viewer {
                 C::own(cmd::ICONS, "View", "As icons", "Ctrl+2").checked(self.view == ViewKind::Icons),
                 C::own(cmd::PANE, "View", "Preview pane", "").checked(self.pane).featured(),
                 C::own(cmd::HIDDEN, "View", "Hidden files", "Ctrl+H").checked(self.hidden),
+                C::own(cmd::ROWS_SMALL, "View", "Small rows", "").checked(self.list_look().rows == RowSize::Small),
+                C::own(cmd::ROWS_MEDIUM, "View", "Medium rows", "").checked(self.list_look().rows == RowSize::Medium),
+                C::own(cmd::ROWS_LARGE, "View", "Large rows", "").checked(self.list_look().rows == RowSize::Large),
+                C::own(cmd::GROUP, "View", "Group by kind", "").checked(self.list_look().group),
                 C::own(cmd::RELOAD, "View", "Read again", "Ctrl+R"),
                 C::own(cmd::BACK, "Go", "Back", "Alt+Left"),
                 C::own(cmd::FORWARD, "Go", "Forward", "Alt+Right"),
                 C::own(cmd::UP, "Go", "Up", "Alt+Up"),
-                C::role(cmd::NEXT_TAB, Role::NextTab),
-                C::role(cmd::PREV_TAB, Role::PreviousTab),
                 C::role(cmd::SETTINGS, Role::Settings),
                 C::role(cmd::ABOUT, Role::About),
             ],
@@ -1914,40 +2024,6 @@ impl Program for Viewer {
 
     fn command(&mut self, id: u32, window: &mut Window) {
         self.run(id, window);
-    }
-
-    fn tab(&mut self, event: TabEvent, window: &mut Window) {
-        match event {
-            TabEvent::Chosen(id) => {
-                self.front = id;
-                self.clear_narrow();
-            }
-            TabEvent::Close(id) => self.close_tab(id, window),
-            TabEvent::CloseOthers(id) => self.tabs.retain(|t| t.id == id),
-            TabEvent::New => self.run(cmd::NEW_TAB, window),
-            TabEvent::Moved { tab, to } => {
-                if let Some(i) = self.tabs.iter().position(|t| t.id == tab) {
-                    let t = self.tabs.remove(i);
-                    self.tabs.insert((to as usize).min(self.tabs.len()), t);
-                }
-            }
-            TabEvent::Out { tab, .. } => {
-                if self.tabs.len() > 1
-                    && let Some(i) = self.tabs.iter().position(|t| t.id == tab)
-                {
-                    let t = self.tabs.remove(i);
-                    if self.front == tab {
-                        self.front = self.tabs.first().map_or(0, |t| t.id);
-                    }
-                    let mut w = Viewer::new(self.shared.clone());
-                    w.front = t.id;
-                    w.tabs.push(t);
-                    window.open_window(vergence_widgets::window(w));
-                }
-            }
-            _ => {}
-        }
-        window.redraw();
     }
 
     fn style(&self) -> vergence_ui::Style {
@@ -1969,6 +2045,8 @@ impl Rows for FilesRows {
                     Row::new("view", "New windows show", "A folder as a list or as icons.", Control::Choose { choices: vec![Choice::text("A list", "list"), Choice::text("Icons", "icons")], desktop: None, app_default: 0 }),
                     Row::new("preview-pane", "Preview pane", "The chosen file at the window's right.", Control::Switch { default: false }),
                     Row::new("hidden", "Hidden files", "Names that start with a dot.", Control::Switch { default: false }),
+                    Row::new("row-size", "Row size", "How tall the list's rows are.", Control::Choose { choices: vec![Choice::text("Small", "small"), Choice::text("Medium", "medium"), Choice::text("Large", "large")], desktop: None, app_default: 1 }),
+                    Row::new("group-by-kind", "Group by kind", "The list under headings: Folders, Documents, Pictures…", Control::Switch { default: false }),
                 ],
             },
             Part {
@@ -2040,8 +2118,14 @@ mod tests {
         v.forward();
         assert_eq!(v.front_tab().unwrap().showing, Showing::Folder(dir.clone()));
         // A file given opens its folder with it chosen.
+        // A file given opens its folder with it chosen (in a window of its own).
+        let mut v = Viewer::new(shared());
         v.open_paths(&[dir.join("a.txt")]);
         assert_eq!(v.front_tab().unwrap().chosen, vec![dir.join("a.txt")]);
+        // One folder a window: more go to windows of their own.
+        v.open_paths(std::slice::from_ref(&dir));
+        assert_eq!(v.tabs.len(), 1);
+        assert_eq!(v.pending, vec![dir.clone()]);
         v.narrow = "zzz".into();
         assert!(v.visible().is_empty());
         std::fs::remove_dir_all(&dir).unwrap();

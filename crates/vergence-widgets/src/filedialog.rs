@@ -263,7 +263,7 @@ impl FileDialog {
             .filter(|e| narrow.is_empty() || e.name.to_lowercase().contains(&narrow))
             .collect();
         // Folders first (the recent files keep their order unless sorted).
-        crate::files::sort(&mut v, self.sort.0, self.sort.1, self.showing == Showing::Recent);
+        crate::files::sort(&mut v, self.sort.0, self.sort.1, self.showing == Showing::Recent, false);
         v.truncate(MAX_ROWS);
         v
     }
@@ -513,7 +513,7 @@ impl Program for FileDialog {
         let visible = self.visible();
         let chosen = |k: usize, e: &Entry| self.selected == Some(k) || self.marked.contains(&e.path);
         let click = |k: usize| FileMsg::Click(k);
-        let view = crate::files::View { entries: &visible, chosen: &chosen, in_view: self.selected.map(|k| (k, self.turn.get() << 32 | k as u64)), click: &click, drag: None, folders: recent, thumb: None, menu: None };
+        let view = crate::files::View { entries: &visible, chosen: &chosen, in_view: self.selected.map(|k| (k, self.turn.get() << 32 | k as u64)), click: &click, drag: None, folders: recent, thumb: None, menu: None, look: &crate::files::ListLook { rows: crate::files::RowSize::Small, kind: false, ..crate::files::ListLook::default() }, folder_size: None, grip: None };
         let (head, rows) = crate::files::list(&view, self.sort, FileMsg::Sort);
         let empty = rows.is_empty();
         let mut list: Vec<Element<FileMsg>> = vec![head, rule()];

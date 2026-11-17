@@ -12,7 +12,10 @@
 //! - **Text**: shown read-only in the toolkit's text area, with "Open in Text
 //!   Editor".
 //! - **Anything else**: says what it is and offers the app chosen for it.
-//! - **Windows and tabs**: one process (hand.rs), a file a tab in the bar.
+//! - **Windows**: one process (hand.rs), one file a window, no tabs (Dave,
+//!   2026-11-16; docs/files-milestone-2.md). A file dropped on a window
+//!   takes its place; files handed over or chosen in Open… open in the
+//!   window if it shows nothing, else each in a window of its own.
 //! - **Preview** (`--preview FILE`): one file in a small window, for File
 //!   Viewer's space bar; Space or Escape closes it, Enter opens it in full.
 //! - **Its settings** (Ctrl+,): the ground around a picture, whether small
@@ -28,7 +31,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use vergence_scene::{Color, Image, Rect};
-use vergence_ui::{AppCommand as C, Bar, BarStyle, BarTab, Role, TabEvent};
+use vergence_ui::{AppCommand as C, Bar, BarStyle, Role};
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
 use vergence_widgets::{Align, AreaOptions, ButtonLook, Element, Input, Length, Padding, Program, TextDoc, Theme, Touch, Waker, Window, button, column, drawing, label, panel, row, rule, text_area};
 
@@ -54,8 +57,6 @@ mod cmd {
     pub const TURN_LEFT: u32 = 9;
     pub const NEXT: u32 = 10;
     pub const PREVIOUS: u32 = 11;
-    pub const NEXT_TAB: u32 = 12;
-    pub const PREV_TAB: u32 = 13;
     pub const OPEN_WITH: u32 = 14;
     pub const SETTINGS: u32 = 40;
     pub const ABOUT: u32 = 41;
@@ -257,6 +258,37 @@ impl Viewer {
         true
     }
 
+    /// Files to show: the first here if this window shows nothing (or
+    /// `replace`, a drop), the rest each in a new window.
+    fn take(&mut self, paths: &[PathBuf], replace: bool, window: &mut Window) {
+        let mut rest = paths.iter();
+        if (self.tabs.is_empty() || replace || self.preview)
+            && let Some(first) = rest.next()
+        {
+            self.tabs.clear();
+            self.open_paths(std::slice::from_ref(first));
+        }
+        for p in rest {
+            if self.tabs.iter().any(|t| t.path == *p) {
+                continue;
+            }
+            let mut w = Viewer::new(self.shared.clone(), false);
+            w.queue(p.clone());
+            window.open_window(vergence_widgets::window(w));
+        }
+    }
+
+    /// A file shown once the window can be woken (its `waker` reads it).
+    fn queue(&mut self, p: PathBuf) {
+        let id = {
+            let mut s = self.shared.borrow_mut();
+            s.next_tab += 1;
+            s.next_tab
+        };
+        self.tabs.push(Tab { id, path: p, content: Content::Loading, zoom: None, pan: (0.0, 0.0), frame: 0 });
+        self.front = id;
+    }
+
     fn open_paths(&mut self, paths: &[PathBuf]) {
         for p in paths {
             let p = std::path::absolute(p).unwrap_or_else(|_| p.clone());
@@ -358,28 +390,6 @@ impl Viewer {
         load(next, id, &shared.borrow(), waker);
     }
 
-    fn close_tab(&mut self, id: u32, window: &mut Window) {
-        let i = self.tabs.iter().position(|t| t.id == id);
-        if let Some(i) = i {
-            self.tabs.remove(i);
-            if self.front == id {
-                self.front = self.tabs.get(i.min(self.tabs.len().saturating_sub(1))).map_or(0, |t| t.id);
-            }
-        }
-        if self.tabs.is_empty() {
-            window.close();
-        }
-    }
-
-    fn step_tab(&mut self, by: isize) {
-        let n = self.tabs.len() as isize;
-        if n < 2 {
-            return;
-        }
-        let i = self.tabs.iter().position(|t| t.id == self.front).unwrap_or(0) as isize;
-        self.front = self.tabs[(i + by).rem_euclid(n) as usize].id;
-    }
-
     fn open_dialog(&mut self, window: &mut Window) {
         let inbox = self.shared.borrow().inbox.clone();
         let waker = self.waker.clone();
@@ -450,10 +460,7 @@ impl Viewer {
                 window.open_window(vergence_widgets::window(w));
             }
             cmd::OPEN => self.open_dialog(window),
-            cmd::CLOSE_TAB => {
-                let f = self.front;
-                self.close_tab(f, window);
-            }
+            cmd::CLOSE_TAB => window.close(),
             cmd::ZOOM_IN => {
                 if let Some(z) = self.zoom_now() {
                     self.zoom_to(z * 1.25, None);
@@ -470,8 +477,6 @@ impl Viewer {
             cmd::TURN_LEFT => self.turn(true),
             cmd::NEXT => self.step(1),
             cmd::PREVIOUS => self.step(-1),
-            cmd::NEXT_TAB => self.step_tab(1),
-            cmd::PREV_TAB => self.step_tab(-1),
             cmd::OPEN_WITH => self.open_with(false),
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
@@ -617,12 +622,9 @@ impl Program for Viewer {
         !self.preview
     }
 
+    /// A plain title bar: one file a window.
     fn bar(&self) -> Option<Bar> {
-        if self.preview {
-            return None;
-        }
-        let tabs = self.tabs.iter().map(|t| BarTab { id: t.id, title: t.name(), closable: true, alert: false, edited: false }).collect();
-        Some(Bar::Tabs { tabs, front: self.front_tab().map_or(0, |t| t.id), plus: true, accent: None, menu: Vec::new() })
+        (!self.preview).then_some(Bar::Plain)
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
@@ -788,6 +790,10 @@ impl Program for Viewer {
             let w = waker.clone();
             let _ = hand::listen(inbox, move || w.wake());
         }
+        // More files from the command line wait for windows of their own.
+        if !self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()).is_empty() {
+            waker.wake();
+        }
         // Files asked for before the window could wake (the command line's).
         let pending: Vec<(u32, PathBuf)> = self.tabs.iter().filter(|t| matches!(t.content, Content::Loading)).map(|t| (t.id, t.path.clone())).collect();
         for (id, path) in pending {
@@ -800,7 +806,7 @@ impl Program for Viewer {
         let mut changed = self.reread() || self.front_tab().is_some_and(|t| matches!(t.content, Content::Picture { .. }));
         let asked: Vec<Vec<PathBuf>> = std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
         for paths in asked {
-            self.open_paths(&paths);
+            self.take(&paths, false, window);
             // Handed over by a start (or the Open dialog): forward, if the server agrees.
             window.activate();
             changed = true;
@@ -847,14 +853,14 @@ impl Program for Viewer {
         true
     }
 
-    /// Files dropped here open as tabs.
+    /// A file dropped here takes this window's place (more, windows of their own).
     fn drag_over(&mut self, _x: f32, _y: f32, kinds: &[String], _ctrl: bool) -> u8 {
         if !self.preview && kinds.iter().any(|k| k == "text/uri-list") { vergence_ui::DROP_COPY } else { vergence_ui::DROP_NONE }
     }
 
     fn dropped(&mut self, _x: f32, _y: f32, _action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
         let paths: Vec<PathBuf> = items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default();
-        self.open_paths(&paths);
+        self.take(&paths, true, window);
         window.redraw();
     }
 
@@ -869,7 +875,7 @@ impl Program for Viewer {
         let mut list = vec![
             C::role(cmd::OPEN, Role::Open).featured(),
             C::role(cmd::NEW_WINDOW, Role::NewWindow),
-            C::role(cmd::CLOSE_TAB, Role::CloseTab),
+            C::role(cmd::CLOSE_TAB, Role::CloseWindow),
             C::own(cmd::OPEN_WITH, "File", "Open with its app", ""),
         ];
         if picture {
@@ -884,45 +890,12 @@ impl Program for Viewer {
                 C::own(cmd::PREVIOUS, "Go", "Previous picture", "Left"),
             ]);
         }
-        list.extend([C::role(cmd::NEXT_TAB, Role::NextTab), C::role(cmd::PREV_TAB, Role::PreviousTab), C::role(cmd::SETTINGS, Role::Settings), C::role(cmd::ABOUT, Role::About)]);
+        list.extend([C::role(cmd::SETTINGS, Role::Settings), C::role(cmd::ABOUT, Role::About)]);
         Some((false, list))
     }
 
     fn command(&mut self, id: u32, window: &mut Window) {
         self.run(id, window);
-    }
-
-    fn tab(&mut self, event: TabEvent, window: &mut Window) {
-        match event {
-            TabEvent::Chosen(id) => self.front = id,
-            // The +: open more.
-            TabEvent::New => self.open_dialog(window),
-            TabEvent::Close(id) => self.close_tab(id, window),
-            TabEvent::CloseOthers(id) => self.tabs.retain(|t| t.id == id),
-            TabEvent::Moved { tab, to } => {
-                if let Some(i) = self.tabs.iter().position(|t| t.id == tab) {
-                    let t = self.tabs.remove(i);
-                    self.tabs.insert((to as usize).min(self.tabs.len()), t);
-                }
-            }
-            TabEvent::Out { tab, .. } => {
-                if self.tabs.len() > 1
-                    && let Some(i) = self.tabs.iter().position(|t| t.id == tab)
-                {
-                    let t = self.tabs.remove(i);
-                    if self.front == tab {
-                        self.front = self.tabs.first().map_or(0, |t| t.id);
-                    }
-                    let mut w = Viewer::new(self.shared.clone(), false);
-                    w.front = t.id;
-                    w.tabs.push(t);
-                    window.open_window(vergence_widgets::window(w));
-                }
-            }
-            _ => {}
-        }
-        self.arm_animation(window);
-        window.redraw();
     }
 
     fn style(&self) -> vergence_ui::Style {
@@ -979,15 +952,15 @@ fn main() {
     }
     let shared = Rc::new(RefCell::new(Shared { inbox: Arc::default(), loaded: Arc::default(), next_tab: 0 }));
     let mut viewer = Viewer::new(shared, preview);
-    // Tabs now; their files are read once the window can be woken (waker()).
-    for p in &files {
-        let id = {
-            let mut s = viewer.shared.borrow_mut();
-            s.next_tab += 1;
-            s.next_tab
-        };
-        viewer.tabs.push(Tab { id, path: p.clone(), content: Content::Loading, zoom: None, pan: (0.0, 0.0), frame: 0 });
-        viewer.front = id;
+    // The first file here, read once the window can be woken (waker()); the
+    // others go into windows of their own when it is (woken()).
+    let mut files = files.into_iter();
+    if let Some(p) = files.next() {
+        viewer.queue(p);
+    }
+    let more: Vec<PathBuf> = files.collect();
+    if !more.is_empty() {
+        viewer.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()).push(more);
     }
     let size = if preview { (720, 540) } else { (960, 680) };
     if let Err(e) = vergence_widgets::run(viewer, size) {
