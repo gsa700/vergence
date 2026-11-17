@@ -21,8 +21,11 @@ hybrid laptop) and a Lenovo Tiny running Fedora (systemd and logind).
 - GPU: the GTX 960 to start (Maxwell: NVIDIA's legacy 580 branch only), a
   Turing or newer card later (a GTX 1650 matches Hubble's chip; a T1000 has
   four outputs).
-- Several NVMe slots: FreeBSD on the first; the others free for a Linux, or
-  scratch.
+- Several NVMe slots: FreeBSD on the first. Fedora goes on a second drive as
+  boot option 2 when one is found (Dave, 2026-11-17: "reliability always
+  matters to me"): a fallback when FreeBSD hits a wall, the same GPU and
+  monitors under Linux to tell an OS bug from ours, and the systemd/logind
+  side.
 
 ## Before installing (BIOS)
 
