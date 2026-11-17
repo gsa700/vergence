@@ -743,7 +743,7 @@ impl Program for FileDialog {
     }
 
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: true, min: (640.0, 400.0), max: (0.0, 0.0) }
+        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: true, min: (640.0, 400.0), max: (0.0, 0.0), alone: false }
     }
 
     fn opening_size(&self) -> Option<(u32, u32)> {

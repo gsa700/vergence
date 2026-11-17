@@ -466,8 +466,11 @@ impl Server {
             }
             // It draws under its bar (look milestone 1): told the inset at once.
             // Its kind, modal, limits (window styles milestone 1). A dialog or
-            // palette of another connection's window, or of none, is a normal
-            // window: a program shapes only its own (§7.3).
+            // palette of another connection's window is a normal window: a
+            // program shapes only its own (§7.3). A dialog of no window is a
+            // lone one (a Properties window, files milestone 2): a window of
+            // its own, listed and stacked as one, with the slim close-only bar
+            // (no app button); a palette of none is a normal window.
             WinRequest::Style { window, kind, modal, min, max } => {
                 if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
                     let parent = n.state.lock().unwrap().parent;
@@ -475,6 +478,7 @@ impl Server {
                     let adopted = self.portal.adopted.contains_key(&Win::Native(n.clone()));
                     let owned = adopted || (parent != 0 && parent != window && self.natives.contains_key(&(client, parent)));
                     let kind = match kind {
+                        vergence_protocol::window::WinKind::Dialog if parent == 0 && !adopted => vergence_protocol::window::WinKind::Dialog,
                         vergence_protocol::window::WinKind::Dialog | vergence_protocol::window::WinKind::Palette if !owned => vergence_protocol::window::WinKind::Normal,
                         k => k,
                     };

@@ -539,6 +539,11 @@ pub struct Style {
     pub modal: bool,
     pub min: (f64, f64),
     pub max: (f64, f64),
+    /// A window another window opened that is not that window's (a
+    /// Properties window, files milestone 2): opened with no parent, so it
+    /// goes nowhere with its opener. A dialog so opened is a lone one to the
+    /// server: a window of its own with the slim close-only bar, no app button.
+    pub alone: bool,
 }
 
 pub trait App {

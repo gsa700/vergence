@@ -287,7 +287,9 @@ impl Program for Properties {
     }
 
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { min: (360.0, 380.0), ..Default::default() }
+        // A window of its own with only a close button (Dave, 2026-11-16: no
+        // app menu or settings on a Properties window).
+        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, alone: true, min: (360.0, 380.0), ..Default::default() }
     }
 
     fn waker(&mut self, waker: Waker) {

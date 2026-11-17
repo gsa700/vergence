@@ -220,7 +220,7 @@ impl Program for KeepDialog {
         window.close();
     }
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: true, min: (380.0, 150.0), max: (0.0, 0.0) }
+        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: true, min: (380.0, 150.0), max: (0.0, 0.0), alone: false }
     }
     /// The countdown: a thread wakes the dialog twice a second until the
     /// time is up (a new window has no hook to start a timer of its own).

@@ -437,7 +437,7 @@ impl<'a> Native<'a> {
         let size = app.opening_size().map_or(OPENED_SIZE, |(w, h)| (w.clamp(64, 16_384), h.clamp(48, 16_384)));
         let (bar_by_server, mut request) = create_request(app.as_ref(), id, serial, size);
         if let WinRequest::Create { parent, .. } = &mut request {
-            *parent = opener;
+            *parent = if app.style().alone { 0 } else { opener };
         }
         app.opened(id);
         app.waker(self.waker.clone());

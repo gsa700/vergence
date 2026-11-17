@@ -61,6 +61,6 @@ impl Program for About {
     }
 
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (380.0, 210.0), max: (0.0, 0.0) }
+        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (380.0, 210.0), max: (0.0, 0.0), alone: false }
     }
 }

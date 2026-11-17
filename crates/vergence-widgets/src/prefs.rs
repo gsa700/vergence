@@ -415,7 +415,7 @@ impl Program for Prefs {
     fn style(&self) -> vergence_ui::Style {
         // Small enough to be made short (it scrolls); it opens as tall as its rows
         // want, or at the size it was last left at.
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (520.0, 260.0), max: (900.0, 0.0) }
+        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (520.0, 260.0), max: (900.0, 0.0), alone: false }
     }
 
     /// It opens at a guess from its rows (the width kept from before), then

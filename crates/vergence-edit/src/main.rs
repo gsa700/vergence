@@ -1605,7 +1605,7 @@ impl Program for SaveQuestion {
         window.close();
     }
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: true, min: (420.0, 150.0), max: (0.0, 0.0) }
+        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: true, min: (420.0, 150.0), max: (0.0, 0.0), alone: false }
     }
 }
 

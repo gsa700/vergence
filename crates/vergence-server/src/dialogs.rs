@@ -142,7 +142,8 @@ impl Server {
             for p in shown {
                 self.space.raise_element(&p, false);
             }
-            let dialogs: Vec<Win> = self.space.elements().filter(|w| self.window_style(w).kind == Kind::Dialog).cloned().collect();
+            // A lone dialog (no parent: a Properties window) is a window of its own and stays where it is.
+            let dialogs: Vec<Win> = self.space.elements().filter(|w| self.belongs_to_parent(w) && self.window_style(w).kind == Kind::Dialog).cloned().collect();
             for d in dialogs {
                 self.space.raise_element(&d, false);
             }

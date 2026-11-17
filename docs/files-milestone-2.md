@@ -59,6 +59,12 @@ Viewer", with Finder's list view as the picture of what he likes.*
    read can be entered, "Allow running as a program"; only the owner or
    root changes them). The menus call it Properties (Ctrl+I); one window per
    chosen item, at most eight. No spelling marks in File Viewer's fields.
+   A lone dialog (Dave, 2026-11-16: no menu or settings on it): the slim bar
+   with close only, no app button, yet a window of its own (`Style::alone`
+   opens it with no parent; the server keeps a dialog of no window a dialog
+   instead of making it a normal one, and lifts only dialogs with a parent
+   over their application's windows), in the dock and Alt+Tab, not going
+   with the File Viewer window that opened it.
 4. Tests green on Hubble, kepler, Techbench 2026-11-16 evening; installed.
    Not yet: a ↔ pointer over the column grips; folder sizes in the Size
    sort after a folder is read again (the sizes are put back only when new
