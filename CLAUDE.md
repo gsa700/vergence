@@ -1,6 +1,6 @@
 # Working in this repository
 
-Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Vergence-Whitepaper.md (Draft 0.23, 2026-11-16; §9 has the status and the order of work), status is also in README.md, and each milestone has its plan and progress in docs/*-milestone-*.md. Phase 1 (docs/milestone-1.md to -4.md, the X11 daemon vergd) is frozen and its daemon retired. Phase 2, the server, is the daily session on Hubble, kepler and Techbench.
+Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Vergence-Whitepaper.md (Draft 0.24, 2026-11-18; §9 has the status and the order of work), status is also in README.md, and each milestone has its plan and progress in docs/*-milestone-*.md. Phase 1 (docs/milestone-1.md to -4.md, the X11 daemon vergd) is frozen and its daemon retired. Phase 2, the server, is the daily session on Hubble, kepler and Techbench.
 
 **Phase 2 milestones, as of 2026-11-14:**
 - Done and closed: the session bus (docs/bus-milestone-1.md; the server's bring-up is docs/server-milestone-1.md); toolkit 1 and 2 (docs/toolkit-milestone-1.md, -2.md, 2026-11-10: vergence-ui with crates/vergence-scene, -render, -text, -wl, -widgets; the terminal, crates/vergence-term, and the settings app on it; iced removed; two items carried forward, see toolkit-milestone-2's header); native windows (docs/native-milestone-1.md, 2026-11-11: crates/vergence-server/src/native.rs, the toolkit's native road crates/vergence-ui/src/native.rs, `VERGENCE_UI_WAYLAND=1` for the Wayland road, placement requests and memory, the meaning tree, `vctl tree`; under GNOME the toolkit draws its own bar and border); the bar (docs/bar-milestone-1.md, 2026-11-12: the server draws every native window's bar, tabs included, from crates/vergence-bar, bus protocol v2, persistence tokens, one terminal process for all its windows, tab dragging and menus, window memory per resolution and scale of a setup; under GNOME our bars follow GNOME's button layout; tab dragging under other desktops carried forward).
@@ -38,8 +38,25 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   never saved; `vctl scale <screen> reset`), steps the window a point at a
   time, and `vergence-harness seams` checks each shot pixel by pixel;
   reports in ~/vergence-display-checks/ on Control. It builds into
-  target-check, apart from the session's build. It changes the screen's
-  scale for a few minutes: not on a screen Dave is working at without asking.
+  target-check, apart from the session's build. On a real screen it changes
+  its scale for a few minutes: not on a screen Dave is working at without
+  asking; `--headless "<spec>"` runs it in a session of its own instead.
+  Layer 3 (docs/headless-milestone-1.md, 2026-11-18): screens in memory
+  (`vctl screen add --fake WxH MMxMM [--hz R] [--name ONEWORD]`, `vctl
+  screen remove MEM-n`; never saved to window memory), `vergence-server
+  --headless --screen "WxH MMxMM@HZ"` (no seat or input; the main render
+  node, or software where there is no GPU), tools/vergence-headless
+  start|env|stop (its own HOME and runtime directory under
+  ~/.cache/vergence-headless; `eval "$(tools/vergence-headless env)"` points
+  vctl at it alone), `vctl picture <i>` (a window's own picture),
+  `vergence-harness same` (pixel comparison). **The display suite**,
+  `tools/display-suite.sh <host> [scenario...]`, runs the scenarios in
+  tools/display-suite/NN-*.sh, each in a headless session of its own, the
+  monitors untouched; before every push of display code on Hubble, kepler
+  and techbench (Dave, 2026-11-18), about three minutes a machine; one host
+  per command (parallel syncs collided). canary (the FreeBSD VM, back since
+  2026-11-18, no GPU) runs it in software. Always the checkout's tools/vctl
+  in scripts: canary's installed one predates VCTL_SOCKET.
 - **GPU hangs: keep the evidence** (2026-11-14). On kepler run tests as
   `tools/test-guard.sh 480 -- cargo test -q --workspace`: if they run over,
   it saves `tools/gpu-report.sh`'s report (each stuck process's threads and

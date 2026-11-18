@@ -281,6 +281,21 @@ pub(crate) fn edges_px(at: Point<i32, Logical>, size: smithay::utils::Size<i32, 
     Rectangle::from_extremities(a.to_i32_round(), b.to_i32_round())
 }
 
+/// A native window's own picture alone, at its pixels from the corner, for
+/// `vctl picture`: the elements and the size to draw them at scale 1.
+pub fn picture_elements(renderer: &mut GlesRenderer, w: &Win) -> Option<(Vec<SceneElement>, smithay::utils::Size<i32, Physical>)> {
+    let p = w.native()?.picture()?;
+    let size = smithay::utils::Size::<i32, Physical>::from((p.px.w, p.px.h));
+    let e = match &p.content {
+        crate::native::Content::Memory(buffer) => SceneElement::Memory(MemoryRenderBufferRenderElement::from_buffer(renderer, (0.0, 0.0), buffer, None, None, None, Kind::Unspecified).ok()?),
+        crate::native::Content::Gpu(_) => {
+            let (t, _, _, _) = native_texture(renderer, w)?;
+            SceneElement::Texture(smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer((0.0, 0.0), &t, None, None, None, Kind::Unspecified))
+        }
+    };
+    Some((vec![e], size))
+}
+
 /// The serial of a native window's GPU picture (GpuPicture::serial), 0 for
 /// any other.
 fn native_serial(w: &Win) -> u64 {

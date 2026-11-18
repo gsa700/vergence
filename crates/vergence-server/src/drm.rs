@@ -995,6 +995,20 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
         }
     }
 
+    // The control socket's `picture`: windows' own pictures, alone, at scale 1.
+    for (w, name) in std::mem::take(&mut state.picture_pending) {
+        match crate::decor::picture_elements(&mut b.renderer, &w) {
+            Some((els, size)) => {
+                let els: Vec<OutputElements> = els.into_iter().map(OutputElements::Scene).collect();
+                match capture(&mut b.renderer, &els, size, 1.0, [0.0, 0.0, 0.0, 0.0]) {
+                    Ok(rgba) => crate::control::save_png(name, size.w as u32, size.h as u32, rgba),
+                    Err(e) => tracing::warn!("picture {name}: {e}"),
+                }
+            }
+            None => tracing::warn!("picture {name}: the window has no picture now"),
+        }
+    }
+
     let clear = state.background_color(&s.connector);
     let outcome = if crtc.0 == MEMORY {
         memory_frame(&mut b.renderer, s, &elements, clear)
@@ -1233,7 +1247,7 @@ pub fn run_headless(event_loop: &mut EventLoop<Server>, state: &mut Server, scre
     for spec in screens {
         let parsed = parse_screen_spec(spec).ok_or_else(|| format!("--screen {spec}: WxH MMxMM[@HZ], as 2560x1440 597x336@60"))?;
         let (px, mm, hz) = parsed;
-        let edid = fake_screen_edid(px, mm, &format!("HL {}x{}", px.0, px.1));
+        let edid = fake_screen_edid(px, mm, &format!("HL{}x{}", px.0, px.1));
         add_memory_screen(state, edid, px, hz)?;
     }
     Ok(())

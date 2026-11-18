@@ -167,3 +167,23 @@ scenarios, each from a bug or a rule we already have:
   UHD 630) 27" QHD at six scales 48/48; techbench 27" 4K at 4/3, 1.5, 2
   24/24; kepler 14" 4K at 2, 2.5, 3, 3.25 32/32; canary (no GPU, llvmpipe)
   24" FHD at 1, 1.25, 1.5 24/24. Tests: Hubble 711, kepler 704, techbench 704.
+- **Step 4 done, reshaped** (2026-11-18): a CPU picture of the server's
+  whole frame would mean a CPU compositor (app buffers, the frost's
+  shaders), so the two comparisons that matter instead: `vctl picture <i>`
+  (a window's own picture, drawn alone at scale 1) against the screen
+  (`vergence-harness same`): on the grid identical, 0 of ~64,000 pixels
+  differ at 1, 1.25, 4/3, 1.5 and 2 (off the grid not compared: the server
+  crops); and the toolkit on the GPU against its CPU reference
+  (testpattern `--rich`: text, rounded shapes, outlines, hairlines;
+  VERGENCE_RENDER=cpu): alike within 1 of 255 at every scale tried.
+  `vctl windows` gives a native window's scale= and text=.
+- **Step 5 done** (2026-11-18): tools/display-suite.sh and
+  tools/display-suite/{lib.sh,run.sh,01..08}: seams, cpu-reference,
+  text-factor, hotplug-add, hotplug-remove, scale-change, setup-memory,
+  two-scales. 8 of 8 on Hubble, kepler, techbench and canary (software),
+  2-3 minutes each, most of it the seams. Noted for Dave: window memory
+  scales a place to a monitor's new size in points, so at a new scale a
+  window comes back with its pixel size, not its point size (the
+  2026-11-12 rule; right for a resolution change).
+- **Step 6 done** (2026-11-18): CLAUDE.md "Display checks", whitepaper §9
+  (Draft 0.24). **Milestone closed.**

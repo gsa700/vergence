@@ -92,6 +92,9 @@ pub struct Server {
     /// The last press on a title bar, for double-click to maximize.
     /// Monitors (connector names) still to capture for the control socket's `shot`.
     pub shot_pending: Vec<String>,
+    /// Windows whose own picture is still to save for `vctl picture`, and
+    /// the name each is saved under (headless milestone 1, step 4).
+    pub picture_pending: Vec<(Win, String)>,
     /// The desktop font for title text (None: titles without text).
     pub title_font: Option<crate::text::TextFont>,
     /// The frost's shader program (look milestone 1, step 3), compiled the
@@ -294,6 +297,7 @@ impl Server {
             tint_on: true,
             tints: Default::default(),
             shot_pending: Vec::new(),
+            picture_pending: Vec::new(),
             title_font: crate::text::TextFont::load(),
             frost: None,
             round: None,

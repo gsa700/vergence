@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "16 November 2026 — Draft 0.23"
+date: "18 November 2026 — Draft 0.24"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.23 · 16 November 2026
+David Erickson (AB0R), with Claude · Draft 0.24 · 18 November 2026
 
 ---
 
@@ -600,6 +600,7 @@ Everything on Mesa shares one path: GBM buffers, EGL rendering, and implicit syn
   - **Live tiles, the drawer and named actions** (16 November, §6.9): the dock's icons dragged, pinned and removed by hand, the dock moved by Alt+drag or its menu; tiles published on the session bus (protocol version 19) and drawn by the server, with cards and controls; the desktop's Sound, Network, Power and clock; a drawer with tiles in trouble coming out by themselves; the rack's UPS from its NUT server as the first lab tile, started from the user's autostart folder; the first named desktop actions, run from the launcher's search.
   - **The lock screen and the login screen** (16 November, §7.5): VDM, the project's display manager, on all three systems: a root program that alone checks passwords through PAM; the lock drawn by the server, on Super+L, after no input, when the screens go off and before sleep; a login screen with the machine's people, the system's own login questions (a password, a security key, a code), the session to start, the machine's keyboard layout and a larger text size; each session on its own console, everything it leaves ended when it ends; Sleep, Restart and Shut Down in the log out dialog and on the login screen; automatic login by strict rules; the settings app's Lock Screen and Login pages. On Fedora it replaced GDM, with logind giving the login screen and each session their seat as GDM's would.
   - **A second GPU** (14 November): screens on another GPU, drawn by the main one and copied over (§8.3, "A screen on a second GPU, as built"): Hubble's 14-inch 4K monitor on the NVIDIA card's HDMI, smooth, paced to its own refresh, its touch panel tied to it, the NVIDIA card asleep when unplugged; the Screens page says which GPU shows and draws each screen; bus protocol version 8. Carried over: the copy by the CPU for GPUs that share no format.
+  - **Display testing** (18 November): the server can draw screens that exist only in memory, beside real monitors (`vctl screen add`) or with none at all (`vergence-server --headless`, a whole session of its own, on the GPU or, with no GPU, in software), from fake EDIDs of any size and density. Three layers check what reaches the screen: geometry tests at every clean scale with no GPU; a test-pattern window with a one-pixel line on each edge, stepped a point at a time through the scales and checked in screen shots pixel by pixel, the screen shown to hold exactly what the program drew; and a suite of scenarios (hot-plug, a window rescued and given back its place, a scale changed under a window, two scales side by side, the GPU against the CPU reference renderer) that runs headless on every development machine before display code is pushed. Its first runs found a picture drawn one pixel taller than it was shown at 120% (rounding in single precision), and a headless session that could have put the machine to sleep. Native windows at a fractional scale keep to the pixel grid of its fraction (at 133⅓%, steps of 3 points), so their edges and bars fall on whole pixels; and text on a screen run below its calculated scale is drawn a little larger, by an adjustable share of what the scale took away (§6.3).
 
   Still open within phase 2: checks by hand left in the seat, shelf and look milestones; drag and drop with Wayland and X11 programs (the native protocol's drags do not cross to them yet); docks on more than one screen; the drawer's filter field and a calendar in the clock's card; the rest of Smithay's replacement (the window space and the renderer next, then the DRM/KMS and input back ends); explicit sync and NVIDIA's own driver (§8.3); and packages for Void, FreeBSD and Fedora (today `tools/install.sh` installs under a prefix).
 
@@ -622,7 +623,7 @@ The display-list renderer was phase 3 work. Step 1 brought its first version for
 
 **Where the real costs are.** Writing the code is not the bottleneck. The bottlenecks are:
 
-- **real-hardware testing:** GPUs, monitors with unusual EDIDs, docks, sleep and wake. Most of it can be automated (§4.8), which turns weeks of manual testing into overnight runs; what remains manual is real docks and KVM switches;
+- **real-hardware testing:** GPUs, monitors with unusual EDIDs, docks, sleep and wake. Most of it can be automated (§4.8), which turns weeks of manual testing into overnight runs, and since 18 November the display's part is (screens in memory and a scenario suite, above); what remains manual is real docks and KVM switches;
 - **the user's time and judgment:** what "the right size" means to their eyes;
 - for phases 3–4, **toolkit adoption**, which only a working demonstration can start.
 

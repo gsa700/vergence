@@ -228,6 +228,11 @@ impl NativeWindow {
         self.state.lock().unwrap().scale
     }
 
+    /// The text factor the window was last told (its screen's).
+    pub fn text(&self) -> f64 {
+        self.state.lock().unwrap().text
+    }
+
     pub fn title(&self) -> String {
         self.state.lock().unwrap().title.clone()
     }

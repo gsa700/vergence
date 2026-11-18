@@ -99,9 +99,30 @@ $geo
 EOF
         shot=$out/scale$scale-step$d.png
         cp "$shots/$screen.png" "$shot"
+        # The window's own picture, as the pattern drew it (vctl picture).
+        rm -f "$shots/window-$idx.png"
+        vctl picture "$idx" >/dev/null
+        i=0
+        while [ ! -s "$shots/window-$idx.png" ] && [ $i -lt 60 ]; do sleep 0.1; i=$((i + 1)); done
+        sleep 0.2
+        picture=$out/scale$scale-step$d-window.png
+        cp "$shots/window-$idx.png" "$picture" 2>/dev/null
+        # Where its first pixel is on the screen, and its corners' radius in pixels.
+        at=$(awk -v x=$((x - ox)) -v y=$((y - oy)) -v s="$scale" 'BEGIN { printf "%d %d %d", int(x * s + 0.5), int(y * s + 0.5), int(7 * s + 0.999) }')
+        set -- $at
+        ax=$1 ay=$2 corners=$3
         {
             echo "== scale $scale, step $d: $w x $h at $x,$y (bar $bar)"
-            "$harness" seams "$shot" --scale "$scale" --window $((x - ox)) $((y - oy)) "$w" "$h" --bar "$bar"
+            ok=0
+            "$harness" seams "$shot" --scale "$scale" --window $((x - ox)) $((y - oy)) "$w" "$h" --bar "$bar" || ok=1
+            # What the pattern drew is what the screen shows, pixel for pixel
+            # (on the grid; off it the server crops a picture a pixel larger).
+            if "$harness" grid "$scale" >/dev/null 2>&1; then
+                "$harness" same "$shot" "$picture" --at "$ax" "$ay" --corners "$corners" || ok=1
+            else
+                echo "same: off the grid, not compared"
+            fi
+            [ $ok -eq 0 ]
         } >>"$report" 2>&1 || failed=$((failed + 1))
         checked=$((checked + 1))
     done

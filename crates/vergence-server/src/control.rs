@@ -344,6 +344,23 @@ impl Server {
                     Err(e) => format!("spawn: {e}"),
                 }
             }
+            // A window's own picture, as its program drew it (headless
+            // milestone 1, step 4): saved as window-<i>.png beside the shots,
+            // at its own pixels, to compare with what the screen shows.
+            "picture" => {
+                if self.backend.is_none() {
+                    return "picture: only with --drm or --headless".into();
+                }
+                let Some(i) = args.first().and_then(|a| a.parse::<usize>().ok()) else { return "picture <i>".into() };
+                let Some(w) = self.space.elements().nth(i).cloned() else { return format!("no window {i}") };
+                if w.native().and_then(|n| n.picture()).is_none() {
+                    return format!("window {i}: no picture of its own (only native windows have one)");
+                }
+                let name = format!("window-{i}");
+                self.picture_pending.push((w, name.clone()));
+                self.redraw_all();
+                format!("picture {i}: {}", shot_dir().join(format!("{name}.png")).display())
+            }
             // Screens in memory beside the monitors (headless milestone 1):
             // `screen add --fake 2560x1440 597x336 [--hz 60] [--name TEXT]`,
             // `screen add --edid FILE 3840x2160 [--hz 60]`, `screen remove MEM-1`,
@@ -549,7 +566,9 @@ impl Server {
                 None => w.toplevel().and_then(|t| smithay::reexports::wayland_server::Resource::client(t.wl_surface())).and_then(|c| c.get_credentials(&self.display_handle).ok()).map(|c| c.pid as u32),
             };
             let pid = pid.map(|p| format!(" pid {p}")).unwrap_or_default();
-            out.push(format!("{i} {kind} {title:?} {class:?} {geo:?} on {on:?} title-bar={} bar-h={}{pid} {}", self.has_title(w), if self.has_title(w) { self.bar_h(w) } else { 0 }, self.describe_style(w)));
+            // A native window's scale and text factor, as told (the display suite).
+            let told = w.native().map_or(String::new(), |n| format!(" scale={:.4} text={:.3}", n.scale(), n.text()));
+            out.push(format!("{i} {kind} {title:?} {class:?} {geo:?} on {on:?} title-bar={} bar-h={}{told}{pid} {}", self.has_title(w), if self.has_title(w) { self.bar_h(w) } else { 0 }, self.describe_style(w)));
         }
         out.join("\n")
     }
