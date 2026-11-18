@@ -671,6 +671,9 @@ struct App {
     scale_drag: Option<(usize, f32)>,
     /// The text slider being dragged: its value, saved when let go.
     text_drag: Option<f32>,
+    /// A `--page` named before its page was listed (the Screens pages wait
+    /// for the screens): opened when they come.
+    page_wanted: Option<String>,
     arrange_drag: Option<ArrangeDrag>,
     arrange_click: Option<(usize, Instant)>,
     /// The size the arrangement was last drawn at (its drawing sets it).
@@ -873,6 +876,7 @@ impl App {
             scale: 1.0,
             scale_drag: None,
             text_drag: None,
+            page_wanted: None,
             arrange_drag: None,
             arrange_click: None,
             arrange_size: Rc::new(Cell::new((1.0, 1.0))),
@@ -1030,9 +1034,14 @@ impl App {
         }
         if let Some(i) = args.iter().position(|a| a == "--page")
             && let Some(name) = args.get(i + 1)
-            && let Some(page) = self.page_named(name)
         {
-            self.open(page);
+            match self.page_named(name) {
+                Some(page) => self.open(page),
+                // The Screens pages are listed once the server has told the
+                // screens (`--page screens` opened Appearance, 2026-11-18).
+                None if self.outputs.is_empty() => self.page_wanted = Some(name.clone()),
+                None => {}
+            }
         }
         if let Some(i) = args.iter().position(|a| a == "--app")
             && let Some(id) = args.get(i + 1).filter(|id| !id.is_empty() && id.len() < 256)
@@ -1224,6 +1233,11 @@ impl App {
                 }
                 if self.page == Page::Overview && self.outputs.len() <= 1 {
                     self.page = Page::Screen(0);
+                }
+                if let Some(name) = self.page_wanted.take()
+                    && let Some(page) = self.page_named(&name)
+                {
+                    self.open(page);
                 }
                 if let Some(o) = self.current_output() {
                     self.scale = o.base_scale as f32;
