@@ -305,6 +305,23 @@ it is today:
   A few lines still give a scroll range; probably the area counts a page of
   room past the last line, or the under-bar inset, as content. Scrolling
   should start only when the text is taller than the view.
+- **Polish: default text sizes that fit the screen** (Dave, techbench,
+  2026-11-17). Today every app's text starts at a fixed point size (10 pt,
+  the terminal's too) and only the screen's scale grows it. The scale
+  already follows pixel density and viewing distance, so the open question
+  is the rest: a big monitor read from farther away, a small laptop panel
+  held close, a TV. Consider a default text size from the screen's physical
+  size (EDID) as well as its density, offered as the "Desktop default", and
+  check it on techbench's 27" LG (Dave's pick there: 133⅓% scale, terminal
+  at 15) against Hubble's 15.6" panel and kepler's 14".
+- **Bug to watch: the terminal's text size once did not change** from its
+  settings window (techbench, 2026-11-17); a live retry worked and writes
+  were seen landing. Note what was picked and what else was open if it
+  comes back.
+- **Packages for Void (xbps) and Fedora (RPM)**, after the FreeBSD one
+  (tools/freebsd/make-pkg.sh, docs/packaging.md); then a clean first
+  install on techbench following only pkg's message, to list every root
+  step a real user meets.
 
 ## Questions for Dave (when each app's turn comes)
 
