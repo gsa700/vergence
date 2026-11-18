@@ -855,7 +855,17 @@ impl<'a> Native<'a> {
         };
         match gpu.draw_into(&w.slots[index].buffer, scene, &mut self.fonts, scale, background) {
             Ok(()) => {}
-            Err(GpuError::Unsupported(_)) => return Ok(false),
+            Err(GpuError::Unsupported(what)) => {
+                // This frame in software; said once for each reason (a window
+                // drawn in software has no frost under its bar or rounded corners).
+                static SAID: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+                let mut said = SAID.lock().unwrap_or_else(|e| e.into_inner());
+                if !said.contains(&what) {
+                    said.push(what);
+                    eprintln!("vergence-ui: a frame drawn in software: not on the GPU yet: {what}");
+                }
+                return Ok(false);
+            }
             Err(e) => {
                 eprintln!("vergence-ui: drawing in software from now: the GPU could not draw ({e:?})");
                 self.give_up_gpu();

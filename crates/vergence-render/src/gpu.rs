@@ -850,7 +850,13 @@ impl Gpu {
             let (clip, clip_param) = match chain.as_slice() {
                 [] => ([0.0; 4], [0.0; 4]),
                 [one] => (rect(one), [one.radius, 1.0, 0.0, 0.0]),
-                _ => return Err(GpuError::Unsupported("a shape inside more than one rounded clip")),
+                // Several: as one, where that is exact (one_clip). Before, such
+                // a frame was drawn in software and lost the frost under its
+                // window's bar (techbench's Settings at 133⅓%, 2026-11-18).
+                many => match one_clip(many, p.bounds) {
+                    Some(one) => (rect(&one), [one.radius, 1.0, 0.0, 0.0]),
+                    None => return Err(GpuError::Unsupported("a shape inside more than one rounded clip")),
+                },
             };
             let (mut shape, mut inner, mut uv) = ([0.0f32; 4], [0.0f32; 4], [0.0f32; 4]);
             let mut param: [f32; 4];
@@ -1093,5 +1099,79 @@ unsafe fn link(gl: &Gles) -> Result<u32, GpuError> {
             return Err(GpuError::Program(CStr::from_ptr(log.as_ptr()).to_string_lossy().into_owned()));
         }
         Ok(program)
+    }
+}
+
+/// Several clips a shape lies in, as the one the shader takes, where that is
+/// exact for the pixels it can touch (`bounds`): a clip with no rounding, or
+/// whose rounded corners those pixels don't reach, acts as a plain
+/// rectangle, and rectangles meet in a rectangle. One truly rounded clip may
+/// remain, if the rectangles leave it whole or the pixels inside them. None
+/// when two rounded clips both matter there, or a rectangle cuts the one
+/// that does.
+pub(crate) fn one_clip(chain: &[RRect], bounds: [i32; 4]) -> Option<RRect> {
+    let b = [bounds[0] as f32, bounds[1] as f32, bounds[2] as f32, bounds[3] as f32];
+    let meets = |a: [f32; 4], c: [f32; 4]| a[0] < c[2] && c[0] < a[2] && a[1] < c[3] && c[1] < a[3];
+    let reaches_corner = |c: &RRect| {
+        let r = c.radius;
+        r > 0.0
+            && [
+                [c.x0, c.y0, c.x0 + r, c.y0 + r],
+                [c.x1 - r, c.y0, c.x1, c.y0 + r],
+                [c.x0, c.y1 - r, c.x0 + r, c.y1],
+                [c.x1 - r, c.y1 - r, c.x1, c.y1],
+            ]
+            .iter()
+            .any(|q| meets(*q, b))
+    };
+    let mut square = [f32::NEG_INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::INFINITY];
+    let mut rounded: Option<RRect> = None;
+    for c in chain {
+        if reaches_corner(c) {
+            if rounded.is_some() {
+                return None;
+            }
+            rounded = Some(*c);
+        } else {
+            square = [square[0].max(c.x0), square[1].max(c.y0), square[2].min(c.x1), square[3].min(c.y1)];
+        }
+    }
+    let inside = |a: [f32; 4], c: [f32; 4]| a[0] >= c[0] && a[1] >= c[1] && a[2] <= c[2] && a[3] <= c[3];
+    match rounded {
+        None => Some(RRect { x0: square[0], y0: square[1], x1: square[2], y1: square[3], radius: 0.0 }),
+        // The rectangles leave the rounded one whole, or the pixels lie inside them.
+        Some(c) if inside([c.x0, c.y0, c.x1, c.y1], square) || inside(b, square) => Some(c),
+        Some(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod clip_tests {
+    use super::*;
+
+    fn rr(x0: f32, y0: f32, x1: f32, y1: f32, radius: f32) -> RRect {
+        RRect { x0, y0, x1, y1, radius }
+    }
+
+    #[test]
+    fn nested_clips_become_one_where_that_is_exact() {
+        // A rounded card inside a rounded scroll area, its text well inside both:
+        // the card is the clip (its corners are near), the area acts as a square.
+        let area = rr(0.0, 0.0, 1000.0, 1600.0, 10.0);
+        let card = rr(40.0, 100.0, 960.0, 400.0, 12.0);
+        let c = one_clip(&[area, card], [50, 110, 300, 130]).unwrap();
+        assert_eq!((c.x0, c.y0, c.x1, c.y1, c.radius), (40.0, 100.0, 960.0, 400.0, 12.0));
+        // Pixels reaching no corner of either: a plain rectangle, both met.
+        let c = one_clip(&[area, card], [400, 200, 500, 220]).unwrap();
+        assert_eq!((c.x0, c.y0, c.x1, c.y1, c.radius), (40.0, 100.0, 960.0, 400.0, 0.0));
+        // Square clips only: their meeting.
+        let c = one_clip(&[rr(0.0, 0.0, 500.0, 500.0, 0.0), rr(100.0, 50.0, 800.0, 300.0, 0.0)], [0, 0, 900, 900]).unwrap();
+        assert_eq!((c.x0, c.y0, c.x1, c.y1), (100.0, 50.0, 500.0, 300.0));
+        // A shape in the corner of two rounded clips that share it: not one clip.
+        let a = rr(0.0, 0.0, 100.0, 100.0, 10.0);
+        let b = rr(0.0, 0.0, 200.0, 200.0, 20.0);
+        assert!(one_clip(&[a, b], [0, 0, 15, 15]).is_none());
+        // A rectangle cutting through the rounded clip that matters: not one clip.
+        assert!(one_clip(&[a, rr(50.0, 0.0, 300.0, 300.0, 0.0)], [0, 0, 100, 100]).is_none());
     }
 }
