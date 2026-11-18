@@ -125,6 +125,35 @@ pub fn detents(default: f64, max: f64) -> Vec<f64> {
     d
 }
 
+/// The scales between `lo` and `hi` at which a `w` x `h` pixel screen is a
+/// whole number of points both ways, so nothing lands between pixels. A
+/// scale goes to apps in 120ths (wp_fractional_scale), so these are the
+/// k/120 where k divides both w*120 and h*120: on 3840x2160, 125%, 150%,
+/// 160%, 166⅔% and others; 144% is not one (2666.67 points wide).
+pub fn clean_scales(w: u32, h: u32, lo: f64, hi: f64) -> Vec<f64> {
+    if w == 0 || h == 0 {
+        return Vec::new();
+    }
+    let (w, h) = (u64::from(w) * 120, u64::from(h) * 120);
+    let (first, last) = ((lo * 120.0).ceil().max(1.0) as u64, (hi * 120.0).floor() as u64);
+    (first..=last).filter(|k| w % k == 0 && h % k == 0).map(|k| k as f64 / 120.0).collect()
+}
+
+/// Where a dragged scale settles: a strong mark (whole number, the default)
+/// within 6%, else a clean scale within 2% (they are close together, so
+/// they hold lightly), else where it is.
+pub fn snap_scale(v: f64, strong: &[f64], clean: &[f64]) -> f64 {
+    stick(v, strong, 0.06).or_else(|| stick(v, clean, 0.02)).unwrap_or(v)
+}
+
+/// Every mark the slider shows: the strong ones and the clean ones, once.
+pub fn all_marks(strong: &[f64], clean: &[f64]) -> Vec<f64> {
+    let mut m: Vec<f64> = strong.iter().chain(clean).copied().collect();
+    m.sort_by(f64::total_cmp);
+    m.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    m
+}
+
 /// The mark `v` is close enough to stick to, if any.
 pub fn stick(v: f64, detents: &[f64], within: f64) -> Option<f64> {
     detents.iter().copied().filter(|d| (d - v).abs() <= within).min_by(|a, b| (a - v).abs().total_cmp(&(b - v).abs()))
@@ -248,6 +277,39 @@ mod tests {
         assert_eq!(stick(1.96, &d, 0.06), Some(2.0));
         assert_eq!(stick(1.8, &d, 0.06), None);
         assert_eq!(stick(1.53, &d, 0.06), Some(1.5));
+    }
+
+    #[test]
+    fn clean_scales_land_on_whole_points() {
+        let k = |v: &[f64]| v.iter().map(|s| (s * 120.0).round() as u32).collect::<Vec<_>>();
+        // 3840x2160 (Techbench's LG, 2026-11-17).
+        let lg = clean_scales(3840, 2160, 0.75, 2.0);
+        assert_eq!(k(&lg), [90, 96, 100, 120, 128, 144, 150, 160, 180, 192, 200, 225, 240]);
+        for s in &lg {
+            // In 120ths, as apps get it: 3840 * 120 / k points, exactly.
+            let k = (s * 120.0).round() as u32;
+            assert_eq!(3840 * 120 % k, 0, "{s}");
+            assert_eq!(2160 * 120 % k, 0, "{s}");
+        }
+        // 144%, where the slider once stopped, is not clean; 125% and 150% are.
+        assert!(!lg.iter().any(|s| (s - 1.4417).abs() < 0.001));
+        assert!(lg.contains(&1.25) && lg.contains(&1.5));
+        // 1920x1080 has the same stops but 106⅔%.
+        assert_eq!(k(&clean_scales(1920, 1080, 0.75, 2.0)), [90, 96, 100, 120, 144, 150, 160, 180, 192, 200, 225, 240]);
+        assert!(clean_scales(0, 1080, 0.75, 2.0).is_empty());
+    }
+
+    #[test]
+    fn strong_marks_win_and_clean_ones_hold_lightly() {
+        let strong = detents(2.0, 4.0);
+        let clean = clean_scales(3840, 2160, 0.75, 4.0);
+        assert_eq!(snap_scale(1.97, &strong, &clean), 2.0);
+        assert_eq!(snap_scale(1.49, &strong, &clean), 1.5);
+        assert_eq!(snap_scale(1.26, &strong, &clean), 1.25);
+        assert_eq!(snap_scale(1.40, &strong, &clean), 1.40);
+        let all = all_marks(&strong, &clean);
+        assert_eq!(all.iter().filter(|m| **m == 2.0).count(), 1);
+        assert!(all.windows(2).all(|w| w[0] < w[1]));
     }
 
     #[test]

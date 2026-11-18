@@ -1388,8 +1388,13 @@ impl App {
                 self.save(|d| disp::set_size(d, s));
             }
             Message::Scale(v) => {
-                let marks = self.scale_marks();
-                self.scale = disp::stick(v as f64, &marks, 0.06).map(|m| m as f32).unwrap_or(v);
+                self.scale = match self.current_output() {
+                    Some(o) => {
+                        let (strong, clean) = scale_detents(o);
+                        disp::snap_scale(v as f64, &strong, &clean) as f32
+                    }
+                    None => v,
+                };
             }
             Message::ScaleDone => {
                 if let Some(o) = self.current_output() {
@@ -1401,8 +1406,8 @@ impl App {
             }
             Message::ScaleOf(i, v) => {
                 if let Some(o) = self.outputs.get(i) {
-                    let marks = disp::detents(o.default_scale, scale_max(o));
-                    let v = disp::stick(v as f64, &marks, 0.06).map(|m| m as f32).unwrap_or(v);
+                    let (strong, clean) = scale_detents(o);
+                    let v = disp::snap_scale(v as f64, &strong, &clean) as f32;
                     self.scale_drag = Some((i, v));
                 }
             }
@@ -1655,13 +1660,6 @@ impl App {
             Some((id, label)) => wall::set(d, Some(id), label, image.as_deref(), &mode, &color),
             None => wall::set(d, None, "", image.as_deref(), &mode, &color),
         });
-    }
-
-    fn scale_marks(&self) -> Vec<f64> {
-        match self.current_output() {
-            Some(o) => disp::detents(o.default_scale, scale_max(o)),
-            None => vec![1.0],
-        }
     }
 
     // ---- the view ----
@@ -2615,7 +2613,7 @@ impl App {
                 Some((j, v)) if j == i => v,
                 _ => o.base_scale as f32,
             };
-            let marks = disp::detents(o.default_scale, scale_max(o));
+            let marks = scale_marks(o);
             let note = if (v as f64 - o.default_scale).abs() < 1e-6 { format!("{:.0}%, the sharpest for it.", o.default_scale * 100.0) } else { format!("Its default is {:.0}%.", o.default_scale * 100.0) };
             scales.push(setting(&screen_label(o), &note, scale_slider_of(i, v, o, &marks)));
         }
@@ -2668,11 +2666,13 @@ impl App {
             items.push(self.group(None, vec![panel(self.arrangement(Some(i), false, 110.0)).padding(6.0).width(Length::FILL)]));
         }
         if let Some(o) = o {
-            let marks = disp::detents(o.default_scale, scale_max(o));
+            let marks = scale_marks(o);
             let note = if (self.scale as f64 - o.default_scale).abs() < 1e-6 {
                 "The default: the sharpest for this screen."
             } else if self.scale.fract() == 0.0 {
                 "Whole number: sharp in every app."
+            } else if scale_detents(o).1.iter().any(|c| (c - self.scale as f64).abs() < 1e-4) {
+                "Whole pixels: sharp in apps that draw at any scale."
             } else {
                 "In between: soft in some older apps."
             };
@@ -3302,6 +3302,23 @@ fn setting(name: &str, detail: &str, control: Element<Message>) -> Element<Messa
 
 fn scale_max(o: &OutputInfo) -> f64 {
     (o.default_scale.ceil() + 2.0).max(3.0)
+}
+
+/// A screen's scale marks: the strong ones (whole numbers, its default) and
+/// the clean ones, where its running mode is a whole number of points.
+fn scale_detents(o: &OutputInfo) -> (Vec<f64>, Vec<f64>) {
+    let max = scale_max(o);
+    let clean = match o.modes.get(o.mode as usize) {
+        Some(m) => disp::clean_scales(m.width, m.height, 0.75, max),
+        None => Vec::new(),
+    };
+    (disp::detents(o.default_scale, max), clean)
+}
+
+/// Every mark a screen's scale slider shows.
+fn scale_marks(o: &OutputInfo) -> Vec<f64> {
+    let (strong, clean) = scale_detents(o);
+    disp::all_marks(&strong, &clean)
 }
 
 fn percent(v: f32) -> Element<Message> {
