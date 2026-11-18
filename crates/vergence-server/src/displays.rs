@@ -153,9 +153,10 @@ impl DisplaysConfig {
         };
         let d = derive(px, mm, dist, 1.0);
         // The same size everywhere: the exact scale (in the 120ths apps draw
-        // at, never below 1); else the sharpest near it.
+        // at, never below 1), or a scale on the pixel grid within 2% of it;
+        // else the sharpest near it.
         let same = self.same_size.unwrap_or(false);
-        let default = if same { crate::scale_in_120ths(d.exact.max(1.0)) } else { sharp(d.exact) };
+        let default = if same { on_grid_near(d.exact.max(1.0)) } else { sharp(d.exact) };
         let calc = match d.note {
             Some(n) => format!("calculated 1 ({n})"),
             None => format!("calculated {:.2} for {:.0} ppi at {} distance", d.exact, d.ppi.unwrap_or(0.0), format!("{dist:?}").to_lowercase()),
@@ -231,6 +232,28 @@ pub fn is_builtin(connector: &str) -> bool {
     ["eDP", "LVDS", "DSI"].iter().any(|p| connector.starts_with(p))
 }
 
+/// How far from the exact scale "the same size on every screen" may go to
+/// land on the pixel grid (grid.rs): 2%, too little to see beside another
+/// screen.
+const SAME_SIZE_SLACK: f64 = 0.02;
+
+/// For "the same size on every screen": the scale on the pixel grid nearest
+/// `exact` (p/q with q of 8 or less, in 120ths) if within SAME_SIZE_SLACK,
+/// else `exact` (in 120ths). kepler, 2026-11-18: its 14" 4K at 3.2833 (no
+/// grid) becomes 3.25; its ASUS at 1.0703 stays 1.0667, the nearest grid
+/// scales (1, 1.125) being 5 to 7% off.
+pub fn on_grid_near(exact: f64) -> f64 {
+    let fine = crate::scale_in_120ths(exact);
+    let best = [1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0]
+        .iter()
+        .map(|q| ((exact * q).round() / q).max(1.0 / q))
+        .min_by(|a, b| (a - exact).abs().total_cmp(&(b - exact).abs()));
+    match best {
+        Some(g) if (g - exact).abs() <= SAME_SIZE_SLACK * exact => crate::scale_in_120ths(g),
+        _ => fine,
+    }
+}
+
 /// The sharpest scale near `exact`: the nearest whole number (at least 1) if
 /// it is within 25% of it, else `exact` itself (in 120ths).
 pub fn sharp(exact: f64) -> f64 {
@@ -287,6 +310,21 @@ mod tests {
 
     fn cfg(text: &str) -> DisplaysConfig {
         toml::from_str::<DesktopFile>(text).unwrap().displays
+    }
+
+    #[test]
+    fn same_size_lands_on_the_grid_when_near() {
+        // kepler's 14" 4K: 3.2833 has no grid; 3.25 (13/4) is 1% off.
+        assert_eq!(on_grid_near(3.2833), 3.25);
+        // Its ASUS: 1.0703; 1 and 1.125 are 5 to 7% off, so its own.
+        assert_eq!(on_grid_near(1.0703), 128.0 / 120.0);
+        // Already on it.
+        assert_eq!(on_grid_near(4.0 / 3.0), crate::scale_in_120ths(4.0 / 3.0));
+        // Whatever it gives has a grid, or is the exact scale.
+        for e in [1.0, 1.13, 1.69, 2.31, 2.9, 3.28] {
+            let g = on_grid_near(e);
+            assert!(crate::grid::step_of(g) > 1 || g.fract() == 0.0 || g == crate::scale_in_120ths(e), "{e} -> {g}");
+        }
     }
 
     #[test]
@@ -389,7 +427,8 @@ mod mode_tests {
         let a = plain.scale_for("x", "HDMI-A-1", (3840, 2160), Some((310, 174)));
         let b = same.scale_for("x", "HDMI-A-1", (3840, 2160), Some((310, 174)));
         assert_eq!(a.default, 3.0);
-        assert!((b.default - 3.28).abs() < 0.02, "{}", b.default);
+        // On the pixel grid within 2% (on_grid_near): 3.25.
+        assert_eq!(b.default, 3.25);
         assert_eq!((b.default * 120.0).fract(), 0.0, "in 120ths");
         assert!(b.how.contains("same size"));
     }

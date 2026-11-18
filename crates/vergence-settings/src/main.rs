@@ -2703,7 +2703,7 @@ impl App {
                 items.push(self.group(None, vec![
                     setting(
                         "Windows the same size on every screen",
-                        "Each screen at its exact calculated scale, so a window looks the same size moving between them. Off: the nearest whole scale where it is close, the sharpest; on, apps that draw only at whole scales may look a little soft.",
+                        "Each screen at its calculated scale (or within 2% of it, where that keeps windows on whole pixels), so a window looks the same size moving between them. Off: the nearest whole scale where it is close, the sharpest; on, apps that draw only at whole scales may look a little soft.",
                         switch(disp::same_size(&self.desktop), Message::SameSize).name("Windows the same size on every screen"),
                     ),
                     self.text_row(),
@@ -2791,7 +2791,7 @@ impl App {
                 // With one screen it still decides for the screens it meets later.
                 rows.push(setting(
                     "Windows the same size on every screen",
-                    "This screen and any other at its exact calculated scale, so a window looks the same size on each; off, the nearest whole scale where close, the sharpest.",
+                    "This screen and any other at its calculated scale (or within 2%, for whole pixels), so a window looks the same size on each; off, the nearest whole scale where close, the sharpest.",
                     switch(disp::same_size(&self.desktop), Message::SameSize).name("Windows the same size on every screen"),
                 ));
                 rows.push(self.text_row());
