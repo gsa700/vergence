@@ -1,12 +1,24 @@
 //! What is running, as the shelf shows it: one item for each application
 //! that has a window open, and where the items stand on the strip.
 
-use crate::{Rect, STRIP_W, desktop::Entry};
+use crate::{Rect, desktop::Entry};
 
-/// The height of one place on the strip (an icon with its margins), and
-/// the icon's side. The first place, at the top, is the apps button's.
+/// The length of one place on the strip (an icon with its margins) and the
+/// icon's side at the dock's usual size; at another size each place is as
+/// long as the dock is thick, and the icon two thirds of it (icon_for).
+/// The first place, at the top, is the apps button's.
 pub const SLOT: i32 = 48;
 pub const ICON: i32 = vergence_look::SHELF_ICON as i32;
+
+/// The icon's side in a place of `side` points: two thirds of it, as 32 in 48.
+pub const fn icon_for(side: i32) -> i32 {
+    side * ICON / SLOT
+}
+
+/// One place's length along a dock: as long as the dock is thick.
+fn side_of(dock: Rect, upright: bool) -> i32 {
+    if upright { dock.w } else { dock.h }
+}
 
 /// The application a window belongs to, by the class the window carries
 /// (a Wayland app_id or an X11 WM_CLASS): the entry whose id is that class,
@@ -86,17 +98,22 @@ pub fn items(entries: &[Entry], pinned: &[String], windows: &[(String, bool)]) -
 /// all its items shows the first of them; scrolling it comes with the
 /// popup's).
 pub fn slot(dock: Rect, index: usize, upright: bool) -> Option<Rect> {
-    let along = SLOT * (index as i32 + 1);
+    let side = side_of(dock, upright);
+    if side <= 0 {
+        return None;
+    }
+    let along = side * (index as i32 + 1);
     if upright {
-        (dock.y + along + SLOT <= dock.bottom()).then(|| Rect::new(dock.x, dock.y + along, STRIP_W, SLOT))
+        (dock.y + along + side <= dock.bottom()).then(|| Rect::new(dock.x, dock.y + along, side, side))
     } else {
-        (dock.x + along + SLOT <= dock.right()).then(|| Rect::new(dock.x + along, dock.y, SLOT, STRIP_W))
+        (dock.x + along + side <= dock.right()).then(|| Rect::new(dock.x + along, dock.y, side, side))
     }
 }
 
-/// The icon's square in a place: in its middle.
+/// The icon's square in a place: in its middle, two thirds of it.
 pub fn icon_in(slot: Rect) -> Rect {
-    Rect::new(slot.x + (slot.w - ICON) / 2, slot.y + (slot.h - ICON) / 2, ICON, ICON)
+    let icon = icon_for(slot.w.min(slot.h));
+    Rect::new(slot.x + (slot.w - icon) / 2, slot.y + (slot.h - icon) / 2, icon, icon)
 }
 
 /// Which of `count` items is at a point, if any.
@@ -108,8 +125,9 @@ pub fn item_at(dock: Rect, count: usize, upright: bool, x: i32, y: i32) -> Optio
 /// `count` (the dock keeps its length while an item is lifted) nearest the
 /// point along the dock, the apps button's place counting as the first.
 pub fn gap_at(dock: Rect, count: usize, upright: bool, x: i32, y: i32) -> usize {
-    let along = if upright { y - dock.y } else { x - dock.x } - SLOT;
-    let at = along.div_euclid(SLOT).max(0) as usize;
+    let side = side_of(dock, upright).max(1);
+    let along = if upright { y - dock.y } else { x - dock.x } - side;
+    let at = along.div_euclid(side).max(0) as usize;
     at.min(count.saturating_sub(1))
 }
 

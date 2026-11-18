@@ -66,6 +66,11 @@ pub const GAP: i32 = vergence_look::SHELF_GAP as i32;
 /// must be dropped to settle along it.
 pub const MAX_GAP: i32 = 24;
 pub const SNAP: i32 = 40;
+/// The sizes the person may give the dock (its thickness, and each place
+/// along it), in points: 48 unless the settings say another (Dave,
+/// 2026-11-17: "the dock's size, chosen by the person").
+pub const MIN_SIZE: i32 = 32;
+pub const MAX_SIZE: i32 = 96;
 
 /// An edge of a screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,12 +101,15 @@ pub struct Placement {
     pub gap: i32,
     /// At an edge: windows keep out of the dock's whole column (or row).
     pub keep_clear: bool,
+    /// Its thickness and each place's length, in points (STRIP_W unless
+    /// the settings say another; MIN_SIZE to MAX_SIZE).
+    pub size: i32,
 }
 
 impl Default for Placement {
     fn default() -> Placement {
         // The bottom edge by default (Dave, 2026-11-16, with the launcher as a start menu).
-        Placement { place: Place::Edge(Edge::Bottom), gap: GAP, keep_clear: true }
+        Placement { place: Place::Edge(Edge::Bottom), gap: GAP, keep_clear: true, size: STRIP_W }
     }
 }
 
@@ -118,6 +126,11 @@ impl Placement {
     fn gap(&self) -> i32 {
         self.gap.clamp(0, MAX_GAP)
     }
+
+    /// The dock's thickness and each place's length, within the limits.
+    pub fn size(&self) -> i32 {
+        self.size.clamp(MIN_SIZE, MAX_SIZE)
+    }
 }
 
 /// The band of its screen an edge's dock stands in: the whole length of the
@@ -126,9 +139,10 @@ impl Placement {
 /// shorter, than three shelves).
 pub fn column(screen: Rect, at: &Placement) -> Option<Rect> {
     let Place::Edge(edge) = at.place else { return None };
-    let deep = STRIP_W + 2 * at.gap();
+    let side = at.size();
+    let deep = side + 2 * at.gap();
     let room = if at.upright() { screen.w } else { screen.h };
-    if room < 3 * STRIP_W || screen.w <= 0 || screen.h <= 0 {
+    if room < 3 * side || screen.w <= 0 || screen.h <= 0 {
         return None;
     }
     Some(match edge {
@@ -146,11 +160,11 @@ pub fn column(screen: Rect, at: &Placement) -> Option<Rect> {
 /// small for all its items it is as long as the screen allows, and holds
 /// the items that fit.
 pub fn dock(screen: Rect, at: &Placement, items: usize) -> Option<Rect> {
-    let (upright, gap) = (at.upright(), at.gap());
+    let (upright, gap, side) = (at.upright(), at.gap(), at.size());
     let along = if upright { screen.h } else { screen.w };
-    let places = (items as i32 + 1).min(((along - 2 * gap) / running::SLOT).max(1));
-    let long = places * running::SLOT;
-    let (w, h) = if upright { (STRIP_W, long) } else { (long, STRIP_W) };
+    let places = (items as i32 + 1).min(((along - 2 * gap) / side).max(1));
+    let long = places * side;
+    let (w, h) = if upright { (side, long) } else { (long, side) };
     match at.place {
         Place::Edge(edge) => {
             let band = column(screen, at)?;
@@ -237,7 +251,7 @@ mod tests {
 
     // The arithmetic is checked with a gap of 6, whatever the default is.
     const T_GAP: i32 = 6;
-    const RIGHT: Placement = Placement { place: Place::Edge(Edge::Right), gap: T_GAP, keep_clear: true };
+    const RIGHT: Placement = Placement { place: Place::Edge(Edge::Right), gap: T_GAP, keep_clear: true, size: STRIP_W };
 
     fn at(edge: Edge) -> Placement {
         Placement { place: Place::Edge(edge), ..RIGHT }
@@ -285,6 +299,27 @@ mod tests {
         let level = dock(LARGE, &at(Edge::Bottom), 3).unwrap();
         assert_eq!(running::slot(level, 0, false), Some(Rect::new(level.x + 48, level.y, 48, 48)));
         assert!(running::slot(level, 2, false).is_some() && running::slot(level, 3, false).is_none());
+    }
+
+    #[test]
+    fn the_dock_takes_the_size_it_is_given() {
+        // 64 points: thicker, each place as long, the band as deep, icons two thirds.
+        let big = Placement { size: 64, ..RIGHT };
+        let d = dock(LARGE, &big, 3).unwrap();
+        assert_eq!((d.w, d.h), (64, 4 * 64));
+        assert_eq!(column(LARGE, &big).unwrap().w, 64 + 2 * T_GAP);
+        let s = running::slot(d, 0, true).unwrap();
+        assert_eq!(s, Rect::new(d.x, d.y + 64, 64, 64));
+        assert_eq!(running::icon_in(s).w, 42);
+        assert_eq!(running::item_at(d, 3, true, d.x + 10, d.y + 64 * 2 + 5), Some(1));
+        assert_eq!(running::gap_at(d, 3, true, d.x + 10, d.y + 64 * 3 + 5), 2);
+        // The usual size gives the usual icon; the limits hold.
+        assert_eq!(running::icon_in(Rect::new(0, 0, 48, 48)).w, running::ICON);
+        assert_eq!(Placement { size: 4, ..RIGHT }.size(), MIN_SIZE);
+        assert_eq!(Placement { size: 500, ..RIGHT }.size(), MAX_SIZE);
+        // Level, along the bottom.
+        let level = dock(LARGE, &Placement { size: 64, ..at(Edge::Bottom) }, 2).unwrap();
+        assert_eq!((level.w, level.h), (3 * 64, 64));
     }
 
     #[test]

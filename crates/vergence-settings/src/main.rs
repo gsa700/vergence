@@ -502,6 +502,7 @@ enum Message {
     DockScreen(usize),
     DockGap(f32),
     DockOpacity(f32),
+    DockSize(f32),
     /// A dock slider let go: what it shows is saved.
     DockSave,
     DockKeepClear(bool),
@@ -695,6 +696,8 @@ struct App {
     /// The dock's gap and opacity while their sliders move (saved on release).
     dock_gap: f32,
     dock_opacity: f32,
+    /// The dock's size in points ([shelf] size), while its slider moves.
+    dock_size: f32,
     /// What can be pinned: the installed applications, by name.
     apps: Vec<vergence_shell::desktop::Entry>,
     /// The mimeapps.list files, read when Default apps opens (defaults.rs).
@@ -884,6 +887,7 @@ impl App {
             click_test: (None, 0),
             dock_gap: 0.0,
             dock_opacity: 1.0,
+            dock_size: vergence_shell::STRIP_W as f32,
             apps: vergence_shell::apps::installed(),
             default_lists: Vec::new(),
             mail,
@@ -1254,11 +1258,23 @@ impl App {
             }
             Message::DockGap(v) => self.dock_gap = v.round(),
             Message::DockOpacity(v) => self.dock_opacity = (v * 20.0).round() / 20.0,
+            // In steps of 4 points, sticking to the usual size near it.
+            Message::DockSize(v) => {
+                let usual = vergence_shell::STRIP_W as f32;
+                self.dock_size = if (v - usual).abs() <= 3.0 { usual } else { (v / 4.0).round() * 4.0 };
+            }
             Message::DockSave => {
                 let (gap, opacity) = (self.dock_gap as i64, (self.dock_opacity as f64 * 100.0).round() / 100.0);
+                let size = self.dock_size.round() as i64;
                 self.save_table("shelf", |t| {
                     t.insert("gap".into(), gap.into());
                     t.insert("opacity".into(), opacity.into());
+                    // The usual size is no setting: the key goes.
+                    if size == vergence_shell::STRIP_W as i64 {
+                        t.remove("size");
+                    } else {
+                        t.insert("size".into(), size.into());
+                    }
                 });
             }
             Message::DockKeepClear(on) => self.save_table("shelf", |t| {
@@ -1696,7 +1712,7 @@ impl App {
             ]),
             ("Desktop", vec![
                 ("Windows".into(), Page::Windows, Icon::Windows, "window title bar buttons controls minimize maximize close snap snapping alt tab keys x11"),
-                ("Dock".into(), Page::Dock, Icon::Dock, "dock shelf pin hide opacity gap edge desktop icons super d"),
+                ("Dock".into(), Page::Dock, Icon::Dock, "dock shelf pin hide opacity gap size bigger smaller edge desktop icons super d"),
                 ("Notifications".into(), Page::Notifications, Icon::Notifications, "notifications cards alerts do not disturb quiet corner banner"),
                 ("Apps".into(), Page::Apps, Icon::Apps, "apps applications title bar light dark firefox per app own settings"),
                 ("Default apps".into(), Page::DefaultApps, Icon::Apps, "default apps applications open with browser mail text pictures pdf music video folders file types"),
@@ -2342,7 +2358,8 @@ impl App {
         let shelf = self.shelf();
         let gap = shelf.and_then(|t| t.get("gap")).and_then(|v| v.as_integer()).unwrap_or(vergence_shell::GAP as i64).clamp(0, vergence_shell::MAX_GAP as i64) as f32;
         let opacity = shelf.and_then(|t| t.get("opacity")).and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))).unwrap_or(1.0).clamp(0.3, 1.0) as f32;
-        (self.dock_gap, self.dock_opacity) = (gap, opacity);
+        let size = shelf.and_then(|t| t.get("size")).and_then(|v| v.as_integer()).unwrap_or(vergence_shell::STRIP_W as i64).clamp(vergence_shell::MIN_SIZE as i64, vergence_shell::MAX_SIZE as i64) as f32;
+        (self.dock_gap, self.dock_opacity, self.dock_size) = (gap, opacity, size);
     }
 
     /// When the dock hides, as a place in DOCK_HIDE: `hide` is a word, or
@@ -2413,6 +2430,21 @@ impl App {
             switch(flag("keep-clear", true), Message::DockKeepClear).name("Keep windows clear"),
         ));
         let look = vec![
+            setting(
+                "Size",
+                "How big the dock and its icons are. The usual size is 48.",
+                row(vec![
+                    slider(vergence_shell::MIN_SIZE as f32, vergence_shell::MAX_SIZE as f32, self.dock_size, Message::DockSize)
+                        .step(1.0)
+                        .marks(vec![vergence_shell::STRIP_W as f32])
+                        .on_release(Message::DockSave)
+                        .width(Length::Fixed(200.0))
+                        .name("Size"),
+                    label(format!("{:.0} pt", self.dock_size)).width(Length::Fixed(48.0)).align(Align::End),
+                ])
+                .spacing(8.0)
+                .align(Align::Center),
+            ),
             setting(
                 "Hide",
                 "Out of the way, a sliver left at its edge; the pointer there brings it back. Windows then have the whole screen.",

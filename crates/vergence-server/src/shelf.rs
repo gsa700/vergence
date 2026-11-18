@@ -140,6 +140,9 @@ pub struct ShelfConfig {
     /// Pinned applications, by desktop entry id, in their order on the dock.
     #[serde(default)]
     pub pinned: Vec<String>,
+    /// The dock's size: its thickness and each place's length, in points
+    /// (48; vergence-shell MIN_SIZE to MAX_SIZE). The icons are two thirds of it.
+    pub size: Option<i32>,
     /// The live tiles that stand on the dock, by id; the rest are in the
     /// drawer. Unset: the desktop's own (tiles.rs, vergence-shell `DOCKED`).
     pub tiles: Option<Vec<String>>,
@@ -226,7 +229,7 @@ impl ShelfConfig {
                 _ => Edge::Bottom,
             }),
         };
-        Placement { place, gap: self.gap.unwrap_or(vergence_shell::GAP), keep_clear: self.keep_clear.unwrap_or(true) }
+        Placement { place, gap: self.gap.unwrap_or(vergence_shell::GAP), keep_clear: self.keep_clear.unwrap_or(true), size: self.size.unwrap_or(vergence_shell::STRIP_W) }
     }
 }
 
@@ -334,7 +337,7 @@ pub struct Lift {
 
 /// A lifted item's picture: what it was drawn for (key, scale, removing,
 /// light, label on the left), the picture, its size in points.
-type Ghost = ((String, u64, bool, bool, bool, bool), MemoryRenderBuffer, i32, i32);
+type Ghost = ((String, u64, bool, bool, bool, bool, i32), MemoryRenderBuffer, i32, i32);
 
 /// A lifted item's `from` when it came from the launcher (step 6): not on
 /// the dock yet, so the dock makes room for it.
@@ -608,6 +611,11 @@ impl Server {
     pub fn shelf_rect(&self) -> Option<Rectangle<i32, Logical>> {
         let at = self.shelf_placement();
         vergence_shell::column(rect(self.shelf_screen()?), &at).filter(|_| at.keep_clear).map(rectangle)
+    }
+
+    /// The dock's thickness and each place's length, in points ([shelf] size).
+    pub(crate) fn shelf_size(&self) -> i32 {
+        self.shelf.config.placement().size()
     }
 
     /// The dock itself, as long as the apps button's place and `items` after
@@ -1182,7 +1190,8 @@ impl Server {
         let upright = self.shelf.config.placement().upright();
         let Some(index) = running::item_at(rect(strip), items.len(), upright, at.x.floor() as i32, at.y.floor() as i32) else {
             // The dock's head is the apps button.
-            let head = Rectangle::new(strip.loc, (running::SLOT, running::SLOT).into());
+            let side = self.shelf_size();
+            let head = Rectangle::new(strip.loc, (side, side).into());
             if head.to_f64().contains(at) {
                 self.launcher_toggle();
             }
@@ -1278,7 +1287,8 @@ impl Server {
         let towards = self.shelf_side(dock);
         let Some(index) = running::item_at(rect(dock), items.len(), upright, at.x.floor() as i32, at.y.floor() as i32) else {
             // The apps button or an empty part: the dock's own menu.
-            let head = Rectangle::new(dock.loc, (running::SLOT, running::SLOT).into());
+            let side = self.shelf_size();
+            let head = Rectangle::new(dock.loc, (side, side).into());
             self.open_shelf_menu(head, towards, vec![(Act::MoveDock, "Move dock".to_string())]);
             return;
         };
@@ -1449,7 +1459,7 @@ impl Server {
         // What the dock shows: each item, its mark, and its icon once that has come.
         let items = self.shelf_items();
         let Some(strip) = self.shelf_dock(items.len()).filter(|r| r.overlaps(out)) else { return Vec::new() };
-        let pixels = (running::ICON as f64 * scale).round() as u32;
+        let pixels = (running::icon_for(self.shelf_size()) as f64 * scale).round() as u32;
         let icons: Vec<Option<Arc<Icon>>> = items.iter().map(|(item, _)| self.shelf_icon(&item.icon, pixels)).collect();
         let accent = self.accent();
         // An application all of whose windows are minimized is there, but faint.
@@ -1509,7 +1519,11 @@ impl Server {
         // Level or upright, and which side faces the windows (its marks are on the other).
         let upright = self.shelf.config.placement().upright();
         let side = self.shelf_side(strip);
-        (strip.size.w, upright, side as u8).hash(&mut hasher);
+        // Everything in a place is drawn for a 48-point dock and scaled by
+        // its size ([shelf] size): the apps button, the marks, the letters,
+        // the tiles' text.
+        let k = self.shelf_size() as f32 / running::SLOT as f32;
+        (strip.size.w, upright, side as u8, k.to_bits()).hash(&mut hasher);
         let key = (strip.size.h, scale.to_bits(), hasher.finish());
         if self.shelf.picture.as_ref().map(|(k, _)| *k) != Some(key) {
             // The dock as a scene, in points: a rounded panel with a line around it,
@@ -1527,11 +1541,12 @@ impl Server {
             // outline, in the dock's own colors (the nine dots are the drawer's).
             // All of it in the outline of a window (Dave: "might still need
             // something like an outline of a window").
-            scene.stroke(SceneRect::new(7.5, 7.5, 33.0, 33.0), 6.0, 1.3, color(s.mark));
-            scene.stroke(SceneRect::new(13.0, 13.0, 22.0, 4.5), 2.25, 1.1, color(s.mark));
+            let r = |x: f32, y: f32, w: f32, h: f32| SceneRect::new(x * k, y * k, w * k, h * k);
+            scene.stroke(r(7.5, 7.5, 33.0, 33.0), 6.0 * k, 1.3 * k.sqrt(), color(s.mark));
+            scene.stroke(r(13.0, 13.0, 22.0, 4.5), 2.25 * k, 1.1 * k.sqrt(), color(s.mark));
             for i in 0..6 {
                 let (column, row) = ((i % 3) as f32, (i / 3) as f32);
-                scene.fill_rounded(SceneRect::new(13.0 + column * 8.5, 21.5 + row * 8.0, 5.0, 5.0), 1.4, color(s.mark));
+                scene.fill_rounded(r(13.0 + column * 8.5, 21.5 + row * 8.0, 5.0, 5.0), 1.4 * k, color(s.mark));
             }
             let local = Rect::new(0, 0, strip.size.w, strip.size.h);
             for (place, shown) in order.iter().enumerate() {
@@ -1550,6 +1565,7 @@ impl Server {
                     None if item.focused => (18.0, accent),
                     None => (6.0, color(s.mark)),
                 };
+                let long = long * k;
                 let faint = away[index];
                 // No mark for one that is neither running nor starting.
                 if !faint && (!windows.is_empty() || starting[index].is_some()) {
@@ -1581,7 +1597,7 @@ impl Server {
                         scene.fill_rounded(square, vergence_look::RADIUS, color(s.tile));
                         let letter: String = item.name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into());
                         if let Some(face) = face {
-                            let size = 18.0;
+                            let size = 18.0 * k;
                             let m = fonts.metrics(face, size);
                             let (_, width) = fonts.layout(face, size, &letter);
                             let origin = ScenePoint::new(square.x + (square.w - width) / 2.0, square.y + ((square.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round());
@@ -1609,21 +1625,22 @@ impl Server {
                     // The drawer: nine dots, and how many it holds in the
                     // color of the worst state among them.
                     crate::tiles::Shown::Drawer(count, worst) => {
-                        let (cx, cy) = (slot.x as f32 + slot.w as f32 / 2.0, slot.y as f32 + slot.h as f32 / 2.0 - 4.0);
-                        for k in 0..9 {
-                            let (col, row) = ((k % 3) as f32 - 1.0, (k / 3) as f32 - 1.0);
-                            scene.fill_rounded(SceneRect::new(cx + col * 7.0 - 1.75, cy + row * 7.0 - 1.75, 3.5, 3.5), 1.75, color(s.mark));
+                        let (cx, cy) = (slot.x as f32 + slot.w as f32 / 2.0, slot.y as f32 + slot.h as f32 / 2.0 - 4.0 * k);
+                        for d in 0..9 {
+                            let (col, row) = ((d % 3) as f32 - 1.0, (d / 3) as f32 - 1.0);
+                            scene.fill_rounded(SceneRect::new(cx + (col * 7.0 - 1.75) * k, cy + (row * 7.0 - 1.75) * k, 3.5 * k, 3.5 * k), 1.75 * k, color(s.mark));
                         }
                         let n = count.to_string();
                         let ink = crate::tiles::state_ink(*worst, light, s.tile_ink);
-                        let lm = fonts.metrics(small, 9.5);
-                        let lw = fonts.layout(small, 9.5, &n).1;
-                        vergence_render::text(&mut scene, fonts, small, 9.5, ink, ScenePoint::new(slot.x as f32 + (slot.w as f32 - lw) / 2.0, (cy + 12.0 + lm.ascent).round()), &n);
+                        let ns = 9.5 * k;
+                        let lm = fonts.metrics(small, ns);
+                        let lw = fonts.layout(small, ns, &n).1;
+                        vergence_render::text(&mut scene, fonts, small, ns, ink, ScenePoint::new(slot.x as f32 + (slot.w as f32 - lw) / 2.0, (cy + 12.0 * k + lm.ascent).round()), &n);
                         continue;
                     }
                 };
                 let ink = crate::tiles::state_ink(tile.state, light, s.tile_ink);
-                let (vs, ls) = (13.0, 9.5);
+                let (vs, ls) = (13.0 * k, 9.5 * k);
                 let (vm, lm) = (fonts.metrics(big, vs), fonts.metrics(small, ls));
                 let (vh, lh) = (vm.ascent + vm.descent, if tile.label.is_empty() { 0.0 } else { lm.ascent + lm.descent });
                 let top = slot.y as f32 + (slot.h as f32 - vh - lh) / 2.0;
@@ -1746,14 +1763,15 @@ impl Server {
         let left = self.shelf.dock.is_some_and(|d| self.shelf_side(d) == Edge::Left);
         // Drawn again once its icon has been decoded (one from the launcher
         // may not have been at the dock's size).
-        let pixels = (running::ICON as f64 * scale).round() as u32;
+        let icon_side = running::icon_for(self.shelf_size());
+        let pixels = (icon_side as f64 * scale).round() as u32;
         let icon = self.shelf_icon(&lift.icon, pixels);
-        let key = (lift.key.clone(), scale.to_bits(), removing, light, left, icon.is_some());
+        let key = (lift.key.clone(), scale.to_bits(), removing, light, left, icon.is_some(), icon_side);
         if self.shelf.ghost.as_ref().map(|(k, ..)| k) != Some(&key) {
             let s = vergence_look::shelf_look(light);
             let color = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
-            let side = running::ICON as f32;
+            let side = icon_side as f32;
             let words = "Remove";
             let (label_w, face) = match fonts.face("sans-serif", 400, false) {
                 Some(face) if removing => (fonts.layout(face, 13.5, words).1 + 20.0, Some(face)),
@@ -1792,7 +1810,7 @@ impl Server {
             self.shelf.ghost = Some((key, buffer, w as i32, h as i32));
         }
         let (_, buffer, w, h) = self.shelf.ghost.as_ref()?;
-        let half = running::ICON / 2;
+        let half = icon_side / 2;
         let removing = self.shelf.ghost.as_ref().is_some_and(|(k, ..)| k.2 && k.4);
         let x = if removing { lift.at.x.round() as i32 + half - w } else { lift.at.x.round() as i32 - half };
         let area: Rectangle<i32, Logical> = Rectangle::new((x, lift.at.y.round() as i32 - h / 2).into(), (*w, *h).into());

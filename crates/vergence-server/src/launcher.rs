@@ -19,7 +19,7 @@
 
 use smithay::utils::{Logical, Point, Rectangle};
 use vergence_protocol::window::{MAX_MENU_LINES, MENU_SERVER_IDS, MenuLine};
-use vergence_shell::{Edge, Place, running};
+use vergence_shell::{Edge, Place};
 
 use crate::{Server, menu::Entry, shelf::Act};
 
@@ -106,7 +106,7 @@ impl Server {
         let (at, bottom): (Point<i32, Logical>, Option<i32>) = match dock {
             Some(d) => {
                 // The button: the dock's head.
-                let b = Rectangle::<i32, Logical>::new(d.loc, (running::SLOT, running::SLOT).into());
+                let b = Rectangle::<i32, Logical>::new(d.loc, (placement.size(), placement.size()).into());
                 let mid = (screen.loc.x + screen.size.w / 2, screen.loc.y + screen.size.h / 2);
                 let side = match placement.place {
                     Place::Edge(e) => e,
