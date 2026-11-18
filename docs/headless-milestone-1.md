@@ -131,4 +131,9 @@ scenarios, each from a bug or a rule we already have:
 
 ## Progress
 
-- Plan accepted 2026-11-18; step 1 next.
+- Plan accepted 2026-11-18.
+- **Step 1 done** (2026-11-18): drm.rs `Surface::present` is a `Present`
+  (one kind so far, `Drm { out, handle }`); what the rest of the code did to
+  the DRM output goes through `Surface::drm`, `handle`, `frame_submitted`,
+  `reset_buffers`. Tests: Hubble 708, kepler 701, techbench 701; Hubble's
+  session on it ran the display check, 40 of 40 shots pass.

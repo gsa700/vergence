@@ -91,7 +91,9 @@ struct Device {
 
 struct Surface {
     output: Output,
-    drm_output: Out,
+    /// How its frames get out: to a monitor's connector, or (headless
+    /// milestone 1) nowhere but memory.
+    present: Present,
     connector: String,
     /// When this monitor was last drawn (the watchdog, below).
     last: std::time::Instant,
@@ -111,11 +113,45 @@ struct Surface {
     /// The monitor's modes (each once) and the one running, for the bus.
     modes: Vec<vergence_protocol::bus::ModeInfo>,
     mode: u32,
-    /// Its connector, to set it up again in another mode.
-    handle: connector::Handle,
     /// When it was connected, in order: screens a setup has no places for
     /// are laid out in this order, so a new one goes on the right.
     since: u64,
+}
+
+/// How a screen's frames get out (headless milestone 1, step 1).
+enum Present {
+    /// A monitor: Smithay's DRM output on its CRTC, and its connector (to set
+    /// it up again in another mode).
+    Drm { out: Out, handle: connector::Handle },
+}
+
+impl Surface {
+    /// The monitor's DRM output; None for a screen that is not a monitor.
+    fn drm(&mut self) -> Option<&mut Out> {
+        match &mut self.present {
+            Present::Drm { out, .. } => Some(out),
+        }
+    }
+
+    fn handle(&self) -> Option<connector::Handle> {
+        match &self.present {
+            Present::Drm { handle, .. } => Some(*handle),
+        }
+    }
+
+    /// The frame queued last is on the screen (its VBlank, or the watchdog).
+    fn frame_submitted(&mut self) {
+        if let Some(out) = self.drm() {
+            let _ = out.frame_submitted();
+        }
+    }
+
+    /// Draw it in full next time.
+    fn reset_buffers(&mut self) {
+        if let Some(out) = self.drm() {
+            out.reset_buffers();
+        }
+    }
 }
 
 /// The order screens were connected in (Surface::since).
@@ -326,7 +362,7 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
                 if let Some(b) = state.backend.as_mut()
                     && let Some(s) = b.surfaces.get_mut(&key)
                 {
-                    let _ = s.drm_output.frame_submitted();
+                    s.frame_submitted();
                     shown = Some((s.connector.clone(), b.surfaces.len()));
                 }
                 // The lock's frame is on this screen now (lock.rs, before sleep).
@@ -362,8 +398,8 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
             if let Some(b) = state.backend.as_mut()
                 && let Some(s) = b.surfaces.get_mut(&key)
             {
-                let _ = s.drm_output.frame_submitted();
-                s.drm_output.reset_buffers();
+                s.frame_submitted();
+                s.reset_buffers();
             }
             render(state, key);
         }
@@ -658,7 +694,7 @@ pub fn displays_changed(state: &mut Server) {
                         _ => false,
                     }
                 })
-                .map(|(k, s)| (*k, s.handle))
+                .filter_map(|(k, s)| Some((*k, s.handle()?)))
                 .collect()
         })
         .unwrap_or_default();
@@ -790,7 +826,7 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     if gpu > 0 {
         tracing::info!("{name}: shown by {}, drawn by {} and copied there", b.devices[gpu].path, b.devices[0].path);
     }
-    b.surfaces.insert((gpu, crtc), Surface { output, drm_output, connector: name, last: std::time::Instant::now(), scale, id, px: (w as u32, h as u32), mm, edid: identity, global, relay, modes, mode: mode_index, handle: conn.handle(), since: CONNECTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) });
+    b.surfaces.insert((gpu, crtc), Surface { output, present: Present::Drm { out: drm_output, handle: conn.handle() }, connector: name, last: std::time::Instant::now(), scale, id, px: (w as u32, h as u32), mm, edid: identity, global, relay, modes, mode: mode_index, since: CONNECTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) });
 }
 
 /// The GL renderer's name ("Mesa Intel(R) UHD Graphics (CML GT2)", "llvmpipe ...").
@@ -967,7 +1003,10 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
 
     let clear = state.background_color(&s.connector);
     let outcome = if crtc.0 == 0 {
-        s.drm_output.render_frame(&mut b.renderer, &elements, clear, FrameFlags::DEFAULT).map(|r| if r.is_empty { Relayed::Nothing } else { Relayed::Shown }).map_err(|e| format!("{e:?}"))
+        match s.drm() {
+            Some(out) => out.render_frame(&mut b.renderer, &elements, clear, FrameFlags::DEFAULT).map(|r| if r.is_empty { Relayed::Nothing } else { Relayed::Shown }).map_err(|e| format!("{e:?}")),
+            None => Err("not a monitor".to_string()),
+        }
     } else {
         relay_frame(&mut b.renderer, b.devices[crtc.0].renderer.as_mut(), s, &elements, clear)
     };
@@ -984,7 +1023,7 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
             });
         }
         Ok(Relayed::Shown) => {
-            let queued = s.drm_output.queue_frame(());
+            let queued = s.drm().map_or(Ok(()), |out| out.queue_frame(()).map_err(|e| format!("{e:?}")));
             if queued.is_ok() {
                 let name = s.connector.clone();
                 state.lock_frame_queued(name);
@@ -1098,7 +1137,11 @@ fn relay_frame(primary: &mut GlesRenderer, copier: Option<&mut GlesRenderer>, s:
     let shown = relay.shown.as_ref().ok_or("no texture")?;
     let el = TextureRenderElement::from_texture_render_buffer((0.0, 0.0), shown, None, None, None, Kind::Unspecified);
     let els = [RelayElements::Texture(el)];
-    let empty = s.drm_output.render_frame(copier, &els, clear, FrameFlags::DEFAULT).map_err(|e| format!("copy: {e:?}"))?.is_empty;
+    // The field itself, not drm(): `relay` holds a borrow of the surface.
+    let out = match &mut s.present {
+        Present::Drm { out, .. } => out,
+    };
+    let empty = out.render_frame(copier, &els, clear, FrameFlags::DEFAULT).map_err(|e| format!("copy: {e:?}"))?.is_empty;
     let damage_px = relay.last_damage_px;
     let tr = std::time::Instant::now();
     // The copy must be finished before the screen flips to it and before the
@@ -1157,8 +1200,11 @@ fn capture(
 pub fn screens_off(state: &mut Server) {
     let Some(b) = state.backend.as_mut() else { return };
     for s in b.surfaces.values_mut() {
-        if let Err(e) = s.drm_output.with_compositor(|c| c.clear()) {
-            tracing::warn!("{}: cannot turn off: {e:?}", s.connector);
+        let name = s.connector.clone();
+        if let Some(out) = s.drm()
+            && let Err(e) = out.with_compositor(|c| c.clear())
+        {
+            tracing::warn!("{name}: cannot turn off: {e:?}");
         }
     }
 }
@@ -1232,7 +1278,7 @@ impl Backend {
     /// Draw every monitor in full on its next frame (wallpaper or settings changed).
     pub fn redraw_all(&mut self) {
         for s in self.surfaces.values_mut() {
-            s.drm_output.reset_buffers();
+            s.reset_buffers();
         }
     }
 
