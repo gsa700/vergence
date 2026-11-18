@@ -1,8 +1,7 @@
 #!/bin/sh
 # Make a FreeBSD package of Vergence from a release build: no root needed.
 #
-#   cargo build --release
-#   tools/freebsd/make-pkg.sh [--version V] [--out DIR]
+#   tools/freebsd/make-pkg.sh [--version V] [--out DIR]   (builds --release first)
 #
 # Then, as root:  pkg install ./dist/vergence-<version>.pkg
 #
@@ -31,16 +30,16 @@ while [ $# -gt 0 ]; do
 done
 [ "$(uname -s)" = FreeBSD ] || { echo "make-pkg.sh: FreeBSD only" >&2; exit 1; }
 
-# Not from a build older than the source: it packages what is built, and
-# does not build (2026-11-18: a package with the night before's server).
-built=${CARGO_TARGET_DIR:-$root/target}/release/vergence-server
-[ -f "$built" ] || { echo "make-pkg.sh: no release build; run cargo build --release" >&2; exit 1; }
-newer=$(find "$root/crates" "$root/Cargo.toml" "$root/Cargo.lock" -newer "$built" -type f \( -name '*.rs' -o -name 'Cargo.*' \) | head -3)
-if [ -n "$newer" ]; then
-    echo "make-pkg.sh: source is newer than the release build; run cargo build --release first:" >&2
-    echo "$newer" | sed 's/^/  /' >&2
-    exit 1
+# What is built is what goes in: the release build brought up to date first
+# (nothing to do when it is). A package once held the night before's
+# server (2026-11-18); a guard by file times was wrong too, since cargo
+# leaves a binary alone when only another crate changed.
+if command -v cargo >/dev/null 2>&1 || [ -f "$HOME/.cargo/env" ]; then
+    [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+    (cd "$root" && cargo build -q --release) || { echo "make-pkg.sh: the release build failed" >&2; exit 1; }
 fi
+built=${CARGO_TARGET_DIR:-$root/target}/release/vergence-server
+[ -f "$built" ] || { echo "make-pkg.sh: no release build" >&2; exit 1; }
 
 work=$(mktemp -d -t vergence-pkg)
 trap 'rm -rf "$work"' EXIT
