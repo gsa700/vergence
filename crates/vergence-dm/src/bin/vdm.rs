@@ -1185,10 +1185,23 @@ fn main() {
         let r = match args.get(2).map(String::as_str) {
             Some("on") => std::fs::DirBuilder::new().recursive(true).mode(0o700).create(paths::STATE_DIR).and_then(|_| std::fs::write(&file, b"")),
             Some("off") => std::fs::remove_file(&file).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }),
-            Some("status") | None => {
-                println!("login screen at boot: {}", if file.exists() { "on" } else { "off" });
-                std::process::exit(0)
-            }
+            // vdm's state directory is root's alone: an ordinary account
+            // can't see the file, so it is told so, not "off" (techbench,
+            // 2026-11-17).
+            Some("status") | None => match std::fs::metadata(&file) {
+                Ok(_) => {
+                    println!("login screen at boot: on");
+                    std::process::exit(0)
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    println!("login screen at boot: off");
+                    std::process::exit(0)
+                }
+                Err(e) => {
+                    eprintln!("vdm: {}: {e} (as root: sudo vdm login-screen status)", file.display());
+                    std::process::exit(1)
+                }
+            },
             _ => {
                 eprintln!("usage: vdm login-screen on | off | status");
                 std::process::exit(2)
