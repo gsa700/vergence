@@ -15,7 +15,7 @@ hybrid laptop) and a Lenovo Tiny running Fedora (systemd and logind).
 
 ## The machine
 
-- ASUS TUF Gaming board (full ATX), Intel i9-13900K with UHD 770 graphics.
+- ASUS TUF GAMING Z690-PLUS WIFI (full ATX, DDR5), Intel i9-13900K with UHD 770 graphics.
 - Supermicro dual-port SFP+ card with an Intel chip (FreeBSD: `ix` or `ixl`;
   the NAS runs the same kind of card on FreeBSD already).
 - GPU: the GTX 960 to start (Maxwell: NVIDIA's legacy 580 branch only), a
@@ -31,7 +31,9 @@ hybrid laptop) and a Lenovo Tiny running Fedora (systemd and logind).
 
 1. Raptor Lake microcode 0x12B or later, and Intel's default power limits
    (not the board's "unlimited" profile): release builds load all cores for
-   minutes at a time. Dave believes both are done; check.
+   minutes at a time. Microcode: done (BIOS 4301 has 0x12F, Intel's final
+   fix; the newer 4505/4601/4701 are security and ME only, and Dave is
+   waiting on them, 2026-11-17). Power limits: check.
 2. Storage in plain NVMe/AHCI mode, Intel VMD off.
 3. "iGPU Multi-Monitor" on, so the Intel outputs work beside the NVIDIA card.
 4. Secure Boot off (FreeBSD's loader isn't signed for it).
