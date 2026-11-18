@@ -368,6 +368,11 @@ pub fn height(lines: &[Line]) -> i32 {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct State {
     pub typed: String,
+    /// The search field's caret and the other end of its selection, as
+    /// byte offsets in `typed` (Dave, 2026-11-18: "I'd like it to be real
+    /// not just a picture with input"): the same where nothing is selected.
+    pub caret: usize,
+    pub anchor: usize,
     /// The chosen line of the top level (or of the results while searching).
     pub top: Option<usize>,
     /// The open submenu: the top-level line it hangs from.
@@ -387,6 +392,17 @@ pub enum Key {
     Escape,
     Back,
     Char(char),
+    /// The search field's own keys: Home, End, Delete, Ctrl+Backspace (a
+    /// word back), Ctrl+A; and Shift with Left, Right, Home, End to select.
+    Home,
+    End,
+    Delete,
+    BackWord,
+    SelectAll,
+    SelectLeft,
+    SelectRight,
+    SelectHome,
+    SelectEnd,
 }
 
 /// What a key did.
@@ -440,9 +456,44 @@ impl State {
                     self.open = None;
                     self.key(m, key)
                 }
+                // The field's own keys do nothing in a submenu.
+                Key::Home | Key::End | Key::Delete | Key::BackWord | Key::SelectAll | Key::SelectLeft | Key::SelectRight | Key::SelectHome | Key::SelectEnd => Did::Nothing,
             };
         }
+        // While there is text, the field has the keys a field has: Left and
+        // Right move in the text, not along the menu.
+        if self.searching(m) {
+            let edited = match key {
+                // Plain: a selection collapses to that end, else a letter on.
+                Key::Left => {
+                    let (a, b) = self.selection();
+                    self.move_caret(if a != b { a } else { self.prev(self.caret) }, false)
+                }
+                Key::Right => {
+                    let (a, b) = self.selection();
+                    self.move_caret(if a != b { b } else { self.next(self.caret) }, false)
+                }
+                Key::SelectLeft => self.move_caret(self.prev(self.caret), true),
+                Key::SelectRight => self.move_caret(self.next(self.caret), true),
+                Key::Home | Key::SelectHome => self.move_caret(0, key == Key::SelectHome),
+                Key::End | Key::SelectEnd => self.move_caret(self.typed.len(), key == Key::SelectEnd),
+                Key::SelectAll => {
+                    (self.anchor, self.caret) = (0, self.typed.len());
+                    Some(false)
+                }
+                Key::Delete => Some(self.delete(false, false)),
+                Key::BackWord => Some(self.delete(true, true)),
+                _ => None,
+            };
+            if let Some(text_changed) = edited {
+                if text_changed {
+                    self.after_typing(m);
+                }
+                return Did::Moved;
+            }
+        }
         match key {
+            Key::Home | Key::End | Key::Delete | Key::BackWord | Key::SelectAll | Key::SelectLeft | Key::SelectRight | Key::SelectHome | Key::SelectEnd => Did::Nothing,
             Key::Up | Key::Down => {
                 self.top = step(&lines, self.top, key == Key::Down);
                 self.open = self.top.filter(|i| matches!(lines.get(*i), Some(Line::Sub(_))));
@@ -467,6 +518,7 @@ impl State {
             Key::Left => Did::Nothing,
             Key::Escape if !self.typed.is_empty() => {
                 self.typed.clear();
+                (self.caret, self.anchor) = (0, 0);
                 (self.top, self.open) = (None, None);
                 Did::Moved
             }
@@ -474,17 +526,125 @@ impl State {
             // A right-click menu has no search.
             Key::Char(_) | Key::Back if m.given.is_some() && !m.searchable => Did::Nothing,
             Key::Back => {
-                self.typed.pop();
+                self.delete(true, false);
                 self.after_typing(m);
                 Did::Moved
             }
-            Key::Char(c) if !c.is_control() && self.typed.chars().count() < 60 => {
-                self.typed.push(c);
-                self.after_typing(m);
+            Key::Char(c) if !c.is_control() => {
+                if self.insert(&c.to_string()) {
+                    self.after_typing(m);
+                }
                 Did::Moved
             }
             Key::Char(_) => Did::Nothing,
         }
+    }
+
+    /// The field has text: its keys are the field's.
+    fn searching(&self, m: &Model) -> bool {
+        !self.typed.is_empty() && self.sub.is_none() && (m.given.is_none() || m.searchable)
+    }
+
+    /// The selection, in order.
+    pub fn selection(&self) -> (usize, usize) {
+        let (a, b) = (self.caret.min(self.typed.len()), self.anchor.min(self.typed.len()));
+        (a.min(b), a.max(b))
+    }
+
+    /// The selected text, for Copy (none selected: none).
+    pub fn selected(&self) -> Option<String> {
+        let (a, b) = self.selection();
+        (a != b).then(|| self.typed[a..b].to_string())
+    }
+
+    /// Cut: the selected text taken out and given back.
+    pub fn cut(&mut self, m: &Model) -> Option<String> {
+        let t = self.selected()?;
+        self.delete(true, false);
+        self.after_typing(m);
+        Some(t)
+    }
+
+    /// Paste: the text's first line, over the selection.
+    pub fn paste(&mut self, m: &Model, text: &str) -> Did {
+        let line: String = text.lines().next().unwrap_or("").chars().filter(|c| !c.is_control()).collect();
+        if line.is_empty() || (m.given.is_some() && !m.searchable) {
+            return Did::Nothing;
+        }
+        if self.insert(&line) {
+            self.after_typing(m);
+        }
+        Did::Moved
+    }
+
+    /// The caret put at byte `at` of the text (a click; `extend`: Shift or a drag).
+    pub fn place(&mut self, at: usize, extend: bool) {
+        let mut at = at.min(self.typed.len());
+        while !self.typed.is_char_boundary(at) {
+            at -= 1;
+        }
+        self.caret = at;
+        if !extend {
+            self.anchor = at;
+        }
+    }
+
+    /// `text` over the selection, as much as the field holds (60 letters).
+    fn insert(&mut self, text: &str) -> bool {
+        let (a, b) = self.selection();
+        let room = 60usize.saturating_sub(self.typed.chars().count() - self.typed[a..b].chars().count());
+        let text: String = text.chars().take(room).collect();
+        if text.is_empty() && a == b {
+            return false;
+        }
+        self.typed.replace_range(a..b, &text);
+        self.caret = a + text.len();
+        self.anchor = self.caret;
+        true
+    }
+
+    /// Backspace (`back`) or Delete: the selection, else the letter (or,
+    /// `word`, the word) beside the caret. True if anything went.
+    fn delete(&mut self, back: bool, word: bool) -> bool {
+        let (mut a, mut b) = self.selection();
+        if a == b {
+            if back {
+                a = if word { self.word_start(a) } else { self.prev(a) };
+            } else {
+                b = self.next(b);
+            }
+        }
+        if a == b {
+            return false;
+        }
+        self.typed.replace_range(a..b, "");
+        (self.caret, self.anchor) = (a, a);
+        true
+    }
+
+    /// Moves the caret (Shift: the selection's end); Some(false): moved.
+    fn move_caret(&mut self, to: usize, extend: bool) -> Option<bool> {
+        self.caret = to;
+        if !extend {
+            self.anchor = to;
+        }
+        Some(false)
+    }
+
+    fn prev(&self, at: usize) -> usize {
+        self.typed[..at.min(self.typed.len())].char_indices().next_back().map_or(0, |(i, _)| i)
+    }
+
+    fn next(&self, at: usize) -> usize {
+        let at = at.min(self.typed.len());
+        self.typed[at..].chars().next().map_or(at, |c| at + c.len_utf8())
+    }
+
+    /// Where the word before `at` starts (spaces before it included).
+    fn word_start(&self, at: usize) -> usize {
+        let before = &self.typed[..at];
+        let trimmed = before.trim_end();
+        trimmed.rfind(char::is_whitespace).map_or(0, |i| i + 1)
     }
 
     /// Searching chooses the first result (Enter takes it).
@@ -774,5 +934,53 @@ mod tests {
         assert_eq!(r[0], Rect::new(106, 56, WIDTH - 12, ITEM_H));
         assert_eq!(r[1].y, 56 + ITEM_H);
         assert_eq!(height(&top), top.iter().map(Line::height).sum::<i32>() + 12);
+    }
+
+    #[test]
+    fn the_search_field_is_a_real_field() {
+        let m = big();
+        let mut s = State::default();
+        for c in "pste".chars() {
+            s.key(&m, Key::Char(c));
+        }
+        // Left moves in the text: the a goes where it was left out.
+        s.key(&m, Key::Left);
+        s.key(&m, Key::Left);
+        s.key(&m, Key::Left);
+        s.key(&m, Key::Char('a'));
+        assert_eq!((s.typed.as_str(), s.caret), ("paste", 2));
+        // Shift+End selects to the end, typing replaces it.
+        s.key(&m, Key::SelectEnd);
+        assert_eq!(s.selected().as_deref(), Some("ste"));
+        s.key(&m, Key::Char('y'));
+        assert_eq!(s.typed, "pay");
+        // Home, Delete; Ctrl+A and Backspace clears.
+        s.key(&m, Key::Home);
+        s.key(&m, Key::Delete);
+        assert_eq!(s.typed, "ay");
+        s.key(&m, Key::SelectAll);
+        s.key(&m, Key::Back);
+        assert_eq!((s.typed.as_str(), s.caret), ("", 0));
+        // Paste: the first line, at the caret; Ctrl+Backspace takes a word.
+        s.paste(&m, "new tab\nignored");
+        assert_eq!(s.typed, "new tab");
+        assert!(matches!(s.shown(&m).get(1), Some(Line::Item { .. })), "and it searches: {:?}", s.shown(&m));
+        s.key(&m, Key::BackWord);
+        assert_eq!(s.typed, "new ");
+        // A click places the caret; Shift+click selects; cut takes it out.
+        s.place(1, false);
+        s.place(3, true);
+        assert_eq!(s.cut(&m).as_deref(), Some("ew"));
+        assert_eq!(s.typed, "n ");
+        // Escape clears first, then closes.
+        assert_eq!(s.key(&m, Key::Escape), Did::Moved);
+        assert_eq!((s.typed.as_str(), s.caret), ("", 0));
+        assert_eq!(s.key(&m, Key::Escape), Did::Close);
+        // Letters beyond ASCII move a whole letter at a time.
+        s.paste(&m, "café");
+        s.key(&m, Key::Left);
+        assert_eq!(s.caret, "caf".len());
+        s.key(&m, Key::Delete);
+        assert_eq!(s.typed, "caf");
     }
 }

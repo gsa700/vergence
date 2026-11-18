@@ -355,6 +355,9 @@ it is today:
   a space too. A word wanted as typed must stay possible (Escape, or a
   click on the typed word, as macOS).
 
+- *Done 2026-11-18: vergence-shell appmenu.rs State caret/anchor and the field's keys (Left/Right in the text, Shift to select, Home/End, Delete, Ctrl+Backspace, Ctrl+A, typing over a selection), a click places the caret and a drag selects; Ctrl+C/X/V through the server's own clipboard (native.rs ClipOwner::Server, server_copy, server_paste); Escape clears first.* **The app menu's (and launcher's) search field a real field** (Dave: "I'd like it to be real not just a picture with input").
+- **Edit and FileView** are the apps' names (Dave, 2026-11-18; Text Editor and File Viewer before).
+
 ## Questions for Dave (when each app's turn comes)
 
 1. **Spellchecking**: dictionaries are data from other projects (Hunspell's

@@ -258,6 +258,7 @@ impl XwmHandler for Server {
         // A native client's clipboard (native.rs), else a Wayland client's.
         let native = match current_data_device_selection_userdata(&self.seat).as_deref() {
             Some(crate::native::ClipOwner::Native(c)) => Some(*c),
+            Some(crate::native::ClipOwner::Server(text)) => return crate::native::write_clip_text(text.clone(), fd),
             _ => None,
         };
         if let Some(c) = native {

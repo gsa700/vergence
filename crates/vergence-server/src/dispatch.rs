@@ -504,6 +504,10 @@ impl Server {
     /// A press or release, to whatever the seat said.
     fn deliver_button(&mut self, t: Target, button: u32, pressed: bool, pos: Point<f64, Logical>, time: InputTime) {
         let serial = SERIAL_COUNTER.next_serial();
+        // A drag in the app menu's search field ends wherever it is let go.
+        if !pressed {
+            self.app_menu_release();
+        }
         // A press anywhere but the drawer, its card or the dock puts the drawer away (drawer.rs).
         if pressed && self.tiles.drawer.is_some() && !matches!(t, Target::Server(Part::Drawer | Part::Card | Part::Dock)) {
             self.drawer_close();

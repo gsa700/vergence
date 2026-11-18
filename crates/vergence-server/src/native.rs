@@ -163,6 +163,22 @@ pub struct NativeInput {
 pub enum ClipOwner {
     X11,
     Native(u32),
+    /// The server's own text (what was copied from the app menu's search
+    /// field, 2026-11-18), written to whoever pastes.
+    Server(Arc<String>),
+}
+
+/// The kinds of text the server offers when it holds the clipboard.
+pub const TEXT_KINDS: [&str; 5] = ["text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "TEXT", "STRING"];
+
+/// The server's own text to a paste's pipe, on a thread of its own (the
+/// reader may be slow, or never read).
+pub fn write_clip_text(text: Arc<String>, fd: std::os::fd::OwnedFd) {
+    let _ = std::thread::Builder::new().name("clipboard".into()).spawn(move || {
+        use std::io::Write;
+        let mut f = std::fs::File::from(fd);
+        let _ = f.write_all(text.as_bytes());
+    });
 }
 
 /// A native window's pixels, as the scene draws them.
@@ -1120,6 +1136,60 @@ impl Server {
         clipboard_allowed(self.keyboard_window().and_then(|w| w.native().map(|n| n.client)), client)
     }
 
+    /// The server puts text on the clipboard itself (Copy or Cut in the app
+    /// menu's search field), for every kind of client.
+    pub fn server_copy(&mut self, text: String) {
+        use smithay::wayland::selection::{SelectionTarget, data_device::set_data_device_selection};
+        let kinds: Vec<String> = TEXT_KINDS.iter().map(|k| k.to_string()).collect();
+        set_data_device_selection(&self.display_handle, &self.seat, kinds.clone(), ClipOwner::Server(Arc::new(text)));
+        if let Some(xwm) = self.xwm.as_mut() {
+            let _ = xwm.new_selection(SelectionTarget::Clipboard, Some(kinds.clone()));
+        }
+        self.native_clipboard_offer(kinds);
+    }
+
+    /// The clipboard's text for the server itself (Paste in the app menu's
+    /// search field): asked of whoever holds it through a pipe, read on a
+    /// thread, and handed to `then` on the main loop.
+    pub fn server_paste(&mut self, then: fn(&mut Server, String)) {
+        use smithay::wayland::selection::{SelectionTarget, data_device::{current_data_device_selection_userdata, request_data_device_client_selection}};
+        let owner = current_data_device_selection_userdata(&self.seat).map(|o| o.clone());
+        if let Some(ClipOwner::Server(text)) = &owner {
+            return then(self, text.to_string());
+        }
+        let kind = self.native_input.clip_kinds.as_ref().and_then(|ks| TEXT_KINDS.iter().find(|k| ks.iter().any(|x| x == *k))).copied().unwrap_or("text/plain;charset=utf-8").to_string();
+        let Ok((read, write)) = vergence_protocol::sock::pipe() else { return };
+        let sent = match owner {
+            Some(ClipOwner::Native(from)) => {
+                self.native_clipboard_send(from, kind, write);
+                Ok(())
+            }
+            Some(ClipOwner::X11) => match self.xwm.as_mut() {
+                Some(xwm) => xwm.send_selection(SelectionTarget::Clipboard, kind, write).map_err(|e| format!("{e:?}")),
+                None => Err("X11 is gone".into()),
+            },
+            Some(ClipOwner::Server(_)) => Ok(()),
+            None => request_data_device_client_selection(&self.seat, kind, write).map_err(|e| format!("{e:?}")),
+        };
+        if let Err(e) = sent {
+            return tracing::info!("paste into the server: nothing on the clipboard ({e})");
+        }
+        let (tx, rx) = smithay::reexports::calloop::channel::channel::<String>();
+        let _ = self.loop_handle.insert_source(rx, move |ev, _, st| {
+            if let smithay::reexports::calloop::channel::Event::Msg(text) = ev {
+                then(st, text);
+            }
+        });
+        let _ = std::thread::Builder::new().name("paste".into()).spawn(move || {
+            use std::io::Read;
+            let mut text = String::new();
+            let mut f = std::fs::File::from(read).take(64 * 1024);
+            if f.read_to_string(&mut text).is_ok() {
+                let _ = tx.send(text);
+            }
+        });
+    }
+
     /// A native client pastes: it gets the read end of a pipe whose write end
     /// goes to whoever has the clipboard. Only the client with the keyboard
     /// may (security pass 2026-11-15, finding 1).
@@ -1137,6 +1207,10 @@ impl Server {
         let sent = match owner {
             Some(ClipOwner::Native(from)) => {
                 self.native_clipboard_send(from, kind.clone(), write);
+                Ok(())
+            }
+            Some(ClipOwner::Server(text)) => {
+                write_clip_text(text, write);
                 Ok(())
             }
             Some(ClipOwner::X11) => match self.xwm.as_mut() {

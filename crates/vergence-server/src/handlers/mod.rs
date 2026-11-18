@@ -89,6 +89,7 @@ impl SelectionHandler for Server {
         }
         match owner {
             crate::native::ClipOwner::Native(client) => self.native_clipboard_send(*client, mime_type, fd),
+            crate::native::ClipOwner::Server(text) => crate::native::write_clip_text(text.clone(), fd),
             crate::native::ClipOwner::X11 => {
                 if let Some(xwm) = self.xwm.as_mut()
                     && let Err(e) = xwm.send_selection(SelectionTarget::Clipboard, mime_type, fd)

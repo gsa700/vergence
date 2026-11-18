@@ -32,6 +32,8 @@ use crate::{Server, decor::SceneElement, win::Win};
 #[derive(Default)]
 pub struct AppMenu {
     open: Option<Open>,
+    /// A press in the search field, held: moving selects (a drag).
+    field_drag: bool,
     /// The two panels' pictures (top, submenu), each with what it was drawn from.
     pictures: [Option<(u64, MemoryRenderBuffer)>; 2],
 }
@@ -278,8 +280,61 @@ impl Server {
         }
     }
 
+    /// Ctrl+V in the search field: the clipboard's text, when it comes.
+    fn app_menu_paste_request(&mut self) {
+        self.server_paste(|st, text| {
+            if let Some(o) = st.app_menu.open.as_mut() {
+                o.state.paste(&o.model, &text);
+                st.redraw_all();
+            }
+        });
+    }
+
+    /// A button let go: a drag in the search field ends.
+    pub fn app_menu_release(&mut self) {
+        self.app_menu.field_drag = false;
+    }
+
+    /// The byte of the search text nearest `pos`, if `pos` is in the field.
+    fn app_menu_field_index(&mut self, pos: Point<f64, Logical>) -> Option<usize> {
+        let o = self.app_menu.open.as_ref()?;
+        let lines = o.top_lines();
+        let i = lines.iter().position(|l| matches!(l, Line::Search))?;
+        let at = o.origin();
+        let r = appmenu::rows((at.x, at.y), &lines)[i];
+        let inside_y = (r.y as f64..(r.y + r.h) as f64).contains(&pos.y);
+        if !self.app_menu.field_drag && !(inside_y && (r.x as f64..(r.x + r.w) as f64).contains(&pos.x)) {
+            return None;
+        }
+        let typed = o.state.typed.clone();
+        // The text starts 28 points in (app_menu_draw), at 13 points.
+        let x = (pos.x - r.x as f64 - 28.0) as f32;
+        let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
+        let face = fonts.face("sans-serif", 400, false)?;
+        let mut best = (0usize, f32::MAX);
+        let mut ends: Vec<usize> = typed.char_indices().map(|(b, _)| b).collect();
+        ends.push(typed.len());
+        for b in ends {
+            let w = fonts.layout(face, 13.0, &typed[..b]).1;
+            let d = (w - x).abs();
+            if d < best.1 {
+                best = (b, d);
+            }
+        }
+        Some(best.0)
+    }
+
     /// The pointer moved: the line under it is chosen, a submenu there opens.
     pub fn app_menu_hover(&mut self, pos: Point<f64, Logical>) {
+        if self.app_menu.field_drag {
+            if let Some(at) = self.app_menu_field_index(pos)
+                && let Some(o) = self.app_menu.open.as_mut()
+            {
+                o.state.place(at, true);
+                self.redraw_all();
+            }
+            return;
+        }
         let Some(o) = self.app_menu.open.as_mut() else { return };
         let before = o.state.clone();
         match o.line_at(pos) {
@@ -293,6 +348,17 @@ impl Server {
     }
 
     pub fn app_menu_press(&mut self, pos: Point<f64, Logical>, button: u32) {
+        // In the search field: the caret goes there (Shift: the selection to
+        // there), and holding the button and moving selects.
+        if button == vergence_seat::BTN_LEFT && let Some(at) = self.app_menu_field_index(pos) {
+            let shift = self.input.keys.as_ref().is_some_and(|k| k.mods().shift);
+            if let Some(o) = self.app_menu.open.as_mut() {
+                o.state.place(at, shift);
+            }
+            self.app_menu.field_drag = true;
+            self.redraw_all();
+            return;
+        }
         self.app_menu_hover(pos);
         if button == vergence_seat::BTN_RIGHT {
             return self.app_menu_pin(pos);
@@ -351,18 +417,46 @@ impl Server {
     }
 
     /// A key while the menu is open (the seat gives it every key).
-    pub fn app_menu_key(&mut self, sym: u32, typed: Option<char>) {
+    pub fn app_menu_key(&mut self, sym: u32, typed: Option<char>, mods: vergence_seat::keyboard::Mods) {
+        // The search field's clipboard keys (a field like any other).
+        if mods.ctrl && !mods.alt {
+            match sym {
+                key::KEY_c | key::KEY_C | key::KEY_x | key::KEY_X => {
+                    let cut = matches!(sym, key::KEY_x | key::KEY_X);
+                    let Some(o) = self.app_menu.open.as_mut() else { return };
+                    let text = if cut { o.state.cut(&o.model) } else { o.state.selected() };
+                    if let Some(t) = text {
+                        self.server_copy(t);
+                        self.redraw_all();
+                    }
+                    return;
+                }
+                key::KEY_v | key::KEY_V => return self.app_menu_paste_request(),
+                _ => {}
+            }
+        }
         let Some(o) = self.app_menu.open.as_mut() else { return };
+        use appmenu::Key as K;
         let k = match sym {
-            key::KEY_Up => appmenu::Key::Up,
-            key::KEY_Down => appmenu::Key::Down,
-            key::KEY_Left => appmenu::Key::Left,
-            key::KEY_Right => appmenu::Key::Right,
-            key::KEY_Return | key::KEY_KP_Enter => appmenu::Key::Enter,
-            key::KEY_Escape => appmenu::Key::Escape,
-            key::KEY_BackSpace => appmenu::Key::Back,
+            key::KEY_Up => K::Up,
+            key::KEY_Down => K::Down,
+            key::KEY_Left if mods.shift => K::SelectLeft,
+            key::KEY_Right if mods.shift => K::SelectRight,
+            key::KEY_Left => K::Left,
+            key::KEY_Right => K::Right,
+            key::KEY_Home | key::KEY_KP_Home if mods.shift => K::SelectHome,
+            key::KEY_End | key::KEY_KP_End if mods.shift => K::SelectEnd,
+            key::KEY_Home | key::KEY_KP_Home => K::Home,
+            key::KEY_End | key::KEY_KP_End => K::End,
+            key::KEY_Delete | key::KEY_KP_Delete => K::Delete,
+            key::KEY_Return | key::KEY_KP_Enter => K::Enter,
+            key::KEY_Escape => K::Escape,
+            key::KEY_BackSpace if mods.ctrl => K::BackWord,
+            key::KEY_BackSpace => K::Back,
+            key::KEY_a | key::KEY_A if mods.ctrl && !mods.alt => K::SelectAll,
+            _ if mods.ctrl || mods.alt || mods.logo => return,
             _ => match typed {
-                Some(c) if !c.is_control() => appmenu::Key::Char(c),
+                Some(c) if !c.is_control() => K::Char(c),
                 _ => return,
             },
         };
@@ -457,6 +551,7 @@ impl Server {
         let Some(o) = self.app_menu.open.as_ref() else { return Vec::new() };
         let light = self.light_style();
         let mut panels: Vec<(usize, Rectangle<i32, Logical>, Vec<Line>, Option<usize>, String, bool)> = Vec::new();
+        let field = (o.state.caret, o.state.anchor);
         if let Some(r) = o.sub_rect() {
             panels.push((1, r, o.state.sub_lines(&o.model), o.state.sub, String::new(), true));
         }
@@ -470,11 +565,11 @@ impl Server {
                 continue;
             }
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            (format!("{lines:?}"), chosen, &typed, keyboard_here, open_sub, scale.to_bits(), light, rect.size.w, rect.size.h).hash(&mut hasher);
+            (format!("{lines:?}"), chosen, &typed, field, keyboard_here, open_sub, scale.to_bits(), light, rect.size.w, rect.size.h).hash(&mut hasher);
             let stamp = hasher.finish();
             if self.app_menu.pictures[slot].as_ref().map(|(k, _)| *k) != Some(stamp) {
                 let menus = if slot == 0 { found_menus.clone() } else { Vec::new() };
-                match self.app_menu_draw(rect, &lines, chosen, &typed, slot == 0 && !typed.trim().is_empty(), &menus, open_sub.filter(|_| slot == 0), light, scale) {
+                match self.app_menu_draw(rect, &lines, chosen, (&typed, field), slot == 0 && !typed.trim().is_empty(), &menus, open_sub.filter(|_| slot == 0), light, scale) {
                     Some(b) => self.app_menu.pictures[slot] = Some((stamp, b)),
                     None => continue,
                 }
@@ -492,7 +587,7 @@ impl Server {
 
     /// One panel's picture.
     #[allow(clippy::too_many_arguments)]
-    fn app_menu_draw(&mut self, rect: Rectangle<i32, Logical>, lines: &[Line], chosen: Option<usize>, typed: &str, results: bool, menus: &[String], open_sub: Option<usize>, light: bool, scale: f64) -> Option<MemoryRenderBuffer> {
+    fn app_menu_draw(&mut self, rect: Rectangle<i32, Logical>, lines: &[Line], chosen: Option<usize>, (typed, (caret, anchor)): (&str, (usize, usize)), results: bool, menus: &[String], open_sub: Option<usize>, light: bool, scale: f64) -> Option<MemoryRenderBuffer> {
         // The launcher finds applications; an app's menu, its commands.
         let placeholder = if self.app_menu_is_launcher() { "Search applications…" } else { "Search commands…" };
         let accent = self.accent();
@@ -532,9 +627,16 @@ impl Server {
                             scene.fill(SceneRect::new(f.x + 28.0, f.y + 7.0, 1.0, f.h - 14.0), color(s.menu_ink));
                             vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink_off), ScenePoint::new(f.x + 32.0, base), placeholder);
                         } else {
-                            let (_, width) = fonts.layout(face, size, typed);
+                            // The selection lit, the text, the caret where it is.
+                            let x_of = |fonts: &mut vergence_text::Fonts, b: usize| fonts.layout(face, size, &typed[..b.min(typed.len())]).1;
+                            let (a, b) = (caret.min(anchor).min(typed.len()), caret.max(anchor).min(typed.len()));
+                            if a != b {
+                                let (xa, xb) = (x_of(fonts, a), x_of(fonts, b));
+                                scene.fill(SceneRect::new(f.x + 28.0 + xa, f.y + 5.0, xb - xa, f.h - 10.0), Color::rgba(accent.r, accent.g, accent.b, 110));
+                            }
                             vergence_render::text(&mut scene, fonts, face, size, color(s.menu_ink), ScenePoint::new(f.x + 28.0, base), typed);
-                            scene.fill(SceneRect::new(f.x + 29.0 + width, f.y + 7.0, 1.0, f.h - 14.0), color(s.menu_ink));
+                            let xc = x_of(fonts, caret);
+                            scene.fill(SceneRect::new(f.x + 28.0 + xc, f.y + 7.0, 1.0, f.h - 14.0), color(s.menu_ink));
                         }
                         scene.pop_clip();
                     }
