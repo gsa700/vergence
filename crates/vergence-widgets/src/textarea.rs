@@ -1320,8 +1320,11 @@ impl Doc {
         (((self.geom.rect.h - 2.0 * PAD_Y) / lh).floor() as usize).saturating_sub(1).max(1)
     }
 
-    /// Scrolls by `dy` points (down is positive), held by the top line. The
-    /// last line can come up to the top, no further.
+    /// Scrolls by `dy` points (down is positive), held by the top line. It
+    /// stops when the last line is at the view's bottom, so text that fits
+    /// doesn't scroll at all (Dave, 2026-11-17: the Text Editor scrolled a
+    /// few lines up under the bar when they didn't fill the window; the last
+    /// line could come up to the top).
     fn scroll_by(&mut self, dy: f32) {
         let n = self.buffer.line_count();
         let mut off = self.top_off + dy;
@@ -1346,6 +1349,27 @@ impl Doc {
             self.top += 1;
         }
         self.top_off = off.max(0.0);
+        let (above, total, view) = self.extent();
+        let most = (total - view).max(0.0);
+        if above > most + 0.01 {
+            self.top = 0;
+            self.top_off = 0.0;
+            self.walk_down(most);
+        }
+    }
+
+    /// From the very top, `dy` points down (within the text).
+    fn walk_down(&mut self, mut dy: f32) {
+        let n = self.buffer.line_count();
+        while self.top + 1 < n {
+            let h = self.line_height(self.top);
+            if dy < h {
+                break;
+            }
+            dy -= h;
+            self.top += 1;
+        }
+        self.top_off = dy.max(0.0);
     }
 
     /// Where line `i`'s top is, from the view's top (negative above it).
@@ -1485,14 +1509,13 @@ impl Doc {
         self.scroll_by(want);
     }
 
-    /// The text above the view, all of it (with room to bring the last line
-    /// to the top), and the view's height, in points.
+    /// The text above the view, all of it, and the view's height, in points.
     fn extent(&self) -> (f32, f32, f32) {
         let n = self.buffer.line_count();
         let above: f32 = (0..self.top.min(n)).map(|k| self.line_height(k)).sum::<f32>() + self.top_off;
         let below: f32 = (self.top.min(n)..n).map(|k| self.line_height(k)).sum();
         let view = self.geom.rect.h - 2.0 * PAD_Y;
-        (above, above + below - self.top_off + (view - self.geom.line_h).max(0.0), view)
+        (above, above + below - self.top_off, view)
     }
 
     /// A press: one click puts the caret there (Shift: the selection runs
@@ -1963,6 +1986,24 @@ mod tests {
     }
 
     #[test]
+    fn text_that_fits_does_not_scroll() {
+        // The view holds 5 rows; 3 lines fit and never move.
+        let mut d = doc("a\nb\nc");
+        d.scroll_by(100.0);
+        assert_eq!((d.top, d.top_off), (0, 0.0));
+        let (above, total, view) = d.extent();
+        assert!(above == 0.0 && total <= view, "no scroll bar: {total} in {view}");
+        // 12 lines: down to the last line at the view's bottom, no further.
+        let mut d = doc(&(0..12).map(|i| i.to_string()).collect::<Vec<_>>().join("\n"));
+        d.scroll_by(1000.0);
+        assert_eq!((d.top, d.top_off), (7, 0.0));
+        let (above, total, view) = d.extent();
+        assert_eq!(above, total - view);
+        d.scroll_by(-25.0);
+        assert_eq!((d.top, d.top_off), (4, 5.0));
+    }
+
+    #[test]
     fn wrapping_breaks_after_spaces_and_inside_long_words() {
         let s = "aaaa bbbb cccc";
         let sh = guess_line(8.0, 32.0, 80.0, s);
@@ -2052,9 +2093,9 @@ mod tests {
         assert_eq!(d.top, 96);
         d.key(sym::HOME, None, Modifiers { ctrl: true, ..Modifiers::default() });
         assert_eq!((d.top, d.top_off), (0, 0.0));
-        // Scrolling stops with the last line at the top.
+        // Scrolling stops with the last line at the bottom (101 lines, 5 in view).
         d.wheel(0.0, 1e6);
-        assert_eq!(d.top, 100);
+        assert_eq!((d.top, d.top_off), (96, 0.0));
         d.wheel(0.0, -1e6);
         assert_eq!(d.top, 0);
     }
