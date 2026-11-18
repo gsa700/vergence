@@ -2907,7 +2907,10 @@ impl App {
             .width(Length::FILL)
             .height(Length::FILL),
         )
-        .padding(22.0)
+        // Below the frosted bar, as every page starts (page_layout): this view
+        // doesn't scroll, so its heading would stay under the bar (techbench,
+        // 2026-11-17).
+        .padding(Padding { top: 22.0 + self.top.get(), bottom: 22.0, left: 22.0, right: 22.0 })
         .width(Length::FILL)
         .height(Length::FILL)
     }
