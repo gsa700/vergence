@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=File Viewer
+Name=FileView
 GenericName=File Manager
 Comment=Your folders and files, with Preview on the space bar
 Exec=vergence-files %U

@@ -771,7 +771,7 @@ impl EditWindow {
             return;
         }
         let waker = self.waker.clone();
-        let prefs = Prefs::new("Text Editor", APP_ID, SECTION, false, Box::new(EditRows::new()), self.prefs_open.clone()).on_write(move || {
+        let prefs = Prefs::new("Edit", APP_ID, SECTION, false, Box::new(EditRows::new()), self.prefs_open.clone()).on_write(move || {
             if let Some(w) = &waker {
                 w.wake();
             }
@@ -885,7 +885,7 @@ impl EditWindow {
             cmd::PREV_TAB => self.step_tab(-1),
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
-                let about = vergence_widgets::about::About::new(APP_ID, "Text Editor", env!("CARGO_PKG_VERSION"), "A plain-text editor: tabs, line numbers, wrapping, undo; files saved whole or not at all.", self.theme());
+                let about = vergence_widgets::about::About::new(APP_ID, "Edit", env!("CARGO_PKG_VERSION"), "A plain-text editor: tabs, line numbers, wrapping, undo; files saved whole or not at all.", self.theme());
                 window.open_window(vergence_widgets::window(about));
             }
             _ => {}
@@ -953,7 +953,7 @@ impl Program for EditWindow {
         match self.front_tab() {
             Some(t) if t.modified() => format!("{} •", t.name()),
             Some(t) => t.name(),
-            None => "Text Editor".into(),
+            None => "Edit".into(),
         }
     }
 

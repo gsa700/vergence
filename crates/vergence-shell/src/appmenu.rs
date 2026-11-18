@@ -601,7 +601,7 @@ mod tests {
         use vergence_protocol::window::MenuLine;
         let mut m = big();
         m.given = Some(vec![
-            MenuLine::item(1, "File Viewer", ""),
+            MenuLine::item(1, "FileView", ""),
             MenuLine::Separator,
             MenuLine::Sub { label: "Internet".into(), lines: vec![MenuLine::item(2, "Firefox", ""), MenuLine::item(3, "Mail", "")] },
             MenuLine::Sub { label: "Office".into(), lines: vec![MenuLine::item(3, "Mail", "")] },
@@ -611,7 +611,7 @@ mod tests {
         let mut s = State::default();
         assert_eq!(s.key(&m, Key::Char('f')), Did::Moved);
         let names: Vec<String> = s.shown(&m).iter().filter_map(|l| if let Line::Item { label, .. } = l { Some(label.clone()) } else { None }).collect();
-        assert_eq!(names, vec!["File Viewer", "Firefox"], "from the top and from a submenu");
+        assert_eq!(names, vec!["FileView", "Firefox"], "from the top and from a submenu");
         s.key(&m, Key::Back);
         s.key(&m, Key::Char('m'));
         assert_eq!(m.search("mail").len(), 1, "an app in two categories found once");
@@ -625,14 +625,14 @@ mod tests {
         m.given = Some(vec![
             MenuLine::Separator,
             MenuLine::item(1, "Open", "Enter"),
-            MenuLine::Sub { label: "Open With".into(), lines: vec![MenuLine::item(10, "Text Editor", ""), MenuLine::item(11, "Close-Up", "")] },
+            MenuLine::Sub { label: "Open With".into(), lines: vec![MenuLine::item(10, "Edit", ""), MenuLine::item(11, "Close-Up", "")] },
             MenuLine::Separator,
             MenuLine::Separator,
             MenuLine::item(2, "Rename…", "F2").enabled(false),
             MenuLine::Separator,
         ]);
         assert_eq!(labels(&m.top()), ["Open (Enter)", "Open With >", "---", "Rename… (F2)"]);
-        assert_eq!(labels(&m.sub("Open With")), ["Text Editor", "Close-Up"]);
+        assert_eq!(labels(&m.sub("Open With")), ["Edit", "Close-Up"]);
         assert!(m.sub("Keyboard shortcuts").is_empty());
         // No search: typing does nothing; the keys walk past the faint line.
         let mut s = State::default();

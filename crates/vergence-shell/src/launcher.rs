@@ -227,11 +227,11 @@ mod tests {
             list.push(e);
         };
         ours("vergence-calc", "Calculator");
-        ours("vergence-files", "File Viewer");
+        ours("vergence-files", "FileView");
         ours("vergence-zz", "Another");
-        ours("vergence-edit", "Text Editor");
+        ours("vergence-edit", "Edit");
         let names: Vec<&str> = own(&list).into_iter().map(|i| list[i].name.as_str()).collect();
-        assert_eq!(names, vec!["File Viewer", "Text Editor", "Calculator", "Another"]);
+        assert_eq!(names, vec!["FileView", "Edit", "Calculator", "Another"]);
     }
 
     #[test]

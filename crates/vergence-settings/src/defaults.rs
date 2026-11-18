@@ -188,7 +188,7 @@ impl App {
             .collect();
         self.page_layout(
             "Default apps",
-            "Which app opens each kind of file and link, from File Viewer, links in apps, and vergence-open. Chosen here for Vergence only: other desktops keep their own.",
+            "Which app opens each kind of file and link, from FileView, links in apps, and vergence-open. Chosen here for Vergence only: other desktops keep their own.",
             vec![self.group(None, rows)],
         )
     }

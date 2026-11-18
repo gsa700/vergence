@@ -528,7 +528,7 @@ impl Desktop {
                     ],
                 },
                 MenuLine::Separator,
-                MenuLine::item(cmd::OPEN_FOLDER, "Open Desktop in File Viewer", ""),
+                MenuLine::item(cmd::OPEN_FOLDER, "Open Desktop in FileView", ""),
                 MenuLine::item(cmd::TERMINAL, "Open in Terminal", ""),
                 MenuLine::Separator,
                 MenuLine::item(cmd::PROPERTIES, "Properties", ""),
@@ -548,7 +548,7 @@ impl Desktop {
             l.push(MenuLine::item(cmd::CLOSE_UP, "Open in Close-Up", ""));
         }
         if files > 0 {
-            l.push(MenuLine::item(cmd::SHOW, "Show in File Viewer", ""));
+            l.push(MenuLine::item(cmd::SHOW, "Show in FileView", ""));
             l.push(MenuLine::Separator);
             l.push(MenuLine::item(cmd::COPY, "Copy", ""));
             l.push(MenuLine::item(cmd::DUPLICATE, "Duplicate", ""));
@@ -781,7 +781,7 @@ impl Program for Desktop {
                     C::own(cmd::BY_NAME, "Desktop arrange", "Arrange by name", "").checked(self.order == Order::Name),
                     C::own(cmd::BY_KIND, "Desktop arrange", "Arrange by kind", "").checked(self.order == Order::Kind),
                     C::own(cmd::BY_DATE, "Desktop arrange", "Arrange by date", "").checked(self.order == Order::Date),
-                    C::own(cmd::OPEN_FOLDER, "Desktop open", "Open Desktop in File Viewer", ""),
+                    C::own(cmd::OPEN_FOLDER, "Desktop open", "Open Desktop in FileView", ""),
                     C::own(cmd::TERMINAL, "Desktop open", "Open Terminal here", ""),
                 ],
             ));
@@ -802,7 +802,7 @@ impl Program for Desktop {
             c.push(C::own(cmd::DUPLICATE, "Edit", "Duplicate", ""));
             c.push(C::own(cmd::COPY, "Edit", "Copy", ""));
             c.push(C::own(cmd::TRASH, "Trash", "Move to the Trash", "Delete"));
-            c.push(C::own(cmd::SHOW, "Show", "Show in File Viewer", ""));
+            c.push(C::own(cmd::SHOW, "Show", "Show in FileView", ""));
         }
         if fixed.contains(&Fixed::Trash) {
             c.push(C::own(cmd::EMPTY_TRASH, "Trash", "Empty Trash…", ""));

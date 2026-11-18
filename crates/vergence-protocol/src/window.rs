@@ -1601,7 +1601,7 @@ mod tests {
                 y: 30.5,
                 lines: vec![
                     MenuLine::item(1, "Open", "Enter"),
-                    MenuLine::Sub { label: "Open With".into(), lines: vec![MenuLine::item(100, "Text Editor", ""), MenuLine::Separator, MenuLine::item(101, "Other…", "").enabled(false)] },
+                    MenuLine::Sub { label: "Open With".into(), lines: vec![MenuLine::item(100, "Edit", ""), MenuLine::Separator, MenuLine::item(101, "Other…", "").enabled(false)] },
                     MenuLine::Separator,
                     MenuLine::item(2, "Hidden files", "Ctrl+H").checked(true),
                 ],

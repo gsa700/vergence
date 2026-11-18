@@ -789,7 +789,7 @@ impl Viewer {
             return;
         }
         let waker = self.waker.clone();
-        let prefs = Prefs::new("File Viewer", APP_ID, SECTION, false, Box::new(FilesRows), self.prefs_open.clone()).on_write(move || {
+        let prefs = Prefs::new("FileView", APP_ID, SECTION, false, Box::new(FilesRows), self.prefs_open.clone()).on_write(move || {
             if let Some(w) = &waker {
                 w.wake();
             }
@@ -986,7 +986,7 @@ impl Viewer {
             }
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
-                let about = vergence_widgets::about::About::new(APP_ID, "File Viewer", env!("CARGO_PKG_VERSION"), "Vergence's file manager: your folders as a list or icons, Preview on the space bar, files opened with the apps chosen for them.", self.theme());
+                let about = vergence_widgets::about::About::new(APP_ID, "FileView", env!("CARGO_PKG_VERSION"), "Vergence's file manager: your folders as a list or icons, Preview on the space bar, files opened with the apps chosen for them.", self.theme());
                 window.open_window(vergence_widgets::window(about));
             }
             _ => {}
@@ -1621,7 +1621,7 @@ impl Program for Viewer {
     type Message = Msg;
 
     fn title(&self) -> String {
-        self.front_tab().map(Tab::name).unwrap_or_else(|| "File Viewer".into())
+        self.front_tab().map(Tab::name).unwrap_or_else(|| "FileView".into())
     }
 
     fn app_id(&self) -> String {
@@ -2062,7 +2062,7 @@ impl Rows for FilesRows {
         let styles = vec![Choice::text("Dark", "dark"), Choice::text("Light", "light")];
         vec![
             Part {
-                title: "File Viewer".into(),
+                title: "FileView".into(),
                 rows: vec![
                     Row::new("view", "New windows show", "A folder as a list or as icons.", Control::Choose { choices: vec![Choice::text("A list", "list"), Choice::text("Icons", "icons")], desktop: None, app_default: 0 }),
                     Row::new("preview-pane", "Preview pane", "The chosen file at the window's right.", Control::Switch { default: false }),
@@ -2077,7 +2077,7 @@ impl Rows for FilesRows {
                     Row::new("style", "Style", "While the desktop's Style is App default.", Control::Choose { choices: styles.clone(), desktop: Some("Built-in (Light)".into()), app_default: 0 }).locked(locked.clone()),
                     Row::new("bar-style", "Title bar", "", Control::Choose { choices: styles, desktop: Some("Built-in (Light)".into()), app_default: 0 }).locked(locked),
                     Row::new("opacity", "Opacity", "30 to 100: how much of the window's ground shows.", Control::Percent { min: 30, desktop: format!("Desktop default ({:.0})", opacity * 100.0), now: (opacity * 100.0).round() as u32 }),
-                    Row::new("", "Window places", "Where the desktop puts File Viewer's windows, for each set of screens.", Control::Button { label: "Forget…".into(), id: 1 }),
+                    Row::new("", "Window places", "Where the desktop puts FileView's windows, for each set of screens.", Control::Button { label: "Forget…".into(), id: 1 }),
                 ],
             },
         ]

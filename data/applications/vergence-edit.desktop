@@ -1,6 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=Text Editor
+Name=Edit
+GenericName=Text Editor
 Comment=Plain text, with tabs, line numbers and undo
 Exec=vergence-edit %F
 Icon=vergence-edit

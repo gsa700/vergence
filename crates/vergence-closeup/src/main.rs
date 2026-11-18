@@ -480,7 +480,7 @@ impl Viewer {
             cmd::OPEN_WITH => self.open_with(false),
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
-                let about = vergence_widgets::about::About::new(APP_ID, "Close-Up", env!("CARGO_PKG_VERSION"), "A file's contents in full: pictures (PNG, JPEG, GIF, WebP, BMP, SVG), decoded apart from the app, and text. The step after File Viewer's Preview.", self.theme());
+                let about = vergence_widgets::about::About::new(APP_ID, "Close-Up", env!("CARGO_PKG_VERSION"), "A file's contents in full: pictures (PNG, JPEG, GIF, WebP, BMP, SVG), decoded apart from the app, and text. The step after FileView's Preview.", self.theme());
                 window.open_window(vergence_widgets::window(about));
             }
             _ => {}
@@ -588,7 +588,7 @@ impl Viewer {
                 if *cut {
                     items.push(label(format!("the first {} MB", MAX_TEXT >> 20)).size(12.0).dim());
                 }
-                items.push(button(label("Open in Text Editor").size(12.0)).padding(Padding::hv(2.0, 10.0)).on_press(Msg::OpenInEditor).name("Open in Text Editor"));
+                items.push(button(label("Open in Edit").size(12.0)).padding(Padding::hv(2.0, 10.0)).on_press(Msg::OpenInEditor).name("Open in Edit"));
             }
             _ => {}
         }
