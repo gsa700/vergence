@@ -23,6 +23,7 @@ pub struct Auth {
     peer_uid: u32,
     guid: String,
     seen: usize,
+    unix_fds: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -38,7 +39,12 @@ pub enum Step {
 
 impl Auth {
     pub fn new(peer_uid: u32, guid: &str) -> Auth {
-        Auth { state: State::WaitingNul, buf: Vec::new(), peer_uid, guid: guid.into(), seen: 0 }
+        Auth { state: State::WaitingNul, buf: Vec::new(), peer_uid, guid: guid.into(), seen: 0, unix_fds: false }
+    }
+
+    /// Whether the client asked to pass file descriptors (and was agreed).
+    pub fn unix_fds(&self) -> bool {
+        self.unix_fds
     }
 
     pub fn feed(&mut self, data: &[u8]) -> Step {
@@ -82,8 +88,13 @@ impl Auth {
                     out.extend_from_slice(b"REJECTED EXTERNAL\r\n");
                     self.state = State::WaitingAuth;
                 }
-                // File descriptor passing is not offered (yet).
-                (State::Authenticated, "NEGOTIATE_UNIX_FD") => out.extend_from_slice(b"ERROR\r\n"),
+                // File descriptors may be passed (2026-11-17: GLib sends one
+                // even when refused, then ends the connection, and with it
+                // Firefox, on its portal OpenDirectory).
+                (State::Authenticated, "NEGOTIATE_UNIX_FD") => {
+                    self.unix_fds = true;
+                    out.extend_from_slice(b"AGREE_UNIX_FD\r\n");
+                }
                 (State::Authenticated, "BEGIN") => return Step::Done(out, std::mem::take(&mut self.buf)),
                 (_, "ERROR") => {
                     out.extend_from_slice(b"REJECTED EXTERNAL\r\n");
@@ -133,7 +144,9 @@ mod tests {
         let hex = encode_hex(b"1001");
         let step = a.feed(format!("\0AUTH EXTERNAL {hex}\r\n").as_bytes());
         assert_eq!(step, Step::Continue(format!("OK {GUID}\r\n").into_bytes()));
-        assert_eq!(a.feed(b"NEGOTIATE_UNIX_FD\r\n"), Step::Continue(b"ERROR\r\n".to_vec()));
+        assert!(!a.unix_fds());
+        assert_eq!(a.feed(b"NEGOTIATE_UNIX_FD\r\n"), Step::Continue(b"AGREE_UNIX_FD\r\n".to_vec()));
+        assert!(a.unix_fds());
         // BEGIN and the first message arrive together.
         assert_eq!(a.feed(b"BEGIN\r\nl\x01\x00\x01"), Step::Done(Vec::new(), b"l\x01\x00\x01".to_vec()));
     }

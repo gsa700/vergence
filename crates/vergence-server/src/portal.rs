@@ -16,8 +16,13 @@
 //
 // org.freedesktop.portal.OpenURI: OpenURI opens a link or a file:// link
 // with the app chosen for its type (shelf.rs `open_items`, as the bus's
-// Open). OpenFile and OpenDirectory pass a file descriptor, which the edge
-// does not take (no unix fd negotiation), so they answer NotSupported.
+// Open). OpenFile and OpenDirectory pass the file as a descriptor (the edge
+// takes descriptors since 2026-11-17): its path is read from the kernel
+// (/proc/self/fd on Linux, F_KINFO on FreeBSD); OpenFile opens it by type,
+// OpenDirectory opens the folder it is in (a folder itself, if one was
+// passed). Before, the edge refused descriptors, GLib sent one anyway and
+// then ended its connection, which ended Firefox ("show in folder" from
+// its downloads panel, Hubble, 2026-11-17).
 //
 // Our apps are not sandboxed: the answer is the file's own file:// link; the
 // Documents portal (copies for sandboxed apps) is not provided.
@@ -346,11 +351,75 @@ impl Server {
         Ok(handle)
     }
 
+    /// OpenURI.OpenFile / OpenDirectory: the file passed as descriptor
+    /// `args[1]` (an index into `fds`), opened by type, or the folder it is
+    /// in shown; the Response sent at once, as OpenURI's.
+    pub fn portal_open_fd(&mut self, conn: u32, unique: &str, directory: bool, args: &[Value], fds: &[std::os::fd::OwnedFd]) -> Result<String, String> {
+        let Some(Value::Fd(i)) = args.get(1) else { return Err("(sha{sv})".into()) };
+        let fd = fds.get(*i as usize).ok_or("no such file descriptor")?;
+        let path = fd_path(fd).ok_or("the file's path could not be found")?;
+        let empty = Value::Array("{sv}".into(), Vec::new());
+        let options = args.get(2).unwrap_or(&empty);
+        let token = opt_str(options, "handle_token").unwrap_or_else(|| {
+            self.portal.serial += 1;
+            format!("vergence{}", self.portal.serial)
+        });
+        let handle = request_path(unique, &token);
+        let target = if directory && !path.is_dir() { path.parent().map(PathBuf::from).unwrap_or(path) } else { path };
+        let what = if directory { "OpenDirectory" } else { "OpenFile" };
+        let response = match self.open_items(&[target.to_string_lossy().into_owned()], "") {
+            Ok(()) => 0,
+            Err(e) => {
+                tracing::info!("portal: {what}: {e}");
+                2
+            }
+        };
+        self.dbus_request_response(conn, &handle, response, Value::Array("{sv}".into(), Vec::new()));
+        Ok(handle)
+    }
+
     /// A window just made by a bus client: if it is a portal dialog's (by
     /// the helper's pid), it belongs to the caller's window.
     pub fn portal_adopt(&mut self, w: &Win, pid: Option<u32>) {
         let Some(parent) = pid.and_then(|p| self.portal.choosers.get(&p)).and_then(|c| c.parent.clone()) else { return };
         self.portal.adopted.insert(w.clone(), parent);
+    }
+}
+
+/// The path an open file descriptor is for, as the kernel knows it.
+fn fd_path(fd: &std::os::fd::OwnedFd) -> Option<PathBuf> {
+    use std::os::fd::AsRawFd;
+    #[cfg(target_os = "linux")]
+    {
+        let p = std::fs::read_link(format!("/proc/self/fd/{}", fd.as_raw_fd())).ok()?;
+        p.is_absolute().then_some(p)
+    }
+    #[cfg(target_os = "freebsd")]
+    {
+        // fcntl(F_KINFO) fills a struct kinfo_file (sys/user.h): its size
+        // first, its path, PATH_MAX bytes, last.
+        const F_KINFO: i32 = 22;
+        const KINFO_FILE_SIZE: usize = 1392;
+        const PATH_MAX: usize = 1024;
+        unsafe extern "C" {
+            fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+        }
+        let mut buf = vec![0u8; KINFO_FILE_SIZE];
+        buf[..4].copy_from_slice(&(KINFO_FILE_SIZE as i32).to_ne_bytes());
+        // SAFETY: a buffer of KINFO_FILE_SIZE bytes, its size in its first field, as F_KINFO asks.
+        if unsafe { fcntl(fd.as_raw_fd(), F_KINFO, buf.as_mut_ptr()) } != 0 {
+            return None;
+        }
+        let raw = &buf[KINFO_FILE_SIZE - PATH_MAX..];
+        let end = raw.iter().position(|&b| b == 0)?;
+        use std::os::unix::ffi::OsStrExt;
+        let p = PathBuf::from(std::ffi::OsStr::from_bytes(&raw[..end]));
+        p.is_absolute().then_some(p)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+    {
+        let _ = fd;
+        None
     }
 }
 
@@ -377,6 +446,19 @@ fn process_name(pid: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_descriptor_gives_its_file_path() {
+        let dir = std::env::temp_dir().join(format!("vergence-fdpath-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a file.txt");
+        std::fs::write(&file, b"hi").unwrap();
+        let f: std::os::fd::OwnedFd = std::fs::File::open(&file).unwrap().into();
+        // The kernel's path may be the real one behind a link (/tmp on some systems).
+        let want = std::fs::canonicalize(&file).unwrap();
+        assert_eq!(fd_path(&f).map(|p| std::fs::canonicalize(p).unwrap()), Some(want));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn options_filters_and_paths_are_read() {

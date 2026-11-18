@@ -87,6 +87,9 @@ pub struct DBus {
     names_tx: Option<channel::Sender<(u32, String)>>,
     /// Settings already read through the portal, to log each one once.
     reads: HashSet<(String, String)>,
+    /// The file descriptors the message being handled carried (closed when
+    /// it has been handled).
+    fds: Vec<std::os::fd::OwnedFd>,
 }
 
 struct Conn {
@@ -103,7 +106,15 @@ struct Conn {
     outbox: Vec<u8>,
     write_source: Option<RegistrationToken>,
     closing: bool,
+    /// It agreed to pass file descriptors (NEGOTIATE_UNIX_FD).
+    unix_fds: bool,
+    /// Descriptors received, not yet taken by a message (in order).
+    fds_in: VecDeque<std::os::fd::OwnedFd>,
 }
+
+/// The most descriptors one connection may have waiting, and one message
+/// may carry: past that it is cut off.
+const MAX_FDS: usize = 16;
 
 pub fn listen(state: &mut Server) {
     let mode = std::env::var("VERGENCE_DBUS").unwrap_or_default();
@@ -249,20 +260,35 @@ impl Server {
                 outbox: Vec::new(),
                 write_source: None,
                 closing: false,
+                unix_fds: false,
+                fds_in: VecDeque::new(),
             },
         );
     }
 
-    fn dbus_readable(&mut self, id: u32, mut stream: &UnixStream) -> bool {
+    fn dbus_readable(&mut self, id: u32, stream: &UnixStream) -> bool {
         let mut buf = [0u8; 16384];
         let mut eof = false;
         loop {
-            match stream.read(&mut buf) {
-                Ok(0) => {
+            match recv_with_fds(stream, &mut buf) {
+                Ok((0, _)) => {
                     eof = true;
                     break;
                 }
-                Ok(n) => self.dbus_bytes(id, &buf[..n]),
+                Ok((n, fds)) => {
+                    if !fds.is_empty()
+                        && let Some(c) = self.dbus.conns.get_mut(&id)
+                    {
+                        // Only after agreeing to them, and never a pile.
+                        if !c.unix_fds || c.fds_in.len() + fds.len() > MAX_FDS {
+                            tracing::warn!("dbus: {} sent file descriptors it may not; disconnecting", c.program);
+                            c.closing = true;
+                            break;
+                        }
+                        c.fds_in.extend(fds);
+                    }
+                    self.dbus_bytes(id, &buf[..n]);
+                }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => break,
                 Err(e) if e.kind() == ErrorKind::Interrupted => continue,
                 Err(_) => {
@@ -290,6 +316,7 @@ impl Server {
                     return;
                 }
                 Step::Done(reply, rest) => {
+                    c.unix_fds = auth.unix_fds();
                     c.auth = None;
                     c.inbuf = rest;
                     self.dbus_send_raw(id, &reply);
@@ -324,7 +351,19 @@ impl Server {
             };
             let bytes: Vec<u8> = c.inbuf.drain(..total).collect();
             match Message::parse(&bytes) {
-                Ok(m) => self.dbus_message(id, m),
+                Ok(m) => {
+                    // Its descriptors, in the order they came.
+                    let want = m.unix_fds as usize;
+                    if want > MAX_FDS || want > c.fds_in.len() {
+                        tracing::warn!("dbus: {} sent a message naming {want} file descriptors it didn't send; disconnecting", c.program);
+                        c.closing = true;
+                        return;
+                    }
+                    self.dbus.fds = c.fds_in.drain(..want).collect();
+                    self.dbus_message(id, m);
+                    // Closed unless something kept them.
+                    self.dbus.fds.clear();
+                }
                 Err(e) => {
                     tracing::warn!("dbus: {} sent a bad message ({e}); disconnecting", c.program);
                     c.closing = true;
@@ -384,6 +423,13 @@ impl Server {
                         }
                     }
                 }
+                // File descriptors go to the edge's own objects only (the
+                // portal); passing them between programs isn't done yet.
+                Some(_) if !self.dbus.fds.is_empty() => {
+                    if m.kind == METHOD_CALL && m.flags & NO_REPLY_EXPECTED == 0 {
+                        self.dbus_reply(id, Message::error(&m, BUS_NAME, "org.freedesktop.DBus.Error.NotSupported", "Vergence's bus doesn't pass file descriptors between programs yet"));
+                    }
+                }
                 Some(to) => self.dbus_deliver(to, &m),
                 None if m.kind == METHOD_CALL && m.flags & NO_REPLY_EXPECTED == 0 => {
                     let text = format!("The name {dest} is not provided by this session (Vergence starts nothing on demand)");
@@ -391,7 +437,7 @@ impl Server {
                 }
                 None => {}
             },
-            None if m.kind == SIGNAL => self.dbus_broadcast(&m),
+            None if m.kind == SIGNAL && self.dbus.fds.is_empty() => self.dbus_broadcast(&m),
             None => {
                 if m.kind == METHOD_CALL && m.flags & NO_REPLY_EXPECTED == 0 {
                     self.dbus_reply(id, Message::error(&m, BUS_NAME, E_UNKNOWN_METHOD, "method calls need a destination"));
@@ -861,7 +907,14 @@ impl Server {
                     Err(e) => err(E_INVALID_ARGS, &e),
                 }
             }
-            (crate::portal::OPEN_URI, "OpenFile" | "OpenDirectory") => err("org.freedesktop.portal.Error.NotAllowed", "files passed by descriptor are not taken by Vergence's bus yet; use OpenURI"),
+            (crate::portal::OPEN_URI, "OpenFile" | "OpenDirectory") => {
+                let unique = self.dbus.conns.get(&id).and_then(|c| c.unique.clone()).unwrap_or_default();
+                let fds = std::mem::take(&mut self.dbus.fds);
+                match self.portal_open_fd(id, &unique, member == "OpenDirectory", &args, &fds) {
+                    Ok(handle) => ok(&[Value::Path(handle)]),
+                    Err(e) => err(E_INVALID_ARGS, &e),
+                }
+            }
             (PORTAL_SETTINGS, "ReadOne") | (PORTAL_SETTINGS, "Read") => match (s(0), s(1)) {
                 (Some(ns), Some(key)) => {
                     self.dbus_log_read(id, &ns, &key);
@@ -1142,3 +1195,41 @@ const INTROSPECTION: &str = r#"<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS 
   <interface name="org.freedesktop.DBus.Introspectable"><method name="Introspect"><arg direction="out" type="s"/></method></interface>
 </node>
 "#;
+
+/// One read from a client, with any file descriptors that came with it
+/// (SCM_RIGHTS; close-on-exec).
+fn recv_with_fds(stream: &UnixStream, buf: &mut [u8]) -> std::io::Result<(usize, Vec<std::os::fd::OwnedFd>)> {
+    use smithay::reexports::rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, recvmsg};
+    let mut space = [std::mem::MaybeUninit::<u8>::uninit(); smithay::reexports::rustix::cmsg_space!(ScmRights(MAX_FDS))];
+    let mut control = RecvAncillaryBuffer::new(&mut space);
+    let mut iov = [std::io::IoSliceMut::new(buf)];
+    let got = recvmsg(stream, &mut iov, &mut control, RecvFlags::CMSG_CLOEXEC).map_err(std::io::Error::from)?;
+    let mut fds = Vec::new();
+    for m in control.drain() {
+        if let RecvAncillaryMessage::ScmRights(more) = m {
+            fds.extend(more);
+        }
+    }
+    Ok((got.bytes, fds))
+}
+
+#[cfg(test)]
+mod fd_tests {
+    use super::*;
+
+    #[test]
+    fn descriptors_come_with_their_bytes() {
+        use smithay::reexports::rustix::net::{SendAncillaryBuffer, SendAncillaryMessage, SendFlags, sendmsg};
+        use std::os::fd::AsFd;
+        let (a, b) = UnixStream::pair().unwrap();
+        let file = std::fs::File::open("/dev/null").unwrap();
+        let mut space = [std::mem::MaybeUninit::<u8>::uninit(); smithay::reexports::rustix::cmsg_space!(ScmRights(1))];
+        let mut control = SendAncillaryBuffer::new(&mut space);
+        let fds = [file.as_fd()];
+        assert!(control.push(SendAncillaryMessage::ScmRights(&fds)));
+        sendmsg(&a, &[std::io::IoSlice::new(b"msg")], &mut control, SendFlags::empty()).unwrap();
+        let mut buf = [0u8; 16];
+        let (n, got) = recv_with_fds(&b, &mut buf).unwrap();
+        assert_eq!((&buf[..n], got.len()), (&b"msg"[..], 1));
+    }
+}
