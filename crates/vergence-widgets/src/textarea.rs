@@ -366,6 +366,9 @@ pub struct Doc {
     marks: Vec<(Pos, Pos)>,
     /// The likely end of the word just typed, shown after the caret.
     ghost: Option<String>,
+    /// Space may take the ghost: what was typed is no word of its own
+    /// (Dave, 2026-11-18: Space takes it, as macOS; "in" must stay "in").
+    ghost_space: bool,
     list: Option<List>,
     /// Words from outside the document ([`Doc::set_words`]).
     words_from: Option<Words>,
@@ -401,6 +404,7 @@ impl Doc {
             words: Vec::new(),
             marks: Vec::new(),
             ghost: None,
+            ghost_space: false,
             list: None,
             words_from: None,
             spelled: Vec::new(),
@@ -525,8 +529,42 @@ impl Doc {
             let rest: String = best.chars().skip(word.chars().count()).collect();
             if !rest.is_empty() {
                 self.ghost = Some(rest);
+                self.ghost_space = !self.known_word(&word);
             }
         }
+    }
+
+    /// Is `word` a word as it is: in the dictionary, or written whole in the
+    /// lines near the caret (other than where it is being typed)? Then Space
+    /// after it is a space, not the suggestion.
+    fn known_word(&self, word: &str) -> bool {
+        if vergence_spell::speller().is_some_and(|sp| sp.check(word)) {
+            return true;
+        }
+        let n = self.buffer.line_count();
+        let here = self.caret.line;
+        let (from, to) = (here.saturating_sub(NEAR_LINES), (here + NEAR_LINES + 1).min(n));
+        let mut seen = 0;
+        for i in from..to {
+            for w in self.buffer.line(i).split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '\'')) {
+                if w.trim_matches('\'').eq_ignore_ascii_case(word) {
+                    seen += 1;
+                }
+            }
+        }
+        // The one being typed counts once.
+        seen > 1
+    }
+
+    /// Takes the ghost, and a space after it (Tab, or Space where the word
+    /// typed is no word of its own).
+    fn take_ghost(&mut self, rest: &str) -> Effect {
+        let c = self.caret;
+        let end = self.edit(c, c, &format!("{rest} "), Kind::Other);
+        self.set_caret(end, false);
+        self.history.break_group();
+        self.reveal();
+        Effect { used: true, text: true, moved: true, ..Effect::default() }
     }
 
     /// Opens (or narrows) the list for the word before the caret.
@@ -882,19 +920,23 @@ impl Doc {
             }
             self.list = None;
         }
-        // Tab takes the suggestion shown.
-        if key == sym::TAB
-            && !m.shift
-            && !(m.ctrl || m.logo || m.alt)
-            && let Some(rest) = ghost
+        // The suggestion shown (Dave, 2026-11-18): Tab takes it, Space takes
+        // it where the word typed is no word of its own, each with a space
+        // after; Escape lets it go, so Space is a plain space.
+        let plain_key = !(m.ctrl || m.logo || m.alt);
+        if let Some(rest) = ghost.as_deref()
             && self.options.editable
+            && plain_key
         {
-            let c = self.caret;
-            let end = self.edit(c, c, &rest, Kind::Other);
-            self.set_caret(end, false);
-            self.history.break_group();
-            self.reveal();
-            return Effect { used: true, text: true, moved: true, ..Effect::default() };
+            if key == sym::TAB && !m.shift {
+                return self.take_ghost(rest);
+            }
+            if key == ' ' as u32 && !m.shift && self.ghost_space {
+                return self.take_ghost(rest);
+            }
+            if key == sym::ESCAPE {
+                return Effect { used: true, ..Effect::default() };
+            }
         }
         // The list on request: Alt+Escape, F5 (as on a Mac), Ctrl+Space.
         let asks = (key == sym::ESCAPE && m.alt) || (key == F5 && !m.ctrl && !m.alt) || (key == ' ' as u32 && m.ctrl && !m.alt);
@@ -2020,6 +2062,10 @@ mod tests {
         d.key(k, None, Modifiers::default())
     }
 
+    fn space(d: &mut Doc) -> Effect {
+        d.key(' ' as u32, Some(" "), Modifiers::default())
+    }
+
     fn typed(d: &mut Doc, s: &str) {
         for c in s.chars() {
             let k = if c == '\n' { sym::RETURN } else { c as u32 };
@@ -2200,10 +2246,10 @@ mod tests {
         typed(&mut d, "rt");
         assert_eq!(d.ghost.as_deref(), Some("ical"));
         key(&mut d, sym::TAB);
-        assert_eq!(d.buffer().line(1), "vertical");
+        assert_eq!(d.buffer().line(1), "vertical ", "a space after it");
         assert!(d.ghost.is_none());
         // Any other key goes on as if nothing were shown.
-        typed(&mut d, " ve");
+        typed(&mut d, "ve");
         key(&mut d, sym::LEFT);
         assert!(d.ghost.is_none());
         assert_eq!(d.buffer().line(1), "vertical ve");
@@ -2214,6 +2260,31 @@ mod tests {
         d.set_selection(Pos::new(1, 11), Pos::new(1, 11));
         typed(&mut d, "r");
         assert!(d.ghost.is_none());
+    }
+
+    #[test]
+    fn space_takes_the_suggestion_unless_the_word_typed_is_one() {
+        // "verg" is no word: Space takes "vergence", a space after it.
+        let mut d = doc("vergence vergence\n");
+        d.set_selection(Pos::new(1, 0), Pos::new(1, 0));
+        typed(&mut d, "verg");
+        assert_eq!(d.ghost.as_deref(), Some("ence"));
+        space(&mut d);
+        assert_eq!(d.buffer().line(1), "vergence ");
+        // "in" is a word (written whole above): Space is a space.
+        let mut d = doc("in inside inside\n");
+        d.set_selection(Pos::new(1, 0), Pos::new(1, 0));
+        typed(&mut d, "in");
+        assert_eq!(d.ghost.as_deref(), Some("side"));
+        space(&mut d);
+        assert_eq!(d.buffer().line(1), "in ");
+        // Escape lets a suggestion go: Space is a plain space.
+        let mut d = doc("vergence vergence\n");
+        d.set_selection(Pos::new(1, 0), Pos::new(1, 0));
+        typed(&mut d, "verg");
+        key(&mut d, sym::ESCAPE);
+        space(&mut d);
+        assert_eq!(d.buffer().line(1), "verg ");
     }
 
     #[test]

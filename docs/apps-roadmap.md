@@ -351,7 +351,7 @@ it is today:
 - *Done 2026-11-18: every right-click menu is the server's on the native road (bus v20 Menu): the terminal's (menu::server_lines), a text area's and a field's (vergence-widgets ui.rs ServerMenu, MENU_ID_BASE; a chosen line comes back as a command and is done as a click on the old menu was); the drawn menus stay for the Wayland road. vergence-ui Frame::native says which road.* **The Text Editor's right-click menu not the same kind as the terminal's**
   (Dave: "Why?"): there were three kinds, the server's (File Viewer), the
   terminal's own, and the toolkit's.
-- **Completion accepted with Space** (as macOS), the space kept; Tab adds
+- *Done 2026-11-18: Tab takes the suggestion and a space; Space takes it too where the word typed is no word of its own (not in the dictionary, not written whole nearby: "in" stays "in"); Escape lets it go (textarea.rs take_ghost, known_word).* **Completion accepted with Space** (as macOS), the space kept; Tab adds
   a space too. A word wanted as typed must stay possible (Escape, or a
   click on the typed word, as macOS).
 
