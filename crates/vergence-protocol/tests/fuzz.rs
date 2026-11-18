@@ -121,6 +121,7 @@ fn output(rng: &mut Rng) -> OutputInfo {
         drawn_by: rng.string(40),
         modes: (0..rng.below(6)).map(|_| vergence_protocol::bus::ModeInfo { width: rng.next() as u32, height: rng.next() as u32, refresh_mhz: rng.next() as u32, preferred: rng.below(2) == 1 }).collect(),
         mode: rng.next() as u32,
+        text_ratio: rng.f64(),
     }
 }
 

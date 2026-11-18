@@ -48,11 +48,12 @@
 //! (backup milestone 1, step 1): `WinRequest::Menu`, a window's own
 //! right-click menu by its lines (`window::MenuLine`), submenus included.
 //! Version 21: `WinEvent::Configure::text`, a screen's text size factor.
+//! Version 22: `OutputInfo::text_ratio`, for the settings app's text slider.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 21;
+pub const VERSION: u32 = 22;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -265,6 +266,10 @@ pub struct OutputInfo {
     /// them), and the one running: an index into `modes`, or `u32::MAX`.
     pub modes: Vec<ModeInfo>,
     pub mode: u32,
+    /// The screen's calculated scale over its base scale (version 22): how
+    /// much smaller than calculated its text would be. Its text factor is
+    /// this to the power of `[displays] text-strength`.
+    pub text_ratio: f64,
 }
 
 /// A monitor's mode: its size in pixels, its refresh in millihertz (59940 is
@@ -710,7 +715,7 @@ impl ServerMsg {
                     for m in &o.modes {
                         e.u32(m.width).u32(m.height).u32(m.refresh_mhz).bool(m.preferred);
                     }
-                    e.u32(o.mode);
+                    e.u32(o.mode).f64(o.text_ratio);
                 }
                 e.str(setup);
                 e
@@ -848,6 +853,7 @@ impl ServerMsg {
                             v
                         },
                         mode: d.u32()?,
+                        text_ratio: d.f64()?,
                     });
                 }
                 let setup = d.str()?;
@@ -929,8 +935,8 @@ mod tests {
 
     fn outputs() -> Vec<OutputInfo> {
         vec![
-            OutputInfo { id: "3f2a9c0e1b7d4a55".into(), name: "eDP-1".into(), description: "14\" 4K".into(), x: 0, y: 0, width: 1170, height: 658, scale: 3.283_333, note: "calculated".into(), default_scale: 3.0, base_scale: 3.0, shown_by: "Intel graphics (i915)".into(), drawn_by: "Intel graphics (i915)".into(), modes: vec![ModeInfo { width: 3840, height: 2160, refresh_mhz: 60000, preferred: true }, ModeInfo { width: 1920, height: 1080, refresh_mhz: 59940, preferred: false }], mode: 0 },
-            OutputInfo { id: "9b1c22d4e5f60718".into(), name: "HDMI-A-1".into(), description: "ASUS VS229".into(), x: 1170, y: 0, width: 1794, height: 1009, scale: 1.075, note: "set by hand".into(), default_scale: 1.0, base_scale: 1.25, shown_by: "NVIDIA graphics (nouveau)".into(), drawn_by: "Intel graphics (i915)".into(), modes: Vec::new(), mode: u32::MAX },
+            OutputInfo { id: "3f2a9c0e1b7d4a55".into(), name: "eDP-1".into(), description: "14\" 4K".into(), x: 0, y: 0, width: 1170, height: 658, scale: 3.283_333, note: "calculated".into(), default_scale: 3.0, base_scale: 3.0, shown_by: "Intel graphics (i915)".into(), drawn_by: "Intel graphics (i915)".into(), modes: vec![ModeInfo { width: 3840, height: 2160, refresh_mhz: 60000, preferred: true }, ModeInfo { width: 1920, height: 1080, refresh_mhz: 59940, preferred: false }], mode: 0, text_ratio: 1.09 },
+            OutputInfo { id: "9b1c22d4e5f60718".into(), name: "HDMI-A-1".into(), description: "ASUS VS229".into(), x: 1170, y: 0, width: 1794, height: 1009, scale: 1.075, note: "set by hand".into(), default_scale: 1.0, base_scale: 1.25, shown_by: "NVIDIA graphics (nouveau)".into(), drawn_by: "Intel graphics (i915)".into(), modes: Vec::new(), mode: u32::MAX, text_ratio: 0.86 },
         ]
     }
 

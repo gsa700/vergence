@@ -545,6 +545,8 @@ enum Message {
     SizeDone,
     /// "Windows the same size on every screen" (settings milestone 2).
     SameSize(bool),
+    TextStrength(f32),
+    TextStrengthDone,
     Scale(f32),
     ScaleDone,
     ScaleDefault,
@@ -667,6 +669,8 @@ struct App {
     scale: f32,
     /// A scale slider on the Screens overview being dragged: which screen, the value.
     scale_drag: Option<(usize, f32)>,
+    /// The text slider being dragged: its value, saved when let go.
+    text_drag: Option<f32>,
     arrange_drag: Option<ArrangeDrag>,
     arrange_click: Option<(usize, Instant)>,
     /// The size the arrangement was last drawn at (its drawing sets it).
@@ -868,6 +872,7 @@ impl App {
             setup: String::new(),
             scale: 1.0,
             scale_drag: None,
+            text_drag: None,
             arrange_drag: None,
             arrange_click: None,
             arrange_size: Rc::new(Cell::new((1.0, 1.0))),
@@ -1305,6 +1310,12 @@ impl App {
                 t.insert("trouble-out".into(), on.into());
             }),
             Message::SameSize(on) => self.save(|d| disp::set_same_size(d, on)),
+            Message::TextStrength(v) => self.text_drag = Some(v.clamp(0.0, 1.0)),
+            Message::TextStrengthDone => {
+                if let Some(v) = self.text_drag.take() {
+                    self.save(|d| disp::set_text_strength(d, v as f64));
+                }
+            }
             Message::Size(v) => self.size = if (v - 1.0).abs() < 0.035 { 1.0 } else { v },
             Message::Repeat(on) => self.save_keyboard(|t| {
                 t.insert("repeat".into(), on.into());
@@ -2681,11 +2692,36 @@ impl App {
                         "Each screen at its exact calculated scale, so a window looks the same size moving between them. Off: the nearest whole scale where it is close, the sharpest; on, apps that draw only at whole scales may look a little soft.",
                         switch(disp::same_size(&self.desktop), Message::SameSize).name("Windows the same size on every screen"),
                     ),
+                    self.text_row(),
                 ]));
                 items.push(self.status_line());
                 items
             },
         )
+    }
+
+    /// "Text on scaled screens" (Dave, 2026-11-18): how much of the text a
+    /// smaller chosen scale takes away is given back, and what each screen
+    /// gets, worked out as the slider moves (the server applies it when let go).
+    fn text_row(&self) -> Element<Message> {
+        let strength = self.text_drag.map_or_else(|| disp::text_strength(&self.desktop), |v| v as f64);
+        let screens: Vec<String> = self
+            .outputs
+            .iter()
+            .map(|o| format!("{} {:.2}\u{d7}", screen_label(o), disp::text_factor(o.text_ratio, strength)))
+            .collect();
+        let note = format!(
+            "A screen run at a smaller scale than its own, for room, shows text smaller too. Off: as small as the scale; full: as large as on any screen. Text now: {}.",
+            if screens.is_empty() { "as given".to_string() } else { screens.join(", ") }
+        );
+        let slider = slider(0.0, 1.0, strength as f32, Message::TextStrength)
+            .step(0.25)
+            .marks(vec![0.0, 0.25, 0.5, 0.75, 1.0])
+            .on_release(Message::TextStrengthDone)
+            .width(Length::Fixed(200.0))
+            .name("Text on scaled screens");
+        let shown = if strength <= 0.0 { "Off".to_string() } else if strength >= 1.0 { "Full".to_string() } else { format!("{:.0}%", strength * 100.0) };
+        setting("Text on scaled screens", &note, row(vec![slider, label(shown).width(Length::Fixed(48.0)).align(Align::End)]).spacing(8.0).align(Align::Center))
     }
 
     fn screen(&self) -> Element<Message> {
@@ -2744,6 +2780,7 @@ impl App {
                     "This screen and any other at its exact calculated scale, so a window looks the same size on each; off, the nearest whole scale where close, the sharpest.",
                     switch(disp::same_size(&self.desktop), Message::SameSize).name("Windows the same size on every screen"),
                 ));
+                rows.push(self.text_row());
             }
             rows.extend(mode_rows);
             // A screen on one GPU drawn by another (GPUs milestone 1) says so up front.

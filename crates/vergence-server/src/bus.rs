@@ -483,6 +483,7 @@ impl Server {
                     drawn_by: self.gpu_words(&o.name(), true),
                     modes: self.backend.as_ref().map(|b| b.modes_of(&o.name()).0).unwrap_or_default(),
                     mode: self.backend.as_ref().map_or(u32::MAX, |b| b.modes_of(&o.name()).1),
+                    text_ratio: self.scale_notes.get(&o.name()).map_or(1.0, |s| s.text_ratio),
                 })
             })
             .collect();

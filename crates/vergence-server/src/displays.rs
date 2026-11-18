@@ -169,12 +169,13 @@ impl DisplaysConfig {
         // ratio down a bit"): a smaller scale chosen for room is also a wish
         // for smaller text, and the distances are guesses. So a part of it,
         // as a power: 0.5 gives the LG 1.13x.
-        let text = match d.note {
-            None => (d.exact / base).powf(self.text_strength()).clamp(MIN_TEXT, MAX_TEXT),
+        let text_ratio = match d.note {
+            None => d.exact / base,
             Some(_) => 1.0,
         };
+        let text = text_factor(text_ratio, self.text_strength());
         let how = if (text - 1.0).abs() >= 0.005 { format!("{how}; text {text:.2}x") } else { how };
-        Scales { shown: crate::scale_in_120ths(base * size), default, base, text, how }
+        Scales { shown: crate::scale_in_120ths(base * size), default, base, text, text_ratio, how }
     }
 
     /// Where `id` sits in `setup`, if the arrangement says.
@@ -189,14 +190,26 @@ use vergence_protocol::window::{MAX_TEXT, MIN_TEXT};
 /// desktop.toml says (DisplaysConfig::text_strength).
 pub const TEXT_STRENGTH: f64 = 0.5;
 
+/// A screen's text factor from its ratio (Scales::text_ratio) and the
+/// strength; the settings app works it out the same way (disp.rs).
+pub fn text_factor(ratio: f64, strength: f64) -> f64 {
+    if !(ratio.is_finite() && ratio > 0.0) {
+        return 1.0;
+    }
+    ratio.powf(strength.clamp(0.0, 1.0)).clamp(MIN_TEXT, MAX_TEXT)
+}
+
 /// A screen's scales (see scale_for).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scales {
     pub shown: f64,
     pub default: f64,
     pub base: f64,
-    /// Text drawn this much larger than its size says (calculated / base).
+    /// Text drawn this much larger than its size says: `text_ratio` to the
+    /// power of the text strength (text_factor).
     pub text: f64,
+    /// The calculated scale over the base (1 when the EDID has no size).
+    pub text_ratio: f64,
     pub how: String,
 }
 
