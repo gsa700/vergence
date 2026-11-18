@@ -149,19 +149,72 @@ pub fn sized_key(base: &str, sizes: &[(String, u32, u32)]) -> String {
 /// A key's monitors' key and its monitors' sizes (none for a key from before
 /// sizes were kept, or one that cannot be read).
 pub fn key_sizes(key: &str) -> (&str, Vec<(String, u32, u32)>) {
+    let (base, monitors) = key_monitors(key);
+    (base, monitors.into_iter().map(|m| (m.id, m.width, m.height)).collect())
+}
+
+/// A monitor in a sized key: its id, its size in points, and its scale in
+/// 120ths when the key says (keys since 2026-11-18: "id=WxH@S").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyMonitor {
+    pub id: String,
+    pub width: u32,
+    pub height: u32,
+    pub scale120: Option<u32>,
+}
+
+impl KeyMonitor {
+    /// Its size in pixels, when the key gives its scale.
+    pub fn pixels(&self) -> Option<(u32, u32)> {
+        let s = self.scale120?;
+        Some(((self.width as u64 * s as u64 / 120) as u32, (self.height as u64 * s as u64 / 120) as u32))
+    }
+}
+
+/// A key's monitors' key and its monitors, with their scales where known.
+pub fn key_monitors(key: &str) -> (&str, Vec<KeyMonitor>) {
     let Some((base, rest)) = key.split_once('|') else { return (key, Vec::new()) };
-    let sizes = rest
+    let monitors = rest
         .split(',')
         .filter_map(|m| {
-            let (id, wh) = m.split_once('=')?;
+            let (id, rest) = m.split_once('=')?;
+            let (wh, scale120) = match rest.split_once('@') {
+                Some((wh, s)) => (wh, Some(s.parse().ok()?)),
+                None => (rest, None),
+            };
             let (w, h) = wh.split_once('x')?;
-            Some((id.to_string(), w.parse().ok()?, h.parse().ok()?))
+            Some(KeyMonitor { id: id.to_string(), width: w.parse().ok()?, height: h.parse().ok()?, scale120 })
         })
         .collect();
-    (base, sizes)
+    (base, monitors)
+}
+
+/// A sized key with each monitor's scale too (in 120ths): a place recorded
+/// at another scale of the same mode keeps its size in points (Dave,
+/// 2026-11-18), one at another resolution scales in proportion.
+pub fn sized_key_scaled(base: &str, monitors: &[(String, u32, u32, u32)]) -> String {
+    let mut v: Vec<String> = monitors.iter().map(|(id, w, h, s)| format!("{id}={w}x{h}@{s}")).collect();
+    v.sort();
+    format!("{base}|{}", v.join(","))
 }
 
 impl WindowSetting {
+    /// This place on its monitor after a scale change (same pixels, `to`
+    /// points now): the same size and place in points, pulled inside the
+    /// monitor where it no longer fits (Dave, 2026-11-18: "keep point size on
+    /// scale changes").
+    pub fn kept(&self, to: (u32, u32)) -> WindowSetting {
+        let width = self.width.min(to.0.max(1));
+        let height = self.height.min(to.1.max(1));
+        WindowSetting {
+            x: self.x.min(to.0 as i32 - width as i32).max(0),
+            y: self.y.min(to.1 as i32 - height as i32).max(0),
+            width,
+            height,
+            ..self.clone()
+        }
+    }
+
     /// This place on its monitor at size `from`, in proportion on the same
     /// monitor at size `to` (points): a window a third of the way across
     /// stays a third of the way across, and as large a part of the monitor.
@@ -323,6 +376,19 @@ mod tests {
         assert_eq!((base, sizes.len()), ("abc", 2));
         assert!(sizes.contains(&("m2".into(), 1280, 720)));
         assert_eq!(key_sizes("abc"), ("abc", vec![]), "a key from before sizes: no sizes");
+        // Keys with scales (2026-11-18), and the older ones without.
+        let k = sized_key_scaled("abc", &[("m1".into(), 1920, 1080, 120), ("m2".into(), 1280, 720, 240)]);
+        assert_eq!(k, "abc|m1=1920x1080@120,m2=1280x720@240");
+        let (_, m) = key_monitors(&k);
+        assert_eq!(m[1].pixels(), Some((2560, 1440)));
+        assert_eq!(key_sizes(&k).1[1], ("m2".to_string(), 1280, 720));
+        assert_eq!(key_monitors("abc|m1=1920x1080").1[0].scale120, None);
+        // A scale change keeps points, pulled inside a smaller monitor.
+        let w2 = WindowSetting { id: WindowId::default(), monitor: "m1".into(), x: 1500, y: 100, width: 420, height: 260, ..WindowSetting::default() };
+        let k2 = w2.kept((1280, 720));
+        assert_eq!((k2.x, k2.y, k2.width, k2.height), (860, 100, 420, 260));
+        let huge = WindowSetting { width: 3000, height: 2000, ..w2.clone() }.kept((1280, 720));
+        assert_eq!((huge.x, huge.y, huge.width, huge.height), (0, 0, 1280, 720));
         let w = WindowSetting { id: WindowId::default(), monitor: "m1".into(), x: 640, y: 360, width: 960, height: 540, ..WindowSetting::default() };
         let s = w.scaled((1920, 1080), (1280, 720));
         assert_eq!((s.x, s.y, s.width, s.height), (427, 240, 640, 360));

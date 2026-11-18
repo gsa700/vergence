@@ -7,11 +7,14 @@
 // - A setup is the set of connected monitors' EDIDs (vergence_profile's
 //   profile_key); a monitor is named by its EDID (monitor_id), not its port.
 //   Places are kept per size of the setup: its key and each monitor's size in
-//   points (windows::sized_key), so the same monitors at another resolution
-//   or scale keep places of their own, and going back finds the old ones
-//   (Dave, 2026-11-12). A size seen for the first time starts from the most
-//   recent other size of the same monitors, each place scaled in proportion
-//   to its monitor; a move there is kept for that size only.
+//   points and scale (windows::sized_key_scaled), so the same monitors at
+//   another resolution or scale keep places of their own, and going back
+//   finds the old ones (Dave, 2026-11-12). A size seen for the first time
+//   starts from the most recent other size of the same monitors: at another
+//   resolution each place scaled in proportion to its monitor; at another
+//   scale of the same mode each keeps its size and place in points, pulled
+//   inside the monitor (Dave, 2026-11-18). A move there is kept for that
+//   size only.
 // - A window is its app's class (X11 WM_CLASS instance/class, Wayland app_id)
 //   and its place among open windows of that class. No titles (Dave, 2026-11-06).
 //   A native window is its persistence token instead (bar milestone 1, step 5;
@@ -260,13 +263,18 @@ impl Server {
         let (s, fallback) = match self.memory.store.get(&key).and_then(|p| find(p)) {
             Some(found) => found,
             None => {
-                let now = vergence_profile::windows::key_sizes(&key).1;
-                let size_in = |sizes: &[(String, u32, u32)], m: &str| sizes.iter().find(|(id, ..)| id == m).map(|(_, w, h)| (*w, *h));
+                use vergence_profile::windows::{KeyMonitor, key_monitors};
+                let now = key_monitors(&key).1;
+                let monitor = |ms: &[KeyMonitor], m: &str| ms.iter().find(|k| k.id == m).cloned();
                 self.memory.store.variants(&self.memory.setup, &key).into_iter().find_map(|p| {
                     let (s, fallback) = find(p)?;
-                    let then = vergence_profile::windows::key_sizes(&p.key).1;
-                    let s = match (size_in(&then, &s.monitor), size_in(&now, &s.monitor)) {
-                        (Some(from), Some(to)) => s.scaled(from, to),
+                    let then = key_monitors(&p.key).1;
+                    let s = match (monitor(&then, &s.monitor), monitor(&now, &s.monitor)) {
+                        // The same pixels at another scale: points kept (Dave,
+                        // 2026-11-18); another resolution: in proportion.
+                        // (Pixels from points and scale may be a few off at a scale off the grid.)
+                        (Some(from), Some(to)) if from.pixels().zip(to.pixels()).is_some_and(|(a, b)| a.0.abs_diff(b.0) <= 4 && a.1.abs_diff(b.1) <= 4) => s.kept((to.width, to.height)),
+                        (Some(from), Some(to)) => s.scaled((from.width, from.height), (to.width, to.height)),
                         _ => s,
                     };
                     Some((s, fallback))
@@ -363,13 +371,15 @@ impl Server {
         if self.memory.setup.is_empty() {
             return String::new();
         }
-        let sizes: Vec<(String, u32, u32)> = self
+        // Each monitor's size in points and its scale in 120ths (a scale
+        // change keeps places' points, a resolution change scales them).
+        let sizes: Vec<(String, u32, u32, u32)> = self
             .space
             .outputs()
-            .filter_map(|o| Some((monitor_id_of(o)?, self.space.output_geometry(o)?.size)))
-            .map(|(id, s)| (id, s.w.max(0) as u32, s.h.max(0) as u32))
+            .filter_map(|o| Some((monitor_id_of(o)?, self.space.output_geometry(o)?.size, o.current_scale().fractional_scale())))
+            .map(|(id, s, scale)| (id, s.w.max(0) as u32, s.h.max(0) as u32, (scale * 120.0).round() as u32))
             .collect();
-        vergence_profile::windows::sized_key(&self.memory.setup, &sizes)
+        vergence_profile::windows::sized_key_scaled(&self.memory.setup, &sizes)
     }
 
     /// The setup changed (or became known): its key from the monitors' EDIDs.
