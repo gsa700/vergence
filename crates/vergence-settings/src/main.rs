@@ -1923,7 +1923,7 @@ impl App {
                     setting("Size of controls", "Window bars, tabs and buttons. A screen with a touch panel uses Large unless its own setting says otherwise (Screens).", choice(controls_names, Some(controls), Message::Controls).width(Length::Fixed(160.0)).name("Size of controls")),
                     setting(
                         "Tint windows with the wallpaper's color",
-                        "In dark style, a window takes some of the color of the wallpaper behind it: 0 (off) to 10%; 8% unless set. Off with Reduce transparency and High contrast.",
+                        "In dark style, a window takes some of the color of the wallpaper behind it: 0 (off) to 10%; 3% unless set. Off with Reduce transparency and High contrast.",
                         row(vec![
                             slider(0.0, 10.0, self.tint_pct, Message::TintSlide).step(0.5).on_release(Message::TintDone).width(Length::Fixed(160.0)).name("Tint windows with the wallpaper's color"),
                             label(if self.tint_pct <= 0.0 { "Off".to_string() } else if self.tint_pct.fract() == 0.0 { format!("{:.0}%", self.tint_pct) } else { format!("{:.1}%", self.tint_pct) }).width(Length::Fixed(44.0)).align(Align::End),

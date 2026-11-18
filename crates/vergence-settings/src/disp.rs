@@ -26,7 +26,7 @@ pub fn size(desktop: &Table) -> f64 {
 /// How much of the text a smaller chosen scale takes away is given back
 /// (`[displays] text-strength`, 0 none .. 1 all): the server's default when
 /// unset (its displays.rs TEXT_STRENGTH).
-pub const TEXT_STRENGTH: f64 = 0.5;
+pub const TEXT_STRENGTH: f64 = 0.25;
 
 pub fn text_strength(desktop: &Table) -> f64 {
     desktop

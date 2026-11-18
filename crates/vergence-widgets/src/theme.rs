@@ -128,7 +128,7 @@ impl Theme {
 
     /// The theme with a little of `tint` (the wallpaper's color behind the
     /// window) in its grounds: the page, the sidebar and the cards, by the
-    /// desktop's amount (8% unless it says otherwise). Text keeps its colors.
+    /// desktop's amount (3% unless it says otherwise). Text keeps its colors.
     pub fn tinted(&self, tint: Color) -> Theme {
         let k = self.tint_mix.clamp(0.0, 0.3);
         let mix = |c: Color| {
@@ -139,9 +139,9 @@ impl Theme {
     }
 }
 
-/// How much of the wallpaper's color a tinted window's grounds take: the
-/// Standard amount.
-pub const TINT_MIX: f32 = 0.08;
+/// How much of the wallpaper's color a tinted window's grounds take unless
+/// the desktop says (Dave, 2026-11-18: 3%; it was 8%, now "standard").
+pub const TINT_MIX: f32 = 0.03;
 
 /// The tint's amount (Dave, 2026-11-15: "needs settings to tone it down",
 /// then a slider): a percentage 0 to 10 in halves (Settings' slider), or a name
@@ -149,6 +149,7 @@ pub const TINT_MIX: f32 = 0.08;
 pub fn tint_amount(value: Option<&str>) -> f32 {
     match value {
         Some("subtle") => 0.04,
+        Some("standard") => 0.08,
         Some("strong") => 0.14,
         Some(v) => v.trim().parse::<f32>().map_or(TINT_MIX, |p| (p / 100.0).clamp(0.0, 0.2)),
         None => TINT_MIX,
@@ -188,6 +189,7 @@ mod tests {
         let t = |text: &str| Theme::from_desktop(text, true, "[x]").tint_mix;
         assert_eq!(t(""), TINT_MIX);
         assert_eq!(t("[appearance]\ntint-amount = \"subtle\"\n"), 0.04);
+        assert_eq!(t("[appearance]\ntint-amount = \"standard\"\n"), 0.08);
         assert_eq!(t("[appearance]\ntint-amount = \"strong\"\n"), 0.14);
         assert_eq!(t("[appearance]\ntint-amount = 5\n"), 0.05);
         assert_eq!(t("[appearance]\ntint-amount = 90\n"), 0.2, "at most 20%");
