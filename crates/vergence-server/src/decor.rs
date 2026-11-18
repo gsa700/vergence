@@ -263,6 +263,16 @@ fn native_texture(renderer: &mut GlesRenderer, w: &Win) -> Option<(smithay::back
     Some((g.texture.clone()?, g.gles.clone()?, p.px, p.logical))
 }
 
+/// The part of a picture drawn into `points` at `scale`: its pixels one for
+/// one, as many as the points cover (rounded), never more than it has. A
+/// toolkit rounds its pixels up, so a picture at a fractional scale has up to
+/// one pixel more than its points cover: cropped, not squeezed, so the body
+/// and its bar end on the same pixel and the text stays sharp.
+fn shown_px(px: (i32, i32), points: smithay::utils::Size<i32, Logical>, scale: f64) -> Rectangle<f64, Logical> {
+    let cover = points.to_f64().to_physical(scale).to_i32_round::<i32>();
+    Rectangle::from_size((px.0.min(cover.w).max(1) as f64, px.1.min(cover.h).max(1) as f64).into())
+}
+
 /// The serial of a native window's GPU picture (GpuPicture::serial), 0 for
 /// any other.
 fn native_serial(w: &Win) -> u64 {
@@ -934,7 +944,7 @@ impl Server {
                     // All of the picture's pixels (drawn for this scale) into the bar's points:
                     // drawn 1:1 (left out, it was taken as points and shown magnified at
                     // scale 2: kepler, 2026-11-12).
-                    let whole = Rectangle::<f64, Logical>::from_size((picture.px.0 as f64, picture.px.1 as f64).into());
+                    let whole = shown_px((picture.px.0, picture.px.1), f.title.size, scale);
                     match MemoryRenderBufferRenderElement::from_buffer(renderer, at.to_f64(), &picture.buffer, None, Some(whole), Some(f.title.size), Kind::Unspecified) {
                         Ok(e) => elements.push(SceneElement::Memory(e)),
                         Err(e) => tracing::warn!("title bar: {e:?}"),
@@ -969,7 +979,9 @@ impl Server {
                         use smithay::backend::renderer::gles::{Uniform, UniformValue};
                         let per_point = px.w as f64 / logical.w.max(1) as f64;
                         let rows = (f.title.size.h as f64 * per_point).round().min(px.h as f64);
-                        let strip = Rectangle::<f64, smithay::utils::Buffer>::from_size((px.w as f64, rows).into());
+                        // As wide as the bar covers, one pixel for one (shown_px).
+                        let cols = shown_px((px.w, px.h), *logical, scale).size.w;
+                        let strip = Rectangle::<f64, smithay::utils::Buffer>::from_size((cols, rows).into());
                         let dst = Rectangle::<i32, Physical>::new(at, f.title.size.to_f64().to_physical(scale).to_i32_round());
                         // The frost's tint: the bar's ground, the alarm's while a superuser's tab
                         // is in front or the window's program is the superuser's.
@@ -1012,7 +1024,7 @@ impl Server {
                     // A window that draws under its bar starts that much higher.
                     let top = Point::<i32, Logical>::from((loc.x, loc.y - n.inset()));
                     let at = (top - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-                    let whole = Rectangle::<f64, Logical>::from_size((p.px.w as f64, p.px.h as f64).into());
+                    let whole = shown_px((p.px.w, p.px.h), p.logical, scale);
                     match &p.content {
                         crate::native::Content::Memory(buffer) => {
                             match MemoryRenderBufferRenderElement::from_buffer(renderer, at.to_f64(), buffer, None, Some(whole), Some(p.logical), Kind::Unspecified) {
@@ -1026,15 +1038,15 @@ impl Server {
                                 match round.as_ref().filter(|_| !self.restore.contains_key(&w) && self.frame_of(&w).is_some()) {
                                     Some(program) => {
                                         use smithay::backend::renderer::gles::{Uniform, UniformValue};
-                                        let per_point = p.px.w as f32 / p.logical.w.max(1) as f32;
+                                        let per_point = whole.size.w as f32 / p.logical.w.max(1) as f32;
                                         let uniforms = vec![
-                                            Uniform::new("size", UniformValue::_2f(p.px.w as f32, p.px.h as f32)),
+                                            Uniform::new("size", UniformValue::_2f(whole.size.w as f32, whole.size.h as f32)),
                                             Uniform::new("radius", UniformValue::_1f(vergence_look::RADIUS * per_point)),
                                             // Drawn under its bar: its own top corners are there too.
                                             Uniform::new("top", UniformValue::_1f(if n.inset() > 0 { 1.0 } else { 0.0 })),
                                         ];
                                         let dst = Rectangle::<i32, Physical>::new(at, p.logical.to_f64().to_physical(scale).to_i32_round());
-                                        let src = Rectangle::<f64, smithay::utils::Buffer>::from_size((p.px.w as f64, p.px.h as f64).into());
+                                        let src = Rectangle::<f64, smithay::utils::Buffer>::from_size((whole.size.w, whole.size.h).into());
                                         let slot = &mut self.decor.entry(w.clone()).or_insert_with(Decor::new).round;
                                         elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(slot, dst, src, gles, native_serial(&w), program.clone(), uniforms)));
                                     }

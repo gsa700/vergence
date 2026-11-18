@@ -196,6 +196,27 @@ pub struct GpuPicture {
     pub serial: u64,
 }
 
+/// A picture's side in points from its side in pixels: the inverse of the
+/// toolkit's pixel_size, which rounds up (580 points at 4/3 are 773.33
+/// pixels, drawn as 774). Rounding to the nearest instead gave 581, a body
+/// two pixels wider than the bar drawn for the 580 the window was given
+/// (techbench at 133⅓%, 2026-11-18): the largest number of points whose
+/// pixels, rounded up, are still `px`.
+pub fn points_of(px: i32, scale: f64) -> i32 {
+    if !(scale.is_finite() && scale > 0.0) || px <= 0 {
+        return px.max(0);
+    }
+    let up = |p: i32| (p as f64 * scale - 1e-6).ceil() as i32;
+    let mut p = (px as f64 / scale).floor() as i32;
+    while p > 0 && up(p) > px {
+        p -= 1;
+    }
+    while up(p + 1) <= px {
+        p += 1;
+    }
+    p
+}
+
 /// The last GPU picture's serial (GpuPicture::serial).
 static PICTURES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -744,7 +765,7 @@ impl Server {
             .render()
             .draw(|mem| copy_damage(&file, mem, w, h, stride, damage))
             .map_err(|e| format!("reading the picture: {e}"))?;
-        p.logical = ((w as f64 / scale).round() as i32, (h as f64 / scale).round() as i32).into();
+        p.logical = (points_of(w, scale), points_of(h, scale)).into();
         Ok(())
     }
 
@@ -761,7 +782,7 @@ impl Server {
         let dmabuf = b.build().ok_or("a GPU picture with no planes")?;
         let px: Size<i32, BufferCoords> = (width as i32, height as i32).into();
         let mut s = n.state.lock().unwrap();
-        let logical = ((width as f64 / s.scale).round() as i32, (height as f64 / s.scale).round() as i32).into();
+        let logical = (points_of(width as i32, s.scale), points_of(height as i32, s.scale)).into();
         let serial = PICTURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let gpu = GpuPicture { dmabuf, texture: None, gles: None, failed: false, serial };
         s.picture = Some(Picture { content: Content::Gpu(Arc::new(Mutex::new(gpu))), px, logical, format });
@@ -1130,6 +1151,23 @@ fn clipboard_allowed(keyboard: Option<u32>, client: u32) -> bool {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// What the toolkit draws for `points` at `scale` (vergence-render
+    /// pixel_size rounds up) comes back as the same points, at every scale
+    /// the slider stops at and others.
+    #[test]
+    fn pixels_rounded_up_come_back_as_the_points_given() {
+        assert_eq!(points_of(774, 4.0 / 3.0), 580, "techbench's Terminal Settings, 2026-11-18");
+        for scale in [0.75, 1.0, 1.25, 4.0 / 3.0, 1.4417, 1.5, 5.0 / 3.0, 2.0, 2.5, 3.0] {
+            for points in [1, 160, 320, 579, 580, 581, 760, 1172, 2880] {
+                let px = (points as f32 * scale as f32).ceil() as i32;
+                let back = points_of(px, scale);
+                assert!(back == points || (scale < 1.0 && (back as f64 * scale).ceil() as i32 == px), "{points} pt at {scale}: {px} px gave {back}");
+            }
+        }
+        assert_eq!(points_of(0, 1.5), 0);
+        assert_eq!(points_of(100, 0.0), 100);
+    }
 
     fn file_with(bytes: &[u8]) -> std::fs::File {
         let path = std::env::temp_dir().join(format!("vergence-native-test-{}-{}", std::process::id(), bytes.len()));
