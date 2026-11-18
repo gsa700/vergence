@@ -301,7 +301,7 @@ it is today:
   NotAllowed (files milestone 1), which may be what Firefox doesn't survive.
   Reproduce, read Firefox's crash report, then answer it properly (show the
   folder in File Viewer).
-- **Bug: the Text Editor scrolls when the text doesn't fill the window.**
+- *Done 2026-11-17 (6db311d): the range is the text's height less the view's; the last line stops at the bottom.* **Bug: the Text Editor scrolls when the text doesn't fill the window.**
   A few lines still give a scroll range; probably the area counts a page of
   room past the last line, or the under-bar inset, as content. Scrolling
   should start only when the text is taller than the view.
