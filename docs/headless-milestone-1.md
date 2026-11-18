@@ -28,11 +28,28 @@ pulled out by a script, so that:
 - `vergence-harness fake` makes EDIDs (name, product, serial, mode, mm).
 - `vctl scale` (layer 2) sets scales at runtime, never saved.
 
+**Accepted 2026-11-18** (Dave): "1 both" (screens in memory beside real
+ones in a session, and `--headless` with none); "2 yes unless it becomes
+too long then on demand and or at milestones" (the suite before every push
+of display code, on the three machines, while it stays a few minutes);
+"3 fakes should work" (EDIDs from vergence-harness fake, with the lab's
+real sizes; no dumps of real monitors in the repo). Also: the 14" 4K touch
+monitor goes on kepler beside the ASUS (two screens, about 3x and 1x), and
+**canary**, the FreeBSD VM, comes back up for what we want to try there.
+
+**canary changes one design point:** it has no GPU, so no render node and
+no GBM. Screens in memory therefore draw into the renderer's own offscreen
+textures (Smithay's `Offscreen<GlesTexture>`, read back with the same code
+as `vctl shot`), not GBM buffers, and `--headless` makes its EGL display
+on Mesa's surfaceless platform when there is no render node (llvmpipe).
+The same suite then runs on a GPU and on software, the case of a machine
+with none (whitepaper: a CPU path for GPU-less machines).
+
 ## Design
 
 **A screen in memory is a Surface with no connector.** `Surface` gets a
 kind: `Drm { drm_output, handle }` as now, or `Virtual { buffers, clock }`:
-two GBM buffers on the primary GPU (linear, so a shot is a plain read), a
+two offscreen textures of the renderer (see canary above), a
 timer at the screen's refresh standing in for vblank, sending frame
 callbacks exactly as a monitor does. Everything above the Surface (scale,
 arrangement, window memory, the dock, notifications, `vctl windows`,
@@ -84,13 +101,14 @@ scenarios, each from a bug or a rule we already have:
    connector handle, modes from the connector) behind the kind; the frame
    loop asks the kind how to present. No change to anything a monitor does;
    the tests on all three machines and a session on each show it.
-2. **Virtual screens in a session**: `vctl screen add/remove`, GBM buffers,
+2. **Virtual screens in a session**: `vctl screen add/remove`, offscreen textures,
    the frame clock, `vctl shot` from them; never saved. Check: a 2560x1440
    fake beside Hubble's panel, a window dragged onto it, shot.
 3. **`--headless`**: the render-node backend with no seat or input, its own
-   sockets; `tools/vergence-session --headless`. Check: started over SSH
-   on all three machines while a session runs on the monitors, `vctl
-   windows` and a shot.
+   sockets, surfaceless EGL (llvmpipe) when there is no render node;
+   `tools/vergence-session --headless`. Check: started over SSH on all
+   three machines while a session runs on the monitors, and on canary,
+   `vctl windows` and a shot.
 4. **The CPU picture**: `vctl shot --cpu` draws the same frame with the
    reference renderer; a check compares the two within the GPU tests'
    tolerance.
@@ -113,4 +131,4 @@ scenarios, each from a bug or a rule we already have:
 
 ## Progress
 
-- Not started.
+- Plan accepted 2026-11-18; step 1 next.
