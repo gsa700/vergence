@@ -268,9 +268,17 @@ fn native_texture(renderer: &mut GlesRenderer, w: &Win) -> Option<(smithay::back
 /// toolkit rounds its pixels up, so a picture at a fractional scale has up to
 /// one pixel more than its points cover: cropped, not squeezed, so the body
 /// and its bar end on the same pixel and the text stays sharp.
-fn shown_px(px: (i32, i32), points: smithay::utils::Size<i32, Logical>, scale: f64) -> Rectangle<f64, Logical> {
-    let cover = points.to_f64().to_physical(scale).to_i32_round::<i32>();
+fn shown_px(px: (i32, i32), cover: smithay::utils::Size<i32, Physical>) -> Rectangle<f64, Logical> {
     Rectangle::from_size((px.0.min(cover.w).max(1) as f64, px.1.min(cover.h).max(1) as f64).into())
+}
+
+/// The pixels a rectangle of points covers at `scale`, each edge rounded on
+/// its own, as Smithay places its elements: two rectangles that meet in
+/// points meet on the same pixel, wherever they are.
+fn edges_px(at: Point<i32, Logical>, size: smithay::utils::Size<i32, Logical>, scale: f64) -> Rectangle<i32, Physical> {
+    let a = at.to_f64().to_physical(scale);
+    let b = (at + size.to_point()).to_f64().to_physical(scale);
+    Rectangle::from_extremities(a.to_i32_round(), b.to_i32_round())
 }
 
 /// The serial of a native window's GPU picture (GpuPicture::serial), 0 for
@@ -940,12 +948,17 @@ impl Server {
                             Err(e) => tracing::warn!("title bar: {e}"),
                         }
                     }
-                    let at = (f.title.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+                    // Where the bar is, not rounded: Smithay rounds both its edges
+                    // (edges_px), so it meets the body below on the same pixel
+                    // wherever the window is (techbench at 133⅓%: a gap that came
+                    // and went while the window moved, 2026-11-18).
+                    let at_f = (f.title.loc - out.loc).to_f64().to_physical(scale);
+                    let bar_px = edges_px(f.title.loc - out.loc, f.title.size, scale);
                     // All of the picture's pixels (drawn for this scale) into the bar's points:
                     // drawn 1:1 (left out, it was taken as points and shown magnified at
                     // scale 2: kepler, 2026-11-12).
-                    let whole = shown_px((picture.px.0, picture.px.1), f.title.size, scale);
-                    match MemoryRenderBufferRenderElement::from_buffer(renderer, at.to_f64(), &picture.buffer, None, Some(whole), Some(f.title.size), Kind::Unspecified) {
+                    let whole = shown_px((picture.px.0, picture.px.1), bar_px.size);
+                    match MemoryRenderBufferRenderElement::from_buffer(renderer, at_f, &picture.buffer, None, Some(whole), Some(f.title.size), Kind::Unspecified) {
                         Ok(e) => elements.push(SceneElement::Memory(e)),
                         Err(e) => tracing::warn!("title bar: {e:?}"),
                     }
@@ -969,8 +982,7 @@ impl Server {
                             corner: 0.0,
                             bottom: false,
                         };
-                        let px = (f.title.size.to_f64().to_physical(scale)).to_i32_round::<i32>();
-                        let dst = Rectangle::<i32, Physical>::new(at, px);
+                        let dst = bar_px;
                         if let Some(e) = crate::backdrop::element(renderer, &mut d.backdrop, dst, program, &look) {
                             elements.push(SceneElement::Backdrop(e));
                         }
@@ -980,9 +992,9 @@ impl Server {
                         let per_point = px.w as f64 / logical.w.max(1) as f64;
                         let rows = (f.title.size.h as f64 * per_point).round().min(px.h as f64);
                         // As wide as the bar covers, one pixel for one (shown_px).
-                        let cols = shown_px((px.w, px.h), *logical, scale).size.w;
+                        let cols = shown_px((px.w, px.h), bar_px.size).size.w;
                         let strip = Rectangle::<f64, smithay::utils::Buffer>::from_size((cols, rows).into());
-                        let dst = Rectangle::<i32, Physical>::new(at, f.title.size.to_f64().to_physical(scale).to_i32_round());
+                        let dst = bar_px;
                         // The frost's tint: the bar's ground, the alarm's while a superuser's tab
                         // is in front or the window's program is the superuser's.
                         let front_alert = root || alerts.get(shown).copied().unwrap_or(false);
@@ -1023,11 +1035,12 @@ impl Server {
                 if let Some(p) = n.picture() {
                     // A window that draws under its bar starts that much higher.
                     let top = Point::<i32, Logical>::from((loc.x, loc.y - n.inset()));
-                    let at = (top - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-                    let whole = shown_px((p.px.w, p.px.h), p.logical, scale);
+                    let at_f = (top - out.loc).to_f64().to_physical(scale);
+                    let body_px = edges_px(top - out.loc, p.logical, scale);
+                    let whole = shown_px((p.px.w, p.px.h), body_px.size);
                     match &p.content {
                         crate::native::Content::Memory(buffer) => {
-                            match MemoryRenderBufferRenderElement::from_buffer(renderer, at.to_f64(), buffer, None, Some(whole), Some(p.logical), Kind::Unspecified) {
+                            match MemoryRenderBufferRenderElement::from_buffer(renderer, at_f, buffer, None, Some(whole), Some(p.logical), Kind::Unspecified) {
                                 Ok(e) => elements.push(SceneElement::Memory(e)),
                                 Err(e) => tracing::warn!("native window picture: {e:?}"),
                             }
@@ -1045,13 +1058,13 @@ impl Server {
                                             // Drawn under its bar: its own top corners are there too.
                                             Uniform::new("top", UniformValue::_1f(if n.inset() > 0 { 1.0 } else { 0.0 })),
                                         ];
-                                        let dst = Rectangle::<i32, Physical>::new(at, p.logical.to_f64().to_physical(scale).to_i32_round());
+                                        let dst = body_px;
                                         let src = Rectangle::<f64, smithay::utils::Buffer>::from_size((whole.size.w, whole.size.h).into());
                                         let slot = &mut self.decor.entry(w.clone()).or_insert_with(Decor::new).round;
                                         elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(slot, dst, src, gles, native_serial(&w), program.clone(), uniforms)));
                                     }
                                     None => {
-                                        let e = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at.to_f64(), &t, None, Some(whole), Some(p.logical), Kind::Unspecified);
+                                        let e = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at_f, &t, None, Some(whole), Some(p.logical), Kind::Unspecified);
                                         elements.push(SceneElement::Texture(e));
                                     }
                                 }
