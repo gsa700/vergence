@@ -137,3 +137,16 @@ scenarios, each from a bug or a rule we already have:
   the DRM output goes through `Surface::drm`, `handle`, `frame_submitted`,
   `reset_buffers`. Tests: Hubble 708, kepler 701, techbench 701; Hubble's
   session on it ran the display check, 40 of 40 shots pass.
+- **Step 2 done** (2026-11-18): `Present::Memory` (drm.rs `MemoryScreen`: an
+  offscreen GlesTexture, Smithay's damage tracker from the output, a timer
+  at the refresh for the VBlank; key `(MEMORY, n)`, names MEM-<n>);
+  `add_memory_screen`/`remove_memory_screen`; `vctl screen add --fake WxH
+  MMxMM [--hz R] [--name ONEWORD]` (EDID from vergence_edid::fake, moved
+  there from the harness; the same spec gives the same identity), `--edid
+  FILE WxH`, `vctl screen remove MEM-n`, `vctl screen`. A setup with a
+  screen in memory is a test's: memory.rs never writes its places and
+  forgets them before the next real save. `vergence-harness seams` counts
+  edge lines only on the grid (off it they cannot be whole pixels).
+  Hubble: a 27" QHD in memory beside the panel, display check at 1, 1.25,
+  4/3, 1.5, 2 and 173/120: 48 shots, all pass; server-windows.toml untouched.
+  Tests: Hubble 709, kepler 702, techbench 702.

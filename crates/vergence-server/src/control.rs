@@ -344,6 +344,69 @@ impl Server {
                     Err(e) => format!("spawn: {e}"),
                 }
             }
+            // Screens in memory beside the monitors (headless milestone 1):
+            // `screen add --fake 2560x1440 597x336 [--hz 60] [--name TEXT]`,
+            // `screen add --edid FILE 3840x2160 [--hz 60]`, `screen remove MEM-1`,
+            // `screen` (each screen; the ones in memory marked).
+            "screen" => {
+                if self.backend.is_none() {
+                    return "screen: only with --drm".into();
+                }
+                let usage = "screen [add --fake WxH MMxMM [--hz R] [--name TEXT] | add --edid FILE WxH [--hz R] | remove NAME]";
+                let flag = |k: &str| args.iter().position(|a| *a == k).and_then(|i| args.get(i + 1)).copied();
+                let pair = |v: &str| -> Option<(u32, u32)> {
+                    let (a, b) = v.split_once('x')?;
+                    Some((a.parse().ok()?, b.parse().ok()?))
+                };
+                match args.first().copied() {
+                    None => {
+                        let mem = crate::drm::memory_screens(self);
+                        let mut lines: Vec<String> = self
+                            .space
+                            .outputs()
+                            .map(|o| {
+                                let g = self.space.output_geometry(o).unwrap_or_default();
+                                let m = if mem.contains(&o.name()) { " (in memory)" } else { "" };
+                                format!("{} {:?} {}x{} pt at {},{} scale {:.4}{m}", o.name(), o.physical_properties().model, g.size.w, g.size.h, g.loc.x, g.loc.y, o.current_scale().fractional_scale())
+                            })
+                            .collect();
+                        lines.sort();
+                        lines.join("\n")
+                    }
+                    Some("remove") => match args.get(1) {
+                        Some(name) => match crate::drm::remove_memory_screen(self, name) {
+                            Ok(()) => format!("removed {name}"),
+                            Err(e) => format!("screen: {e}"),
+                        },
+                        None => usage.into(),
+                    },
+                    Some("add") => {
+                        let hz = flag("--hz").and_then(|v| v.parse::<f64>().ok()).unwrap_or(60.0);
+                        let refresh = (hz * 1000.0).round() as u32;
+                        let (edid, px) = if let Some(file) = flag("--edid") {
+                            let Some(px) = args.iter().skip_while(|a| **a != "--edid").nth(2).and_then(|v| pair(v)) else { return usage.into() };
+                            match std::fs::read(file) {
+                                Ok(b) => (b, px),
+                                Err(e) => return format!("screen: {file}: {e}"),
+                            }
+                        } else if let Some(px) = flag("--fake").and_then(pair) {
+                            let Some(mm) = args.iter().skip_while(|a| **a != "--fake").nth(2).and_then(|v| pair(v)) else { return usage.into() };
+                            let name = flag("--name").map_or_else(|| format!("FAKE {}x{}", px.0, px.1), str::to_string);
+                            // The same spec, the same monitor: its serial from it (window memory per setup).
+                            let serial = (px.0 * 31 + px.1).wrapping_mul(2654435761).wrapping_add(mm.0 * 7 + mm.1) % 100_000_000;
+                            let spec = vergence_edid::fake::Spec { name: &name, product: 0x9a00, serial, timing: vergence_edid::fake::FHD_60, size_mm: (mm.0 as u16, mm.1 as u16) };
+                            (vergence_edid::fake::build(&spec), px)
+                        } else {
+                            return usage.into();
+                        };
+                        match crate::drm::add_memory_screen(self, edid, px, refresh) {
+                            Ok(name) => format!("added {name}"),
+                            Err(e) => format!("screen: {e}"),
+                        }
+                    }
+                    _ => usage.into(),
+                }
+            }
             // A screen's scale for a test, as if chosen but not saved
             // (tools/display-check.sh): `scale DP-1 1.3333`, `scale DP-1 reset`,
             // `scale reset` (all), `scale` (each screen's).
@@ -439,7 +502,7 @@ impl Server {
                 self.loop_signal.stop();
                 "quitting".into()
             }
-            _ => "commands: shot, windows, gpus, shelf, tiles, actions, action <id or name>, session, apps, key <name> (chords: ctrl+v), type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, scale [<screen> <scale>|reset], focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
+            _ => "commands: shot, windows, gpus, shelf, tiles, actions, action <id or name>, session, apps, key <name> (chords: ctrl+v), type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, scale [<screen> <scale>|reset], screen [add|remove], focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
         }
     }
 

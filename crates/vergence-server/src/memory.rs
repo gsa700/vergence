@@ -60,6 +60,8 @@ pub struct Memory {
     pub setup: String,
     /// Each open window's identity (fixed when it opened: its class index).
     ids: HashMap<Win, WindowId>,
+    /// Setups seen with a screen in memory (mark_test_setup): not saved.
+    test_setups: std::collections::HashSet<String>,
 }
 
 fn path() -> Option<PathBuf> {
@@ -83,10 +85,29 @@ impl Memory {
                 }
             })
             .unwrap_or_default();
-        Memory { store, setup: String::new(), ids: HashMap::new() }
+        Memory { store, setup: String::new(), ids: HashMap::new(), test_setups: Default::default() }
+    }
+
+    /// The current setup has a screen in memory (drm.rs, headless milestone
+    /// 1): a test's, so its places are never written.
+    pub fn mark_test_setup(&mut self) {
+        if !self.setup.is_empty() {
+            self.test_setups.insert(self.setup.clone());
+        }
     }
 
     fn save(&mut self) {
+        // A test's setup: nothing written while it is up; its places are
+        // forgotten before the next save of a real one.
+        if self.test_setups.contains(&self.setup) {
+            return;
+        }
+        for key in std::mem::take(&mut self.test_setups) {
+            let n = self.store.forget(&key);
+            if n > 0 {
+                tracing::info!("memory: forgot {n} places of a test setup");
+            }
+        }
         // Windows with a token that have not come back for 90 days are forgotten.
         let pruned = self.store.prune_unseen(today().saturating_sub(90));
         if pruned > 0 {

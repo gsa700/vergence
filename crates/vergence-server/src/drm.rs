@@ -123,19 +123,36 @@ enum Present {
     /// A monitor: Smithay's DRM output on its CRTC, and its connector (to set
     /// it up again in another mode).
     Drm { out: Out, handle: connector::Handle },
+    /// A screen in memory (`vctl screen add`, headless milestone 1, step 2):
+    /// drawn into an offscreen texture of the primary's renderer (no GBM, so
+    /// a machine with no GPU has them too), at its refresh by a timer.
+    Memory(MemoryScreen),
 }
+
+struct MemoryScreen {
+    tex: smithay::backend::renderer::gles::GlesTexture,
+    damage: smithay::backend::renderer::damage::OutputDamageTracker,
+    /// A frame's time, standing in for the monitor's VBlank.
+    interval: Duration,
+}
+
+/// The "GPU" of screens in memory, in their Key (no CRTC: a number of ours).
+const MEMORY: usize = usize::MAX;
+static MEMORY_SCREENS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
 
 impl Surface {
     /// The monitor's DRM output; None for a screen that is not a monitor.
     fn drm(&mut self) -> Option<&mut Out> {
         match &mut self.present {
             Present::Drm { out, .. } => Some(out),
+            Present::Memory(_) => None,
         }
     }
 
     fn handle(&self) -> Option<connector::Handle> {
         match &self.present {
             Present::Drm { handle, .. } => Some(*handle),
+            Present::Memory(_) => None,
         }
     }
 
@@ -660,6 +677,10 @@ fn setup_changed(state: &mut Server, anchors: Vec<(crate::win::Win, String, smit
     // The setup first: the arrangement is kept per setup.
     let edids: Vec<Vec<u8>> = state.backend.as_ref().map(|b| b.surfaces.values().map(|s| s.edid.clone()).collect()).unwrap_or_default();
     state.set_setup(&edids);
+    // A setup with a screen in memory is a test's: never saved (memory.rs).
+    if state.backend.as_ref().is_some_and(|b| b.surfaces.keys().any(|k| k.0 == MEMORY)) {
+        state.memory.mark_test_setup();
+    }
     lay_out(state);
     state.rearrange_windows(anchors);
 }
@@ -1002,7 +1023,9 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
     }
 
     let clear = state.background_color(&s.connector);
-    let outcome = if crtc.0 == 0 {
+    let outcome = if crtc.0 == MEMORY {
+        memory_frame(&mut b.renderer, s, &elements, clear)
+    } else if crtc.0 == 0 {
         match s.drm() {
             Some(out) => out.render_frame(&mut b.renderer, &elements, clear, FrameFlags::DEFAULT).map(|r| if r.is_empty { Relayed::Nothing } else { Relayed::Shown }).map_err(|e| format!("{e:?}")),
             None => Err("not a monitor".to_string()),
@@ -1018,6 +1041,22 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
         Ok(Relayed::Waiting) => {
             // The primary is still drawing it: look again in 3 ms, not a frame.
             let _ = state.loop_handle.insert_source(Timer::from_duration(Duration::from_millis(3)), move |_, _, st| {
+                render(st, crtc);
+                TimeoutAction::Drop
+            });
+        }
+        Ok(Relayed::Shown) if crtc.0 == MEMORY => {
+            // In memory it is "on the screen" at once; the next frame comes
+            // after a frame's time, as a VBlank would.
+            let name = s.connector.clone();
+            let interval = match &s.present {
+                Present::Memory(m) => m.interval,
+                Present::Drm { .. } => Duration::from_millis(16),
+            };
+            let screens = b.surfaces.len();
+            state.lock_frame_queued(name.clone());
+            state.lock_frame_shown(&name, screens);
+            let _ = state.loop_handle.insert_source(Timer::from_duration(interval), move |_, _, st| {
                 render(st, crtc);
                 TimeoutAction::Drop
             });
@@ -1140,6 +1179,7 @@ fn relay_frame(primary: &mut GlesRenderer, copier: Option<&mut GlesRenderer>, s:
     // The field itself, not drm(): `relay` holds a borrow of the surface.
     let out = match &mut s.present {
         Present::Drm { out, .. } => out,
+        Present::Memory(_) => return Err("copy: not a monitor".into()),
     };
     let empty = out.render_frame(copier, &els, clear, FrameFlags::DEFAULT).map_err(|e| format!("copy: {e:?}"))?.is_empty;
     let damage_px = relay.last_damage_px;
@@ -1175,6 +1215,88 @@ fn read_back(renderer: &mut GlesRenderer, dmabuf: &mut smithay::backend::allocat
 
 /// Render `elements` into an offscreen buffer the size of the monitor and read it back
 /// (R, G, B, A bytes, top row first).
+/// A screen in memory, one frame: drawn into its texture (what changed).
+fn memory_frame(renderer: &mut GlesRenderer, s: &mut Surface, elements: &[OutputElements], clear: [f32; 4]) -> Result<Relayed, String> {
+    use smithay::backend::renderer::Bind;
+    let Present::Memory(m) = &mut s.present else { return Err("not in memory".into()) };
+    let mut fb = renderer.bind(&mut m.tex).map_err(|e| e.to_string())?;
+    // One texture, kept: what was drawn last is still in it (age 1).
+    let r = m.damage.render_output(renderer, &mut fb, 1, elements, clear).map_err(|e| format!("{e:?}"))?;
+    Ok(if r.damage.is_some_and(|d| !d.is_empty()) { Relayed::Shown } else { Relayed::Nothing })
+}
+
+/// A screen in memory beside the monitors (`vctl screen add`): `edid` its
+/// identity (a fake's, vergence_edid::fake), `px` its mode, `refresh_mhz` its
+/// rate. Laid out, scaled and remembered like a monitor, except that its
+/// setups are never saved (memory.rs). Its name, MEM-<n>.
+pub fn add_memory_screen(state: &mut Server, edid: Vec<u8>, px: (u32, u32), refresh_mhz: u32) -> Result<String, String> {
+    use smithay::backend::renderer::Offscreen;
+    if !(1..=8192).contains(&px.0) || !(1..=8192).contains(&px.1) || !(1_000..=500_000).contains(&refresh_mhz) {
+        return Err("a screen from 1x1 to 8192x8192 pixels, 1 to 500 Hz".into());
+    }
+    let n = MEMORY_SCREENS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let name = format!("MEM-{n}");
+    let crtc: crtc::Handle = smithay::reexports::drm::control::from_u32(n).ok_or("no number for it")?;
+    let dh = state.display_handle.clone();
+    let Some(b) = state.backend.as_mut() else { return Err("no backend".into()) };
+    let others: Vec<Vec<u8>> = b.surfaces.values().map(|s| s.edid.clone()).collect();
+    let identity = crate::monitors::identity(&edid, &others);
+    let id = vergence_profile::monitor_id(&identity);
+    let parsed = vergence_edid::Edid::parse(&edid).ok();
+    let mm = parsed.as_ref().and_then(|e| e.physical_size_mm()).map(|(a, c)| (a as u32, c as u32));
+    let label = parsed.as_ref().and_then(|e| e.name.clone()).unwrap_or_else(|| name.clone());
+    let mut cfg = crate::displays::load();
+    if let Some(v) = state.scale_test.get(&name) {
+        cfg.set_scale(&id, *v);
+    }
+    let scales = cfg.scale_for(&id, &name, px, mm);
+    let scale = scales.shown;
+    tracing::info!("{name}: in memory, {label:?} {}x{} at {:.2} Hz {mm:?} mm -> scale {scale:.4}, {}", px.0, px.1, refresh_mhz as f64 / 1000.0, scales.how);
+    state.scale_notes.insert(name.clone(), scales);
+    let Some(b) = state.backend.as_mut() else { return Err("no backend".into()) };
+    let wl_mode = WlMode { size: (px.0 as i32, px.1 as i32).into(), refresh: refresh_mhz as i32 };
+    let output = Output::new(
+        name.clone(),
+        PhysicalProperties { size: mm.map(|(a, c)| (a as i32, c as i32)).unwrap_or((0, 0)).into(), subpixel: Subpixel::Unknown, make: "Vergence".into(), model: label, serial_number: String::new() },
+    );
+    let global = output.create_global::<Server>(&dh);
+    output.user_data().insert_if_missing(|| crate::memory::MonitorId(id.clone()));
+    output.set_preferred(wl_mode);
+    output.change_current_state(Some(wl_mode), Some(Transform::Normal), Some(Scale::Fractional(scale)), None);
+    let tex = b.renderer.create_buffer(Fourcc::Abgr8888, (px.0 as i32, px.1 as i32).into()).map_err(|e| format!("{name}: no texture to draw it in: {e}"))?;
+    // From the output, so a scale changed later (vctl scale, the settings app) is followed.
+    let damage = smithay::backend::renderer::damage::OutputDamageTracker::from_output(&output);
+    let interval = Duration::from_micros(1_000_000_000 / refresh_mhz as u64);
+    let modes = vec![vergence_protocol::bus::ModeInfo { width: px.0, height: px.1, refresh_mhz, preferred: true }];
+    b.surfaces.insert(
+        (MEMORY, crtc),
+        Surface { output, present: Present::Memory(MemoryScreen { tex, damage, interval }), connector: name.clone(), last: std::time::Instant::now(), scale, id, px, mm, edid: identity, global, relay: None, modes, mode: 0, since: CONNECTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) },
+    );
+    let anchors = state.window_anchors();
+    setup_changed(state, anchors);
+    state.bus_outputs_changed();
+    render(state, (MEMORY, crtc));
+    Ok(name)
+}
+
+/// Take a screen in memory away, as a monitor unplugged.
+pub fn remove_memory_screen(state: &mut Server, name: &str) -> Result<(), String> {
+    let key = state.backend.as_ref().and_then(|b| b.surfaces.iter().find(|(k, s)| k.0 == MEMORY && s.connector == name).map(|(k, _)| *k)).ok_or_else(|| format!("no screen {name} in memory"))?;
+    let anchors = state.window_anchors();
+    disconnect(state, key);
+    state.scale_notes.remove(name);
+    state.scale_test.remove(name);
+    setup_changed(state, anchors);
+    Ok(())
+}
+
+/// The screens in memory, by name.
+pub fn memory_screens(state: &Server) -> Vec<String> {
+    let mut v: Vec<String> = state.backend.as_ref().map(|b| b.surfaces.iter().filter(|(k, _)| k.0 == MEMORY).map(|(_, s)| s.connector.clone()).collect()).unwrap_or_default();
+    v.sort();
+    v
+}
+
 fn capture(
     renderer: &mut GlesRenderer,
     elements: &[OutputElements],

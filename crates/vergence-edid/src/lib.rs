@@ -6,6 +6,8 @@
 //! checked, and a short blob, a bad header or a bad checksum is an error, not
 //! a guess.
 
+pub mod fake;
+
 use std::fmt;
 
 /// Size of the EDID base block.

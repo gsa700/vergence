@@ -57,6 +57,10 @@ pub fn edges(at: f64, len: f64, scale: f64) -> (i32, i32) {
 
 struct Checks {
     failed: usize,
+    /// Off the grid (a scale whose step is longer than 8 points): edges
+    /// cannot all land on whole pixels, so the edge lines are shown but
+    /// not counted; what must hold anywhere (the bar meeting the body) is.
+    off_grid: bool,
 }
 
 impl Checks {
@@ -66,6 +70,30 @@ impl Checks {
             self.failed += 1;
         }
     }
+
+    /// A check that holds only on the grid.
+    fn on_grid(&mut self, ok: bool, what: &str) {
+        if self.off_grid {
+            println!("{} {what} (off the grid: not counted)", if ok { "pass" } else { "miss" });
+        } else {
+            self.check(ok, what);
+        }
+    }
+}
+
+/// The server's grid step for a scale (vergence-server grid.rs step_of): q
+/// for p/q in 120ths, or none past 8 points.
+pub fn grid_step(scale: f64) -> Option<i64> {
+    let p = (scale * 120.0).round() as i64;
+    if p <= 0 {
+        return None;
+    }
+    let (mut a, mut b) = (p, 120);
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    let q = 120 / a;
+    (q <= 8).then_some(q)
 }
 
 /// Of the pixels along a line, how many are `want`, and the first that is not.
@@ -108,11 +136,14 @@ pub fn run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
     let inset = (8.0 * scale).ceil() as i32;
     let rows = || (t + inset)..(b - inset);
     let cols = || (l + inset)..(r - inset);
-    let mut c = Checks { failed: 0 };
-    let mut line = |c: &mut Checks, name: &str, points: Vec<(i32, i32)>, want: Rgb| {
+    let mut c = Checks { failed: 0, off_grid: grid_step(scale).is_none() };
+    if c.off_grid {
+        println!("scale {scale:.4} is off the grid: edge lines not counted");
+    }
+    let line = |c: &mut Checks, name: &str, points: Vec<(i32, i32)>, want: Rgb| {
         let (good, all, bad) = along(&shot, points.into_iter(), want);
         let note = bad.map_or(String::new(), |(x, y, c)| format!("; first wrong at {x},{y}: {c:?}"));
-        c.check(good == all, &format!("{name}: {good}/{all}{note}"));
+        c.on_grid(good == all, &format!("{name}: {good}/{all}{note}"));
     };
     line(&mut c, "top line on the first row", cols().map(|x| (x, t)).collect(), TOP);
     line(&mut c, "bottom line on the last row", cols().map(|x| (x, b - 1)).collect(), BOTTOM);
@@ -125,7 +156,7 @@ pub fn run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
     // Nothing of the pattern outside its pixels (a picture shown too big).
     let outside: Vec<(i32, i32)> = cols().map(|x| (x, b)).chain(rows().map(|y| (r, y))).collect();
     let spill = outside.iter().filter(|(x, y)| shot.at(*x, *y).is_some_and(|p| near(p, BOTTOM, SLACK) || near(p, RIGHT, SLACK) || near(p, BODY, SLACK))).count();
-    c.check(spill == 0, &format!("nothing of it past its last row and column: {spill} pixels"));
+    c.on_grid(spill == 0, &format!("nothing of it past its last row and column: {spill} pixels"));
     if let Some(bar) = bar {
         let (bt, bb) = edges(y - bar, bar, scale);
         c.check(bb == t, &format!("bar ends where the body starts: row {bb} and {t}"));
@@ -142,7 +173,7 @@ pub fn run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
                 same += 1;
             }
         }
-        c.check(all > 0 && same * 10 >= all * 9, &format!("bar's first and last columns alike: {same}/{all} rows"));
+        c.on_grid(all > 0 && same * 10 >= all * 9, &format!("bar's first and last columns alike: {same}/{all} rows"));
     }
     println!("{} of the checks failed", c.failed);
     Ok(c.failed == 0)
@@ -161,6 +192,14 @@ mod tests {
             }
         }
         Shot { w, h, rgba }
+    }
+
+    #[test]
+    fn grid_steps_match_the_server() {
+        assert_eq!(grid_step(4.0 / 3.0), Some(3));
+        assert_eq!(grid_step(1.25), Some(4));
+        assert_eq!(grid_step(2.0), Some(1));
+        assert_eq!(grid_step(173.0 / 120.0), None);
     }
 
     #[test]
