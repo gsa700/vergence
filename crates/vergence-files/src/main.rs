@@ -1566,7 +1566,7 @@ impl Viewer {
             let lines: Vec<Element<Msg>> = text.lines().take(if big { 60 } else { 24 }).map(|l| label(if l.is_empty() { " ".to_string() } else { l.replace('\t', "    ").chars().take(120).collect() }).size(if big { 12.0 } else { 10.0 }).color(t.dim)).collect();
             return panel(column(lines).spacing(1.0).width(Length::FILL)).color(t.card).radius(6.0).padding(8.0).width(Length::FILL).height(Length::FILL);
         }
-        panel(files::kind_icon_sized(e.kind(), if big { 8.0 } else { 5.0 }).width(Length::FILL).height(Length::Fixed(if big { 150.0 } else { 90.0 }))).width(Length::FILL).height(Length::FILL)
+        panel(files::entry_icon_sized(e, if big { 8.0 } else { 5.0 }).width(Length::FILL).height(Length::Fixed(if big { 150.0 } else { 90.0 }))).width(Length::FILL).height(Length::FILL)
     }
 
     fn pane_view(&self, t: &Theme) -> Element<Msg> {

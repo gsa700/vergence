@@ -145,6 +145,7 @@ PLACES = {
     "music": ("Music: the folder with a note.", pressed('<path d="M35 29 L35 41 Q35 45 31 45 Q27 45 27 42 Q27 39 31 39 Q32 39 33 39.4 L33 31 L39 30 L39 33 Z"/>')),
     "videos": ("Videos: the folder with a play mark.", pressed('<path d="M28 30 L40 38 L28 46 Z"/>')),
     "folder": ("A folder.", FOLDER),
+    "recent": ("Recent: the folder with a clock.", FOLDER + f'<g fill="none" stroke="{BLUE}" stroke-width="2.2" stroke-linecap="round" opacity="0.85"><circle cx="32" cy="38" r="9"/><path d="M32 32.5 L32 38 L36 40.5"/></g>'),
     "network": ("Network: the folder with a globe (a server's folder).", FOLDER + f'<g fill="none" stroke="{BLUE}" stroke-width="2" opacity="0.85"><circle cx="32" cy="38" r="9"/><ellipse cx="32" cy="38" rx="3.6" ry="9"/><line x1="23" y1="38" x2="41" y2="38"/><path d="M24.5 33.5 Q32 31.5 39.5 33.5 M24.5 42.5 Q32 44.5 39.5 42.5"/></g>'),
     "trash": ("The Trash, empty.", CAN),
     "trash-full": ("The Trash, full, a few dropped beside it.", CAN_FULL),

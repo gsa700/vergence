@@ -226,3 +226,37 @@ mod tests {
         assert_eq!(words[19], 0x8080_8080, "white at half, premultiplied");
     }
 }
+
+/// `vergence-harness icons <data/icons> <share/vergence/icons>`: Vergence's
+/// place and kind icons (tools/make-icons.py) copied, each with its pixels
+/// at 16, 32, 64, 128 and 256 beside it (<name>.<px>.rgba: "VRGB", width,
+/// height as little-endian words, then straight RGBA), so the toolkit shows
+/// them with no SVG code of its own (vergence-widgets files.rs own_icon).
+pub fn icons(args: &[String]) -> Result<bool, Box<dyn Error>> {
+    let (Some(src), Some(dest)) = (args.first(), args.get(1)) else { return Err("icons <data/icons> <share/vergence/icons>".into()) };
+    let mut count = 0;
+    for group in ["places", "kinds"] {
+        let to = Path::new(dest).join(group);
+        std::fs::create_dir_all(&to)?;
+        for entry in std::fs::read_dir(Path::new(src).join(group))? {
+            let path = entry?.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("svg") {
+                continue;
+            }
+            let name = path.file_stem().and_then(|s| s.to_str()).ok_or("a name")?.to_string();
+            let data = std::fs::read(&path)?;
+            std::fs::write(to.join(format!("{name}.svg")), &data)?;
+            for px in [16u32, 32, 64, 128, 256] {
+                let p = vergence_decode::decode_bytes(&data, Some((px, px)))?;
+                let mut out = b"VRGB".to_vec();
+                out.extend_from_slice(&p.width.to_le_bytes());
+                out.extend_from_slice(&p.height.to_le_bytes());
+                out.extend_from_slice(&p.frames.into_iter().next().ok_or("no frame")?.rgba);
+                std::fs::write(to.join(format!("{name}.{px}.rgba")), out)?;
+            }
+            count += 1;
+        }
+    }
+    println!("{count} icons drawn into {dest}");
+    Ok(true)
+}

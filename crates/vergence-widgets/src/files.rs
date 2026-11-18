@@ -263,6 +263,28 @@ pub fn places() -> Vec<Place> {
     out
 }
 
+/// Which of Vergence's own icons a place shows in the sidebar: the user's
+/// folders their own (by the names user_dirs gives them), the Trash full or
+/// empty, drives and the network theirs.
+fn place_icon(p: &Place) -> (&'static str, &'static str) {
+    if p.network {
+        return ("places", "network");
+    }
+    match (p.name.as_str(), p.path.as_deref()) {
+        (_, None) => ("places", "recent"),
+        ("Home", _) => ("places", "home"),
+        ("Desktop", _) => ("places", "desktop"),
+        ("Documents", _) => ("places", "documents"),
+        ("Downloads", _) => ("places", "downloads"),
+        ("Pictures", _) => ("places", "pictures"),
+        ("Music", _) => ("places", "music"),
+        ("Videos", _) => ("places", "videos"),
+        ("Computer", _) => ("places", "disk"),
+        ("Trash", Some(t)) => ("places", if fs::read_dir(t).is_ok_and(|mut d| d.next().is_some()) { "trash-full" } else { "trash" }),
+        _ => ("places", "usb"),
+    }
+}
+
 /// The places sidebar: each a button, the one shown chosen. `here`: the
 /// folder shown (None for Recent).
 pub fn sidebar<M: Clone + 'static>(places: &[Place], here: Option<&Path>, go: impl Fn(&Place) -> M, t: &Theme) -> Element<M> {
@@ -277,7 +299,18 @@ pub fn sidebar<M: Clone + 'static>(places: &[Place], here: Option<&Path>, go: im
             items.push(row(vec![space().width(Length::Fixed(10.0)), label("Network").size(10.5).dim()]));
         }
         let chosen = p.path.as_deref() == here;
-        items.push(button(label(p.name.clone()).size(12.0).width(Length::FILL)).look(if chosen { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(5.0, 10.0)).on_press(go(p)).width(Length::FILL).name(p.name.clone()));
+        let (group, name) = place_icon(p);
+        let mark = drawing(move |scene, _, r: Rect, _t: &Theme| {
+            let side = r.w.min(r.h);
+            if let Some(img) = own_icon(group, name, (side * 2.5).ceil() as u32) {
+                let id = scene.image(img);
+                scene.draw_image(id, Rect::new(r.x, r.y + (r.h - side) / 2.0, side, side), 1.0);
+            }
+        })
+        .width(Length::Fixed(16.0))
+        .height(Length::Fixed(16.0));
+        let line = row(vec![mark, label(p.name.clone()).size(12.0).width(Length::FILL)]).spacing(7.0).align(Align::Center).width(Length::FILL);
+        items.push(button(line).look(if chosen { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(5.0, 8.0)).on_press(go(p)).width(Length::FILL).name(p.name.clone()));
     }
     panel(scroll(column(items).spacing(1.0).width(Length::FILL))).color(t.card).radius(8.0).padding(6.0).width(Length::Fixed(160.0)).height(Length::FILL)
 }
@@ -365,7 +398,7 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
         }
         let small = rs.text() - 1.0;
         let mut cells: Vec<Element<M>> = vec![
-            kind_icon_sized(e.kind(), rs.mark()).width(Length::Fixed(icon_w)).height(Length::Fixed(18.0 * rs.mark())),
+            entry_icon_sized(e, rs.mark()).width(Length::Fixed(icon_w)).height(Length::Fixed(18.0 * rs.mark())),
             column(name_col).width(Length::FILL),
         ];
         for &c in &shown {
@@ -444,7 +477,7 @@ pub fn icons<M: Clone + 'static>(v: &View<M>) -> Element<M> {
             // One line, cut with "…" to the cell (a name without spaces cannot wrap).
             let mark = match v.thumb.and_then(|t| t(e)) {
                 Some(img) => crate::picture(img).width(Length::Fixed(80.0)).height(Length::Fixed(52.0)),
-                None => kind_icon_sized(e.kind(), 3.0).width(Length::Fixed(80.0)).height(Length::Fixed(52.0)),
+                None => entry_icon_sized(e, 3.0).width(Length::Fixed(80.0)).height(Length::Fixed(52.0)),
             };
             let mut b = button(column(vec![mark, label(e.name.clone()).size(11.0).align(Align::Center).elide().width(Length::Fixed(88.0))]).spacing(4.0).align(Align::Center))
                 .look(if (v.chosen)(k, e) { ButtonLook::Chosen } else { ButtonLook::Plain })
@@ -514,9 +547,106 @@ pub fn kind_icon<M: 'static>(kind: Kind) -> Element<M> {
     kind_icon_sized(kind, 1.0).width(Length::Fixed(20.0)).height(Length::Fixed(18.0))
 }
 
-/// The same mark drawn `k` times as large (the icon view's), centered in its place.
+/// The same mark drawn `k` times as large (the icon view's), centered in its
+/// place: Vergence's own icon for the kind where it is installed
+/// (own_icon), else the mark drawn here.
 pub fn kind_icon_sized<M: 'static>(kind: Kind, k: f32) -> Element<M> {
-    drawing(move |scene, _, r: Rect, t: &Theme| draw_kind(scene, r, k, kind, t))
+    icon_sized(kind, own_icon_name(kind), k)
+}
+
+/// A file's mark: its kind's, or its own type's where Vergence has an icon
+/// for that (a PDF's red band).
+pub fn entry_icon_sized<M: 'static>(e: &Entry, k: f32) -> Element<M> {
+    let own = match e.mime {
+        Some("application/pdf") => ("kinds", "pdf"),
+        _ if e.dir => special_folder(&e.path).unwrap_or(("places", "folder")),
+        _ => own_icon_name(e.kind()),
+    };
+    icon_sized(e.kind(), own, k)
+}
+
+fn icon_sized<M: 'static>(kind: Kind, (group, name): (&'static str, &'static str), k: f32) -> Element<M> {
+    drawing(move |scene, _, r: Rect, t: &Theme| {
+        // The icon's square: the mark's box (18 x 15 points times k), at most the place.
+        let side = (18.0 * k).min(r.w).min(r.h.max(15.0 * k));
+        // Pixels enough for a 2x screen and then some (the renderer shrinks it).
+        let px = (side * 2.5).ceil() as u32;
+        match own_icon(group, name, px) {
+            Some(img) => {
+                let id = scene.image(img);
+                scene.draw_image(id, Rect::new(r.x + (r.w - side) / 2.0, r.y + (r.h - side) / 2.0, side, side), 1.0);
+            }
+            None => draw_kind(scene, r, k, kind, t),
+        }
+    })
+}
+
+/// Which of Vergence's own icons (tools/make-icons.py) a kind shows.
+pub fn own_icon_name(kind: Kind) -> (&'static str, &'static str) {
+    match kind {
+        Kind::Folder => ("places", "folder"),
+        Kind::Program => ("kinds", "program"),
+        Kind::Text => ("kinds", "text"),
+        Kind::Picture => ("kinds", "picture"),
+        Kind::Sound => ("kinds", "sound"),
+        Kind::Video => ("kinds", "video"),
+        Kind::Archive => ("kinds", "archive"),
+        Kind::Document => ("kinds", "document"),
+        Kind::Other => ("kinds", "other"),
+    }
+}
+
+/// The user's own folders' icons (Desktop, Documents ... by user_dirs,
+/// read once): a folder that is one of them shows its own, as the sidebar.
+fn special_folder(path: &Path) -> Option<(&'static str, &'static str)> {
+    thread_local! {
+        static DIRS: Vec<(String, PathBuf)> = user_dirs();
+    }
+    let name = DIRS.with(|d| d.iter().find(|(_, p)| p == path).map(|(n, _)| n.clone()))?;
+    Some(("places", match name.as_str() {
+        "Desktop" => "desktop",
+        "Documents" => "documents",
+        "Downloads" => "downloads",
+        "Pictures" => "pictures",
+        "Music" => "music",
+        "Videos" => "videos",
+        _ => return None,
+    }))
+}
+
+thread_local! {
+    /// Own icons read so far, by group, name and size (None: not installed).
+    static OWN_ICONS: std::cell::RefCell<std::collections::HashMap<(String, u32), Option<std::sync::Arc<vergence_scene::Image>>>> = Default::default();
+}
+
+/// One of Vergence's own icons at the smallest size drawn at install that is
+/// at least `px` (vergence-harness icons: <name>.<px>.rgba in
+/// share/vergence/icons/<group>), read once. None where it is not installed.
+pub fn own_icon(group: &str, name: &str, px: u32) -> Option<std::sync::Arc<vergence_scene::Image>> {
+    let size = [16u32, 32, 64, 128, 256].into_iter().find(|s| *s >= px).unwrap_or(256);
+    let key = (format!("{group}/{name}"), size);
+    if let Some(found) = OWN_ICONS.with(|c| c.borrow().get(&key).cloned()) {
+        return found;
+    }
+    let file = format!("{group}/{name}.{size}.rgba");
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(bin) = exe.parent()
+    {
+        dirs.push(bin.join("../share/vergence/icons"));
+    }
+    let data = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
+    dirs.extend(data.split(':').filter(|d| !d.is_empty()).map(|d| Path::new(d).join("vergence/icons")));
+    let img = dirs.into_iter().find_map(|d| std::fs::read(d.join(&file)).ok()).and_then(|b| {
+        if b.len() < 12 || &b[..4] != b"VRGB" {
+            return None;
+        }
+        let w = u32::from_le_bytes([b[4], b[5], b[6], b[7]]);
+        let h = u32::from_le_bytes([b[8], b[9], b[10], b[11]]);
+        (b.len() == 12 + (w * h * 4) as usize && w > 0 && h > 0).then(|| std::sync::Arc::new(vergence_scene::Image { width: w, height: h, rgba: b[12..].to_vec() }))
+    });
+    OWN_ICONS.with(|c| c.borrow_mut().insert(key, img.clone()));
+    img
 }
 
 /// A family's mark drawn into a scene, `k` times its small size, centered in `r`.

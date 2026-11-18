@@ -152,10 +152,16 @@ if [ -x "$release/vergence-harness" ]; then
 else
     echo "install.sh: no vergence-harness in $release: the Vergence pointers are not installed" >&2
 fi
+# Places and kinds: the SVGs, and their pixels at five sizes drawn by
+# vergence-harness (the toolkit shows those, with no SVG code of its own).
 for g in places kinds; do
     install -d -m 755 "$ownicons/$g"
     for f in "$root/data/icons/$g"/*.svg; do install -m 644 "$f" "$ownicons/$g/"; done
 done
+if [ -x "$release/vergence-harness" ]; then
+    "$release/vergence-harness" icons "$root/data/icons" "$ownicons" >/dev/null || echo "install.sh: the icons' pixels could not be drawn (drawn marks are shown)" >&2
+    chmod -R a+rX "$ownicons" 2>/dev/null
+fi
 for f in "$root"/data/fonts/*; do install -m 644 "$f" "$fonts/"; done
 # Every app on the machine may use them (GTK, Qt, Firefox find fonts through
 # fontconfig): its conf.d gets our directory, after the system's own.
