@@ -277,8 +277,34 @@ it is today:
   FreeBSD, read under each person's own settings), the machine-wide look
   above being one use of it.
 - Open by hand from VDM milestone 1: a YubiKey at the login screen, a
-  screenshot while locked, the login screen on several monitors,
-  `--no-vdm`.
+  screenshot while locked, `--no-vdm`. (*Done 2026-11-17: the login screen
+  on several monitors, on Techbench's LG + ASUS; it starts on the last
+  session's main screen, 3ca9a85.*)
+
+## From Dave, 2026-11-17 (to do)
+
+- **The dock's size, chosen by the person**: by dragging its edge (as the
+  macOS Dock's divider does), or a slider on Settings' Dock page, or both.
+  Today the dock's size follows the bar's proportions only.
+- **As compatible as possible without Wayland's own software installed**:
+  Vergence speaks Wayland to outside apps but needs no libwayland (Dave's
+  decision of 2026-11-16: Smithay's pure-Rust backend instead of
+  `use_system_lib`; the running server dlopens libwayland-server today, seen
+  on kepler). Find every part that pulls in Wayland's packages (the server,
+  Xwayland's needs, the toolkit's Wayland road, install.sh's package lists)
+  and drop or replace each, with outside apps still working. Apps bring
+  their own libwayland-client; that's theirs, not ours.
+- **Bug: Firefox crashes opening the Downloads folder** from its downloads
+  panel. Firefox asks the desktop to show the folder (the portal's
+  OpenURI/OpenDirectory, or org.freedesktop.FileManager1.ShowItems over
+  D-Bus); our portal answers fd-based OpenFile/OpenDirectory with
+  NotAllowed (files milestone 1), which may be what Firefox doesn't survive.
+  Reproduce, read Firefox's crash report, then answer it properly (show the
+  folder in File Viewer).
+- **Bug: the Text Editor scrolls when the text doesn't fill the window.**
+  A few lines still give a scroll range; probably the area counts a page of
+  room past the last line, or the under-bar inset, as content. Scrolling
+  should start only when the text is taller than the view.
 
 ## Questions for Dave (when each app's turn comes)
 
