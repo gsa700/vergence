@@ -499,9 +499,9 @@ fn run_session(h: &pam::Handle, plan: &LoginPlan) -> c_int {
                         })
                     };
                     match cmd.spawn() {
-                        Ok(mut child) => {
+                        Ok(child) => {
                             log(&format!("session for {} started on VT {vt} (pid {}): {}", a.name, child.id(), plan.exec));
-                            let status = child.wait();
+                            let status = wait_reaping(child.id());
                             log(&format!("session for {} ended ({})", a.name, status.map(|s| s.to_string()).unwrap_or_else(|e| e.to_string())));
                             0
                         }
@@ -527,6 +527,29 @@ fn run_session(h: &pam::Handle, plan: &LoginPlan) -> c_int {
     }
     h.setcred(pam::DELETE_CRED);
     code
+}
+
+/// Wait for the worker's own child `pid`, reaping on the way every orphan the
+/// reaper role (sys::become_reaper) hands this worker: a process whose parent
+/// ended before it did (an app started from a shell, a crashed helper) would
+/// otherwise stay a zombie until the session ends.
+fn wait_reaping(pid: u32) -> std::io::Result<std::process::ExitStatus> {
+    use std::os::unix::process::ExitStatusExt;
+    loop {
+        let mut status: c_int = 0;
+        // SAFETY: an out-parameter we own.
+        let got = unsafe { waitpid(-1, &mut status, 0) };
+        if got == pid as c_int {
+            return Ok(std::process::ExitStatus::from_raw(status));
+        }
+        if got < 0 {
+            let e = std::io::Error::last_os_error();
+            if e.kind() != std::io::ErrorKind::Interrupted {
+                return Err(e);
+            }
+        }
+        // Any other pid: an orphan, now gone.
+    }
 }
 
 /// Every process left below the worker: SIGTERM, up to 3 s for them to go,
@@ -843,13 +866,13 @@ fn greeter_worker(uid: u32, gid: u32, server: &std::path::Path, home: &std::path
     let mut run_it = |env: Vec<(String, String)>| -> c_int {
         let Some((tty, out)) = io.take() else { return 3 };
         match spawn_greeter_server(uid, gid, server, home, run, tty, out, env) {
-            Ok(mut child) => {
+            Ok(child) => {
                 GREETER_SERVER.store(child.id() as i32, std::sync::atomic::Ordering::Relaxed);
                 if GREETER_TERM.load(std::sync::atomic::Ordering::Relaxed) {
                     // SAFETY: our own child.
                     unsafe { kill(child.id() as c_int, 15) };
                 }
-                let _ = child.wait();
+                let _ = wait_reaping(child.id());
                 end_leftovers("the login screen");
                 0
             }
@@ -1991,5 +2014,35 @@ fn main() {
             continue;
         }
         running.insert(pid, (uid, stream, false));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A process orphaned while the worker waits is reaped on the way, not
+    /// left a zombie until the session ends (Hubble, 2026-11-17: two of
+    /// Firefox's sat below a session's worker). This binary has no other
+    /// tests, so the test process may become a reaper itself.
+    #[test]
+    // Both children are reaped by waitpid, not by Child::wait.
+    #[allow(clippy::zombie_processes)]
+    fn orphans_are_reaped_while_waiting() {
+        if !sys::become_reaper() {
+            eprintln!("no reaper role on this system; skipped");
+            return;
+        }
+        // The shell leaves a background sleep behind and exits: the sleep is
+        // handed to us and ends while we still wait for `main`.
+        std::process::Command::new("/bin/sh").args(["-c", "sleep 0.2 & exit 0"]).spawn().expect("sh");
+        let main = std::process::Command::new("/bin/sh").args(["-c", "sleep 1; exit 3"]).spawn().expect("sh");
+        let status = wait_reaping(main.id()).expect("wait");
+        assert_eq!(status.code(), Some(3));
+        // Nothing left to reap: no zombie below us, and nothing running.
+        let mut st: c_int = 0;
+        // SAFETY: an out-parameter we own.
+        let left = unsafe { waitpid(-1, &mut st, WNOHANG) };
+        assert_eq!(left, -1, "a child was still there to reap");
     }
 }
