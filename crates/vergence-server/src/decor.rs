@@ -337,6 +337,13 @@ impl Server {
     /// Automatic, Large where a touch panel is on it and the desktop's
     /// choice (Settings > Appearance) elsewhere.
     pub fn bar_sizes_on(&self, o: &smithay::output::Output) -> vergence_bar::Sizes {
+        let mut z = self.bar_sizes_unsnapped(o);
+        // A bar on whole pixels, as the windows under it (grid.rs).
+        z.bar_h = crate::grid::snap_len(z.bar_h as i32, crate::grid::step_of(o.current_scale().fractional_scale())) as f32;
+        z
+    }
+
+    fn bar_sizes_unsnapped(&self, o: &smithay::output::Output) -> vergence_bar::Sizes {
         let desktop = self.look_setting("size");
         let Some(id) = crate::memory::monitor_id_of(o) else { return vergence_bar::Sizes::of(desktop) };
         match self.settings.current.get(&(crate::settings::LOOK.to_string(), format!("size:{id}"))) {
@@ -356,10 +363,11 @@ impl Server {
     /// A window's size of controls: the screen its center is on (window
     /// memory's rule).
     pub fn bar_sizes(&self, w: &Win) -> vergence_bar::Sizes {
-        let z = match self.space.element_geometry(w) {
-            Some(g) => self.bar_sizes_at((g.loc.x + g.size.w / 2, g.loc.y + g.size.h / 2).into()),
-            None => self.bar_sizes_at(self.pointer_location().to_i32_round()),
+        let at = match self.space.element_geometry(w) {
+            Some(g) => (g.loc.x + g.size.w / 2, g.loc.y + g.size.h / 2).into(),
+            None => self.pointer_location().to_i32_round(),
         };
+        let z = self.bar_sizes_at(at);
         // A dialog's bar is slim, a palette's thin (window styles milestone 1):
         // the screen's proportions, scaled to 28 and 22 of the standard 36.
         let k = match self.window_style(w).kind {
@@ -367,7 +375,8 @@ impl Server {
             crate::style::Kind::Palette => 22.0 / 36.0,
             _ => return z,
         };
-        vergence_bar::Sizes { bar_h: (z.bar_h * k).round(), item_h: (z.item_h * k).round(), button_w: (z.button_w * k).round(), plus_w: 0.0, side: z.side, gap: z.gap }
+        let bar_h = crate::grid::snap_len((z.bar_h * k).round() as i32, self.grid_step_at(at)) as f32;
+        vergence_bar::Sizes { bar_h, item_h: (z.item_h * k).round(), button_w: (z.button_w * k).round(), plus_w: 0.0, side: z.side, gap: z.gap }
     }
 
     /// A window's bar height in points.
@@ -1223,7 +1232,7 @@ impl Server {
             });
             t.send_pending_configure();
         }
-        self.space.map_element(w.clone(), rect.loc, true);
+        self.put(w.clone(), rect.loc, true);
     }
 }
 

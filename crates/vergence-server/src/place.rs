@@ -100,7 +100,7 @@ impl Server {
                 t.with_pending_state(|s| s.size = Some(r.size));
                 t.send_pending_configure();
             }
-            self.space.map_element(w.clone(), r.loc, false);
+            self.put(w.clone(), r.loc, false);
             if max {
                 self.toggle_maximize(w);
             }
@@ -117,7 +117,7 @@ impl Server {
         // Not exactly on another window of its program (three of the toolkit's
         // Wayland windows opened at once stacked in the middle, 2026-11-12).
         let r = self.clear_of_siblings(w, Rectangle::new(center(area, fitted), fitted), out);
-        self.space.map_element(w.clone(), r.loc, false);
+        self.put(w.clone(), r.loc, false);
         self.window_opened(w);
     }
 }
@@ -236,7 +236,7 @@ impl Server {
         {
             self.native_configure(n, r.size, false);
         }
-        self.space.map_element(w.clone(), r.loc, false);
+        self.put(w.clone(), r.loc, false);
     }
 }
 

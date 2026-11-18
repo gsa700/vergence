@@ -221,6 +221,11 @@ pub fn points_of(px: i32, scale: f64) -> i32 {
 static PICTURES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl NativeWindow {
+    /// The scale the window was last told (its screen's).
+    pub fn scale(&self) -> f64 {
+        self.state.lock().unwrap().scale
+    }
+
     pub fn title(&self) -> String {
         self.state.lock().unwrap().title.clone()
     }
@@ -476,7 +481,7 @@ impl Server {
                         let s = n.state.lock().unwrap();
                         (s.place, s.place_maximized)
                     };
-                    self.space.map_element(w.clone(), place, true);
+                    self.put(w.clone(), place, true);
                     if maximized {
                         self.toggle_maximize(&w);
                     }
@@ -591,7 +596,7 @@ impl Server {
                 }
                 tracing::info!("native: {:?} window {window} asks {width}x{height}, given {}x{} at {},{}", n.app_id, size.w, size.h, at.x, at.y);
                 if at != loc {
-                    self.space.map_element(w.clone(), at, false);
+                    self.put(w.clone(), at, false);
                 }
                 let maximized = n.state.lock().unwrap().maximized;
                 self.native_configure(n, size, maximized);
@@ -641,7 +646,7 @@ impl Server {
                 match self.native_place_rect(client, 0, &place, geo.size, &w) {
                     Some(r) => {
                         tracing::info!("native: client {client} window {window} placed at {},{} as asked", r.loc.x, r.loc.y);
-                        self.space.map_element(w.clone(), r.loc, false);
+                        self.put(w.clone(), r.loc, false);
                         self.remember(&w);
                     }
                     None => tracing::info!("native: client {client} window {window} asked for {place:?}: not allowed"),
@@ -837,6 +842,10 @@ impl Server {
     /// Tell the window its size, scale and state (paced: one configure waits
     /// for the client to acknowledge the last).
     pub fn native_configure(&mut self, n: &NativeWindow, size: Size<i32, Logical>, maximized: bool) {
+        // On whole pixels at a fractional scale (grid.rs); a maximized
+        // window fills its work area as it is.
+        let on_grid = !maximized && self.natives.get(&(n.client, n.id)).is_some_and(|w| self.on_grid(w));
+        let size = if on_grid { Self::grid_size(size, n.scale()) } else { size };
         {
             let mut s = n.state.lock().unwrap();
             if s.acked_serial != s.sent_serial {
@@ -908,7 +917,21 @@ impl Server {
             };
             if changed {
                 tracing::info!("native: {:?} window {} now at scale {scale:.4}", n.app_id, n.id);
-                self.native_send_configure(n);
+                // On the new screen's grid (grid.rs): its size again, then its place.
+                let (size, maximized) = {
+                    let s = n.state.lock().unwrap();
+                    (s.size, s.maximized)
+                };
+                let snapped = if !maximized && self.on_grid(&w) { Self::grid_size(size, scale) } else { size };
+                if snapped != size {
+                    self.native_configure(n, snapped, maximized);
+                } else {
+                    self.native_send_configure(n);
+                }
+                // Moved only when off the grid: map_element also raises it.
+                if !maximized && self.grid_loc(&w, geo.loc) != geo.loc {
+                    self.put(w.clone(), geo.loc, false);
+                }
             }
         }
     }

@@ -872,7 +872,7 @@ impl Server {
                             // Out of maximized, its old size, under the pointer by its title bar.
                             let x = (pos.x - old.size.w as f64 / 2.0).round() as i32;
                             let y = pos.y.round() as i32 + crate::decor::TITLE_H / 2;
-                            self.space.map_element(window.clone(), (x, y), true);
+                            self.put(window.clone(), (x, y), true);
                             if let Some(xs) = window.x11_surface() {
                                 let _ = xs.configure(Rectangle::new((x, y).into(), old.size));
                             }
@@ -883,7 +883,7 @@ impl Server {
                 } else {
                     self.snap_track(pos);
                     let to = (loc.to_f64() + delta).to_i32_round();
-                    self.space.map_element(window.clone(), to, true);
+                    self.put(window.clone(), to, true);
                     if let Some(x) = window.x11_surface() {
                         let _ = x.configure(Rectangle::new(to, x.geometry().size));
                     }
@@ -894,7 +894,14 @@ impl Server {
                 }
             }
             Some(Running::Resize { window, edges, from, initial, .. }) => {
-                let size = self.within_limits(&window, resized(edges, initial, pos - from));
+                let mut size = self.within_limits(&window, resized(edges, initial, pos - from));
+                // A native window's new size on its screen's grid first, so a
+                // left or top edge moves by the same steps (grid.rs).
+                if let Win::Native(n) = &window
+                    && self.on_grid(&window)
+                {
+                    size = Self::grid_size(size, n.scale());
+                }
                 let mut loc = initial.loc;
                 if edges.intersects(ResizeEdge::LEFT) {
                     loc.x += initial.size.w - size.w;
@@ -907,7 +914,7 @@ impl Server {
                 } else if let Win::Native(n) = &window {
                     let n = n.clone();
                     self.native_configure(&n, size, false);
-                    self.space.map_element(window.clone(), loc, true);
+                    self.put(window.clone(), loc, true);
                 } else if let Some(t) = window.toplevel() {
                     // Its location follows as the new size arrives (resize_commit).
                     t.with_pending_state(|s| {
@@ -992,7 +999,7 @@ impl Server {
         if edges.intersects(ResizeEdge::TOP) {
             loc.y = initial.loc.y + (initial.size.h - size.h);
         }
-        self.space.map_element(window, loc, false);
+        self.put(window, loc, false);
     }
 
     /// The edges to resize from (Alt+right drag): the window's nearest third in each direction.

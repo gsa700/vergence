@@ -38,7 +38,7 @@ impl Server {
             let _ = x.set_fullscreen(true);
             let _ = x.configure(screen);
         }
-        self.space.map_element(w.clone(), screen.loc, true);
+        self.put(w.clone(), screen.loc, true);
         tracing::info!("full screen: {:?} on {:?}", self.window_title(w), screen);
         self.redraw_all();
     }
@@ -56,7 +56,7 @@ impl Server {
             let _ = x.set_fullscreen(false);
             let _ = x.configure(before);
         }
-        self.space.map_element(w.clone(), before.loc, true);
+        self.put(w.clone(), before.loc, true);
         tracing::info!("full screen: {:?} back to {:?}", self.window_title(w), before);
         self.redraw_all();
     }

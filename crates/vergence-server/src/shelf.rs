@@ -1000,7 +1000,7 @@ impl Server {
             at = (area.loc.x + 40, area.loc.y + 40).into();
         }
         tracing::info!("shelf: back {:?}", self.window_title(&w));
-        self.space.map_element(w.clone(), at, true);
+        self.put(w.clone(), at, true);
         self.focus_window(&w, smithay::utils::SERIAL_COUNTER.next_serial());
         self.redraw_all();
     }

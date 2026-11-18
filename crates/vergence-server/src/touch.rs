@@ -264,7 +264,7 @@ impl Server {
                         && id == window
                     {
                         let to = (from.to_f64() + Point::from((dx, dy))).to_i32_round();
-                        self.space.map_element(w, to, true);
+                        self.put(w, to, true);
                     }
                 }
                 Out::FingerMoveEnd(window) => {

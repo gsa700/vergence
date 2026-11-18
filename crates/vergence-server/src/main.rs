@@ -16,6 +16,7 @@ mod drm;
 mod cursor;
 mod focus;
 mod decor;
+mod grid;
 mod xsettings;
 mod control;
 mod text;

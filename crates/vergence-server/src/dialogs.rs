@@ -81,7 +81,7 @@ impl Server {
 
     /// Put a window's content at `at` (X11 windows are told).
     fn move_window(&mut self, w: &Win, at: Point<i32, Logical>) {
-        self.space.map_element(w.clone(), at, false);
+        self.put(w.clone(), at, false);
         if let Some(x) = w.x11_surface() {
             let _ = x.configure(Rectangle::new(at, x.geometry().size));
         }
@@ -130,7 +130,7 @@ impl Server {
         let hidden = std::mem::take(&mut self.dialogs.hidden);
         for (p, at) in hidden {
             if same(self, &p) {
-                self.space.map_element(p.clone(), at, true);
+                self.put(p.clone(), at, true);
             } else {
                 self.dialogs.hidden.push((p, at));
             }

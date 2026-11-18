@@ -59,7 +59,7 @@ impl Server {
     pub fn desktop_place(&mut self, w: &Win) {
         let (Some(area), Win::Native(n)) = (self.desktop_area(), w) else { return };
         let n = n.clone();
-        self.space.map_element(w.clone(), area.loc, false);
+        self.put(w.clone(), area.loc, false);
         self.native_configure(&n, area.size, false);
         self.desktop_to_bottom();
         tracing::info!("desktop: its window at {}x{} from {},{}", area.size.w, area.size.h, area.loc.x, area.loc.y);

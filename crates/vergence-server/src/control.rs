@@ -353,7 +353,7 @@ impl Server {
                     return "move <i> <x> <y>".into();
                 };
                 let Some(w) = self.space.elements().nth(i).cloned() else { return format!("no window {i}") };
-                self.space.map_element(w.clone(), (x, y), true);
+                self.put(w.clone(), (x, y), true);
                 if let Some(xs) = w.x11_surface() {
                     let _ = xs.configure(smithay::utils::Rectangle::new((x, y).into(), xs.geometry().size));
                 }
