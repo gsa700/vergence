@@ -294,7 +294,7 @@ it is today:
   Xwayland's needs, the toolkit's Wayland road, install.sh's package lists)
   and drop or replace each, with outside apps still working. Apps bring
   their own libwayland-client; that's theirs, not ours.
-- **Bug: Firefox crashes opening the Downloads folder** from its downloads
+- *Done 2026-11-17 (21dd778): the D-Bus edge passes file descriptors, the portal opens the folder in File Viewer; Dave's click on Hubble works.* **Bug: Firefox crashes opening the Downloads folder** from its downloads
   panel. Firefox asks the desktop to show the folder (the portal's
   OpenURI/OpenDirectory, or org.freedesktop.FileManager1.ShowItems over
   D-Bus); our portal answers fd-based OpenFile/OpenDirectory with
