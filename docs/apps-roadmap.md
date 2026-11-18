@@ -313,7 +313,13 @@ it is today:
   held close, a TV. Consider a default text size from the screen's physical
   size (EDID) as well as its density, offered as the "Desktop default", and
   check it on techbench's 27" LG (Dave's pick there: 133⅓% scale, terminal
-  at 15) against Hubble's 15.6" panel and kepler's 14".
+  at 15) against Hubble's 15.6" panel and kepler's 14". Dave: the LG sits
+  closer than it should, and the default "13.3" was too small, 15 right:
+  the scale was right for the interface, the text wanted a step more.
+  Units to fix with it: the terminal's "Desktop default (13.3)" is 10 pt in
+  pixels (×96/72) while its list's 8–24 are pixels taken as they are, so
+  15 there is about 11.3 pt; the menu should speak points, as the desktop
+  does.
 - **Bug to watch: the terminal's text size once did not change** from its
   settings window (techbench, 2026-11-17); a live retry worked and writes
   were seen landing. Note what was picked and what else was open if it
