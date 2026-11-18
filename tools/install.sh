@@ -22,6 +22,7 @@
 #   share/doc/vergence/                      LICENSE-APACHE, LICENSE-GPL, THIRD-PARTY-NOTICES.md
 #   share/vergence/words/                    the spelling list (data/words/en_US.txt, from SCOWL) and its terms
 #   share/vergence/fonts/                    Inter and JetBrains Mono (data/fonts), with their licenses
+#   share/vergence/icons/{places,kinds}/     Vergence's own icons for places and files (data/icons)
 #   libexec/vergence/ups-tile, vtile-demo  lab tiles on the dock from scripts (tools/lab)
 #   libexec/vergence/vergence-choose         the Open/Save dialog the portal shows for apps not ours
 #   libexec/vergence/vergence-decode         pictures decoded apart, limited (Capsicum on FreeBSD)
@@ -74,6 +75,8 @@ libexec=$destdir$prefix/libexec/vergence
 sbin=$destdir$prefix/sbin
 words=$destdir$prefix/share/vergence/words
 fonts=$destdir$prefix/share/vergence/fonts
+# Vergence's own icons for places and kinds of files (tools/make-icons.py).
+ownicons=$destdir$prefix/share/vergence/icons
 
 if [ -n "$uninstall" ]; then
     for p in $programs vctl vergence-session vergence; do rm -f "$bin/$p"; done
@@ -95,6 +98,7 @@ if [ -n "$uninstall" ]; then
     rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
     [ -z "$destdir" ] && rm -f /etc/fonts/conf.d/90-vergence-fonts.conf /usr/local/etc/fonts/conf.d/90-vergence-fonts.conf
     rm -f "$fonts"/InterVariable*.ttf "$fonts"/JetBrainsMono-Variable*.ttf "$fonts"/Inter-OFL.txt "$fonts"/JetBrainsMono-OFL.txt
+    rm -rf "$ownicons"
     rmdir "$words" "$fonts" "$destdir$prefix/share/vergence" 2>/dev/null || true
     rmdir "$libexec" 2>/dev/null || true
     rmdir "$docs" 2>/dev/null || true
@@ -136,6 +140,10 @@ install -m 644 "$root/data/words/SCOWL-COPYRIGHT.txt" "$words/SCOWL-COPYRIGHT.tx
 # Mono with their licenses (SIL OFL 1.1); a family the system has itself is
 # the system's copy, these the fallback (vergence-text db.rs).
 install -d -m 755 "$fonts"
+for g in places kinds; do
+    install -d -m 755 "$ownicons/$g"
+    for f in "$root/data/icons/$g"/*.svg; do install -m 644 "$f" "$ownicons/$g/"; done
+done
 for f in "$root"/data/fonts/*; do install -m 644 "$f" "$fonts/"; done
 # Every app on the machine may use them (GTK, Qt, Firefox find fonts through
 # fontconfig): its conf.d gets our directory, after the system's own.

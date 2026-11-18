@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+<!-- An archive: a zipped band. Drawn by the project (tools/make-icons.py). -->
+<defs>
+<linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e3e6ec"/></linearGradient>
+<linearGradient id="folderBack" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b97ee"/><stop offset="1" stop-color="#3b77d6"/></linearGradient>
+<linearGradient id="folderFront" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8fbaf6"/><stop offset="1" stop-color="#5b97ee"/></linearGradient>
+<linearGradient id="metal" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#c9ced8"/><stop offset="0.45" stop-color="#f2f4f7"/><stop offset="1" stop-color="#a9b0bd"/></linearGradient>
+</defs>
+<path d="M17 4 L40 4 L51 15 L51 57 Q51 60 48 60 L17 60 Q14 60 14 57 L14 7 Q14 4 17 4 Z" fill="url(#paper)" stroke="#2a303c" stroke-width="1.2"/><path d="M40 4 L40 13 Q40 15 42 15 L51 15" fill="#e3e6ec" stroke="#2a303c" stroke-width="1.2"/><rect x="28" y="4" width="9" height="56" fill="#f0b43c" opacity="0.9"/><g fill="#2a303c"><rect x="33" y="8" width="3" height="2"/><rect x="29" y="12" width="3" height="2"/><rect x="33" y="16" width="3" height="2"/><rect x="29" y="20" width="3" height="2"/><rect x="33" y="24" width="3" height="2"/><rect x="29" y="28" width="3" height="2"/><rect x="33" y="32" width="3" height="2"/><rect x="29" y="36" width="3" height="2"/></g><rect x="28.5" y="40" width="8" height="10" rx="1.5" fill="#dfe3ea" stroke="#2a303c" stroke-width="1"/>
+</svg>

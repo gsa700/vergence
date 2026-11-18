@@ -14,7 +14,7 @@ host=${1:-hubble}
 here=$(cd "$(dirname "$0")/.." && pwd)
 ssh -o BatchMode=yes "$host" 'mkdir -p ~/src/vergence'
 rsync -a --delete \
-    --exclude .git/ --exclude target/ --exclude /dist/ --exclude .DS_Store \
+    --exclude .git/ --exclude target/ --exclude /target-check/ --exclude /dist/ --exclude .DS_Store \
     --exclude tools/sizebox/bin/ \
     --exclude tools/sizebox/avalonia/bin/ --exclude tools/sizebox/avalonia/obj/ \
     "$here"/ "$host":src/vergence/

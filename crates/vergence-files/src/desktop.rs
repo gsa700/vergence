@@ -329,13 +329,59 @@ impl Desktop {
         vergence_shell::desktop::parse(e.name.trim_end_matches(".desktop"), &text)
     }
 
-    /// The marks to decode: pictures (small) and launchers' icons.
+    /// Which of Vergence's own icons an entry shows (tools/make-icons.py):
+    /// the fixed ones', a folder's, a file's kind's; and the key it is kept
+    /// under (one decode for every entry of the same kind).
+    fn own_icon(&self, e: &Entry) -> Option<(&'static str, &'static str)> {
+        if let Some(f) = self.fixed_of(e) {
+            return Some(match f {
+                Fixed::Home => ("places", "home"),
+                Fixed::Volume => ("places", "usb"),
+                // Full while anything is in it (a few on the floor).
+                Fixed::Trash => ("places", if std::fs::read_dir(&e.path).is_ok_and(|mut d| d.next().is_some()) { "trash-full" } else { "trash" }),
+            });
+        }
+        if Desktop::launcher(e) {
+            return None;
+        }
+        if e.mime == Some("application/pdf") {
+            return Some(("kinds", "pdf"));
+        }
+        Some(match e.kind() {
+            Kind::Folder => ("places", "folder"),
+            Kind::Program => ("kinds", "program"),
+            Kind::Text => ("kinds", "text"),
+            Kind::Picture => ("kinds", "picture"),
+            Kind::Sound => ("kinds", "sound"),
+            Kind::Video => ("kinds", "video"),
+            Kind::Archive => ("kinds", "archive"),
+            Kind::Document => ("kinds", "document"),
+            Kind::Other => ("kinds", "other"),
+        })
+    }
+
+    /// The key an entry's mark is kept under: its own path (a picture's
+    /// thumbnail, a launcher's icon), else its own icon's ("::icon:places/home").
+    fn mark_key(&self, e: &Entry) -> PathBuf {
+        let thumb = Desktop::launcher(e) || (e.kind() == Kind::Picture && self.fixed_of(e).is_none());
+        match self.own_icon(e) {
+            Some((g, n)) if !thumb => PathBuf::from(format!("::icon:{g}/{n}")),
+            _ => e.path.clone(),
+        }
+    }
+
+    /// The marks to decode: pictures (small), launchers' icons, and our own
+    /// icons for the fixed ones, folders and files of each kind.
     fn want_marks(&self) {
         for e in &self.entries {
-            if self.asked.borrow().contains(&e.path) {
+            let key = self.mark_key(e);
+            if self.asked.borrow().contains(&key) {
                 continue;
             }
-            let source = if Desktop::launcher(e) {
+            let own = self.own_icon(e).filter(|_| key != e.path).and_then(|(g, n)| vergence_shell::icons::vergence_icon(g, n));
+            let source = if let Some(own) = own {
+                Some(own)
+            } else if Desktop::launcher(e) {
                 Desktop::entry_of(e).filter(|x| !x.icon.is_empty()).and_then(|x| if x.icon.starts_with('/') { Some(PathBuf::from(x.icon)) } else { vergence_shell::icons::find("", &x.icon, 128) })
             } else if e.kind() == Kind::Picture {
                 Some(e.path.clone())
@@ -343,9 +389,9 @@ impl Desktop {
                 None
             };
             let Some(source) = source else { continue };
-            self.asked.borrow_mut().insert(e.path.clone());
-            let (out, waker, key) = (self.marks.clone(), self.waker.clone(), e.path.clone());
-            let picture = !Desktop::launcher(e);
+            self.asked.borrow_mut().insert(key.clone());
+            let picture = key == e.path && !Desktop::launcher(e);
+            let (out, waker) = (self.marks.clone(), self.waker.clone());
             std::thread::spawn(move || {
                 // A picture's thumbnail comes from the shared cache (made once);
                 // a launcher's icon is decoded small.
@@ -440,7 +486,7 @@ impl Desktop {
                     None if Desktop::launcher(e) => Desktop::entry_of(e).map(|x| x.name).unwrap_or_else(|| e.name.clone()),
                     None => e.name.clone(),
                 };
-                (c, name, e.kind(), marks.get(&e.path).cloned().flatten(), self.chosen.contains(&e.path), self.fixed_of(e))
+                (c, name, e.kind(), marks.get(&self.mark_key(e)).cloned().flatten(), self.chosen.contains(&e.path), self.fixed_of(e))
             })
             .collect();
         let accent = t.accent;
@@ -453,7 +499,8 @@ impl Desktop {
                 }
                 let icon = Rect::new(c.x + (c.w - ICON) / 2.0, c.y + 8.0, ICON, ICON);
                 match img {
-                    _ if fixed.is_some() => draw_fixed(scene, icon, fixed.unwrap_or(Fixed::Home), t),
+                    // Our own icon, else the mark drawn here (no icon file found).
+                    None if fixed.is_some() => draw_fixed(scene, icon, fixed.unwrap_or(Fixed::Home), t),
                     Some(img) => {
                         let s = (ICON / img.width as f32).min(ICON / img.height as f32);
                         let (w, h) = (img.width as f32 * s, img.height as f32 * s);

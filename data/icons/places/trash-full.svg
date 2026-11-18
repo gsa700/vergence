@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+<!-- The Trash, full, a few dropped beside it. Drawn by the project (tools/make-icons.py). -->
+<defs>
+<linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e3e6ec"/></linearGradient>
+<linearGradient id="folderBack" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b97ee"/><stop offset="1" stop-color="#3b77d6"/></linearGradient>
+<linearGradient id="folderFront" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8fbaf6"/><stop offset="1" stop-color="#5b97ee"/></linearGradient>
+<linearGradient id="metal" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#c9ced8"/><stop offset="0.45" stop-color="#f2f4f7"/><stop offset="1" stop-color="#a9b0bd"/></linearGradient>
+</defs>
+<path d="M17 14 L27 7 L33 14 Z" fill="#ffffff" stroke="#2a303c" stroke-width="1"/><path d="M30 13 L43 7 L42 15 Z" fill="#fff4c9" stroke="#2a303c" stroke-width="1"/><circle cx="25" cy="12" r="4" fill="#f4f6f9" stroke="#2a303c" stroke-width="1"/><path d="M15 19 L45 19 L42.5 54 Q42.2 57 39.2 57 L20.8 57 Q17.8 57 17.5 54 Z" fill="url(#metal)" stroke="#2a303c" stroke-width="1.2"/><rect x="11" y="15" width="38" height="7" rx="3" fill="#dfe3ea" stroke="#2a303c" stroke-width="1.2" transform="rotate(-8 30 18)"/><g stroke="#8a919e" stroke-width="2" stroke-linecap="round"><line x1="24" y1="27" x2="25" y2="51"/><line x1="30" y1="27" x2="30" y2="51"/><line x1="36" y1="27" x2="35" y2="51"/></g><path d="M46 55 Q49 50 54 52 Q58 54 56 58 Q52 61 47 59 Q44 58 46 55 Z" fill="#f4f6f9" stroke="#2a303c" stroke-width="1"/><path d="M48 55 Q51 54 54 56" fill="none" stroke="#9aa3b5" stroke-width="0.8"/><path d="M4 57 L13 53 L15 60 L6 61 Z" fill="#fff4c9" stroke="#2a303c" stroke-width="1"/><line x1="7" y1="57.5" x2="12" y2="55.5" stroke="#c9b98a" stroke-width="0.8"/>
+</svg>

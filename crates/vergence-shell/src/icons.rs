@@ -147,6 +147,23 @@ pub fn find_in(data_dirs: &[PathBuf], home: Option<&Path>, theme: &str, name: &s
     None
 }
 
+/// One of Vergence's own icons (tools/make-icons.py, 2026-11-18): `group`
+/// "places" (home, trash, trash-full, folder, disk, usb ...) or "kinds"
+/// (text, picture, pdf ...). Installed in share/vergence/icons/<group>
+/// (install.sh); a checkout's own data/icons/<group> beside its build
+/// (target/release/../../data) for a development session.
+pub fn vergence_icon(group: &str, name: &str) -> Option<PathBuf> {
+    let file = format!("{group}/{name}.svg");
+    let mut dirs: Vec<PathBuf> = crate::apps::data_dirs().into_iter().map(|d| d.join("vergence/icons")).collect();
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(bin) = exe.parent()
+    {
+        dirs.insert(0, bin.join("../share/vergence/icons"));
+        dirs.push(bin.join("../../data/icons"));
+    }
+    dirs.into_iter().map(|d| d.join(&file)).find(|p| p.is_file())
+}
+
 /// [`find_in`] this machine's data directories and the user's home.
 pub fn find(theme: &str, name: &str, pixels: u32) -> Option<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from);

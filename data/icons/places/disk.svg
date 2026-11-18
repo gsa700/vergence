@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+<!-- A disk inside the machine. Drawn by the project (tools/make-icons.py). -->
+<defs>
+<linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e3e6ec"/></linearGradient>
+<linearGradient id="folderBack" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b97ee"/><stop offset="1" stop-color="#3b77d6"/></linearGradient>
+<linearGradient id="folderFront" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8fbaf6"/><stop offset="1" stop-color="#5b97ee"/></linearGradient>
+<linearGradient id="metal" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#c9ced8"/><stop offset="0.45" stop-color="#f2f4f7"/><stop offset="1" stop-color="#a9b0bd"/></linearGradient>
+</defs>
+<rect x="6" y="20" width="52" height="26" rx="5" fill="url(#metal)" stroke="#2a303c" stroke-width="1.2"/><rect x="6" y="38" width="52" height="8" rx="3" fill="#a9b0bd" stroke="#2a303c" stroke-width="1.2"/><circle cx="50" cy="42" r="2" fill="#4caf72"/><g stroke="#8a919e" stroke-width="1.5"><line x1="12" y1="27" x2="34" y2="27"/><line x1="12" y1="31" x2="28" y2="31"/></g>
+</svg>
