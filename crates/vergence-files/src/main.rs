@@ -873,25 +873,22 @@ impl Viewer {
             cmd::UNDO => {
                 let last = self.shared.borrow_mut().undo.pop();
                 if let Some(d) = last {
-                    self.notice = Some(match ops::undo(&d) {
-                        Ok(words) => words,
-                        Err(why) => format!("It could not be undone: {why}"),
-                    });
+                    // Only what went wrong is said: what was done shows itself
+                    // (Dave, 2026-11-18: "I know I deleted a file").
+                    if let Err(why) = ops::undo(&d) {
+                        self.notice = Some(format!("It could not be undone: {why}"));
+                    }
                     self.read_all();
                 }
             }
             cmd::RESTORE => {
                 self.notice = None;
                 let names: Vec<String> = self.chosen_paths().iter().filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).collect();
-                let mut back = 0;
+                // Only what went wrong is said (Dave, 2026-11-18).
                 for n in &names {
-                    match ops::restore(n) {
-                        Ok(_) => back += 1,
-                        Err(e) => self.notice = Some(format!("“{n}” could not be put back: {e}")),
+                    if let Err(e) = ops::restore(n) {
+                        self.notice = Some(format!("“{n}” could not be put back: {e}"));
                     }
-                }
-                if back > 0 && self.notice.is_none() {
-                    self.notice = Some(format!("Put back where {} came from.", if back == 1 { "it" } else { "they" }));
                 }
                 self.read_all();
             }
@@ -1264,9 +1261,7 @@ impl Viewer {
             }
         }
         if !done.is_empty() {
-            if self.notice.is_none() {
-                self.notice = Some(format!("{} moved to the Trash. Ctrl+Z puts {} back.", if done.len() == 1 { "1 item".to_string() } else { format!("{} items", done.len()) }, if done.len() == 1 { "it" } else { "them" }));
-            }
+            // No notice of it (Dave, 2026-11-18): it shows in the Trash, and Ctrl+Z puts it back.
             self.shared.borrow_mut().undo.push(ops::Done::Trashed(done));
         }
         self.read_all();
