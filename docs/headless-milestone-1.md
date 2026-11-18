@@ -149,4 +149,7 @@ scenarios, each from a bug or a rule we already have:
   edge lines only on the grid (off it they cannot be whole pixels).
   Hubble: a 27" QHD in memory beside the panel, display check at 1, 1.25,
   4/3, 1.5, 2 and 173/120: 48 shots, all pass; server-windows.toml untouched.
-  Tests: Hubble 709, kepler 702, techbench 702.
+  Tests: Hubble 709, kepler 702, techbench 702. kepler on real monitors
+  (FreeBSD; the 14" 4K at 30 Hz on HDMI-A-1, the ASUS on HDMI-A-2): the 4K at
+  1.5, 2, 2.4, 2.5, 3 (40/40, twice) and the ASUS at 1, 1.25, 4/3 and its
+  same-size 16/15 (32/32).
