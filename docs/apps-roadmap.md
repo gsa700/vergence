@@ -305,6 +305,13 @@ it is today:
   A few lines still give a scroll range; probably the area counts a page of
   room past the last line, or the under-bar inset, as content. Scrolling
   should start only when the text is taller than the view.
+- **Next (Dave, 2026-11-18): native windows on whole pixels at fractional
+  scales.** At 133⅓% a window's bar and body still disagree by a pixel by
+  position (the bar's outline shows or is cropped; a line flickers at the
+  seam while dragging). Snap native windows' positions and the sizes the
+  server gives out to multiples of q points for a scale p/q (4/3: 3), so
+  nothing rounds. Done before it: 94c8862 (points back exactly), e24e617
+  (edges rounded once). Shared memory has the details.
 - **Polish: default text sizes that fit the screen** (Dave, techbench,
   2026-11-17). Today every app's text starts at a fixed point size (10 pt,
   the terminal's too) and only the screen's scale grows it. The scale
