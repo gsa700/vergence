@@ -268,14 +268,14 @@ fn native_texture(renderer: &mut GlesRenderer, w: &Win) -> Option<(smithay::back
 /// toolkit rounds its pixels up, so a picture at a fractional scale has up to
 /// one pixel more than its points cover: cropped, not squeezed, so the body
 /// and its bar end on the same pixel and the text stays sharp.
-fn shown_px(px: (i32, i32), cover: smithay::utils::Size<i32, Physical>) -> Rectangle<f64, Logical> {
+pub(crate) fn shown_px(px: (i32, i32), cover: smithay::utils::Size<i32, Physical>) -> Rectangle<f64, Logical> {
     Rectangle::from_size((px.0.min(cover.w).max(1) as f64, px.1.min(cover.h).max(1) as f64).into())
 }
 
 /// The pixels a rectangle of points covers at `scale`, each edge rounded on
 /// its own, as Smithay places its elements: two rectangles that meet in
 /// points meet on the same pixel, wherever they are.
-fn edges_px(at: Point<i32, Logical>, size: smithay::utils::Size<i32, Logical>, scale: f64) -> Rectangle<i32, Physical> {
+pub(crate) fn edges_px(at: Point<i32, Logical>, size: smithay::utils::Size<i32, Logical>, scale: f64) -> Rectangle<i32, Physical> {
     let a = at.to_f64().to_physical(scale);
     let b = (at + size.to_point()).to_f64().to_physical(scale);
     Rectangle::from_extremities(a.to_i32_round(), b.to_i32_round())

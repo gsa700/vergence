@@ -17,6 +17,8 @@ mod cursor;
 mod focus;
 mod decor;
 mod grid;
+#[cfg(test)]
+mod geometry_tests;
 mod xsettings;
 mod control;
 mod text;

@@ -72,12 +72,19 @@ impl From<SceneError> for RenderError {
     }
 }
 
+/// How far over a whole pixel a side may be and still be that pixel: the
+/// scale comes as f32 (420 points at 1.2 were 504.00003 pixels, drawn as
+/// 505 where the server shows 504, cropping the last row: the geometry
+/// tests, 2026-11-18). The server's points_of rounds the same way.
+pub const PIXEL_SLACK: f64 = 1e-3;
+
 /// The size in pixels of a scene drawn at `scale`: every started pixel counts.
 pub fn pixel_size(scene: &Scene, scale: f32) -> Result<(u32, u32), RenderError> {
     if !(scale.is_finite() && scale > 0.0 && scale <= MAX_SCALE) {
         return Err(RenderError::Scale);
     }
-    let (w, h) = ((scene.width * scale).ceil(), (scene.height * scale).ceil());
+    let side = |points: f32| (points as f64 * scale as f64 - PIXEL_SLACK).ceil() as f32;
+    let (w, h) = (side(scene.width), side(scene.height));
     if !(w >= 1.0 && h >= 1.0 && w <= MAX_SIDE as f32 && h <= MAX_SIDE as f32) || (w as u64) * (h as u64) > MAX_PIXELS {
         return Err(RenderError::TooLarge);
     }

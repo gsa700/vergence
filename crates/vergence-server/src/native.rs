@@ -208,7 +208,7 @@ pub fn points_of(px: i32, scale: f64) -> i32 {
     if !(scale.is_finite() && scale > 0.0) || px <= 0 {
         return px.max(0);
     }
-    let up = |p: i32| (p as f64 * scale - 1e-6).ceil() as i32;
+    let up = |p: i32| (p as f64 * scale - vergence_render::PIXEL_SLACK).ceil() as i32;
     let mut p = (px as f64 / scale).floor() as i32;
     while p > 0 && up(p) > px {
         p -= 1;
