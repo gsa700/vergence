@@ -106,6 +106,8 @@ struct State {
     /// The size it was last told to draw at, in reference units, and the scale.
     size: Size<i32, Logical>,
     scale: f64,
+    /// Its screen's text factor (displays.rs, Scales::text), told with the scale.
+    text: f64,
     maximized: bool,
     activated: bool,
     /// The last configure sent and the last one the client said it drew for;
@@ -373,6 +375,7 @@ impl Server {
                         title,
                         size: asked,
                         scale: 1.0,
+                        text: 1.0,
                         maximized: false,
                         activated: false,
                         sent_serial: 0,
@@ -421,7 +424,7 @@ impl Server {
                         (self.clear_of_siblings(&w, Rectangle::new(crate::place::center(area, size), size), out), false)
                     }
                 };
-                let scale = self.scale_at(rect);
+                let (scale, text) = self.screen_at(rect);
                 // Its first size on the grid too (grid.rs); its place is when it is shown (put).
                 let mut rect = rect;
                 if !maximized && self.on_grid(&w) {
@@ -429,7 +432,7 @@ impl Server {
                 }
                 {
                     let mut s = n.state.lock().unwrap();
-                    (s.size, s.scale, s.place, s.place_maximized) = (rect.size, scale, rect.loc, maximized);
+                    (s.size, s.scale, s.text, s.place, s.place_maximized) = (rect.size, scale, text, rect.loc, maximized);
                 }
                 self.natives.insert((client, window), w.clone());
                 let _ = self.window_identity(&w);
@@ -867,13 +870,13 @@ impl Server {
 
     pub(crate) fn native_send_configure(&mut self, n: &NativeWindow) {
         let bar = self.natives.get(&(n.client, n.id)).cloned().map_or(crate::decor::TITLE_H, |w| self.bar_h(&w));
-        let (serial, size, scale, maximized, activated, inset) = {
+        let (serial, size, scale, maximized, activated, inset, text) = {
             let mut s = n.state.lock().unwrap();
             s.sent_serial = s.sent_serial.wrapping_add(1).max(1);
             s.inset = if s.under_bar { bar } else { 0 };
-            (s.sent_serial, s.size, s.scale, s.maximized, s.activated, s.inset as f64)
+            (s.sent_serial, s.size, s.scale, s.maximized, s.activated, s.inset as f64, s.text)
         };
-        let ev = WinEvent::Configure { window: n.id, serial, width: size.w as f64, height: size.h as f64, scale, maximized, activated, inset };
+        let ev = WinEvent::Configure { window: n.id, serial, width: size.w as f64, height: size.h as f64, scale, maximized, activated, inset, text };
         self.bus_send(n.client, ServerMsg::Window(ev));
     }
 
@@ -882,19 +885,21 @@ impl Server {
         self.bus_send(n.client, ServerMsg::Window(WinEvent::Close { window: n.id }));
     }
 
-    /// The scale of the monitor a rectangle is mostly on.
-    fn scale_at(&self, rect: Rectangle<i32, Logical>) -> f64 {
+    /// The scale and text factor (displays.rs, Scales::text) of the monitor
+    /// a rectangle is mostly on.
+    fn screen_at(&self, rect: Rectangle<i32, Logical>) -> (f64, f64) {
+        let of = |o: &Output| (o.current_scale().fractional_scale(), self.scale_notes.get(&o.name()).map_or(1.0, |s| s.text));
         self.space
             .outputs()
             .filter_map(|o| {
                 let g = self.space.output_geometry(o)?;
                 let i = g.intersection(rect)?;
-                Some((i.size.w as i64 * i.size.h as i64, o.current_scale().fractional_scale()))
+                Some((i.size.w as i64 * i.size.h as i64, of(o)))
             })
             .max_by_key(|(a, _)| *a)
             .map(|(_, s)| s)
-            .or_else(|| self.space.outputs().next().map(|o| o.current_scale().fractional_scale()))
-            .unwrap_or(1.0)
+            .or_else(|| self.space.outputs().next().map(of))
+            .unwrap_or((1.0, 1.0))
     }
 
     /// `output` has been drawn: windows on it that wait for a frame hear so,
@@ -911,17 +916,17 @@ impl Server {
                 self.bus_send(n.client, ServerMsg::Window(WinEvent::Frame { window: n.id, time_ms }));
             }
             let Some(geo) = self.space.element_geometry(&w) else { continue };
-            let scale = self.scale_at(geo);
+            let (scale, text) = self.screen_at(geo);
             let changed = {
                 let mut s = n.state.lock().unwrap();
-                let moved = (s.scale - scale).abs() > 1e-6;
+                let moved = (s.scale - scale).abs() > 1e-6 || (s.text - text).abs() > 1e-6;
                 if moved {
-                    s.scale = scale;
+                    (s.scale, s.text) = (scale, text);
                 }
                 moved
             };
             if changed {
-                tracing::info!("native: {:?} window {} now at scale {scale:.4}", n.app_id, n.id);
+                tracing::info!("native: {:?} window {} now at scale {scale:.4}, text {text:.3}", n.app_id, n.id);
                 // On the new screen's grid (grid.rs): its size again, then its place.
                 let (size, maximized) = {
                     let s = n.state.lock().unwrap();

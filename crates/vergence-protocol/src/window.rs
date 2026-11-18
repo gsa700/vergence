@@ -497,6 +497,9 @@ fn limit(v: f64, what: &'static str) -> Result<f64, WireError> {
 
 /// The tallest strip a window may be asked to draw under its bar, in points.
 pub const MAX_INSET: f64 = 256.0;
+/// The text factor's range (`WinEvent::Configure::text`).
+pub const MIN_TEXT: f64 = 0.5;
+pub const MAX_TEXT: f64 = 2.0;
 
 /// What the server tells a client about its windows.
 #[derive(Debug, Clone, PartialEq)]
@@ -507,7 +510,10 @@ pub enum WinEvent {
     /// `inset`: the strip at the top of the window's picture under the
     /// server's bar (points; 0 unless it asked with [`WinRequest::UnderBar`]):
     /// the picture is `height + inset` tall and the content below the strip.
-    Configure { window: u32, serial: u32, width: f64, height: f64, scale: f64, maximized: bool, activated: bool, inset: f64 },
+    /// `text`: how much larger than its sizes say to draw text on this
+    /// screen (version 21): the screen's calculated scale over the one it is
+    /// shown at, so a size looks the same on every screen (1 = as given).
+    Configure { window: u32, serial: u32, width: f64, height: f64, scale: f64, maximized: bool, activated: bool, inset: f64, text: f64 },
     /// The user asked for the window to close.
     Close { window: u32 },
     /// The last picture is on the screen: draw the next when there is one.
@@ -1168,9 +1174,9 @@ impl WinEvent {
                 e.u32(*serial).u32(*window).str(token);
                 e
             }
-            WinEvent::Configure { window, serial, width, height, scale, maximized, activated, inset } => {
+            WinEvent::Configure { window, serial, width, height, scale, maximized, activated, inset, text } => {
                 let mut e = Encoder::frame(op::CONFIGURE);
-                e.u32(*window).u32(*serial).f64(*width).f64(*height).f64(*scale).bool(*maximized).bool(*activated).f64(*inset);
+                e.u32(*window).u32(*serial).f64(*width).f64(*height).f64(*scale).bool(*maximized).bool(*activated).f64(*inset).f64(*text);
                 e
             }
             WinEvent::Close { window } => {
@@ -1372,6 +1378,13 @@ impl WinEvent {
                         return Err(WireError::BadValue("inset"));
                     }
                     inset
+                },
+                text: {
+                    let text = finite(d.f64()?, "text")?;
+                    if !(MIN_TEXT..=MAX_TEXT).contains(&text) {
+                        return Err(WireError::BadValue("text"));
+                    }
+                    text
                 },
             },
             op::CLOSE => WinEvent::Close { window: d.u32()? },
@@ -1633,7 +1646,7 @@ mod tests {
     fn every_event_survives_the_wire() {
         let all = vec![
             WinEvent::Created { serial: 7, window: 1, token: "t1".into() },
-            WinEvent::Configure { window: 1, serial: 2, width: 880.0, height: 640.0, scale: 1.5, maximized: false, activated: true, inset: 36.0 },
+            WinEvent::Configure { window: 1, serial: 2, width: 880.0, height: 640.0, scale: 1.5, maximized: false, activated: true, inset: 36.0, text: 1.27 },
             WinEvent::Close { window: 1 },
             WinEvent::Frame { window: 1, time_ms: 1234 },
             WinEvent::PointerEnter { window: 1, serial: 3, x: 1.5, y: 2.5 },

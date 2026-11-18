@@ -134,6 +134,11 @@ pub struct Frame {
     /// grounds (window styles milestone 1: the server sends it in dark style
     /// only); None: no tint.
     pub tint: Option<Color>,
+    /// Text on this screen is drawn this much larger than its sizes say
+    /// (the server's text factor, bus v21; 1 on the Wayland road): sizes are
+    /// as on a screen at its calculated scale, so they look the same on
+    /// every screen. `vergence_look::text_size` applies it.
+    pub text: f32,
 }
 
 /// What the bar's description is made of ([`App::bar`]): the native
@@ -1939,7 +1944,7 @@ impl<'a> Runner<'a> {
         let t = Instant::now();
         let w = &self.windows[i];
         let bar_h = w.bar_h();
-        let frame = Frame { width: w.width as f32, height: (w.height as f32 - bar_h).max(1.0), scale: w.scale120 as f32 / 120.0, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: false, top: 0.0 , tint: None };
+        let frame = Frame { width: w.width as f32, height: (w.height as f32 - bar_h).max(1.0), scale: w.scale120 as f32 / 120.0, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: false, top: 0.0 , tint: None, text: 1.0 };
         let mut scene = self.windows[i].app.get().scene(&frame, &mut self.fonts);
         if self.windows[i].frame {
             let title = self.windows[i].app.get().title();

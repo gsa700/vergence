@@ -581,9 +581,13 @@ impl<P: Program> Host<P> {
             self.scale = frame.scale;
             self.stale |= self.program.scale(frame.scale);
         }
-        if self.stale || self.laid_at != (frame.width, frame.height) || self.theme.top != frame.top || self.tint != frame.tint {
+        if self.stale || self.laid_at != (frame.width, frame.height) || self.theme.top != frame.top || self.tint != frame.tint || self.theme.text_factor != frame.text {
             self.theme = self.program.theme();
             self.theme.top = frame.top;
+            // Text as large on this screen as on any (Frame::text).
+            self.theme.text_factor = frame.text;
+            self.theme.text_size = vergence_look::text_size(self.theme.text_size, frame.text);
+            self.ui.set_text_factor(frame.text);
             // The wallpaper's color behind the window (tint, window styles milestone 1).
             if let Some(c) = frame.tint {
                 self.theme = self.theme.tinted(c);

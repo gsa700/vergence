@@ -20,6 +20,9 @@ pub struct Theme {
     /// The interface font's family, and the size of text that names none.
     pub font: String,
     pub text_size: f32,
+    /// The screen's text factor (vergence_ui::Frame::text), already in
+    /// `text_size`; for sizes an app names itself (vergence_look::text_size).
+    pub text_factor: f32,
     /// How opaque the window's ground is (`vergence_ui::opacity_setting`).
     pub opacity: f32,
     /// The longest time between two clicks of a double-click, in ms.
@@ -58,6 +61,7 @@ impl Theme {
             hover: Color { a: p.hover_alpha, ..c(p.hover) },
             font: "sans-serif".into(),
             text_size: 13.0,
+            text_factor: 1.0,
             opacity: 1.0,
             double_click: 400,
             top: 0.0,

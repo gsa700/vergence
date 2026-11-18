@@ -33,6 +33,15 @@ impl Rgb {
 /// allows, and a window's own corners when the server rounds them.
 pub const RADIUS: f32 = 5.0;
 
+/// A text size on a screen with text factor `factor` (the server's
+/// `Configure::text`, 2026-11-18): larger or smaller by it, to half a unit.
+pub fn text_size(size: f32, factor: f32) -> f32 {
+    if !(factor.is_finite() && factor > 0.0) {
+        return size;
+    }
+    ((size * factor * 2.0).round() / 2.0).max(1.0)
+}
+
 /// **Menus** (Dave, 2026-11-16: "the black rounded design", a standard for
 /// every right-click menu, light where the look is light): the server's
 /// (the desktop's, the dock's, a title bar's, an app's own) and the

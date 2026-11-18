@@ -47,11 +47,12 @@
 //! server's menu. Version 19 (dock milestone 1): live tiles. Version 20
 //! (backup milestone 1, step 1): `WinRequest::Menu`, a window's own
 //! right-click menu by its lines (`window::MenuLine`), submenus included.
+//! Version 21: `WinEvent::Configure::text`, a screen's text size factor.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 20;
+pub const VERSION: u32 = 21;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

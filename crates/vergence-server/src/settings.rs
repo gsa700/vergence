@@ -226,9 +226,11 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
     m
 }
 
-/// The desktop's fonts when settings.toml names none.
-pub const DEFAULT_FONT: &str = "Inter Variable 10";
-pub const DEFAULT_MONO: &str = "JetBrains Mono 10";
+/// The desktop's fonts when settings.toml names none: sizes as on a screen
+/// at its calculated scale, which each screen's text factor keeps them
+/// (Dave, 2026-11-18: 11 and 12, Hubble's).
+pub const DEFAULT_FONT: &str = "Inter Variable 11";
+pub const DEFAULT_MONO: &str = "JetBrains Mono 12";
 
 fn load() -> Map {
     let read = |n: &str| config(n).and_then(|p| std::fs::read_to_string(p).ok());

@@ -1619,7 +1619,7 @@ impl Doc {
     pub(crate) fn draw(&mut self, scene: &mut Scene, fonts: &mut Fonts, r: Rect, inset: f32, theme: &Theme, focused: bool, caret_on: bool) {
         let inset = inset.clamp(0.0, (r.h - 40.0).max(0.0));
         let v = Rect::new(r.x, r.y + inset, r.w, r.h - inset);
-        let size = self.options.size.unwrap_or(theme.text_size).clamp(4.0, 200.0);
+        let size = self.options.size.map_or(theme.text_size, |s| vergence_look::text_size(s, theme.text_factor)).clamp(4.0, 200.0);
         let Some(face) = fonts.face(&self.options.font, 400, false).or_else(|| fonts.face("monospace", 400, false)).or_else(|| fonts.face(&theme.font, 400, false)) else { return };
         let m = fonts.metrics(face, size);
         let line_h = (m.ascent + m.descent + m.line_gap).max(size * 1.3).ceil();

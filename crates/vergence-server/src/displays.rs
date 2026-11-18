@@ -152,7 +152,16 @@ impl DisplaysConfig {
         };
         let size = self.size();
         let how = if size != 1.0 { format!("{how}; size {}", pct(size)) } else { how };
-        Scales { shown: crate::scale_in_120ths(base * size), default, base, how }
+        // Text as large as the calculated scale would show it, whatever scale
+        // was chosen (Dave, 2026-11-18: per screen, full compensation): 133%
+        // on the LG, calculated 1.69, draws text 1.27 times its size. Before
+        // the size preference, which makes text larger with the rest.
+        let text = match d.note {
+            None => (d.exact / base).clamp(MIN_TEXT, MAX_TEXT),
+            Some(_) => 1.0,
+        };
+        let how = if (text - 1.0).abs() >= 0.005 { format!("{how}; text {text:.2}x") } else { how };
+        Scales { shown: crate::scale_in_120ths(base * size), default, base, text, how }
     }
 
     /// Where `id` sits in `setup`, if the arrangement says.
@@ -161,12 +170,16 @@ impl DisplaysConfig {
     }
 }
 
+use vergence_protocol::window::{MAX_TEXT, MIN_TEXT};
+
 /// A screen's scales (see scale_for).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scales {
     pub shown: f64,
     pub default: f64,
     pub base: f64,
+    /// Text drawn this much larger than its size says (calculated / base).
+    pub text: f64,
     pub how: String,
 }
 
@@ -267,6 +280,25 @@ mod tests {
         // A silly chosen value is ignored.
         let c = cfg("[[displays.screen]]\nid = \"asus\"\nscale = 40.0\n");
         assert_eq!(c.scale_for("asus", "HDMI-A-1", (1920, 1080), Some((475, 267))).base, 1.0);
+    }
+
+    #[test]
+    fn text_follows_the_calculated_scale() {
+        // techbench's LG (162 ppi, calculated 1.69) chosen at 133%: text 1.27x.
+        let c = cfg("[[displays.screen]]\nid = \"lg\"\nscale = 1.3333333333\n");
+        let s = c.scale_for("lg", "DP-1", (3840, 2160), Some((600, 340)));
+        assert!((s.text - 1.27).abs() < 0.01, "{}", s.text);
+        // At its default 200% the text is drawn smaller (full compensation).
+        let s = DisplaysConfig::default().scale_for("lg", "DP-1", (3840, 2160), Some((600, 340)));
+        assert!((s.text - 0.845).abs() < 0.01, "{}", s.text);
+        // The size preference does not take it back: text grows with the rest.
+        let c = cfg("[displays]\nsize = 1.25\n[[displays.screen]]\nid = \"lg\"\nscale = 1.3333333333\n");
+        assert!((c.scale_for("lg", "DP-1", (3840, 2160), Some((600, 340))).text - 1.27).abs() < 0.01);
+        // Hubble's panel at a laptop's distance: 1.04.
+        let s = DisplaysConfig::default().scale_for("p", "eDP-1", (1920, 1080), Some((344, 193)));
+        assert!((s.text - 1.04).abs() < 0.01, "{}", s.text);
+        // No size from the EDID: as given.
+        assert_eq!(DisplaysConfig::default().scale_for("x", "HDMI-A-1", (1920, 1080), None).text, 1.0);
     }
 
     #[test]

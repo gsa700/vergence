@@ -180,6 +180,10 @@ pub struct Ui<M> {
     /// 1): scroll bars start below it (Dave, 2026-11-14: they went under the
     /// title bar).
     under_bar: f32,
+    /// The screen's text factor (Frame::text): sizes that labels name are
+    /// drawn this much larger (the size of text that names none is the
+    /// theme's, already larger).
+    text_factor: f32,
     switches: HashMap<Id, SwitchState>,
     drag: Option<Drag>,
     open: Option<Open>,
@@ -216,6 +220,7 @@ impl<M> Default for Ui<M> {
             fields: HashMap::new(),
             scrolls: HashMap::new(),
             under_bar: 0.0,
+            text_factor: 1.0,
             switches: HashMap::new(),
             drag: None,
             open: None,
@@ -312,13 +317,17 @@ impl<M: Clone> Ui<M> {
     /// Lays `root` out in a window `width` x `height`. What is remembered
     /// stays with the widgets whose ids are still there.
     /// The strip at the window's top under the server's bar: scroll bars start below it.
+    pub fn set_text_factor(&mut self, factor: f32) {
+        self.text_factor = if factor.is_finite() && factor > 0.0 { factor } else { 1.0 };
+    }
+
     pub fn set_under_bar(&mut self, top: f32) {
         self.under_bar = top.max(0.0);
     }
 
     pub fn layout(&mut self, root: Element<M>, width: f32, height: f32, measure: &mut dyn Measure, text_size: f32) {
         let mut nodes = Vec::new();
-        Layout { measure, text_size, lines_seen: Default::default() }.run(root, Rect::new(0.0, 0.0, width, height), &mut nodes);
+        Layout { measure, text_size, factor: self.text_factor, lines_seen: Default::default() }.run(root, Rect::new(0.0, 0.0, width, height), &mut nodes);
         let before: HashSet<Id> = self.nodes.iter().map(|n| n.id).collect();
         self.nodes = nodes;
         self.size = (width, height);

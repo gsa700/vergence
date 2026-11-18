@@ -178,8 +178,8 @@ impl Settings {
             })
         };
         let (left, right) = bar::decoration_layout(&value("Gtk/DecorationLayout").unwrap_or_else(|| bar::DEFAULT_LAYOUT.into()));
-        let (ui_family, ui_size) = font_name(&value("Gtk/FontName").unwrap_or_default(), "sans-serif", 10.0);
-        let (mono_family, mono_size) = font_name(&value("Gtk/MonospaceFontName").unwrap_or_default(), "monospace", 10.0);
+        let (ui_family, ui_size) = font_name(&value("Gtk/FontName").unwrap_or_default(), "sans-serif", 11.0);
+        let (mono_family, mono_size) = font_name(&value("Gtk/MonospaceFontName").unwrap_or_default(), "monospace", 12.0);
         Settings { left, right, light: false, ui_family, ui_size, mono_family, mono_size }
     }
 }
@@ -721,6 +721,8 @@ struct Terminal {
     /// times this, from the app menu's Text size row or Ctrl+= / Ctrl+- /
     /// Ctrl+0; not kept (the lasting size is the terminal's settings').
     zoom: f32,
+    /// The screen's text factor (vergence_ui::Frame::text).
+    text: f32,
     /// The bar style it asks for, and the one last told the server.
     bar_style: vergence_ui::BarStyle,
     bar_style_told: Option<vergence_ui::BarStyle>,
@@ -870,6 +872,7 @@ impl Terminal {
             bar_told: None,
             commands_told: None,
             zoom: 1.0,
+            text: 1.0,
             prefs_open: Rc::new(std::cell::Cell::new(false)),
             cursor_shape: CursorShape::of(&config("desktop.toml")),
             blink: term_flag(&config("desktop.toml"), "blink", true),
@@ -2481,7 +2484,12 @@ impl App for Terminal {
         if self.opacity >= 1.0 {
             scene.fill(Rect::new(0.0, 0.0, frame.width, frame.height), self.palette.bg);
         }
-        let size = self.settings.mono_size * self.zoom;
+        // As large on this screen as on any (Frame::text): new cells when it changes.
+        if (frame.text - self.text).abs() > 1e-4 {
+            self.text = frame.text;
+            self.metrics = None;
+        }
+        let size = vergence_look::text_size(self.settings.mono_size * self.zoom, self.text);
         if self.metrics.is_none() {
             // The settings' fonts, or the machine's own if it does not have them.
             let mono = &self.settings.mono_family;
@@ -2566,7 +2574,7 @@ impl App for Terminal {
             scene.fill(d.line, if held { p.accent } else { Color::rgba(p.fg.r, p.fg.g, p.fg.b, 56) });
         }
         if let Some(menu) = &self.menu {
-            menu.draw(&mut scene, fonts, mt.ui, self.settings.ui_size, p.accent, self.menu_hover);
+            menu.draw(&mut scene, fonts, mt.ui, vergence_look::text_size(self.settings.ui_size, self.text), p.accent, self.menu_hover);
         }
         self.last_commands = scene.commands.len();
         scene

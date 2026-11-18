@@ -94,6 +94,8 @@ struct Win<'a> {
     width: u32,
     height: u32,
     scale: f64,
+    /// Its screen's text factor (Frame::text).
+    text: f64,
     configured: bool,
     dirty: bool,
     /// A picture is out and its frame event has not come yet.
@@ -288,6 +290,7 @@ impl<'a> Win<'a> {
             width: size.0.max(1),
             height: size.1.max(1),
             scale: 1.0,
+            text: 1.0,
             configured: false,
             dirty: false,
             frame_pending: false,
@@ -552,7 +555,7 @@ impl<'a> Native<'a> {
                     }
                 }
             }
-            WinEvent::Configure { window, serial, width, height, scale, inset, .. } => {
+            WinEvent::Configure { window, serial, width, height, scale, inset, text, .. } => {
                 self.send(WinRequest::AckConfigure { window, serial })?;
                 let Some(i) = self.index(window) else { return Ok(()) };
                 let w = &mut self.windows[i];
@@ -562,6 +565,9 @@ impl<'a> Native<'a> {
                 }
                 if scale.is_finite() && scale > 0.0 {
                     w.scale = scale;
+                }
+                if text.is_finite() && (vergence_protocol::window::MIN_TEXT..=vergence_protocol::window::MAX_TEXT).contains(&text) {
+                    w.text = text;
                 }
                 w.configured = true;
                 w.dirty = true;
@@ -885,7 +891,7 @@ impl<'a> Native<'a> {
     fn draw(&mut self, i: usize) -> io::Result<()> {
         let t = Instant::now();
         let w = &mut self.windows[i];
-        let frame = Frame { width: w.width as f32, height: w.height as f32 + w.inset, scale: w.scale as f32, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: w.bar_by_server, top: w.inset , tint: w.tint };
+        let frame = Frame { width: w.width as f32, height: w.height as f32 + w.inset, scale: w.scale as f32, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: w.bar_by_server, top: w.inset , tint: w.tint, text: w.text as f32 };
         let id = w.id;
         let scene = w.app.get().scene(&frame, &mut self.fonts);
         let background = self.windows[i].app.get().background();

@@ -85,6 +85,8 @@ pub(crate) struct Layout<'a> {
     pub measure: &'a mut dyn Measure,
     /// The size of text that does not name one.
     pub text_size: f32,
+    /// The screen's text factor, for sizes a label names (Ui::set_text_factor).
+    pub factor: f32,
     /// A label's lines, remembered for this layout pass: containers measure
     /// their children more than once, and nested ones multiply that, so
     /// without it a long wrapped text was broken into lines dozens of times
@@ -118,7 +120,7 @@ impl Layout<'_> {
     }
 
     fn lines(&mut self, l: &Label, width: Option<f32>) -> (Vec<Line>, f32) {
-        let size = l.size.unwrap_or(self.text_size);
+        let size = l.size.map_or(self.text_size, |s| vergence_look::text_size(s, self.factor));
         let key = LinesKey {
             text: {
                 let mut h = DefaultHasher::new();
@@ -367,7 +369,7 @@ impl Layout<'_> {
                 let (mut lines, _) = self.lines(&l, Some(rect.w));
                 // Cut to its place, "…" at the end, characters taken off until it fits.
                 if l.elide && !l.wrap && lines.len() == 1 && lines[0].width > rect.w + 0.5 {
-                    let size = l.size.unwrap_or(self.text_size);
+                    let size = l.size.map_or(self.text_size, |s| vergence_look::text_size(s, self.factor));
                     let chars: Vec<char> = lines[0].text.chars().collect();
                     let (mut lo, mut hi) = (0usize, chars.len());
                     while lo < hi {
@@ -386,7 +388,7 @@ impl Layout<'_> {
                         Align::End => (rect.w - line.width).round(),
                     };
                 }
-                let size = l.size.unwrap_or(self.text_size);
+                let size = l.size.map_or(self.text_size, |s| vergence_look::text_size(s, self.factor));
                 push(out, What::Label { lines, size, weight: l.weight, color: l.color, dim: l.dim });
             }
             Kind::Panel { child, padding, fill, edge, radius, align_x, align_y } => {
