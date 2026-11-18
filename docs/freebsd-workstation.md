@@ -47,7 +47,7 @@ hybrid laptop) and a Lenovo Tiny running Fedora (systemd and logind).
 - Network: the SFP+ card's port by DHCP in `rc.conf` (`ifconfig_ix0="DHCP"` or
   `ixl0`, whichever `pciconf -lv` shows). The card brings Hambench's MAC
   address, so the DHCP reservation and DNS name need changing on pfSense
-  (Dave's step). The machine's new name is Dave's to choose.
+  (Dave's step). Its name: **techbench** (Dave, 2026-11-17), already the reservation for that MAC on pfSense.
 
 ## Packages
 
