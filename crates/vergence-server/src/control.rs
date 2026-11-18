@@ -344,6 +344,44 @@ impl Server {
                     Err(e) => format!("spawn: {e}"),
                 }
             }
+            // A screen's scale for a test, as if chosen but not saved
+            // (tools/display-check.sh): `scale DP-1 1.3333`, `scale DP-1 reset`,
+            // `scale reset` (all), `scale` (each screen's).
+            "scale" => {
+                if self.backend.is_none() {
+                    return "scale: only with --drm".into();
+                }
+                match (args.first().copied(), args.get(1).copied()) {
+                    (Some("reset"), None) => self.scale_test.clear(),
+                    (Some(name), Some("reset")) => {
+                        self.scale_test.remove(name);
+                    }
+                    (Some(name), Some(v)) => {
+                        let Some(s) = v.parse::<f64>().ok().filter(|s| s.is_finite() && (0.5..=8.0).contains(s)) else {
+                            return "scale: a scale from 0.5 to 8".into();
+                        };
+                        if !self.space.outputs().any(|o| o.name() == name) {
+                            return format!("scale: no screen {name}");
+                        }
+                        self.scale_test.insert(name.to_string(), s);
+                    }
+                    (None, _) => {}
+                    _ => return "scale [<screen> <scale>|<screen> reset|reset]".into(),
+                }
+                if !args.is_empty() {
+                    crate::drm::displays_changed(self);
+                }
+                let mut lines: Vec<String> = self
+                    .space
+                    .outputs()
+                    .map(|o| {
+                        let test = if self.scale_test.contains_key(&o.name()) { " (test)" } else { "" };
+                        format!("{} {:.4}{test}", o.name(), o.current_scale().fractional_scale())
+                    })
+                    .collect();
+                lines.sort();
+                lines.join("\n")
+            }
             "move" => {
                 let (Some(i), Some(x), Some(y)) = (
                     args.first().and_then(|a| a.parse::<usize>().ok()),
@@ -401,7 +439,7 @@ impl Server {
                 self.loop_signal.stop();
                 "quitting".into()
             }
-            _ => "commands: shot, windows, gpus, shelf, tiles, actions, action <id or name>, session, apps, key <name> (chords: ctrl+v), type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
+            _ => "commands: shot, windows, gpus, shelf, tiles, actions, action <id or name>, session, apps, key <name> (chords: ctrl+v), type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, scale [<screen> <scale>|reset], focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
         }
     }
 
@@ -451,7 +489,7 @@ impl Server {
                 None => w.toplevel().and_then(|t| smithay::reexports::wayland_server::Resource::client(t.wl_surface())).and_then(|c| c.get_credentials(&self.display_handle).ok()).map(|c| c.pid as u32),
             };
             let pid = pid.map(|p| format!(" pid {p}")).unwrap_or_default();
-            out.push(format!("{i} {kind} {title:?} {class:?} {geo:?} on {on:?} title-bar={}{pid} {}", self.has_title(w), self.describe_style(w)));
+            out.push(format!("{i} {kind} {title:?} {class:?} {geo:?} on {on:?} title-bar={} bar-h={}{pid} {}", self.has_title(w), if self.has_title(w) { self.bar_h(w) } else { 0 }, self.describe_style(w)));
         }
         out.join("\n")
     }

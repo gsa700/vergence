@@ -631,7 +631,15 @@ fn setup_changed(state: &mut Server, anchors: Vec<(crate::win::Win, String, smit
 /// desktop.toml's [displays] changed (the settings app): work every scale out
 /// again and lay the screens out again; windows go with their screens.
 pub fn displays_changed(state: &mut Server) {
-    let cfg = crate::displays::load();
+    let mut cfg = crate::displays::load();
+    // Test scales (vctl scale) over what is chosen, never saved.
+    if let Some(b) = state.backend.as_ref() {
+        for s in b.surfaces.values() {
+            if let Some(v) = state.scale_test.get(&s.connector) {
+                cfg.set_scale(&s.id, *v);
+            }
+        }
+    }
     let anchors = state.window_anchors();
     // A screen whose chosen mode is not the one running (or that lost its
     // choice) is set up again in it (settings milestone 2).

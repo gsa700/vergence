@@ -29,6 +29,17 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   crate, a dependency or a version, copy Cargo.lock back from the build box
   (`scp hubble:src/vergence/Cargo.lock .`) and commit it: Cargo updates it
   there, never here (it was stale for three changes, 2026-11-11). Fake monitors for tests: docs/milestone-1.md, "Found on Hubble".
+- **Display checks** (testing method, 2026-11-18): layer 1 is
+  crates/vergence-server/src/geometry_tests.rs in `cargo test` (pixel
+  geometry at every clean scale, no GPU). Layer 2 is
+  `tools/display-check.sh <host> <screen> [scale...]` on a running session:
+  it opens vergence-ui's `testpattern` example (one-pixel colored lines on
+  each edge), sets each scale with `vctl scale <screen> <s>` (runtime only,
+  never saved; `vctl scale <screen> reset`), steps the window a point at a
+  time, and `vergence-harness seams` checks each shot pixel by pixel;
+  reports in ~/vergence-display-checks/ on Control. It builds into
+  target-check, apart from the session's build. It changes the screen's
+  scale for a few minutes: not on a screen Dave is working at without asking.
 - **GPU hangs: keep the evidence** (2026-11-14). On kepler run tests as
   `tools/test-guard.sh 480 -- cargo test -q --workspace`: if they run over,
   it saves `tools/gpu-report.sh`'s report (each stuck process's threads and

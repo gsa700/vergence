@@ -115,6 +115,14 @@ pub fn distance(name: Option<&str>) -> Distance {
 }
 
 impl DisplaysConfig {
+    /// A screen's scale as if chosen (`vctl scale`'s test scales).
+    pub fn set_scale(&mut self, id: &str, scale: f64) {
+        match self.screen.iter_mut().find(|s| s.id == id) {
+            Some(s) => s.scale = Some(scale),
+            None => self.screen.push(ScreenConfig { id: id.to_string(), scale: Some(scale), ..Default::default() }),
+        }
+    }
+
     fn screen(&self, id: &str) -> Option<&ScreenConfig> {
         self.screen.iter().find(|s| s.id == id)
     }

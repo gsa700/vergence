@@ -84,6 +84,9 @@ pub struct Server {
     /// Windows tinted with the wallpaper behind them (tint.rs): the switch, and what each was told.
     pub tint_on: bool,
     pub tints: crate::tint::Tints,
+    /// Scales set by `vctl scale` for tests, by connector: as if chosen in
+    /// the settings app, but never saved (testing method, 2026-11-18).
+    pub scale_test: std::collections::HashMap<String, f64>,
     /// Full-screen windows and where each was before (fullscreen.rs).
     pub fullscreen: std::collections::HashMap<Win, smithay::utils::Rectangle<i32, Logical>>,
     /// The last press on a title bar, for double-click to maximize.
@@ -286,6 +289,7 @@ impl Server {
             restore: Default::default(),
             snap: Default::default(),
             fullscreen: Default::default(),
+            scale_test: Default::default(),
             dialogs: Default::default(),
             tint_on: true,
             tints: Default::default(),
