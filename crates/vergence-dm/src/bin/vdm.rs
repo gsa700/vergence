@@ -862,7 +862,7 @@ fn greeter_worker(uid: u32, gid: u32, server: &std::path::Path, home: &std::path
     let mut io = Some((tty, out));
     let mut code = 3;
     let tty_path = vergence_dm::vt::tty_path(vergence_dm::vt::GREETER_VT);
-    let with_pam = std::path::Path::new(paths::PAM_DIR).join(paths::GREETER_SERVICE).is_file();
+    let with_pam = paths::pam_service_exists(paths::GREETER_SERVICE);
     let mut run_it = |env: Vec<(String, String)>| -> c_int {
         let Some((tty, out)) = io.take() else { return 3 };
         match spawn_greeter_server(uid, gid, server, home, run, tty, out, env) {
@@ -1177,6 +1177,34 @@ fn main() {
         };
         control_command(&line);
     }
+    // The login screen at boot, on or off (root): the file vdm reads when it
+    // starts (paths::login_screen_file); what `tools/install.sh --vdm` did,
+    // for a package's admin step.
+    if args.get(1).map(String::as_str) == Some("login-screen") {
+        let file = paths::login_screen_file();
+        let r = match args.get(2).map(String::as_str) {
+            Some("on") => std::fs::DirBuilder::new().recursive(true).mode(0o700).create(paths::STATE_DIR).and_then(|_| std::fs::write(&file, b"")),
+            Some("off") => std::fs::remove_file(&file).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }),
+            Some("status") | None => {
+                println!("login screen at boot: {}", if file.exists() { "on" } else { "off" });
+                std::process::exit(0)
+            }
+            _ => {
+                eprintln!("usage: vdm login-screen on | off | status");
+                std::process::exit(2)
+            }
+        };
+        match r {
+            Ok(()) => {
+                println!("login screen at boot: {} (from vdm's next start)", if file.exists() { "on" } else { "off" });
+                std::process::exit(0)
+            }
+            Err(e) => {
+                eprintln!("vdm: {}: {e} (as root: sudo vdm login-screen ...)", file.display());
+                std::process::exit(1)
+            }
+        }
+    }
     if args.get(1).map(String::as_str) == Some("greeter") {
         let line = if args.get(2).map(String::as_str) == Some("stop") { "greeter stop" } else { "greeter" };
         control_command(line);
@@ -1190,8 +1218,8 @@ fn main() {
     }
     // Our own PAM file, or nothing: without it PAM would use "other", which
     // differs between systems (review I2).
-    if !std::path::Path::new(paths::PAM_DIR).join(&service).is_file() {
-        log(&format!("{}/{service} is missing; not starting (tools/install.sh puts it there)", paths::PAM_DIR));
+    if !paths::pam_service_exists(&service) {
+        log(&format!("{}/{service} is missing; not starting (the package or tools/install.sh puts it there)", paths::PAM_DIRS.join(" or ")));
         std::process::exit(1);
     }
     sys::no_core_files();
@@ -1789,7 +1817,7 @@ fn main() {
                     // its server, or below the worker vdm runs it in (finding 3).
                     let ancestors: Vec<u32> = sessions.iter().filter(|(u, _)| *u == uid).filter_map(|(_, st)| session_pids.get(&st.as_raw_fd()).copied()).chain(logins.iter().filter(|(_, l)| l.uid == uid && l.yes).map(|(p, _)| *p as u32)).collect();
                     let at_console = !ancestors.is_empty() && vergence_dm::elevate::descends_from(pid, &ancestors);
-                    let pam_file = std::path::Path::new(paths::PAM_DIR).join(paths::ELEVATE_SERVICE).is_file();
+                    let pam_file = paths::pam_service_exists(paths::ELEVATE_SERVICE);
                     let wait_declined = declined.get(&uid).map_or(0, |(t, n)| (10u64 << (n.saturating_sub(1)).min(5)).min(300).saturating_sub(t.elapsed().as_secs()));
                     match (acct, action) {
                         (_, Err(why)) => refuse_with(c, &why),
@@ -1801,7 +1829,7 @@ fn main() {
                         }
                         (Some(_), Ok(_)) if elevations.iter().any(|e| e.uid == uid) => refuse_with(c, "another request is waiting at the prompt"),
                         (Some(_), Ok(_)) if wait_declined > 0 => refuse_with(c, &format!("the last request was declined; wait {wait_declined} s")),
-                        (Some(_), Ok(_)) if !pam_file => refuse_with(c, &format!("{}/{} is missing (tools/install.sh writes it)", paths::PAM_DIR, paths::ELEVATE_SERVICE)),
+                        (Some(_), Ok(_)) if !pam_file => refuse_with(c, &format!("{}/{} is missing (the package or tools/install.sh writes it)", paths::PAM_DIRS[0], paths::ELEVATE_SERVICE)),
                         (Some(_), Ok(_)) if pauses.wait(uid) > 0 => refuse_with(c, &format!("wait {} s after a wrong password", pauses.wait(uid))),
                         (Some(a), Ok(action)) => {
                             let id = vergence_dm::elevate::random_id();

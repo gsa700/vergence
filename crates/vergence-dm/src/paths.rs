@@ -91,8 +91,18 @@ pub const STATE_DIR: &str = "/var/db/vdm";
 /// refuses to start without it rather than fall back to "other".
 pub const UNLOCK_SERVICE: &str = "vdm-unlock";
 
-/// Where PAM's service files are.
-pub const PAM_DIR: &str = "/etc/pam.d";
+/// Where PAM's service files are: the system's, and on FreeBSD also
+/// /usr/local/etc/pam.d, where a package puts its own (OpenPAM looks there
+/// too, after /etc/pam.d).
+#[cfg(target_os = "freebsd")]
+pub const PAM_DIRS: &[&str] = &["/etc/pam.d", "/usr/local/etc/pam.d"];
+#[cfg(not(target_os = "freebsd"))]
+pub const PAM_DIRS: &[&str] = &["/etc/pam.d"];
+
+/// Is there a PAM service file for `service`, where PAM looks?
+pub fn pam_service_exists(service: &str) -> bool {
+    PAM_DIRS.iter().any(|d| std::path::Path::new(d).join(service).is_file())
+}
 
 /// Below this uid an account is a system account: no unlock, no login
 /// (review I10; root is refused by uid 0 and by name, FreeBSD's `toor`

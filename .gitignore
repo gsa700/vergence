@@ -4,3 +4,4 @@ target/
 tools/sizebox/bin/
 tools/sizebox/avalonia/bin/
 tools/sizebox/avalonia/obj/
+/dist/
