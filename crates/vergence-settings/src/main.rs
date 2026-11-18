@@ -3300,8 +3300,10 @@ fn setting(name: &str, detail: &str, control: Element<Message>) -> Element<Messa
     panel(row(vec![column(left).spacing(2.0).width(Length::FILL), control]).spacing(16.0).align(Align::Center).width(Length::FILL)).padding(Padding::hv(8.0, 12.0)).width(Length::FILL)
 }
 
+/// The slider's top: 300% (Dave, 2026-11-17: "No one will run a monitor
+/// past 300%"), or a screen's own default where that is higher.
 fn scale_max(o: &OutputInfo) -> f64 {
-    (o.default_scale.ceil() + 2.0).max(3.0)
+    o.default_scale.ceil().max(3.0)
 }
 
 /// A screen's scale marks: the strong ones (whole numbers, its default) and
