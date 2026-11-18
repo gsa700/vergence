@@ -263,6 +263,16 @@ fn native_texture(renderer: &mut GlesRenderer, w: &Win) -> Option<(smithay::back
     Some((g.texture.clone()?, g.gles.clone()?, p.px, p.logical))
 }
 
+/// The serial of a native window's GPU picture (GpuPicture::serial), 0 for
+/// any other.
+fn native_serial(w: &Win) -> u64 {
+    let Some(p) = w.native().and_then(|n| n.picture()) else { return 0 };
+    match &p.content {
+        crate::native::Content::Gpu(g) => g.lock().unwrap().serial,
+        _ => 0,
+    }
+}
+
 impl Server {
     /// Does the server draw this window's title bar?
     pub fn has_title(&self, w: &Win) -> bool {
@@ -990,7 +1000,7 @@ impl Server {
                             // start: the frost does not blur across that edge.
                             Uniform::new("split", UniformValue::_1f(tools_of(&w).map_or(0.0, |(from, _)| ((from as f64 - 1.0) * per_point / px.w.max(1) as f64) as f32))),
                         ];
-                        elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(&mut d.frost, dst, strip, texture.clone(), program.clone(), uniforms)));
+                        elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(&mut d.frost, dst, strip, texture.clone(), native_serial(&w), program.clone(), uniforms)));
                     }
                 }
             }
@@ -1026,7 +1036,7 @@ impl Server {
                                         let dst = Rectangle::<i32, Physical>::new(at, p.logical.to_f64().to_physical(scale).to_i32_round());
                                         let src = Rectangle::<f64, smithay::utils::Buffer>::from_size((p.px.w as f64, p.px.h as f64).into());
                                         let slot = &mut self.decor.entry(w.clone()).or_insert_with(Decor::new).round;
-                                        elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(slot, dst, src, gles, program.clone(), uniforms)));
+                                        elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(slot, dst, src, gles, native_serial(&w), program.clone(), uniforms)));
                                     }
                                     None => {
                                         let e = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at.to_f64(), &t, None, Some(whole), Some(p.logical), Kind::Unspecified);

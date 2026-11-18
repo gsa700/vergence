@@ -236,10 +236,14 @@ pub struct ShadedSlot {
 
 impl Shaded {
     /// `texture` drawn from `src` (its pixels) to `dst` (the output's).
-    pub fn new(slot: &mut ShadedSlot, dst: Rectangle<i32, Physical>, src: Rectangle<f64, BufferCoords>, texture: GlesTexture, program: GlesTexProgram, uniforms: Vec<Uniform<'static>>) -> Shaded {
+    /// `content` changes with what the texture holds (a native window's
+    /// picture serial): the texture's own number may be the same for a new
+    /// picture, GL reusing a freed one.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(slot: &mut ShadedSlot, dst: Rectangle<i32, Physical>, src: Rectangle<f64, BufferCoords>, texture: GlesTexture, content: u64, program: GlesTexProgram, uniforms: Vec<Uniform<'static>>) -> Shaded {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (texture.tex_id(), dst.loc.x, dst.loc.y, dst.size.w, dst.size.h, src.loc.x.to_bits(), src.loc.y.to_bits(), src.size.w.to_bits(), src.size.h.to_bits()).hash(&mut h);
+        (texture.tex_id(), content, dst.loc.x, dst.loc.y, dst.size.w, dst.size.h, src.loc.x.to_bits(), src.loc.y.to_bits(), src.size.w.to_bits(), src.size.h.to_bits()).hash(&mut h);
         for u in &uniforms {
             u.name.hash(&mut h);
             format!("{:?}", u.value).hash(&mut h);

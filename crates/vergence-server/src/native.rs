@@ -188,7 +188,16 @@ pub struct GpuPicture {
     pub gles: Option<smithay::backend::renderer::gles::GlesTexture>,
     /// The renderer refused it: not tried again (the window keeps its last picture).
     pub failed: bool,
+    /// Which attach this was, counted over all windows: what tells a new
+    /// frame from the last (backdrop.rs Shaded). The GL texture's number
+    /// can't: a freed one is handed straight back to the next import, so a
+    /// new frame looked unchanged and stayed off the screen until the next
+    /// (the terminal's echo on Techbench, 2026-11-17).
+    pub serial: u64,
 }
+
+/// The last GPU picture's serial (GpuPicture::serial).
+static PICTURES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl NativeWindow {
     pub fn title(&self) -> String {
@@ -753,7 +762,8 @@ impl Server {
         let px: Size<i32, BufferCoords> = (width as i32, height as i32).into();
         let mut s = n.state.lock().unwrap();
         let logical = ((width as f64 / s.scale).round() as i32, (height as f64 / s.scale).round() as i32).into();
-        let gpu = GpuPicture { dmabuf, texture: None, gles: None, failed: false };
+        let serial = PICTURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let gpu = GpuPicture { dmabuf, texture: None, gles: None, failed: false, serial };
         s.picture = Some(Picture { content: Content::Gpu(Arc::new(Mutex::new(gpu))), px, logical, format });
         Ok(())
     }
