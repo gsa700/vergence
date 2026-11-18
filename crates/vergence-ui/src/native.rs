@@ -179,7 +179,24 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
     };
     app.token_given(&token);
     app.opened(1);
-    let gpu = (std::env::var("VERGENCE_RENDER").as_deref() != Ok("cpu")).then(|| Gpu::new().ok()).flatten().filter(Gpu::shares_buffers);
+    // Software when asked, or when the GPU can't be used: said once, on the
+    // error output (the server's log for apps it starts), so a session that
+    // draws in software says why (techbench, 2026-11-18).
+    let gpu = if std::env::var("VERGENCE_RENDER").as_deref() == Ok("cpu") {
+        None
+    } else {
+        match Gpu::new() {
+            Ok(g) if g.shares_buffers() => Some(g),
+            Ok(_) => {
+                eprintln!("vergence-ui: drawing in software: the GPU can't make buffers to share with the display server");
+                None
+            }
+            Err(e) => {
+                eprintln!("vergence-ui: drawing in software: no GPU renderer ({e:?})");
+                None
+            }
+        }
+    };
     let (wake_read, wake_write) = sock::pipe()?;
     let wake_pending = Arc::new(AtomicBool::new(false));
     let waker = Waker { pipe: Arc::new(wake_write.into()), pending: wake_pending.clone() };
@@ -827,7 +844,8 @@ impl<'a> Native<'a> {
                     w.slots.push(Slot { buffer, busy: false });
                     w.slots.len() - 1
                 }
-                Err(_) => {
+                Err(e) => {
+                    eprintln!("vergence-ui: drawing in software from now: no GPU buffer of {pw}x{ph} ({e:?})");
                     self.give_up_gpu();
                     return Ok(false);
                 }
@@ -838,7 +856,8 @@ impl<'a> Native<'a> {
         match gpu.draw_into(&w.slots[index].buffer, scene, &mut self.fonts, scale, background) {
             Ok(()) => {}
             Err(GpuError::Unsupported(_)) => return Ok(false),
-            Err(_) => {
+            Err(e) => {
+                eprintln!("vergence-ui: drawing in software from now: the GPU could not draw ({e:?})");
                 self.give_up_gpu();
                 return Ok(false);
             }
