@@ -23,6 +23,7 @@
 #   share/vergence/words/                    the spelling list (data/words/en_US.txt, from SCOWL) and its terms
 #   share/vergence/fonts/                    Inter and JetBrains Mono (data/fonts), with their licenses
 #   share/vergence/icons/{places,kinds}/     Vergence's own icons for places and files (data/icons)
+#   share/icons/Vergence/                    Vergence's pointers (an Xcursor theme, drawn at install)
 #   libexec/vergence/ups-tile, vtile-demo  lab tiles on the dock from scripts (tools/lab)
 #   libexec/vergence/vergence-choose         the Open/Save dialog the portal shows for apps not ours
 #   libexec/vergence/vergence-decode         pictures decoded apart, limited (Capsicum on FreeBSD)
@@ -77,6 +78,8 @@ words=$destdir$prefix/share/vergence/words
 fonts=$destdir$prefix/share/vergence/fonts
 # Vergence's own icons for places and kinds of files (tools/make-icons.py).
 ownicons=$destdir$prefix/share/vergence/icons
+# Vergence's pointers, an Xcursor theme (vergence-harness cursors).
+cursortheme=$destdir$prefix/share/icons/Vergence
 
 if [ -n "$uninstall" ]; then
     for p in $programs vctl vergence-session vergence; do rm -f "$bin/$p"; done
@@ -98,7 +101,7 @@ if [ -n "$uninstall" ]; then
     rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
     [ -z "$destdir" ] && rm -f /etc/fonts/conf.d/90-vergence-fonts.conf /usr/local/etc/fonts/conf.d/90-vergence-fonts.conf
     rm -f "$fonts"/InterVariable*.ttf "$fonts"/JetBrainsMono-Variable*.ttf "$fonts"/Inter-OFL.txt "$fonts"/JetBrainsMono-OFL.txt
-    rm -rf "$ownicons"
+    rm -rf "$ownicons" "$cursortheme"
     rmdir "$words" "$fonts" "$destdir$prefix/share/vergence" 2>/dev/null || true
     rmdir "$libexec" 2>/dev/null || true
     rmdir "$docs" 2>/dev/null || true
@@ -140,6 +143,15 @@ install -m 644 "$root/data/words/SCOWL-COPYRIGHT.txt" "$words/SCOWL-COPYRIGHT.tx
 # Mono with their licenses (SIL OFL 1.1); a family the system has itself is
 # the system's copy, these the fallback (vergence-text db.rs).
 install -d -m 755 "$fonts"
+# The pointers: drawn by vergence-harness from their own SVG (the theme the
+# server picks when none is chosen; it inherits Adwaita for rare shapes).
+if [ -x "$release/vergence-harness" ]; then
+    rm -rf "$cursortheme"
+    "$release/vergence-harness" cursors "$cursortheme" >/dev/null || echo "install.sh: the Vergence pointers could not be drawn (Adwaita's are used)" >&2
+    chmod -R a+rX "$cursortheme" 2>/dev/null
+else
+    echo "install.sh: no vergence-harness in $release: the Vergence pointers are not installed" >&2
+fi
 for g in places kinds; do
     install -d -m 755 "$ownicons/$g"
     for f in "$root/data/icons/$g"/*.svg; do install -m 644 "$f" "$ownicons/$g/"; done

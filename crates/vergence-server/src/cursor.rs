@@ -61,9 +61,10 @@ pub struct Pointer {
 impl Pointer {
     /// The pointer in the desktop's cursor theme: settings.toml's
     /// Gtk/CursorThemeName (the settings app's Theme page), else XCURSOR_THEME,
-    /// else Adwaita.
+    /// else Vergence's own (install.sh, vergence-harness cursors; 2026-11-18)
+    /// where it is installed, else Adwaita.
     pub fn load() -> Pointer {
-        let theme_name = configured_theme().or_else(|| std::env::var("XCURSOR_THEME").ok()).unwrap_or_else(|| "Adwaita".into());
+        let theme_name = configured_theme().or_else(|| std::env::var("XCURSOR_THEME").ok()).unwrap_or_else(|| if own_theme_installed() { "Vergence".into() } else { "Adwaita".into() });
         // Apps started from now on draw their own pointers in it too.
         unsafe { std::env::set_var("XCURSOR_THEME", &theme_name) };
         let size = std::env::var("XCURSOR_SIZE").ok().and_then(|s| s.parse().ok()).unwrap_or(24);
@@ -205,6 +206,14 @@ impl Pointer {
 }
 
 /// The frame of an animation to show at `time` (the first if still).
+/// Is Vergence's cursor theme where Xcursor finds themes (~/.icons, the data
+/// directories' icons)?
+fn own_theme_installed() -> bool {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let data = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
+    home.map(|h| h.join(".icons")).into_iter().chain(data.split(':').filter(|d| !d.is_empty()).map(|d| std::path::Path::new(d).join("icons"))).any(|d| d.join("Vergence/cursors/default").exists())
+}
+
 /// Gtk/CursorThemeName from ~/.config/vergence/settings.toml.
 fn configured_theme() -> Option<String> {
     let path = std::path::Path::new(&std::env::var_os("HOME")?).join(".config/vergence/settings.toml");

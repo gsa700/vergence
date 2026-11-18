@@ -20,9 +20,11 @@
 //!   vergence-harness measure <window title>...
 //!   vergence-harness seams <shot.png> --scale S --window X Y W H [--bar H]
 //!   vergence-harness same <a.png> <b.png> [--at X Y] [--corners R] [--top N] [--tolerance T]
+//!   vergence-harness cursors <theme directory>   (Vergence's pointers as an Xcursor theme)
 //!       Find each size box (tools/sizebox) and print its size on the panel
 //!       in millimeters (milestone 4, acceptance 3).
 
+mod cursors;
 mod db;
 mod fake;
 mod live;
@@ -60,6 +62,7 @@ fn main() -> ExitCode {
         Some("measure") if args.len() >= 2 => measure::run(&args[1..]),
         Some("seams") if args.len() >= 2 => seams::run(&args[1..]),
         Some("same") if args.len() >= 3 => same::run(&args[1..]),
+        Some("cursors") if args.len() == 2 => cursors::run(&args[1..]),
         // `grid <scale>`: exit 0 if the scale has the server's pixel grid (step and all).
         Some("grid") if args.len() == 2 => match args[1].parse::<f64>().ok().and_then(seams::grid_step) {
             Some(q) => {
