@@ -2233,6 +2233,7 @@ dependencies = [
 name = "vergence-harness"
 version = "0.1.0"
 dependencies = [
+ "vergence-decode",
  "vergence-edid",
  "vergence-profile",
  "x11rb 0.13.2",
