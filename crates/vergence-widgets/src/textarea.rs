@@ -77,6 +77,9 @@ struct List {
     keys: Vec<&'static str>,
     /// Where it opens (the right click's point); None: under the caret.
     at: Option<(f32, f32)>,
+    /// The server draws it (menu_for_server): kept, not drawn, until its
+    /// chosen line comes back or anything else is done here.
+    server: bool,
     chosen: usize,
     /// Where the word being completed starts.
     start: Pos,
@@ -540,7 +543,7 @@ impl Doc {
         let keep = self.list.as_ref().and_then(|l| l.words.get(l.chosen).cloned());
         let chosen = keep.and_then(|k| words.iter().position(|w| *w == k)).unwrap_or(0);
         let actions = vec![Action::Word; words.len()];
-        self.list = Some(List { words, actions, enabled: Vec::new(), keys: Vec::new(), at: None, chosen, start, first: 0 });
+        self.list = Some(List { words, actions, enabled: Vec::new(), keys: Vec::new(), at: None, chosen, start, first: 0, server: false });
         true
     }
 
@@ -868,6 +871,7 @@ impl Doc {
 
     /// A key, while the area has the keyboard.
     pub(crate) fn key(&mut self, key: u32, typed: Option<&str>, m: Modifiers) -> Effect {
+        self.drop_server_menu();
         let ghost = self.ghost.take();
         // A word being typed is marked only once it is left.
         let was_typing = std::mem::take(&mut self.typing_word);
@@ -1245,7 +1249,44 @@ impl Doc {
             }
         }
         let chosen = enabled.iter().position(|e| *e).unwrap_or(0);
-        self.list = Some(List { words, actions, enabled, keys, at: Some((x, y)), chosen, start: p, first: 0 });
+        self.list = Some(List { words, actions, enabled, keys, at: Some((x, y)), chosen, start: p, first: 0, server: false });
+    }
+
+    /// The right-click menu just opened (context), for the server to draw as
+    /// every window's right-click menu is (bus v20; Dave, 2026-11-18: one
+    /// kind of menu everywhere): where, and its lines, each line's id its
+    /// index from `base`. The menu is kept here, not drawn, until
+    /// menu_chosen or anything else done in the area.
+    pub(crate) fn menu_for_server(&mut self, base: u32) -> Option<((f32, f32), Vec<vergence_ui::MenuLine>)> {
+        let l = self.list.as_mut().filter(|l| !l.enabled.is_empty())?;
+        let at = l.at?;
+        l.server = true;
+        let lines = l
+            .actions
+            .iter()
+            .enumerate()
+            .map(|(i, a)| match a {
+                Action::Line => vergence_ui::MenuLine::Separator,
+                _ => vergence_ui::MenuLine::Item { id: base + i as u32, label: l.words[i].clone(), keys: l.keys.get(i).copied().unwrap_or("").to_string(), enabled: l.enabled.get(i).copied().unwrap_or(true), checked: None },
+            })
+            .collect();
+        Some((at, lines))
+    }
+
+    /// Line `k` of the menu the server drew was chosen: done as a press on it.
+    pub(crate) fn menu_chosen(&mut self, k: usize) -> Effect {
+        match self.list.take() {
+            Some(l) if l.server && l.enabled.get(k).copied().unwrap_or(false) => self.take_item(l, k),
+            _ => Effect::default(),
+        }
+    }
+
+    /// A menu the server drew and that was closed without a choice is
+    /// forgotten at the next key or press.
+    fn drop_server_menu(&mut self) {
+        if self.list.as_ref().is_some_and(|l| l.server) {
+            self.list = None;
+        }
     }
 
     /// The word spelled wrong at `p`, if any: where it starts and ends, and it.
@@ -1523,6 +1564,7 @@ impl Doc {
     /// A press on the popup does what its line says (`used` set); elsewhere
     /// it closes it and the press is the text's.
     pub(crate) fn press(&mut self, x: f32, y: f32, count: u8, shift: bool) -> Effect {
+        self.drop_server_menu();
         self.ghost = None;
         self.typing_word = false;
         if let Some((r, row_h)) = self.geom.list
@@ -1805,7 +1847,7 @@ impl Doc {
         }
         if focused
             && (caret_seen || self.list.as_ref().is_some_and(|l| l.at.is_some()))
-            && let Some(l) = self.list.as_mut()
+            && let Some(l) = self.list.as_mut().filter(|l| !l.server)
         {
             let menu = !l.enabled.is_empty();
             let rows = if menu { l.words.len() } else { l.words.len().min(LIST_ROWS) };

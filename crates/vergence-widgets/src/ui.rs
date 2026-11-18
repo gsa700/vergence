@@ -116,6 +116,20 @@ fn drag_id(d: &Drag) -> Id {
     }
 }
 
+/// The first id of a right-click menu's lines drawn by the server: the
+/// program's own command ids stay below it (the host sends ids from here
+/// to [`Ui::menu_chosen`]).
+pub const MENU_ID_BASE: u32 = 0x7f00_0000;
+
+/// What the lines of a right-click menu drawn by the server do.
+#[derive(Debug, Clone)]
+enum ServerMenu {
+    /// A text area's (its own list holds the lines: TextDoc::menu_chosen).
+    Area(Id),
+    /// A field's: each line's act, by index.
+    Field(Id, Vec<Option<FieldAct>>),
+}
+
 /// What a line of a field's right-click menu does.
 #[derive(Debug, Clone, PartialEq)]
 enum FieldAct {
@@ -184,6 +198,13 @@ pub struct Ui<M> {
     /// drawn this much larger (the size of text that names none is the
     /// theme's, already larger).
     text_factor: f32,
+    /// Right-click menus are drawn by the server (the native road: every
+    /// window's menu one kind, 2026-11-18); set by the host each frame.
+    server_menus: bool,
+    /// A right-click menu for the server to open (where, its lines), taken
+    /// by the host (take_menu_request), and what its lines do.
+    menu_request: Option<(f32, f32, Vec<vergence_ui::MenuLine>)>,
+    server_menu: Option<ServerMenu>,
     switches: HashMap<Id, SwitchState>,
     drag: Option<Drag>,
     open: Option<Open>,
@@ -221,6 +242,9 @@ impl<M> Default for Ui<M> {
             scrolls: HashMap::new(),
             under_bar: 0.0,
             text_factor: 1.0,
+            server_menus: false,
+            menu_request: None,
+            server_menu: None,
             switches: HashMap::new(),
             drag: None,
             open: None,
@@ -317,6 +341,36 @@ impl<M: Clone> Ui<M> {
     /// Lays `root` out in a window `width` x `height`. What is remembered
     /// stays with the widgets whose ids are still there.
     /// The strip at the window's top under the server's bar: scroll bars start below it.
+    /// Right-click menus drawn by the server (the native road) or here.
+    pub fn set_server_menus(&mut self, on: bool) {
+        self.server_menus = on;
+    }
+
+    /// A right-click menu the server is to open: where, and its lines.
+    pub fn take_menu_request(&mut self) -> Option<(f32, f32, Vec<vergence_ui::MenuLine>)> {
+        self.menu_request.take()
+    }
+
+    /// Line `k` of the last menu the server opened for us was chosen.
+    pub fn menu_chosen(&mut self, k: usize) -> Response<M> {
+        let mut r = Response::default();
+        match self.server_menu.take() {
+            Some(ServerMenu::Area(id)) => {
+                if let Some(doc) = self.area_doc(id) {
+                    let e = doc.borrow_mut().menu_chosen(k);
+                    self.area_effect(id, e, &mut r);
+                }
+            }
+            Some(ServerMenu::Field(id, acts)) => {
+                if let Some(Some(act)) = acts.get(k).cloned() {
+                    self.field_act(id, act, &mut r);
+                }
+            }
+            None => {}
+        }
+        r
+    }
+
     pub fn set_text_factor(&mut self, factor: f32) {
         self.text_factor = if factor.is_finite() && factor > 0.0 { factor } else { 1.0 };
     }
@@ -805,6 +859,35 @@ impl<M: Clone> Ui<M> {
             }
         }
         let selected = f.caret != f.anchor;
+        // Drawn by the server: the standard menu, every line there, faint
+        // when it cannot be done now, the keys at the right (as a text area's).
+        if self.server_menus {
+            use vergence_ui::MenuLine;
+            let mut lines = Vec::new();
+            let mut acts = Vec::new();
+            for (label, act) in &items {
+                let real = *act != FieldAct::Nothing;
+                lines.push(MenuLine::Item { id: MENU_ID_BASE + acts.len() as u32, label: label.clone(), keys: String::new(), enabled: real, checked: None });
+                acts.push(real.then(|| act.clone()));
+            }
+            if !items.is_empty() {
+                lines.push(MenuLine::Separator);
+                acts.push(None);
+            }
+            for (label, act, on, keys) in [
+                ("Cut", FieldAct::Cut, selected && editable && !secret, "Ctrl+X"),
+                ("Copy", FieldAct::Copy, selected && !secret, "Ctrl+C"),
+                ("Paste", FieldAct::Paste, editable, "Ctrl+V"),
+            ] {
+                lines.push(MenuLine::Item { id: MENU_ID_BASE + acts.len() as u32, label: label.into(), keys: keys.into(), enabled: on, checked: None });
+                acts.push(on.then_some(act));
+            }
+            self.focus = Some(id);
+            self.field_menu = None;
+            self.menu_request = Some((x, y, lines));
+            self.server_menu = Some(ServerMenu::Field(id, acts));
+            return;
+        }
         if selected && editable && !secret {
             items.push(("Cut".into(), FieldAct::Cut));
         }
@@ -831,7 +914,11 @@ impl<M: Clone> Ui<M> {
     fn field_menu_choose(&mut self, k: usize, r: &mut Response<M>) {
         let Some(menu) = self.field_menu.take() else { return };
         let Some((_, act)) = menu.items.get(k).cloned() else { return };
-        let id = menu.id;
+        self.field_act(menu.id, act, r);
+    }
+
+    /// Does what a line of field `id`'s menu says (drawn here or by the server).
+    fn field_act(&mut self, id: Id, act: FieldAct, r: &mut Response<M>) {
         let Some(f) = self.fields.get_mut(&id) else { return };
         let (a, b) = (f.caret.min(f.anchor), f.caret.max(f.anchor));
         match act {
@@ -1199,6 +1286,12 @@ impl<M: Clone> Ui<M> {
                     self.focus = Some(id);
                     self.ring = false;
                     doc.borrow_mut().context(x, y);
+                    if self.server_menus
+                        && let Some(((mx, my), lines)) = doc.borrow_mut().menu_for_server(MENU_ID_BASE)
+                    {
+                        self.menu_request = Some((mx, my, lines));
+                        self.server_menu = Some(ServerMenu::Area(id));
+                    }
                     self.caret_moved();
                     self.area_changed(id, &mut r);
                     r.redraw = true;

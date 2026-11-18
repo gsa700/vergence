@@ -139,6 +139,9 @@ pub struct Frame {
     /// as on a screen at its calculated scale, so they look the same on
     /// every screen. `vergence_look::text_size` applies it.
     pub text: f32,
+    /// The native road (a Vergence session): the server draws what the
+    /// desktop draws for every window (its bar, its right-click menus).
+    pub native: bool,
 }
 
 /// What the bar's description is made of ([`App::bar`]): the native
@@ -1944,7 +1947,7 @@ impl<'a> Runner<'a> {
         let t = Instant::now();
         let w = &self.windows[i];
         let bar_h = w.bar_h();
-        let frame = Frame { width: w.width as f32, height: (w.height as f32 - bar_h).max(1.0), scale: w.scale120 as f32 / 120.0, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: false, top: 0.0 , tint: None, text: 1.0 };
+        let frame = Frame { width: w.width as f32, height: (w.height as f32 - bar_h).max(1.0), scale: w.scale120 as f32 / 120.0, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: false, top: 0.0 , tint: None, text: 1.0, native: false };
         let mut scene = self.windows[i].app.get().scene(&frame, &mut self.fonts);
         if self.windows[i].frame {
             let title = self.windows[i].app.get().title();

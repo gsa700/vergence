@@ -1,6 +1,7 @@
 //! The right-click menu: copy and paste for the mouse, and the pane and
-//! tab commands. It is drawn in the window, over the terminal, and kept inside
-//! it; where each line sits is worked out once ([`Menu::new`]) and used both
+//! tab commands. On the native road the server draws it (server_lines), as
+//! every window's; elsewhere (under GNOME, the terminal's own bar) it is
+//! drawn in the window, over the terminal, and kept inside it; where each line sits is worked out once ([`Menu::new`]) and used both
 //! to draw it and to say what is under the pointer.
 
 use vergence_look::RADIUS;
@@ -63,6 +64,22 @@ const LINES: [Option<Item>; 11] = [
     Some(Item::PaneToTab),
     Some(Item::PaneToWindow),
 ];
+
+/// The same menu for the server to draw, as every window's right-click
+/// menu is (bus v20; 2026-11-18: one kind of menu everywhere): its lines,
+/// each with the id of the terminal's command that does the same (`id`).
+pub fn server_lines(can_copy: bool, id: impl Fn(Item) -> u32) -> Vec<vergence_ui::MenuLine> {
+    LINES
+        .iter()
+        .map(|line| match line {
+            None => vergence_ui::MenuLine::Separator,
+            Some(item) => {
+                let (label, keys) = item.words();
+                vergence_ui::MenuLine::Item { id: id(*item), label: label.into(), keys: keys.into(), enabled: *item != Item::Copy || can_copy, checked: None }
+            }
+        })
+        .collect()
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Menu {

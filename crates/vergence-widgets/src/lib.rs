@@ -350,6 +350,12 @@ impl<P: Program> vergence_ui::App for Host<P> {
     }
 
     fn command(&mut self, id: u32, window: &mut Window) {
+        // A line of a right-click menu the server drew for a text area or a field.
+        if id >= ui::MENU_ID_BASE {
+            let r = self.ui.menu_chosen((id - ui::MENU_ID_BASE) as usize);
+            self.respond(r, window);
+            return;
+        }
         self.program.command(id, window);
         self.changed(window);
     }
@@ -512,26 +518,9 @@ impl<P: Program> vergence_ui::App for Host<P> {
             return;
         }
         let r = self.ui.input(input);
-        if let Some(c) = r.cursor {
-            window.set_cursor(c);
-        }
-        if r.redraw {
-            window.redraw();
-        }
-        if let Some(text) = &r.copy {
-            window.copy(text);
-        }
-        if r.paste {
-            window.paste();
-        }
-        let any = !r.messages.is_empty();
-        for m in r.messages {
-            self.program.update(m, window);
-        }
-        if any {
-            self.changed(window);
-        }
-        if !r.used && self.program.input(input, window) {
+        let used = r.used;
+        self.respond(r, window);
+        if !used && self.program.input(input, window) {
             self.changed(window);
         }
         self.rearm(window);
@@ -575,6 +564,33 @@ impl<P: Program> vergence_ui::App for Host<P> {
 }
 
 impl<P: Program> Host<P> {
+    /// What the widgets did, for the window and the program; a right-click
+    /// menu they opened goes to the server to draw.
+    fn respond(&mut self, r: ui::Response<P::Message>, window: &mut Window) {
+        if let Some(c) = r.cursor {
+            window.set_cursor(c);
+        }
+        if r.redraw {
+            window.redraw();
+        }
+        if let Some(text) = &r.copy {
+            window.copy(text);
+        }
+        if r.paste {
+            window.paste();
+        }
+        if let Some((x, y, lines)) = self.ui.take_menu_request() {
+            window.menu(x, y, lines);
+        }
+        let any = !r.messages.is_empty();
+        for m in r.messages {
+            self.program.update(m, window);
+        }
+        if any {
+            self.changed(window);
+        }
+    }
+
     /// The frame's scene: the tree built again if anything changed, then drawn.
     fn build(&mut self, frame: &Frame, fonts: &mut Fonts) -> Scene {
         if frame.scale != self.scale {
@@ -588,6 +604,8 @@ impl<P: Program> Host<P> {
             self.theme.text_factor = frame.text;
             self.theme.text_size = vergence_look::text_size(self.theme.text_size, frame.text);
             self.ui.set_text_factor(frame.text);
+            // The server draws right-click menus on the native road.
+            self.ui.set_server_menus(frame.native);
             // The wallpaper's color behind the window (tint, window styles milestone 1).
             if let Some(c) = frame.tint {
                 self.theme = self.theme.tinted(c);

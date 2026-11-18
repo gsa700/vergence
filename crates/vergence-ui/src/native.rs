@@ -891,7 +891,7 @@ impl<'a> Native<'a> {
     fn draw(&mut self, i: usize) -> io::Result<()> {
         let t = Instant::now();
         let w = &mut self.windows[i];
-        let frame = Frame { width: w.width as f32, height: w.height as f32 + w.inset, scale: w.scale as f32, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: w.bar_by_server, top: w.inset , tint: w.tint, text: w.text as f32 };
+        let frame = Frame { width: w.width as f32, height: w.height as f32 + w.inset, scale: w.scale as f32, time: w.started.elapsed().as_secs_f64(), number: w.frames, drawn_by: w.drawn_by, bar_by_server: w.bar_by_server, top: w.inset , tint: w.tint, text: w.text as f32, native: true };
         let id = w.id;
         let scene = w.app.get().scene(&frame, &mut self.fonts);
         let background = self.windows[i].app.get().background();

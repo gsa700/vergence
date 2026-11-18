@@ -1469,6 +1469,12 @@ impl Terminal {
         }
         match button {
             Button::Left => self.press_text(x, y, m, window),
+            // The server draws it where it draws the bar (the native road), as
+            // every window's right-click menu; a chosen line comes back as the
+            // command (Self::command). Elsewhere, drawn here.
+            Button::Right if !self.own_bar => {
+                window.menu(x, y, menu::server_lines(self.selected_text().is_some(), command_of));
+            }
             Button::Right => {
                 self.menu = Some(Menu::new(x, y, (self.width, self.height), self.selected_text().is_some()));
                 self.menu_hover = None;
@@ -1702,6 +1708,20 @@ fn draw_pane(scene: &mut Scene, fonts: &mut Fonts, numbers: &mut HashMap<FaceId,
 }
 
 /// The app menu's command ids (app settings milestone 1).
+/// The command that does what a menu line says (menu::server_lines).
+fn command_of(item: Item) -> u32 {
+    match item {
+        Item::Copy => cmd::COPY,
+        Item::Paste => cmd::PASTE,
+        Item::SplitSide => cmd::SPLIT_SIDE,
+        Item::SplitStack => cmd::SPLIT_STACK,
+        Item::NewTab => cmd::NEW_TAB,
+        Item::ClosePane => cmd::CLOSE_TAB,
+        Item::PaneToTab => cmd::PANE_TO_TAB,
+        Item::PaneToWindow => cmd::PANE_TO_WINDOW,
+    }
+}
+
 mod cmd {
     pub const COPY: u32 = 1;
     pub const PASTE: u32 = 2;

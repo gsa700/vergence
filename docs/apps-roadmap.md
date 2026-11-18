@@ -336,6 +336,25 @@ it is today:
   install on techbench following only pkg's message, to list every root
   step a real user meets.
 
+## From Dave, 2026-11-18 (wish list, ~/Vergence-wishlist-2 on techbench)
+
+- **A remote viewer**: native Vergence (scenes, not pixels) and VNC, SPICE,
+  RDP; each outside protocol's library is a borrowing question.
+- **PDF in Close-Up** (or a viewer of its own): a PDF library is a
+  borrowing question (pdfium BSD, MuPDF AGPL, poppler GPL).
+- **File Viewer's Space preview as a window of its own**, attached to File
+  Viewer, with Open in… for full viewing and editing.
+- **File Viewer's history**: the mouse's back button (BTN_SIDE) goes back
+  as in a browser; going back gives each folder its state (scroll,
+  selection) again; forgotten when the session ends.
+- **The dock's minimized apps look ambiguous**: a design to choose.
+- *Done 2026-11-18: every right-click menu is the server's on the native road (bus v20 Menu): the terminal's (menu::server_lines), a text area's and a field's (vergence-widgets ui.rs ServerMenu, MENU_ID_BASE; a chosen line comes back as a command and is done as a click on the old menu was); the drawn menus stay for the Wayland road. vergence-ui Frame::native says which road.* **The Text Editor's right-click menu not the same kind as the terminal's**
+  (Dave: "Why?"): there were three kinds, the server's (File Viewer), the
+  terminal's own, and the toolkit's.
+- **Completion accepted with Space** (as macOS), the space kept; Tab adds
+  a space too. A word wanted as typed must stay possible (Escape, or a
+  click on the typed word, as macOS).
+
 ## Questions for Dave (when each app's turn comes)
 
 1. **Spellchecking**: dictionaries are data from other projects (Hunspell's
