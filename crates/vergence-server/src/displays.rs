@@ -43,6 +43,11 @@ pub struct DisplaysConfig {
     /// not the nearest whole number. desktop.toml `[displays] same-size`.
     #[serde(rename = "same-size")]
     pub same_size: Option<bool>,
+    /// How much of the text a chosen scale takes away is given back
+    /// (Scales::text): 0 none, 1 all, as a power of the ratio.
+    /// desktop.toml `[displays] text-strength`; TEXT_STRENGTH unset.
+    #[serde(rename = "text-strength")]
+    pub text_strength: Option<f64>,
     pub screen: Vec<ScreenConfig>,
     pub arrangement: Vec<Arrangement>,
 }
@@ -120,6 +125,10 @@ impl DisplaysConfig {
         self.screen.iter().find(|s| s.id == id).and_then(|s| s.mode.as_deref()).and_then(parse_mode)
     }
 
+    pub fn text_strength(&self) -> f64 {
+        self.text_strength.filter(|s| s.is_finite()).unwrap_or(TEXT_STRENGTH).clamp(0.0, 1.0)
+    }
+
     pub fn size(&self) -> f64 {
         self.size.filter(|s| s.is_finite()).unwrap_or(1.0).clamp(0.5, 3.0)
     }
@@ -156,8 +165,12 @@ impl DisplaysConfig {
         // was chosen (Dave, 2026-11-18: per screen, full compensation): 133%
         // on the LG, calculated 1.69, draws text 1.27 times its size. Before
         // the size preference, which makes text larger with the rest.
+        // Full compensation was too much (Dave, 10:33: "maybe we adjust the
+        // ratio down a bit"): a smaller scale chosen for room is also a wish
+        // for smaller text, and the distances are guesses. So a part of it,
+        // as a power: 0.5 gives the LG 1.13x.
         let text = match d.note {
-            None => (d.exact / base).clamp(MIN_TEXT, MAX_TEXT),
+            None => (d.exact / base).powf(self.text_strength()).clamp(MIN_TEXT, MAX_TEXT),
             Some(_) => 1.0,
         };
         let how = if (text - 1.0).abs() >= 0.005 { format!("{how}; text {text:.2}x") } else { how };
@@ -171,6 +184,10 @@ impl DisplaysConfig {
 }
 
 use vergence_protocol::window::{MAX_TEXT, MIN_TEXT};
+
+/// How much of the lost text size a chosen scale gets back, unless
+/// desktop.toml says (DisplaysConfig::text_strength).
+pub const TEXT_STRENGTH: f64 = 0.5;
 
 /// A screen's scales (see scale_for).
 #[derive(Debug, Clone, PartialEq)]
@@ -284,19 +301,24 @@ mod tests {
 
     #[test]
     fn text_follows_the_calculated_scale() {
-        // techbench's LG (162 ppi, calculated 1.69) chosen at 133%: text 1.27x.
+        let lg = |c: &DisplaysConfig| c.scale_for("lg", "DP-1", (3840, 2160), Some((600, 340))).text;
+        let near = |a: f64, b: f64| (a - b).abs() < 0.01;
+        // techbench's LG (162 ppi, calculated 1.69) chosen at 133%: 1.27 lost,
+        // half of it back by default (1.27^0.5 = 1.13), all of it at strength 1.
         let c = cfg("[[displays.screen]]\nid = \"lg\"\nscale = 1.3333333333\n");
-        let s = c.scale_for("lg", "DP-1", (3840, 2160), Some((600, 340)));
-        assert!((s.text - 1.27).abs() < 0.01, "{}", s.text);
-        // At its default 200% the text is drawn smaller (full compensation).
-        let s = DisplaysConfig::default().scale_for("lg", "DP-1", (3840, 2160), Some((600, 340)));
-        assert!((s.text - 0.845).abs() < 0.01, "{}", s.text);
+        assert!(near(lg(&c), 1.127), "{}", lg(&c));
+        let full = cfg("[displays]\ntext-strength = 1.0\n[[displays.screen]]\nid = \"lg\"\nscale = 1.3333333333\n");
+        assert!(near(lg(&full), 1.27), "{}", lg(&full));
+        let off = cfg("[displays]\ntext-strength = 0\n[[displays.screen]]\nid = \"lg\"\nscale = 1.3333333333\n");
+        assert_eq!(lg(&off), 1.0);
+        // At its default 200% the text is drawn a little smaller.
+        assert!(near(lg(&DisplaysConfig::default()), 0.919), "{}", lg(&DisplaysConfig::default()));
         // The size preference does not take it back: text grows with the rest.
         let c = cfg("[displays]\nsize = 1.25\n[[displays.screen]]\nid = \"lg\"\nscale = 1.3333333333\n");
-        assert!((c.scale_for("lg", "DP-1", (3840, 2160), Some((600, 340))).text - 1.27).abs() < 0.01);
-        // Hubble's panel at a laptop's distance: 1.04.
+        assert!(near(lg(&c), 1.127));
+        // Hubble's panel at a laptop's distance: 1.04, half of it 1.02.
         let s = DisplaysConfig::default().scale_for("p", "eDP-1", (1920, 1080), Some((344, 193)));
-        assert!((s.text - 1.04).abs() < 0.01, "{}", s.text);
+        assert!(near(s.text, 1.02), "{}", s.text);
         // No size from the EDID: as given.
         assert_eq!(DisplaysConfig::default().scale_for("x", "HDMI-A-1", (1920, 1080), None).text, 1.0);
     }
