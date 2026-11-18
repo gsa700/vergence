@@ -422,6 +422,11 @@ impl Server {
                     }
                 };
                 let scale = self.scale_at(rect);
+                // Its first size on the grid too (grid.rs); its place is when it is shown (put).
+                let mut rect = rect;
+                if !maximized && self.on_grid(&w) {
+                    rect.size = Self::grid_size(rect.size, scale);
+                }
                 {
                     let mut s = n.state.lock().unwrap();
                     (s.size, s.scale, s.place, s.place_maximized) = (rect.size, scale, rect.loc, maximized);

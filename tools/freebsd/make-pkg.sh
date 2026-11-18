@@ -31,6 +31,17 @@ while [ $# -gt 0 ]; do
 done
 [ "$(uname -s)" = FreeBSD ] || { echo "make-pkg.sh: FreeBSD only" >&2; exit 1; }
 
+# Not from a build older than the source: it packages what is built, and
+# does not build (2026-11-18: a package with the night before's server).
+built=${CARGO_TARGET_DIR:-$root/target}/release/vergence-server
+[ -f "$built" ] || { echo "make-pkg.sh: no release build; run cargo build --release" >&2; exit 1; }
+newer=$(find "$root/crates" "$root/Cargo.toml" "$root/Cargo.lock" -newer "$built" -type f \( -name '*.rs' -o -name 'Cargo.*' \) | head -3)
+if [ -n "$newer" ]; then
+    echo "make-pkg.sh: source is newer than the release build; run cargo build --release first:" >&2
+    echo "$newer" | sed 's/^/  /' >&2
+    exit 1
+fi
+
 work=$(mktemp -d -t vergence-pkg)
 trap 'rm -rf "$work"' EXIT
 stage=$work/stage
