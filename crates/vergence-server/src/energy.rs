@@ -203,6 +203,12 @@ impl Server {
         if self.backend.is_none() || self.session.as_ref().is_some_and(|s| !s.is_active()) {
             return;
         }
+        // Only the session on the real monitors: a headless one (tests, its
+        // screens in memory) must never turn screens off, lock, or put the
+        // machine to sleep (headless milestone 1).
+        if !std::env::args().any(|a| a == "--drm") {
+            return;
+        }
         let idle = self.energy.last_input.elapsed();
         let c = self.energy.config.clone();
         let battery = self.energy.on_battery.load(Ordering::Relaxed);

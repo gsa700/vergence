@@ -106,9 +106,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state.start_greeter();
     }
 
-    // --drm: the real monitors (from a text console, through libseat); else nested.
-    if std::env::args().any(|a| a == "--drm") {
+    // --drm: the real monitors (from a text console, through libseat);
+    // --headless: screens in memory only (`--screen "WxH MMxMM[@HZ]"`, repeated;
+    // headless milestone 1); else nested.
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--drm") {
         crate::drm::run(&mut event_loop, &mut state)?;
+    } else if args.iter().any(|a| a == "--headless") {
+        let screens: Vec<String> = args.windows(2).filter(|w| w[0] == "--screen").map(|w| w[1].clone()).collect();
+        crate::drm::run_headless(&mut event_loop, &mut state, &screens)?;
     } else {
         crate::winit::init_winit(&mut event_loop, &mut state)?;
     }
@@ -234,7 +240,7 @@ pub fn spawn(cmd: &mut std::process::Command) -> std::io::Result<u32> {
 /// leftover from the first nested tests). Nested runs still take `-c`.
 fn spawn_client() {
     let all: Vec<String> = std::env::args().skip(1).collect();
-    if all.iter().any(|a| a == "--drm") {
+    if all.iter().any(|a| a == "--drm" || a == "--headless") {
         return;
     }
     let mut args = all.into_iter();

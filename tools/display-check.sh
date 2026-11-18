@@ -3,6 +3,8 @@
 #
 #   tools/display-check.sh <host> <screen> [scale...]
 #   tools/display-check.sh techbench DP-1 1 1.25 1.3333333333 1.5 2
+#   tools/display-check.sh <host> --headless "2560x1440 597x336" [scale...]
+#     (a session of its own, a screen in memory: the monitors untouched)
 #
 # Syncs the tree to <host> (tools/sync-hubble.sh), runs
 # tools/display-check-remote.sh there in the running session (vctl; the
@@ -15,7 +17,13 @@ host=${1:?usage: display-check.sh <host> <screen> [scale...]}
 screen=${2:?usage: display-check.sh <host> <screen> [scale...]}
 shift 2
 "$here/sync-hubble.sh" "$host" >/dev/null || exit 2
-ssh "$host" "sh src/vergence/tools/display-check-remote.sh $screen $*"
+if [ "$screen" = "--headless" ]; then
+    spec=${1:?usage: display-check.sh <host> --headless "<spec>" [scale...]}
+    shift
+    ssh "$host" "sh src/vergence/tools/display-check-remote.sh --headless '$spec' $*"
+else
+    ssh "$host" "sh src/vergence/tools/display-check-remote.sh $screen $*"
+fi
 status=$?
 last=$(ssh "$host" 'ls -td ~/vergence-display-check/*/ | head -1')
 dest=$HOME/vergence-display-checks/$host-$(basename "$last")

@@ -1,0 +1,103 @@
+#!/bin/sh
+# A Vergence session with no monitors (headless milestone 1, step 3): the
+# server's --headless, its screens in memory, beside whatever runs on the
+# real monitors and never touching it.
+#
+#   tools/vergence-headless start [--screen "2560x1440 597x336@60"]...
+#   eval "$(tools/vergence-headless env)"   # then vctl, vctl spawn ... drive it
+#   tools/vergence-headless stop
+#
+# It has its own HOME and runtime directory under ~/.cache/vergence-headless
+# (a throwaway profile: its own settings, window memory, no session restore;
+# lock, screens off and sleep never happen), its own Wayland socket, bus and
+# control socket. `env` sets VCTL_SOCKET, so vctl talks to it and to nothing
+# else (a test must never fall through to the session on the monitors).
+# The server: $VERGENCE_SERVER, else the checkout's target-check build
+# (tools/display-check-remote.sh builds it there), else target/release.
+# With no --screen: one 1920x1080 screen of 531x299 mm (a 24").
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(cd "$here/.." && pwd)
+base=$HOME/.cache/vergence-headless
+run=$base/run
+home=$base/home
+pidfile=$base/server.pid
+
+server() {
+    if [ -n "${VERGENCE_SERVER:-}" ]; then echo "$VERGENCE_SERVER"
+    elif [ -x "$root/target-check/release/vergence-server" ]; then echo "$root/target-check/release/vergence-server"
+    elif [ -x "$root/target/release/vergence-server" ]; then echo "$root/target/release/vergence-server"
+    else command -v vergence-server
+    fi
+}
+
+running() {
+    [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null
+}
+
+case "${1:-}" in
+start)
+    shift
+    if running; then
+        echo "vergence-headless: already running (pid $(cat "$pidfile"))" >&2
+        exit 1
+    fi
+    bin=$(server)
+    [ -x "$bin" ] || { echo "vergence-headless: no vergence-server" >&2; exit 1; }
+    rm -rf "$run"
+    mkdir -p "$home/.config/vergence" "$base"
+    mkdir -m 700 "$run" || exit 1
+    # A test profile: nothing locks, turns off or sleeps; no X11.
+    if [ ! -f "$home/.config/vergence/desktop.toml" ]; then
+        cat >"$home/.config/vergence/desktop.toml" <<'EOF'
+# Vergence's headless test profile (tools/vergence-headless).
+[energy]
+screens-off = 0
+sleep = 0
+
+[lock]
+after = 0
+
+[x11]
+enabled = false
+EOF
+    fi
+    [ $# -gt 0 ] || set -- --screen "1920x1080 531x299@60"
+    # Its programs (vctl spawn) from the same build.
+    PATH=$(dirname "$bin"):$PATH
+    env -u WAYLAND_DISPLAY -u VERGENCE_BUS -u DBUS_SESSION_BUS_ADDRESS -u DISPLAY \
+        HOME="$home" XDG_RUNTIME_DIR="$run" VERGENCE_CONTROL=1 PATH="$PATH" \
+        RUST_LOG="${RUST_LOG:-info}" \
+        "$bin" --headless "$@" >"$base/server.log" 2>&1 &
+    echo $! >"$pidfile"
+    i=0
+    while [ ! -S "$run/vergence-control" ] && [ $i -lt 100 ]; do
+        running || { echo "vergence-headless: the server stopped; $base/server.log:" >&2; tail -20 "$base/server.log" >&2; exit 1; }
+        sleep 0.1
+        i=$((i + 1))
+    done
+    [ -S "$run/vergence-control" ] || { echo "vergence-headless: no control socket after 10 s" >&2; exit 1; }
+    echo "vergence-headless: running (pid $(cat "$pidfile")); log $base/server.log"
+    ;;
+env)
+    running || { echo "vergence-headless: not running" >&2; exit 1; }
+    echo "VCTL_SOCKET=$run/vergence-control; export VCTL_SOCKET"
+    # This checkout's vctl: an older installed one ignores VCTL_SOCKET.
+    echo "vctl() { sh '$root/tools/vctl' \"\$@\"; }"
+    ;;
+stop)
+    if running; then
+        kill "$(cat "$pidfile")"
+        i=0
+        while running && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+        running && kill -9 "$(cat "$pidfile")"
+    fi
+    rm -f "$pidfile"
+    rm -rf "$run"
+    echo "vergence-headless: stopped"
+    ;;
+*)
+    sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+    exit 2
+    ;;
+esac

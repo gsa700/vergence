@@ -391,11 +391,8 @@ impl Server {
                             }
                         } else if let Some(px) = flag("--fake").and_then(pair) {
                             let Some(mm) = args.iter().skip_while(|a| **a != "--fake").nth(2).and_then(|v| pair(v)) else { return usage.into() };
-                            let name = flag("--name").map_or_else(|| format!("FAKE {}x{}", px.0, px.1), str::to_string);
-                            // The same spec, the same monitor: its serial from it (window memory per setup).
-                            let serial = (px.0 * 31 + px.1).wrapping_mul(2654435761).wrapping_add(mm.0 * 7 + mm.1) % 100_000_000;
-                            let spec = vergence_edid::fake::Spec { name: &name, product: 0x9a00, serial, timing: vergence_edid::fake::FHD_60, size_mm: (mm.0 as u16, mm.1 as u16) };
-                            (vergence_edid::fake::build(&spec), px)
+                            let name = flag("--name").map_or_else(|| format!("FAKE{}x{}", px.0, px.1), str::to_string);
+                            (crate::drm::fake_screen_edid(px, mm, &name), px)
                         } else {
                             return usage.into();
                         };

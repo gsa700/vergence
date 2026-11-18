@@ -153,3 +153,17 @@ scenarios, each from a bug or a rule we already have:
   (FreeBSD; the 14" 4K at 30 Hz on HDMI-A-1, the ASUS on HDMI-A-2): the 4K at
   1.5, 2, 2.4, 2.5, 3 (40/40, twice) and the ASUS at 1, 1.25, 4/3 and its
   same-size 16/15 (32/32).
+- **Step 3 done** (2026-11-18): `vergence-server --headless [--screen
+  "WxH MMxMM[@HZ]"]...` (drm.rs `run_headless`: EGL's device platform, the
+  lowest-numbered render node or VERGENCE_HEADLESS_GPU, else Mesa's
+  software device; no seat, DRM master or input; energy, lock, Wi-Fi,
+  autostart and session restore stay off, as nested). tools/vergence-headless
+  start|env|stop: its own HOME and runtime directory under
+  ~/.cache/vergence-headless, `env` sets VCTL_SOCKET and a vctl function
+  for the checkout's vctl (canary's installed vctl was older than
+  VCTL_SOCKET and would have reached a session on the monitors).
+  `tools/display-check.sh <host> --headless "<spec>" [scales]`. Display
+  checks headless, the sessions on the monitors untouched: Hubble (Intel
+  UHD 630) 27" QHD at six scales 48/48; techbench 27" 4K at 4/3, 1.5, 2
+  24/24; kepler 14" 4K at 2, 2.5, 3, 3.25 32/32; canary (no GPU, llvmpipe)
+  24" FHD at 1, 1.25, 1.5 24/24. Tests: Hubble 711, kepler 704, techbench 704.

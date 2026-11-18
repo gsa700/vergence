@@ -3,6 +3,11 @@
 # layer 2, 2026-11-18). Run by tools/display-check.sh from Control; by hand:
 #
 #   sh tools/display-check-remote.sh <screen> [scale...]
+#   sh tools/display-check-remote.sh --headless "<spec>" [scale...]
+#
+# --headless: a session of its own with one screen in memory (spec as
+# tools/vergence-headless takes it, "2560x1440 597x336@60"), started and
+# stopped here; the session on the monitors is not touched.
 #
 # Builds the test pattern (vergence-ui's testpattern example) and the
 # checker (vergence-harness seams) into target-check, apart from the build
@@ -14,9 +19,20 @@
 set -u
 root=$(cd "$(dirname "$0")/.." && pwd)
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+# The checkout's vctl, never one on PATH: an older installed one does not
+# know VCTL_SOCKET and would find the session on the monitors instead of the
+# headless one (canary's, 2026-11-18).
+vctl() { sh "$root/tools/vctl" "$@"; }
 target=$root/target-check
-screen=${1:?usage: display-check-remote.sh <screen> [scale...]}
-shift
+headless=
+if [ "${1:-}" = "--headless" ]; then
+    headless=${2:?usage: display-check-remote.sh --headless "<spec>" [scale...]}
+    shift 2
+    screen=MEM-1
+else
+    screen=${1:?usage: display-check-remote.sh <screen> [scale...]}
+    shift
+fi
 [ $# -gt 0 ] || set -- 1 1.25 1.3333333333 1.5 2
 
 echo "building the pattern and the checker"
@@ -25,7 +41,17 @@ CARGO_TARGET_DIR=$target cargo build -q --release --manifest-path "$root/Cargo.t
 CARGO_TARGET_DIR=$target cargo build -q --release --manifest-path "$root/Cargo.toml" -p vergence-harness --bin vergence-harness || exit 2
 pattern=$target/release/examples/testpattern
 harness=$target/release/vergence-harness
+if [ -n "$headless" ]; then
+    CARGO_TARGET_DIR=$target cargo build -q --release --manifest-path "$root/Cargo.toml" -p vergence-server || exit 2
+    "$root/tools/vergence-headless" stop >/dev/null 2>&1
+    VERGENCE_SERVER=$target/release/vergence-server "$root/tools/vergence-headless" start --screen "$headless" || exit 2
+    eval "$("$root/tools/vergence-headless" env)"
+    SHOTS_DIR=$HOME/.cache/vergence-headless/home/vergence-shots
+    trap '"$root/tools/vergence-headless" stop >/dev/null' EXIT
+fi
 
+# Where the server writes its shots: its HOME's (a headless session has its own).
+shots=${SHOTS_DIR:-$HOME/vergence-shots}
 out=$HOME/vergence-display-check/$(date +%Y%m%d-%H%M%S)
 mkdir -p "$out"
 report=$out/report.txt
@@ -62,17 +88,17 @@ for s in "$@"; do
         idx=$(pattern_line | cut -d' ' -f1)
         vctl move "$idx" $((ox + 40 + d)) $((oy + 80 + d)) >/dev/null
         sleep 0.6
-        rm -f "$HOME/vergence-shots/$screen.png"
+        rm -f "$shots/$screen.png"
         vctl shot >/dev/null
         i=0
-        while [ ! -s "$HOME/vergence-shots/$screen.png" ] && [ $i -lt 60 ]; do sleep 0.1; i=$((i + 1)); done
+        while [ ! -s "$shots/$screen.png" ] && [ $i -lt 60 ]; do sleep 0.1; i=$((i + 1)); done
         sleep 0.3
         geo=$(pattern_line | sed -E 's/.*\{ x: (-?[0-9]+), y: (-?[0-9]+), width: ([0-9]+), height: ([0-9]+) \}.*bar-h=([0-9]+).*/\1 \2 \3 \4 \5/')
         read -r x y w h bar <<EOF
 $geo
 EOF
         shot=$out/scale$scale-step$d.png
-        cp "$HOME/vergence-shots/$screen.png" "$shot"
+        cp "$shots/$screen.png" "$shot"
         {
             echo "== scale $scale, step $d: $w x $h at $x,$y (bar $bar)"
             "$harness" seams "$shot" --scale "$scale" --window $((x - ox)) $((y - oy)) "$w" "$h" --bar "$bar"

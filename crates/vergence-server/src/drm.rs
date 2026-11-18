@@ -221,8 +221,9 @@ enum Relayed {
 
 pub struct Backend {
     renderer: GlesRenderer,
-    /// The primary GPU's buffers, for the frames of screens on other GPUs.
-    gbm: GbmDevice<DrmDeviceFd>,
+    /// The primary GPU's buffers, for the frames of screens on other GPUs
+    /// (None headless: no monitors, so no relays).
+    gbm: Option<GbmDevice<DrmDeviceFd>>,
     /// devices[0] is the primary GPU, the one that draws.
     devices: Vec<Device>,
     surfaces: HashMap<Key, Surface>,
@@ -351,7 +352,7 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
             }
         }
     })?;
-    state.backend = Some(Backend { renderer, gbm: primary_gbm, devices, surfaces: HashMap::new(), paused: false, waiting: Vec::new(), probed });
+    state.backend = Some(Backend { renderer, gbm: Some(primary_gbm), devices, surfaces: HashMap::new(), paused: false, waiting: Vec::new(), probed });
     state.session = Some(session.clone());
 
     // Input from every device on the seat.
@@ -392,36 +393,7 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
         })?;
     }
 
-    // THE WATCHDOG (2026-11-08: the whole desktop froze, pointer and all, with
-    // the server idle and nothing logged): drawing is driven by VBlank events,
-    // so a lost one, or a frame that ended without arranging the next, stops a
-    // monitor for good. Any monitor not drawn for 2 s while the session is
-    // active is drawn again, and it is logged.
-    event_loop.handle().insert_source(Timer::from_duration(Duration::from_secs(1)), |_, _, state| {
-        let stalled: Vec<(Key, String, u128)> = state
-            .backend
-            .as_ref()
-            .filter(|_| state.session.as_ref().is_none_or(|s| s.is_active()) && !state.energy.screens_off)
-            .map(|b| {
-                b.surfaces
-                    .iter()
-                    .filter(|(_, s)| s.last.elapsed() > Duration::from_secs(2))
-                    .map(|(c, s)| (*c, s.connector.clone(), s.last.elapsed().as_millis()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        for (key, name, ms) in stalled {
-            tracing::warn!("watchdog: {name} not drawn for {ms} ms (VBlank lost?); drawing it again");
-            if let Some(b) = state.backend.as_mut()
-                && let Some(s) = b.surfaces.get_mut(&key)
-            {
-                s.frame_submitted();
-                s.reset_buffers();
-            }
-            render(state, key);
-        }
-        TimeoutAction::ToDuration(Duration::from_secs(1))
-    })?;
+    watchdog(event_loop)?;
 
     // Console switches.
     let mut libinput = libinput_for_session;
@@ -634,7 +606,7 @@ fn is_drm_hotplug(line: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+mod spec_tests {
     #[test]
     fn software_renderers_are_known() {
         assert!(super::is_software("llvmpipe (LLVM 22.1.8, 256 bits)"));
@@ -828,7 +800,8 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
         // copy is pixel for pixel; the real output keeps the screen's own scale.
         let plain = Output::new(format!("{name} (copy)"), PhysicalProperties { size: (0, 0).into(), subpixel: Subpixel::Unknown, make: "Vergence".into(), model: String::new(), serial_number: String::new() });
         plain.change_current_state(Some(wl_mode), Some(Transform::Normal), Some(Scale::Integer(1)), None);
-        let buf = match relay_buffer(&b.gbm, w as u32, h as u32) {
+        let Some(gbm) = b.gbm.as_ref() else { return };
+        let buf = match relay_buffer(gbm, w as u32, h as u32) {
             Ok(v) => v,
             Err(e) => return tracing::warn!("{name}: no buffer to draw it in: {e}"),
         };
@@ -1215,6 +1188,141 @@ fn read_back(renderer: &mut GlesRenderer, dmabuf: &mut smithay::backend::allocat
 
 /// Render `elements` into an offscreen buffer the size of the monitor and read it back
 /// (R, G, B, A bytes, top row first).
+/// `--headless` (headless milestone 1, step 3): no seat, no DRM master, no
+/// input devices; the GPU through EGL's device platform (its render node,
+/// any user's), or Mesa's software device on a machine with none (canary);
+/// every screen in memory (`--screen WxH MMxMM[@HZ]`, again and again, or
+/// `vctl screen add`). Input comes only from vctl. Run it with its own HOME
+/// and runtime directory (tools/vergence-session --headless): it is a whole
+/// session, with its own settings, window memory and session restore.
+pub fn run_headless(event_loop: &mut EventLoop<Server>, state: &mut Server, screens: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    use smithay::backend::egl::EGLDevice;
+    // The GPU: VERGENCE_HEADLESS_GPU (a render node's path) if given, else the
+    // lowest-numbered render node (renderD128, the main GPU as a rule: Hubble's
+    // Intel before its NVIDIA, which zink drew on at first), else Mesa's
+    // software device (canary, no GPU).
+    let mut all: Vec<(Option<smithay::backend::drm::DrmNode>, EGLDevice)> = EGLDevice::enumerate()?.map(|d| (d.try_get_render_node().ok().flatten(), d)).collect();
+    all.sort_by_key(|(n, d)| (d.is_software(), n.map_or(u64::MAX, |n| n.minor() as u64)));
+    let wanted = std::env::var("VERGENCE_HEADLESS_GPU").ok().and_then(|p| smithay::backend::drm::DrmNode::from_path(p).ok());
+    let pick = match wanted {
+        Some(w) => all.iter().find(|(n, _)| n.is_some_and(|n| n.dev_id() == w.dev_id())).ok_or("VERGENCE_HEADLESS_GPU: no such render node")?,
+        None => all.first().ok_or("no EGL device, not even a software one")?,
+    };
+    let device = pick.1.clone();
+    let node = device.try_get_render_node().ok().flatten();
+    let display = unsafe { EGLDisplay::new(device)? };
+    let context = EGLContext::new(&display)?;
+    let mut renderer = unsafe { GlesRenderer::new(context)? };
+    let name = gl_renderer(&mut renderer);
+    tracing::info!("headless: drawing with {name} ({})", node.map_or("no render node: software".to_string(), |n| format!("{n:?}")));
+    state.shm_formats_from(&renderer);
+    if let Some(node) = node {
+        match smithay::wayland::dmabuf::DmabufFeedbackBuilder::new(node.dev_id(), renderer.dmabuf_formats()).build() {
+            Ok(feedback) => {
+                let mut dmabuf_state = smithay::wayland::dmabuf::DmabufState::new();
+                let global = dmabuf_state.create_global_with_default_feedback::<Server>(&state.display_handle, &feedback);
+                state.dmabuf = Some((dmabuf_state, global));
+            }
+            Err(e) => tracing::warn!("linux-dmabuf: {e:?}"),
+        }
+    }
+    let (probed, _probed_rx) = smithay::reexports::calloop::channel::channel::<usize>();
+    state.backend = Some(Backend { renderer, gbm: None, devices: Vec::new(), surfaces: HashMap::new(), paused: false, waiting: Vec::new(), probed });
+    state.session = None;
+    watchdog(event_loop)?;
+    for spec in screens {
+        let parsed = parse_screen_spec(spec).ok_or_else(|| format!("--screen {spec}: WxH MMxMM[@HZ], as 2560x1440 597x336@60"))?;
+        let (px, mm, hz) = parsed;
+        let edid = fake_screen_edid(px, mm, &format!("HL {}x{}", px.0, px.1));
+        add_memory_screen(state, edid, px, hz)?;
+    }
+    Ok(())
+}
+
+/// A screen in memory: its mode in pixels, its size in mm, its rate in mHz.
+pub type ScreenSpec = ((u32, u32), (u32, u32), u32);
+
+/// "2560x1440 597x336@60": a screen's mode, its size in mm, and its rate
+/// (60 Hz unless given); the rate may follow either part.
+pub fn parse_screen_spec(spec: &str) -> Option<ScreenSpec> {
+    let pair = |v: &str| -> Option<(u32, u32)> {
+        let (a, b) = v.split_once('x')?;
+        Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
+    };
+    let mut hz = 60_000;
+    let mut parts = Vec::new();
+    for word in spec.split([' ', ',']).filter(|w| !w.is_empty()) {
+        let size = match word.split_once('@') {
+            Some((size, rate)) => {
+                hz = (rate.parse::<f64>().ok()? * 1000.0).round() as u32;
+                size
+            }
+            None => word,
+        };
+        parts.push(pair(size)?);
+    }
+    match parts.as_slice() {
+        [px, mm] => Some((*px, *mm, hz)),
+        _ => None,
+    }
+}
+
+/// A fake monitor's EDID for a screen in memory: the same mode, size and
+/// name give the same monitor (window memory per setup).
+pub fn fake_screen_edid(px: (u32, u32), mm: (u32, u32), name: &str) -> Vec<u8> {
+    let serial = (px.0.wrapping_mul(31).wrapping_add(px.1)).wrapping_mul(2654435761).wrapping_add(mm.0 * 7 + mm.1) % 100_000_000;
+    vergence_edid::fake::build(&vergence_edid::fake::Spec { name, product: 0x9a00, serial, timing: vergence_edid::fake::FHD_60, size_mm: (mm.0.min(4095) as u16, mm.1.min(4095) as u16) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn screen_specs() {
+        assert_eq!(parse_screen_spec("2560x1440 597x336"), Some(((2560, 1440), (597, 336), 60_000)));
+        assert_eq!(parse_screen_spec("3840x2160@30 310x174"), Some(((3840, 2160), (310, 174), 30_000)));
+        assert_eq!(parse_screen_spec("1920x1080,531x299@59.94"), Some(((1920, 1080), (531, 299), 59_940)));
+        assert_eq!(parse_screen_spec("1920x1080"), None);
+        assert_eq!(fake_screen_edid((2560, 1440), (597, 336), "A"), fake_screen_edid((2560, 1440), (597, 336), "A"));
+        assert_ne!(fake_screen_edid((2560, 1440), (597, 336), "A"), fake_screen_edid((1920, 1080), (597, 336), "A"));
+    }
+}
+
+fn watchdog(event_loop: &mut EventLoop<Server>) -> Result<(), Box<dyn std::error::Error>> {
+    // THE WATCHDOG (2026-11-08: the whole desktop froze, pointer and all, with
+    // the server idle and nothing logged): drawing is driven by VBlank events,
+    // so a lost one, or a frame that ended without arranging the next, stops a
+    // monitor for good. Any monitor not drawn for 2 s while the session is
+    // active is drawn again, and it is logged.
+    event_loop.handle().insert_source(Timer::from_duration(Duration::from_secs(1)), |_, _, state| {
+        let stalled: Vec<(Key, String, u128)> = state
+            .backend
+            .as_ref()
+            .filter(|_| state.session.as_ref().is_none_or(|s| s.is_active()) && !state.energy.screens_off)
+            .map(|b| {
+                b.surfaces
+                    .iter()
+                    .filter(|(_, s)| s.last.elapsed() > Duration::from_secs(2))
+                    .map(|(c, s)| (*c, s.connector.clone(), s.last.elapsed().as_millis()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (key, name, ms) in stalled {
+            tracing::warn!("watchdog: {name} not drawn for {ms} ms (VBlank lost?); drawing it again");
+            if let Some(b) = state.backend.as_mut()
+                && let Some(s) = b.surfaces.get_mut(&key)
+            {
+                s.frame_submitted();
+                s.reset_buffers();
+            }
+            render(state, key);
+        }
+        TimeoutAction::ToDuration(Duration::from_secs(1))
+    })?;
+    Ok(())
+}
+
 /// A screen in memory, one frame: drawn into its texture (what changed).
 fn memory_frame(renderer: &mut GlesRenderer, s: &mut Surface, elements: &[OutputElements], clear: [f32; 4]) -> Result<Relayed, String> {
     use smithay::backend::renderer::Bind;
