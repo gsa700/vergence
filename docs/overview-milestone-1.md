@@ -79,6 +79,29 @@ any window**. That comes first.
 2. **The desktop moving aside:** (a) on unless switched off, as the Mac
    (recommended); (b) off unless switched on.
 
+## Progress
+
+All seven steps built 2026-11-18 evening, tests and the display suite
+(10 of 10 with scenario 10-overview) green on Hubble, kepler and
+techbench:
+
+1. Window pictures: the server's thumbs.rs (8a09e57); `vctl thumb`.
+2. The dock's dots, hollow when minimized; icons never faint (2c51269).
+3. The dock's picker: picker.rs, seat `Part::Picker` (2c51269);
+   `vctl picker`, `vctl minimize`.
+4. Alt+Tab's live tiles: switch.rs (11a0f83).
+5. The overview, Super+Tab: vergence-shell overview.rs (the
+   arrangement, tested), the seat's `KeyOut::Overview` and
+   `Menu::Overview`, the server's overview.rs (e09887c); `vctl overview`.
+6. The desktop moving aside: bus v23 `WinRequest::GroundClicked`, the
+   server's aside.rs, `[windows] desktop-aside`, its switch on Settings >
+   Windows (8ead4a1).
+7. Tests: the arrangement's, the seat's, tools/display-suite/10-overview.sh.
+
+Open, by hand: the picker with a finger (a touch held on an icon does
+not open it yet: touch has no hover); the slide's feel on a real screen;
+everything on Dave's machines.
+
 ## Not in this milestone
 
 Spaces (several desktops), dragging a window between screens in the
