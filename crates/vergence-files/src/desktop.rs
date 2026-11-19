@@ -707,6 +707,19 @@ impl Program for Desktop {
                     }
                 }
             }
+            // A click on the bare ground (pressed and let go there, not
+            // pulled): the windows move aside, or come back (overview
+            // milestone 1, step 6; Dave, 2026-11-18, after the Mac).
+            Msg::Touch(Touch::Release { x, y }) => {
+                if let Some((px, py, None)) = self.press.take()
+                    && !self.dragged
+                    && ((x - px).powi(2) + (y - py).powi(2)) <= 36.0
+                    && !self.mods.ctrl
+                    && !self.mods.shift
+                {
+                    window.ground_clicked();
+                }
+            }
             Msg::Touch(_) => {}
             Msg::Allow => {
                 if let Some(Ask::Trust(p)) = self.ask.take() {

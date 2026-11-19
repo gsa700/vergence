@@ -519,6 +519,17 @@ impl Server {
         if !pressed {
             self.app_menu_release();
         }
+        // The windows moved aside (aside.rs): a press on any of them brings all back.
+        if pressed && self.aside.active() {
+            let w = match &t {
+                Target::Native(id) | Target::Surface(id, _) => self.input.wins.get(id).cloned(),
+                Target::Server(Part::Title(id) | Part::Close(id) | Part::Maximize(id) | Part::Minimize(id) | Part::Edge(id, _) | Part::Tab(id, _) | Part::CloseTab(id, _) | Part::Plus(id) | Part::Tool(id, _) | Part::AppMenu(id)) => self.input.wins.get(id).cloned(),
+                _ => None,
+            };
+            if let Some(w) = w {
+                self.aside_pressed(&w);
+            }
+        }
         // A press anywhere but on the picker puts it away (picker.rs); one on
         // the dock does what it does as well.
         if pressed && self.picker.is_some() && !matches!(t, Target::Server(Part::Picker)) {
@@ -571,6 +582,8 @@ impl Server {
             Target::Server(Part::Note) if pressed => self.notify_press(pos),
             Target::Server(Part::Picker) if pressed && button == vergence_seat::BTN_LEFT => self.picker_press(pos),
             Target::Server(Part::Overview) if pressed && button == vergence_seat::BTN_LEFT => self.overview_press(pos),
+            // The bare wallpaper (no desktop icons): as the icons' ground (aside.rs).
+            Target::Server(Part::Desktop) if pressed && button == vergence_seat::BTN_LEFT => self.ground_clicked(),
             Target::Server(Part::Card) if pressed && button == vergence_seat::BTN_LEFT => self.card_press(pos),
             Target::Server(Part::Card) if !pressed => self.card_release(),
             Target::Server(Part::Drawer) if pressed && button == vergence_seat::BTN_LEFT => self.drawer_press(pos),

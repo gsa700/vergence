@@ -385,6 +385,8 @@ enum Command {
     Activate,
     /// The server's menu with the window's commands, at this point in it.
     ContextMenu(f32, f32),
+    /// The desktop's bare ground was clicked (bus v23).
+    GroundClicked,
     Menu(f32, f32, Vec<MenuLine>),
 }
 
@@ -431,6 +433,13 @@ impl Window {
     /// The commands are sent first if they changed. The native road only.
     pub fn context_menu(&mut self, x: f32, y: f32) {
         self.commands.push(Command::ContextMenu(x, y));
+    }
+
+    /// Tells the server the desktop's bare ground was clicked (bus v23):
+    /// the windows move aside, or come back. Heard only from a window of
+    /// the Desktop kind. The native road only.
+    pub fn ground_clicked(&mut self) {
+        self.commands.push(Command::GroundClicked);
     }
 
     /// Asks the server to open the window's own right-click menu here
@@ -1345,7 +1354,7 @@ impl<'a> Runner<'a> {
                 Command::Size(..) => {}
                 // Drags under other desktops: Wayland drag and drop, later;
                 // activation: xdg-activation, later.
-                Command::Drag(..) | Command::Activate | Command::ContextMenu(..) | Command::Menu(..) => {}
+                Command::Drag(..) | Command::Activate | Command::ContextMenu(..) | Command::Menu(..) | Command::GroundClicked => {}
                 Command::Minimize => self.client.set_minimized(toplevel)?,
                 Command::Copy(text) => {
                     if let (Some(manager), Some(device)) = (self.data_manager, self.data_device) {

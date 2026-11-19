@@ -432,6 +432,7 @@ impl<'a> Native<'a> {
                     let y = y as f64 - self.windows[i].inset as f64;
                     self.send(WinRequest::Menu { window: id, x: x as f64, y, lines })?
                 }
+                Command::GroundClicked => self.send(WinRequest::GroundClicked { window: id })?,
                 Command::Minimize => self.send(WinRequest::Minimize { window: id })?,
                 Command::Copy(text) => {
                     self.send(WinRequest::Copy { input_serial: self.input_serial, kinds: TEXT_KINDS.iter().map(|k| k.to_string()).collect() })?;

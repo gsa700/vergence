@@ -2603,6 +2603,11 @@ impl App {
             ),
             setting("Alt+Tab shows", "The windows it steps through, the most recently used first.", pick("alt-tab", &ALT_TAB, 0, 180.0, "Alt+Tab shows", true)),
             setting("Alt+` (the key above Tab)", "The same, among the focused application's windows only.", flag("app-switch", true, "Alt+backtick", true)),
+            setting(
+                "Click the desktop to move windows aside",
+                "A click on the desktop's bare ground slides the windows to the sides; another click, or a click on a window, brings them back.",
+                flag("desktop-aside", true, "Click the desktop to move windows aside", true),
+            ),
         ])
     }
 

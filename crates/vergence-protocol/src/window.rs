@@ -287,6 +287,10 @@ pub enum WinRequest {
     /// its app menu's commands; a chosen line comes back as
     /// [`WinEvent::Command`] with its id.
     Menu { window: u32, x: f64, y: f64, lines: Vec<MenuLine> },
+    /// The desktop's bare ground was clicked (bus v23, overview milestone
+    /// 1, step 6): the windows move aside, or come back. Heard only from a
+    /// window of the Desktop kind; any other's is ignored.
+    GroundClicked { window: u32 },
 }
 
 /// A line of a window's right-click menu ([`WinRequest::Menu`]).
@@ -609,6 +613,7 @@ pub(crate) mod op {
     pub const ACTIVATE: u16 = 122;
     pub const CONTEXT_MENU: u16 = 123;
     pub const MENU: u16 = 124;
+    pub const GROUND_CLICKED: u16 = 125;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -974,6 +979,11 @@ impl WinRequest {
                 put_menu_lines(&mut e, lines);
                 e
             }
+            WinRequest::GroundClicked { window } => {
+                let mut e = Encoder::frame(op::GROUND_CLICKED);
+                e.u32(*window);
+                e
+            }
             WinRequest::BarStyle { window, style } => {
                 let mut e = Encoder::frame(op::BAR_STYLE);
                 e.u32(*window).u8(match style {
@@ -1152,6 +1162,7 @@ impl WinRequest {
                 let (window, x, y) = (d.u32()?, finite(d.f64()?, "x")?, finite(d.f64()?, "y")?);
                 WinRequest::Menu { window, x, y, lines: get_menu_lines(&mut d, false)? }
             }
+            op::GROUND_CLICKED => WinRequest::GroundClicked { window: d.u32()? },
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -1595,6 +1606,7 @@ mod tests {
             WinRequest::DragAccept { window: 1, action: DROP_MOVE },
             WinRequest::Activate { window: 1 },
             WinRequest::ContextMenu { window: 1, x: 40.0, y: 60.5 },
+            WinRequest::GroundClicked { window: 1 },
             WinRequest::Menu {
                 window: 1,
                 x: 12.0,

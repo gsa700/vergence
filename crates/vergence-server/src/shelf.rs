@@ -917,7 +917,7 @@ impl Server {
     }
 
     /// Motion on the desktop is wanted (the settings' reduce-motion is off).
-    fn motion_wanted(&self) -> bool {
+    pub fn motion_wanted(&self) -> bool {
         !matches!(self.settings.current.get(&(crate::settings::INTERFACE.to_string(), "enable-animations".to_string())), Some(vergence_protocol::bus::SettingValue::Bool(false)))
     }
 

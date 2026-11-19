@@ -55,6 +55,7 @@ mod switch;
 mod thumbs;
 mod picker;
 mod overview;
+mod aside;
 mod opened;
 mod snap;
 mod style;

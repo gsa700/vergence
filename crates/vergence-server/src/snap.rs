@@ -89,6 +89,9 @@ pub struct SnapConfig {
     /// `alt-tab = "screen"`: Alt+Tab lists only the windows on the focused
     /// window's screen (default "all").
     pub alt_tab_screen: bool,
+    /// A click on the desktop's bare ground moves the windows aside
+    /// (`desktop-aside`, on unless false; overview milestone 1, step 6).
+    pub desktop_aside: bool,
 }
 
 impl SnapConfig {
@@ -99,7 +102,7 @@ impl SnapConfig {
 
 impl Default for SnapConfig {
     fn default() -> SnapConfig {
-        SnapConfig { mode: SnapMode::Always, top_half: false, between: false, preview: true, layouts_hover: true, gaps: true, window_keys: true, app_switch: true, alt_tab_screen: false }
+        SnapConfig { mode: SnapMode::Always, top_half: false, between: false, preview: true, layouts_hover: true, gaps: true, window_keys: true, app_switch: true, alt_tab_screen: false, desktop_aside: true }
     }
 }
 
@@ -117,7 +120,7 @@ pub fn config_from(text: &str) -> SnapConfig {
         Some(toml::Value::String(s)) if s == "ctrl" => SnapMode::Ctrl,
         _ => d.mode,
     };
-    SnapConfig { mode, top_half: word("top-edge") == "half", between: word("between-screens") == "press", preview: flag("preview", d.preview), layouts_hover: flag("layouts-hover", d.layouts_hover), gaps: flag("gaps", d.gaps), window_keys: flag("window-keys", d.window_keys), app_switch: flag("app-switch", d.app_switch), alt_tab_screen: word("alt-tab") == "screen" }
+    SnapConfig { mode, top_half: word("top-edge") == "half", between: word("between-screens") == "press", preview: flag("preview", d.preview), layouts_hover: flag("layouts-hover", d.layouts_hover), gaps: flag("gaps", d.gaps), window_keys: flag("window-keys", d.window_keys), app_switch: flag("app-switch", d.app_switch), alt_tab_screen: word("alt-tab") == "screen", desktop_aside: flag("desktop-aside", d.desktop_aside) }
 }
 
 fn load_config() -> SnapConfig {
@@ -560,7 +563,7 @@ mod tests {
         assert_eq!(config_from("[windows]\npreview = false\n").mode, SnapMode::Always);
         assert_eq!(config_from("[windows]\nsnap = \"ctrl\"\n").mode, SnapMode::Ctrl);
         let c = config_from("[windows]\nsnap = true\ntop-edge = \"half\"\nbetween-screens = \"press\"\npreview = false\nlayouts-hover = false\n");
-        assert_eq!(c, SnapConfig { mode: SnapMode::Always, top_half: true, between: true, preview: false, layouts_hover: false, gaps: true, window_keys: true, app_switch: true, alt_tab_screen: false });
+        assert_eq!(c, SnapConfig { mode: SnapMode::Always, top_half: true, between: true, preview: false, layouts_hover: false, gaps: true, window_keys: true, app_switch: true, alt_tab_screen: false, desktop_aside: true });
         let c = config_from("[windows]\nwindow-keys = false\napp-switch = false\nalt-tab = \"screen\"\n");
         assert!(!c.window_keys && !c.app_switch && c.alt_tab_screen);
         assert!(!config_from("[windows]\ngaps = false\n").gaps);

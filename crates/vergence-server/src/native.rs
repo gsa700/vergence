@@ -581,6 +581,15 @@ impl Server {
                     self.open_context_menu(&w, at);
                 }
             }
+            // The desktop's bare ground clicked (bus v23; aside.rs): only a
+            // window of the Desktop kind says so.
+            WinRequest::GroundClicked { window } => {
+                if let Some(w) = self.natives.get(&(client, window)).cloned()
+                    && self.is_desktop(&w)
+                {
+                    self.ground_clicked();
+                }
+            }
             // Its own right-click menu by its lines (bus v20; appmenu.rs).
             WinRequest::Menu { window, x, y, lines } => {
                 if let Some(w) = self.natives.get(&(client, window)).cloned() {

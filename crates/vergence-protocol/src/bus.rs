@@ -49,11 +49,13 @@
 //! right-click menu by its lines (`window::MenuLine`), submenus included.
 //! Version 21: `WinEvent::Configure::text`, a screen's text size factor.
 //! Version 22: `OutputInfo::text_ratio`, for the settings app's text slider.
+//! Version 23 (overview milestone 1, step 6): `WinRequest::GroundClicked`,
+//! the desktop's bare ground clicked (the windows move aside).
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 22;
+pub const VERSION: u32 = 23;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

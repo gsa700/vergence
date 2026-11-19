@@ -102,6 +102,8 @@ pub struct Server {
     pub picker: Option<crate::picker::Picker>,
     /// The overview, Super+Tab, open (overview.rs).
     pub overview: Option<crate::overview::Overview>,
+    /// The windows moved aside by a click on the desktop (aside.rs).
+    pub aside: crate::aside::Aside,
     pub thumb_pending: Vec<(Win, i32, String)>,
     /// The desktop font for title text (None: titles without text).
     pub title_font: Option<crate::text::TextFont>,
@@ -309,6 +311,7 @@ impl Server {
             thumbs: Default::default(),
             picker: None,
             overview: None,
+            aside: Default::default(),
             thumb_pending: Vec::new(),
             title_font: crate::text::TextFont::load(),
             frost: None,
