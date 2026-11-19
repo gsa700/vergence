@@ -210,6 +210,9 @@ impl Server {
             }
             // Snapping's choices, what a drag is aimed at, the snapped windows (snap.rs).
             "snap" => self.snap_report(),
+            // The overview and the dock's picker as they are (overview milestone 1, tests).
+            "overview" => self.overview_report(),
+            "picker" => self.picker_report(),
             // Native windows' meaning (Contract 3, native.rs).
             "tree" => self.native_tree_report(),
             "shelf" => self.shelf_report(),

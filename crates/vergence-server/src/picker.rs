@@ -95,6 +95,16 @@ impl Server {
         }
     }
 
+    /// For `vctl picker`: closed, or the app and each tile's picture (x y w h).
+    pub fn picker_report(&self) -> String {
+        let Some(p) = self.picker.as_ref() else { return "closed".into() };
+        let mut out = vec![format!("open {} at {} {} {} {}, {} windows", p.key, p.rect.loc.x, p.rect.loc.y, p.rect.size.w, p.rect.size.h, p.windows.len())];
+        for (i, t) in p.thumbs.iter().enumerate() {
+            out.push(format!("{i} {} {} {} {}", t.loc.x, t.loc.y, t.size.w, t.size.h));
+        }
+        out.join("\n")
+    }
+
     pub fn picker_close(&mut self) {
         if self.picker.take().is_some() {
             self.redraw_all();

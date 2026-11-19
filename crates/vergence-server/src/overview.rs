@@ -132,6 +132,17 @@ impl Server {
         });
     }
 
+    /// For `vctl overview`: closed, or each window's place (x y w h), title
+    /// and whether it is minimized, and which is chosen.
+    pub fn overview_report(&self) -> String {
+        let Some(ov) = self.overview.as_ref() else { return "closed".into() };
+        let mut out = vec![format!("open, {} windows, filter {:?}, chosen {:?}", ov.entries.len(), ov.filter, ov.at)];
+        for (i, e) in ov.entries.iter().enumerate() {
+            out.push(format!("{i} {} {} {} {} {:?}{}", e.rect.loc.x, e.rect.loc.y, e.rect.size.w, e.rect.size.h, e.title, if e.minimized { " minimized" } else { "" }));
+        }
+        out.join("\n")
+    }
+
     pub fn overview_close(&mut self) {
         if self.overview.take().is_some() {
             tracing::info!("overview: closed");
