@@ -11,9 +11,12 @@
 //
 // The list (step 5): once Alt has been held 0.15 s after the first Tab (so a
 // quick Alt+Tab switches without a flash), a frosted panel in the middle of
-// the screen with the focused window: a row for each window, its
-// application's icon (the dock's) and its title, the minimized ones faint,
-// the one stepped to shaded. A click on a row chooses it.
+// the screen with the focused window. Since overview milestone 1, step 4
+// (Dave, 2026-11-18: "Alt+Tab live tiles"), a tile for each window: its live
+// picture (thumbs.rs) over its application's icon and title, the minimized
+// ones faint with their last picture, the one stepped to outlined in the
+// accent; more than fit across wrap to more rows, and when those would not
+// fit the screen the tiles shrink. A click on a tile chooses it.
 
 use std::{
     hash::{Hash, Hasher},
@@ -41,10 +44,14 @@ use crate::{Server, decor::SceneElement, win::Win};
 
 /// How long Alt is held after the first Tab before the list shows.
 const SHOW_AFTER: Duration = Duration::from_millis(150);
-/// A row's height, the panel's padding, the icon's size, in points.
-const ROW_H: i32 = 40;
-const PAD: i32 = 8;
-const ICON: i32 = 28;
+/// A tile's picture room and title row, the space between tiles, the
+/// panel's padding, the title's icon, in points (at full size).
+const TILE_W: i32 = 220;
+const TILE_H: i32 = 138;
+const TITLE_H: i32 = 28;
+const GAP: i32 = 12;
+const PAD: i32 = 14;
+const ICON: i32 = 18;
 
 /// A row of the list: its application's icon name, the window's title, minimized.
 struct Row {
@@ -61,8 +68,6 @@ pub struct Switching {
     since: Instant,
     /// The screen the list is shown on (the focused window's, else the pointer's).
     screen: Option<Rectangle<i32, Logical>>,
-    /// The first row shown, when there are more than fit.
-    top: usize,
     picture: Option<(u64, MemoryRenderBuffer)>,
     backdrop: crate::backdrop::Slot,
 }
@@ -77,25 +82,44 @@ impl Switching {
         self.since.elapsed() >= SHOW_AFTER
     }
 
-    /// The panel: as wide as a third of the screen within limits, as tall as its
-    /// rows within three fifths of the screen; in the screen's middle.
-    fn panel(&self) -> Option<(Rectangle<i32, Logical>, usize)> {
+    /// The panel and each tile's whole place (picture over title), the
+    /// picture room's size: rows as wide as nine tenths of the screen allow,
+    /// centered, the panel in the screen's middle; the tiles shrunk (not
+    /// below a third) until the rows fit four fifths of its height.
+    fn layout(&self) -> Option<(Rectangle<i32, Logical>, Vec<Rectangle<i32, Logical>>, (i32, i32))> {
         let s = self.screen?;
-        let w = (s.size.w * 2 / 5).clamp(360, 640).min(s.size.w - 32);
-        let fit = ((s.size.h * 3 / 5 - 2 * PAD) / ROW_H).max(1) as usize;
-        let rows = self.list.len().min(fit);
-        let h = rows as i32 * ROW_H + 2 * PAD;
-        Some((Rectangle::new((s.loc.x + (s.size.w - w) / 2, s.loc.y + (s.size.h - h) / 2).into(), (w, h).into()), rows))
+        let n = self.list.len().max(1) as i32;
+        let (max_w, max_h) = (s.size.w * 9 / 10, s.size.h * 4 / 5);
+        let mut k = 1.0f64;
+        let (tw, th, per_row, rows) = loop {
+            let (tw, th) = ((TILE_W as f64 * k).round() as i32, (TILE_H as f64 * k).round() as i32);
+            let per_row = ((max_w - 2 * PAD + GAP) / (tw + GAP)).clamp(1, n);
+            let rows = (n + per_row - 1) / per_row;
+            let h = 2 * PAD + rows * (th + TITLE_H) + (rows - 1) * GAP;
+            if h <= max_h || k < 0.34 {
+                break (tw, th, per_row, rows);
+            }
+            k *= 0.9;
+        };
+        let w = 2 * PAD + per_row * tw + (per_row - 1) * GAP;
+        let h = 2 * PAD + rows * (th + TITLE_H) + (rows - 1) * GAP;
+        let panel = Rectangle::new((s.loc.x + (s.size.w - w) / 2, s.loc.y + (s.size.h - h) / 2).into(), (w, h).into());
+        let tiles = (0..n)
+            .map(|i| {
+                let (row, col) = (i / per_row, i % per_row);
+                // The last row, if short, centered.
+                let in_row = if row == rows - 1 { n - row * per_row } else { per_row };
+                let row_w = in_row * tw + (in_row - 1) * GAP;
+                let x0 = panel.loc.x + (w - row_w) / 2;
+                Rectangle::new((x0 + col * (tw + GAP), panel.loc.y + PAD + row * (th + TITLE_H + GAP)).into(), (tw, th + TITLE_H).into())
+            })
+            .collect();
+        Some((panel, tiles, (tw, th)))
     }
 
-    /// Keep the one stepped to among the rows shown.
-    fn keep_in_view(&mut self) {
-        let Some((_, rows)) = self.panel() else { return };
-        if self.at < self.top {
-            self.top = self.at;
-        } else if self.at >= self.top + rows {
-            self.top = self.at + 1 - rows;
-        }
+    /// The panel alone.
+    fn panel(&self) -> Option<Rectangle<i32, Logical>> {
+        self.layout().map(|(p, ..)| p)
     }
 }
 
@@ -118,19 +142,27 @@ impl Server {
                     self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|o| o.contains(mid))
                 });
                 let screen = screen.or_else(|| self.output_at_pointer());
-                let mut sw = Switching { list, at: 0, rows, since: Instant::now(), screen, top: 0, picture: None, backdrop: None };
+                let mut sw = Switching { list, at: 0, rows, since: Instant::now(), screen, picture: None, backdrop: None };
                 if focused.is_some_and(|f| sw.list[0] == f) {
                     sw.step(back);
                 } else if back {
                     sw.at = sw.list.len() - 1;
                 }
-                sw.keep_in_view();
                 self.input.switching = Some(sw);
+                // Live tiles: drawn again while the list is up (thumbs.rs).
+                let _ = self.loop_handle.insert_source(smithay::reexports::calloop::timer::Timer::from_duration(crate::thumbs::EVERY), |_, _, st| {
+                    if st.input.switching.is_none() {
+                        return smithay::reexports::calloop::timer::TimeoutAction::Drop;
+                    }
+                    if st.input.switching.as_ref().is_some_and(|sw| sw.shown()) {
+                        st.redraw_all();
+                    }
+                    smithay::reexports::calloop::timer::TimeoutAction::ToDuration(crate::thumbs::EVERY)
+                });
             }
             Switch::Step { back } => {
                 if let Some(sw) = self.input.switching.as_mut() {
                     sw.step(back);
-                    sw.keep_in_view();
                 }
             }
             Switch::Choose => {
@@ -222,18 +254,14 @@ impl Server {
 
     /// Is `pos` on the shown list (dispatch.rs: a press there is the list's)?
     pub fn switcher_contains(&self, pos: Point<f64, Logical>) -> bool {
-        self.input.switching.as_ref().filter(|sw| sw.shown()).and_then(|sw| sw.panel()).is_some_and(|(r, _)| r.to_f64().contains(pos))
+        self.input.switching.as_ref().filter(|sw| sw.shown()).and_then(|sw| sw.panel()).is_some_and(|r| r.to_f64().contains(pos))
     }
 
-    /// A click on the list: the row under it is chosen.
+    /// A click on the list: the tile under it is chosen.
     pub fn switch_click(&mut self, pos: Point<f64, Logical>) {
         let Some(sw) = self.input.switching.as_ref() else { return };
-        let Some((panel, rows)) = sw.panel() else { return };
-        let row = ((pos.y - (panel.loc.y + PAD) as f64) / ROW_H as f64).floor();
-        if row < 0.0 || row as usize >= rows {
-            return;
-        }
-        let i = sw.top + row as usize;
+        let Some((_, tiles, _)) = sw.layout() else { return };
+        let Some(i) = tiles.iter().position(|t| t.to_f64().contains(pos)) else { return };
         let Some(sw) = self.input.switching.take() else { return };
         self.input.seat.switch_ended();
         if let Some(w) = sw.list.get(i).cloned() {
@@ -241,27 +269,26 @@ impl Server {
         }
     }
 
-    /// The list's picture on `out`, once it shows.
+    /// The list's picture on `out`, once it shows: the live pictures in
+    /// front, the chrome (tiles' grounds, outline, icons, titles), the frost.
     pub fn switcher_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
-        let Some((panel, rows)) = self.input.switching.as_ref().filter(|sw| sw.shown()).and_then(|sw| sw.panel()) else { return Vec::new() };
+        let Some((panel, tiles, (tw, th))) = self.input.switching.as_ref().filter(|sw| sw.shown()).and_then(|sw| sw.layout()) else { return Vec::new() };
         if !panel.overlaps(out) {
             return Vec::new();
         }
         let light = self.light_style();
         let s = vergence_look::shelf_look(light);
         let frost = self.frost_program(renderer);
+        let accent = self.accent();
         let pixels = (ICON as f64 * scale).round() as u32;
-        // The rows shown, each with its icon once it has come.
-        let (top, at) = {
-            let sw = self.input.switching.as_ref().unwrap();
-            (sw.top, sw.at)
-        };
-        let shown: Vec<(usize, String, String, bool)> = self.input.switching.as_ref().unwrap().rows.iter().enumerate().skip(top).take(rows).map(|(i, r)| (i, r.icon.clone(), r.title.clone(), r.minimized)).collect();
-        let icons: Vec<Option<Arc<crate::shelf::Icon>>> = shown.iter().map(|(_, icon, ..)| self.shelf_icon(icon, pixels)).collect();
+        let at = self.input.switching.as_ref().unwrap().at;
+        let rows: Vec<(String, String, bool)> = self.input.switching.as_ref().unwrap().rows.iter().map(|r| (r.icon.clone(), r.title.clone(), r.minimized)).collect();
+        let list: Vec<Win> = self.input.switching.as_ref().unwrap().list.clone();
+        let icons: Vec<Option<Arc<crate::shelf::Icon>>> = rows.iter().map(|(icon, ..)| self.shelf_icon(icon, pixels)).collect();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (top, at, rows, panel.size.w, panel.size.h, scale.to_bits(), light, frost.is_some()).hash(&mut hasher);
-        for ((i, _, title, min), icon) in shown.iter().zip(&icons) {
-            (i, title, min, icon.is_some()).hash(&mut hasher);
+        (at, panel.size.w, panel.size.h, tw, th, scale.to_bits(), light, frost.is_some(), (accent.r, accent.g, accent.b)).hash(&mut hasher);
+        for ((_, title, min), icon) in rows.iter().zip(&icons) {
+            (title, min, icon.is_some()).hash(&mut hasher);
         }
         let stamp = hasher.finish();
         let color = |c: vergence_look::Rgb| Color::rgb(c.0, c.1, c.2);
@@ -274,14 +301,18 @@ impl Server {
             scene.stroke(SceneRect::new(0.0, 0.0, w, h), vergence_look::RADIUS, vergence_look::EDGE, color(s.edge));
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             let face = fonts.face("sans-serif", 400, false);
-            for (k, ((i, _, title, minimized), icon)) in shown.iter().zip(&icons).enumerate() {
-                let y = (PAD + k as i32 * ROW_H) as f32;
-                let row = SceneRect::new(PAD as f32 / 2.0, y, w - PAD as f32, ROW_H as f32);
-                if *i == at {
-                    scene.fill_rounded(row, vergence_look::RADIUS, color(s.hover));
+            for (i, (((_, title, minimized), icon), tile)) in rows.iter().zip(&icons).zip(&tiles).enumerate() {
+                let (x, y) = ((tile.loc.x - panel.loc.x) as f32, (tile.loc.y - panel.loc.y) as f32);
+                // The picture's room: a faint ground where the picture does not fill it.
+                scene.fill_rounded(SceneRect::new(x, y, tw as f32, th as f32), 5.0, Color { a: 26, ..color(s.menu_ink) });
+                // The one stepped to: shaded, outlined in the accent.
+                if i == at {
+                    let r = SceneRect::new(x - 5.0, y - 5.0, tw as f32 + 10.0, (th + TITLE_H) as f32 + 5.0);
+                    scene.fill_rounded(r, vergence_look::RADIUS + 2.0, Color { a: 60, ..color(s.hover) });
+                    scene.stroke(r, vergence_look::RADIUS + 2.0, 2.5, accent);
                 }
-                let square = SceneRect::new(PAD as f32 + 6.0, y + (ROW_H - ICON) as f32 / 2.0, ICON as f32, ICON as f32);
                 let alpha = if *minimized { 0.45 } else { 1.0 };
+                let square = SceneRect::new(x + 2.0, y + th as f32 + (TITLE_H - ICON) as f32 / 2.0, ICON as f32, ICON as f32);
                 match icon {
                     Some(icon) => {
                         let (iw, ih) = (icon.width as f32 / scale as f32, icon.height as f32 / scale as f32);
@@ -289,27 +320,24 @@ impl Server {
                         scene.draw_image(picture, SceneRect::new(square.x + (square.w - iw) / 2.0, square.y + (square.h - ih) / 2.0, iw, ih), alpha);
                     }
                     None => {
-                        scene.fill_rounded(square, vergence_look::RADIUS, color(s.tile));
+                        scene.fill_rounded(square, 4.0, color(s.tile));
                     }
                 }
                 if let Some(face) = face {
-                    let size = 14.0;
+                    let size = 12.5;
                     let m = fonts.metrics(face, size);
-                    let x = square.x + square.w + 12.0;
-                    let room = w - x - PAD as f32 - 8.0;
-                    // Cut with an ellipsis to the room there is.
-                    let mut text = if *minimized { format!("{title} (minimized)") } else { title.clone() };
+                    let tx = square.x + ICON as f32 + 6.0;
+                    let room = x + tw as f32 - tx;
+                    let mut text = if title.is_empty() { "Untitled".to_string() } else { title.clone() };
                     if fonts.layout(face, size, &text).1 > room {
                         while !text.is_empty() && fonts.layout(face, size, &format!("{text}…")).1 > room {
                             text.pop();
                         }
                         text.push('…');
                     }
-                    // Faint for a minimized window, except on the shaded row, where the
-                    // faint ink would not read (its icon stays faint).
-                    let ink = if *minimized && *i != at { s.menu_ink_off } else { s.menu_ink };
-                    scene.push_clip(SceneRect::new(x, y, room, ROW_H as f32), 0.0);
-                    vergence_render::text(&mut scene, fonts, face, size, color(ink), ScenePoint::new(x, (y + (ROW_H as f32 - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), &text);
+                    let ink = if *minimized && i != at { s.menu_ink_off } else { s.menu_ink };
+                    scene.push_clip(SceneRect::new(tx, y + th as f32, room, TITLE_H as f32), 0.0);
+                    vergence_render::text(&mut scene, fonts, face, size, color(ink), ScenePoint::new(tx, (y + th as f32 + (TITLE_H as f32 - (m.ascent + m.descent)) / 2.0 + m.ascent).round()), &text);
                     scene.pop_clip();
                 }
             }
@@ -324,12 +352,25 @@ impl Server {
                 }
             }
         }
-        let a = (panel.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-        let b = (panel.loc + panel.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-        let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
+        let px = |r: Rectangle<i32, Logical>| -> Rectangle<i32, smithay::utils::Physical> {
+            let a = (r.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+            let b = (r.loc + r.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+            Rectangle::new(a, (b.x - a.x, b.y - a.y).into())
+        };
         let mut elements = Vec::new();
+        // The live pictures in front.
+        for (i, w) in list.iter().enumerate() {
+            let Some(tile) = tiles.get(i) else { break };
+            let room = Rectangle::new(tile.loc, (tw, th).into());
+            let alpha = if rows.get(i).is_some_and(|r| r.2) { 0.5 } else { 1.0 };
+            if let Some(e) = self.thumb_element(renderer, w, px(room), alpha) {
+                elements.push(SceneElement::Thumb(e));
+            }
+        }
+        let whole = px(panel);
+        let src = Rectangle::<f64, Logical>::from_size((whole.size.w as f64, whole.size.h as f64).into());
         if let Some((_, buffer)) = &self.input.switching.as_ref().unwrap().picture
-            && let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(panel.size), Kind::Unspecified)
+            && let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(renderer, whole.loc.to_f64(), buffer, None, Some(src), Some(panel.size), Kind::Unspecified)
         {
             elements.push(SceneElement::Memory(el));
         }
@@ -343,9 +384,8 @@ impl Server {
                 corner: vergence_look::RADIUS * scale as f32,
                 bottom: true,
             };
-            let dst = Rectangle::<i32, smithay::utils::Physical>::new(a, (b.x - a.x, b.y - a.y).into());
             let mut slot = self.input.switching.as_mut().unwrap().backdrop.take();
-            if let Some(e) = crate::backdrop::element(renderer, &mut slot, dst, program, &look) {
+            if let Some(e) = crate::backdrop::element(renderer, &mut slot, whole, program, &look) {
                 elements.push(SceneElement::Backdrop(e));
             }
             self.input.switching.as_mut().unwrap().backdrop = slot;
@@ -358,7 +398,7 @@ impl Server {
         match &self.input.switching {
             None => "not switching".into(),
             Some(sw) => {
-                let mut out = vec![format!("at {} of {}, shown {}, panel {:?}", sw.at, sw.list.len(), sw.shown(), sw.panel().map(|(r, n)| (r, n)))];
+                let mut out = vec![format!("at {} of {}, shown {}, panel {:?}", sw.at, sw.list.len(), sw.shown(), sw.panel())];
                 for (i, r) in sw.rows.iter().enumerate() {
                     out.push(format!("{}{}: {}{}", if i == sw.at { "> " } else { "  " }, i, r.title, if r.minimized { " (minimized)" } else { "" }));
                 }

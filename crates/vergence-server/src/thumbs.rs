@@ -69,9 +69,10 @@ fn content_size(w: &Win) -> Option<Size<i32, Logical>> {
 }
 
 /// The scale that fits `content` (points) into `room` (pixels), keeping its
-/// shape, and the picture's size in pixels at that scale (at least 1x1).
+/// shape, never above one pixel a point (a small window is not blown up
+/// blurred), and the picture's size in pixels at that scale (at least 1x1).
 pub fn fit(content: Size<i32, Logical>, room: Size<i32, Physical>) -> (f64, Size<i32, Physical>) {
-    let k = (room.w as f64 / content.w.max(1) as f64).min(room.h as f64 / content.h.max(1) as f64).max(0.0);
+    let k = (room.w as f64 / content.w.max(1) as f64).min(room.h as f64 / content.h.max(1) as f64).clamp(0.0, 1.0);
     let px = Size::from((((content.w as f64 * k).round() as i32).max(1), ((content.h as f64 * k).round() as i32).max(1)));
     (k, px)
 }
@@ -231,6 +232,10 @@ mod tests {
         // A tall one: as tall as the room.
         let (_, px) = fit(Size::from((400, 800)), Size::from((300, 200)));
         assert_eq!((px.w, px.h), (100, 200));
+        // A small window is not blown up.
+        let (k, px) = fit(Size::from((100, 50)), Size::from((400, 400)));
+        assert!((k - 1.0).abs() < 1e-9);
+        assert_eq!((px.w, px.h), (100, 50));
         // Never nothing, however small the room.
         let (_, px) = fit(Size::from((4000, 10)), Size::from((10, 10)));
         assert!(px.w >= 1 && px.h >= 1);
