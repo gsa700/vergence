@@ -161,12 +161,24 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// An entry for a path (links followed: a link to a folder is a folder).
+    /// An entry for a path (links followed: a link to a folder is a folder);
+    /// its type by its name, else by its first bytes.
     pub fn of(path: PathBuf) -> Option<Entry> {
+        Entry::of_looking(path, true)
+    }
+
+    /// An entry for a path. `look`: when the name says nothing of its type,
+    /// its first bytes are read (vergence-types: signatures, then text), so
+    /// a file with no extension gets its mark (Dave, 2026-11-18: the
+    /// desktop's icon for "Vergence-wishlist-2" had no picture). Not on a
+    /// network mount, where opening every file to list a folder is slow.
+    pub fn of_looking(path: PathBuf, look: bool) -> Option<Entry> {
         let name = path.file_name()?.to_string_lossy().into_owned();
         let m = fs::metadata(&path).ok();
         let dir = m.as_ref().is_some_and(|m| m.is_dir());
-        Some(Entry { mime: kind_of(dir, &name), dir, size: m.as_ref().map_or(0, |m| m.len()), changed: m.and_then(|m| m.modified().ok()), name, path })
+        let file = m.as_ref().is_some_and(|m| m.is_file());
+        let mime = kind_of(dir, &name).or_else(|| (look && file).then(|| vergence_types::of_file(&path)));
+        Some(Entry { mime, dir, size: m.as_ref().map_or(0, |m| m.len()), changed: m.and_then(|m| m.modified().ok()), name, path })
     }
 
     pub fn kind(&self) -> Kind {
@@ -177,7 +189,10 @@ impl Entry {
 /// A folder's entries, or why it cannot be read (in plain words).
 pub fn read_folder(dir: &Path) -> Result<Vec<Entry>, String> {
     match fs::read_dir(dir) {
-        Ok(rd) => Ok(rd.flatten().filter_map(|e| Entry::of(e.path())).collect()),
+        Ok(rd) => {
+            let look = !network_mounts().iter().any(|m| dir.starts_with(m));
+            Ok(rd.flatten().filter_map(|e| Entry::of_looking(e.path(), look)).collect())
+        }
         Err(e) => Err(format!("This folder cannot be read: {}", plain(&e))),
     }
 }
@@ -1119,6 +1134,24 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_file_with_no_extension_is_known_by_what_is_in_it() {
+        let d = std::env::temp_dir().join(format!("vergence-files-sniff-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("Vergence-wishlist-2"), "Vergence Wish List:\nsome lines\n").unwrap();
+        fs::write(d.join("blob"), [0u8, 1, 2, 3, 0, 9]).unwrap();
+        fs::write(d.join("picture"), b"\x89PNG\r\n\x1a\n....").unwrap();
+        let v = read_folder(&d).unwrap();
+        let by = |n: &str| v.iter().find(|e| e.name == n).unwrap();
+        assert_eq!(by("Vergence-wishlist-2").kind(), Kind::Text);
+        assert_eq!(by("picture").kind(), Kind::Picture);
+        assert_eq!(by("blob").kind(), Kind::Other);
+        // Not looked into: by the name alone, nothing.
+        assert_eq!(Entry::of_looking(d.join("Vergence-wishlist-2"), false).unwrap().mime, None);
+        fs::remove_dir_all(&d).unwrap();
+    }
 
     #[test]
     fn entries_sort_folders_first_then_as_asked() {

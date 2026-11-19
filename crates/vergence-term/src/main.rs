@@ -1738,6 +1738,7 @@ mod cmd {
     pub const ZOOM_OUT: u32 = 13;
     pub const ZOOM_RESET: u32 = 14;
     pub const SETTINGS: u32 = 15;
+    pub const ABOUT: u32 = 16;
 }
 
 /// The cursor's shape (the settings' `cursor`).
@@ -1895,6 +1896,9 @@ impl App for Terminal {
         let percent = format!("{}%", (self.zoom * 100.0).round());
         let list = vec![
             C::role(cmd::SETTINGS, Role::Settings),
+            // Its own About window, as Edit's (Dave, 2026-11-18: the server's
+            // card for apps with none was a notification).
+            C::role(cmd::ABOUT, Role::About),
             C::role(cmd::NEW_WINDOW, Role::NewWindow).featured(),
             C::role(cmd::NEW_TAB, Role::NewTab).featured(),
             C::role(cmd::ZOOM_OUT, Role::ZoomOut).enabled(self.zoom > ZOOM_MIN + 0.001).featured(),
@@ -1936,6 +1940,11 @@ impl App for Terminal {
             cmd::PANE_TO_WINDOW => Item::PaneToWindow,
             cmd::NEW_WINDOW => return self.new_window(window),
             cmd::SETTINGS => return self.open_settings(window),
+            cmd::ABOUT => {
+                let theme = vergence_widgets::Theme::from_desktop(&config("desktop.toml"), true, "[terminal]");
+                let about = vergence_widgets::about::About::new("vergence-term", "Terminal", env!("CARGO_PKG_VERSION"), "A terminal: tabs, and sections side by side or stacked.", theme);
+                return window.open_window(vergence_widgets::window(about));
+            }
             cmd::ZOOM_IN => return self.zoom_by(Some(ZOOM_STEP), window),
             cmd::ZOOM_OUT => return self.zoom_by(Some(-ZOOM_STEP), window),
             cmd::ZOOM_RESET => return self.zoom_by(None, window),

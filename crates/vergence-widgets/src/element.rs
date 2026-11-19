@@ -155,6 +155,8 @@ pub struct Element<M> {
     /// Drawn and taking the pointer only while the pointer is on the button
     /// it sits in ([`Element::shown_on_hover`]).
     pub(crate) hover_only: bool,
+    /// The pointer over it, if not the usual (a button that is a link: the hand).
+    pub(crate) pointer: Option<vergence_ui::Cursor>,
     /// Sent on a right click (or a touch held) on it or on anything inside it
     /// that has none of its own: a list row's menu, the ground's menu.
     pub(crate) on_menu: Option<M>,
@@ -162,7 +164,7 @@ pub struct Element<M> {
 
 impl<M> Element<M> {
     pub(crate) fn new(kind: Kind<M>, width: Length, height: Length) -> Element<M> {
-        Element { kind, width, height, max_width: None, key: None, name: None, reveal: false, hover_only: false, on_menu: None }
+        Element { kind, width, height, max_width: None, key: None, name: None, reveal: false, hover_only: false, pointer: None, on_menu: None }
     }
 
     pub fn width(mut self, width: Length) -> Self {
@@ -578,9 +580,14 @@ impl<M> Element<M> {
 
     /// The pointer's shape over a drawing, and while it is pulled (a
     /// column's grip: [`vergence_ui::Cursor::ColResize`]). None: the arrow.
+    /// The pointer over it. Buttons, switches and the like show the arrow,
+    /// as on the Mac and Windows (Dave, 2026-11-18: "everything in FileView
+    /// gets the hand"); a button that is a link asks for `Cursor::Pointer`.
     pub fn cursor(mut self, c: vergence_ui::Cursor) -> Self {
         if let Kind::Drawing { cursor, .. } = &mut self.kind {
             *cursor = Some(c);
+        } else {
+            self.pointer = Some(c);
         }
         self
     }

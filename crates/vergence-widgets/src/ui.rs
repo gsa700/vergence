@@ -1529,14 +1529,17 @@ impl<M: Clone> Ui<M> {
             }),
             _ => None,
         };
+        let asked = t.and_then(|id| self.node(id)).and_then(|n| n.pointer);
         r.cursor = Some(match (what, self.drag) {
             _ if pulled.is_some() => pulled.unwrap_or(Cursor::Default),
+            (_, None) if asked.is_some() => asked.unwrap_or(Cursor::Default),
             (_, Some(Drag::AreaBar { .. })) => Cursor::Default,
             (Some(What::Area { .. }), None) if on_bar => Cursor::Default,
             (_, Some(Drag::Select { .. } | Drag::AreaSelect { .. })) | (Some(What::Field { .. } | What::Area { .. }), _) => Cursor::Text,
             (Some(What::Drawing { cursor, .. }), _) => cursor.unwrap_or(Cursor::Default),
-            (None, _) => Cursor::Default,
-            (Some(_), _) => Cursor::Pointer,
+            // Buttons, switches, sliders: the arrow, as on the Mac and
+            // Windows; the hand only where asked (a link).
+            (None, _) | (Some(_), _) => Cursor::Default,
         });
         // A drawing hears the pointer pass over it.
         let drawing = t.filter(|id| self.node(*id).is_some_and(|n| matches!(n.what, What::Drawing { .. })));

@@ -66,6 +66,8 @@ pub(crate) struct Node<M> {
     pub reveal: bool,
     /// Shown only while the pointer is on the button around it ([`crate::Element::shown_on_hover`]).
     pub hover_only: bool,
+    /// The pointer over it, if not the usual ([`crate::Element::cursor`]).
+    pub pointer: Option<vergence_ui::Cursor>,
 }
 
 pub(crate) fn child_id(parent: Id, index: usize, key: Option<u64>) -> Id {
@@ -355,8 +357,9 @@ impl Layout<'_> {
         let name = e.name;
         let reveal = e.reveal;
         let hover_only = e.hover_only;
+        let pointer = e.pointer;
         let on_menu = e.on_menu;
-        let push = |out: &mut Vec<Node<M>>, what: What<M>| out.push(Node { id, rect, parent, what, name: name.clone(), on_menu: None, reveal, hover_only });
+        let push = |out: &mut Vec<Node<M>>, what: What<M>| out.push(Node { id, rect, parent, what, name: name.clone(), on_menu: None, reveal, hover_only, pointer });
         // Each element is one node, pushed before its children.
         self.arrange_kind(e.kind, rect, me, id, push, out);
         if let Some(n) = out.get_mut(me) {

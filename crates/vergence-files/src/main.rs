@@ -265,7 +265,8 @@ fn as_trashed(entries: &mut [Entry], trash: &Path) -> std::collections::HashMap<
         }
         if let Some(n) = t.from.file_name() {
             e.name = n.to_string_lossy().into_owned();
-            e.mime = files::kind_of(e.dir, &e.name);
+            // By the name it had, else what its bytes said.
+            e.mime = files::kind_of(e.dir, &e.name).or(e.mime);
         }
         from.insert(e.path.clone(), t.from.clone());
     }
