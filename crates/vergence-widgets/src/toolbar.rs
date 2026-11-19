@@ -41,6 +41,10 @@ pub enum Icon {
     Trash,
     Open,
     Hidden,
+    /// Put back where it was (out of the Trash): an arrow turning back.
+    PutBack,
+    /// Remove for good: a cross.
+    Remove,
 }
 
 /// An icon at `size` points, in the theme's text color (dim when `dim`).
@@ -171,6 +175,21 @@ pub fn icon<M: 'static>(which: Icon, size: f32, dim: bool) -> Element<M> {
                 line!((11.0, 11.5), (5.0, 11.5));
                 line!((5.0, 11.5), (1.5, 8.0));
                 scene.stroke(rect(6.0, 6.0, 4.0, 4.0), 2.0 * k, w, ink);
+            }
+            Icon::PutBack => {
+                // The head pointing left at the top, the shaft round and down.
+                line!((2.5, 6.0), (5.5, 3.0));
+                line!((2.5, 6.0), (5.5, 9.0));
+                line!((2.5, 6.0), (10.0, 6.0));
+                line!((10.0, 6.0), (12.5, 7.5));
+                line!((12.5, 7.5), (13.5, 10.0));
+                line!((13.5, 10.0), (12.5, 12.5));
+                line!((12.5, 12.5), (10.0, 13.5));
+                line!((10.0, 13.5), (6.0, 13.5));
+            }
+            Icon::Remove => {
+                line!((4.0, 4.0), (12.0, 12.0));
+                line!((12.0, 4.0), (4.0, 12.0));
             }
         }
     })

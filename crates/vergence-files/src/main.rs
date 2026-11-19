@@ -51,6 +51,8 @@ const WATCH_TIMER: u64 = 1;
 const DOUBLE: std::time::Duration = std::time::Duration::from_millis(450);
 /// The preview pane's width.
 const PANE_W: f32 = 260.0;
+/// A Trash row's own buttons (Put Back, Delete Forever), each this square.
+const ROW_TOOL: f32 = 22.0;
 
 mod cmd {
     pub const NEW_WINDOW: u32 = 1;
@@ -158,11 +160,14 @@ struct Tab {
     turn: u64,
     /// The window's counted folder sizes, put into the entries as they are read.
     sizes: Sizes,
+    /// In the Trash: where each item came from (its path in the Trash to
+    /// the path it had).
+    from: std::collections::HashMap<PathBuf, PathBuf>,
 }
 
 impl Tab {
     fn new(id: u32, showing: Showing, sizes: Sizes) -> Tab {
-        let mut t = Tab { id, showing, back: Vec::new(), forward: Vec::new(), entries: Vec::new(), problem: None, stamp: None, chosen: Vec::new(), cursor: None, turn: 0, sizes };
+        let mut t = Tab { id, showing, back: Vec::new(), forward: Vec::new(), entries: Vec::new(), problem: None, stamp: None, chosen: Vec::new(), cursor: None, turn: 0, sizes, from: Default::default() };
         t.read();
         t
     }
@@ -195,6 +200,7 @@ impl Tab {
         match &self.showing {
             Showing::Recent => "Recent".into(),
             Showing::Folder(p) if Some(p.as_path()) == files::home().as_deref() => "Home".into(),
+            Showing::Folder(p) if ops::trash_dir().is_some_and(|t| t.join("files") == *p) => "Trash".into(),
             Showing::Folder(p) if p.as_os_str() == "/" => "Computer".into(),
             Showing::Folder(p) => p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string()),
         }
@@ -205,10 +211,15 @@ impl Tab {
         self.entries = match &self.showing {
             Showing::Folder(dir) => {
                 self.stamp = std::fs::metadata(dir).and_then(|m| m.modified()).ok();
-                files::read_folder(dir).unwrap_or_else(|why| {
+                let mut v = files::read_folder(dir).unwrap_or_else(|why| {
                     self.problem = Some(why);
                     Vec::new()
-                })
+                });
+                self.from = match ops::trash_dir() {
+                    Some(t) if t.join("files") == *dir => as_trashed(&mut v, &t),
+                    _ => Default::default(),
+                };
+                v
             }
             Showing::Recent => files::recent(),
         };
@@ -231,6 +242,31 @@ impl Tab {
         self.cursor = None;
         self.read();
     }
+}
+
+/// The Trash's entries as its list shows them (Dave, 2026-11-18: "just a
+/// list of the files and a restore or remove forever button"): each by the
+/// name it had (two of a name have names of their own in the Trash), its
+/// time the moment it was trashed (its info file's, written then), and
+/// where it came from, returned by its path in the Trash.
+fn as_trashed(entries: &mut [Entry], trash: &Path) -> std::collections::HashMap<PathBuf, PathBuf> {
+    let info = Some(trash.join("info"));
+    let all: std::collections::HashMap<String, ops::Trashed> = ops::trashed_in(trash).into_iter().map(|t| (t.name.clone(), t)).collect();
+    let mut from = std::collections::HashMap::new();
+    for e in entries.iter_mut() {
+        let Some(t) = all.get(&e.name) else { continue };
+        if let Some(i) = &info
+            && let Ok(when) = std::fs::metadata(i.join(format!("{}.trashinfo", t.name))).and_then(|m| m.modified())
+        {
+            e.changed = Some(when);
+        }
+        if let Some(n) = t.from.file_name() {
+            e.name = n.to_string_lossy().into_owned();
+            e.mime = files::kind_of(e.dir, &e.name);
+        }
+        from.insert(e.path.clone(), t.from.clone());
+    }
+    from
 }
 
 /// A picture for the preview, decoded apart, for a path.
@@ -391,6 +427,10 @@ enum Msg {
     Grip(usize, vergence_widgets::Touch),
     /// A right click on the ground around the rows: the folder's menu.
     GroundMenu,
+    /// A Trash row's own Put Back.
+    RowPutBack(usize),
+    /// A Trash row's own Delete Forever (asked first).
+    RowForever(usize),
 }
 
 /// desktop.toml's text.
@@ -556,8 +596,10 @@ impl Viewer {
         let Some(t) = self.front_tab() else { return Vec::new() };
         let n = self.narrow.to_lowercase();
         let source = if self.search.is_some() { &self.search_entries } else { &t.entries };
-        let mut v: Vec<&Entry> = source.iter().filter(|e| self.hidden || !e.name.starts_with('.')).filter(|e| n.is_empty() || e.name.to_lowercase().contains(&n)).collect();
-        let group = self.view == ViewKind::List && self.list_look().group;
+        // What is in the Trash is all shown: a hidden file thrown away is still there.
+        let all = self.hidden || self.in_trash();
+        let mut v: Vec<&Entry> = source.iter().filter(|e| all || !e.name.starts_with('.')).filter(|e| n.is_empty() || e.name.to_lowercase().contains(&n)).collect();
+        let group = self.shown_view() == ViewKind::List && self.list_look().group;
         files::sort(&mut v, self.sort.0, self.sort.1, t.showing == Showing::Recent && self.search.is_none(), group);
         v.truncate(files::MAX_ROWS);
         v
@@ -619,6 +661,9 @@ impl Viewer {
     }
 
     fn up(&mut self) {
+        if self.in_trash() {
+            return;
+        }
         let up = self.front_tab().and_then(|t| t.dir()).and_then(Path::parent).map(Path::to_path_buf);
         if let Some(p) = up {
             let came_from = self.front_tab().and_then(|t| t.dir().map(Path::to_path_buf));
@@ -883,11 +928,11 @@ impl Viewer {
             }
             cmd::RESTORE => {
                 self.notice = None;
-                let names: Vec<String> = self.chosen_paths().iter().filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).collect();
+                let names: Vec<(String, String)> = self.chosen_paths().iter().filter_map(|p| p.file_name().map(|n| (n.to_string_lossy().into_owned(), self.shown_name(p)))).collect();
                 // Only what went wrong is said (Dave, 2026-11-18).
-                for n in &names {
+                for (n, shown) in &names {
                     if let Err(e) = ops::restore(n) {
-                        self.notice = Some(format!("“{n}” could not be put back: {e}"));
+                        self.notice = Some(format!("“{shown}” could not be put back: {e}"));
                     }
                 }
                 self.read_all();
@@ -1032,7 +1077,7 @@ impl Viewer {
         lines.push(MenuLine::item(cmd::RENAME, "Rename…", "F2").enabled(one && !trash));
         if trash {
             lines.push(MenuLine::item(cmd::RESTORE, "Put Back", "").enabled(any));
-            lines.push(MenuLine::item(cmd::DELETE, "Delete for Good…", "Shift+Delete").enabled(any));
+            lines.push(MenuLine::item(cmd::DELETE, "Delete Forever…", "Delete").enabled(any));
         } else {
             lines.push(MenuLine::item(cmd::TRASH, "Move to the Trash", "Delete").enabled(any));
         }
@@ -1156,6 +1201,33 @@ impl Viewer {
 
     fn chosen_paths(&self) -> Vec<PathBuf> {
         self.front_tab().map(|t| t.chosen.clone()).unwrap_or_default()
+    }
+
+    /// A Trash row's own button: that row chosen, then put back, or asked
+    /// about deleting it forever.
+    fn row_tool(&mut self, k: usize, put_back: bool, window: &mut Window) {
+        let Some(p) = self.visible().get(k).map(|e| e.path.clone()) else { return };
+        if let Some(t) = self.front_mut() {
+            t.chosen = vec![p.clone()];
+            t.cursor = Some(p.clone());
+        }
+        if put_back {
+            self.run(cmd::RESTORE, window);
+        } else {
+            self.notice = None;
+            self.ask = Some(Ask::Forever(vec![p]));
+        }
+    }
+
+    /// The view as shown: the Trash is always a list (Dave, 2026-11-18),
+    /// whatever the window's view is for folders.
+    fn shown_view(&self) -> ViewKind {
+        if self.in_trash() { ViewKind::List } else { self.view }
+    }
+
+    /// The name an item is shown by: in the Trash, the name it had.
+    fn shown_name(&self, p: &Path) -> String {
+        self.front_tab().and_then(|t| t.entries.iter().find(|e| e.path == p)).map(|e| e.name.clone()).unwrap_or_else(|| p.file_name().unwrap_or_default().to_string_lossy().into_owned())
     }
 
     /// Whether the folder shown is the Trash's.
@@ -1357,7 +1429,7 @@ impl Viewer {
                 ]));
             }
             Some(Ask::Forever(paths)) => {
-                let what = if paths.len() == 1 { format!("Delete “{}” for good? It cannot be undone.", paths[0].file_name().unwrap_or_default().to_string_lossy()) } else { format!("Delete {} items for good? They cannot be undone.", paths.len()) };
+                let what = if paths.len() == 1 { format!("Delete “{}” for good? It cannot be undone.", self.shown_name(&paths[0])) } else { format!("Delete {} items for good? They cannot be undone.", paths.len()) };
                 out.push(strip(vec![label(what).size(12.0).weight(600).wrap().width(Length::FILL), b("Cancel", Msg::Confirm(false), false), b("Delete", Msg::Confirm(true), true)]));
             }
             Some(Ask::EmptyTrash) => {
@@ -1401,7 +1473,8 @@ impl Viewer {
         let tab = self.front_tab();
         let can_back = tab.is_some_and(|t| !t.back.is_empty());
         let can_forward = tab.is_some_and(|t| !t.forward.is_empty());
-        let can_up = tab.and_then(|t| t.dir()).is_some_and(|d| d.parent().is_some());
+        // The Trash is a place of its own: nothing above it to go up to.
+        let can_up = !self.in_trash() && tab.and_then(|t| t.dir()).is_some_and(|d| d.parent().is_some());
         let mut items = vec![group(vec![
             tool(Icon::Back, "Back", can_back.then_some(Msg::Run(cmd::BACK))),
             tool(Icon::Forward, "Forward", can_forward.then_some(Msg::Run(cmd::FORWARD))),
@@ -1411,6 +1484,8 @@ impl Viewer {
         let mut crumbs: Vec<Element<Msg>> = Vec::new();
         match tab.map(|t| &t.showing) {
             Some(Showing::Recent) | None => crumbs.push(label("Recent").size(13.0).weight(600)),
+            // The Trash by its name, not the folders it is kept in.
+            Some(Showing::Folder(_)) if self.in_trash() => crumbs.push(label("Trash").size(13.0).weight(600)),
             Some(Showing::Folder(dir)) => {
                 let home = files::home();
                 let (mut at, rest, first) = match home.as_ref().and_then(|h| dir.strip_prefix(h).ok().map(|r| (h.clone(), r.to_path_buf()))) {
@@ -1440,9 +1515,14 @@ impl Viewer {
         items.push(row(crumbs).spacing(2.0).align(Align::Center));
         items.push(flexible());
         let any = tab.is_some_and(|t| !t.chosen.is_empty());
-        if self.in_trash() {
-            items.push(button(label("Put back").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(any, Msg::Run(cmd::RESTORE)).name("Put back"));
-            items.push(button(label("Empty Trash").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press(Msg::Run(cmd::EMPTY_TRASH)).name("Empty Trash"));
+        let trash = self.in_trash();
+        if trash {
+            // The chosen ones put back or deleted; the whole Trash emptied
+            // (Dave, 2026-11-18: right click and each row have them too).
+            let full = tab.is_some_and(|t| !t.entries.is_empty());
+            items.push(button(label("Put Back").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(any, Msg::Run(cmd::RESTORE)).name("Put Back"));
+            items.push(button(label("Delete Forever…").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(any, Msg::Run(cmd::DELETE)).name("Delete Forever"));
+            items.push(button(label("Empty Trash…").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(full, Msg::Run(cmd::EMPTY_TRASH)).name("Empty Trash"));
         } else {
             items.push(group(vec![
                 tool(Icon::NewFolder, "New folder", self.here().is_some().then_some(Msg::Run(cmd::NEW_FOLDER))),
@@ -1455,11 +1535,18 @@ impl Viewer {
             let on = self.search.is_some();
             items.push(button(label("In subfolders").size(11.5)).look(if on { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(4.0, 8.0)).on_press(Msg::SearchBelow).name("Search in subfolders"));
         }
-        items.push(group(vec![
-            toggle(Icon::List, "As a list", self.view == ViewKind::List, Msg::Run(cmd::LIST)),
-            toggle(Icon::Grid, "As icons", self.view == ViewKind::Icons, Msg::Run(cmd::ICONS)),
-        ]));
-        items.push(group(vec![toggle(Icon::Pane, "Preview pane", self.pane, Msg::Run(cmd::PANE)), toggle(Icon::Hidden, "Hidden files", self.hidden, Msg::Run(cmd::HIDDEN))]));
+        // The Trash is a list and shows its hidden files: those two are not its.
+        if !trash {
+            items.push(group(vec![
+                toggle(Icon::List, "As a list", self.view == ViewKind::List, Msg::Run(cmd::LIST)),
+                toggle(Icon::Grid, "As icons", self.view == ViewKind::Icons, Msg::Run(cmd::ICONS)),
+            ]));
+        }
+        let mut panes = vec![toggle(Icon::Pane, "Preview pane", self.pane, Msg::Run(cmd::PANE))];
+        if !trash {
+            panes.push(toggle(Icon::Hidden, "Hidden files", self.hidden, Msg::Run(cmd::HIDDEN)));
+        }
+        items.push(group(panes));
         toolbar(items, t)
     }
 
@@ -1486,23 +1573,48 @@ impl Viewer {
         let grip: fn(usize, vergence_widgets::Touch) -> Option<Msg> = |c, t| Some(Msg::Grip(c, t));
         // The icon view's thumbnails: this folder's pictures asked for, in
         // their order; what other folders asked and has not begun is dropped.
-        if self.view == ViewKind::Icons {
+        if self.shown_view() == ViewKind::Icons {
             self.thumbs.forget_waiting();
             for e in visible.iter().filter(|e| e.kind() == Kind::Picture) {
                 self.thumbs.want(&e.path, e.changed);
             }
         }
         let thumb = |e: &Entry| self.thumbs.get(&e.path, e.changed).flatten();
-        let v = files::View { entries: &visible, chosen: &chosen, in_view, click: &click, drag: Some(&drag), folders: tab.showing == Showing::Recent || self.search.is_some(), thumb: if self.view == ViewKind::Icons { Some(&thumb) } else { None }, menu: Some(&menu), look: &look, folder_size: Some(&folder_size), grip: Some(grip) };
+        // The Trash: where each came from under its name, when it was
+        // deleted, and its own Put Back and Delete Forever, shown on the row
+        // under the pointer and on the chosen ones (no hover on a touch screen).
+        let trash = self.in_trash();
+        let under = |e: &Entry| tab.from.get(&e.path).and_then(|p| p.parent()).map(files::tilde);
+        let row_tools = |k: usize, e: &Entry| -> Element<Msg> {
+            let small = |which: Icon, name: &str, m: Msg| button(vergence_widgets::toolbar::icon(which, 14.0, false)).look(ButtonLook::Plain).padding(Padding::all(0.0)).width(Length::Fixed(ROW_TOOL)).height(Length::Fixed(ROW_TOOL)).on_press(m).name(name);
+            let tools = row(vec![small(Icon::PutBack, "Put Back", Msg::RowPutBack(k)), small(Icon::Remove, "Delete Forever", Msg::RowForever(k))]).spacing(4.0).align(Align::Center);
+            if tab.chosen.contains(&e.path) { tools } else { tools.shown_on_hover() }
+        };
+        let v = files::View {
+            entries: &visible,
+            chosen: &chosen,
+            in_view,
+            click: &click,
+            drag: Some(&drag),
+            folders: trash || tab.showing == Showing::Recent || self.search.is_some(),
+            thumb: if self.shown_view() == ViewKind::Icons { Some(&thumb) } else { None },
+            menu: Some(&menu),
+            look: &look,
+            folder_size: Some(&folder_size),
+            grip: Some(grip),
+            under: if trash { Some(&under) } else { None },
+            changed_heading: trash.then_some("Deleted"),
+            trailing: if trash { Some((&row_tools, 2.0 * ROW_TOOL + 4.0)) } else { None },
+        };
         let mut body: Vec<Element<Msg>> = Vec::new();
         if let Some(p) = &tab.problem {
             body.push(label(p.clone()).size(12.0).wrap().width(Length::FILL));
         }
         if visible.is_empty() && tab.problem.is_none() {
-            let why = if self.search.is_some() && !self.search_done { "Searching…" } else if self.search.is_some() { "Nothing here or below has that in its name." } else if !self.narrow.is_empty() { "Nothing here has that in its name." } else if tab.showing == Showing::Recent { "Nothing opened or saved yet." } else { "This folder is empty." };
+            let why = if self.search.is_some() && !self.search_done { "Searching…" } else if self.search.is_some() { "Nothing here or below has that in its name." } else if !self.narrow.is_empty() { "Nothing here has that in its name." } else if tab.showing == Showing::Recent { "Nothing opened or saved yet." } else if trash { "The Trash is empty." } else { "This folder is empty." };
             body.push(panel(label(why).size(12.0).dim()).padding(12.0));
         }
-        let list = match self.view {
+        let list = match self.shown_view() {
             ViewKind::List => {
                 let (head, rows) = files::list(&v, self.sort, Msg::Sort);
                 let mut all = vec![head, rule()];
@@ -1707,6 +1819,8 @@ impl Program for Viewer {
                 }
             }
             Msg::DismissNotice => self.notice = None,
+            Msg::RowPutBack(k) => self.row_tool(k, true, window),
+            Msg::RowForever(k) => self.row_tool(k, false, window),
             Msg::RowMenu(k) => {
                 let visible: Vec<PathBuf> = self.visible().iter().map(|e| e.path.clone()).collect();
                 if let (Some(p), Some(t)) = (visible.get(k).cloned(), self.front_mut())
@@ -1754,7 +1868,7 @@ impl Program for Viewer {
                 Some(Ask::Forever(paths)) if yes => {
                     for p in &paths {
                         if let Err(e) = ops::remove_tree(p) {
-                            self.notice = Some(format!("“{}” could not be deleted: {}", p.file_name().unwrap_or_default().to_string_lossy(), files::plain(&e)));
+                            self.notice = Some(format!("“{}” could not be deleted: {}", self.shown_name(p), files::plain(&e)));
                             break;
                         }
                         // Deleted out of the Trash: its info goes too.
@@ -1842,18 +1956,18 @@ impl Program for Viewer {
             RIGHT if m.alt => self.run(cmd::FORWARD, window),
             DOWN if m.alt || m.ctrl => self.run(cmd::OPEN, window),
             UP => {
-                self.move_cursor(if self.view == ViewKind::Icons { -self.per_row() } else { -1 });
+                self.move_cursor(if self.shown_view() == ViewKind::Icons { -self.per_row() } else { -1 });
                 self.want_picture();
             }
             DOWN => {
-                self.move_cursor(if self.view == ViewKind::Icons { self.per_row() } else { 1 });
+                self.move_cursor(if self.shown_view() == ViewKind::Icons { self.per_row() } else { 1 });
                 self.want_picture();
             }
-            LEFT if self.view == ViewKind::Icons || self.preview => {
+            LEFT if self.shown_view() == ViewKind::Icons || self.preview => {
                 self.move_cursor(-1);
                 self.want_picture();
             }
-            RIGHT if self.view == ViewKind::Icons || self.preview => {
+            RIGHT if self.shown_view() == ViewKind::Icons || self.preview => {
                 self.move_cursor(1);
                 self.want_picture();
             }
@@ -2114,6 +2228,32 @@ mod tests {
 
     fn shared() -> SharedRef {
         lone_shared()
+    }
+
+    #[test]
+    fn the_trash_lists_names_they_had_and_where_from() {
+        let d = std::env::temp_dir().join(format!("vergence-files-trash-list-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let (files_dir, info) = (d.join("files"), d.join("info"));
+        std::fs::create_dir_all(&files_dir).unwrap();
+        std::fs::create_dir_all(&info).unwrap();
+        // Two notes.txt thrown away: the second has a name of its own in the Trash.
+        std::fs::write(files_dir.join("notes.txt"), "one").unwrap();
+        std::fs::write(files_dir.join("notes 2.txt"), "two").unwrap();
+        std::fs::write(info.join("notes.txt.trashinfo"), "[Trash Info]\nPath=/home/u/Documents/notes.txt\nDeletionDate=2026-11-17T10:00:00\n").unwrap();
+        std::fs::write(info.join("notes 2.txt.trashinfo"), "[Trash Info]\nPath=/home/u/src/notes.txt\nDeletionDate=2026-11-18T10:00:00\n").unwrap();
+        // One with no info (put there by hand) keeps its own name.
+        std::fs::write(files_dir.join("stray"), "").unwrap();
+        let mut v = files::read_folder(&files_dir).unwrap();
+        let from = as_trashed(&mut v, &d);
+        let by = |p: &str| v.iter().find(|e| e.path == files_dir.join(p)).unwrap();
+        assert_eq!(by("notes.txt").name, "notes.txt");
+        assert_eq!(by("notes 2.txt").name, "notes.txt", "shown by the name it had");
+        assert_eq!(from.get(&files_dir.join("notes 2.txt")).map(PathBuf::as_path), Some(Path::new("/home/u/src/notes.txt")));
+        assert_eq!(by("notes 2.txt").changed, std::fs::metadata(info.join("notes 2.txt.trashinfo")).and_then(|m| m.modified()).ok(), "deleted when its info was written");
+        assert_eq!(by("stray").name, "stray");
+        assert!(!from.contains_key(&files_dir.join("stray")));
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

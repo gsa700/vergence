@@ -504,7 +504,51 @@ impl<M: Clone> Ui<M> {
 
     /// The topmost widget that takes input at `x`, `y`.
     fn target(&self, x: f32, y: f32) -> Option<Id> {
-        (0..self.nodes.len()).rev().find(|&i| self.nodes[i].active() && self.hit(i, x, y)).map(|i| self.nodes[i].id)
+        let hidden = self.hidden();
+        (0..self.nodes.len()).rev().find(|&i| !hidden[i] && self.nodes[i].active() && self.hit(i, x, y)).map(|i| self.nodes[i].id)
+    }
+
+    /// Whether the element named `name` is in sight (not hidden for want of hover).
+    #[cfg(test)]
+    pub(crate) fn shown_named(&self, name: &str) -> bool {
+        let hidden = self.hidden();
+        self.nodes.iter().position(|n| n.name.as_deref() == Some(name)).is_some_and(|i| !hidden[i])
+    }
+
+    /// For each node, whether it is out of sight now: shown only on hover
+    /// ([`crate::Element::shown_on_hover`]) while the pointer is not on the
+    /// button around it and the focus is not on it, or inside one that is.
+    fn hidden(&self) -> Vec<bool> {
+        let mut out = vec![false; self.nodes.len()];
+        if !self.nodes.iter().any(|n| n.hover_only) {
+            return out;
+        }
+        // The node under the pointer and everything around it.
+        let mut hot = Vec::new();
+        let mut at = self.hover.and_then(|h| self.nodes.iter().position(|n| n.id == h));
+        while let Some(i) = at {
+            hot.push(i);
+            at = self.nodes[i].parent;
+        }
+        for i in 0..self.nodes.len() {
+            // Parents come before their children, so theirs is known.
+            if self.nodes[i].parent.is_some_and(|p| out[p]) {
+                out[i] = true;
+                continue;
+            }
+            if self.nodes[i].hover_only {
+                let mut p = self.nodes[i].parent;
+                while let Some(q) = p {
+                    if matches!(self.nodes[q].what, What::Button { .. }) {
+                        break;
+                    }
+                    p = self.nodes[q].parent;
+                }
+                // The keyboard's focus on it shows it too.
+                out[i] = !p.is_some_and(|q| hot.contains(&q)) && self.focus != Some(self.nodes[i].id);
+            }
+        }
+        out
     }
 
     /// The menu message of the innermost element at `x`, `y` that has one.
@@ -1810,6 +1854,7 @@ impl<M: Clone> Ui<M> {
         self.spell = theme.spell;
         let face = |fonts: &mut Fonts, weight: u16| fonts.face(&theme.font, weight, false).or_else(|| fonts.face("sans-serif", weight, false));
         let mut ink: Vec<Color> = Vec::with_capacity(self.nodes.len());
+        let hidden = self.hidden();
         // The scrolling places being drawn into, the innermost last.
         let mut open: Vec<usize> = Vec::new();
         let mut field_stops: Vec<(Id, Vec<(usize, f32)>, f32)> = Vec::new();
@@ -1841,7 +1886,7 @@ impl<M: Clone> Ui<M> {
             let inherited = n.parent.map_or(theme.text, |p| ink[p]);
             let mut mine = inherited;
             let r = self.shown(i);
-            let seen = {
+            let seen = !hidden[i] && {
                 let v = meet(r, self.clip_of(i));
                 v.w > 0.0 && v.h > 0.0
             };

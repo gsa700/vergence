@@ -64,6 +64,8 @@ pub(crate) struct Node<M> {
     pub on_menu: Option<M>,
     /// Scrolled into view when it first appears ([`crate::Element::keep_in_view`]).
     pub reveal: bool,
+    /// Shown only while the pointer is on the button around it ([`crate::Element::shown_on_hover`]).
+    pub hover_only: bool,
 }
 
 pub(crate) fn child_id(parent: Id, index: usize, key: Option<u64>) -> Id {
@@ -352,8 +354,9 @@ impl Layout<'_> {
         let me = out.len();
         let name = e.name;
         let reveal = e.reveal;
+        let hover_only = e.hover_only;
         let on_menu = e.on_menu;
-        let push = |out: &mut Vec<Node<M>>, what: What<M>| out.push(Node { id, rect, parent, what, name: name.clone(), on_menu: None, reveal });
+        let push = |out: &mut Vec<Node<M>>, what: What<M>| out.push(Node { id, rect, parent, what, name: name.clone(), on_menu: None, reveal, hover_only });
         // Each element is one node, pushed before its children.
         self.arrange_kind(e.kind, rect, me, id, push, out);
         if let Some(n) = out.get_mut(me) {

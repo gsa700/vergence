@@ -176,6 +176,39 @@ fn a_click_is_judged_where_it_happened() {
 }
 
 #[test]
+fn a_rows_own_button_shows_and_takes_clicks_only_on_hover() {
+    // Two rows, each a button with its own small button at the end, shown on hover.
+    let rows = || column(vec![
+        button(row(vec![label("one").width(Length::FILL), button(label("x")).on_press(Msg::B).name("x1").shown_on_hover()])).on_press(Msg::A).name("row1").width(Length::FILL),
+        button(row(vec![label("two").width(Length::FILL), button(label("x")).on_press(Msg::C).name("x2").shown_on_hover()])).on_press(Msg::A).name("row2").width(Length::FILL),
+    ]).spacing(4.0);
+    let mut ui = laid(rows(), 300.0, 100.0);
+    let (x1, x2) = (bounds(&ui, "x1"), bounds(&ui, "x2"));
+    // It keeps its room, so nothing moves when it shows.
+    assert!(x1.w > 0.0 && x2.w > 0.0);
+    // The pointer on neither row: neither shows.
+    ui.input(&Input::PointerMoved { x: 1.0, y: 99.0 });
+    assert!(!ui.shown_named("x1") && !ui.shown_named("x2"));
+    // On row 1's words: x1 shows, x2 does not; a click on x1 is x1's, not the row's.
+    ui.input(&Input::PointerMoved { x: 2.0, y: x1.y + 2.0 });
+    assert!(ui.shown_named("x1") && !ui.shown_named("x2"));
+    ui.input(&Input::PointerMoved { x: x1.x + 2.0, y: x1.y + 2.0 });
+    assert!(ui.shown_named("x1"), "still shown with the pointer on it");
+    assert!(press(&mut ui, x1.x + 2.0, x1.y + 2.0, true).is_empty());
+    assert_eq!(press(&mut ui, x1.x + 2.0, x1.y + 2.0, false), vec![Msg::B]);
+    // Where x2 is, while hidden, a click is its row's: it never takes one unseen.
+    ui.input(&Input::PointerMoved { x: 1.0, y: 99.0 });
+    let pressed = {
+        press(&mut ui, x2.x + 2.0, x2.y + 2.0, true);
+        press(&mut ui, x2.x + 2.0, x2.y + 2.0, false)
+    };
+    assert_eq!(pressed, vec![Msg::A]);
+    // The pointer gone from the window: none shows.
+    ui.input(&Input::PointerLeft);
+    assert!(!ui.shown_named("x1") && !ui.shown_named("x2"));
+}
+
+#[test]
 fn a_finger_taps() {
     let mut ui = laid(two_buttons(), 300.0, 100.0);
     let b = bounds(&ui, "B");

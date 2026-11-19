@@ -152,6 +152,9 @@ pub struct Element<M> {
     pub(crate) key: Option<u64>,
     pub(crate) name: Option<String>,
     pub(crate) reveal: bool,
+    /// Drawn and taking the pointer only while the pointer is on the button
+    /// it sits in ([`Element::shown_on_hover`]).
+    pub(crate) hover_only: bool,
     /// Sent on a right click (or a touch held) on it or on anything inside it
     /// that has none of its own: a list row's menu, the ground's menu.
     pub(crate) on_menu: Option<M>,
@@ -159,7 +162,7 @@ pub struct Element<M> {
 
 impl<M> Element<M> {
     pub(crate) fn new(kind: Kind<M>, width: Length, height: Length) -> Element<M> {
-        Element { kind, width, height, max_width: None, key: None, name: None, reveal: false, on_menu: None }
+        Element { kind, width, height, max_width: None, key: None, name: None, reveal: false, hover_only: false, on_menu: None }
     }
 
     pub fn width(mut self, width: Length) -> Self {
@@ -177,6 +180,16 @@ impl<M> Element<M> {
     /// key so it is a new one each time the choice moves.
     pub fn keep_in_view(mut self) -> Self {
         self.reveal = true;
+        self
+    }
+
+    /// Drawn, and clicked, only while the pointer is on the button it sits
+    /// in: a list row's own buttons (the Trash's Put Back and Delete
+    /// Forever), so a long list does not read as a column of buttons. It
+    /// keeps its room either way, so nothing moves when it shows. A touch
+    /// screen has no hover: show it always on the row that is chosen.
+    pub fn shown_on_hover(mut self) -> Self {
+        self.hover_only = true;
         self
     }
 

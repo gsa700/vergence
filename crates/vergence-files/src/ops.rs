@@ -125,7 +125,11 @@ pub fn trash(path: &Path) -> io::Result<String> {
 
 /// What is in the Trash, newest first.
 pub fn trashed() -> Vec<Trashed> {
-    let Some(dir) = trash_dir() else { return Vec::new() };
+    trash_dir().map(|d| trashed_in(&d)).unwrap_or_default()
+}
+
+/// What is in the Trash at `dir` (its `files` and `info`), newest first.
+pub fn trashed_in(dir: &Path) -> Vec<Trashed> {
     let mut out: Vec<Trashed> = fs::read_dir(dir.join("info"))
         .map(|rd| {
             rd.flatten()

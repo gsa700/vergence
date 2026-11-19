@@ -317,6 +317,10 @@ pub fn sidebar<M: Clone + 'static>(places: &[Place], here: Option<&Path>, go: im
 
 /// A folder's size once counted, for the list's Size column.
 pub type FolderSize<'a> = &'a dyn Fn(&Entry) -> Option<u64>;
+/// The line under a row's name ([`View::under`]).
+pub type Under<'a> = &'a dyn Fn(&Entry) -> Option<String>;
+/// A row's own controls ([`View::trailing`]).
+pub type Trailing<'a, M> = &'a dyn Fn(usize, &Entry) -> Element<M>;
 
 /// How the list or icon view shows its entries.
 pub struct View<'a, M> {
@@ -342,6 +346,15 @@ pub struct View<'a, M> {
     /// A column's edge pulled (its place in [`COLUMNS`], the touch), if the
     /// widths can be changed.
     pub grip: Option<fn(usize, crate::Touch) -> Option<M>>,
+    /// The line under each name in place of its folder (with `folders`):
+    /// the Trash's "where it came from".
+    pub under: Option<Under<'a>>,
+    /// The date column's heading, if not "Date Changed" (the Trash's
+    /// "Deleted", whose entries carry the time they were trashed).
+    pub changed_heading: Option<&'static str>,
+    /// A row's own controls at its end (its index, the entry), with the room
+    /// they take kept in the headings too.
+    pub trailing: Option<(Trailing<'a, M>, f32)>,
 }
 
 /// The list (Details): headings that sort, with grips between them that
@@ -365,6 +378,7 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
     let mut head_items: Vec<Element<M>> = vec![space().width(Length::Fixed(icon_w)), heading("Name", SortBy::Name, Length::FILL, false)];
     for &c in &shown {
         let (text, s) = COLUMNS[c];
+        let text = if s == SortBy::Changed { v.changed_heading.unwrap_or(text) } else { text };
         // The edge before the column: pulled, the column grows or shrinks.
         let mut g = drawing(|scene, _, r: Rect, t: &Theme| {
             scene.fill(Rect::new(r.x + r.w / 2.0 - 0.5, r.y + 4.0, 1.0, (r.h - 8.0).max(0.0)), t.line);
@@ -375,6 +389,9 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
         }
         head_items.push(g);
         head_items.push(heading(text, s, Length::Fixed(look.widths[c]), s == SortBy::Size));
+    }
+    if let Some((_, w)) = v.trailing {
+        head_items.push(space().width(Length::Fixed(GAP + w)));
     }
     let head = panel(row(head_items).spacing(0.0).align(Align::Center).width(Length::FILL)).padding(Padding::hv(0.0, PAD)).width(Length::FILL);
     // A gray that darkens a light ground and lightens a dark one alike.
@@ -393,8 +410,14 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
             }
         }
         let mut name_col: Vec<Element<M>> = vec![label(e.name.clone()).size(rs.text()).elide().width(Length::FILL)];
-        if v.folders && let Some(p) = e.path.parent() {
-            name_col.push(label(tilde(p)).size(10.0).dim().elide().width(Length::FILL));
+        if v.folders {
+            let words = match v.under {
+                Some(f) => f(e),
+                None => e.path.parent().map(tilde),
+            };
+            if let Some(w) = words {
+                name_col.push(label(w).size(10.0).dim().elide().width(Length::FILL));
+            }
         }
         let small = rs.text() - 1.0;
         let mut cells: Vec<Element<M>> = vec![
@@ -412,6 +435,10 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
                 }
                 _ => label(kind_words(e)).size(small).dim().elide().width(w),
             });
+        }
+        if let Some((f, w)) = v.trailing {
+            cells.push(space().width(Length::Fixed(GAP)));
+            cells.push(f(k, e).width(Length::Fixed(w)));
         }
         let chosen = (v.chosen)(k, e);
         let ground = if chosen {
