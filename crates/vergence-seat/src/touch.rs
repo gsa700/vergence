@@ -63,7 +63,7 @@ impl Seat {
         let under = if self.locked { Some(Target::Server(Part::Lock)) } else { under };
         let mut out = Vec::new();
         self.keyboard.super_alone = false;
-        let ours = self.menu.is_some() || matches!(under, Some(Target::Server(Part::Note | Part::Card | Part::Drawer | Part::Session)));
+        let ours = self.menu.is_some() || matches!(under, Some(Target::Server(Part::Note | Part::Card | Part::Picker | Part::Drawer | Part::Session)));
         if self.touch.on_windows.iter().any(|(s, _)| *s == slot) || self.touch.pointing == Some(slot) {
             // A slot already down (the panel lost an up): ignore the repeat.
             return out;

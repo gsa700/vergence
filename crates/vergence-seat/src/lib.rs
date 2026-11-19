@@ -90,6 +90,9 @@ pub enum Part {
     Note,
     /// A live tile's card beside the dock (dock milestone 1).
     Card,
+    /// The dock's window picker: an app's windows as live tiles beside its
+    /// icon (overview milestone 1, step 3).
+    Picker,
     /// The dock's drawer of tiles (dock milestone 1).
     Drawer,
     /// The lock screen (VDM milestone 1): while locked, every pointer and

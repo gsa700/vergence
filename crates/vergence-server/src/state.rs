@@ -98,6 +98,8 @@ pub struct Server {
     /// Windows' pictures (thumbs.rs), and those still to save for `vctl
     /// thumb`: the window, the room's side in pixels, the name.
     pub thumbs: crate::thumbs::Thumbs,
+    /// The dock's window picker, open (picker.rs).
+    pub picker: Option<crate::picker::Picker>,
     pub thumb_pending: Vec<(Win, i32, String)>,
     /// The desktop font for title text (None: titles without text).
     pub title_font: Option<crate::text::TextFont>,
@@ -303,6 +305,7 @@ impl Server {
             shot_pending: Vec::new(),
             picture_pending: Vec::new(),
             thumbs: Default::default(),
+            picker: None,
             thumb_pending: Vec::new(),
             title_font: crate::text::TextFont::load(),
             frost: None,

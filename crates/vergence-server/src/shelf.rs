@@ -414,7 +414,7 @@ pub struct Shelf {
     /// The item the pointer is over, and whether it has rested there long
     /// enough for the application's name to be shown beside it.
     hover: Option<usize>,
-    named: bool,
+    pub(crate) named: bool,
     /// The items' names as last drawn, and the name's picture for a scale.
     pub names: Vec<String>,
     label: Option<((String, u64, bool), MemoryRenderBuffer, i32)>,
@@ -478,7 +478,7 @@ impl Shelf {
     }
 }
 
-fn rect(r: Rectangle<i32, Logical>) -> Rect {
+pub(crate) fn rect(r: Rectangle<i32, Logical>) -> Rect {
     Rect::new(r.loc.x, r.loc.y, r.size.w, r.size.h)
 }
 
@@ -854,10 +854,26 @@ impl Server {
         if std::mem::take(&mut self.shelf.named) {
             self.redraw_all();
         }
+        // The picker open for another app: this one's windows at once
+        // (overview milestone 1, step 3), if it has any.
+        if let Some(i) = over
+            && self.picker.is_some()
+            && self.shelf_items().get(i).is_some_and(|(_, ws)| !ws.is_empty())
+        {
+            self.picker_open(i);
+            return;
+        }
         if over.is_some() {
+            // Resting on a running app: its windows' picker; on one that is
+            // not running, its name.
             let rest = smithay::reexports::calloop::timer::Timer::from_duration(std::time::Duration::from_millis(500));
             let _ = self.loop_handle.insert_source(rest, move |_, _, state| {
-                if state.shelf.hover == over && !state.shelf.named {
+                let busy = state.shelf.held.is_some() || state.shelf.lift.is_some() || state.shelf.dragged.is_some() || state.menu_is_open();
+                if let Some(i) = over.filter(|_| state.shelf.hover == over && !busy)
+                    && state.shelf_items().get(i).is_some_and(|(_, ws)| !ws.is_empty())
+                {
+                    state.picker_open(i);
+                } else if state.shelf.hover == over && !state.shelf.named && state.picker.is_none() {
                     state.shelf.named = true;
                     state.redraw_all();
                 }
@@ -1462,8 +1478,12 @@ impl Server {
         let pixels = (running::icon_for(self.shelf_size()) as f64 * scale).round() as u32;
         let icons: Vec<Option<Arc<Icon>>> = items.iter().map(|(item, _)| self.shelf_icon(&item.icon, pixels)).collect();
         let accent = self.accent();
-        // An application all of whose windows are minimized is there, but faint.
-        let away: Vec<bool> = items.iter().map(|(_, windows)| !windows.is_empty() && windows.iter().all(|w| self.is_minimized(w))).collect();
+        // Each application's windows, and how many of them are minimized: a
+        // dot for each window under its icon, hollow for a minimized one
+        // (overview milestone 1, step 2; Dave, 2026-11-18: "Mac and Windows
+        // both keep dots under running apps when minimized ... that is how
+        // you know there is something there"). The icon is never faint.
+        let counts: Vec<(usize, usize)> = items.iter().map(|(_, windows)| (windows.len(), windows.iter().filter(|w| self.is_minimized(w)).count())).collect();
         // One that is starting says so with a mark that grows and shrinks, ten
         // steps a second (a still one where motion is not wanted).
         let moving = self.motion_wanted();
@@ -1482,8 +1502,8 @@ impl Server {
             })
             .collect();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        for (((item, windows), icon), away) in items.iter().zip(&icons).zip(&away) {
-            (&item.key, &item.name, windows.len(), item.focused, icon.is_some(), away).hash(&mut hasher);
+        for (((item, _), icon), count) in items.iter().zip(&icons).zip(&counts) {
+            (&item.key, &item.name, item.focused, icon.is_some(), count).hash(&mut hasher);
         }
         starting.hash(&mut hasher);
         asking.hash(&mut hasher);
@@ -1552,38 +1572,61 @@ impl Server {
             for (place, shown) in order.iter().enumerate() {
                 let Some(slot) = running::slot(local, place, upright) else { break };
                 let Some(index) = *shown else { continue };
-                let ((item, windows), icon) = (&items[index], &icons[index]);
+                let ((item, _), icon) = (&items[index], &icons[index]);
                 let at = running::icon_in(slot);
                 let square = SceneRect::new(at.x as f32, at.y as f32, at.w as f32, at.h as f32);
-                // The mark: short and gray for an application that
-                // is running, long and in the accent for the one that has the keyboard.
-                let (long, mark) = match starting[index] {
-                    // From 6 points to 18 and back in a second.
-                    Some(step) => (6.0 + 12.0 * (1.0 - (step as f32 - 5.0).abs() / 5.0), accent),
-                    None if asking[index] == Some(true) => (18.0, accent),
-                    None if asking[index] == Some(false) => (6.0, color(s.mark)),
-                    None if item.focused => (18.0, accent),
-                    None => (6.0, color(s.mark)),
+                // The marks, on the dock's outside edge, away from the windows
+                // (Dave, 2026-11-10): starting, a bar that grows and shrinks;
+                // asking, a long bar in the accent; otherwise a dot for each
+                // window, up to three, hollow for a minimized one, in the
+                // accent for the application that has the keyboard.
+                let outside = match side {
+                    Edge::Left => Edge::Right,
+                    Edge::Right => Edge::Left,
+                    Edge::Top => Edge::Bottom,
+                    Edge::Bottom => Edge::Top,
                 };
-                let long = long * k;
-                let faint = away[index];
-                // No mark for one that is neither running nor starting.
-                if !faint && (!windows.is_empty() || starting[index].is_some()) {
+                // A mark `long` points along the edge, 3 thick, centered on the slot.
+                let along_edge = |long: f32| -> SceneRect {
                     let (down, along) = (slot.y as f32 + (slot.h as f32 - long) / 2.0, slot.x as f32 + (slot.w as f32 - long) / 2.0);
-                    // On the dock's outside edge, away from the windows (Dave, 2026-11-10).
-                    let outside = match side {
-                        Edge::Left => Edge::Right,
-                        Edge::Right => Edge::Left,
-                        Edge::Top => Edge::Bottom,
-                        Edge::Bottom => Edge::Top,
-                    };
-                    let place = match outside {
+                    match outside {
                         Edge::Left => SceneRect::new(3.0, down, 3.0, long),
                         Edge::Right => SceneRect::new(w - 6.0, down, 3.0, long),
                         Edge::Top => SceneRect::new(along, 3.0, long, 3.0),
                         Edge::Bottom => SceneRect::new(along, h - 6.0, long, 3.0),
-                    };
-                    scene.fill_rounded(place, 1.5, mark);
+                    }
+                };
+                let bar = match starting[index] {
+                    // From 6 points to 18 and back in a second.
+                    Some(step) => Some((6.0 + 12.0 * (1.0 - (step as f32 - 5.0).abs() / 5.0), accent)),
+                    None if asking[index] == Some(true) => Some((18.0, accent)),
+                    _ => None,
+                };
+                let faint = false;
+                let (open_n, gone) = counts[index];
+                if let Some((long, mark)) = bar {
+                    scene.fill_rounded(along_edge(long * k), 1.5, mark);
+                } else if open_n > 0 {
+                    let mark = if item.focused { accent } else { color(s.mark) };
+                    let shown = open_n.min(3);
+                    // The minimized ones' dots last; with more than three, as many
+                    // hollow as fit after the open ones (at least one if any is).
+                    let hollow = if gone == 0 { 0 } else { gone.min(shown).max(1).min(shown) };
+                    // Big enough that a hollow one reads as a ring at scale 1.
+                    let (d, gap) = (6.0 * k.max(0.75), 3.0 * k.max(0.75));
+                    let long = shown as f32 * d + (shown as f32 - 1.0) * gap;
+                    let row = along_edge(long);
+                    let vertical = matches!(outside, Edge::Left | Edge::Right);
+                    for i in 0..shown {
+                        let off = i as f32 * (d + gap);
+                        let (x, y) = if vertical { (row.x - 1.5, row.y + off) } else { (row.x + off, row.y - 2.0) };
+                        let dot = SceneRect::new(x, y, d, d);
+                        if i >= shown - hollow {
+                            scene.stroke(SceneRect::new(dot.x + 0.75, dot.y + 0.75, d - 1.5, d - 1.5), (d - 1.5) / 2.0, 1.5, mark);
+                        } else {
+                            scene.fill_rounded(dot, d / 2.0, mark);
+                        }
+                    }
                 }
                 match icon {
                     Some(icon) => {

@@ -347,6 +347,14 @@ impl Server {
             // A window's own picture, as its program drew it (headless
             // milestone 1, step 4): saved as window-<i>.png beside the shots,
             // at its own pixels, to compare with what the screen shows.
+            // A window minimized, as its bar's button does (tests: the dock's
+            // hollow dots, the pickers' minimized tiles).
+            "minimize" => {
+                let Some(i) = args.first().and_then(|a| a.parse::<usize>().ok()) else { return "minimize <i>".into() };
+                let Some(w) = self.space.elements().nth(i).cloned() else { return format!("no window {i}") };
+                self.minimize(&w);
+                format!("minimized {i}")
+            }
             // A window's picture as the dock's picker and Alt+Tab show it
             // (thumbs.rs), fitted into a square `side` pixels wide.
             "thumb" => {

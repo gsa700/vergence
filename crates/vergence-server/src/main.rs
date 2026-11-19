@@ -53,6 +53,7 @@ mod native;
 mod sound;
 mod switch;
 mod thumbs;
+mod picker;
 mod opened;
 mod snap;
 mod style;

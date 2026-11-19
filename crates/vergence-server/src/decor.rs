@@ -757,7 +757,8 @@ impl Server {
         elements.extend(self.menu_elements(renderer, out, scale));
         // Then notifications, in front of every window (notify.rs).
         elements.extend(self.notify_elements(renderer, out, scale));
-        // Then a tile's card beside the dock (tiles.rs).
+        // Then the dock's window picker (picker.rs) and a tile's card beside the dock (tiles.rs).
+        elements.extend(self.picker_elements(renderer, out, scale));
         elements.extend(self.card_elements(renderer, out, scale));
         // Behind the card, the drawer, with a tile being dragged in front of all (drawer.rs).
         elements.extend(self.drawer_elements(renderer, out, scale));

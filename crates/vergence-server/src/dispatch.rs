@@ -242,6 +242,9 @@ impl Server {
         if let Some(modal) = hit_window.and_then(|w| self.modal_of(&w)) {
             return Some(Target::Server(Part::Blocked(self.win_id(&modal))));
         }
+        if self.picker_at(pos) {
+            return Some(Target::Server(Part::Picker));
+        }
         if self.card_at(pos) {
             return Some(Target::Server(Part::Card));
         }
@@ -310,6 +313,7 @@ impl Server {
         self.notify_hover(pos);
         self.session_dialog_hover(pos);
         self.shelf_hover(pos);
+        self.picker_hover(pos);
     }
 
     /// The pointer's picture, and Smithay's pointer where the pointer is.
@@ -508,6 +512,11 @@ impl Server {
         if !pressed {
             self.app_menu_release();
         }
+        // A press anywhere but on the picker puts it away (picker.rs); one on
+        // the dock does what it does as well.
+        if pressed && self.picker.is_some() && !matches!(t, Target::Server(Part::Picker)) {
+            self.picker_close();
+        }
         // A press anywhere but the drawer, its card or the dock puts the drawer away (drawer.rs).
         if pressed && self.tiles.drawer.is_some() && !matches!(t, Target::Server(Part::Drawer | Part::Card | Part::Dock)) {
             self.drawer_close();
@@ -553,6 +562,7 @@ impl Server {
             Target::Server(Part::Menu) if pressed => self.menu_press(pos),
             Target::Server(Part::AppList) if pressed => self.app_menu_press(pos, button),
             Target::Server(Part::Note) if pressed => self.notify_press(pos),
+            Target::Server(Part::Picker) if pressed && button == vergence_seat::BTN_LEFT => self.picker_press(pos),
             Target::Server(Part::Card) if pressed && button == vergence_seat::BTN_LEFT => self.card_press(pos),
             Target::Server(Part::Card) if !pressed => self.card_release(),
             Target::Server(Part::Drawer) if pressed && button == vergence_seat::BTN_LEFT => self.drawer_press(pos),
