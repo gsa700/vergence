@@ -462,6 +462,16 @@ pub(crate) fn notify(summary: &str, body: &str) {
 
 /// Opens files with the apps chosen for their types: the server's Open in a
 /// Vergence session (the dock shows them starting), else started here.
+/// Starts a program and lets it run on its own: a thread waits for it, so
+/// it is not left behind as a zombie when it ends (the desktop's process
+/// lives all session and started a FileView for each folder opened, each
+/// left over once it handed its folder on, 2026-11-18).
+pub(crate) fn start(cmd: &mut std::process::Command) -> std::io::Result<()> {
+    let mut child = cmd.spawn()?;
+    std::thread::spawn(move || child.wait());
+    Ok(())
+}
+
 pub(crate) fn open_files(paths: &[PathBuf]) -> Result<(), String> {
     open_files_with(paths, None)
 }
@@ -484,7 +494,7 @@ pub(crate) fn open_files_with(paths: &[PathBuf], app: Option<&str>) -> Result<()
     for (entry, files) in groups {
         for argv in vergence_shell::open::commands(&entry, &files) {
             if let Some((p, rest)) = argv.split_first() {
-                let _ = std::process::Command::new(p).args(rest).spawn();
+                let _ = crate::start(std::process::Command::new(p).args(rest));
             }
         }
     }
@@ -705,7 +715,7 @@ impl Viewer {
             let p = one.path.clone();
             // The Trash window shows only the Trash: a folder in it opens in FileView.
             if self.trash_window {
-                let _ = std::process::Command::new("vergence-files").arg(&p).spawn();
+                let _ = crate::start(std::process::Command::new("vergence-files").arg(&p));
                 return;
             }
             self.preview = false;
@@ -1007,7 +1017,7 @@ impl Viewer {
                     _ => self.here(),
                 };
                 if let Some(d) = at
-                    && let Err(e) = std::process::Command::new("vergence-term").current_dir(&d).spawn()
+                    && let Err(e) = crate::start(std::process::Command::new("vergence-term").current_dir(&d))
                 {
                     self.notice = Some(format!("The Terminal could not be opened: {}", files::plain(&e)));
                 }
@@ -1852,7 +1862,7 @@ impl Program for Viewer {
             Msg::OpenChosen => self.open_chosen(),
             Msg::OpenInCloseUp => {
                 if let Some(e) = self.cursor_entry() {
-                    let _ = std::process::Command::new("vergence-closeup").arg(&e.path).spawn();
+                    let _ = crate::start(std::process::Command::new("vergence-closeup").arg(&e.path));
                 }
             }
             Msg::DismissNotice => self.notice = None,
@@ -2272,7 +2282,7 @@ impl Rows for FilesRows {
 
     fn button(&self, id: u32) {
         if id == 1 {
-            let _ = std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", APP_ID]).spawn();
+            let _ = crate::start(std::process::Command::new("vergence-settings").args(["--page", "windows", "--forget", APP_ID]));
         }
     }
 }

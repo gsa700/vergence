@@ -417,12 +417,12 @@ impl Desktop {
         let Some(e) = self.entries.get(i).cloned() else { return };
         // The Trash: its own window (Dave, 2026-11-18), made if not there yet.
         if self.fixed_of(&e) == Some(Fixed::Trash) {
-            let _ = std::process::Command::new("vergence-files").arg("--trash").spawn();
+            let _ = crate::start(std::process::Command::new("vergence-files").arg("--trash"));
             return;
         }
         // A folder, Home, a disk: in File Viewer.
         if e.dir {
-            let _ = std::process::Command::new("vergence-files").arg(&e.path).spawn();
+            let _ = crate::start(std::process::Command::new("vergence-files").arg(&e.path));
             return;
         }
         if Desktop::launcher(&e) {
@@ -469,7 +469,7 @@ impl Desktop {
         };
         for argv in vergence_shell::open::commands(&entry, &[]) {
             if let Some((p, rest)) = argv.split_first() {
-                let _ = std::process::Command::new(p).args(rest).stdin(std::process::Stdio::null()).spawn();
+                let _ = crate::start(std::process::Command::new(p).args(rest).stdin(std::process::Stdio::null()));
             }
         }
     }
@@ -873,7 +873,7 @@ impl Program for Desktop {
             }
             cmd::CLOSE_UP => {
                 if let [one] = paths.as_slice() {
-                    let _ = std::process::Command::new("vergence-closeup").arg(one).spawn();
+                    let _ = crate::start(std::process::Command::new("vergence-closeup").arg(one));
                 }
             }
             cmd::RENAME => {
@@ -901,7 +901,7 @@ impl Program for Desktop {
                 self.read();
             }
             cmd::SHOW => {
-                let _ = std::process::Command::new("vergence-files").arg(&self.dir).spawn();
+                let _ = crate::start(std::process::Command::new("vergence-files").arg(&self.dir));
             }
             cmd::EMPTY_TRASH => self.ask = Some(Ask::EmptyTrash),
             cmd::EJECT => {
@@ -932,10 +932,10 @@ impl Program for Desktop {
                 self.read();
             }
             cmd::OPEN_FOLDER => {
-                let _ = std::process::Command::new("vergence-files").arg(&self.dir).spawn();
+                let _ = crate::start(std::process::Command::new("vergence-files").arg(&self.dir));
             }
             cmd::TERMINAL => {
-                let _ = std::process::Command::new("vergence-term").current_dir(&self.dir).spawn();
+                let _ = crate::start(std::process::Command::new("vergence-term").current_dir(&self.dir));
             }
             // Its own window, as File Viewer's (one per item, at most eight);
             // the Desktop folder's own when nothing is chosen.

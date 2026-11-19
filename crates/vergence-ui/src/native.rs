@@ -264,7 +264,7 @@ fn create_request(app: &dyn App, window: u32, serial: u32, size: (u32, u32)) -> 
     let request = WinRequest::Create {
         serial,
         window,
-        role: "main".into(),
+        role: app.role(),
         token: app.token(),
         title: app.title(),
         width: size.0.max(1) as f64,

@@ -603,6 +603,13 @@ pub trait App {
         true
     }
 
+    /// What this window is among its program's (Contract 2): window memory
+    /// keeps a place for each role apart, so a program's Properties window
+    /// does not take its main window's place. "main" unless said.
+    fn role(&self) -> String {
+        "main".into()
+    }
+
     /// The persistence token this window had on an earlier run, if the
     /// program kept one (Contract 2): presented when the window is created,
     /// so window memory puts it back where it was. Empty: a new window.

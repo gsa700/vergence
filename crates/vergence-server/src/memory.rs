@@ -142,9 +142,13 @@ impl Server {
         // A window with a parent counts too: its parent is known when it is
         // created, its kind only once its style arrives, which can be after
         // the server first places it.
+        // A lone dialog of our own toolkit (no parent: a Properties window,
+        // 2026-11-16) is a window of its own and is remembered by its role
+        // (Dave, 2026-11-18: it no longer kept its size or place).
         use crate::style::Kind;
         let style = self.window_style(w);
-        if matches!(style.kind, Kind::Dialog | Kind::Palette | Kind::Splash | Kind::Desktop) {
+        let lone_dialog = style.kind == Kind::Dialog && style.parent.is_none() && w.native().is_some_and(|n| n.style().0 == 0 && n.role != "main");
+        if matches!(style.kind, Kind::Dialog | Kind::Palette | Kind::Splash | Kind::Desktop) && !lone_dialog {
             return None;
         }
         // A native window with a parent may be one of those until its style

@@ -286,6 +286,12 @@ impl Program for Properties {
         Some((420, 470))
     }
 
+    /// Its own place in window memory, apart from FileView's windows (Dave,
+    /// 2026-11-18: it no longer kept its size or place).
+    fn role(&self) -> String {
+        "properties".into()
+    }
+
     fn style(&self) -> vergence_ui::Style {
         // A window of its own with only a close button (Dave, 2026-11-16: no
         // app menu or settings on a Properties window).

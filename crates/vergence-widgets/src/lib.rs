@@ -125,6 +125,13 @@ pub trait Program {
     /// window of the program (`TabEvent::Join`'s `into`).
     fn opened(&mut self, _id: u32) {}
 
+    /// What this window is among the program's, for window memory: each
+    /// role keeps places of its own ("main" unless said; a Properties
+    /// window's "properties").
+    fn role(&self) -> String {
+        "main".into()
+    }
+
     /// The persistence token this window had on an earlier run, so window
     /// memory puts it back where it was; "new" asks for one; empty: the
     /// program keeps none.
@@ -405,6 +412,10 @@ impl<P: Program> vergence_ui::App for Host<P> {
 
     fn opened(&mut self, id: u32) {
         self.program.opened(id);
+    }
+
+    fn role(&self) -> String {
+        self.program.role()
     }
 
     fn token(&self) -> String {
