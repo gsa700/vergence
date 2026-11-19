@@ -126,6 +126,9 @@ impl Server {
             // Super with an arrow (snap.rs).
             KeyOut::Window(k) => self.window_key(k),
             KeyOut::ShowDesktop => self.show_desktop(),
+            // Super+Tab, and the open overview's keys (overview.rs).
+            KeyOut::Overview => self.overview_toggle(),
+            KeyOut::OverviewKey => self.overview_key(key.sym, key.typed, mods),
             // The lock screen (lock.rs).
             KeyOut::Lock => {
                 self.lock_request("Super+L");

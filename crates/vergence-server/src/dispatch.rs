@@ -175,7 +175,9 @@ impl Server {
     pub fn dispatch_sync(&mut self) {
         // A menu open over the launcher (an application's menu there) comes
         // first: a press on it is the menu's, not one outside the launcher.
-        let menu = if self.app_menu_is_open() {
+        let menu = if self.overview_is_open() {
+            Some(vergence_seat::Menu::Overview)
+        } else if self.app_menu_is_open() {
             Some(vergence_seat::Menu::AppMenu)
         } else if self.menu_is_open() {
             Some(vergence_seat::Menu::Menu)
@@ -224,6 +226,10 @@ impl Server {
         // while one shows (session_dialog.rs, elevate.rs).
         if self.session_dialog.open || self.elevating() {
             return Some(Target::Server(Part::Session));
+        }
+        // The overview has the whole screen but the dock (overview.rs).
+        if self.overview_is_open() && !self.shelf_at(pos) {
+            return Some(Target::Server(Part::Overview));
         }
         if self.app_menu_contains(pos) {
             return Some(Target::Server(Part::AppList));
@@ -314,6 +320,7 @@ impl Server {
         self.session_dialog_hover(pos);
         self.shelf_hover(pos);
         self.picker_hover(pos);
+        self.overview_hover(pos);
     }
 
     /// The pointer's picture, and Smithay's pointer where the pointer is.
@@ -563,6 +570,7 @@ impl Server {
             Target::Server(Part::AppList) if pressed => self.app_menu_press(pos, button),
             Target::Server(Part::Note) if pressed => self.notify_press(pos),
             Target::Server(Part::Picker) if pressed && button == vergence_seat::BTN_LEFT => self.picker_press(pos),
+            Target::Server(Part::Overview) if pressed && button == vergence_seat::BTN_LEFT => self.overview_press(pos),
             Target::Server(Part::Card) if pressed && button == vergence_seat::BTN_LEFT => self.card_press(pos),
             Target::Server(Part::Card) if !pressed => self.card_release(),
             Target::Server(Part::Drawer) if pressed && button == vergence_seat::BTN_LEFT => self.drawer_press(pos),

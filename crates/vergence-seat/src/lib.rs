@@ -93,6 +93,8 @@ pub enum Part {
     /// The dock's window picker: an app's windows as live tiles beside its
     /// icon (overview milestone 1, step 3).
     Picker,
+    /// The overview over the whole screen (overview milestone 1, step 5).
+    Overview,
     /// The dock's drawer of tiles (dock milestone 1).
     Drawer,
     /// The lock screen (VDM milestone 1): while locked, every pointer and
@@ -146,6 +148,9 @@ pub enum Menu {
     /// A window's app menu (app settings milestone 1): it takes every key
     /// while open, to search and to move through it.
     AppMenu,
+    /// The overview, Super+Tab (overview milestone 1): every key is its,
+    /// to narrow by typing, to move with the arrows, to choose or close.
+    Overview,
 }
 
 /// A grab: for as long as it lasts, the pointer is its.

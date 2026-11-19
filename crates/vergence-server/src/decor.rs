@@ -768,6 +768,8 @@ impl Server {
         elements.extend(self.shelf_elements(renderer, out, scale));
         // Then windows on their way into the dock or out of it.
         elements.extend(self.shelf_motion_elements(renderer, out, scale));
+        // Then the overview over every window, the dock left in front (overview.rs).
+        elements.extend(self.overview_elements(renderer, out, scale));
         // Then a dragged tab's ghost, over every window (dispatch.rs, tab_ghost).
         elements.extend(self.native_drag_ghost(renderer, out, scale, light));
         elements.extend(self.tab_ghost_element(renderer, out, scale, light));

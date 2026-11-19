@@ -100,6 +100,8 @@ pub struct Server {
     pub thumbs: crate::thumbs::Thumbs,
     /// The dock's window picker, open (picker.rs).
     pub picker: Option<crate::picker::Picker>,
+    /// The overview, Super+Tab, open (overview.rs).
+    pub overview: Option<crate::overview::Overview>,
     pub thumb_pending: Vec<(Win, i32, String)>,
     /// The desktop font for title text (None: titles without text).
     pub title_font: Option<crate::text::TextFont>,
@@ -306,6 +308,7 @@ impl Server {
             picture_pending: Vec::new(),
             thumbs: Default::default(),
             picker: None,
+            overview: None,
             thumb_pending: Vec::new(),
             title_font: crate::text::TextFont::load(),
             frost: None,

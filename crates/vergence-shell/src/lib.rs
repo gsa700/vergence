@@ -19,6 +19,7 @@ pub mod desktop;
 pub mod icons;
 pub mod launcher;
 pub mod open;
+pub mod overview;
 pub mod running;
 pub mod session;
 pub mod snap;

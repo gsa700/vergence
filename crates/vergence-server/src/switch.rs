@@ -53,6 +53,9 @@ const GAP: i32 = 12;
 const PAD: i32 = 14;
 const ICON: i32 = 18;
 
+/// The list's panel, each tile's place, and the picture room's size.
+type Layout = (Rectangle<i32, Logical>, Vec<Rectangle<i32, Logical>>, (i32, i32));
+
 /// A row of the list: its application's icon name, the window's title, minimized.
 struct Row {
     icon: String,
@@ -86,7 +89,7 @@ impl Switching {
     /// picture room's size: rows as wide as nine tenths of the screen allow,
     /// centered, the panel in the screen's middle; the tiles shrunk (not
     /// below a third) until the rows fit four fifths of its height.
-    fn layout(&self) -> Option<(Rectangle<i32, Logical>, Vec<Rectangle<i32, Logical>>, (i32, i32))> {
+    fn layout(&self) -> Option<Layout> {
         let s = self.screen?;
         let n = self.list.len().max(1) as i32;
         let (max_w, max_h) = (s.size.w * 9 / 10, s.size.h * 4 / 5);

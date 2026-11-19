@@ -18,6 +18,8 @@
 //! 7. While the popup is open, every key is its.
 //! 8. Alt+Tab (Alt+Shift+Tab backwards) begins switching among every
 //!    window; Alt+` (the key above Tab) among the focused application's.
+//! 8b. Super+Tab opens the overview (overview milestone 1); while it is
+//!    open every key is its (Super+Tab again closes it there).
 //! 9. Super with an arrow is a window key (snap, maximize, restore);
 //!    Super+D shows the desktop (files milestone 1), and again brings the
 //!    windows back.
@@ -121,6 +123,10 @@ pub enum KeyOut {
     Window(WindowKey),
     /// Super+D: every window out of the way, or back.
     ShowDesktop,
+    /// Super+Tab: the overview opens.
+    Overview,
+    /// The open overview's: the server gives it the key's symbol and character.
+    OverviewKey,
     /// Kept from every program, with nothing else to do.
     Swallow,
     /// Lock the screen: Super+L, or Ctrl+Super+Q (VDM milestone 1).
@@ -229,6 +235,9 @@ impl Seat {
         if self.menu == Some(Menu::AppMenu) {
             return if pressed { KeyOut::AppMenu } else { KeyOut::Swallow };
         }
+        if self.menu == Some(Menu::Overview) {
+            return if pressed && !is_super { KeyOut::OverviewKey } else { KeyOut::Swallow };
+        }
         // Alt+Space: the app menu, as Windows' system menu (app settings milestone 1).
         if pressed
             && key == Key::Space
@@ -252,6 +261,9 @@ impl Seat {
         }
         if pressed && mods.logo && !mods.alt && !mods.ctrl && !mods.shift && key == Key::D {
             return KeyOut::ShowDesktop;
+        }
+        if pressed && mods.logo && !mods.alt && !mods.ctrl && key == Key::Tab {
+            return KeyOut::Overview;
         }
         if pressed && mods.logo && !mods.alt && !mods.ctrl && self.keyboard.window_keys {
             let w = match key {
@@ -378,6 +390,21 @@ mod tests {
         // Their releases go on to the window, which never saw the press: harmless,
         // and Smithay's keyboard state stays right.
         assert_eq!(seat.key(Key::VolumeUp, false, none()), KeyOut::Forward(Some(W1)));
+    }
+
+    #[test]
+    fn super_tab_opens_the_overview_which_then_has_every_key() {
+        let mut seat = Seat::new();
+        let logo = Mods { logo: true, ..none() };
+        seat.key(Key::Super, true, none());
+        assert_eq!(seat.key(Key::Tab, true, logo), KeyOut::Overview);
+        // Super let go after Tab: no launcher.
+        assert_eq!(seat.key(Key::Super, false, logo), KeyOut::Forward(None));
+        seat.menu_opened(Menu::Overview);
+        assert_eq!(seat.key(Key::Other, true, none()), KeyOut::OverviewKey);
+        assert_eq!(seat.key(Key::Escape, true, none()), KeyOut::OverviewKey);
+        assert_eq!(seat.key(Key::Tab, true, logo), KeyOut::OverviewKey, "Super+Tab again: the overview's (it closes)");
+        assert_eq!(seat.key(Key::Other, false, none()), KeyOut::Swallow);
     }
 
     #[test]
