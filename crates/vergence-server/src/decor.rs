@@ -72,6 +72,8 @@ smithay::backend::renderer::element::render_elements! {
     Texture = smithay::backend::renderer::element::texture::TextureRenderElement<smithay::backend::renderer::gles::GlesTexture>,
     Shaded = crate::backdrop::Shaded,
     Backdrop = crate::backdrop::Backdrop,
+    /// A window's picture (thumbs.rs): the dock's picker, Alt+Tab, the overview.
+    Thumb = crate::thumbs::ThumbElement,
 }
 
 /// What is under a point of the desktop.
@@ -242,7 +244,7 @@ fn corner_pictures(fonts: &mut vergence_text::Fonts, scale: f64, rgb: [u8; 3]) -
 /// A native window's picture as a GPU texture, with its size in pixels and
 /// in points: imported the first time it is asked for, on whichever monitor
 /// that is. None for a picture in shared memory or one that failed to import.
-fn native_texture(renderer: &mut GlesRenderer, w: &Win) -> Option<(smithay::backend::renderer::element::texture::TextureBuffer<smithay::backend::renderer::gles::GlesTexture>, smithay::backend::renderer::gles::GlesTexture, smithay::utils::Size<i32, smithay::utils::Buffer>, smithay::utils::Size<i32, Logical>)> {
+pub(crate) fn native_texture(renderer: &mut GlesRenderer, w: &Win) -> Option<(smithay::backend::renderer::element::texture::TextureBuffer<smithay::backend::renderer::gles::GlesTexture>, smithay::backend::renderer::gles::GlesTexture, smithay::utils::Size<i32, smithay::utils::Buffer>, smithay::utils::Size<i32, Logical>)> {
     let n = w.native()?;
     let p = n.picture()?;
     let crate::native::Content::Gpu(g) = &p.content else { return None };

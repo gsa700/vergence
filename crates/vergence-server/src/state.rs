@@ -95,6 +95,10 @@ pub struct Server {
     /// Windows whose own picture is still to save for `vctl picture`, and
     /// the name each is saved under (headless milestone 1, step 4).
     pub picture_pending: Vec<(Win, String)>,
+    /// Windows' pictures (thumbs.rs), and those still to save for `vctl
+    /// thumb`: the window, the room's side in pixels, the name.
+    pub thumbs: crate::thumbs::Thumbs,
+    pub thumb_pending: Vec<(Win, i32, String)>,
     /// The desktop font for title text (None: titles without text).
     pub title_font: Option<crate::text::TextFont>,
     /// The frost's shader program (look milestone 1, step 3), compiled the
@@ -298,6 +302,8 @@ impl Server {
             tints: Default::default(),
             shot_pending: Vec::new(),
             picture_pending: Vec::new(),
+            thumbs: Default::default(),
+            thumb_pending: Vec::new(),
             title_font: crate::text::TextFont::load(),
             frost: None,
             round: None,

@@ -1009,6 +1009,18 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
         }
     }
 
+    // The control socket's `thumb`: windows' pictures as the pickers show them.
+    for (w, side, name) in std::mem::take(&mut state.thumb_pending) {
+        match state.thumb(&mut b.renderer, &w, (side, side).into()) {
+            Some((mut texture, px)) => match read_texture(&mut b.renderer, &mut texture, px) {
+                Ok(rgba) => crate::control::save_png(name, px.w as u32, px.h as u32, rgba),
+                Err(e) => tracing::warn!("thumb {name}: {e}"),
+            },
+            None => tracing::warn!("thumb {name}: the window has nothing to show"),
+        }
+    }
+    state.thumbs_prune();
+
     let clear = state.background_color(&s.connector);
     let outcome = if crtc.0 == MEMORY {
         memory_frame(&mut b.renderer, s, &elements, clear)
@@ -1417,6 +1429,16 @@ pub fn memory_screens(state: &Server) -> Vec<String> {
     let mut v: Vec<String> = state.backend.as_ref().map(|b| b.surfaces.iter().filter(|(k, _)| k.0 == MEMORY).map(|(_, s)| s.connector.clone()).collect()).unwrap_or_default();
     v.sort();
     v
+}
+
+/// A texture's pixels, RGBA.
+fn read_texture(renderer: &mut GlesRenderer, tex: &mut smithay::backend::renderer::gles::GlesTexture, size: smithay::utils::Size<i32, smithay::utils::Physical>) -> Result<Vec<u8>, String> {
+    use smithay::backend::renderer::{Bind, ExportMem};
+    let buf = smithay::utils::Size::<i32, smithay::utils::Buffer>::from((size.w, size.h));
+    let fb = renderer.bind(tex).map_err(|e| e.to_string())?;
+    let mapping = renderer.copy_framebuffer(&fb, smithay::utils::Rectangle::from_size(buf), Fourcc::Abgr8888).map_err(|e| e.to_string())?;
+    let bytes = renderer.map_texture(&mapping).map_err(|e| e.to_string())?;
+    Ok(bytes.to_vec())
 }
 
 fn capture(

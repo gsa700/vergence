@@ -347,6 +347,21 @@ impl Server {
             // A window's own picture, as its program drew it (headless
             // milestone 1, step 4): saved as window-<i>.png beside the shots,
             // at its own pixels, to compare with what the screen shows.
+            // A window's picture as the dock's picker and Alt+Tab show it
+            // (thumbs.rs), fitted into a square `side` pixels wide.
+            "thumb" => {
+                if self.backend.is_none() {
+                    return "thumb: only with --drm or --headless".into();
+                }
+                let (Some(i), Some(side)) = (args.first().and_then(|a| a.parse::<usize>().ok()), args.get(1).and_then(|a| a.parse::<i32>().ok()).filter(|s| (8..=2048).contains(s))) else {
+                    return "thumb <i> <side 8-2048>".into();
+                };
+                let Some(w) = self.space.elements().nth(i).cloned() else { return format!("no window {i}") };
+                let name = format!("thumb-{i}");
+                self.thumb_pending.push((w, side, name.clone()));
+                self.redraw_all();
+                format!("thumb {i}: {}", shot_dir().join(format!("{name}.png")).display())
+            }
             "picture" => {
                 if self.backend.is_none() {
                     return "picture: only with --drm or --headless".into();

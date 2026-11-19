@@ -1,6 +1,6 @@
 # Overview milestone 1: live window pictures, the dock's picker, Alt+Tab tiles, Super+Tab
 
-Status: **proposed 2026-11-18**, waiting for Dave's acceptance.
+Status: **accepted 2026-11-18** (Dave: "go, 1a and 2a"): minimized windows in a faint row along the overview's bottom; the desktop moves aside unless switched off.
 
 ## What Dave asked for (2026-11-18)
 

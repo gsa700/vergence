@@ -52,6 +52,7 @@ mod win;
 mod native;
 mod sound;
 mod switch;
+mod thumbs;
 mod opened;
 mod snap;
 mod style;
