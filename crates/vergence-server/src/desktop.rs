@@ -96,6 +96,22 @@ impl Server {
         }
     }
 
+    /// A window someone works in, for Super+D and the desktop moving aside:
+    /// not the desktop, a splash, a palette, a dialog of another window or
+    /// an X11 popup, nor one full screen; whoever draws its title bar
+    /// (Firefox and GTK 4 apps draw their own: they were left out while this
+    /// asked for the server's bar, Dave 2026-11-18).
+    pub fn ordinary_window(&self, w: &Win) -> bool {
+        use crate::style::Kind;
+        if self.is_desktop(w) || self.belongs_to_parent(w) || self.fullscreen.contains_key(w) {
+            return false;
+        }
+        if w.x11_surface().is_some_and(|x| x.is_override_redirect()) {
+            return false;
+        }
+        !matches!(self.window_style(w).kind, Kind::Splash | Kind::Desktop | Kind::Palette)
+    }
+
     /// Super+D: the windows out of the way (minimized), or the same back.
     pub fn show_desktop(&mut self) {
         let hidden: Vec<Win> = std::mem::take(&mut self.desktop_hidden).into_iter().filter(|w| smithay::utils::IsAlive::alive(w)).collect();
@@ -105,7 +121,7 @@ impl Server {
             }
             return;
         }
-        let shown: Vec<Win> = self.space.elements().filter(|w| !self.is_desktop(w) && !self.belongs_to_parent(w) && self.has_title(w)).cloned().collect();
+        let shown: Vec<Win> = self.space.elements().filter(|w| self.ordinary_window(w)).cloned().collect();
         for w in &shown {
             self.minimize(w);
         }

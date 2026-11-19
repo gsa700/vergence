@@ -5,7 +5,8 @@
 //
 // A click on the desktop's bare ground (the desktop window says so, bus v23
 // `GroundClicked`; with no icons, a press on the bare wallpaper) slides every
-// window with a bar off toward its screen's nearer side, left or right, a
+// window someone works in (desktop.rs ordinary_window: Firefox and other
+// windows that draw their own bar too) off toward its screen's nearer side, left or right, a
 // strip of it still showing. Another click on the ground, or a press on any
 // window's strip, slides them all back to where they were. A short slide;
 // none with Reduce motion. Super+D (minimize all) is a separate thing.
@@ -56,7 +57,7 @@ impl Server {
             return;
         }
         let screens: Vec<smithay::utils::Rectangle<i32, Logical>> = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).collect();
-        let windows: Vec<Win> = self.space.elements().filter(|w| !self.is_desktop(w) && !self.belongs_to_parent(w) && self.has_title(w) && !self.is_minimized(w)).cloned().collect();
+        let windows: Vec<Win> = self.space.elements().filter(|w| self.ordinary_window(w) && !self.is_minimized(w)).cloned().collect();
         let mut moved = Vec::new();
         // Windows near the middle (a twentieth of the screen either way) go
         // to the sides by turns, so they spread instead of piling on one.
