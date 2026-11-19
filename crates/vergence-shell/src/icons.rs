@@ -164,6 +164,79 @@ pub fn vergence_icon(group: &str, name: &str) -> Option<PathBuf> {
     dirs.into_iter().map(|d| d.join(&file)).find(|p| p.is_file())
 }
 
+/// The icon theme Vergence installs (share/icons/Vergence: the apps, places
+/// and kinds of files drawn by the project, and the pointers), and the one
+/// used when none is chosen (Dave, 2026-11-18: "yes Vergence, and yes our
+/// apps follow it").
+pub const THEME: &str = "Vergence";
+
+/// Vergence's own icons by their freedesktop names (the Icon Naming
+/// Specification): (group, our name, the theme's folder, its name there).
+/// install.sh lays the theme out by this (vergence-harness icon-theme);
+/// our apps look these names up in the chosen theme.
+pub const NAMES: &[(&str, &str, &str, &str)] = &[
+    ("places", "folder", "places", "folder"),
+    ("places", "home", "places", "user-home"),
+    ("places", "desktop", "places", "user-desktop"),
+    ("places", "documents", "places", "folder-documents"),
+    ("places", "downloads", "places", "folder-download"),
+    ("places", "pictures", "places", "folder-pictures"),
+    ("places", "music", "places", "folder-music"),
+    ("places", "videos", "places", "folder-videos"),
+    ("places", "recent", "places", "folder-recent"),
+    ("places", "network", "places", "folder-remote"),
+    ("places", "trash", "places", "user-trash"),
+    ("places", "trash-full", "places", "user-trash-full"),
+    ("places", "disk", "devices", "drive-harddisk"),
+    ("places", "usb", "devices", "drive-removable-media"),
+    ("kinds", "text", "mimetypes", "text-x-generic"),
+    ("kinds", "document", "mimetypes", "x-office-document"),
+    ("kinds", "picture", "mimetypes", "image-x-generic"),
+    ("kinds", "sound", "mimetypes", "audio-x-generic"),
+    ("kinds", "video", "mimetypes", "video-x-generic"),
+    ("kinds", "archive", "mimetypes", "package-x-generic"),
+    ("kinds", "pdf", "mimetypes", "application-pdf"),
+    ("kinds", "program", "mimetypes", "application-x-executable"),
+    ("kinds", "other", "mimetypes", "application-x-generic"),
+];
+
+/// The freedesktop name of one of our icons.
+pub fn freedesktop_name(group: &str, name: &str) -> Option<&'static str> {
+    NAMES.iter().find(|(g, n, ..)| *g == group && *n == name).map(|(.., f)| *f)
+}
+
+/// The icon theme chosen in Settings (settings.toml's "Net/IconThemeName",
+/// what the server tells programs as XSETTINGS), else Vergence's.
+pub fn chosen_theme() -> String {
+    let dir = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
+    let text = dir.and_then(|d| std::fs::read_to_string(d.join("vergence/settings.toml")).ok()).unwrap_or_default();
+    theme_in(&text)
+}
+
+/// The theme a settings.toml's text names, else Vergence's.
+pub fn theme_in(settings_toml: &str) -> String {
+    settings_toml
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("\"Net/IconThemeName\""))
+        .filter_map(|rest| rest.trim().strip_prefix('='))
+        .map(|v| v.trim().trim_matches('"').to_string())
+        .rfind(|v| !v.is_empty() && !v.contains('/'))
+        .unwrap_or_else(|| THEME.to_string())
+}
+
+/// The file for one of our icons (`group`, `name`) at about `pixels` in the
+/// chosen theme `theme`: Vergence's own SVG for Vergence's theme, else the
+/// theme's icon of that name (what it inherits from included), else ours.
+pub fn themed(theme: &str, group: &str, name: &str, pixels: u32) -> Option<PathBuf> {
+    if theme != THEME
+        && let Some(fd) = freedesktop_name(group, name)
+        && let Some(found) = find(theme, fd, pixels)
+    {
+        return Some(found);
+    }
+    vergence_icon(group, name)
+}
+
 /// [`find_in`] this machine's data directories and the user's home.
 pub fn find(theme: &str, name: &str, pixels: u32) -> Option<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
@@ -174,6 +247,20 @@ pub fn find(theme: &str, name: &str, pixels: u32) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use crate::apps::tests::Scratch;
+
+    #[test]
+    fn the_chosen_theme_is_settings_or_vergence() {
+        assert_eq!(theme_in(""), "Vergence");
+        assert_eq!(theme_in("[settings]\n\"Net/IconThemeName\" = \"Adwaita\"\n"), "Adwaita");
+        assert_eq!(theme_in("\"Net/IconThemeName\" = \"\"\n"), "Vergence", "empty is unset");
+        assert_eq!(theme_in("\"Net/IconThemeName\" = \"../x\"\n"), "Vergence", "no paths");
+        // Every one of our icons has a freedesktop name, each once.
+        let mut seen = std::collections::HashSet::new();
+        for (g, n, _, f) in NAMES {
+            assert!(seen.insert(*f), "{f} twice");
+            assert_eq!(freedesktop_name(g, n), Some(*f));
+        }
+    }
 
     const HICOLOR: &str = "[Icon Theme]\nName=Hicolor\nDirectories=16x16/apps,48x48/apps,256x256/apps,scalable/apps,48x48/actions,32x32@2/apps\n\n[16x16/apps]\nSize=16\nType=Fixed\n\n[48x48/apps]\nSize=48\nType=Fixed\n\n[256x256/apps]\nSize=256\nMinSize=64\nMaxSize=256\nType=Scalable\n\n[scalable/apps]\nSize=64\nMinSize=8\nMaxSize=512\nType=Scalable\n\n[48x48/actions]\nSize=48\n\n[32x32@2/apps]\nSize=32\nScale=2\n";
 

@@ -394,6 +394,8 @@ pub struct Shelf {
     order: Vec<Win>,
     /// Icons by name and pixel size, and the thread that decodes them.
     icons: HashMap<(String, u32), Asked>,
+    /// The icon theme the icons were found in (a new one: found again).
+    icons_theme: String,
     decoder: Option<std::sync::mpsc::Sender<(String, String, u32)>>,
     /// The fonts a letter tile is written with, looked for when first needed.
     pub fonts: Option<vergence_text::Fonts>,
@@ -542,6 +544,15 @@ impl Server {
         if name.is_empty() {
             return None;
         }
+        // The icon theme chosen in Settings; Vergence's when none is (2026-11-18).
+        let theme = match self.settings.current.get(&(crate::settings::INTERFACE.to_string(), "icon-theme".to_string())) {
+            Some(vergence_protocol::bus::SettingValue::Str(t)) if !t.is_empty() => t.clone(),
+            _ => vergence_shell::icons::THEME.to_string(),
+        };
+        if self.shelf.icons_theme != theme {
+            self.shelf.icons.clear();
+            self.shelf.icons_theme = theme.clone();
+        }
         let key = (name.to_string(), pixels);
         match self.shelf.icons.get(&key) {
             Some(Asked::Done(icon)) => return icon.clone(),
@@ -572,10 +583,6 @@ impl Server {
                 self.shelf.decoder = Some(jobs);
             }
         }
-        let theme = match self.settings.current.get(&(crate::settings::INTERFACE.to_string(), "icon-theme".to_string())) {
-            Some(vergence_protocol::bus::SettingValue::Str(t)) => t.clone(),
-            _ => String::new(),
-        };
         let sent = self.shelf.decoder.as_ref().is_some_and(|d: &std::sync::mpsc::Sender<(String, String, u32)>| d.send((theme, name.to_string(), pixels)).is_ok());
         self.shelf.icons.insert(key, if sent { Asked::Pending } else { Asked::Done(None) });
         None

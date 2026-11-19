@@ -175,12 +175,47 @@ pub fn xcursor(images: &[(u32, u32, u32, u32, u32, Vec<u8>)]) -> Vec<u8> {
     out
 }
 
+/// The Vergence theme's index: its icons (icon-theme) and its pointers
+/// (cursors) in one theme, as Adwaita has them; what it has not drawn
+/// comes from Adwaita, then hicolor.
+const INDEX: &str = "[Icon Theme]\nName=Vergence\nComment=Vergence's own icons and pointers\nInherits=Adwaita,hicolor\nDirectories=scalable/apps,scalable/places,scalable/devices,scalable/mimetypes\n\n[scalable/apps]\nSize=64\nMinSize=8\nMaxSize=512\nType=Scalable\nContext=Applications\n\n[scalable/places]\nSize=64\nMinSize=8\nMaxSize=512\nType=Scalable\nContext=Places\n\n[scalable/devices]\nSize=64\nMinSize=8\nMaxSize=512\nType=Scalable\nContext=Devices\n\n[scalable/mimetypes]\nSize=64\nMinSize=8\nMaxSize=512\nType=Scalable\nContext=MimeTypes\n";
+
+/// `vergence-harness icon-theme <data/icons> <share/icons/Vergence>`: the
+/// Vergence icon theme laid out by the freedesktop names
+/// (vergence_shell::icons::NAMES): the apps' icons in scalable/apps, the
+/// places and devices, the kinds of files in scalable/mimetypes; with the
+/// index (Dave, 2026-11-18: a named set chosen in Settings, our apps
+/// following it).
+pub fn icon_theme(args: &[String]) -> Result<bool, Box<dyn Error>> {
+    let (Some(src), Some(dest)) = (args.first(), args.get(1)) else { return Err("icon-theme <data/icons> <share/icons/Vergence>".into()) };
+    let (src, dest) = (Path::new(src), Path::new(dest));
+    let apps = dest.join("scalable/apps");
+    std::fs::create_dir_all(&apps)?;
+    let mut count = 0;
+    for e in std::fs::read_dir(src)?.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with("vergence-") && name.ends_with(".svg") {
+            std::fs::copy(e.path(), apps.join(&name))?;
+            count += 1;
+        }
+    }
+    for (group, ours, folder, fd) in vergence_shell::icons::NAMES {
+        let to = dest.join("scalable").join(folder);
+        std::fs::create_dir_all(&to)?;
+        std::fs::copy(src.join(group).join(format!("{ours}.svg")), to.join(format!("{fd}.svg")))?;
+        count += 1;
+    }
+    std::fs::write(dest.join("index.theme"), INDEX)?;
+    println!("{count} icons in {}", dest.display());
+    Ok(true)
+}
+
 /// Writes the theme's cursors/ into `dir` (with index.theme).
 pub fn run(args: &[String]) -> Result<bool, Box<dyn Error>> {
     let dir = Path::new(args.first().ok_or("cursors <theme directory>")?);
     let cursors = dir.join("cursors");
     std::fs::create_dir_all(&cursors)?;
-    std::fs::write(dir.join("index.theme"), "[Icon Theme]\nName=Vergence\nComment=Vergence's pointers: the classic arrow, color where it means something\nInherits=Adwaita\n")?;
+    std::fs::write(dir.join("index.theme"), INDEX)?;
     let mut count = 0;
     for shape in shapes() {
         let mut images = Vec::new();

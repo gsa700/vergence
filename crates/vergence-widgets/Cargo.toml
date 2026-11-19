@@ -15,3 +15,5 @@ vergence-ui.workspace = true
 vergence-look.workspace = true
 vergence-spell.workspace = true
 vergence-types.workspace = true
+vergence-shell.workspace = true
+vergence-decode.workspace = true

@@ -2236,6 +2236,7 @@ dependencies = [
  "vergence-decode",
  "vergence-edid",
  "vergence-profile",
+ "vergence-shell",
  "x11rb 0.13.2",
 ]
 
@@ -2449,10 +2450,12 @@ dependencies = [
 name = "vergence-widgets"
 version = "0.1.0"
 dependencies = [
+ "vergence-decode",
  "vergence-look",
  "vergence-media",
  "vergence-render",
  "vergence-scene",
+ "vergence-shell",
  "vergence-spell",
  "vergence-text",
  "vergence-types",

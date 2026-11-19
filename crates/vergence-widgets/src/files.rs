@@ -666,6 +666,77 @@ thread_local! {
 /// share/vergence/icons/<group>), read once. None where it is not installed.
 pub fn own_icon(group: &str, name: &str, px: u32) -> Option<std::sync::Arc<vergence_scene::Image>> {
     let size = [16u32, 32, 64, 128, 256].into_iter().find(|s| *s >= px).unwrap_or(256);
+    // Another icon theme chosen in Settings: its icon, once decoded (Dave,
+    // 2026-11-18: "our apps follow it"); ours until then, or if it has none.
+    let theme = icon_theme();
+    if theme != vergence_shell::icons::THEME
+        && let Some(found) = themed_icon(&theme, group, name, size)
+    {
+        return Some(found);
+    }
+    vergence_own_icon(group, name, size)
+}
+
+thread_local! {
+    /// The icon theme chosen, and when it was last read.
+    static THEME_READ: std::cell::RefCell<Option<(std::time::Instant, String)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The icon theme chosen in Settings, read again at most every 2 s (a change
+/// there reaches open windows at their next drawing).
+pub fn icon_theme() -> String {
+    THEME_READ.with(|t| {
+        let mut t = t.borrow_mut();
+        if let Some((at, name)) = t.as_ref()
+            && at.elapsed() < std::time::Duration::from_secs(2)
+        {
+            return name.clone();
+        }
+        let name = vergence_shell::icons::chosen_theme();
+        *t = Some((std::time::Instant::now(), name.clone()));
+        name
+    })
+}
+
+/// Icons of other themes, by theme, group, name and size: decoded (None:
+/// the theme has none, ours is shown), and those being decoded.
+type Themed = std::collections::HashMap<(String, String, String, u32), Option<std::sync::Arc<vergence_scene::Image>>>;
+type Decoding = std::collections::HashSet<(String, String, String, u32)>;
+static THEMED: std::sync::LazyLock<std::sync::Mutex<(Themed, Decoding)>> = std::sync::LazyLock::new(Default::default);
+
+/// One of our icons from theme `theme`: decoded on a worker (the sandboxed
+/// decoder, vergence-decode, as the dock's), None until it is, or if the
+/// theme has no icon of that name.
+fn themed_icon(theme: &str, group: &str, name: &str, size: u32) -> Option<std::sync::Arc<vergence_scene::Image>> {
+    let key = (theme.to_string(), group.to_string(), name.to_string(), size);
+    let mut all = THEMED.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(found) = all.0.get(&key) {
+        return found.clone();
+    }
+    if !all.1.insert(key.clone()) {
+        return None;
+    }
+    drop(all);
+    std::thread::spawn(move || {
+        let (theme, group, name, size) = (&key.0, &key.1, &key.2, key.3);
+        let ours = vergence_shell::icons::vergence_icon(group, name);
+        let img = vergence_shell::icons::themed(theme, group, name, size)
+            .filter(|p| Some(p) != ours.as_ref())
+            .filter(|p| std::fs::metadata(p).is_ok_and(|m| m.len() <= 4 << 20))
+            .and_then(|p| vergence_decode::decode_file(&p, Some((size, size))).ok())
+            .and_then(|p| {
+                let f = p.frames.into_iter().next()?;
+                (p.width > 0 && p.height > 0 && p.width <= 1024 && p.height <= 1024).then(|| std::sync::Arc::new(vergence_scene::Image { width: p.width, height: p.height, rgba: f.rgba }))
+            });
+        let mut all = THEMED.lock().unwrap_or_else(|e| e.into_inner());
+        all.1.remove(&key);
+        all.0.insert(key, img);
+    });
+    None
+}
+
+/// One of Vergence's own icons, its pixels drawn at install.
+fn vergence_own_icon(group: &str, name: &str, size: u32) -> Option<std::sync::Arc<vergence_scene::Image>> {
     let key = (format!("{group}/{name}"), size);
     if let Some(found) = OWN_ICONS.with(|c| c.borrow().get(&key).cloned()) {
         return found;

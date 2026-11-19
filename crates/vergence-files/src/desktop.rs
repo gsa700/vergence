@@ -365,7 +365,8 @@ impl Desktop {
     fn mark_key(&self, e: &Entry) -> PathBuf {
         let thumb = Desktop::launcher(e) || (e.kind() == Kind::Picture && self.fixed_of(e).is_none());
         match self.own_icon(e) {
-            Some((g, n)) if !thumb => PathBuf::from(format!("::icon:{g}/{n}")),
+            // By the theme too, so a theme chosen in Settings is drawn anew.
+            Some((g, n)) if !thumb => PathBuf::from(format!("::icon:{}/{g}/{n}", files::icon_theme())),
             _ => e.path.clone(),
         }
     }
@@ -378,11 +379,14 @@ impl Desktop {
             if self.asked.borrow().contains(&key) {
                 continue;
             }
-            let own = self.own_icon(e).filter(|_| key != e.path).and_then(|(g, n)| vergence_shell::icons::vergence_icon(g, n));
+            // Our icons and launchers' from the icon theme chosen in Settings
+            // (Vergence's unless another is), ours where it has none.
+            let theme = files::icon_theme();
+            let own = self.own_icon(e).filter(|_| key != e.path).and_then(|(g, n)| vergence_shell::icons::themed(&theme, g, n, 128));
             let source = if let Some(own) = own {
                 Some(own)
             } else if Desktop::launcher(e) {
-                Desktop::entry_of(e).filter(|x| !x.icon.is_empty()).and_then(|x| if x.icon.starts_with('/') { Some(PathBuf::from(x.icon)) } else { vergence_shell::icons::find("", &x.icon, 128) })
+                Desktop::entry_of(e).filter(|x| !x.icon.is_empty()).and_then(|x| if x.icon.starts_with('/') { Some(PathBuf::from(x.icon)) } else { vergence_shell::icons::find(&theme, &x.icon, 128) })
             } else if e.kind() == Kind::Picture {
                 Some(e.path.clone())
             } else {

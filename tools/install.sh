@@ -23,7 +23,7 @@
 #   share/vergence/words/                    the spelling list (data/words/en_US.txt, from SCOWL) and its terms
 #   share/vergence/fonts/                    Inter and JetBrains Mono (data/fonts), with their licenses
 #   share/vergence/icons/{places,kinds}/     Vergence's own icons for places and files (data/icons)
-#   share/icons/Vergence/                    Vergence's pointers (an Xcursor theme, drawn at install)
+#   share/icons/Vergence/                    the Vergence icon theme: our apps, places, kinds of files, and the pointers (drawn at install)
 #   libexec/vergence/ups-tile, vtile-demo  lab tiles on the dock from scripts (tools/lab)
 #   libexec/vergence/vergence-choose         the Open/Save dialog the portal shows for apps not ours
 #   libexec/vergence/vergence-decode         pictures decoded apart, limited (Capsicum on FreeBSD)
@@ -161,6 +161,10 @@ done
 if [ -x "$release/vergence-harness" ]; then
     "$release/vergence-harness" icons "$root/data/icons" "$ownicons" >/dev/null || echo "install.sh: the icons' pixels could not be drawn (drawn marks are shown)" >&2
     chmod -R a+rX "$ownicons" 2>/dev/null
+    # The Vergence icon theme (with the pointers above): Settings > Theme and
+    # fonts > Icons, which our apps follow, Vergence's when none is chosen.
+    "$release/vergence-harness" icon-theme "$root/data/icons" "$cursortheme" >/dev/null || echo "install.sh: the Vergence icon theme could not be laid out" >&2
+    chmod -R a+rX "$cursortheme" 2>/dev/null
 fi
 for f in "$root"/data/fonts/*; do install -m 644 "$f" "$fonts/"; done
 # Every app on the machine may use them (GTK, Qt, Firefox find fonts through
