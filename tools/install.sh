@@ -17,7 +17,7 @@
 #   bin/vergence-session                     the session launcher (tools/vergence-session)
 #   bin/vergence -> vergence-session         start the session from a text console
 #   share/wayland-sessions/vergence.desktop  "Vergence" at a display manager's login screen
-#   share/applications/vergence-*.desktop    the terminal, the settings app, the calculator, Force Quit, Hardware and the text editor, for the shelf and any launcher
+#   share/applications/vergence-*.desktop    the terminal, the settings app, the calculator, Force Quit, Hardware, the text editor, FileView and its Trash window (NoDisplay: the dock's icon only), for the shelf and any launcher
 #   share/icons/hicolor/scalable/apps/       their icons (data/icons, drawn by the project)
 #   share/doc/vergence/                      LICENSE-APACHE, LICENSE-GPL, THIRD-PARTY-NOTICES.md
 #   share/vergence/words/                    the spelling list (data/words/en_US.txt, from SCOWL) and its terms
@@ -71,7 +71,7 @@ icons=$destdir$prefix/share/icons/hicolor/scalable/apps
 docs=$destdir$prefix/share/doc/vergence       # license and notices (the settings app's About page names it)
 docfiles="LICENSE-APACHE LICENSE-GPL THIRD-PARTY-NOTICES.md"
 programs="vergence-server vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit vergence-closeup vergence-files vergence-open vbus vtile vnative vsound vshell vdm-try"
-tools="vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit vergence-closeup vergence-files"
+tools="vergence-term vergence-settings vergence-calc vergence-quit vergence-hw vergence-edit vergence-closeup vergence-files vergence-trash"
 libexec=$destdir$prefix/libexec/vergence
 sbin=$destdir$prefix/sbin
 words=$destdir$prefix/share/vergence/words

@@ -13,9 +13,12 @@ use std::sync::{Arc, Mutex};
 const MAX_FILES: usize = 256;
 const MAX_PATH: usize = 4096;
 
-fn socket_path() -> Option<PathBuf> {
+/// The socket of the process named `name`: "vergence-files" for File
+/// Viewer's windows, "vergence-trash" for the Trash window's (a process of
+/// its own, so the dock shows it as its own item).
+fn socket_path(name: &str) -> Option<PathBuf> {
     let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)?;
-    Some(dir.join("vergence-files.sock"))
+    Some(dir.join(format!("{name}.sock")))
 }
 
 /// A second start's files, as one line: "open", then each path, tab-separated.
@@ -34,8 +37,8 @@ pub fn decode(line: &str) -> Option<Vec<PathBuf>> {
 }
 
 /// Asks a running File Viewer to open `files` (none: a new window). True if one said yes.
-pub fn hand_over(files: &[PathBuf]) -> bool {
-    let Some(path) = socket_path() else { return false };
+pub fn hand_over(name: &str, files: &[PathBuf]) -> bool {
+    let Some(path) = socket_path(name) else { return false };
     let Ok(mut s) = UnixStream::connect(&path) else { return false };
     let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(2)));
     if s.write_all(encode(files).as_bytes()).is_err() {
@@ -47,8 +50,8 @@ pub fn hand_over(files: &[PathBuf]) -> bool {
 
 /// Becomes the File Viewer others hand over to: each request's files go to
 /// `inbox` and `wake` is called. False if the socket could not be made.
-pub fn listen(inbox: Arc<Mutex<Vec<Vec<PathBuf>>>>, wake: impl Fn() + Send + 'static) -> bool {
-    let Some(path) = socket_path() else { return false };
+pub fn listen(name: &str, inbox: Arc<Mutex<Vec<Vec<PathBuf>>>>, wake: impl Fn() + Send + 'static) -> bool {
+    let Some(path) = socket_path(name) else { return false };
     // A socket nobody answers on is left from one that went away.
     if UnixStream::connect(&path).is_err() {
         let _ = std::fs::remove_file(&path);

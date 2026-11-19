@@ -83,6 +83,19 @@ milestone 1's menus already hold.
 3. Local snapshots: ZFS and Btrfs back ends, the vdm actions and their
    elevation, the schedule and the pruning rules.
 4. Earlier Versions in File Viewer, from snapshots and from the copy.
+   **The Trash window as the place for what was deleted** (Dave,
+   2026-11-18; the Trash window is `vergence-files --trash`): Earlier
+   Versions… needs a file to right-click, and something deleted for good
+   has none. So, once Backup is on, the Trash window gets a second part
+   under what is in the Trash now: **"Deleted earlier: still in your
+   versions"**, items gone from the Trash that a local snapshot or the
+   copy still holds, by name, where they were and the newest version
+   that has them, with Restore (copied back from that version, beside
+   anything of the same name). The narrowing field searches both parts
+   ("I don't know where it was"). Delete Forever and Empty Trash say
+   "still in last night's backup" when it is so, and say plainly when it
+   is not. The Trash itself is never backed up (question 2's exclusions),
+   so an item is in the Trash or in a version, never both.
 5. Running on schedule (question 4); tests (the engine against a scratch
    tree; each back end where its file system is: kepler's ZFS, Techbench's
    Btrfs, Hubble's ext4 copy-only); an independent review.

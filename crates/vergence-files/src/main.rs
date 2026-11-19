@@ -44,6 +44,9 @@ use vergence_widgets::toolbar::{Icon, flexible, group, tool, toggle, toolbar};
 use vergence_widgets::{Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Waker, Window, button, column, drawing, field, label, panel, row, rule, scroll, space, stack};
 
 const APP_ID: &str = "vergence-files";
+/// The Trash window's (Dave, 2026-11-18): a process of its own, so the dock
+/// shows it with the Trash's icon and window memory keeps its place apart.
+const TRASH_ID: &str = "vergence-trash";
 const SECTION: &str = "[files]";
 /// How often the folder shown is looked at for changes.
 const WATCH_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
@@ -343,6 +346,9 @@ struct Viewer {
     /// which column, where it began, the width then.
     widths: [f32; 3],
     pulling: Option<(usize, f32, f32)>,
+    /// The Trash window (`vergence-files --trash`): the Trash alone, no
+    /// sidebar, path or preview pane, a place of its own.
+    trash_window: bool,
     /// Folders' sizes counted by a worker (by path: the folder's own time
     /// when counted, the size or None if it was too big to count), what was
     /// asked, and the worker's queue.
@@ -536,6 +542,7 @@ impl Viewer {
             pending: Vec::new(),
             widths: vergence_ui::table_value(&desktop_now, SECTION, "columns").map_or(files::COLUMN_WIDTHS, |v| files::parse_widths(&v)),
             pulling: None,
+            trash_window: false,
             sizes,
             sizes_seen: 0,
             size_asked: RefCell::new(std::collections::HashSet::new()),
@@ -558,6 +565,17 @@ impl Viewer {
     /// folder with the file chosen; the first in this window if it shows
     /// nothing yet, the rest in windows of their own (`pending`, opened by
     /// woken()). None: the home folder.
+    /// The Trash window: the Trash, made if it was not there yet.
+    fn trash_window(shared: SharedRef) -> Option<Viewer> {
+        let trash = ops::trash_dir()?.join("files");
+        let _ = std::fs::create_dir_all(&trash);
+        let mut v = Viewer::new(shared);
+        v.trash_window = true;
+        v.pane = false;
+        v.new_tab(Showing::Folder(trash));
+        Some(v)
+    }
+
     fn open_paths(&mut self, paths: &[PathBuf]) {
         let home = || files::home().unwrap_or_else(|| PathBuf::from("/"));
         let mut all: Vec<PathBuf> = if paths.is_empty() { vec![home()] } else { paths.to_vec() };
@@ -685,6 +703,11 @@ impl Viewer {
             && one.dir
         {
             let p = one.path.clone();
+            // The Trash window shows only the Trash: a folder in it opens in FileView.
+            if self.trash_window {
+                let _ = std::process::Command::new("vergence-files").arg(&p).spawn();
+                return;
+            }
             self.preview = false;
             return self.go(Showing::Folder(p));
         }
@@ -1480,6 +1503,10 @@ impl Viewer {
             tool(Icon::Forward, "Forward", can_forward.then_some(Msg::Run(cmd::FORWARD))),
             tool(Icon::Up, "Up", can_up.then_some(Msg::Run(cmd::UP))),
         ])];
+        // The Trash window goes nowhere: its name is in its title bar.
+        if self.trash_window {
+            items.clear();
+        }
         // The path: each folder from Home (or the computer) a button.
         let mut crumbs: Vec<Element<Msg>> = Vec::new();
         match tab.map(|t| &t.showing) {
@@ -1512,7 +1539,9 @@ impl Viewer {
                 }
             }
         }
-        items.push(row(crumbs).spacing(2.0).align(Align::Center));
+        if !self.trash_window {
+            items.push(row(crumbs).spacing(2.0).align(Align::Center));
+        }
         items.push(flexible());
         let any = tab.is_some_and(|t| !t.chosen.is_empty());
         let trash = self.in_trash();
@@ -1529,7 +1558,7 @@ impl Viewer {
                 tool(Icon::Trash, "Move to the Trash", any.then_some(Msg::Run(cmd::TRASH))),
             ]));
         }
-        items.push(field(self.narrow.clone(), Msg::Narrow).placeholder("Narrow this folder").width(Length::Fixed(200.0)).name("Narrow this folder"));
+        items.push(field(self.narrow.clone(), Msg::Narrow).placeholder(if trash { "Narrow the Trash" } else { "Narrow this folder" }).width(Length::Fixed(200.0)).name("Narrow"));
         // With words typed: search the folders below too.
         if !self.narrow.trim().is_empty() && self.here().is_some() {
             let on = self.search.is_some();
@@ -1542,11 +1571,13 @@ impl Viewer {
                 toggle(Icon::Grid, "As icons", self.view == ViewKind::Icons, Msg::Run(cmd::ICONS)),
             ]));
         }
-        let mut panes = vec![toggle(Icon::Pane, "Preview pane", self.pane, Msg::Run(cmd::PANE))];
-        if !trash {
-            panes.push(toggle(Icon::Hidden, "Hidden files", self.hidden, Msg::Run(cmd::HIDDEN)));
+        if !self.trash_window {
+            let mut panes = vec![toggle(Icon::Pane, "Preview pane", self.pane, Msg::Run(cmd::PANE))];
+            if !trash {
+                panes.push(toggle(Icon::Hidden, "Hidden files", self.hidden, Msg::Run(cmd::HIDDEN)));
+            }
+            items.push(group(panes));
         }
-        items.push(group(panes));
         toolbar(items, t)
     }
 
@@ -1732,11 +1763,17 @@ impl Program for Viewer {
     }
 
     fn app_id(&self) -> String {
-        APP_ID.into()
+        if self.trash_window { TRASH_ID.into() } else { APP_ID.into() }
     }
 
     fn theme(&self) -> Theme {
         files_theme(&self.desktop)
+    }
+
+    /// The Trash window opens smaller than a folder's (the server's memory of
+    /// its place decides once it has one).
+    fn opening_size(&self) -> Option<(u32, u32)> {
+        self.trash_window.then_some((720, 460))
     }
 
     fn bar_style(&self) -> Option<BarStyle> {
@@ -1756,8 +1793,8 @@ impl Program for Viewer {
         let places = self.places();
         let here = self.front_tab().and_then(|t| t.dir().map(Path::to_path_buf));
         let sidebar = files::sidebar(&places, here.as_deref(), |p| Msg::Go(p.clone()), t);
-        let mut middle = vec![sidebar, self.folder_view(t)];
-        if self.pane {
+        let mut middle = if self.trash_window { vec![self.folder_view(t)] } else { vec![sidebar, self.folder_view(t)] };
+        if self.pane && !self.trash_window {
             middle.push(self.pane_view(t));
         }
         let middle: Element<Msg> = row(middle).spacing(8.0).width(Length::FILL).height(Length::FILL);
@@ -1996,8 +2033,12 @@ impl Program for Viewer {
 
     /// Files dragged here go into the folder shown: moved, or copied with Ctrl.
     fn drag_over(&mut self, _x: f32, _y: f32, kinds: &[String], ctrl: bool) -> u8 {
-        if !kinds.iter().any(|k| k == "text/uri-list") || self.here().is_none() || self.in_trash() || self.job.is_some() {
+        if !kinds.iter().any(|k| k == "text/uri-list") || self.here().is_none() || self.job.is_some() {
             return vergence_ui::DROP_NONE;
+        }
+        // Onto the Trash: thrown away (never copied there).
+        if self.in_trash() {
+            return vergence_ui::DROP_MOVE;
         }
         if ctrl { vergence_ui::DROP_COPY } else { vergence_ui::DROP_MOVE }
     }
@@ -2006,6 +2047,18 @@ impl Program for Viewer {
         let Some(dir) = self.here() else { return };
         let paths: Vec<PathBuf> = items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default();
         if paths.is_empty() {
+            return;
+        }
+        if self.in_trash() {
+            // What is in the Trash already stays as it is.
+            let trash = ops::trash_dir();
+            for p in paths.iter().filter(|p| !trash.as_ref().is_some_and(|t| p.starts_with(t))) {
+                if let Err(e) = ops::trash(p) {
+                    self.notice = Some(format!("“{}” could not be moved to the Trash: {e}", p.file_name().unwrap_or_default().to_string_lossy()));
+                    break;
+                }
+            }
+            self.read_all();
             return;
         }
         let cut = action == vergence_ui::DROP_MOVE;
@@ -2035,7 +2088,7 @@ impl Program for Viewer {
         if first {
             let inbox = self.shared.borrow().inbox.clone();
             let w = waker.clone();
-            let _ = hand::listen(inbox, move || w.wake());
+            let _ = hand::listen(if self.trash_window { TRASH_ID } else { APP_ID }, inbox, move || w.wake());
         }
         // Once woken, the folder watch's timer is set (woken() has the window).
         waker.wake();
@@ -2075,7 +2128,10 @@ impl Program for Viewer {
         }
         let asked: Vec<Vec<PathBuf>> = std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
         for paths in asked {
-            self.open_paths(&paths);
+            // The Trash window started again: only forward.
+            if !self.trash_window {
+                self.open_paths(&paths);
+            }
             // Handed over by a start the person just made: forward (the server judges).
             window.activate();
             changed = true;
@@ -2115,6 +2171,27 @@ impl Program for Viewer {
     }
 
     fn commands(&self) -> Option<(bool, Vec<C>)> {
+        if self.trash_window {
+            return Some((
+                false,
+                vec![
+                    C::role(cmd::CLOSE, Role::CloseWindow),
+                    C::own(cmd::OPEN, "File", "Open", "Enter"),
+                    C::own(cmd::PREVIEW, "File", "Preview", "Space").checked(self.preview),
+                    C::own(cmd::RESTORE, "File", "Put Back", "").featured(),
+                    C::own(cmd::DELETE, "File", "Delete Forever…", "Delete"),
+                    C::own(cmd::EMPTY_TRASH, "File", "Empty Trash…", "").featured(),
+                    C::own(cmd::INFO, "File", "Properties", "Ctrl+I"),
+                    C::role(cmd::SELECT_ALL, Role::SelectAll),
+                    C::own(cmd::ROWS_SMALL, "View", "Small rows", "").checked(self.list_look().rows == RowSize::Small),
+                    C::own(cmd::ROWS_MEDIUM, "View", "Medium rows", "").checked(self.list_look().rows == RowSize::Medium),
+                    C::own(cmd::ROWS_LARGE, "View", "Large rows", "").checked(self.list_look().rows == RowSize::Large),
+                    C::own(cmd::RELOAD, "View", "Read again", "Ctrl+R"),
+                    C::role(cmd::SETTINGS, Role::Settings),
+                    C::role(cmd::ABOUT, Role::About),
+                ],
+            ));
+        }
         Some((
             false,
             vec![
@@ -2158,7 +2235,8 @@ impl Program for Viewer {
     }
 
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { min: (560.0, 360.0), ..Default::default() }
+        let min = if self.trash_window { (420.0, 260.0) } else { (560.0, 360.0) };
+        vergence_ui::Style { min, ..Default::default() }
     }
 }
 
@@ -2209,8 +2287,25 @@ fn main() {
     if args.iter().any(|a| a == "--desktop") {
         return desktop::run();
     }
+    // The Trash window (Dave, 2026-11-18): the desktop's Trash and the
+    // dock's; one, brought forward if it is open already.
+    if args.iter().any(|a| a == "--trash") {
+        if hand::hand_over(TRASH_ID, &[]) {
+            return;
+        }
+        let shared = Rc::new(RefCell::new(Shared { inbox: Arc::default(), next_tab: 0, clip: None, undo: Vec::new() }));
+        let Some(v) = Viewer::trash_window(shared) else {
+            eprintln!("vergence-files: no Trash (no home folder)");
+            std::process::exit(1);
+        };
+        if let Err(e) = vergence_widgets::run(v, (720, 460)) {
+            eprintln!("vergence-files: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let paths: Vec<PathBuf> = args.iter().filter(|a| !a.starts_with("--")).map(|a| vergence_types::path_of_link(a).unwrap_or_else(|| PathBuf::from(a))).map(|p| std::path::absolute(&p).unwrap_or(p)).collect();
-    if hand::hand_over(&paths) {
+    if hand::hand_over(APP_ID, &paths) {
         return;
     }
     let shared = Rc::new(RefCell::new(Shared { inbox: Arc::default(), next_tab: 0, clip: None, undo: Vec::new() }));

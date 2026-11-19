@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Trash
+GenericName=Trash
+Comment=What you threw away: put it back, or delete it forever
+Exec=vergence-files --trash
+Icon=vergence-trash
+Terminal=false
+NoDisplay=true
+Categories=System;Utility;
+StartupWMClass=vergence-trash

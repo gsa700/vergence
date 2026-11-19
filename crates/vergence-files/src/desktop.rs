@@ -415,12 +415,13 @@ impl Desktop {
     /// first if it is not trusted), a file with its app.
     fn open(&mut self, i: usize) {
         let Some(e) = self.entries.get(i).cloned() else { return };
-        // A folder, Home, a disk, the Trash: in File Viewer.
+        // The Trash: its own window (Dave, 2026-11-18), made if not there yet.
+        if self.fixed_of(&e) == Some(Fixed::Trash) {
+            let _ = std::process::Command::new("vergence-files").arg("--trash").spawn();
+            return;
+        }
+        // A folder, Home, a disk: in File Viewer.
         if e.dir {
-            // The Trash may not have been made yet.
-            if self.fixed_of(&e) == Some(Fixed::Trash) {
-                let _ = std::fs::create_dir_all(&e.path);
-            }
             let _ = std::process::Command::new("vergence-files").arg(&e.path).spawn();
             return;
         }

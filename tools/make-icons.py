@@ -182,9 +182,12 @@ def main():
         write(os.path.join(OUT, f"{name}.svg"), svg(tile(kind) + body, comment, kind))
     for name, (comment, body) in PLACES.items():
         write(os.path.join(OUT, "places", f"{name}.svg"), svg(body, comment))
+    # The Trash window's own icon, for the dock (Dave, 2026-11-18): the can
+    # itself, no tile, as the desktop's Trash.
+    write(os.path.join(OUT, "vergence-trash.svg"), svg(CAN, "The Trash: its window's icon, the can itself."))
     for name, (comment, body) in KINDS.items():
         write(os.path.join(OUT, "kinds", f"{name}.svg"), svg(body, comment))
-    print(f"{len(APPS)} apps, {len(PLACES)} places, {len(KINDS)} kinds in {os.path.normpath(OUT)}")
+    print(f"{len(APPS) + 1} apps, {len(PLACES)} places, {len(KINDS)} kinds in {os.path.normpath(OUT)}")
 
 
 if __name__ == "__main__":
