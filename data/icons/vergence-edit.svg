@@ -1,11 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-<!-- Edit: a page and a pencil. Drawn by the project (tools/make-icons.py). -->
-<defs>
-<linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e3e6ec"/></linearGradient>
-<linearGradient id="folderBack" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b97ee"/><stop offset="1" stop-color="#3b77d6"/></linearGradient>
-<linearGradient id="folderFront" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8fbaf6"/><stop offset="1" stop-color="#5b97ee"/></linearGradient>
-<linearGradient id="metal" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#c9ced8"/><stop offset="0.45" stop-color="#f2f4f7"/><stop offset="1" stop-color="#a9b0bd"/></linearGradient>
-<linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5d6b86"/><stop offset="1" stop-color="#3b465c"/></linearGradient>
-</defs>
-<rect x="2" y="2" width="60" height="60" rx="14" fill="url(#tile)"/><rect x="2.5" y="2.5" width="59" height="59" rx="13.5" fill="none" stroke="rgba(255,255,255,0.28)"/><rect x="2" y="2" width="60" height="60" rx="14" fill="none" stroke="rgba(10,14,24,0.45)"/><rect x="15" y="11" width="28" height="40" rx="2.5" fill="url(#paper)" stroke="#1a1d24" stroke-width="1.2"/><g stroke="#9aa3b5" stroke-width="2" stroke-linecap="round"><line x1="20" y1="19" x2="37" y2="19"/><line x1="20" y1="25" x2="34" y2="25"/><line x1="20" y1="31" x2="36" y2="31"/><line x1="20" y1="37" x2="30" y2="37"/></g><g transform="rotate(38 42 38)"><rect x="38" y="17" width="8" height="28" rx="1.5" fill="#f0b43c" stroke="#1a1d24" stroke-width="1.2"/><rect x="38" y="17" width="8" height="5" rx="1.5" fill="#e0574a" stroke="#1a1d24" stroke-width="1.2"/><path d="M38 45 L42 52 L46 45 Z" fill="#f4dfb6" stroke="#1a1d24" stroke-width="1.2" stroke-linejoin="round"/></g>
+  <!-- Vergence's text editor: a page of lines with numbers down its side, a pencil over it. Drawn by the project. -->
+  <rect x="10" y="4" width="44" height="56" rx="6" fill="#fbfbfc"/>
+  <rect x="10" y="4" width="44" height="56" rx="6" fill="none" stroke="#6b7a9e" stroke-width="2"/>
+  <rect x="11" y="5" width="9" height="54" rx="5" fill="#eef0f4"/>
+  <g fill="#9aa3b5">
+    <rect x="13" y="13" width="4" height="3" rx="1"/><rect x="13" y="21" width="4" height="3" rx="1"/><rect x="13" y="29" width="4" height="3" rx="1"/><rect x="13" y="37" width="4" height="3" rx="1"/><rect x="13" y="45" width="4" height="3" rx="1"/>
+  </g>
+  <g fill="#4a5168">
+    <rect x="24" y="13" width="22" height="3" rx="1.5"/><rect x="24" y="21" width="16" height="3" rx="1.5"/><rect x="28" y="29" width="18" height="3" rx="1.5"/><rect x="28" y="37" width="12" height="3" rx="1.5"/><rect x="24" y="45" width="9" height="3" rx="1.5"/>
+  </g>
+  <g transform="rotate(-45 46 46)">
+    <rect x="34" y="42" width="22" height="8" rx="1.5" fill="#729fcf"/>
+    <rect x="52" y="42" width="5" height="8" rx="1.5" fill="#e8a0a0"/>
+    <path d="M34 42 L27 46 L34 50 Z" fill="#f2d7a6"/>
+    <path d="M29.5 44.6 L27 46 L29.5 47.4 Z" fill="#4a5168"/>
+  </g>
 </svg>

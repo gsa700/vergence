@@ -55,48 +55,10 @@ def tile(kind):
 
 
 # ---- the apps ----
-
-APPS = {
-    "vergence-edit": ("slate", "Edit: a page and a pencil.",
-        f'<rect x="15" y="11" width="28" height="40" rx="2.5" fill="url(#paper)" stroke="{INK}" stroke-width="1.2"/>'
-        f'<g stroke="{LINE}" stroke-width="2" stroke-linecap="round"><line x1="20" y1="19" x2="37" y2="19"/><line x1="20" y1="25" x2="34" y2="25"/><line x1="20" y1="31" x2="36" y2="31"/><line x1="20" y1="37" x2="30" y2="37"/></g>'
-        f'<g transform="rotate(38 42 38)"><rect x="38" y="17" width="8" height="28" rx="1.5" fill="{AMBER}" stroke="{INK}" stroke-width="1.2"/><rect x="38" y="17" width="8" height="5" rx="1.5" fill="{RED}" stroke="{INK}" stroke-width="1.2"/><path d="M38 45 L42 52 L46 45 Z" fill="#f4dfb6" stroke="{INK}" stroke-width="1.2" stroke-linejoin="round"/></g>'),
-    "vergence-files": ("blue", "FileView: a folder with a page in it, after NeXTSTEP's File Viewer.",
-        '<path d="M12 21 Q12 18 15 18 L25 18 L29 22 L49 22 Q52 22 52 25 L52 47 Q52 50 49 50 L15 50 Q12 50 12 47 Z" fill="#dbe9ff" stroke="#0f2f6b" stroke-width="1.2"/>'
-        '<rect x="21" y="14" width="22" height="22" rx="2" fill="#ffffff" stroke="#0f2f6b" stroke-width="1.2"/>'
-        f'<g stroke="{LINE}" stroke-width="1.8" stroke-linecap="round"><line x1="25" y1="20" x2="39" y2="20"/><line x1="25" y1="25" x2="35" y2="25"/></g>'
-        '<path d="M12 29 Q12 27 14 27 L50 27 Q52 27 52 29 L52 47 Q52 50 49 50 L15 50 Q12 50 12 47 Z" fill="#f4f8ff" stroke="#0f2f6b" stroke-width="1.2"/>'
-        f'<rect x="27" y="36" width="10" height="3" rx="1.5" fill="{BLUE}"/>'),
-    "vergence-term": ("graphite", "Terminal: a screen with a prompt.",
-        '<rect x="11" y="13" width="42" height="34" rx="4" fill="#0b0c0f" stroke="#6c7280" stroke-width="1.2"/>'
-        '<path d="M17 23 L24 29 L17 35" fill="none" stroke="#6fe08a" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>'
-        '<line x1="27" y1="36" x2="37" y2="36" stroke="#6fe08a" stroke-width="2.6" stroke-linecap="round"/>'
-        '<rect x="24" y="50" width="16" height="3" rx="1.5" fill="#6c7280"/>'),
-    "vergence-settings": ("steel", "Settings: three sliders.",
-        '<g stroke="#20232a" stroke-width="3" stroke-linecap="round"><line x1="20" y1="14" x2="20" y2="50"/><line x1="32" y1="14" x2="32" y2="50"/><line x1="44" y1="14" x2="44" y2="50"/></g>'
-        f'<g stroke="{INK}" stroke-width="1.2"><rect x="14" y="20" width="12" height="8" rx="2" fill="{AMBER}"/><rect x="26" y="34" width="12" height="8" rx="2" fill="#5b97ee"/><rect x="38" y="25" width="12" height="8" rx="2" fill="{RED}"/></g>'
-        '<g stroke="rgba(255,255,255,0.6)" stroke-width="1"><line x1="15.5" y1="21.5" x2="24.5" y2="21.5"/><line x1="27.5" y1="35.5" x2="36.5" y2="35.5"/><line x1="39.5" y1="26.5" x2="48.5" y2="26.5"/></g>'),
-    "vergence-calc": ("slate", "Calculator: a keypad and its display.",
-        f'<rect x="14" y="10" width="36" height="12" rx="2.5" fill="#cfe3c4" stroke="{INK}" stroke-width="1.2"/>'
-        f'<g fill="#eef1f6" stroke="{INK}" stroke-width="1.2"><rect x="14" y="27" width="9" height="7" rx="1.5"/><rect x="27" y="27" width="9" height="7" rx="1.5"/><rect x="14" y="38" width="9" height="7" rx="1.5"/><rect x="27" y="38" width="9" height="7" rx="1.5"/><rect x="14" y="49" width="22" height="6" rx="1.5"/></g>'
-        f'<rect x="40" y="27" width="10" height="28" rx="1.5" fill="{AMBER}" stroke="{INK}" stroke-width="1.2"/>'),
-    "vergence-closeup": ("teal", "Close-Up: a photograph under a magnifier.",
-        '<rect x="10" y="12" width="36" height="30" rx="2.5" fill="#ffffff" stroke="#0d2b29" stroke-width="1.2"/>'
-        f'<rect x="13" y="15" width="30" height="24" rx="1" fill="#cfe6ff"/><path d="M13 39 L22 28 L28 34 L33 29 L43 39 Z" fill="{GREEN}"/><circle cx="36" cy="20" r="3" fill="{AMBER}"/>'
-        '<circle cx="40" cy="38" r="10" fill="rgba(255,255,255,0.35)" stroke="#0d2b29" stroke-width="2.6"/>'
-        '<line x1="47.5" y1="45.5" x2="54" y2="52" stroke="#0d2b29" stroke-width="5" stroke-linecap="round"/>'),
-    "vergence-hw": ("steel", "Hardware: a chip on its board, and a gauge.",
-        f'<g stroke="{INK}" stroke-width="1.2" fill="#c9ced8">' + "".join(f'<rect x="{x}" y="10" width="3" height="6" rx="1"/><rect x="{x}" y="48" width="3" height="6" rx="1"/>' for x in (21, 27, 34, 40)) + "</g>"
-        f'<rect x="15" y="15" width="34" height="34" rx="4" fill="#2a2e36" stroke="{INK}" stroke-width="1.2"/>'
-        '<rect x="18.5" y="18.5" width="27" height="27" rx="2" fill="none" stroke="rgba(255,255,255,0.18)"/>'
-        f'<path d="M22 38 A10 10 0 0 1 42 38" fill="none" stroke="#6c7280" stroke-width="3" stroke-linecap="round"/>'
-        f'<path d="M22 38 A10 10 0 0 1 36 29.3" fill="none" stroke="{GREEN}" stroke-width="3" stroke-linecap="round"/>'
-        '<line x1="32" y1="38" x2="37" y2="30" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><circle cx="32" cy="38" r="2" fill="#ffffff"/>'),
-    "vergence-quit": ("red", "Force Quit: a stop sign with a hand.",
-        f'<path d="M24 10 L40 10 L54 24 L54 40 L40 54 L24 54 L10 40 L10 24 Z" fill="#ffffff" stroke="{INK}" stroke-width="1.2"/>'
-        '<path d="M25.5 13.5 L38.5 13.5 L50.5 25.5 L50.5 38.5 L38.5 50.5 L25.5 50.5 L13.5 38.5 L13.5 25.5 Z" fill="#c8372c"/>'
-        '<path d="M26 44 L26 28 Q26 26 28 26 Q30 26 30 28 L30 34 L30 22 Q30 20 32 20 Q34 20 34 22 L34 34 L34 24 Q34 22 36 22 Q38 22 38 24 L38 36 L39.5 33 Q41 31 42.5 32.5 Q43.5 33.5 42.5 35.5 L38 44 Q36 47 32 47 L30 47 Q26 47 26 44 Z" fill="#ffffff"/>'),
-}
+# The apps' own icons are not drawn here: Dave preferred the hand-drawn ones
+# from before direction D (2026-11-18, side by side), so data/icons/
+# vergence-<app>.svg are kept as they are. Direction D's app tiles are in
+# git (ee1af80) if they are wanted again.
 
 # ---- places: the folder, with a mark pressed into it ----
 
@@ -178,8 +140,6 @@ def write(path, text):
 
 
 def main():
-    for name, (kind, comment, body) in APPS.items():
-        write(os.path.join(OUT, f"{name}.svg"), svg(tile(kind) + body, comment, kind))
     for name, (comment, body) in PLACES.items():
         write(os.path.join(OUT, "places", f"{name}.svg"), svg(body, comment))
     # The Trash window's own icon, for the dock (Dave, 2026-11-18): the can
@@ -187,7 +147,7 @@ def main():
     write(os.path.join(OUT, "vergence-trash.svg"), svg(CAN, "The Trash: its window's icon, the can itself."))
     for name, (comment, body) in KINDS.items():
         write(os.path.join(OUT, "kinds", f"{name}.svg"), svg(body, comment))
-    print(f"{len(APPS) + 1} apps, {len(PLACES)} places, {len(KINDS)} kinds in {os.path.normpath(OUT)}")
+    print(f"the Trash window, {len(PLACES)} places, {len(KINDS)} kinds in {os.path.normpath(OUT)}")
 
 
 if __name__ == "__main__":

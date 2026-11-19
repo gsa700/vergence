@@ -1,11 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-<!-- Hardware: a chip on its board, and a gauge. Drawn by the project (tools/make-icons.py). -->
-<defs>
-<linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e3e6ec"/></linearGradient>
-<linearGradient id="folderBack" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b97ee"/><stop offset="1" stop-color="#3b77d6"/></linearGradient>
-<linearGradient id="folderFront" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8fbaf6"/><stop offset="1" stop-color="#5b97ee"/></linearGradient>
-<linearGradient id="metal" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#c9ced8"/><stop offset="0.45" stop-color="#f2f4f7"/><stop offset="1" stop-color="#a9b0bd"/></linearGradient>
-<linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6c7280"/><stop offset="1" stop-color="#474c57"/></linearGradient>
-</defs>
-<rect x="2" y="2" width="60" height="60" rx="14" fill="url(#tile)"/><rect x="2.5" y="2.5" width="59" height="59" rx="13.5" fill="none" stroke="rgba(255,255,255,0.28)"/><rect x="2" y="2" width="60" height="60" rx="14" fill="none" stroke="rgba(0,0,0,0.45)"/><g stroke="#1a1d24" stroke-width="1.2" fill="#c9ced8"><rect x="21" y="10" width="3" height="6" rx="1"/><rect x="21" y="48" width="3" height="6" rx="1"/><rect x="27" y="10" width="3" height="6" rx="1"/><rect x="27" y="48" width="3" height="6" rx="1"/><rect x="34" y="10" width="3" height="6" rx="1"/><rect x="34" y="48" width="3" height="6" rx="1"/><rect x="40" y="10" width="3" height="6" rx="1"/><rect x="40" y="48" width="3" height="6" rx="1"/></g><rect x="15" y="15" width="34" height="34" rx="4" fill="#2a2e36" stroke="#1a1d24" stroke-width="1.2"/><rect x="18.5" y="18.5" width="27" height="27" rx="2" fill="none" stroke="rgba(255,255,255,0.18)"/><path d="M22 38 A10 10 0 0 1 42 38" fill="none" stroke="#6c7280" stroke-width="3" stroke-linecap="round"/><path d="M22 38 A10 10 0 0 1 36 29.3" fill="none" stroke="#4caf72" stroke-width="3" stroke-linecap="round"/><line x1="32" y1="38" x2="37" y2="30" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><circle cx="32" cy="38" r="2" fill="#ffffff"/>
+  <!-- Vergence's Hardware: a chip with its pins and a line of load across it. Drawn by the project. -->
+  <g stroke="#6b7a9e" stroke-width="3" stroke-linecap="round">
+    <path d="M22 6 V12 M32 6 V12 M42 6 V12 M22 52 V58 M32 52 V58 M42 52 V58 M6 22 H12 M6 32 H12 M6 42 H12 M52 22 H58 M52 32 H58 M52 42 H58"/>
+  </g>
+  <rect x="12" y="12" width="40" height="40" rx="7" fill="#20232c"/>
+  <rect x="12" y="12" width="40" height="40" rx="7" fill="none" stroke="#6b7a9e" stroke-width="2"/>
+  <path d="M17 38 L25 30 L31 35 L39 24 L47 29" fill="none" stroke="#729fcf" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
