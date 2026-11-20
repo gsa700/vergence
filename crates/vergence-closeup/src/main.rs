@@ -38,7 +38,7 @@ use std::time::SystemTime;
 use vergence_scene::{Color, Image, Rect};
 use vergence_ui::{AppCommand as C, Bar, BarStyle, Role};
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
-use vergence_widgets::{Align, AreaOptions, ButtonLook, Element, Input, Length, Padding, Program, TextDoc, Theme, Touch, Waker, Window, button, column, drawing, label, panel, row, rule, text_area};
+use vergence_widgets::{Align, AreaOptions, ButtonLook, Element, Input, Length, Padding, Program, TextDoc, Theme, Touch, Waker, Window, button, column, drawing, field, label, panel, row, rule, text_area};
 
 const APP_ID: &str = "vergence-closeup";
 const SECTION: &str = "[closeup]";
@@ -49,6 +49,8 @@ const MIN_ZOOM: f32 = 0.02;
 const MAX_ZOOM: f32 = 32.0;
 /// The animation's timer.
 const ANIM_TIMER: u64 = 1;
+/// A PDF's page and zoom saved a moment after they stop changing.
+const PLACE_TIMER: u64 = 2;
 
 mod cmd {
     pub const NEW_WINDOW: u32 = 1;
@@ -74,6 +76,8 @@ enum Loaded {
     Picture { width: u32, height: u32, frames: Vec<(u32, Vec<Arc<Image>>)> },
     Text { text: String, cut: bool },
     Pdf(pdf::Pdf),
+    /// A PDF that needs its password, open in its helper.
+    Locked(vergence_pdf::helper::Viewer),
     /// Why it cannot be shown here, and whether another app might.
     Problem { why: String, elsewhere: bool },
 }
@@ -107,6 +111,9 @@ enum Content {
     Picture { width: u32, height: u32, frames: Vec<(u32, Vec<Arc<Image>>)> },
     Text { doc: TextDoc, cut: bool },
     Pdf(pdf::Pdf),
+    /// The helper (taken while a password is tried), the password typed, and
+    /// whether the last one was wrong.
+    Locked { viewer: Option<vergence_pdf::helper::Viewer>, password: String, wrong: bool },
     Problem { why: String, elsewhere: bool },
 }
 
@@ -124,7 +131,8 @@ fn load(path: PathBuf, id: u32, shared: &Shared, waker: Option<Waker>) {
         let mime = vergence_types::of_file(&path);
         let loaded = if mime == "application/pdf" {
             match pdf::open(&path, waker.clone()) {
-                Ok(d) => Loaded::Pdf(d),
+                Ok(pdf::Opened::Ready(d)) => Loaded::Pdf(d),
+                Ok(pdf::Opened::Locked(v)) => Loaded::Locked(v),
                 Err(why) => Loaded::Problem { why: format!("“{}” could not be shown: {why}", path.file_name().unwrap_or_default().to_string_lossy()), elsewhere: true },
             }
         } else if mime.starts_with("image/") {
@@ -224,6 +232,19 @@ struct Viewer {
     animating: bool,
     /// Ctrl held (the wheel zooms a PDF then; scroll events carry no keys).
     ctrl: bool,
+    /// The status line's page number while it is being typed.
+    page_field: Option<String>,
+    /// The PDF place saved last: path, page, mode.
+    saved_place: Option<(PathBuf, usize, String)>,
+}
+
+/// A PDF with its remembered page and zoom, to be gone to once placed.
+fn with_place(mut d: pdf::Pdf, path: &Path) -> pdf::Pdf {
+    if let Some((page, mode)) = pdf::places::load(path) {
+        d.mode = mode;
+        d.restore = Some(page.min(d.pages.len() - 1));
+    }
+    d
 }
 
 #[derive(Debug, Clone)]
@@ -231,6 +252,10 @@ enum Msg {
     Touch(Touch),
     /// A command from the toolbar.
     Run(u32),
+    Password(String),
+    Unlock,
+    PageField(String),
+    GoToPage,
     OpenWith,
     OpenInEditor,
 }
@@ -254,6 +279,8 @@ impl Viewer {
             prefs_open: Rc::new(Cell::new(false)),
             animating: false,
             ctrl: false,
+            page_field: None,
+            saved_place: None,
         }
     }
 
@@ -366,6 +393,47 @@ impl Viewer {
         match &mut self.front_mut()?.content {
             Content::Pdf(d) => Some(d),
             _ => None,
+        }
+    }
+
+    /// Saves the front PDF's page and zoom soon (once they stop changing).
+    fn place_soon(&self, window: &mut Window) {
+        if self.is_pdf() {
+            window.wake_after(PLACE_TIMER, std::time::Duration::from_millis(700));
+        }
+    }
+
+    fn save_place(&mut self) {
+        let r = self.area.get();
+        let Some(t) = self.front_tab() else { return };
+        let Content::Pdf(d) = &t.content else { return };
+        let (page, mode) = (d.current(r), d.mode);
+        let key = (t.path.clone(), page, format!("{mode:?}"));
+        if self.saved_place.as_ref() != Some(&key) {
+            pdf::places::save(&t.path, page, mode);
+            self.saved_place = Some(key);
+        }
+    }
+
+    /// Tries the typed password on a locked PDF; opens it if it is right.
+    fn unlock(&mut self) {
+        let waker = self.waker.clone();
+        let Some(t) = self.front_mut() else { return };
+        let Content::Locked { viewer, password, wrong } = &mut t.content else { return };
+        let typed = std::mem::take(password);
+        let Some(mut v) = viewer.take() else { return };
+        match v.unlock(typed.as_bytes()) {
+            Ok(true) => {
+                t.content = match pdf::start(v, waker) {
+                    Ok(d) => Content::Pdf(with_place(d, &t.path)),
+                    Err(why) => Content::Problem { why, elsewhere: true },
+                }
+            }
+            Ok(false) => {
+                *viewer = Some(v);
+                *wrong = true;
+            }
+            Err(e) => t.content = Content::Problem { why: e.to_string(), elsewhere: true },
         }
     }
 
@@ -598,6 +666,7 @@ impl Viewer {
 
     fn run(&mut self, id: u32, window: &mut Window) {
         if self.pdf_run(id) {
+            self.place_soon(window);
             window.redraw();
             return;
         }
@@ -780,7 +849,10 @@ impl Viewer {
             }
             Content::Pdf(d) => {
                 let r = self.area.get();
-                items.push(label(format!("Page {} of {}", d.current(r) + 1, d.pages.len())).size(12.0).dim());
+                let shown = self.page_field.clone().unwrap_or_else(|| (d.current(r) + 1).to_string());
+                items.push(label("Page").size(12.0).dim());
+                items.push(field(shown, Msg::PageField).on_submit(Msg::GoToPage).name("Page number").width(Length::Fixed(52.0)));
+                items.push(label(format!("of {}", d.pages.len())).size(12.0).dim());
                 let mode = match d.mode {
                     pdf::Mode::Width => " (width)",
                     pdf::Mode::Page => " (page)",
@@ -843,6 +915,17 @@ impl Program for Viewer {
             Content::Picture { width, height, frames } => self.picture_view(tab, *width, *height, frames),
             Content::Text { doc, .. } => text_area(doc).key(tab.id as u64).name(tab.name()),
             Content::Pdf(d) => self.pdf_view(d),
+            Content::Locked { password, wrong, .. } => {
+                let mut items: Vec<Element<Msg>> = vec![
+                    label(format!("“{}” is protected by a password.", tab.name())).size(13.0).wrap().width(Length::FILL),
+                    field(password.clone(), Msg::Password).secret().autofocus().placeholder("Password").on_submit(Msg::Unlock).name("Password").width(Length::Fixed(280.0)),
+                ];
+                if *wrong {
+                    items.push(label("That password does not open it.").size(12.0).dim());
+                }
+                items.push(button(label("Open").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 12.0)).on_press(Msg::Unlock).name("Open"));
+                panel(column(items).spacing(12.0).width(Length::Fixed(420.0))).padding(24.0).width(Length::FILL).height(Length::FILL)
+            }
             Content::Problem { why, elsewhere } => {
                 let mut items: Vec<Element<Msg>> = vec![label(why.clone()).size(13.0).wrap().width(Length::FILL)];
                 if *elsewhere {
@@ -898,6 +981,7 @@ impl Program for Viewer {
                 {
                     d.scroll(sy - y, x - sx, r);
                     self.drag = Some(((x, y), (0.0, 0.0)));
+                    self.place_soon(window);
                 } else if pressed && let Some(((sx, sy), start)) = self.drag {
                     let (scale, small) = (self.scale, self.small_actual());
                     if let Some(t) = self.front_mut()
@@ -910,6 +994,24 @@ impl Program for Viewer {
             }
             Msg::Touch(Touch::Release { .. }) | Msg::Touch(Touch::Leave) => self.drag = None,
             Msg::Run(c) => return self.run(c, window),
+            Msg::Password(p) => {
+                if let Some(t) = self.front_mut()
+                    && let Content::Locked { password, .. } = &mut t.content
+                {
+                    *password = p;
+                }
+            }
+            Msg::Unlock => self.unlock(),
+            Msg::PageField(text) => self.page_field = Some(text.chars().filter(char::is_ascii_digit).take(6).collect()),
+            Msg::GoToPage => {
+                let r = self.area.get();
+                if let Some(n) = self.page_field.take().and_then(|t| t.parse::<usize>().ok())
+                    && let Some(d) = self.pdf_mut()
+                {
+                    d.go_to(n.saturating_sub(1), r);
+                }
+                self.place_soon(window);
+            }
             Msg::OpenWith => self.open_with(false),
             Msg::OpenInEditor => self.open_with(true),
         }
@@ -923,7 +1025,11 @@ impl Program for Viewer {
         if let Input::Focus(false) = input {
             self.ctrl = false;
         }
+        if self.front_tab().is_some_and(|t| matches!(t.content, Content::Locked { .. })) {
+            return false;
+        }
         if self.is_pdf() && self.pdf_input(input, window) {
+            self.place_soon(window);
             return true;
         }
         match input {
@@ -1054,12 +1160,22 @@ impl Program for Viewer {
                         let options = AreaOptions { editable: false, complete: false, spell: false, current_line: false, ..AreaOptions::default() };
                         Content::Text { doc: TextDoc::with_options(&text, options), cut }
                     }
-                    Loaded::Pdf(d) => Content::Pdf(d),
+                    Loaded::Pdf(d) => Content::Pdf(with_place(d, &t.path)),
+                    Loaded::Locked(v) => Content::Locked { viewer: Some(v), password: String::new(), wrong: false },
                     Loaded::Problem { why, elsewhere } => Content::Problem { why, elsewhere },
                 };
                 t.frame = 0;
                 changed = true;
             }
+        }
+        // A remembered page, gone to once the view has its place.
+        let r = self.area.get();
+        if r.w > 1.0
+            && let Some(d) = self.pdf_mut()
+            && let Some(page) = d.restore.take()
+        {
+            d.go_to(page, r);
+            changed = true;
         }
         if changed {
             self.arm_animation(window);
@@ -1068,6 +1184,10 @@ impl Program for Viewer {
     }
 
     fn timer(&mut self, id: u64, window: &mut Window) -> bool {
+        if id == PLACE_TIMER {
+            self.save_place();
+            return false;
+        }
         if id != ANIM_TIMER {
             return false;
         }

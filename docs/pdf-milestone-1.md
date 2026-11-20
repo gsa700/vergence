@@ -307,3 +307,14 @@ selection order; color management beyond the simple formulas.
   page fits, stepping pages. Still to come in step 6: tiles past 16 M
   pixels a page, the password field, the sidebar (thumbnails, outline),
   links, go to page, each document's page and zoom remembered.
+- **Step 6, part 3** (2026-11-20 night): deep zoom in tiles (past 16 M
+  pixels a page, the part in sight is drawn in 512-pixel tiles at the
+  screen's pixels over the page picture; the R56 manual crisp at 723% with
+  no seams); a locked PDF shows a password field (the helper unlocks it,
+  "That password does not open it." otherwise; tried with a generated RC4
+  R3 file); each document's page and zoom remembered in
+  ~/.local/state/vergence/closeup-pdf-places (owner-only, 500 at most,
+  saved 0.7 s after they stop changing; reopening goes to the page's top,
+  not the exact spot in it); the status line's page number is a field
+  (type a number, Enter). Still in step 6: the sidebar (thumbnails,
+  outline), links.
