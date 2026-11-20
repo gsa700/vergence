@@ -5,7 +5,9 @@
 //! function-based) by `sh` and as patterns; tiling patterns; constant
 //! alpha; annotations' normal appearances.
 //!
-//! Not yet: text (step 4: the operators are read and skipped), JPEG and
+//! Text (step 4): the text operators, rendering modes 0 to 7 (text as a
+//! clip included), glyphs from font/ drawn as paths in the fill or stroke.
+//! Not yet: CFF, Type 1 and Type 3 glyph programs (step 4's next parts), JPEG and
 //! the other picture codecs (step 5: a light gray box stands in), blend
 //! modes, soft masks and knockout groups (drawn as normal), mesh shadings
 //! (types 4 to 7: skipped).
@@ -16,6 +18,7 @@ use std::rc::Rc;
 use vergence_raster::{Canvas, Cap, Clip, FillRule, Image, Join, Path, Point, Stroke, Transform};
 
 use crate::color::ColorSpace;
+use crate::font::Font;
 use crate::content;
 use crate::function::Function;
 use crate::image::{self, Decoded};
@@ -40,7 +43,7 @@ pub fn render_page(doc: &Document, page: &Page, scale: f64) -> Option<Canvas> {
     let mut canvas = Canvas::new(pw, ph)?;
     canvas.clear([1.0, 1.0, 1.0, 1.0]);
     let base = page_transform(b, page.rotate, scale);
-    let mut r = Renderer { doc, canvas, ops: 0, forms: HashSet::new(), base };
+    let mut r = Renderer { doc, canvas, ops: 0, forms: HashSet::new(), base, fonts: std::collections::HashMap::new() };
     let resources = Rc::new(page.resources.clone().unwrap_or_default());
     let mut gs = State::new(base, Clip::full(pw, ph), resources.clone());
     // The page's box clips everything drawn on it.
@@ -105,11 +108,32 @@ struct State {
     stroke_alpha: f32,
     fill_alpha: f32,
     resources: Rc<Dict>,
+    text: TextState,
+}
+
+/// The text state (ISO 32000-2 §9.3), part of the graphics state.
+#[derive(Clone)]
+struct TextState {
+    char_spacing: f64,
+    word_spacing: f64,
+    /// Tz / 100.
+    scale: f64,
+    leading: f64,
+    font: Option<Rc<Font>>,
+    size: f64,
+    mode: i64,
+    rise: f64,
+}
+
+impl Default for TextState {
+    fn default() -> TextState {
+        TextState { char_spacing: 0.0, word_spacing: 0.0, scale: 1.0, leading: 0.0, font: None, size: 0.0, mode: 0, rise: 0.0 }
+    }
 }
 
 impl State {
     fn new(ctm: Transform, clip: Clip, resources: Rc<Dict>) -> State {
-        State { ctm, clip: Rc::new(clip), stroke: Stroke::default(), stroke_paint: Paint::black(), fill_paint: Paint::black(), stroke_alpha: 1.0, fill_alpha: 1.0, resources }
+        State { ctm, clip: Rc::new(clip), stroke: Stroke::default(), stroke_paint: Paint::black(), fill_paint: Paint::black(), stroke_alpha: 1.0, fill_alpha: 1.0, resources, text: TextState::default() }
     }
 }
 
@@ -121,6 +145,8 @@ struct Renderer<'d> {
     forms: HashSet<u32>,
     /// The page's own transform (patterns live in its space).
     base: Transform,
+    /// Fonts loaded on this page, by object number (or by name if direct).
+    fonts: std::collections::HashMap<Vec<u8>, Rc<Font>>,
 }
 
 fn num(o: Option<&Object>) -> f64 {
@@ -140,6 +166,10 @@ impl Renderer<'_> {
         let mut path = Path::new();
         let mut current = Point::new(0.0, 0.0);
         let mut pending_clip: Option<FillRule> = None;
+        // The text matrices (reset at BT, not saved by q) and the glyphs
+        // gathered for a text clip (modes 4 to 7), applied at ET.
+        let (mut tm, mut tlm) = (Transform::IDENTITY, Transform::IDENTITY);
+        let mut text_clip: Option<Path> = None;
         for op in &ops {
             self.ops += 1;
             if self.ops > MAX_PAGE_OPS {
@@ -265,9 +295,126 @@ impl Renderer<'_> {
                         self.image(decoded, &gs, matches!(d.get("I").or_else(|| d.get("Interpolate")), Some(Object::Bool(true))));
                     }
                 }
-                // Text and everything else: read and passed over (text is step 4).
+                // Text.
+                b"BT" => {
+                    tm = Transform::IDENTITY;
+                    tlm = Transform::IDENTITY;
+                    text_clip = None;
+                }
+                b"ET" => {
+                    if let Some(p) = text_clip.take() {
+                        let (w, h) = self.size();
+                        gs.clip = Rc::new(gs.clip.intersect(&p, &gs.ctm, FillRule::NonZero, w, h));
+                    }
+                }
+                b"Tc" => gs.text.char_spacing = n(0),
+                b"Tw" => gs.text.word_spacing = n(0),
+                b"Tz" => gs.text.scale = n(0) / 100.0,
+                b"TL" => gs.text.leading = n(0),
+                b"Ts" => gs.text.rise = n(0),
+                b"Tr" => gs.text.mode = n(0) as i64,
+                b"Tf" => {
+                    gs.text.size = n(1);
+                    if let Some(name) = a.first().and_then(Object::as_name) {
+                        gs.text.font = self.font(&gs, name);
+                    }
+                }
+                b"Td" | b"TD" => {
+                    if op.name == b"TD" {
+                        gs.text.leading = -n(1);
+                    }
+                    tlm = Transform::translate(n(0), n(1)).then(&tlm);
+                    tm = tlm;
+                }
+                b"Tm" if a.len() >= 6 => {
+                    let m = Transform::new(n(0), n(1), n(2), n(3), n(4), n(5));
+                    if m.is_finite() {
+                        tlm = m;
+                        tm = m;
+                    }
+                }
+                b"T*" => {
+                    tlm = Transform::translate(0.0, -gs.text.leading).then(&tlm);
+                    tm = tlm;
+                }
+                b"Tj" => {
+                    if let Some(Object::String(t)) = a.first() {
+                        self.show(t, &gs, &mut tm, &mut text_clip, depth);
+                    }
+                }
+                b"'" | b"\"" => {
+                    if op.name == b"\"" {
+                        gs.text.word_spacing = n(0);
+                        gs.text.char_spacing = n(1);
+                    }
+                    tlm = Transform::translate(0.0, -gs.text.leading).then(&tlm);
+                    tm = tlm;
+                    if let Some(Object::String(t)) = a.last() {
+                        self.show(t, &gs, &mut tm, &mut text_clip, depth);
+                    }
+                }
+                b"TJ" => {
+                    if let Some(Object::Array(items)) = a.first() {
+                        for item in items {
+                            match item {
+                                Object::String(t) => self.show(t, &gs, &mut tm, &mut text_clip, depth),
+                                other => {
+                                    if let Some(adj) = other.as_f64() {
+                                        let tx = -adj / 1000.0 * gs.text.size * gs.text.scale;
+                                        tm = Transform::translate(tx, 0.0).then(&tm);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Everything else (marked content, compatibility sections): passed over.
                 _ => {}
             }
+        }
+    }
+
+    /// A font resource, loaded once per page.
+    fn font(&mut self, gs: &State, name: &[u8]) -> Option<Rc<Font>> {
+        let entry = self.resource(gs, "Font", name);
+        let key = match entry.as_ref() {
+            Some(r) => format!("{} {}", r.num, r.generation).into_bytes(),
+            None => [b"/".as_slice(), name].concat(),
+        };
+        if let Some(f) = self.fonts.get(&key) {
+            return Some(f.clone());
+        }
+        let d = self.doc.resolve(&entry).as_dict().cloned()?;
+        let f = Rc::new(Font::load(self.doc, &d));
+        self.fonts.insert(key, f.clone());
+        Some(f)
+    }
+
+    /// Shows a string: each glyph through the text rendering matrix, drawn
+    /// as the mode says, the pen moved by its width and the spacings.
+    fn show(&mut self, s: &[u8], gs: &State, tm: &mut Transform, text_clip: &mut Option<Path>, depth: usize) {
+        let Some(font) = gs.text.font.clone() else { return };
+        let t = &gs.text;
+        let mode = t.mode;
+        for (code, is_space) in font.codes(s) {
+            let w0 = font.width(code);
+            if mode != 3
+                && let Some(g) = font.glyph(code)
+            {
+                let trm = Transform::new(t.size * t.scale, 0.0, 0.0, t.size, 0.0, t.rise).then(tm);
+                let user = g.transformed(&trm);
+                if matches!(mode, 0 | 2 | 4 | 6) {
+                    self.fill(&user, FillRule::NonZero, gs, depth);
+                }
+                if matches!(mode, 1 | 2 | 5 | 6) {
+                    self.stroke(&user, gs);
+                }
+                if (4..=7).contains(&mode) {
+                    text_clip.get_or_insert_with(Path::new).append(&user);
+                }
+            }
+            let tx = (w0 * t.size + t.char_spacing + if is_space { t.word_spacing } else { 0.0 }) * t.scale;
+            *tm = Transform::translate(tx, 0.0).then(tm);
         }
     }
 
@@ -511,7 +658,7 @@ impl Renderer<'_> {
         }
         let Some(cell_canvas) = Canvas::new(cw, ch) else { return };
         let cell_t = Transform::new(k, 0.0, 0.0, -k, -bbox[0] * k, bbox[1] * k + ystep * k);
-        let mut sub = Renderer { doc, canvas: cell_canvas, ops: self.ops, forms: std::mem::take(&mut self.forms), base: cell_t };
+        let mut sub = Renderer { doc, canvas: cell_canvas, ops: self.ops, forms: std::mem::take(&mut self.forms), base: cell_t, fonts: std::mem::take(&mut self.fonts) };
         if let Some(r) = reference {
             sub.forms.insert(r.num);
         }
@@ -528,6 +675,7 @@ impl Renderer<'_> {
         sub.run(&data, cell_state, depth + 1);
         self.ops = sub.ops;
         self.forms = std::mem::take(&mut sub.forms);
+        self.fonts = std::mem::take(&mut sub.fonts);
         if let Some(r) = reference {
             self.forms.remove(&r.num);
         }

@@ -8,3 +8,4 @@ description = "Our own PDF reader (PDF milestone 1): objects, cross-references w
 
 [dependencies]
 vergence-raster.workspace = true
+vergence-text.workspace = true

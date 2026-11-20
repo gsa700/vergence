@@ -150,6 +150,26 @@ impl Path {
         self.segs.is_empty()
     }
 
+    /// The path with every point through `t`.
+    pub fn transformed(&self, t: &Transform) -> Path {
+        let segs = self
+            .segs
+            .iter()
+            .map(|s| match *s {
+                Seg::Move(p) => Seg::Move(t.apply(p)),
+                Seg::Line(p) => Seg::Line(t.apply(p)),
+                Seg::Cubic(a, b, c) => Seg::Cubic(t.apply(a), t.apply(b), t.apply(c)),
+                Seg::Close => Seg::Close,
+            })
+            .collect();
+        Path { segs }
+    }
+
+    /// Another path's subpaths added to this one.
+    pub fn append(&mut self, other: &Path) {
+        self.segs.extend_from_slice(&other.segs);
+    }
+
     /// The path through `t`, each subpath flattened into a polyline (closed
     /// ones marked), curves within `tolerance` of the true curve in the
     /// transformed space. Points that are not finite drop their subpath.

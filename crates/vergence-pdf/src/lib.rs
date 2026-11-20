@@ -23,6 +23,7 @@ pub mod color;
 pub mod content;
 pub mod crypt;
 pub mod filter;
+pub mod font;
 pub mod function;
 pub mod image;
 pub mod lexer;

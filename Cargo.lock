@@ -2272,6 +2272,7 @@ name = "vergence-pdf"
 version = "0.1.0"
 dependencies = [
  "vergence-raster",
+ "vergence-text",
 ]
 
 [[package]]
