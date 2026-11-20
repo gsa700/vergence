@@ -949,6 +949,7 @@ impl Gpu {
                                 continue;
                             }
                             let Some(face) = prepared.faces[cell.font as usize] else { continue };
+                            let face = fonts.sized(face, *size);
                             let x = (origin.x + c as f32 * cell_w) * scale;
                             let (mut whole_x, mut sub) = (x.floor(), ((x - x.floor()) * 4.0).round() as u8);
                             if sub == 4 {

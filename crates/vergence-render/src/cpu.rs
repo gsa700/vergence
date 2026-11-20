@@ -242,6 +242,8 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
                 // A font this machine does not have draws nothing: another
                 // font's glyph numbers would be other characters.
                 let Some(face) = faces[*font as usize] else { continue };
+                // The instance for this size (optical sizes), as layout measured it.
+                let face = fonts.sized(face, *size);
                 for g in glyphs {
                     let x = (origin.x + g.x) * scale;
                     let (mut whole_x, mut sub) = (x.floor(), ((x - x.floor()) * 4.0).round() as u8);
@@ -327,6 +329,7 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
                             continue;
                         }
                         let Some(face) = faces[cell.font as usize] else { continue };
+                        let face = fonts.sized(face, *size);
                         let x = (origin.x + c as f32 * cell_w) * scale;
                         let (mut whole_x, mut sub) = (x.floor(), ((x - x.floor()) * 4.0).round() as u8);
                         if sub == 4 {

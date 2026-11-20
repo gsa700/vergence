@@ -1,7 +1,7 @@
 # Text milestone 1: kerning, weight, sharp text at low density, optical sizes
 
 Status: **accepted 2026-11-19** (Dave: "do both, make the milestone doc and
-then go ahead"). Steps 1, 2 and 3 built 2026-11-19 (step 3 by pixel size,
+then go ahead"). Steps 1 to 4 built 2026-11-19 (step 3 by pixel size,
 not screen scale: below 24 px to the em; hint.rs; the GPU reads the CPU's
 coverage tables as a texture since) (kerning matches
 HarfBuzz at weights 400, 700, 900; GPU and CPU agree within one step; tests
@@ -96,7 +96,7 @@ Found, worst first:
    idea: more darkening at small pixel sizes, none from about 24 px up,
    folded into step 2's curve. No full TrueType hinting (macOS has none
    either; what macOS adds is darkening).
-4. **Optical sizes.** A variable font with `opsz` is set to the text's size
+4. **Optical sizes** (built: Fonts::sized; layout and both renderers ask for it). A variable font with `opsz` is set to the text's size
    in points (whole numbers, clamped to the axis), so Inter's headings use
    its display cut. Layout and raster agree because the size picks the
    instance before either. Faces are cached per (file, weight, opsz).

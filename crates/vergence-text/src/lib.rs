@@ -110,6 +110,10 @@ struct Loaded {
     /// Its x-height in font units (OS/2 sxHeight; 0 if unknown), for
     /// hint.rs.
     x_height: f32,
+    /// Its optical size axis (`opsz`: least, default, most), if it has
+    /// one, and the setting this instance is drawn at (0 for the default).
+    opsz_axis: Option<(f32, f32, f32)>,
+    opsz: u16,
 }
 
 impl Loaded {
@@ -137,8 +141,9 @@ struct GlyphKey {
 pub struct Fonts {
     db: FontDb,
     loaded: Vec<Loaded>,
-    /// Database entry and weight -> the loaded face (None: it would not load).
-    by_entry: HashMap<(usize, u16), Option<FaceId>>,
+    /// Database entry, weight and optical size (0: the default) -> the
+    /// loaded face (None: it would not load).
+    by_entry: HashMap<(usize, u16, u16), Option<FaceId>>,
     /// The face and glyph that stand in for a character a face lacks.
     fallbacks: HashMap<(FaceId, char), (FaceId, u32)>,
     cache: HashMap<GlyphKey, Option<Arc<Bitmap>>>,
@@ -175,40 +180,73 @@ impl Fonts {
     }
 
     fn load(&mut self, entry: usize, weight: u16) -> Option<FaceId> {
+        self.load_at(entry, weight, 0)
+    }
+
+    fn load_at(&mut self, entry: usize, weight: u16, opsz: u16) -> Option<FaceId> {
         let info = &self.db.faces.get(entry)?.info;
         let weight = match info.weight_axis {
             Some((min, max)) => weight.clamp(min, max),
             None => info.weight,
         };
-        if let Some(known) = self.by_entry.get(&(entry, weight)) {
+        if let Some(known) = self.by_entry.get(&(entry, weight, opsz)) {
             return *known;
         }
-        let face = self.read(entry, weight).map(|l| {
+        let face = self.read(entry, weight, opsz).map(|l| {
             self.loaded.push(l);
             FaceId(self.loaded.len() as u32 - 1)
         });
-        self.by_entry.insert((entry, weight), face);
+        self.by_entry.insert((entry, weight, opsz), face);
         face
     }
 
-    fn read(&self, entry: usize, weight: u16) -> Option<Loaded> {
+    fn read(&self, entry: usize, weight: u16, opsz: u16) -> Option<Loaded> {
         let e = &self.db.faces[entry];
         if std::fs::metadata(&e.path).ok()?.len() > MAX_FONT_FILE {
             return None;
         }
         let bytes = std::fs::read(&e.path).ok()?;
-        let settings: &[([u8; 4], f32)] = if e.info.weight_axis.is_some() { &[(*b"wght", weight as f32)] } else { &[] };
-        let kerning = kern::Kerning::read(&bytes, e.info.index, &kern::coordinates(&bytes, e.info.index, settings));
+        let opsz_axis = kern::axis(&bytes, e.info.index, b"opsz");
+        let mut settings: Vec<([u8; 4], f32)> = Vec::new();
+        if e.info.weight_axis.is_some() {
+            settings.push((*b"wght", weight as f32));
+        }
+        if opsz != 0 && opsz_axis.is_some() {
+            settings.push((*b"opsz", opsz as f32));
+        }
+        let kerning = kern::Kerning::read(&bytes, e.info.index, &kern::coordinates(&bytes, e.info.index, &settings));
         // OS/2 version 2 and later carry sxHeight at 86.
         let x_height = kern::table(&bytes, e.info.index, b"OS/2")
             .filter(|t| t.len() >= 88 && u16::from_be_bytes([t[0], t[1]]) >= 2)
             .map_or(0.0, |t| i16::from_be_bytes([t[86], t[87]]).max(0) as f32);
         let mut font = FontVec::try_from_vec_and_index(bytes, e.info.index).ok()?;
-        if e.info.weight_axis.is_some() {
-            font.set_variation(b"wght", weight as f32);
+        for (tag, value) in &settings {
+            font.set_variation(tag, *value);
         }
         let units = font.units_per_em().filter(|u| *u > 0.0)?;
-        Some(Loaded { entry, weight, font, units, kerning, x_height })
+        Some(Loaded { entry, weight, font, units, kerning, x_height, opsz_axis, opsz: if opsz_axis.is_some() { opsz } else { 0 } })
+    }
+
+    /// The instance of `face` for text `size` units tall (text milestone 1,
+    /// step 4): a variable font with an optical size axis set to the size
+    /// (whole units, within the axis), as browsers do
+    /// (`font-optical-sizing: auto`), so Inter's headings take its display
+    /// cut. The face itself when it has no such axis, or the size is its
+    /// default. Layout and the renderers both ask for it, so they agree;
+    /// scenes keep naming the face (Fonts::name is the same).
+    pub fn sized(&mut self, face: FaceId, size: f32) -> FaceId {
+        let Some(l) = self.loaded.get(face.0 as usize) else { return face };
+        let Some((min, default, max)) = l.opsz_axis else { return face };
+        if !size.is_finite() {
+            return face;
+        }
+        let want = size.round().clamp(min, max);
+        let opsz = if (want - default).abs() < 0.5 { 0 } else { want as u16 };
+        if opsz == l.opsz {
+            return face;
+        }
+        let (entry, weight) = (l.entry, l.weight);
+        self.load_at(entry, weight, opsz).unwrap_or(face)
     }
 
     /// The face's name, for a scene's font table.
@@ -252,7 +290,8 @@ impl Fonts {
     }
 
     /// How far the line moves on after this glyph, at `size`.
-    pub fn advance(&self, face: FaceId, glyph: u32, size: f32) -> f32 {
+    pub fn advance(&mut self, face: FaceId, glyph: u32, size: f32) -> f32 {
+        let face = self.sized(face, size);
         let l = &self.loaded[face.0 as usize];
         l.font.h_advance_unscaled(glyph_id(glyph)) * size / l.units
     }
@@ -265,7 +304,10 @@ impl Fonts {
         let mut prev: Option<(FaceId, u32)> = None;
         for c in text.chars().filter(|c| !c.is_control()) {
             let (f, g) = self.glyph(face, c);
-            let l = &self.loaded[f.0 as usize];
+            // Measured in the instance drawn for this size (optical sizes);
+            // the run names the face itself.
+            let at = self.sized(f, size);
+            let l = &self.loaded[at.0 as usize];
             if let Some((pf, pg)) = prev
                 && pf == f
             {
@@ -457,6 +499,27 @@ mod tests {
         let (runs, _) = fonts.layout(face, 16.0, &format!("A{c}A"));
         assert_eq!(runs.iter().map(|r| r.face).collect::<Vec<_>>(), [face, other, face]);
         assert!(fonts.raster(other, g, 32.0, 0).is_some() || fonts.advance(other, g, 32.0) > 0.0);
+    }
+
+    #[test]
+    fn headings_take_the_display_cut() {
+        // Inter, shipped: opsz 14 (text) to 32 (display).
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/fonts");
+        let mut fonts = Fonts::new(FontDb::scan(&[dir]));
+        let face = fonts.face("Inter Variable", 400, false).expect("Inter in data/fonts");
+        assert_eq!(fonts.sized(face, 13.0), face, "below the axis: the default instance");
+        assert_eq!(fonts.sized(face, 14.2), face, "the default size");
+        let big = fonts.sized(face, 28.0);
+        assert_ne!(big, face);
+        assert_eq!(fonts.sized(face, 28.3), big, "kept, not loaded again");
+        assert_eq!(fonts.name(big), fonts.name(face), "scenes name it the same");
+        // The display cut is set tighter: per unit of size, narrower.
+        let (_, text_w) = fonts.layout(face, 14.0, "Wave headline");
+        let (_, head_w) = fonts.layout(face, 28.0, "Wave headline");
+        assert!(head_w < text_w * 2.0 * 0.99, "28: {head_w}, 14: {text_w}");
+        // Its glyphs are drawn from that instance.
+        let (_, a) = fonts.glyph(face, 'a');
+        assert!(fonts.raster(big, a, 28.0, 0).is_some());
     }
 
     #[test]

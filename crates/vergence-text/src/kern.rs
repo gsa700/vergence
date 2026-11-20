@@ -65,6 +65,21 @@ pub fn table<'a>(file: &'a [u8], index: u32, tag: &[u8; 4]) -> Option<&'a [u8]> 
     None
 }
 
+/// A variable font's axis by tag: its least, default and most values.
+pub fn axis(file: &[u8], index: u32, tag: &[u8; 4]) -> Option<(f32, f32, f32)> {
+    let fvar = table(file, index, b"fvar")?;
+    let (first, count, size) = (u16_at(fvar, 4)? as usize, (u16_at(fvar, 8)? as usize).min(64), (u16_at(fvar, 10)? as usize).max(20));
+    let fixed = |at: usize| u32_at(fvar, at).map(|v| v as i32 as f32 / 65536.0);
+    (0..count).find_map(|i| {
+        let a = first + i * size;
+        if fvar.get(a..a + 4)? != tag {
+            return None;
+        }
+        let (min, def, max) = (fixed(a + 4)?, fixed(a + 8)?, fixed(a + 12)?);
+        (min.is_finite() && max.is_finite() && min <= def && def <= max).then_some((min, def, max))
+    })
+}
+
 /// A variable font's normalized coordinates (-1 to 1 per axis, after
 /// `avar`), for the axis settings given by tag in the font's own units
 /// (`wght` 400); axes not given are at their defaults.
@@ -511,6 +526,14 @@ mod tests {
         assert_eq!(c[1], -1.0);
         let mid = coordinates(&file, 0, &[(*b"wght", 700.0)])[1];
         assert!(mid > 0.0 && mid < 1.0, "{mid}");
+    }
+
+    #[test]
+    fn axes_are_read() {
+        let file = shipped("InterVariable.ttf");
+        assert_eq!(axis(&file, 0, b"opsz"), Some((14.0, 14.0, 32.0)));
+        assert_eq!(axis(&file, 0, b"wght"), Some((100.0, 400.0, 900.0)));
+        assert_eq!(axis(&shipped("JetBrainsMono-Variable.ttf"), 0, b"opsz"), None);
     }
 
     #[test]
