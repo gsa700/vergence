@@ -35,14 +35,35 @@ const MAX_CELL: usize = 1 << 22;
 
 /// A page drawn at `scale` pixels per point (1 = 72 dpi), white ground.
 pub fn render_page(doc: &Document, page: &Page, scale: f64) -> Option<Canvas> {
+    render_region(doc, page, scale, None)
+}
+
+/// The page's size as shown, in points: its visible box, turned by /Rotate.
+pub fn page_size(page: &Page) -> (f64, f64) {
+    let b = page_box(page);
+    let (w, h) = (b[2] - b[0], b[3] - b[1]);
+    if page.rotate % 180 == 90 { (h, w) } else { (w, h) }
+}
+
+/// The page's pixels at `scale` (its full size is page_size times scale,
+/// rounded up), or only the rectangle `region` (x, y, width, height in
+/// those pixels): a tile while zoomed in.
+pub fn render_region(doc: &Document, page: &Page, scale: f64, region: Option<(usize, usize, usize, usize)>) -> Option<Canvas> {
     let b = page_box(page);
     let (w, h) = (b[2] - b[0], b[3] - b[1]);
     let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
-    let (dw, dh) = if page.rotate % 180 == 90 { (h, w) } else { (w, h) };
-    let (pw, ph) = ((dw * scale).ceil().max(1.0) as usize, (dh * scale).ceil().max(1.0) as usize);
+    let (dw, dh) = page_size(page);
+    let (full_w, full_h) = ((dw * scale).ceil().max(1.0) as usize, (dh * scale).ceil().max(1.0) as usize);
+    let (x, y, pw, ph) = match region {
+        Some((x, y, rw, rh)) if rw > 0 && rh > 0 && x < full_w && y < full_h => (x, y, rw.min(full_w - x), rh.min(full_h - y)),
+        Some(_) => return None,
+        None => (0, 0, full_w, full_h),
+    };
     let mut canvas = Canvas::new(pw, ph)?;
     canvas.clear([1.0, 1.0, 1.0, 1.0]);
-    let base = page_transform(b, page.rotate, scale);
+    let mut base = page_transform(b, page.rotate, scale);
+    base.e -= x as f64;
+    base.f -= y as f64;
     let mut r = Renderer { doc, canvas, ops: 0, forms: HashSet::new(), base, fonts: std::collections::HashMap::new() };
     let resources = Rc::new(page.resources.clone().unwrap_or_default());
     let mut gs = State::new(base, Clip::full(pw, ph), resources.clone());

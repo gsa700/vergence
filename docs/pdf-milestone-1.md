@@ -279,3 +279,16 @@ selection order; color management beyond the simple formulas.
   cover. Corpus: no panics; 63 tests on all three. Left in step 5: the
   JPEG 2000 placeholder (30 files; the Icom receivers brochure is nearly
   all JPX), Huffman JBIG2.
+- **Step 6, part 1** (2026-11-20 night): the sandboxed helper.
+  vergence-pdf's helper.rs: `libexec/vergence/vergence-pdf` reads the
+  substitute fonts (font::preload_substitutes), then confines itself with
+  vergence-decode's `confine` (now public, with the CPU time as a
+  parameter: 4 hours over a helper's life, 10 s for pictures as before),
+  then serves requests on its pipe: the document's bytes (it opens no
+  file), a password, a page or a tile at a scale (render_region, new).
+  The client `Viewer` times each answer (30 s), and after a crash or hang
+  starts a new helper with the document and password again; a panic while
+  drawing refuses that request only. tests/helper.rs runs the real
+  confined helper (seccomp on Hubble, Capsicum on kepler and techbench);
+  examples/pdfhelper draws through it (a non-embedded Helvetica drawn by
+  its substitute under Capsicum on kepler). install.sh installs it.

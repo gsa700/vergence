@@ -305,6 +305,17 @@ pub fn decode_bytes(data: &[u8], at_least: Option<(u32, u32)>) -> Result<Picture
 /// with less confinement than it means to have (security pass 2026-11-15,
 /// finding 3).
 fn limit_self() {
+    confine(10);
+}
+
+/// Confines this process as the picture helper is confined (see the
+/// crate's comment): every descriptor but the standard three closed, no
+/// file written, no new descriptor, `cpu_seconds` of processor time, 4 GB
+/// of address space, then capability mode on FreeBSD or no-new-privileges
+/// and the seccomp filter on Linux. Anything that cannot be set ends the
+/// process (exit 3). The PDF helper (vergence-pdf) uses it too, with more
+/// time: it lives as long as its document's window.
+pub fn confine(cpu_seconds: u64) {
     #[repr(C)]
     struct Rlimit {
         cur: u64,
@@ -321,17 +332,18 @@ fn limit_self() {
     // CPU seconds, file size (none written), open files (only the three
     // standard ones: no new descriptor at all), address space.
     #[cfg(target_os = "linux")]
-    const LIMITS: [(i32, u64); 4] = [(0, 10), (1, 0), (7, 3), (9, 4 << 30)]; // CPU, FSIZE, NOFILE, AS
+    let limits: [(i32, u64); 4] = [(0, cpu_seconds), (1, 0), (7, 3), (9, 4 << 30)]; // CPU, FSIZE, NOFILE, AS
     #[cfg(target_os = "freebsd")]
-    const LIMITS: [(i32, u64); 4] = [(0, 10), (1, 0), (8, 3), (10, 4 << 30)]; // CPU, FSIZE, NOFILE, VMEM (AS)
+    let limits: [(i32, u64); 4] = [(0, cpu_seconds), (1, 0), (8, 3), (10, 4 << 30)]; // CPU, FSIZE, NOFILE, VMEM (AS)
     #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
-    const LIMITS: [(i32, u64); 0] = [];
+    let limits: [(i32, u64); 0] = [];
+    let _ = cpu_seconds;
     // Nothing but the three standard descriptors stays open.
     for fd in 3..1024 {
         // SAFETY: close(2) on descriptors this process may hold; none is used after.
         unsafe { close(fd) };
     }
-    for (resource, value) in LIMITS {
+    for (resource, value) in limits {
         let r = Rlimit { cur: value, max: value };
         // SAFETY: setrlimit(2) with a valid struct of two rlim_t.
         if unsafe { setrlimit(resource, &r) } != 0 {

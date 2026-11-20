@@ -546,6 +546,16 @@ fn embedded(doc: &Document, descriptor: &Dict) -> Program {
     Program::None
 }
 
+/// Reads every substitute face now: the sandboxed helper calls this before
+/// it confines itself, after which it can open no file.
+pub fn preload_substitutes() {
+    for base in ["Helvetica", "Times-Roman", "Courier"] {
+        for flags in [0, 64, 0x40000, 0x40000 | 64] {
+            let _ = substitute(base, flags);
+        }
+    }
+}
+
 /// A system font standing in for one not embedded: by its name (Courier,
 /// Times, Helvetica and the like) and flags (fixed pitch 1, serif 2,
 /// italic 64), metric-compatible faces first, Vergence's own last.

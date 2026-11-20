@@ -2274,6 +2274,7 @@ dependencies = [
  "vergence-decode",
  "vergence-raster",
  "vergence-text",
+ "vergence-types",
 ]
 
 [[package]]

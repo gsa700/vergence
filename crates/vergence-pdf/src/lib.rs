@@ -26,6 +26,7 @@ pub mod crypt;
 pub mod filter;
 pub mod font;
 pub mod function;
+pub mod helper;
 pub mod image;
 pub mod jbig2;
 pub mod lexer;
@@ -41,7 +42,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 pub use filter::Decoded;
-pub use render::render_page;
+pub use render::{page_size, render_page, render_region};
 use lexer::Lexer;
 pub use object::{Dict, Object, Ref, Stream};
 use xref::Entry;
