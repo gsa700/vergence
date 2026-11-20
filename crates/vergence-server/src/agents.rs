@@ -149,6 +149,8 @@ pub struct Agents {
     /// The rings where agents acted (step 5), and whether their timer runs.
     rings: Vec<Ring>,
     ring_timer: bool,
+    /// The minutes left each running-out grant was last told at.
+    told: HashMap<(String, String), u64>,
 }
 
 /// A ring where an agent acted: on the screens, its color, when, its picture.
@@ -466,8 +468,49 @@ impl Server {
         }
     }
 
+    /// What the agent on bus client `client` may do with `app`: its span's
+    /// word ("" if not asked yet) and the minutes a timed one has left.
+    pub fn agent_grant_for(&mut self, client: u32, app: &str) -> (String, u32) {
+        let Some(agent) = self.bus_agent_name(client) else { return (String::new(), 0) };
+        self.agents.load();
+        let word = match self.agents.grants.get(&(agent.clone(), app.to_string())) {
+            Some(Span::Connection(c)) if *c == client => "just now",
+            Some(Span::Until(t)) if *t > now_secs() => "timed",
+            Some(Span::Session) => "session",
+            Some(Span::Always) => "always",
+            Some(Span::Never) => "never",
+            _ => "",
+        };
+        (word.into(), self.agents.minutes_left(&agent, app).filter(|_| word == "timed").unwrap_or(0) as u32)
+    }
+
+    /// Timed grants running out: each agent hears of its own, each minute
+    /// of the last five, and once at the end (step 6; the change log).
+    fn agents_time_told(&mut self) {
+        let now = now_secs();
+        let mut tell = Vec::new();
+        for ((agent, app), span) in &self.agents.grants {
+            let Span::Until(t) = span else { continue };
+            let left = t.saturating_sub(now).div_ceil(60);
+            if left > ENDING_MINUTES {
+                continue;
+            }
+            let key = (agent.clone(), app.clone());
+            if self.agents.told.get(&key) != Some(&left) {
+                tell.push((key, left));
+            }
+        }
+        for ((agent, app), left) in tell {
+            self.agents.told.insert((agent.clone(), app.clone()), left);
+            self.meaning_log.push(crate::meaning::Change::Time { agent, app, minutes_left: left as u32 });
+        }
+        let grants = &self.agents.grants;
+        self.agents.told.retain(|k, _| matches!(grants.get(k), Some(Span::Until(_))));
+    }
+
     /// The tile while an agent works (with the dock's tick, once a second).
     pub fn agents_tick(&mut self) {
+        self.agents_time_told();
         if self.agents.tile_up && self.agents.last.as_ref().is_none_or(|(_, _, t)| t.elapsed().as_secs() >= WORKING_SECS) {
             self.agents.tile_up = false;
             self.tile_remove(crate::tiles::Owner::Desktop, "agent");

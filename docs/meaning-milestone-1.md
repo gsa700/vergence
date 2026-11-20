@@ -271,3 +271,27 @@ unnecessary for now); voice control.
   ring on the pressed 5 (picture checked), the tile at 4 minutes left,
   extended to 64, the expired question (picture checked) answered and
   its waiting press done.
+- **Step 6** (2026-11-20 afternoon): the adapter, and time told to the
+  agent. Bus v28: `AgentWindow::allowed` (not asked, just now, timed,
+  session, always, never) and `minutes_left`; `AgentChange::Time { app,
+  minutes_left }`, logged each minute of a timed grant's last five and at
+  its end, heard only by its own agent. vergence-agent-mcp
+  (vergence-protocol src/bin, installed): MCP over its standard input and
+  output (JSON-RPC 2.0, a message a line; protocol versions 2025-06-18,
+  2025-03-26, 2024-11-05), our own JSON code (nesting and line length
+  bounded; 64-bit node ids as strings); tools windows, tree, find,
+  focused, act (by path, exactly one widget, or by window and node;
+  waits up to 1.5 s for the window's tree to show what it did, and
+  answers with the widget as it is after), wait (changes after a number,
+  up to 30 s, the time running out among them). The agent connects at its
+  first tool call, says its name (`--name`, "Claude" by default), and
+  waits through the person's question. For Claude Code: `claude mcp add
+  vergence -- vergence-agent-mcp --name Claude` (over SSH: `ssh HOST env
+  XDG_RUNTIME_DIR=... WAYLAND_DISPLAY=wayland-1 vergence-agent-mcp`).
+  Tests: JSON both ways (escapes, surrogate pairs, big ids), bad JSON
+  refused and fuzzed, the protocol's handshake, list and errors without
+  a bus. Seen headless on Hubble, a scripted MCP session: initialize, the
+  tools, windows ("not asked yet"), act on the 7 waiting through the
+  question then done, x, 6, =, find answering "7×6" and "42" at once (no
+  frame-old read), windows "allowed for 60 more min"; a grant 4 minutes
+  from its end told by wait ("ends in 4 min; ask the person for more").

@@ -57,11 +57,13 @@
 //! 3): the agent interface, `ClientMsg::Agent`/`ServerMsg::Agent` (agent.rs).
 //! Version 27 (step 4, part 2): `ListGrants`/`Grants` and `RevokeGrants`,
 //! the agents' grants for the settings app's Privacy > Agents page.
+//! Version 28 (step 6): an agent hears what it may do with each window's
+//! app and the minutes left (`agent::AgentWindow::allowed`, `AgentChange::Time`).
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 27;
+pub const VERSION: u32 = 28;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

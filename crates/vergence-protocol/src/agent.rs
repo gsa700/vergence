@@ -43,6 +43,11 @@ pub struct AgentWindow {
     pub at: Rect4,
     /// The screen it is mostly on (its name).
     pub screen: String,
+    /// What this agent may do with its app (bus v28): "", "just now",
+    /// "timed", "session", "always" or "never" ("" not asked yet), and the
+    /// minutes a timed grant has left.
+    pub allowed: String,
+    pub minutes_left: u32,
 }
 
 /// A widget found, with its window.
@@ -64,6 +69,10 @@ pub enum AgentChange {
     Focus { client: u32, window: u32, node: u64 },
     Caret { client: u32, window: u32, at: Option<Rect4> },
     Tree { client: u32, window: u32 },
+    /// This agent's timed grant for an app is running out (each minute of
+    /// its last five) or has run out (0): ask the person for more before a
+    /// long step (bus v28).
+    Time { app: String, minutes_left: u32 },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -269,7 +278,7 @@ impl AgentEvent {
                 for w in windows {
                     e.u32(w.client).u32(w.window).str(&w.title).str(&w.app_id).str(&w.kind).bool(w.keyboard).bool(w.meaning);
                     put_rect(&mut e, &w.at);
-                    e.str(&w.screen);
+                    e.str(&w.screen).str(&w.allowed).u32(w.minutes_left);
                 }
                 e
             }
@@ -322,6 +331,7 @@ impl AgentEvent {
                             &mut e
                         }
                         AgentChange::Tree { client, window } => e.u8(3).u32(*client).u32(*window),
+                        AgentChange::Time { app, minutes_left } => e.u8(4).str(app).u32(*minutes_left),
                     };
                 }
                 e
@@ -340,7 +350,8 @@ impl AgentEvent {
                 for _ in 0..n {
                     let (client, window, title, app_id, kind, keyboard, meaning) = (d.u32()?, d.u32()?, d.str()?, d.str()?, d.str()?, d.bool()?, d.bool()?);
                     let at = get_rect(&mut d)?;
-                    windows.push(AgentWindow { client, window, title, app_id, kind, keyboard, meaning, at, screen: d.str()? });
+                    let screen = d.str()?;
+                    windows.push(AgentWindow { client, window, title, app_id, kind, keyboard, meaning, at, screen, allowed: d.str()?, minutes_left: d.u32()? });
                 }
                 AgentEvent::Windows { serial, windows }
             }
@@ -373,6 +384,7 @@ impl AgentEvent {
                             AgentChange::Caret { client, window, at: get_opt_rect(&mut d)? }
                         }
                         3 => AgentChange::Tree { client: d.u32()?, window: d.u32()? },
+                        4 => AgentChange::Time { app: d.str()?, minutes_left: d.u32()? },
                         _ => return Err(WireError::BadValue("change")),
                     };
                     changes.push((seq, c));
@@ -414,7 +426,7 @@ mod tests {
     fn events_round_trip() {
         let f = AgentFound { client: 4, window: 1, title: "Windows".into(), node: node(), screen: "DP-1".into() };
         for ev in [
-            AgentEvent::Windows { serial: 1, windows: vec![AgentWindow { client: 4, window: 1, title: "Windows".into(), app_id: "vergence-settings".into(), kind: "native".into(), keyboard: true, meaning: true, at: (10.0, 20.0, 800.0, 600.0), screen: "DP-1".into() }] },
+            AgentEvent::Windows { serial: 1, windows: vec![AgentWindow { client: 4, window: 1, title: "Windows".into(), app_id: "vergence-settings".into(), kind: "native".into(), keyboard: true, meaning: true, at: (10.0, 20.0, 800.0, 600.0), screen: "DP-1".into(), allowed: "timed".into(), minutes_left: 12 }] },
             AgentEvent::Tree { serial: 2, client: 4, window: 1, title: "Windows".into(), focus: 9, caret: Some((1.0, 2.0, 1.0, 14.0)), nodes: vec![node()] },
             AgentEvent::Found { serial: 3, found: vec![f.clone(), f.clone()] },
             AgentEvent::Focused { serial: 4, found: Some(Box::new(f)), caret: None },
@@ -428,6 +440,7 @@ mod tests {
                     (38, AgentChange::Focus { client: 4, window: 1, node: 9 }),
                     (39, AgentChange::Caret { client: 4, window: 1, at: Some((5.0, 6.0, 1.0, 14.0)) }),
                     (40, AgentChange::Tree { client: 4, window: 1 }),
+                    (41, AgentChange::Time { app: "vergence-calc".into(), minutes_left: 4 }),
                 ],
             },
         ] {

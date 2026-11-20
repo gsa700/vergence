@@ -98,7 +98,12 @@ fn run(name: &str, args: &[String]) -> Result<String, String> {
                 .map(|w| {
                     let mark = if w.keyboard { "> " } else { "  " };
                     let meaning = if w.meaning { "" } else { " (no meaning)" };
-                    format!("{mark}{}/{} {} {:?} ({}) at {:.0},{:.0} {:.0}x{:.0} on {}{meaning}", w.client, w.window, w.kind, w.title, w.app_id, w.at.0, w.at.1, w.at.2, w.at.3, w.screen)
+                    let allowed = match (w.allowed.as_str(), w.meaning) {
+                        (_, false) | ("", _) => String::new(),
+                        ("timed", _) => format!(", allowed for {} more min", w.minutes_left),
+                        (a, _) => format!(", allowed {a}"),
+                    };
+                    format!("{mark}{}/{} {} {:?} ({}) at {:.0},{:.0} {:.0}x{:.0} on {}{meaning}{allowed}", w.client, w.window, w.kind, w.title, w.app_id, w.at.0, w.at.1, w.at.2, w.at.3, w.screen)
                 })
                 .collect::<Vec<_>>()
                 .join("\n")),

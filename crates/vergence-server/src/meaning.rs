@@ -49,6 +49,9 @@ pub enum Change {
     Caret { client: u32, window: u32, at: Option<Rect4> },
     /// A window's tree changed (widgets, values, states).
     Tree { client: u32, window: u32 },
+    /// An agent's timed grant for an app is running out, or has (0): only
+    /// that agent hears it (agents.rs).
+    Time { agent: String, app: String, minutes_left: u32 },
 }
 
 #[derive(Default)]
@@ -364,13 +367,15 @@ impl Server {
             AgentRequest::Windows { serial } => {
                 let keyboard = self.input.keyboard_native.clone();
                 let mut windows = Vec::new();
-                for w in self.space.elements().take(MAX_LISTED) {
+                let wins: Vec<Win> = self.space.elements().take(MAX_LISTED).cloned().collect();
+                for w in &wins {
                     let g = self.space.element_geometry(w).unwrap_or_default();
                     let (kind, app_id) = self.window_kind_app(w);
                     let (client, window, meaning) = w.native().map_or((0, 0, false), |n| (n.client, n.id, n.meaning().is_some()));
                     let at = (g.loc.x as f64, g.loc.y as f64, g.size.w as f64, g.size.h as f64);
                     let screen = self.screen_name_at(at.0 + at.2 / 2.0, at.1 + at.3 / 2.0);
-                    windows.push(AgentWindow { client, window, title: self.window_title(w), app_id, kind: kind.into(), keyboard: keyboard.as_ref() == Some(w), meaning, at, screen });
+                    let (allowed, minutes_left) = self.agent_grant_for(id, &app_id);
+                    windows.push(AgentWindow { client, window, title: self.window_title(w), app_id, kind: kind.into(), keyboard: keyboard.as_ref() == Some(w), meaning, at, screen, allowed, minutes_left });
                 }
                 reply(self, AgentEvent::Windows { serial, windows });
             }
@@ -432,9 +437,11 @@ impl Server {
             }
             AgentRequest::Changes { serial, since } => {
                 let (changes, latest) = self.meaning_log.since(since);
+                let me = self.bus_agent_name(id).unwrap_or_default();
                 let mut out = Vec::new();
                 let mut upto = since;
                 for (n, c) in changes.into_iter().take(MAX_LISTED) {
+                    upto = n;
                     out.push((
                         n,
                         match c {
@@ -442,9 +449,11 @@ impl Server {
                             Change::Focus { client, window, node } => AgentChange::Focus { client, window, node },
                             Change::Caret { client, window, at } => AgentChange::Caret { client, window, at },
                             Change::Tree { client, window } => AgentChange::Tree { client, window },
+                            // Only its own grants' time.
+                            Change::Time { agent, app, minutes_left } if agent == me => AgentChange::Time { app, minutes_left },
+                            Change::Time { .. } => continue,
                         },
                     ));
-                    upto = n;
                 }
                 // Cut short: the agent asks again from where this ends.
                 let latest = if out.len() == MAX_LISTED { upto } else { latest };
