@@ -464,6 +464,16 @@ selection order; color management beyond the simple formulas.
   match. Pages with JPEG 2000 pictures: median 166 ms on Hubble, most of
   it drawing pages that are themselves huge (300 dpi scans stored at
   2480 by 3508 points).
-  Seen on the way, for later: big pictures drawn much smaller are point
-  sampled, so a scan's thin text breaks up (PDFKit averages); the Icom
-  catalog's title is missing but one letter (a font, not the picture).
+  Seen on the way, for later: big pictures drawn much smaller were point
+  sampled, so a scan's thin text broke up (PDFKit averages; done in part
+  4); the Icom catalog's title is missing but one letter (a font, not the
+  picture).
+- **Step 9, part 4** (2026-11-20 afternoon): pictures drawn much smaller
+  than they are. vergence-raster's draw_image averages a picture down
+  first, by whole factors along each of its axes (premultiplied, so
+  transparency averages right), then smooths it; stencil masks (1-bit
+  scans) go the same way. 704 corpus pages changed: a scan's thin text
+  stays whole and halftones turn to even gray, as PDFKit shows them (the
+  TM-V71 modification sheet, the Collins 51S-1 cover). Cost: the Collins
+  page 376 ms before, 400 ms after (its three 33M-pixel scans are
+  averaged once each). Test: one-pixel columns shrunk ten times are gray.

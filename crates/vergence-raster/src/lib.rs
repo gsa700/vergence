@@ -252,8 +252,30 @@ impl Canvas {
         if img.width == 0 || img.height == 0 || img.data.len() < img.width * img.height * 4 {
             return;
         }
+        // Much smaller than it is: averaged down first, by whole factors
+        // along each of its axes, so detail thinner than a device pixel
+        // (a scan's strokes) shows as gray instead of breaking up (PDF
+        // milestone 1, step 9). Then smoothed like any picture.
+        let shrink = |dx: f64, dy: f64| -> usize {
+            let len = dx.hypot(dy);
+            if len > 0.0 && len.is_finite() { (1.0 / len).floor().clamp(1.0, 64.0) as usize } else { 1 }
+        };
+        let (fx, fy) = (shrink(t.a, t.b), shrink(t.c, t.d));
+        if fx >= 2 || fy >= 2 {
+            let small = reduce(img, fx, fy);
+            let t2 = Transform::scale(fx as f64, fy as f64).then(t);
+            let extent = (img.width as f64 / fx as f64, img.height as f64 / fy as f64);
+            self.draw_image_in(&small, &t2, true, alpha, clip, extent);
+            return;
+        }
+        self.draw_image_in(img, t, smooth, alpha, clip, (img.width as f64, img.height as f64));
+    }
+
+    /// draw_image's work; `extent` is the picture's own size in its pixels
+    /// (an averaged-down picture's last pixels cover less than a whole one).
+    fn draw_image_in(&mut self, img: &Image, t: &Transform, smooth: bool, alpha: f32, clip: Option<&Clip>, extent: (f64, f64)) {
         let Some(inv) = t.invert() else { return };
-        let corners = [(0.0, 0.0), (img.width as f64, 0.0), (0.0, img.height as f64), (img.width as f64, img.height as f64)].map(|(x, y)| t.apply(Point::new(x, y)));
+        let corners = [(0.0, 0.0), (extent.0, 0.0), (0.0, extent.1), (extent.0, extent.1)].map(|(x, y)| t.apply(Point::new(x, y)));
         let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
         for c in corners {
             x0 = x0.min(c.x);
@@ -266,7 +288,7 @@ impl Canvas {
         }
         // The picture's own edges, anti-aliased like any shape.
         let mut outline = Path::new();
-        outline.rect(0.0, 0.0, img.width as f64, img.height as f64);
+        outline.rect(0.0, 0.0, extent.0, extent.1);
         let Some(cov) = fill_coverage(&outline, t, FillRule::NonZero, self.width, self.height) else { return };
         let (w, h) = (img.width as f64, img.height as f64);
         let sample = |u: f64, v: f64| -> Rgba {
@@ -335,6 +357,45 @@ impl Canvas {
     }
 }
 
+/// `img` averaged down by `fx` x `fy` (premultiplied, so averaging is
+/// right for transparent pixels too); the last row and column average what
+/// is there.
+fn reduce(img: &Image, fx: usize, fy: usize) -> Image {
+    let (w, h) = (img.width.div_ceil(fx), img.height.div_ceil(fy));
+    let mut data = vec![0u8; w * h * 4];
+    let mut sum = vec![0u32; w * 4];
+    let mut rows = vec![0u32; w];
+    for oy in 0..h {
+        sum.iter_mut().for_each(|v| *v = 0);
+        rows.iter_mut().for_each(|v| *v = 0);
+        for y in oy * fy..((oy + 1) * fy).min(img.height) {
+            let line = img.data[y * img.width * 4..(y + 1) * img.width * 4].as_chunks::<4>().0;
+            for (o, block) in line.chunks(fx).enumerate() {
+                let (mut r, mut g, mut b, mut a) = (0u32, 0u32, 0u32, 0u32);
+                for px in block {
+                    r += px[0] as u32;
+                    g += px[1] as u32;
+                    b += px[2] as u32;
+                    a += px[3] as u32;
+                }
+                let acc = &mut sum[o * 4..o * 4 + 4];
+                acc[0] += r;
+                acc[1] += g;
+                acc[2] += b;
+                acc[3] += a;
+                rows[o] += block.len() as u32;
+            }
+        }
+        for o in 0..w {
+            let n = rows[o].max(1);
+            for k in 0..4 {
+                data[(oy * w + o) * 4 + k] = ((sum[o * 4 + k] + n / 2) / n) as u8;
+            }
+        }
+    }
+    Image { width: w, height: h, data }
+}
+
 /// A straight color as premultiplied.
 pub fn premul(c: Rgba) -> Rgba {
     let a = c[3].clamp(0.0, 1.0);
@@ -362,6 +423,25 @@ mod tests {
 
     const BLACK: Rgba = [0.0, 0.0, 0.0, 1.0];
     const RED: Rgba = [1.0, 0.0, 0.0, 1.0];
+
+    #[test]
+    fn a_picture_much_smaller_than_itself_is_averaged() {
+        // One-pixel black and white columns, 200 wide, drawn 20 wide: gray,
+        // not black or white as point sampling would give.
+        let (w, h) = (200, 100);
+        let data: Vec<u8> = (0..w * h).flat_map(|i| if i % 2 == 0 { [0, 0, 0, 255] } else { [255, 255, 255, 255] }).collect();
+        let img = Image { width: w, height: h, data };
+        let mut c = Canvas::new(40, 40).unwrap();
+        c.clear([1.0, 0.0, 0.0, 1.0]);
+        c.draw_image(&img, &Transform::scale(0.1, 0.1), false, 1.0, None);
+        for x in 1..19 {
+            let p = c.pixel(x, 5);
+            assert!((p[0] as i32 - 128).abs() <= 3 && p[0] == p[1], "gray at {x}: {p:?}");
+        }
+        // Its edge is where the whole picture's edge is: 20 pixels in.
+        assert_eq!(c.pixel(20, 5), [255, 0, 0, 255]);
+        assert_eq!(c.pixel(5, 10), [255, 0, 0, 255]);
+    }
 
     #[test]
     fn fill_and_clip() {
