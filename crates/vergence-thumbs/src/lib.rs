@@ -199,6 +199,26 @@ fn write_private(to: &Path, bytes: &[u8]) -> std::io::Result<()> {
     written
 }
 
+/// Whether a file of this type gets a thumbnail: pictures, and PDF
+/// documents (their first page; PDF milestone 1, step 8).
+pub fn has_thumbnail(mime: Option<&str>) -> bool {
+    mime.is_some_and(|m| m.starts_with("image/") || m == "application/pdf")
+}
+
+/// A PDF's first page drawn to fit `size` x `size` pixels, by vergence-pdf's
+/// confined helper (never in this process). None for a PDF that needs a
+/// password, has no pages, or will not draw.
+pub fn pdf_page(path: &Path, size: u32) -> Option<Image> {
+    let mut v = vergence_pdf::helper::Viewer::open(path).ok()?;
+    if v.info.needs_password {
+        return None;
+    }
+    let (w, h) = *v.info.pages.first()?;
+    let scale = (size as f32 / w.max(h).max(1.0)).clamp(0.01, 8.0);
+    let t = v.render(0, scale, None).ok()?;
+    Some(Image { width: t.width, height: t.height, rgba: t.rgba })
+}
+
 /// The file's thumbnail: the cache's if fresh, else made (decoded apart,
 /// shrunk, written to the cache). None for a file that is not a picture
 /// the helper can read (marked failed until it changes), or that is in the
@@ -218,7 +238,8 @@ pub fn get(path: &Path) -> Option<Image> {
     if vergence_types::read_regular(&fail, MAX_CACHED).is_ok_and(|b| fresh(&b, &link, time)) {
         return None;
     }
-    let made = std::fs::metadata(path).ok().filter(|m| m.is_file() && m.len() <= MAX_FILE).and_then(|_| vergence_decode::decode_file(path, Some((SIZE, SIZE))).ok()).and_then(decoded).map(|img| shrink(&img, SIZE));
+    let pdf = vergence_types::of_file(path) == "application/pdf";
+    let made = std::fs::metadata(path).ok().filter(|m| m.is_file() && m.len() <= MAX_FILE).and_then(|_| if pdf { pdf_page(path, SIZE) } else { vergence_decode::decode_file(path, Some((SIZE, SIZE))).ok().and_then(decoded) }).map(|img| shrink(&img, SIZE));
     match made {
         Some(img) => {
             if let Some(bytes) = encode(&img, &link, time) {

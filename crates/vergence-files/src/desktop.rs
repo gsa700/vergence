@@ -363,7 +363,7 @@ impl Desktop {
     /// The key an entry's mark is kept under: its own path (a picture's
     /// thumbnail, a launcher's icon), else its own icon's ("::icon:places/home").
     fn mark_key(&self, e: &Entry) -> PathBuf {
-        let thumb = Desktop::launcher(e) || (e.kind() == Kind::Picture && self.fixed_of(e).is_none());
+        let thumb = Desktop::launcher(e) || (!e.dir && vergence_thumbs::has_thumbnail(e.mime) && self.fixed_of(e).is_none());
         match self.own_icon(e) {
             // By the theme too, so a theme chosen in Settings is drawn anew.
             Some((g, n)) if !thumb => PathBuf::from(format!("::icon:{}/{g}/{n}", files::icon_theme())),
@@ -387,7 +387,7 @@ impl Desktop {
                 Some(own)
             } else if Desktop::launcher(e) {
                 Desktop::entry_of(e).filter(|x| !x.icon.is_empty()).and_then(|x| if x.icon.starts_with('/') { Some(PathBuf::from(x.icon)) } else { vergence_shell::icons::find(&theme, &x.icon, 128) })
-            } else if e.kind() == Kind::Picture {
+            } else if !e.dir && vergence_thumbs::has_thumbnail(e.mime) {
                 Some(e.path.clone())
             } else {
                 None

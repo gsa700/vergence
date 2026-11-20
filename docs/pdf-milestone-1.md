@@ -353,3 +353,18 @@ selection order; color management beyond the simple formulas.
   found". Seen headless on Hubble: "grounding" 2,040 times in the R56
   manual in about 5 s; a selection copied and pasted into Edit, lines
   intact. Tests on all four machines (apollo, Fedora, joined).
+- **Step 8** (2026-11-20 night): PDFs in FileView and on the desktop.
+  vergence-thumbs: has_thumbnail (pictures and PDFs) and pdf_page (the
+  first page drawn by the confined helper to fit a size); PDF thumbnails
+  go into the shared freedesktop cache like pictures', a PDF that needs a
+  password or will not draw is marked failed and keeps its icon. FileView:
+  the icon view's thumbnails, the side pane and Space's preview (the
+  first page at up to 1200 px) and "Open in Close-Up" for PDFs; the
+  desktop's icons the same. Close-Up's desktop entry lists
+  application/pdf ("Picture and PDF Viewer"), so it is the default for
+  PDFs (our own apps first; a choice made in Vergence still wins). Seen
+  headless on Hubble: a folder of the R56 manual, the Omron datasheet, a
+  QST scan (CCITT), the Transistor Radio Handbook (JBIG2) and the locked
+  test file (the PDF icon): thumbnails, and the R56's first page in
+  Space's preview. Space shows the first page only for now. Tests on all
+  four machines.

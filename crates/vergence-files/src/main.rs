@@ -793,19 +793,25 @@ impl Viewer {
         ((room + 6.0) / 106.0).floor().max(1.0) as isize
     }
 
-    /// Asks the worker for the cursor's picture (if it is one and not asked already).
+    /// Asks the worker for the cursor's picture (if it is one, or a PDF's
+    /// first page, and not asked already).
     fn want_picture(&self) {
         let Some(e) = self.cursor_entry() else { return };
-        if e.kind() != Kind::Picture || self.asked.borrow().as_ref() == Some(&e.path) {
+        if e.dir || !vergence_thumbs::has_thumbnail(e.mime) || self.asked.borrow().as_ref() == Some(&e.path) {
             return;
         }
+        let pdf = e.mime == Some("application/pdf");
         *self.asked.borrow_mut() = Some(e.path.clone());
         let (out, waker, path) = (self.picture.clone(), self.waker.clone(), e.path.clone());
         std::thread::spawn(move || {
-            let img = vergence_decode::decode_file(&path, Some((1600, 1200))).ok().and_then(|p| {
-                let f = p.frames.into_iter().next()?;
-                Some(Arc::new(Image { width: p.width, height: p.height, rgba: f.rgba }))
-            });
+            let img = if pdf {
+                vergence_thumbs::pdf_page(&path, 1200).map(Arc::new)
+            } else {
+                vergence_decode::decode_file(&path, Some((1600, 1200))).ok().and_then(|p| {
+                    let f = p.frames.into_iter().next()?;
+                    Some(Arc::new(Image { width: p.width, height: p.height, rgba: f.rgba }))
+                })
+            };
             *out.lock().unwrap_or_else(|e| e.into_inner()) = Some((path, img));
             if let Some(w) = waker {
                 w.wake();
@@ -1617,7 +1623,7 @@ impl Viewer {
         // their order; what other folders asked and has not begun is dropped.
         if self.shown_view() == ViewKind::Icons {
             self.thumbs.forget_waiting();
-            for e in visible.iter().filter(|e| e.kind() == Kind::Picture) {
+            for e in visible.iter().filter(|e| !e.dir && vergence_thumbs::has_thumbnail(e.mime)) {
                 self.thumbs.want(&e.path, e.changed);
             }
         }
@@ -1702,7 +1708,7 @@ impl Viewer {
 
     /// The preview of a file: its picture, the start of its text, or its mark.
     fn look_at(&self, e: &Entry, big: bool, t: &Theme) -> Element<Msg> {
-        if e.kind() == Kind::Picture {
+        if !e.dir && vergence_thumbs::has_thumbnail(e.mime) {
             if let Some(img) = self.picture_of(&e.path) {
                 return Viewer::fitted(img);
             }
@@ -1727,7 +1733,7 @@ impl Viewer {
                 if !e.dir {
                     parts.push(space().height(Length::Fixed(6.0)));
                     parts.push(button(label("Open").size(12.0)).look(ButtonLook::Accent).padding(Padding::hv(4.0, 12.0)).on_press(Msg::OpenChosen).name("Open"));
-                    if matches!(e.kind(), Kind::Picture | Kind::Text) {
+                    if matches!(e.kind(), Kind::Picture | Kind::Text) || e.mime == Some("application/pdf") {
                         parts.push(button(label("Open in Close-Up").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Msg::OpenInCloseUp).name("Open in Close-Up"));
                     }
                 }
