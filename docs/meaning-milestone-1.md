@@ -162,3 +162,30 @@ unnecessary for now); voice control.
   paths (names, roles, below a part, case, nothing), the window part, the
   log. Seen headless on Hubble: a switch found by path, every choice with
   its items, focus moved by an action and the log saying so.
+- **Step 3** (2026-11-20 afternoon): the agent interface. Bus v26:
+  vergence-protocol agent.rs (opcodes 200 to 299 both ways),
+  `ClientMsg::Agent(AgentRequest)`, `ServerMsg::Agent(AgentEvent)`:
+  Hello (the agent's name), Windows (every window: kind, keyboard, has
+  meaning, place, screen), Tree (a native window's widgets on the
+  screens), Find (by path), Focused, Act (answered once the window
+  answers; an agent's serial carried through the server's action book),
+  Changes (the log, polled; an agent waits by asking again). Replies cut
+  to their frame. The server (bus.rs, meaning.rs): an agent must say who
+  it is first; a secret field is refused before its program hears of it;
+  a window or program that goes fails its pending actions ("the window
+  went away"). **On only where the control socket is** (a development
+  session, or ~/.config/vergence/control-socket) until step 4's
+  permission: before it, any program of the person's could drive their
+  apps. `vagent` (installed with vtile): windows, tree, find, focused,
+  `do <action> <path> [value]` (exactly one widget, else the matches
+  listed), act, changes. `tools/vergence-headless env` sets VERGENCE_BUS
+  too. Tests: requests and replies round trip, damage never panics.
+  Seen headless on Hubble: every window listed with the keyboard's
+  marked; 8 × 5 = and 9 × 4 = pressed by path in the Calculator (40, 36);
+  Settings' top-edge choice chosen by name; a missing path refused. Seen
+  too: a tree read straight after an action can be a frame behind (wait
+  for the Tree change); label ids move when a layout gains a line (ids
+  are by place); Focus moves a window's focus but not the keyboard to it
+  (not felt), so `focused` follows only the window the person uses.
+  Not yet: a window's picture for windows without meaning (step 3, part
+  2: a picture needs a descriptor beside the frame).

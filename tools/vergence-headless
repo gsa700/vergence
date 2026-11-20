@@ -10,8 +10,9 @@
 # It has its own HOME and runtime directory under ~/.cache/vergence-headless
 # (a throwaway profile: its own settings, window memory, no session restore;
 # lock, screens off and sleep never happen), its own Wayland socket, bus and
-# control socket. `env` sets VCTL_SOCKET, so vctl talks to it and to nothing
-# else (a test must never fall through to the session on the monitors).
+# control socket. `env` sets VCTL_SOCKET and VERGENCE_BUS, so vctl and bus
+# clients (vtile, vagent) talk to it and to nothing else (a test must never
+# fall through to the session on the monitors).
 # The server: $VERGENCE_SERVER, else the checkout's target-check build
 # (tools/display-check-remote.sh builds it there), else target/release.
 # With no --screen: one 1920x1080 screen of 531x299 mm (a 24").
@@ -82,6 +83,9 @@ EOF
 env)
     running || { echo "vergence-headless: not running" >&2; exit 1; }
     echo "VCTL_SOCKET=$run/vergence-control; export VCTL_SOCKET"
+    # Its session bus, for bus clients (vtile, vagent): never the monitors' session's.
+    bus=$(ls "$run"/vergence-bus-* 2>/dev/null | head -n 1)
+    [ -n "$bus" ] && echo "VERGENCE_BUS=$bus; export VERGENCE_BUS"
     # This checkout's vctl: an older installed one ignores VCTL_SOCKET.
     echo "vctl() { sh '$root/tools/vctl' \"\$@\"; }"
     ;;

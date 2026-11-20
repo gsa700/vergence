@@ -258,6 +258,150 @@ impl Server {
     }
 }
 
+/// Whether agents may use the interface: until the person can allow them
+/// (step 4, the permission dialog), only in a development session, where
+/// the control socket is on too and the security model is already set
+/// aside for testing (control.rs).
+pub fn agents_allowed() -> bool {
+    crate::control::enabled()
+}
+
+/// How much of a reply's frame its list may fill (frames are at most 64 KB).
+const REPLY_BUDGET: usize = 60 * 1024;
+
+/// A node's share of a frame, roughly (ids, bounds, its strings).
+fn node_size(n: &Node) -> usize {
+    64 + n.role.len() + n.name.len() + n.value.as_ref().map_or(0, String::len) + n.states.iter().map(|s| s.len() + 4).sum::<usize>() + n.items.iter().map(|s| s.len() + 4).sum::<usize>()
+}
+
+/// A node moved onto the screens.
+fn on_screens(n: &Node, origin: (f64, f64)) -> Node {
+    let mut n = n.clone();
+    n.x += origin.0;
+    n.y += origin.1;
+    n
+}
+
+impl Server {
+    /// The screen a point is on (its name).
+    fn screen_name_at(&self, x: f64, y: f64) -> String {
+        self.space
+            .outputs()
+            .find(|o| self.space.output_geometry(o).is_some_and(|g| x >= g.loc.x as f64 && y >= g.loc.y as f64 && x < (g.loc.x + g.size.w) as f64 && y < (g.loc.y + g.size.h) as f64))
+            .map(|o| o.name())
+            .unwrap_or_default()
+    }
+
+    /// A window's kind and application id, whatever kind it is.
+    fn window_kind_app(&self, w: &Win) -> (&'static str, String) {
+        if let Some(n) = w.native() {
+            return ("native", n.app_id.clone());
+        }
+        if let Some(x) = w.x11_surface() {
+            return ("x11", x.class());
+        }
+        let app = w
+            .toplevel()
+            .map(|t| {
+                smithay::wayland::compositor::with_states(t.wl_surface(), |s| {
+                    s.data_map.get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>().and_then(|d| d.lock().unwrap().app_id.clone()).unwrap_or_default()
+                })
+            })
+            .unwrap_or_default();
+        ("wayland", app)
+    }
+
+    fn agent_found(&self, f: &Found) -> vergence_protocol::agent::AgentFound {
+        let mut node = f.node.clone();
+        (node.x, node.y) = (f.at.0, f.at.1);
+        vergence_protocol::agent::AgentFound { client: f.client, window: f.window, title: f.title.clone(), node, screen: f.screen.clone().unwrap_or_default() }
+    }
+
+    /// An agent's request (it has said who it is; bus.rs checks).
+    pub fn agent_request(&mut self, id: u32, r: vergence_protocol::agent::AgentRequest) {
+        use vergence_protocol::agent::{AgentChange, AgentEvent, AgentRequest, AgentWindow, MAX_LISTED};
+        use vergence_protocol::bus::{ErrorCode, ServerMsg};
+        let reply = |s: &mut Server, e: AgentEvent| s.bus_send(id, ServerMsg::Agent(e));
+        let refuse = |s: &mut Server, serial: u32, code: ErrorCode, message: String| s.bus_send(id, ServerMsg::Error { serial, code, message });
+        match r {
+            AgentRequest::Hello { .. } => {}
+            AgentRequest::Windows { serial } => {
+                let keyboard = self.input.keyboard_native.clone();
+                let mut windows = Vec::new();
+                for w in self.space.elements().take(MAX_LISTED) {
+                    let g = self.space.element_geometry(w).unwrap_or_default();
+                    let (kind, app_id) = self.window_kind_app(w);
+                    let (client, window, meaning) = w.native().map_or((0, 0, false), |n| (n.client, n.id, n.meaning().is_some()));
+                    let at = (g.loc.x as f64, g.loc.y as f64, g.size.w as f64, g.size.h as f64);
+                    let screen = self.screen_name_at(at.0 + at.2 / 2.0, at.1 + at.3 / 2.0);
+                    windows.push(AgentWindow { client, window, title: self.window_title(w), app_id, kind: kind.into(), keyboard: keyboard.as_ref() == Some(w), meaning, at, screen });
+                }
+                reply(self, AgentEvent::Windows { serial, windows });
+            }
+            AgentRequest::Tree { serial, client, window } => {
+                let Some(w) = self.natives.get(&(client, window)).cloned() else {
+                    return refuse(self, serial, ErrorCode::Failed, format!("no native window {client}/{window}"));
+                };
+                let Some(n) = w.native() else { return };
+                let Some((focus, caret, nodes)) = n.meaning() else {
+                    return refuse(self, serial, ErrorCode::Failed, "that window has sent no meaning".into());
+                };
+                let loc = self.space.element_location(&w).unwrap_or_default();
+                let origin = (loc.x as f64, loc.y as f64);
+                let mut used = 256;
+                let nodes: Vec<Node> = nodes.iter().map(|m| on_screens(m, origin)).take_while(|m| (used + node_size(m) <= REPLY_BUDGET).then(|| used += node_size(m)).is_some()).collect();
+                let caret = caret.map(|(x, y, cw, ch)| (origin.0 + x, origin.1 + y, cw, ch));
+                reply(self, AgentEvent::Tree { serial, client, window, title: n.title(), focus, caret, nodes });
+            }
+            AgentRequest::Find { serial, path } => {
+                let mut used = 256;
+                let found: Vec<_> = self.meaning_find(&path).iter().map(|f| self.agent_found(f)).take(MAX_LISTED).take_while(|f| (used + node_size(&f.node) + f.title.len() + 32 <= REPLY_BUDGET).then(|| used += node_size(&f.node) + f.title.len() + 32).is_some()).collect();
+                reply(self, AgentEvent::Found { serial, found });
+            }
+            AgentRequest::Focused { serial } => {
+                let (found, caret) = match self.meaning_focus() {
+                    Some((f, caret)) => (Some(Box::new(self.agent_found(&f))), caret),
+                    None => (None, None),
+                };
+                reply(self, AgentEvent::Focused { serial, found, caret });
+            }
+            AgentRequest::Act { serial, client, window, node, action } => {
+                let Some(w) = self.natives.get(&(client, window)).cloned() else {
+                    return reply(self, AgentEvent::Acted { serial, ok: false, why: format!("no native window {client}/{window}") });
+                };
+                // A secret field is never set, whatever its program would do.
+                let secret = w.native().and_then(|n| n.meaning()).is_some_and(|(_, _, nodes)| nodes.iter().any(|m| m.id == node && m.states.iter().any(|s| s == "secret")));
+                if secret && matches!(action, vergence_protocol::window::Action::Set(_)) {
+                    return reply(self, AgentEvent::Acted { serial, ok: false, why: "a secret field is not set by agents".into() });
+                }
+                if self.send_act(&w, node, action, Some((id, serial))).is_none() {
+                    reply(self, AgentEvent::Acted { serial, ok: false, why: "not a native window".into() });
+                }
+            }
+            AgentRequest::Changes { serial, since } => {
+                let (changes, latest) = self.meaning_log.since(since);
+                let mut out = Vec::new();
+                let mut upto = since;
+                for (n, c) in changes.into_iter().take(MAX_LISTED) {
+                    out.push((
+                        n,
+                        match c {
+                            Change::Window { client, window } => AgentChange::Window { client, window },
+                            Change::Focus { client, window, node } => AgentChange::Focus { client, window, node },
+                            Change::Caret { client, window, at } => AgentChange::Caret { client, window, at },
+                            Change::Tree { client, window } => AgentChange::Tree { client, window },
+                        },
+                    ));
+                    upto = n;
+                }
+                // Cut short: the agent asks again from where this ends.
+                let latest = if out.len() == MAX_LISTED { upto } else { latest };
+                reply(self, AgentEvent::Changes { serial, latest, changes: out });
+            }
+        }
+    }
+}
+
 fn found_line(f: &Found) -> String {
     let n = &f.node;
     let value = n.value.as_ref().map(|v| format!(" = {v:?}")).unwrap_or_default();

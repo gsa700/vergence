@@ -53,12 +53,13 @@
 //! the desktop's bare ground clicked (the windows move aside). Version 24
 //! (meaning milestone 1, step 1): `WinEvent::Act` and `WinRequest::Acted`,
 //! a widget acted on by its meaning node (`window::Action`). Version 25
-//! (step 2): `window::Node::items`, what a choice offers.
+//! (step 2): `window::Node::items`, what a choice offers. Version 26 (step
+//! 3): the agent interface, `ClientMsg::Agent`/`ServerMsg::Agent` (agent.rs).
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 25;
+pub const VERSION: u32 = 26;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -337,6 +338,8 @@ pub enum ClientMsg {
     RemoveTile { serial: u32, id: String },
     /// Windows (window.rs).
     Window(crate::window::WinRequest),
+    /// An agent's request (agent.rs; meaning milestone 1, step 3).
+    Agent(crate::agent::AgentRequest),
 }
 
 /// A running application, as Force Quit lists it: its key (the dock's),
@@ -404,6 +407,8 @@ pub enum ServerMsg {
     TileAction { id: String, control: String, value: f64 },
     /// Windows (window.rs).
     Window(crate::window::WinEvent),
+    /// A reply to an agent (agent.rs; meaning milestone 1, step 3).
+    Agent(crate::agent::AgentEvent),
 }
 
 mod op {
@@ -571,6 +576,7 @@ impl ClientMsg {
             }
             // Its descriptors are lost here: send it with encode_with_fds.
             ClientMsg::Window(w) => return w.encode().map(|(bytes, _)| bytes),
+            ClientMsg::Agent(a) => return a.encode(),
         };
         e.finish()
     }
@@ -597,6 +603,9 @@ impl ClientMsg {
     pub fn decode(frame: &Frame) -> Result<ClientMsg, Unknown> {
         if crate::window::is_window_opcode(frame.opcode) {
             return ClientMsg::decode_with_fds(frame, &mut crate::window::NoFds);
+        }
+        if crate::agent::is_agent_opcode(frame.opcode) {
+            return crate::agent::AgentRequest::decode(frame.opcode, &frame.payload).map(ClientMsg::Agent).map_err(|(serial, error)| Unknown { serial, code: ErrorCode::BadMessage, error });
         }
         let mut d = Decoder::new(&frame.payload);
         let bad = |serial: u32, error: WireError| Unknown { serial, code: ErrorCode::BadMessage, error };
@@ -799,6 +808,7 @@ impl ServerMsg {
             }
             // Its descriptors are lost here: send it with encode_with_fds.
             ServerMsg::Window(w) => return w.encode().map(|(bytes, _)| bytes),
+            ServerMsg::Agent(a) => return a.encode(),
         };
         e.finish()
     }
@@ -822,6 +832,9 @@ impl ServerMsg {
     pub fn decode(frame: &Frame) -> Result<ServerMsg, WireError> {
         if crate::window::is_window_opcode(frame.opcode) {
             return ServerMsg::decode_with_fds(frame, &mut crate::window::NoFds);
+        }
+        if crate::agent::is_agent_opcode(frame.opcode) {
+            return crate::agent::AgentEvent::decode(frame.opcode, &frame.payload).map(ServerMsg::Agent);
         }
         let mut d = Decoder::new(&frame.payload);
         Ok(match frame.opcode {

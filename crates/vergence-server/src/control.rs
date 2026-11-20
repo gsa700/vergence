@@ -237,7 +237,7 @@ impl Server {
                     _ => return usage.into(),
                 };
                 let Some(w) = self.space.elements().nth(i).cloned() else { return format!("no window {i}") };
-                match self.send_act(&w, node, action) {
+                match self.send_act(&w, node, action, None) {
                     Some(serial) => format!("act {serial}: sent; `acted {serial}` for the answer"),
                     None => format!("window {i}: not a native window (only they have meaning)"),
                 }

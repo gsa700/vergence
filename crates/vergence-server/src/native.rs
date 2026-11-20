@@ -94,9 +94,10 @@ pub struct Acts {
     sent: std::collections::BTreeMap<u32, ActSent>,
 }
 
-/// An action sent: the client and window it went to, and its answer (done,
-/// or why not) once given.
-type ActSent = (u32, u32, Option<(bool, String)>);
+/// An action sent: the client and window it went to, its answer (done, or
+/// why not) once given, and the agent to pass the answer to (its bus client
+/// and the serial it asked with), if an agent asked.
+type ActSent = (u32, u32, Option<(bool, String)>, Option<(u32, u32)>);
 
 /// How many actions' answers are kept.
 const ACTS_KEPT: usize = 256;
@@ -144,7 +145,7 @@ struct State {
     /// The pointer's shape over it, as it asked (step 4).
     cursor: smithay::input::pointer::CursorIcon,
     /// Its meaning as last sent (Contract 3): the focused widget, the caret, the tree.
-    meaning: Option<(u64, Option<(f64, f64, f64, f64)>, Vec<vergence_protocol::window::Node>)>,
+    meaning: Option<crate::meaning::WindowMeaning>,
     /// What its bar shows, as last sent (bar milestone 1); none: a plain bar
     /// with its title, as before. The server draws it from step 3.
     bar: Option<vergence_protocol::window::Bar>,
@@ -273,7 +274,7 @@ impl NativeWindow {
 
     /// Its meaning as last sent (Contract 3): the focused widget, the caret
     /// in window points, the tree.
-    pub fn meaning(&self) -> Option<(u64, Option<(f64, f64, f64, f64)>, Vec<vergence_protocol::window::Node>)> {
+    pub fn meaning(&self) -> Option<crate::meaning::WindowMeaning> {
         self.state.lock().unwrap().meaning.clone()
     }
 
@@ -497,6 +498,7 @@ impl Server {
                     self.native_drop(&w);
                     self.forget_window(&w);
                 }
+                self.acts_fail(client, Some(window));
             }
             WinRequest::Title { window, title } => {
                 if let Some(Win::Native(n)) = self.natives.get(&(client, window)) {
@@ -722,7 +724,11 @@ impl Server {
                     && entry.1 == window
                     && entry.2.is_none()
                 {
-                    entry.2 = Some((ok, why.chars().take(200).collect()));
+                    let why: String = why.chars().take(200).collect();
+                    entry.2 = Some((ok, why.clone()));
+                    if let Some((agent, agent_serial)) = entry.3 {
+                        self.bus_send(agent, vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted { serial: agent_serial, ok, why }));
+                    }
                 }
             }
             WinRequest::Meaning { window, focus, caret, nodes } => {
@@ -730,7 +736,7 @@ impl Server {
                     && let Win::Native(n) = &w
                 {
                     let new = (focus, caret, nodes);
-                    let old = std::mem::replace(&mut n.state.lock().unwrap().meaning, Some(new.clone()));
+                    let old = n.state.lock().unwrap().meaning.replace(new.clone());
                     let loc = self.space.element_location(&w).unwrap_or_default();
                     self.meaning_changed(client, window, old.as_ref(), &new, (loc.x as f64, loc.y as f64));
                 }
@@ -770,17 +776,32 @@ impl Server {
     /// Sends `action` to the widget with meaning node `node` in native
     /// window `w`: the serial its answer will carry, or None if `w` is not
     /// a native window.
-    pub fn send_act(&mut self, w: &Win, node: u64, action: vergence_protocol::window::Action) -> Option<u32> {
+    pub fn send_act(&mut self, w: &Win, node: u64, action: vergence_protocol::window::Action, reply: Option<(u32, u32)>) -> Option<u32> {
         let n = w.native()?;
         let (client, window) = (n.client, n.id);
         self.acts.next = self.acts.next.wrapping_add(1).max(1);
         let serial = self.acts.next;
-        self.acts.sent.insert(serial, (client, window, None));
+        self.acts.sent.insert(serial, (client, window, None, reply));
         while self.acts.sent.len() > ACTS_KEPT {
             self.acts.sent.pop_first();
         }
         self.bus_send(client, vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::Act { window, serial, node, action }));
         Some(serial)
+    }
+
+    /// Actions still unanswered by a window that went (or by every window
+    /// of a client that left: `window` None) fail, and their agents hear why.
+    pub fn acts_fail(&mut self, client: u32, window: Option<u32>) {
+        let mut tell = Vec::new();
+        for e in self.acts.sent.values_mut() {
+            if e.0 == client && window.is_none_or(|w| w == e.1) && e.2.is_none() {
+                e.2 = Some((false, "the window went away".into()));
+                tell.extend(e.3);
+            }
+        }
+        for (agent, serial) in tell {
+            self.bus_send(agent, vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted { serial, ok: false, why: "the window went away".into() }));
+        }
     }
 
     /// An action's answer: None while it has not come (or the serial is unknown).
@@ -925,6 +946,7 @@ impl Server {
     /// Bus client `client` has gone: its windows go with it.
     pub fn native_forget(&mut self, client: u32) {
         self.native_input.keymap_sent.remove(&client);
+        self.acts_fail(client, None);
         // What it had put on the clipboard goes with it.
         use smithay::wayland::selection::data_device::{clear_data_device_selection, current_data_device_selection_userdata};
         let owned = current_data_device_selection_userdata(&self.seat).is_some_and(|o| *o == ClipOwner::Native(client));

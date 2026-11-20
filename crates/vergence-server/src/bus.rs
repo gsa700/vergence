@@ -49,6 +49,9 @@ struct Conn {
     fds: std::collections::VecDeque<std::os::fd::OwnedFd>,
     /// Set by Hello: the app id the client gave (recorded, not trusted, §7.4).
     app_id: Option<String>,
+    /// Set by the agent interface's Hello: the name the agent gave, shown
+    /// to the person (meaning milestone 1, step 3; meaning.rs).
+    agent: Option<String>,
     uid: u32,
     /// The client's process id, from the socket's peer credentials.
     pid: Option<u32>,
@@ -137,6 +140,7 @@ impl Server {
                 reader: FrameReader::new(),
                 fds: Default::default(),
                 app_id: None,
+                agent: None,
                 uid,
                 pid,
                 topics: HashSet::new(),
@@ -329,6 +333,27 @@ impl Server {
             }
             // Windows on the native protocol (native milestone 1, native.rs).
             ClientMsg::Window(req) => self.native_request(id, req),
+            // The agent interface (meaning milestone 1, step 3; meaning.rs).
+            ClientMsg::Agent(vergence_protocol::agent::AgentRequest::Hello { serial, name }) => {
+                let name: String = name.trim().chars().filter(|c| !c.is_control()).collect();
+                if !crate::meaning::agents_allowed() {
+                    return self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message: "agents are off: the person allows them (until then, only in a development session)".into() });
+                }
+                if name.is_empty() {
+                    return self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::BadMessage, message: "an agent needs a name".into() });
+                }
+                if let Some(c) = self.bus.clients.get_mut(&id) {
+                    tracing::info!("bus: client {id} is the agent {name:?}");
+                    c.agent = Some(name);
+                }
+                self.bus_send(id, ServerMsg::Done { serial });
+            }
+            ClientMsg::Agent(r) => {
+                if self.bus.clients.get(&id).is_none_or(|c| c.agent.is_none()) {
+                    return self.bus_send(id, ServerMsg::Error { serial: r.serial(), code: ErrorCode::Denied, message: "say who the agent is first (the agent interface's Hello)".into() });
+                }
+                self.agent_request(id, r);
+            }
         }
     }
 

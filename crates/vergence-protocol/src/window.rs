@@ -701,7 +701,74 @@ fn take(fds: &mut dyn FdSource, d: &mut Decoder) -> Result<Vec<Fd>, WireError> {
     Ok(out)
 }
 
-fn finite(v: f64, what: &'static str) -> Result<f64, WireError> {
+/// Meaning nodes on the wire (Meaning, and the agent interface's replies).
+pub(crate) fn put_nodes(e: &mut Encoder, nodes: &[Node]) {
+    e.count(nodes.len());
+    for n in nodes {
+        e.u64(n.id).u64(n.parent).str(&n.role).str(&n.name);
+        match &n.value {
+            Some(v) => e.bool(true).str(v),
+            None => e.bool(false),
+        };
+        e.count(n.states.len());
+        for s in &n.states {
+            e.str(s);
+        }
+        e.f64(n.x).f64(n.y).f64(n.w).f64(n.h);
+        e.count(n.items.len());
+        for i in &n.items {
+            e.str(i);
+        }
+    }
+}
+
+pub(crate) fn get_nodes(d: &mut Decoder) -> Result<Vec<Node>, WireError> {
+    let n = d.count(16 + 8 + 1 + 4 + 32 + 4)?;
+    if n > MAX_NODES {
+        return Err(WireError::TooLong(n));
+    }
+    let mut nodes = Vec::with_capacity(n);
+    for _ in 0..n {
+        let (id, parent, role, name) = (d.u64()?, d.u64()?, d.str()?, d.str()?);
+        let value = if d.bool()? { Some(d.str()?) } else { None };
+        let ns = d.count(4)?;
+        if ns > MAX_STATES {
+            return Err(WireError::TooLong(ns));
+        }
+        let states = (0..ns).map(|_| d.str()).collect::<Result<_, _>>()?;
+        let (x, y, w, h) = (finite(d.f64()?, "bounds")?, finite(d.f64()?, "bounds")?, finite(d.f64()?, "bounds")?, finite(d.f64()?, "bounds")?);
+        let ni = d.count(4)?;
+        if ni > MAX_ITEMS {
+            return Err(WireError::TooLong(ni));
+        }
+        let items = (0..ni).map(|_| d.str()).collect::<Result<_, _>>()?;
+        nodes.push(Node { id, parent, role, name, value, states, x, y, w, h, items });
+    }
+    Ok(nodes)
+}
+
+pub(crate) fn put_action(e: &mut Encoder, action: &Action) {
+    match action {
+        Action::Press => e.u8(0),
+        Action::Focus => e.u8(1),
+        Action::Set(v) => e.u8(2).str(v),
+        Action::Choose(v) => e.u8(3).str(v),
+        Action::Reveal => e.u8(4),
+    };
+}
+
+pub(crate) fn get_action(d: &mut Decoder) -> Result<Action, WireError> {
+    Ok(match d.u8()? {
+        0 => Action::Press,
+        1 => Action::Focus,
+        2 => Action::Set(d.str()?),
+        3 => Action::Choose(d.str()?),
+        4 => Action::Reveal,
+        _ => return Err(WireError::BadValue("action")),
+    })
+}
+
+pub(crate) fn finite(v: f64, what: &'static str) -> Result<f64, WireError> {
     if v.is_finite() && v.abs() <= 1e7 { Ok(v) } else { Err(WireError::BadValue(what)) }
 }
 
@@ -922,23 +989,7 @@ impl WinRequest {
                     Some((x, y, w, h)) => e.bool(true).f64(*x).f64(*y).f64(*w).f64(*h),
                     None => e.bool(false),
                 };
-                e.count(nodes.len());
-                for n in nodes {
-                    e.u64(n.id).u64(n.parent).str(&n.role).str(&n.name);
-                    match &n.value {
-                        Some(v) => e.bool(true).str(v),
-                        None => e.bool(false),
-                    };
-                    e.count(n.states.len());
-                    for s in &n.states {
-                        e.str(s);
-                    }
-                    e.f64(n.x).f64(n.y).f64(n.w).f64(n.h);
-                    e.count(n.items.len());
-                    for i in &n.items {
-                        e.str(i);
-                    }
-                }
+                put_nodes(&mut e, nodes);
                 e
             }
             WinRequest::Copy { input_serial, kinds } => {
@@ -1097,27 +1148,7 @@ impl WinRequest {
                 let window = d.u32()?;
                 let focus = d.u64()?;
                 let caret = if d.bool()? { Some((finite(d.f64()?, "caret")?, finite(d.f64()?, "caret")?, finite(d.f64()?, "caret")?, finite(d.f64()?, "caret")?)) } else { None };
-                let n = d.count(16 + 8 + 1 + 4 + 32)?;
-                if n > MAX_NODES {
-                    return Err(WireError::TooLong(n));
-                }
-                let mut nodes = Vec::with_capacity(n);
-                for _ in 0..n {
-                    let (id, parent, role, name) = (d.u64()?, d.u64()?, d.str()?, d.str()?);
-                    let value = if d.bool()? { Some(d.str()?) } else { None };
-                    let ns = d.count(4)?;
-                    if ns > MAX_STATES {
-                        return Err(WireError::TooLong(ns));
-                    }
-                    let states = (0..ns).map(|_| d.str()).collect::<Result<_, _>>()?;
-                    let (x, y, w, h) = (finite(d.f64()?, "bounds")?, finite(d.f64()?, "bounds")?, finite(d.f64()?, "bounds")?, finite(d.f64()?, "bounds")?);
-                    let ni = d.count(4)?;
-                    if ni > MAX_ITEMS {
-                        return Err(WireError::TooLong(ni));
-                    }
-                    let items = (0..ni).map(|_| d.str()).collect::<Result<_, _>>()?;
-                    nodes.push(Node { id, parent, role, name, value, states, x, y, w, h, items });
-                }
+                let nodes = get_nodes(&mut d)?;
                 WinRequest::Meaning { window, focus, caret, nodes }
             }
             op::COPY => WinRequest::Copy { input_serial: d.u32()?, kinds: get_kinds(&mut d)? },
@@ -1395,13 +1426,7 @@ impl WinEvent {
             WinEvent::Act { window, serial, node, action } => {
                 let mut e = Encoder::frame(op::ACT);
                 e.u32(*window).u32(*serial).u64(*node);
-                match action {
-                    Action::Press => e.u8(0),
-                    Action::Focus => e.u8(1),
-                    Action::Set(v) => e.u8(2).str(v),
-                    Action::Choose(v) => e.u8(3).str(v),
-                    Action::Reveal => e.u8(4),
-                };
+                put_action(&mut e, action);
                 e
             }
             WinEvent::Tint { window, rgb } => {
@@ -1509,14 +1534,7 @@ impl WinEvent {
             op::DRAG_ENDED => WinEvent::DragEnded { window: d.u32()?, action: d.u8()? },
             op::ACT => {
                 let (window, serial, node) = (d.u32()?, d.u32()?, d.u64()?);
-                let action = match d.u8()? {
-                    0 => Action::Press,
-                    1 => Action::Focus,
-                    2 => Action::Set(d.str()?),
-                    3 => Action::Choose(d.str()?),
-                    4 => Action::Reveal,
-                    _ => return Err(WireError::BadValue("action")),
-                };
+                let action = get_action(&mut d)?;
                 WinEvent::Act { window, serial, node, action }
             }
             other => return Err(WireError::UnknownOpcode(other)),
