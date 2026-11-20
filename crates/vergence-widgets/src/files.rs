@@ -1028,8 +1028,12 @@ pub fn parse_mounts(text: &str) -> Vec<Mount> {
 /// The system's mounts now.
 pub fn mounts() -> Vec<Mount> {
     let text = fs::read_to_string("/proc/self/mounts").ok().or_else(|| {
-        // FreeBSD: mount -p prints the table in fstab's form.
-        std::process::Command::new("mount").arg("-p").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        // FreeBSD: mount -p prints the table in fstab's form. By its full
+        // path: a session's PATH has no /sbin (found on techbench 2026-11-19:
+        // no drive ever showed on the desktop or in FileView), and a PATH
+        // is not a thing to trust for a system tool anyway.
+        let mount = if Path::new("/sbin/mount").exists() { "/sbin/mount" } else { "mount" };
+        std::process::Command::new(mount).arg("-p").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
     });
     parse_mounts(&text.unwrap_or_default())
 }
