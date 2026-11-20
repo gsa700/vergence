@@ -15,9 +15,10 @@
 //!   which is today's look; 2.2: physically linear), and the coverage that
 //!   gives that result when blended as stored is what is painted.
 //!
-//! Light ink gets fuller edges; dark ink stays about as before. The CPU
-//! renderer looks the answer up in a 256-value table per ink color; the GPU
-//! shader works out the same function ([`GLSL`]), so the two agree.
+//! Light ink gets fuller edges; dark ink stays about as before. Both
+//! renderers look the answer up in the same tables, one per ink luminance
+//! byte ([`curves`]): the CPU per glyph, the GPU from a texture of them
+//! ([`GLSL`]), so the two paint the same.
 //!
 //! `VERGENCE_TEXT_LOOK="gamma,contrast"` overrides the defaults (for
 //! setting them by eye; read once per process).
@@ -65,8 +66,16 @@ pub fn cover(a: f32, s: f32, gamma: f32, contrast: f32) -> f32 {
     ((mixed.powf(1.0 / gamma) - ground_v) / (s - ground_v)).clamp(0.0, 1.0)
 }
 
-/// The table for one ink: coverage in 0..=255 to coverage to paint.
-pub fn table(s: f32, gamma: f32, contrast: f32) -> [u8; 256] {
+/// The ink's luminance as a byte, 0 to 255: which row of [`curves`] it
+/// takes. The GPU shader works out the same from the same color.
+pub fn luma_byte(r: u8, g: u8, b: u8) -> usize {
+    (luminance(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0).clamp(0.0, 1.0) * 255.0).round() as usize
+}
+
+/// The table for one ink luminance (a byte): coverage in 0..=255 to the
+/// coverage to paint.
+pub fn table(luma: usize, gamma: f32, contrast: f32) -> [u8; 256] {
+    let s = luma.min(255) as f32 / 255.0;
     let mut t = [0u8; 256];
     for (i, v) in t.iter_mut().enumerate() {
         *v = (cover(i as f32 / 255.0, s, gamma, contrast) * 255.0).round() as u8;
@@ -74,22 +83,20 @@ pub fn table(s: f32, gamma: f32, contrast: f32) -> [u8; 256] {
     t
 }
 
-/// [`cover`] for the GPU's fragment program, line for line; `u_text` holds
-/// gamma and contrast.
+/// Every ink luminance's table, row by row (256 x 256 bytes): the GPU's
+/// texture of them, so it paints exactly what the CPU's tables say.
+pub fn curves(gamma: f32, contrast: f32) -> Vec<u8> {
+    (0..256).flat_map(|l| table(l, gamma, contrast)).collect()
+}
+
+/// The GPU's look-up of [`curves`] (a 256 x 256 one-byte texture,
+/// `u_curves`): coverage across, the ink's luminance byte down.
 pub const GLSL: &str = r#"
-uniform vec2 u_text;
+uniform highp sampler2D u_curves;
 float text_cover(float a, vec3 c) {
-    float s = clamp(dot(c, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
-    float g = u_text.x;
-    float ink = pow(s, g);
-    float ground = 1.0 - ink;
-    float ground_v = pow(ground, 1.0 / g);
-    a = clamp(a + u_text.y * ground * a * (1.0 - a), 0.0, 1.0);
-    if (abs(s - ground_v) < 1.0 / 256.0) {
-        return a;
-    }
-    float mixed = ink * a + ground * (1.0 - a);
-    return clamp((pow(mixed, 1.0 / g) - ground_v) / (s - ground_v), 0.0, 1.0);
+    int ai = int(floor(clamp(a, 0.0, 1.0) * 255.0 + 0.5));
+    int li = int(floor(clamp(dot(c, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0) * 255.0 + 0.5));
+    return texelFetch(u_curves, ivec2(ai, li), 0).r;
 }
 "#;
 
@@ -123,8 +130,17 @@ mod tests {
     }
 
     #[test]
+    fn the_texture_holds_every_table() {
+        let all = curves(GAMMA, CONTRAST);
+        assert_eq!(all.len(), 65536);
+        assert_eq!(&all[200 * 256..201 * 256], &table(200, GAMMA, CONTRAST)[..]);
+        assert_eq!(luma_byte(255, 255, 255), 255);
+        assert_eq!(luma_byte(0, 0, 0), 0);
+    }
+
+    #[test]
     fn the_curve_only_rises() {
-        for s in [0.0, 0.25, 0.5, 0.6, 0.75, 1.0] {
+        for s in [0, 64, 128, 153, 191, 255] {
             let t = table(s, GAMMA, CONTRAST);
             assert!(t.windows(2).all(|w| w[0] <= w[1]), "{s}");
             assert_eq!((t[0], t[255]), (0, 255));

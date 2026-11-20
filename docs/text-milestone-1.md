@@ -1,7 +1,9 @@
 # Text milestone 1: kerning, weight, sharp text at low density, optical sizes
 
 Status: **accepted 2026-11-19** (Dave: "do both, make the milestone doc and
-then go ahead"). Steps 1 and 2 built 2026-11-19 (kerning matches
+then go ahead"). Steps 1, 2 and 3 built 2026-11-19 (step 3 by pixel size,
+not screen scale: below 24 px to the em; hint.rs; the GPU reads the CPU's
+coverage tables as a texture since) (kerning matches
 HarfBuzz at weights 400, 700, 900; GPU and CPU agree within one step; tests
 and the display suite 10/10 on Hubble, kepler, techbench). Shots in
 ~/vergence-display-checks/text-1/ on Control (`vscene type`). Questions for
@@ -85,7 +87,7 @@ Found, worst first:
    checks are unchanged (they are on colors, not coverage). Gamma and
    contrast set by eye on techbench's LG and ASUS, light and dark, before
    and after.
-3. **Low density** (scale under 1.5; the server knows each screen's).
+3. **Low density** (built as: by the em in pixels, below 24; hint.rs).
    (a) The x-height on a whole pixel: glyphs rasterized with their vertical
    scale nudged so the face's x-height (OS/2 `sxHeight`) rounds to whole
    pixels, horizontal scale and advances untouched, so layout does not

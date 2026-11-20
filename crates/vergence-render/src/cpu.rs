@@ -207,14 +207,12 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
     let whole = [0, 0, w as i32, h as i32];
     let mut prims: Vec<Prim> = Vec::with_capacity(scene.commands.len());
     let mut chains: Vec<Vec<RRect>> = vec![Vec::new()];
-    // Each ink's coverage table (textlook.rs), made once per color a frame.
+    // Each ink's coverage table (textlook.rs), by its luminance byte, made once a frame.
     let (gamma, contrast) = crate::textlook::look();
-    let mut curves: std::collections::HashMap<[u8; 3], Arc<[u8; 256]>> = std::collections::HashMap::new();
+    let mut curves: Vec<Option<Arc<[u8; 256]>>> = vec![None; 256];
     let mut curve = |c: &Color| -> Arc<[u8; 256]> {
-        curves
-            .entry([c.r, c.g, c.b])
-            .or_insert_with(|| Arc::new(crate::textlook::table(crate::textlook::luminance(c.r as f32 / 255.0, c.g as f32 / 255.0, c.b as f32 / 255.0), gamma, contrast)))
-            .clone()
+        let l = crate::textlook::luma_byte(c.r, c.g, c.b);
+        curves[l].get_or_insert_with(|| Arc::new(crate::textlook::table(l, gamma, contrast))).clone()
     };
     // The scissor rectangle and the chain in force, one entry per open clip.
     let mut clips: Vec<([i32; 4], u32)> = vec![(whole, 0)];

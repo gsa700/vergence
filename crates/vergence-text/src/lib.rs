@@ -20,14 +20,16 @@
 //! Plain text only: left to right, one character one glyph, combining marks
 //! as their fonts place them (zero advance, drawn over the glyph before).
 //! Shaping for scripts that need it, right-to-left text and input methods are
-//! open (whitepaper §10, question 8). Outlines are not hinted yet, which
-//! shows at low density (the whitepaper wants hinting there).
+//! open (whitepaper §10, question 8). Outlines are not hinted; small text
+//! has its x-height put on a whole pixel and its strokes darkened instead
+//! (hint.rs, text milestone 1).
 //!
 //! Glyph outlines are read and rasterized by ab_glyph (borrowed, whitepaper
 //! §8). The font files' own descriptions are read by sfnt.rs, which is ours
 //! and treats every file as untrusted.
 
 pub mod db;
+pub mod hint;
 pub mod kern;
 pub mod sfnt;
 
@@ -105,6 +107,9 @@ struct Loaded {
     units: f32,
     /// Its `GPOS` kerning at its own weight (None: the legacy `kern` table, if any).
     kerning: Option<kern::Kerning>,
+    /// Its x-height in font units (OS/2 sxHeight; 0 if unknown), for
+    /// hint.rs.
+    x_height: f32,
 }
 
 impl Loaded {
@@ -194,12 +199,16 @@ impl Fonts {
         let bytes = std::fs::read(&e.path).ok()?;
         let settings: &[([u8; 4], f32)] = if e.info.weight_axis.is_some() { &[(*b"wght", weight as f32)] } else { &[] };
         let kerning = kern::Kerning::read(&bytes, e.info.index, &kern::coordinates(&bytes, e.info.index, settings));
+        // OS/2 version 2 and later carry sxHeight at 86.
+        let x_height = kern::table(&bytes, e.info.index, b"OS/2")
+            .filter(|t| t.len() >= 88 && u16::from_be_bytes([t[0], t[1]]) >= 2)
+            .map_or(0.0, |t| i16::from_be_bytes([t[86], t[87]]).max(0) as f32);
         let mut font = FontVec::try_from_vec_and_index(bytes, e.info.index).ok()?;
         if e.info.weight_axis.is_some() {
             font.set_variation(b"wght", weight as f32);
         }
         let units = font.units_per_em().filter(|u| *u > 0.0)?;
-        Some(Loaded { entry, weight, font, units, kerning })
+        Some(Loaded { entry, weight, font, units, kerning, x_height })
     }
 
     /// The face's name, for a scene's font table.
@@ -309,7 +318,10 @@ impl Fonts {
     fn rasterize(&self, face: FaceId, glyph: u32, em_px: f32, sub_x: u8) -> Option<Bitmap> {
         let l = self.loaded.get(face.0 as usize)?;
         // ab_glyph's scale is the height from ascent to descent, not the em.
-        let scale = PxScale::from(em_px * l.font.height_unscaled() / l.units);
+        let s = em_px * l.font.height_unscaled() / l.units;
+        // Small text: the x-height on a whole pixel, strokes a little wider (hint.rs).
+        let ky = hint::x_height_scale(l.x_height * em_px / l.units, em_px);
+        let scale = PxScale { x: s, y: s * ky };
         let outline = l.font.outline_glyph(glyph_id(glyph).with_scale_and_position(scale, point(sub_x as f32 / 4.0, 0.0)))?;
         let b = outline.px_bounds();
         let (w, h) = ((b.max.x - b.min.x).max(0.0) as usize, (b.max.y - b.min.y).max(0.0) as usize);
@@ -322,6 +334,7 @@ impl Fonts {
                 *p = (cov.clamp(0.0, 1.0) * 255.0).round() as u8;
             }
         });
+        let (alpha, w) = hint::dilate(&alpha, w, hint::darkening(em_px));
         Some(Bitmap { width: w as u32, height: h as u32, left: b.min.x as i32, top: b.min.y as i32, alpha })
     }
 

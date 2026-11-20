@@ -332,6 +332,8 @@ pub struct Gpu {
     target: Option<(u32, u32, u32, u32)>,
     /// A one-pixel texture, bound where no picture is needed.
     blank: u32,
+    /// Glyph coverage by the ink (textlook.rs `curves`), on texture unit 2.
+    curves: u32,
     /// The pictures of the last frame, each as a texture, by where its
     /// pixels are. Held (so the address cannot be another picture's) until
     /// a frame goes by without it: a program that shows the same picture
@@ -393,9 +395,8 @@ impl Gpu {
             (gl.glUseProgram)(program);
             (gl.glUniform1i)((gl.glGetUniformLocation)(program, c"u_atlas".as_ptr()), 0);
             (gl.glUniform1i)((gl.glGetUniformLocation)(program, c"u_image".as_ptr()), 1);
-            // Glyph coverage by the ink (textlook.rs), the same as the CPU's tables.
-            let (gamma, contrast) = crate::textlook::look();
-            (gl.glUniform2f)((gl.glGetUniformLocation)(program, c"u_text".as_ptr()), gamma, contrast);
+            // Glyph coverage by the ink (textlook.rs): the CPU's tables, as a texture on unit 2.
+            (gl.glUniform1i)((gl.glGetUniformLocation)(program, c"u_curves".as_ptr()), 2);
             let size_uniform = (gl.glGetUniformLocation)(program, c"u_size".as_ptr());
 
             let (mut vertex_array, mut buffer) = (0, 0);
@@ -423,6 +424,8 @@ impl Gpu {
             };
             let atlas_texture = texture(gl::GL_R8, gl::GL_RED, size, size, std::ptr::null());
             let blank = texture(gl::GL_RGBA8, gl::GL_RGBA, 1, 1, [0u8; 4].as_ptr() as *const c_void);
+            let (gamma, contrast) = crate::textlook::look();
+            let curves = texture(gl::GL_R8, gl::GL_RED, 256, 256, crate::textlook::curves(gamma, contrast).as_ptr() as *const c_void);
             let error = (gl.glGetError)();
             if error != 0 {
                 return Err(GpuError::Gl(error));
@@ -442,6 +445,7 @@ impl Gpu {
                 atlas: Atlas { texture: atlas_texture, size, x: 0, y: 0, row: 0, places: HashMap::default(), held: Vec::new() },
                 target: None,
                 blank,
+                curves,
                 pictures: HashMap::default(),
             })
         }
@@ -773,6 +777,8 @@ impl Gpu {
             (gl.glBufferData)(gl::GL_ARRAY_BUFFER, std::mem::size_of_val(data.as_slice()) as isize, data.as_ptr() as *const c_void, gl::GL_STREAM_DRAW);
             (gl.glActiveTexture)(gl::GL_TEXTURE0);
             (gl.glBindTexture)(gl::GL_TEXTURE_2D, self.atlas.texture);
+            (gl.glActiveTexture)(gl::GL_TEXTURE0 + 2);
+            (gl.glBindTexture)(gl::GL_TEXTURE_2D, self.curves);
             (gl.glActiveTexture)(gl::GL_TEXTURE1);
             (gl.glBindTexture)(gl::GL_TEXTURE_2D, self.blank);
             let stride = (FLOATS * 4) as i32;
@@ -1007,6 +1013,7 @@ impl Drop for Gpu {
                 }
                 (gl.glDeleteTextures)(1, &self.atlas.texture);
                 (gl.glDeleteTextures)(1, &self.blank);
+                (gl.glDeleteTextures)(1, &self.curves);
                 for (_, texture) in self.pictures.values() {
                     (gl.glDeleteTextures)(1, texture);
                 }
