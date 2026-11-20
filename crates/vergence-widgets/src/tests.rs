@@ -731,3 +731,84 @@ fn a_text_area_is_drawn() {
     let m = ui.meaning();
     assert!(m.iter().any(|m| m.role == "text area" && m.states.contains(&"focused")));
 }
+
+/// The meaning node id of the widget named `name`.
+fn id_of(ui: &Ui<Msg>, name: &str) -> u64 {
+    ui.meaning().into_iter().find(|m| m.name == name).unwrap_or_else(|| panic!("no {name:?} in\n{}", ui.meaning_text())).id
+}
+
+fn act(ui: &mut Ui<Msg>, name: &str, action: vergence_ui::Action) -> Result<Vec<Msg>, String> {
+    let id = id_of(ui, name);
+    ui.act(id, &action).map(|r| r.messages)
+}
+
+#[test]
+fn actions_by_meaning_do_what_input_does() {
+    use vergence_ui::Action;
+    let page = || {
+        column(vec![
+            button(label("Save")).on_press(Msg::A).name("Save"),
+            button(label("Later")).name("Later"),
+            switch(false, Msg::Toggle).name("Repeat"),
+            slider(0.0, 100.0, 50.0, Msg::Value).on_release(Msg::Done).name("Delay"),
+            field("Ann", Msg::Text).name("Name"),
+            field("hunter2", Msg::Text).secret().name("Password"),
+            choice(vec!["Inter".into(), "JetBrains Mono".into()], Some(0), Msg::Pick).name("Font"),
+            label("Hello"),
+        ])
+    };
+    let mut ui = laid(page(), 300.0, 400.0);
+    assert_eq!(act(&mut ui, "Save", Action::Press), Ok(vec![Msg::A]));
+    assert_eq!(act(&mut ui, "Later", Action::Press), Err("it is off".into()), "a button with nothing to do");
+    assert_eq!(act(&mut ui, "Repeat", Action::Press), Ok(vec![Msg::Toggle(true)]));
+    assert_eq!(act(&mut ui, "Repeat", Action::Set("on".into())), Ok(vec![Msg::Toggle(true)]));
+    assert_eq!(act(&mut ui, "Repeat", Action::Set("off".into())), Ok(vec![]), "already off");
+    assert_eq!(act(&mut ui, "Delay", Action::Set("250".into())), Ok(vec![Msg::Value(100.0), Msg::Done]), "kept within its range");
+    assert!(act(&mut ui, "Delay", Action::Set("loud".into())).is_err());
+    // A field's whole text replaced, as typing over it would.
+    assert_eq!(act(&mut ui, "Name", Action::Set("Dave".into())), Ok(vec![Msg::Text("Dave".into())]));
+    assert_eq!(act(&mut ui, "Password", Action::Set("x".into())), Err("a secret field is not set by actions".into()));
+    assert_eq!(act(&mut ui, "Font", Action::Choose("jetbrains mono".into())), Ok(vec![Msg::Pick(1)]), "by name, any case");
+    assert_eq!(act(&mut ui, "Font", Action::Set("Inter".into())), Ok(vec![Msg::Pick(0)]), "set means choose");
+    assert_eq!(act(&mut ui, "Font", Action::Choose("Comic Sans".into())), Err("no item named \"Comic Sans\" (its items: Inter, JetBrains Mono)".into()), "says what there is");
+    assert_eq!(act(&mut ui, "Hello", Action::Press), Err("it cannot be pressed".into()));
+    assert_eq!(ui.act(9_999_999, &Action::Press).err(), Some("no such node".into()));
+    // No action moves the focus but Focus.
+    assert_eq!(ui.focused(), None);
+    assert!(act(&mut ui, "Name", Action::Focus).is_ok());
+    assert_eq!(ui.focused(), Some(id_of(&ui, "Name")));
+    assert!(ui.meaning().iter().any(|m| m.name == "Name" && m.states.contains(&"focused")));
+    assert_eq!(act(&mut ui, "Hello", Action::Focus), Err("it cannot take the keyboard".into()));
+}
+
+#[test]
+fn reveal_scrolls_a_widget_into_view() {
+    use vergence_ui::Action;
+    let rows: Vec<Element<Msg>> = (0..40).map(|i| button(label(format!("Row {i}"))).on_press(Msg::A).name(format!("Row {i}"))).collect();
+    let mut ui = laid(scroll(column(rows)).name("List"), 200.0, 100.0);
+    let before = bounds(&ui, "Row 30");
+    assert!(before.y > 100.0, "out of sight first: {before:?}");
+    assert!(act(&mut ui, "Row 30", Action::Reveal).is_ok());
+    let after = bounds(&ui, "Row 30");
+    assert!(after.y >= 0.0 && after.y + after.h <= 100.0, "in sight after: {after:?}");
+    // A press reveals what it presses too.
+    let mut ui = laid(scroll(column((0..40).map(|i| button(label(format!("Row {i}"))).on_press(Msg::B).name(format!("Row {i}"))).collect())), 200.0, 100.0);
+    assert_eq!(act(&mut ui, "Row 39", Action::Press), Ok(vec![Msg::B]));
+    let at = bounds(&ui, "Row 39");
+    assert!(at.y + at.h <= 100.0, "{at:?}");
+}
+
+#[test]
+fn a_text_area_set_by_action_is_one_step_to_undo() {
+    use vergence_ui::Action;
+    let doc = crate::textarea::TextDoc::new("first line\nsecond");
+    let mut ui = laid(column(vec![crate::textarea::text_area::<Msg>(&doc).name("Notes")]), 300.0, 200.0);
+    assert!(act(&mut ui, "Notes", Action::Set("all new\ntext".into())).is_ok());
+    assert_eq!(doc.borrow().text(), "all new\ntext");
+    assert!(doc.borrow_mut().undo());
+    assert_eq!(doc.borrow().text(), "first line\nsecond", "one undo brings it back");
+    // A read-only one refuses.
+    let ro = crate::textarea::TextDoc::with_options("x", crate::textarea::AreaOptions { editable: false, ..Default::default() });
+    let mut ui = laid(column(vec![crate::textarea::text_area::<Msg>(&ro).name("Log")]), 300.0, 200.0);
+    assert_eq!(act(&mut ui, "Log", Action::Set("y".into())), Err("it is off".into()));
+}

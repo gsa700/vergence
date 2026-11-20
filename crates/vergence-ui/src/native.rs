@@ -736,6 +736,16 @@ impl<'a> Native<'a> {
             WinEvent::TabChosen { window, tab } => self.with_window(window, |app, w| app.tab(TabEvent::Chosen(tab), w))?,
             WinEvent::BarButton { window, id } => self.with_window(window, |app, w| app.bar_button(id, w))?,
             WinEvent::Command { window, id } => self.with_window(window, |app, w| app.command(id, w))?,
+            // An agent's action on a widget by its meaning node (bus v24).
+            WinEvent::Act { window, serial, node, action } => {
+                let mut done = Err("no such window".to_string());
+                self.with_window(window, |app, w| done = app.act(node, &action, w))?;
+                let (ok, why) = match done {
+                    Ok(()) => (true, String::new()),
+                    Err(e) => (false, e),
+                };
+                self.send(WinRequest::Acted { window, serial, ok, why })?;
+            }
             // Drag and drop (files milestone 1, step 8).
             WinEvent::DragOver { window, x, y, kinds, mods } => {
                 let mut action = crate::DROP_NONE;

@@ -25,6 +25,10 @@
 //   focus <i>            raise window i and give it the keyboard
 //   pointer <x> <y>      move the pointer to logical x, y (as the mouse would)
 //   press|release [left|right|middle]   a mouse button, as the mouse would
+//   act <i> <node> press|focus|reveal       an action on window i's widget by its
+//   act <i> <node> set|choose <value...>     meaning node (`tree` shows the ids;
+//                                            Contract 3, bus v24): its serial
+//   acted <serial>       that action's answer (ok, why not, or waiting)
 //   restart              exit with status 75 (the launcher starts the new build)
 //   quit                 exit
 //
@@ -215,6 +219,35 @@ impl Server {
             "picker" => self.picker_report(),
             // Native windows' meaning (Contract 3, native.rs).
             "tree" => self.native_tree_report(),
+            // An action on a widget by its meaning node (meaning milestone 1, step 1).
+            "act" => {
+                use vergence_protocol::window::Action;
+                let usage = "act <i> <node> press|focus|reveal, or act <i> <node> set|choose <value...>";
+                let (Some(i), Some(node), Some(verb)) = (args.first().and_then(|a| a.parse::<usize>().ok()), args.get(1).and_then(|a| a.parse::<u64>().ok()), args.get(2)) else { return usage.into() };
+                let value = args.get(3..).map(|v| v.join(" ")).unwrap_or_default();
+                let action = match *verb {
+                    "press" => Action::Press,
+                    "focus" => Action::Focus,
+                    "reveal" => Action::Reveal,
+                    "set" => Action::Set(value),
+                    "choose" if !value.is_empty() => Action::Choose(value),
+                    _ => return usage.into(),
+                };
+                let Some(w) = self.space.elements().nth(i).cloned() else { return format!("no window {i}") };
+                match self.send_act(&w, node, action) {
+                    Some(serial) => format!("act {serial}: sent; `acted {serial}` for the answer"),
+                    None => format!("window {i}: not a native window (only they have meaning)"),
+                }
+            }
+            "acted" => {
+                let Some(serial) = args.first().and_then(|a| a.parse::<u32>().ok()) else { return "acted <serial>".into() };
+                match self.act_answer(serial) {
+                    None => format!("acted {serial}: no such action"),
+                    Some(None) => format!("acted {serial}: waiting"),
+                    Some(Some((true, _))) => format!("acted {serial}: ok"),
+                    Some(Some((false, why))) => format!("acted {serial}: refused: {why}"),
+                }
+            }
             "shelf" => self.shelf_report(),
             "tiles" => self.tiles_report(),
             // The lock: `lock` alone reports; `lock now` asks to lock, as Super+L does.

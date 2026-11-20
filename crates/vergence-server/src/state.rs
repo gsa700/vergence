@@ -95,6 +95,9 @@ pub struct Server {
     /// Windows whose own picture is still to save for `vctl picture`, and
     /// the name each is saved under (headless milestone 1, step 4).
     pub picture_pending: Vec<(Win, String)>,
+    /// Actions sent to native windows by their meaning, and their answers
+    /// (Contract 3, meaning milestone 1; native.rs).
+    pub acts: crate::native::Acts,
     /// Windows' pictures (thumbs.rs), and those still to save for `vctl
     /// thumb`: the window, the room's side in pixels, the name.
     pub thumbs: crate::thumbs::Thumbs,
@@ -310,6 +313,7 @@ impl Server {
             tints: Default::default(),
             shot_pending: Vec::new(),
             picture_pending: Vec::new(),
+            acts: Default::default(),
             thumbs: Default::default(),
             picker: None,
             overview: None,

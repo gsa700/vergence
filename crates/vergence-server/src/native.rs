@@ -83,6 +83,24 @@ pub struct NativeStyle {
     pub max: (f64, f64),
 }
 
+/// Actions sent to native windows by their meaning (Contract 3, bus v24,
+/// meaning milestone 1) and the answers that came back: the last few kept,
+/// by serial, for whoever sent them to read (`vctl acted`, later the agent
+/// interface).
+#[derive(Default)]
+pub struct Acts {
+    next: u32,
+    /// By serial.
+    sent: std::collections::BTreeMap<u32, ActSent>,
+}
+
+/// An action sent: the client and window it went to, and its answer (done,
+/// or why not) once given.
+type ActSent = (u32, u32, Option<(bool, String)>);
+
+/// How many actions' answers are kept.
+const ACTS_KEPT: usize = 256;
+
 pub struct NativeWindow {
     /// The bus connection it belongs to, and the id the client chose.
     pub client: u32,
@@ -690,6 +708,17 @@ impl Server {
                     None => tracing::info!("native: client {client} window {window} asked for {place:?}: not allowed"),
                 }
             }
+            // An answer to an action (bus v24): kept for its sender; only the
+            // window it was sent to can answer it.
+            WinRequest::Acted { window, serial, ok, why } => {
+                if let Some(entry) = self.acts.sent.get_mut(&serial)
+                    && entry.0 == client
+                    && entry.1 == window
+                    && entry.2.is_none()
+                {
+                    entry.2 = Some((ok, why.chars().take(200).collect()));
+                }
+            }
             WinRequest::Meaning { window, focus, caret, nodes } => {
                 if let Some(Win::Native(n)) = self.natives.get(&(client, window)) {
                     n.state.lock().unwrap().meaning = Some((focus, caret, nodes));
@@ -727,6 +756,27 @@ impl Server {
     /// For `vctl tree`: every native window's meaning as it last sent it,
     /// indented by the tree, the focused widget marked. Values are shown;
     /// a secret field has none (the toolkit never sends it).
+    /// Sends `action` to the widget with meaning node `node` in native
+    /// window `w`: the serial its answer will carry, or None if `w` is not
+    /// a native window.
+    pub fn send_act(&mut self, w: &Win, node: u64, action: vergence_protocol::window::Action) -> Option<u32> {
+        let n = w.native()?;
+        let (client, window) = (n.client, n.id);
+        self.acts.next = self.acts.next.wrapping_add(1).max(1);
+        let serial = self.acts.next;
+        self.acts.sent.insert(serial, (client, window, None));
+        while self.acts.sent.len() > ACTS_KEPT {
+            self.acts.sent.pop_first();
+        }
+        self.bus_send(client, vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::Act { window, serial, node, action }));
+        Some(serial)
+    }
+
+    /// An action's answer: None while it has not come (or the serial is unknown).
+    pub fn act_answer(&self, serial: u32) -> Option<Option<(bool, String)>> {
+        self.acts.sent.get(&serial).map(|e| e.2.clone())
+    }
+
     pub fn native_tree_report(&self) -> String {
         let mut out = Vec::new();
         let mut keys: Vec<&(u32, u32)> = self.natives.keys().collect();
@@ -734,7 +784,9 @@ impl Server {
         for k in keys {
             let Some(Win::Native(n)) = self.natives.get(k) else { continue };
             let s = n.state.lock().unwrap();
-            out.push(format!("window {:?} ({}, client {} window {})", s.title, n.app_id, n.client, n.id));
+            // Its index as `vctl windows` and `vctl act` count (the stacking order).
+            let index = self.space.elements().position(|e| e.native().is_some_and(|m| m.client == n.client && m.id == n.id)).map_or("-".to_string(), |i| i.to_string());
+            out.push(format!("window {index} {:?} ({}, client {} window {})", s.title, n.app_id, n.client, n.id));
             let Some((focus, caret, nodes)) = &s.meaning else {
                 out.push("  (no meaning sent)".into());
                 continue;
@@ -754,7 +806,7 @@ impl Server {
                 let value = m.value.as_ref().map(|v| format!(" = {v:?}")).unwrap_or_default();
                 let states = if m.states.is_empty() { String::new() } else { format!(" [{}]", m.states.join(", ")) };
                 let mark = if m.id == *focus { "> " } else { "  " };
-                out.push(format!("{mark}{}{} {:?}{value}{states} at {:.0},{:.0} {:.0}x{:.0}", "  ".repeat(depth_of(m.id)), m.role, m.name, m.x, m.y, m.w, m.h));
+                out.push(format!("{mark}{}#{} {} {:?}{value}{states} at {:.0},{:.0} {:.0}x{:.0}", "  ".repeat(depth_of(m.id)), m.id, m.role, m.name, m.x, m.y, m.w, m.h));
             }
             if let Some((x, y, w, h)) = caret {
                 out.push(format!("  caret at {x:.0},{y:.0} {w:.0}x{h:.0}"));

@@ -122,4 +122,28 @@ unnecessary for now); voice control.
 
 ## Progress
 
-(None yet.)
+- **Step 1** (2026-11-20 afternoon): actions on the wire. Bus v24:
+  vergence-protocol `window::Action` (Press, Focus, Set, Choose, Reveal),
+  `WinEvent::Act { window, serial, node, action }`, `WinRequest::Acted {
+  window, serial, ok, why }`. vergence-ui: `App::act` (default: "this
+  window takes no actions"), the native road answers every Act with
+  Acted. vergence-widgets: `Ui::act` through the paths input takes (a
+  press is the keyboard's activation and reveals what it presses; a
+  field's new text typed over its whole text, one step to undo; a text
+  area's the same through select all and insert; a switch "on"/"off", a
+  slider's number kept within its range with its release message; a
+  choice's item by name, any case, "set" meaning "choose", a miss listing
+  the items; Focus the only action that moves the focus; a secret field's
+  text never set; the off and the unknown refused in a few words), the
+  host's `App::act` delivering its messages as any input's. The server:
+  `send_act`, the last 256 actions' answers by serial (only the window
+  sent to can answer), `vctl act <i> <node> press|focus|reveal|set|choose
+  [value]` and `vctl acted <serial>`; `vctl tree` shows each window's
+  index and each node's `#id`. Tests: the protocol's round trips, every
+  widget kind's action, a text area's one-step undo, reveal in a scroll.
+  Seen in a headless session on Hubble: 7 × 6 = pressed by name in the
+  Calculator ("Earlier: 7×6 = 42"), Settings' "Minimize" switched off,
+  "Snap a window dragged to an edge" chosen by name after a miss named
+  its items, "Window keys" focused, an unknown node refused. Seen too: a
+  choice's items are not in the tree yet (step 2's model should carry
+  them).

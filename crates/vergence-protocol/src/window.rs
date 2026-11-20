@@ -202,6 +202,23 @@ pub struct Node {
     pub h: f64,
 }
 
+/// What an agent asks a window's widget to do (Contract 3, bus v24,
+/// meaning milestone 1): the widget answers as if the person had used it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Action {
+    /// Press it: a button, a switch, a menu item, a choice (which opens).
+    Press,
+    /// Give it the keyboard.
+    Focus,
+    /// Its value: a field's or a text area's whole text (never a secret
+    /// field's), a slider's number, a switch's "on" or "off".
+    Set(String),
+    /// A choice's item, by its name.
+    Choose(String),
+    /// Scroll whatever holds it until it can be seen.
+    Reveal,
+}
+
 /// What a client asks of its windows.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WinRequest {
@@ -291,6 +308,9 @@ pub enum WinRequest {
     /// 1, step 6): the windows move aside, or come back. Heard only from a
     /// window of the Desktop kind; any other's is ignored.
     GroundClicked { window: u32 },
+    /// The answer to [`WinEvent::Act`] with this serial (bus v24): done, or
+    /// why not ("it is off", "no such node").
+    Acted { window: u32, serial: u32, ok: bool, why: String },
 }
 
 /// A line of a window's right-click menu ([`WinRequest::Menu`]).
@@ -584,6 +604,9 @@ pub enum WinEvent {
     /// To the window the drag started from: it ended, with this action
     /// ([`DROP_NONE`]: nowhere took it).
     DragEnded { window: u32, action: u8 },
+    /// Do `action` to the widget whose meaning node is `node` (Contract 3,
+    /// bus v24): answered by [`WinRequest::Acted`] with the same serial.
+    Act { window: u32, serial: u32, node: u64, action: Action },
 }
 
 pub(crate) mod op {
@@ -614,6 +637,7 @@ pub(crate) mod op {
     pub const CONTEXT_MENU: u16 = 123;
     pub const MENU: u16 = 124;
     pub const GROUND_CLICKED: u16 = 125;
+    pub const ACTED: u16 = 126;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -649,6 +673,7 @@ pub(crate) mod op {
     pub const DRAG_LEAVE: u16 = 131;
     pub const DRAG_DROP: u16 = 132;
     pub const DRAG_ENDED: u16 = 133;
+    pub const ACT: u16 = 134;
 
     /// Whether an opcode is a window message's (either way).
     pub fn is_window(opcode: u16) -> bool {
@@ -984,6 +1009,11 @@ impl WinRequest {
                 e.u32(*window);
                 e
             }
+            WinRequest::Acted { window, serial, ok, why } => {
+                let mut e = Encoder::frame(op::ACTED);
+                e.u32(*window).u32(*serial).bool(*ok).str(why);
+                e
+            }
             WinRequest::BarStyle { window, style } => {
                 let mut e = Encoder::frame(op::BAR_STYLE);
                 e.u32(*window).u8(match style {
@@ -1163,6 +1193,7 @@ impl WinRequest {
                 WinRequest::Menu { window, x, y, lines: get_menu_lines(&mut d, false)? }
             }
             op::GROUND_CLICKED => WinRequest::GroundClicked { window: d.u32()? },
+            op::ACTED => WinRequest::Acted { window: d.u32()?, serial: d.u32()?, ok: d.bool()?, why: d.str()? },
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -1346,6 +1377,18 @@ impl WinEvent {
                 e.u32(*window).u8(*action);
                 e
             }
+            WinEvent::Act { window, serial, node, action } => {
+                let mut e = Encoder::frame(op::ACT);
+                e.u32(*window).u32(*serial).u64(*node);
+                match action {
+                    Action::Press => e.u8(0),
+                    Action::Focus => e.u8(1),
+                    Action::Set(v) => e.u8(2).str(v),
+                    Action::Choose(v) => e.u8(3).str(v),
+                    Action::Reveal => e.u8(4),
+                };
+                e
+            }
             WinEvent::Tint { window, rgb } => {
                 let mut e = Encoder::frame(op::TINT);
                 e.u32(*window);
@@ -1449,6 +1492,18 @@ impl WinEvent {
                 WinEvent::DragDrop { window, x, y, action, items: get_items(&mut d)? }
             }
             op::DRAG_ENDED => WinEvent::DragEnded { window: d.u32()?, action: d.u8()? },
+            op::ACT => {
+                let (window, serial, node) = (d.u32()?, d.u32()?, d.u64()?);
+                let action = match d.u8()? {
+                    0 => Action::Press,
+                    1 => Action::Focus,
+                    2 => Action::Set(d.str()?),
+                    3 => Action::Choose(d.str()?),
+                    4 => Action::Reveal,
+                    _ => return Err(WireError::BadValue("action")),
+                };
+                WinEvent::Act { window, serial, node, action }
+            }
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -1607,6 +1662,8 @@ mod tests {
             WinRequest::Activate { window: 1 },
             WinRequest::ContextMenu { window: 1, x: 40.0, y: 60.5 },
             WinRequest::GroundClicked { window: 1 },
+            WinRequest::Acted { window: 1, serial: 7, ok: false, why: "it is off".into() },
+            WinRequest::Acted { window: 2, serial: 8, ok: true, why: String::new() },
             WinRequest::Menu {
                 window: 1,
                 x: 12.0,
@@ -1692,6 +1749,11 @@ mod tests {
             WinEvent::DragLeave { window: 1 },
             WinEvent::DragDrop { window: 1, x: 3.0, y: 4.0, action: DROP_COPY, items: vec![("text/uri-list".into(), b"file:///a\r\n".to_vec())] },
             WinEvent::DragEnded { window: 1, action: DROP_NONE },
+            WinEvent::Act { window: 1, serial: 7, node: 1 << 40, action: Action::Press },
+            WinEvent::Act { window: 1, serial: 8, node: 3, action: Action::Focus },
+            WinEvent::Act { window: 1, serial: 9, node: 3, action: Action::Set("Hello, wörld".into()) },
+            WinEvent::Act { window: 1, serial: 10, node: 4, action: Action::Choose("JetBrains Mono".into()) },
+            WinEvent::Act { window: 1, serial: 11, node: 5, action: Action::Reveal },
         ];
         for m in all {
             let (bytes, fds) = m.encode().unwrap();

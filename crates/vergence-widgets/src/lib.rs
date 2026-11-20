@@ -356,6 +356,15 @@ impl<P: Program> vergence_ui::App for Host<P> {
         })?
     }
 
+    /// An agent's action on a widget by its meaning node (Contract 3): the
+    /// widgets do it as a person's input would, and the program hears the
+    /// same messages.
+    fn act(&mut self, node: u64, action: &vergence_ui::Action, window: &mut Window) -> Result<(), String> {
+        let r = self.ui.act(node, action)?;
+        self.respond(r, window);
+        Ok(())
+    }
+
     fn command(&mut self, id: u32, window: &mut Window) {
         // A line of a right-click menu the server drew for a text area or a field.
         if id >= ui::MENU_ID_BASE {

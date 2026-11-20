@@ -614,6 +614,8 @@ pub use vergence_protocol::window::WinKind;
 pub use vergence_protocol::commands::{Command as AppCommand, Role};
 pub use vergence_protocol::window::BarStyle;
 pub use vergence_protocol::window::MenuLine;
+/// What an agent asks of a widget by its meaning node (Contract 3, bus v24).
+pub use vergence_protocol::window::Action;
 
 /// What kind of window an app's is, and its size limits in points (0: none):
 /// told to the server on the native road (window styles milestone 1).
@@ -772,6 +774,13 @@ pub trait App {
 
     /// One of the window's commands was chosen in its app menu: its id.
     fn command(&mut self, _id: u32, _window: &mut Window) {}
+
+    /// Do `action` to the widget whose meaning node is `node` (Contract 3,
+    /// meaning milestone 1): as if the person had used it. Err says why not.
+    /// The native road only; a window that publishes no meaning takes none.
+    fn act(&mut self, _node: u64, _action: &Action, _window: &mut Window) -> Result<(), String> {
+        Err("this window takes no actions".into())
+    }
 
     /// A drag is over the window at (x, y) with these kinds: what a drop
     /// would do ([`DROP_NONE`], [`DROP_COPY`], [`DROP_MOVE`]).

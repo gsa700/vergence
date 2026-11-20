@@ -754,6 +754,103 @@ impl<M: Clone> Ui<M> {
         r.redraw = true;
     }
 
+    /// Does `action` to the widget with meaning node `id` (Contract 3,
+    /// meaning milestone 1) through the same paths a person's input takes:
+    /// a press is the keyboard's activation, a field's new text is typed
+    /// over its whole text (one step to undo), a choice's item is picked.
+    /// An action never moves the focus but Focus itself, and never touches
+    /// a secret field's text. Err says why not, in a few words.
+    pub fn act(&mut self, id: Id, action: &vergence_ui::Action) -> Result<Response<M>, String> {
+        use vergence_ui::Action;
+        let i = self.index(id).ok_or("no such node")?;
+        let mut r = Response::default();
+        let usable = self.nodes[i].active();
+        match action {
+            Action::Press => match &self.nodes[i].what {
+                What::Button { on_press: Some(_), .. } | What::Switch { on_toggle: Some(_), .. } | What::Choice { on_select: Some(_), .. } if usable => {
+                    self.reveal(i);
+                    self.activate(id, &mut r);
+                }
+                What::Button { .. } | What::Switch { .. } | What::Choice { .. } => return Err("it is off".into()),
+                _ => return Err("it cannot be pressed".into()),
+            },
+            Action::Focus => {
+                if !self.nodes[i].focusable() {
+                    return Err("it cannot take the keyboard".into());
+                }
+                self.focus = Some(id);
+                self.ring = true;
+                self.reveal(i);
+                r.redraw = true;
+            }
+            Action::Set(value) => match &self.nodes[i].what {
+                What::Field { secret: true, .. } => return Err("a secret field is not set by actions".into()),
+                What::Field { value: current, on_input: Some(_), .. } if usable => {
+                    let current = current.clone();
+                    let f = self.fields.entry(id).or_insert_with(|| FieldState { text: current.clone(), sent: current, ..Default::default() });
+                    f.anchor = 0;
+                    f.caret = f.text.len();
+                    self.field_insert(id, value, crate::edit::Kind::Other, &mut r);
+                    if self.fields.get(&id).is_some_and(|f| f.text != *value) && !value.is_empty() {
+                        return Err("the field took only part of it (one line, at most its room)".into());
+                    }
+                }
+                What::Switch { on, on_toggle: Some(f) } if usable => {
+                    let want = match value.to_ascii_lowercase().as_str() {
+                        "on" | "true" | "yes" | "1" => true,
+                        "off" | "false" | "no" | "0" => false,
+                        _ => return Err("a switch is on or off".into()),
+                    };
+                    if want != *on {
+                        r.messages.push(f(want));
+                    }
+                    r.redraw = true;
+                }
+                What::Slider { min, max, on_change: Some(f), on_release, .. } if usable => {
+                    let v: f32 = value.trim().parse().map_err(|_| "a slider's value is a number")?;
+                    if !v.is_finite() {
+                        return Err("a slider's value is a number".into());
+                    }
+                    r.messages.push(f(v.clamp(min.min(*max), max.max(*min))));
+                    r.messages.extend(on_release.clone());
+                    r.redraw = true;
+                }
+                What::Choice { .. } => return self.act(id, &Action::Choose(value.clone())),
+                What::Area { doc, .. } if usable && doc.borrow().options().editable => {
+                    let doc = doc.clone();
+                    {
+                        let mut d = doc.borrow_mut();
+                        d.select_all();
+                        d.insert(value);
+                    }
+                    self.caret_moved();
+                    self.area_changed(id, &mut r);
+                    r.redraw = true;
+                }
+                What::Field { .. } | What::Switch { .. } | What::Slider { .. } | What::Area { .. } => return Err("it is off".into()),
+                _ => return Err("it has no value to set".into()),
+            },
+            Action::Choose(name) => match &self.nodes[i].what {
+                What::Choice { options, on_select: Some(f), .. } if usable => {
+                    let k = options.iter().position(|o| o == name).or_else(|| options.iter().position(|o| o.eq_ignore_ascii_case(name))).ok_or_else(|| format!("no item named {name:?} (its items: {})", options.join(", ")))?;
+                    r.messages.push(f(k));
+                    if self.open.is_some_and(|o| o.id == id) {
+                        self.open = None;
+                    }
+                    r.redraw = true;
+                }
+                What::Choice { .. } => return Err("it is off".into()),
+                _ => return Err("it has no items to choose from".into()),
+            },
+            Action::Reveal => {
+                self.reveal(i);
+                r.redraw = true;
+            }
+        }
+        r.used = true;
+        Ok(r)
+    }
+
     /// The open list's place, the height of an item, and how many there are.
     fn list_rect(&self) -> Option<(Rect, f32, usize)> {
         let o = self.open?;
