@@ -2,8 +2,8 @@
 
 Status: **accepted 2026-11-19** (Dave: "close-up, drawn signature first,
 placeholder for jpeg 2000"; the corpus: "use the PDFs in my Documents
-folder for testing"). Step 1 built 2026-11-19 (below); step 2, our
-own path renderer, next.
+folder for testing"). Steps 1 and 2 built 2026-11-19 (below); step 3,
+pages drawn, next.
 
 ## What Dave asked for
 
@@ -180,3 +180,15 @@ selection order; color management beyond the simple formulas.
   themselves (revision 2: 16, 3: 22, 4: 62, 6: 1); one personal document
   has a real user password and correctly asks for it. 238,301 pages,
   every content stream decoding cleanly.
+- **Step 2** (2026-11-19 night): crates/vergence-raster, no dependencies:
+  geom.rs (affine transforms composed as PDF's `cm`, paths of lines and
+  cubics, curves flattened by Wang's bound to 0.1 device pixel),
+  raster.rs (exact-area coverage accumulation, font-rs's method;
+  non-zero and even-odd), stroke.rs (quads, miter/round/bevel joins with
+  the miter limit, butt/round/square caps, dashes with phase, worked out
+  in user space so a stretched matrix gives an elliptical pen; never
+  thinner than one device pixel; a dot for a zero-length round cap),
+  lib.rs (Canvas: fills, strokes, a per-pixel paint for shadings, Mask
+  clips intersected path by path, images through any transform with
+  smoothing). Bounded and fuzzed; 20 tests on all three;
+  examples/rastercard.rs draws a test card (checked by eye).

@@ -2299,6 +2299,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "vergence-raster"
+version = "0.1.0"
+
+[[package]]
 name = "vergence-render"
 version = "0.1.0"
 dependencies = [
