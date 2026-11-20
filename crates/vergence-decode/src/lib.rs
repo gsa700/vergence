@@ -231,7 +231,7 @@ pub fn jpeg_samples(data: &[u8]) -> Result<(u32, u32, u8, Vec<u8>), String> {
         return Err("short picture".into());
     }
     if input == Cs::YCCK {
-        for px in samples.chunks_exact_mut(4) {
+        for px in samples.as_chunks_mut::<4>().0 {
             let (y, cb, cr) = (px[0] as f32, px[1] as f32 - 128.0, px[2] as f32 - 128.0);
             let rgb = [y + 1.402 * cr, y - 0.344_136 * cb - 0.714_136 * cr, y + 1.772 * cb];
             for (c, v) in px[..3].iter_mut().zip(rgb) {

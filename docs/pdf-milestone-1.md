@@ -401,12 +401,35 @@ selection order; color management beyond the simple formulas.
   - **Not ours:** pdf.js under Node left some CCITT and JBIG2 scans blank
     (the RF Exposure book, QST reviews, the TR-7950 manual); ours checked
     by eye. JPEG 2000 pictures are the placeholder (as decided).
-  - **Open: soft masks, blend modes, transparency groups.** Step 3 has
-    them and they were never built (its progress note: "Not yet"); the
-    corpus shows them (the Hacking VoIP cover's luminosity soft mask,
-    Multiply at 0.75). Step 9's second part, before the milestone closes.
+  - **Soft masks, blend modes, transparency groups:** step 3 had them
+    and they were never built (its progress note: "Not yet"); done in
+    part 2, below.
   Timing on kepler (i5-8500T), 4,170 pages at 1.5x: median 20.6 ms, 84%
   under 100 ms, 90th percentile 148 ms; the slowest are huge pages (the
   TH-F6 schematic, 70 by 50 inches: 7 s) and big scans, decoded at full
   size before drawing (decoding at the drawn size would be the next
   speed-up). Tests on all four machines.
+- **Step 9, part 2** (2026-11-20 morning): transparency, step 3's gap.
+  vergence-raster's blend.rs: all sixteen blend modes (the separable ones
+  and Hue, Saturation, Color, Luminosity by the spec's formulas), the
+  general compositing formula for every paint when the mode is not
+  Normal; `Canvas::blend`, `Canvas::composite` (a layer onto a canvas at
+  an alpha through a mask), `Clip::times`. render.rs: /BM (a name or an
+  array, the first known), /SMask in a graphics state (its group drawn
+  under the transform current at `gs` onto /BC in the group's color space
+  for Luminosity, onto nothing for Alpha, /TR applied; kept per page by
+  object and transform; taken into the clip, so everything painted goes
+  through it; /SMask /None ends it), and transparency groups painted with
+  alpha below 1, a blend mode or a soft mask drawn apart and composited
+  once (their parts no longer fade one by one where they overlap). Not
+  yet: knockout groups, and a non-isolated group's backdrop when the group
+  is drawn apart (drawn as isolated). Tests: the modes' formulas, Multiply
+  and Screen on a page, a group at half strength, luminosity and alpha
+  masks with /BC and /SMask /None.
+  Corpus: 70 pages changed, none panic, about the same speed. pdf.js under
+  Node turned out wrong on some transparency (the AEMC brochure's title,
+  the Spiderbeam guide's masked standpipe, a QST photo under a mask, the
+  IC-V86 headline): Apple's PDFKit (tools/pdfcheck/pdfkit-page.swift, on
+  Control) breaks such ties, and on every page checked it draws what we
+  now draw. The Hacking VoIP cover's picture is JPEG 2000 (the
+  placeholder); the transparency around it is right.

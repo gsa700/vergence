@@ -7,15 +7,17 @@
 //!
 //! Text (step 4): the text operators, rendering modes 0 to 7 (text as a
 //! clip included), glyphs from font/ drawn as paths in the fill or stroke.
-//! Not yet: CFF, Type 1 and Type 3 glyph programs (step 4's next parts), JPEG and
-//! the other picture codecs (step 5: a light gray box stands in), blend
-//! modes, soft masks and knockout groups (drawn as normal), mesh shadings
-//! (types 4 to 7: skipped).
+//! Transparency (step 9, part 2): blend modes (/BM, every one of PDF's),
+//! soft masks (/SMask, luminosity and alpha, with /BC and /TR) taken into
+//! the clip, and transparency groups painted with alpha, a blend mode or a
+//! soft mask drawn apart and composited once. Not yet: knockout groups and
+//! a non-isolated group's backdrop (drawn as isolated), mesh shadings
+//! (types 4 to 7: skipped), JPEG 2000 (a light gray box stands in).
 
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use vergence_raster::{Canvas, Cap, Clip, FillRule, Image, Join, Path, Point, Stroke, Transform};
+use vergence_raster::{Blend, Canvas, Cap, Clip, FillRule, Image, Join, Mask, Path, Point, Stroke, Transform};
 
 use crate::color::ColorSpace;
 use crate::font::Font;
@@ -64,13 +66,13 @@ pub fn render_region(doc: &Document, page: &Page, scale: f64, region: Option<(us
     let mut base = page_transform(b, page.rotate, scale);
     base.e -= x as f64;
     base.f -= y as f64;
-    let mut r = Renderer { doc, canvas, ops: 0, forms: HashSet::new(), base, fonts: std::collections::HashMap::new(), text_only: false, chars: Vec::new() };
+    let mut r = Renderer { doc, canvas, ops: 0, forms: HashSet::new(), base, fonts: std::collections::HashMap::new(), text_only: false, chars: Vec::new(), masks: std::collections::HashMap::new() };
     let resources = Rc::new(page.resources.clone().unwrap_or_default());
     let mut gs = State::new(base, Clip::full(pw, ph), resources.clone());
     // The page's box clips everything drawn on it.
     let mut boxpath = Path::new();
     boxpath.rect(b[0], b[1], w, h);
-    gs.clip = Rc::new(gs.clip.intersect(&boxpath, &base, FillRule::NonZero, pw, ph));
+    gs.narrow(&boxpath, &base, FillRule::NonZero, pw, ph);
     let data = doc.contents(page);
     r.run(&data, gs.clone(), 0);
     r.annotations(page, &gs);
@@ -83,7 +85,7 @@ pub fn page_text(doc: &Document, page: &Page) -> Vec<crate::text::Char> {
     let b = page_box(page);
     let Some(canvas) = Canvas::new(1, 1) else { return Vec::new() };
     let base = page_transform(b, page.rotate, 1.0);
-    let mut r = Renderer { doc, canvas, ops: 0, forms: HashSet::new(), base, fonts: std::collections::HashMap::new(), text_only: true, chars: Vec::new() };
+    let mut r = Renderer { doc, canvas, ops: 0, forms: HashSet::new(), base, fonts: std::collections::HashMap::new(), text_only: true, chars: Vec::new(), masks: std::collections::HashMap::new() };
     let resources = Rc::new(page.resources.clone().unwrap_or_default());
     let gs = State::new(base, Clip::full(1, 1), resources);
     let data = doc.contents(page);
@@ -136,7 +138,13 @@ impl Paint {
 #[derive(Clone)]
 struct State {
     ctm: Transform,
+    /// What painting goes through: the clip times the soft mask, if any.
     clip: Rc<Clip>,
+    /// The clip alone, without the soft mask (a new /SMask replaces the old).
+    base_clip: Rc<Clip>,
+    /// The soft mask (/SMask), in device pixels, fixed when it was set.
+    smask: Option<Rc<Mask>>,
+    blend: Blend,
     stroke: Stroke,
     stroke_paint: Paint,
     fill_paint: Paint,
@@ -167,8 +175,35 @@ impl Default for TextState {
 }
 
 impl State {
+    /// The clip narrowed to `path` (W, W*, a text clip, a form's BBox).
+    fn narrow(&mut self, path: &Path, t: &Transform, rule: FillRule, w: usize, h: usize) {
+        self.base_clip = Rc::new(self.base_clip.intersect(path, t, rule, w, h));
+        self.clip = if self.smask.is_some() { Rc::new(self.clip.intersect(path, t, rule, w, h)) } else { self.base_clip.clone() };
+    }
+
+    /// A new soft mask (None: /SMask /None).
+    fn set_smask(&mut self, mask: Option<Rc<Mask>>) {
+        self.clip = match &mask {
+            Some(m) => Rc::new(self.base_clip.times(m)),
+            None => self.base_clip.clone(),
+        };
+        self.smask = mask;
+    }
+
+    /// For drawing a transparency group apart: everything the group itself
+    /// is painted with (alpha, blend mode, soft mask) left for compositing.
+    fn plain(&self) -> State {
+        let mut inner = self.clone();
+        inner.fill_alpha = 1.0;
+        inner.stroke_alpha = 1.0;
+        inner.blend = Blend::Normal;
+        inner.set_smask(None);
+        inner
+    }
+
     fn new(ctm: Transform, clip: Clip, resources: Rc<Dict>) -> State {
-        State { ctm, clip: Rc::new(clip), stroke: Stroke::default(), stroke_paint: Paint::black(), fill_paint: Paint::black(), stroke_alpha: 1.0, fill_alpha: 1.0, resources, text: TextState::default() }
+        let clip = Rc::new(clip);
+        State { ctm, base_clip: clip.clone(), clip, smask: None, blend: Blend::Normal, stroke: Stroke::default(), stroke_paint: Paint::black(), fill_paint: Paint::black(), stroke_alpha: 1.0, fill_alpha: 1.0, resources, text: TextState::default() }
     }
 }
 
@@ -185,6 +220,9 @@ struct Renderer<'d> {
     /// Gathering the text layer: nothing painted, every character kept.
     text_only: bool,
     chars: Vec<crate::text::Char>,
+    /// Soft masks made on this page, by their object and the transform
+    /// they were made under (a page may set the same one many times).
+    masks: std::collections::HashMap<(u32, [u64; 6]), Rc<Mask>>,
 }
 
 fn num(o: Option<&Object>) -> f64 {
@@ -215,6 +253,7 @@ impl Renderer<'_> {
             }
             let a = &op.args;
             let n = |i: usize| num(a.get(i));
+            self.canvas.blend = gs.blend;
             match op.name.as_slice() {
                 b"q" => {
                     if stack.len() < MAX_SAVES {
@@ -242,7 +281,7 @@ impl Renderer<'_> {
                 }
                 b"gs" => {
                     if let Some(name) = a.first().and_then(Object::as_name) {
-                        self.ext_gstate(&mut gs, name);
+                        self.ext_gstate(&mut gs, name, depth);
                     }
                 }
                 // Path construction.
@@ -292,7 +331,7 @@ impl Renderer<'_> {
                     }
                     if let Some(rule) = pending_clip.take() {
                         let (w, h) = self.size();
-                        gs.clip = Rc::new(gs.clip.intersect(&path, &gs.ctm, rule, w, h));
+                        gs.narrow(&path, &gs.ctm.clone(), rule, w, h);
                     }
                     path = Path::new();
                 }
@@ -344,7 +383,7 @@ impl Renderer<'_> {
                 b"ET" => {
                     if let Some(p) = text_clip.take() {
                         let (w, h) = self.size();
-                        gs.clip = Rc::new(gs.clip.intersect(&p, &gs.ctm, FillRule::NonZero, w, h));
+                        gs.narrow(&p, &gs.ctm.clone(), FillRule::NonZero, w, h);
                     }
                 }
                 b"Tc" => gs.text.char_spacing = n(0),
@@ -501,7 +540,7 @@ impl Renderer<'_> {
         group.get(key).cloned().unwrap_or(Object::Null)
     }
 
-    fn ext_gstate(&self, gs: &mut State, name: &[u8]) {
+    fn ext_gstate(&mut self, gs: &mut State, name: &[u8], depth: usize) {
         let Some(d) = self.doc.resolve(&self.resource(gs, "ExtGState", name)).as_dict().cloned() else { return };
         let get = |k: &str| self.doc.get_in(&d, k);
         if let Some(v) = get("LW").as_f64() {
@@ -528,6 +567,86 @@ impl Renderer<'_> {
         if let Some(v) = get("ca").as_f64() {
             gs.fill_alpha = v.clamp(0.0, 1.0) as f32;
         }
+        // A name, or an array of them: the first one known (§11.6.3).
+        match get("BM") {
+            Object::Name(n) => gs.blend = Blend::from_name(&n).unwrap_or(Blend::Normal),
+            Object::Array(list) => {
+                gs.blend = list.iter().find_map(|o| self.doc.resolve(o).as_name().and_then(Blend::from_name)).unwrap_or(Blend::Normal);
+            }
+            _ => {}
+        }
+        if self.text_only {
+            return;
+        }
+        let smask = d.get("SMask").cloned();
+        match smask.as_ref().map(|o| (o.as_ref(), self.doc.resolve(o))) {
+            Some((_, Object::Name(n))) if n == b"None" => gs.set_smask(None),
+            Some((reference, Object::Dict(m))) => {
+                let key = reference.map(|r| (r.num, [gs.ctm.a, gs.ctm.b, gs.ctm.c, gs.ctm.d, gs.ctm.e, gs.ctm.f].map(f64::to_bits)));
+                let mask = match key.and_then(|k| self.masks.get(&k).cloned()) {
+                    Some(m) => Some(m),
+                    None => {
+                        let made = self.soft_mask(&m, gs, depth).map(Rc::new);
+                        if let (Some(k), Some(m)) = (key, &made) {
+                            self.masks.insert(k, m.clone());
+                        }
+                        made
+                    }
+                };
+                gs.set_smask(mask);
+            }
+            _ => {}
+        }
+    }
+
+    /// A soft mask dictionary (§11.6.5.2) made into device pixels: its
+    /// group /G drawn under the current transform onto the backdrop /BC
+    /// (luminosity) or onto nothing (alpha), each pixel's luminosity or
+    /// alpha then put through /TR. None if it cannot be drawn (no mask).
+    fn soft_mask(&mut self, m: &Dict, gs: &State, depth: usize) -> Option<Mask> {
+        let doc = self.doc;
+        let group = doc.get_in(m, "G");
+        let reference = m.get("G").and_then(Object::as_ref);
+        let Object::Stream(g) = group else { return None };
+        let luminosity = doc.get_in(m, "S").as_name() != Some(b"Alpha".as_slice());
+        let (w, h) = self.size();
+        let mut canvas = Canvas::new(w, h)?;
+        if luminosity {
+            // The backdrop, in the group's color space; black by default.
+            let space = doc.get_in(&g.dict, "Group").as_dict().map(|gd| doc.get_in(gd, "CS")).and_then(|cs| ColorSpace::parse(&cs, doc, Some(&gs.resources)));
+            let bc: Vec<f64> = doc.get_in(m, "BC").as_array().map(|a| a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect()).unwrap_or_default();
+            let rgb = match space {
+                Some(cs) if bc.len() == cs.components() => cs.to_rgb(&bc).unwrap_or([0.0; 3]),
+                _ => [0.0; 3],
+            };
+            canvas.clear([rgb[0], rgb[1], rgb[2], 1.0]);
+        }
+        let transfer = match doc.get_in(m, "TR") {
+            Object::Name(_) | Object::Null => None,
+            _ => m.get("TR").and_then(|f| Function::parse(f, doc)),
+        };
+        // The group drawn as the page would draw it, into its own canvas.
+        let own = std::mem::replace(&mut self.canvas, canvas);
+        let mut inner = State::new(gs.ctm, Clip::full(w, h), gs.resources.clone());
+        inner.text = gs.text.clone();
+        self.form(&g, reference, &inner, depth + 1, None);
+        let drawn = std::mem::replace(&mut self.canvas, own);
+        let mut lut = [0f32; 256];
+        for (i, v) in lut.iter_mut().enumerate() {
+            let x = i as f64 / 255.0;
+            *v = transfer.as_ref().and_then(|f| f.eval(&[x]).first().copied()).unwrap_or(x).clamp(0.0, 1.0) as f32;
+        }
+        let data = drawn
+            .data
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|p| {
+                let v = if luminosity { (0.3 * p[0] as f32 + 0.59 * p[1] as f32 + 0.11 * p[2] as f32).round() as usize } else { p[3] as usize };
+                lut[v.min(255)]
+            })
+            .collect();
+        Some(Mask { width: w, height: h, data })
     }
 
     fn fill(&mut self, path: &Path, rule: FillRule, gs: &State, depth: usize) {
@@ -600,10 +719,25 @@ impl Renderer<'_> {
             let mut bp = Path::new();
             bp.rect(b[0], b[1], b[2] - b[0], b[3] - b[1]);
             let (w, h) = self.size();
-            inner.clip = Rc::new(inner.clip.intersect(&bp, &inner.ctm, FillRule::NonZero, w, h));
+            let t = inner.ctm;
+            inner.narrow(&bp, &t, FillRule::NonZero, w, h);
         }
         let data = self.doc.stream(s).data;
-        self.run(&data, inner, depth + 1);
+        // A transparency group painted with alpha, a blend mode or a soft
+        // mask is drawn apart and composited once (§11.4.7): its objects
+        // overlap each other as they would at full strength.
+        let group = self.doc.get_in(&s.dict, "Group").as_dict().is_some_and(|g| self.doc.get_in(g, "S").as_name() == Some(b"Transparency".as_slice()));
+        let apart = group && !self.text_only && (gs.fill_alpha < 1.0 || gs.blend != Blend::Normal || gs.smask.is_some());
+        match apart.then(|| Canvas::new(self.canvas.width, self.canvas.height)).flatten() {
+            Some(layer) => {
+                let own = std::mem::replace(&mut self.canvas, layer);
+                self.run(&data, inner.plain(), depth + 1);
+                let layer = std::mem::replace(&mut self.canvas, own);
+                self.canvas.blend = gs.blend;
+                self.canvas.composite(&layer, gs.fill_alpha, gs.smask.as_deref());
+            }
+            None => self.run(&data, inner, depth + 1),
+        }
         if let Some(r) = reference {
             self.forms.remove(&r.num);
         }
@@ -750,14 +884,14 @@ impl Renderer<'_> {
         }
         let Some(cell_canvas) = Canvas::new(cw, ch) else { return };
         let cell_t = Transform::new(k, 0.0, 0.0, -k, -bbox[0] * k, bbox[1] * k + ystep * k);
-        let mut sub = Renderer { doc, canvas: cell_canvas, ops: self.ops, forms: std::mem::take(&mut self.forms), base: cell_t, fonts: std::mem::take(&mut self.fonts) , text_only: false, chars: Vec::new() };
+        let mut sub = Renderer { doc, canvas: cell_canvas, ops: self.ops, forms: std::mem::take(&mut self.forms), base: cell_t, fonts: std::mem::take(&mut self.fonts) , text_only: false, chars: Vec::new(), masks: std::mem::take(&mut self.masks) };
         if let Some(r) = reference {
             sub.forms.insert(r.num);
         }
         let mut cell_state = State::new(cell_t, Clip::full(cw, ch), Rc::new(doc.get_in(&s.dict, "Resources").as_dict().cloned().unwrap_or_default()));
         let mut bp = Path::new();
         bp.rect(bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]);
-        cell_state.clip = Rc::new(cell_state.clip.intersect(&bp, &cell_t, FillRule::NonZero, cw, ch));
+        cell_state.narrow(&bp, &cell_t, FillRule::NonZero, cw, ch);
         if let Some(c) = tint {
             let paint = Paint { space: Rc::new(ColorSpace::Rgb), color: c.iter().map(|v| *v as f64).collect(), pattern: None };
             cell_state.fill_paint = paint.clone();
@@ -768,6 +902,7 @@ impl Renderer<'_> {
         self.ops = sub.ops;
         self.forms = std::mem::take(&mut sub.forms);
         self.fonts = std::mem::take(&mut sub.fonts);
+        self.masks = std::mem::take(&mut sub.masks);
         if let Some(r) = reference {
             self.forms.remove(&r.num);
         }
@@ -919,12 +1054,23 @@ mod tests {
     use super::*;
 
     fn pdf(content: &str, resources: &str) -> Vec<u8> {
-        let objects = [
+        pdf_with(content, resources, &[])
+    }
+
+    /// A form XObject (a stream object) for `pdf_with`'s extra objects.
+    fn form(extra_dict: &str, content: &str) -> String {
+        format!("<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] {extra_dict} /Length {} >>\nstream\n{content}\nendstream", content.len())
+    }
+
+    /// A one-page PDF with more objects after the page's, numbered from 5.
+    fn pdf_with(content: &str, resources: &str, extra: &[String]) -> Vec<u8> {
+        let mut objects = vec![
             "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
             format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R /Resources {resources} >>"),
             format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
         ];
+        objects.extend(extra.iter().cloned());
         let mut out = b"%PDF-1.7\n".to_vec();
         let mut offsets = Vec::new();
         for (i, body) in objects.iter().enumerate() {
@@ -932,18 +1078,65 @@ mod tests {
             out.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
         }
         let xref = out.len();
-        out.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
         for o in offsets {
             out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
         }
-        out.extend_from_slice(format!("trailer << /Size 5 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF").as_bytes());
+        out.extend_from_slice(format!("trailer << /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF", objects.len() + 1).as_bytes());
         out
     }
 
     fn draw(content: &str, resources: &str) -> Canvas {
-        let doc = Document::open(pdf(content, resources)).unwrap();
+        draw_with(content, resources, &[])
+    }
+
+    fn draw_with(content: &str, resources: &str, extra: &[String]) -> Canvas {
+        let doc = Document::open(pdf_with(content, resources, extra)).unwrap();
         let page = doc.pages().remove(0);
         render_page(&doc, &page, 1.0).unwrap()
+    }
+
+    #[test]
+    fn multiply_darkens_what_is_under_it() {
+        let c = draw("1 0 0 rg 0 0 100 100 re f /M gs 0 0 1 rg 0 0 50 50 re f 0.5 g 50 50 50 50 re f", "<< /ExtGState << /M << /BM /Multiply >> >> >>");
+        assert_eq!(c.pixel(10, 90), [0, 0, 0, 255], "blue times red is black");
+        assert_eq!(c.pixel(90, 10), [128, 0, 0, 255], "gray times red is dark red");
+        assert_eq!(c.pixel(90, 90), [255, 0, 0, 255], "red where nothing went over it");
+        // An array names the first mode known.
+        let c = draw("1 0 0 rg 0 0 100 100 re f /M gs 0 0 1 rg 0 0 100 100 re f", "<< /ExtGState << /M << /BM [/Fancy /Screen] >> >> >>");
+        assert_eq!(c.pixel(50, 50), [255, 0, 255, 255], "red screened with blue is magenta");
+    }
+
+    #[test]
+    fn a_group_at_half_strength_does_not_darken_where_its_parts_overlap() {
+        let squares = "0 g 10 10 50 50 re f 40 40 50 50 re f";
+        let res = "<< /ExtGState << /H << /ca 0.5 >> >> /XObject << /F 5 0 R >> >>";
+        let c = draw_with("/H gs /F Do", res, &[form("/Group << /S /Transparency >>", squares)]);
+        assert_eq!(c.pixel(20, 80), [128, 128, 128, 255], "one square: half gray");
+        assert_eq!(c.pixel(50, 50), [128, 128, 128, 255], "the overlap: the same half gray");
+        // A form that is not a group: each square faded on its own.
+        let c = draw_with("/H gs /F Do", res, &[form("", squares)]);
+        assert_eq!(c.pixel(50, 50), [64, 64, 64, 255], "not a group: the overlap darker");
+    }
+
+    #[test]
+    fn a_luminosity_soft_mask_lets_through_where_its_group_is_light() {
+        // The mask's group: white on the left half, nothing (the black backdrop) on the right.
+        let mask = form("/Group << /S /Transparency /CS /DeviceGray >>", "1 g 0 0 50 100 re f");
+        let res = "<< /ExtGState << /S << /SMask << /S /Luminosity /G 5 0 R >> >> /N << /SMask /None >> >> >>";
+        let c = draw_with("/S gs 0 0 1 rg 0 0 100 100 re f", res, std::slice::from_ref(&mask));
+        assert_eq!(c.pixel(20, 50), [0, 0, 255, 255], "left: painted");
+        assert_eq!(c.pixel(80, 50), [255, 255, 255, 255], "right: masked out");
+        // /SMask /None ends it; a white backdrop (/BC) lets everything through.
+        let c = draw_with("/S gs /N gs 0 0 1 rg 0 0 100 100 re f", res, std::slice::from_ref(&mask));
+        assert_eq!(c.pixel(80, 50), [0, 0, 255, 255]);
+        let res = "<< /ExtGState << /S << /SMask << /S /Luminosity /G 5 0 R /BC [1] >> >> >> >>";
+        let c = draw_with("/S gs 0 0 1 rg 0 0 100 100 re f", res, std::slice::from_ref(&mask));
+        assert_eq!(c.pixel(80, 50), [0, 0, 255, 255]);
+        // An alpha mask: where the group painted anything at all.
+        let res = "<< /ExtGState << /S << /SMask << /S /Alpha /G 5 0 R >> >> >> >>";
+        let c = draw_with("/S gs 0 0 1 rg 0 0 100 100 re f", res, &[mask]);
+        assert_eq!((c.pixel(20, 50), c.pixel(80, 50)), ([0, 0, 255, 255], [255, 255, 255, 255]));
     }
 
     #[test]

@@ -4,7 +4,8 @@
 //! non-zero or even-odd rule with exact-area anti-aliasing (raster.rs),
 //! stroked with widths, caps, joins, a miter limit and dashes (stroke.rs),
 //! clipped by any path (a [`Mask`]), and pictures drawn through any
-//! transform with smoothing. A [`Canvas`] holds premultiplied RGBA.
+//! transform with smoothing. A [`Canvas`] holds premultiplied RGBA and
+//! paints in any of PDF's blend modes (blend.rs, step 9).
 //!
 //! **Input is untrusted** (it comes from PDF files): segment counts,
 //! areas and canvas sizes are bounded, numbers that are not finite drop
@@ -12,10 +13,12 @@
 //! test). Not constant-time, not SIMD: correct first, measured later.
 //! (Later it can stand in for resvg's renderer too: docs/borrowed-review.md.)
 
+pub mod blend;
 pub mod geom;
 pub mod raster;
 pub mod stroke;
 
+pub use blend::Blend;
 pub use geom::{Path, Point, Polyline, Transform};
 pub use raster::{Coverage, FillRule};
 pub use stroke::{Cap, Join, Stroke};
@@ -107,6 +110,19 @@ impl Clip {
         mask.intersect(path, t, rule);
         Clip::Mask(mask)
     }
+
+    /// This clip times `mask` (a soft mask, PDF's SMask in a graphics
+    /// state): what both let through. A mask of another size lets nothing through.
+    pub fn times(&self, mask: &Mask) -> Clip {
+        let (w, h) = (mask.width, mask.height);
+        let mut out = mask.clone();
+        for y in 0..h {
+            for x in 0..w {
+                out.data[y * w + x] *= self.at(x, y);
+            }
+        }
+        Clip::Mask(out)
+    }
 }
 
 /// The device rectangle a path is, if it is one rectangle with sides along
@@ -148,6 +164,8 @@ pub struct Canvas {
     pub width: usize,
     pub height: usize,
     pub data: Vec<u8>,
+    /// How what is painted mixes with what is there (Normal: source over).
+    pub blend: Blend,
 }
 
 /// A path's coverage on a `width` x `height` target.
@@ -173,7 +191,7 @@ impl Canvas {
     /// A transparent canvas; None if it would be too large.
     pub fn new(width: usize, height: usize) -> Option<Canvas> {
         let n = width.checked_mul(height).filter(|n| *n <= MAX_PIXELS && *n > 0)?;
-        Some(Canvas { width, height, data: vec![0; n * 4] })
+        Some(Canvas { width, height, data: vec![0; n * 4], blend: Blend::Normal })
     }
 
     /// Fills the whole canvas with one color (a page's white).
@@ -217,7 +235,12 @@ impl Canvas {
                     continue;
                 }
                 let c = color(x as f64 + 0.5, y as f64 + 0.5);
-                over(&mut self.data[(y * self.width + x) * 4..][..4], c, a);
+                let dst = &mut self.data[(y * self.width + x) * 4..][..4];
+                if self.blend == Blend::Normal {
+                    over(dst, c, a);
+                } else {
+                    blend::composite(dst, c, a, self.blend);
+                }
             }
         }
     }
@@ -268,6 +291,36 @@ impl Canvas {
             let c = sample(p.x, p.y);
             [c[0] * alpha, c[1] * alpha, c[2] * alpha, c[3] * alpha]
         });
+    }
+
+    /// Paints `src`, a canvas of the same size (a transparency group drawn
+    /// apart), onto this one at `alpha`, through `mask` (a soft mask) if
+    /// there is one, in this canvas's blend mode.
+    pub fn composite(&mut self, src: &Canvas, alpha: f32, mask: Option<&Mask>) {
+        if src.width != self.width || src.height != self.height {
+            return;
+        }
+        let alpha = alpha.clamp(0.0, 1.0);
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let i = (y * self.width + x) * 4;
+                let p = &src.data[i..i + 4];
+                if p[3] == 0 {
+                    continue;
+                }
+                let a = alpha * mask.map_or(1.0, |m| m.at(x, y));
+                if a <= 0.0 {
+                    continue;
+                }
+                let c = [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0, p[3] as f32 / 255.0];
+                let dst = &mut self.data[i..i + 4];
+                if self.blend == Blend::Normal {
+                    over(dst, c, a);
+                } else {
+                    blend::composite(dst, c, a, self.blend);
+                }
+            }
+        }
     }
 
     /// A pixel as straight RGBA bytes (tests, and the PNG writer).

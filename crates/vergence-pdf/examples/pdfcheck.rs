@@ -67,7 +67,7 @@ fn write_ppm(path: &Path, c: &vergence_raster::Canvas) -> std::io::Result<()> {
     let mut out = format!("P6 {} {} 255\n", c.width, c.height).into_bytes();
     out.reserve(c.width * c.height * 3);
     // The ground is white and opaque, so premultiplied is plain RGB here.
-    for px in c.data.chunks_exact(4) {
+    for px in c.data.as_chunks::<4>().0 {
         out.extend_from_slice(&px[..3]);
     }
     std::fs::write(path, out)
@@ -186,7 +186,7 @@ fn compare(reference: &Path, new: &Path) {
             continue;
         }
         // Pixels whose color moved by more than a rounding step.
-        let moved = a.2.chunks_exact(3).zip(b.2.chunks_exact(3)).filter(|(p, q)| p.iter().zip(q.iter()).any(|(x, y)| x.abs_diff(*y) > 2)).count();
+        let moved = a.2.as_chunks::<3>().0.iter().zip(b.2.as_chunks::<3>().0).filter(|(p, q)| p.iter().zip(q.iter()).any(|(x, y)| x.abs_diff(*y) > 2)).count();
         if moved == 0 {
             same += 1;
         } else {
