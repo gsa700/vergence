@@ -1,7 +1,7 @@
 # Text milestone 1: kerning, weight, sharp text at low density, optical sizes
 
 Status: **accepted 2026-11-19** (Dave: "do both, make the milestone doc and
-then go ahead"). Steps 1 to 5 built 2026-11-19 (step 3 by pixel size,
+then go ahead"). **All steps built 2026-11-19** (1 to 6; step 6 the same night) (step 3 by pixel size,
 not screen scale: below 24 px to the em; hint.rs; the GPU reads the CPU's
 coverage tables as a texture since) (kerning matches
 HarfBuzz at weights 400, 700, 900; GPU and CPU agree within one step; tests
@@ -109,7 +109,11 @@ Found, worst first:
    just use 10?"). Converted so nothing visibly changed (Dave: "set it to
    whatever corresponds to the current view"): Hubble's interface 11 -> 10,
    its monospace 12 and Edit's own 15 kept; kepler and techbench already 10.
-6. **Line spacing in Edit** (waits on question 2).
+6. **Line spacing in Edit** (built: Dave took the recommendation).
+   AreaOptions::line_spacing; Edit's Automatic (the default) gives prose
+   1.5 (.md, .txt, .rst and the like, names with no extension, untitled;
+   not dotfiles) and code 1.3, never under the font's own; Edit's settings
+   row Line spacing: Automatic, Compact 1.3, Comfortable 1.45, Loose 1.6.
 7. **Checks.** A type sample (vergence-ui example `typesample`: Inter and
    JetBrains Mono at 11 to 28, kerning pairs, light and dark) shot with
    `vctl picture` on Hubble, kepler, techbench's LG and ASUS, before and
@@ -135,7 +139,7 @@ Found, worst first:
    as GTK reads it, so our apps and GTK apps agree; the default becomes
    "Inter Variable 10" (13.3, about today's 13). (b) Drop the number from
    the picker and keep size in Accessibility's Size. Recommended: (a).
-2. **Edit's line spacing.** A setting (Compact 1.3, today; Comfortable
+2. *Answered: Automatic by file type, with a setting.* **Edit's line spacing.** A setting (Compact 1.3, today; Comfortable
    1.45; Loose 1.6), default Comfortable for prose files (.md, .txt) and
    Compact for code? Or one default for all?
 3. **Shaping by rustybuzz** (borrowed, MIT) in a later milestone, or our

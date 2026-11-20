@@ -126,11 +126,20 @@ pub struct AreaOptions {
     /// the terminal's"): the label, its id, its keys. A chosen one is read
     /// with [`Doc::take_command`] when the area's change message comes.
     pub commands: Vec<(String, u32, &'static str)>,
+    /// Line height as a multiple of the text size (at least the font's own
+    /// spacing); None: [`CODE_SPACING`].
+    pub line_spacing: Option<f32>,
 }
+
+/// Line spacing for code and for prose (text milestone 1, step 6): code
+/// editors set about 1.3 (VS Code 1.35, Sublime 1.3); running text reads
+/// best near 1.5, which WCAG 2 (1.4.12) asks to be possible.
+pub const CODE_SPACING: f32 = 1.3;
+pub const PROSE_SPACING: f32 = 1.5;
 
 impl Default for AreaOptions {
     fn default() -> Self {
-        AreaOptions { font: "monospace".into(), size: None, line_numbers: true, wrap: true, tab_width: 4, spaces: true, current_line: true, editable: true, complete: true, spell: true, commands: Vec::new() }
+        AreaOptions { font: "monospace".into(), size: None, line_numbers: true, wrap: true, tab_width: 4, spaces: true, current_line: true, editable: true, complete: true, spell: true, commands: Vec::new(), line_spacing: None }
     }
 }
 
@@ -1715,7 +1724,8 @@ impl Doc {
         .clamp(4.0, 200.0);
         let Some(face) = fonts.face(family, 400, false).or_else(|| fonts.face("monospace", 400, false)).or_else(|| fonts.face(&theme.font, 400, false)) else { return };
         let m = fonts.metrics(face, size);
-        let line_h = (m.ascent + m.descent + m.line_gap).max(size * 1.3).ceil();
+        let spacing = self.options.line_spacing.filter(|s| s.is_finite()).unwrap_or(CODE_SPACING).clamp(1.0, 3.0);
+        let line_h = (m.ascent + m.descent + m.line_gap).max(size * spacing).ceil();
         let adv = |fonts: &mut Fonts, c: char| {
             let (f, g) = fonts.glyph(face, c);
             fonts.advance(f, g, size)

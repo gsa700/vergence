@@ -38,7 +38,7 @@ use std::time::Instant;
 
 pub use element::{Align, ButtonLook, Element, Fit, Length, Padding, Touch, Weight, button, choice, column, drawing, field, label, panel, picture, row, rule, scroll, slider, space, stack, switch, vrule};
 pub use layout::{Id, Line, Measure};
-pub use textarea::{AreaOptions, TextDoc, WeakDoc, Words, text_area};
+pub use textarea::{AreaOptions, CODE_SPACING, PROSE_SPACING, TextDoc, WeakDoc, Words, text_area};
 pub use theme::{Theme, parse_hex, tint_amount};
 pub use ui::{Meaning, Response, Ui};
 pub use vergence_ui::{Frame, Input, Waker, Window};

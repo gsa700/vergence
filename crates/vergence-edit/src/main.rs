@@ -100,6 +100,20 @@ fn stamp(p: &Path) -> Option<(SystemTime, u64)> {
 type SharedRef = Rc<RefCell<Shared>>;
 
 /// One document in a tab.
+/// A file read as running text rather than code: an untitled document, a
+/// name with no extension (not a dotfile), or a prose extension.
+fn is_prose(path: Option<&std::path::Path>) -> bool {
+    let Some(path) = path else { return true };
+    // A dotfile (.zshrc, .gitignore) is configuration, not prose.
+    if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.')) {
+        return false;
+    }
+    match path.extension().and_then(|e| e.to_str()) {
+        None => true,
+        Some(e) => matches!(e.to_ascii_lowercase().as_str(), "md" | "markdown" | "txt" | "text" | "rst" | "adoc" | "asciidoc" | "org" | "tex"),
+    }
+}
+
 struct DocTab {
     id: u32,
     doc: TextDoc,
@@ -294,6 +308,19 @@ impl EditWindow {
                 Some("false") => false,
                 _ => vergence_ui::table_value(&self.desktop, "[text]", "spellcheck").as_deref() != Some("false"),
             },
+            line_spacing: Some(self.spacing_for(t)),
+        }
+    }
+
+    /// The document's line spacing (text milestone 1, step 6): the chosen
+    /// one, else by the kind of file (Automatic): prose roomier, code closer.
+    fn spacing_for(&self, t: &DocTab) -> f32 {
+        match self.setting("line-spacing").as_deref() {
+            Some("compact") => vergence_widgets::CODE_SPACING,
+            Some("comfortable") => 1.45,
+            Some("loose") => 1.6,
+            _ if is_prose(t.path.as_deref()) => vergence_widgets::PROSE_SPACING,
+            _ => vergence_widgets::CODE_SPACING,
         }
     }
 
@@ -1656,6 +1683,12 @@ impl Rows for EditRows {
                 rows: vec![
                     Row::new("font", "Font", "", Control::Choose { choices: fonts, desktop: Some("Monospace".into()), app_default: 0 }),
                     Row::new("text-size", "Text size", "Ctrl+= and Ctrl+− change it for a while.", Control::Choose { choices: sizes, desktop: Some("Desktop default".into()), app_default: 0 }),
+                    Row::new(
+                        "line-spacing",
+                        "Line spacing",
+                        "Automatic: roomier for prose (.md, .txt, untitled), closer for code.",
+                        Control::Choose { choices: vec![Choice::text("Automatic", "auto"), Choice::text("Compact", "compact"), Choice::text("Comfortable", "comfortable"), Choice::text("Loose", "loose")], desktop: None, app_default: 0 },
+                    ),
                     Row::new("line-numbers", "Line numbers", "", Control::Switch { default: true }),
                     Row::new("wrap", "Wrap lines", "Long lines go on below at the window's edge; off, the text scrolls sideways.", Control::Switch { default: true }),
                     Row::new("current-line", "Shade the current line", "", Control::Switch { default: true }),
@@ -1730,6 +1763,18 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prose_is_told_from_code_by_its_name() {
+        use std::path::Path;
+        assert!(is_prose(None), "untitled");
+        for p in ["notes.md", "README", "Vergence-wishlist-2", "a.TXT", "doc.rst"] {
+            assert!(is_prose(Some(Path::new(p))), "{p}");
+        }
+        for p in ["main.rs", "index.html", "app.py", "page.php", "desktop.toml", ".zshrc"] {
+            assert!(!is_prose(Some(Path::new(p))), "{p}");
+        }
+    }
 
     fn shared() -> SharedRef {
         Rc::new(RefCell::new(Shared { windows: Vec::new(), transfers: Vec::new(), inbox: Arc::new(Mutex::new(Vec::new())), listener: Arc::new(Mutex::new(None)), next_tab: 0, snaps: Vec::new(), pending: Vec::new() }))
