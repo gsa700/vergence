@@ -237,12 +237,23 @@ pub fn is_builtin(connector: &str) -> bool {
 /// screen.
 const SAME_SIZE_SLACK: f64 = 0.02;
 
+/// How far "the same size" gives way to a whole number: 8%. Whole scales
+/// put every line and edge on the panel's pixels, and at about 100 ppi that
+/// is sharper than being the same size to the last few percent (Dave,
+/// 2026-11-19, the ASUS on kepler: 1.0667 against 1.0, "1.0 looks
+/// sharper"). The text factor (Scales::text) gives some of the size back.
+const WHOLE_SLACK: f64 = 0.08;
+
 /// For "the same size on every screen": the scale on the pixel grid nearest
 /// `exact` (p/q with q of 8 or less, in 120ths) if within SAME_SIZE_SLACK,
-/// else `exact` (in 120ths). kepler, 2026-11-18: its 14" 4K at 3.2833 (no
-/// grid) becomes 3.25; its ASUS at 1.0703 stays 1.0667, the nearest grid
-/// scales (1, 1.125) being 5 to 7% off.
+/// else `exact` (in 120ths); but a whole number within WHOLE_SLACK first.
+/// kepler: its 14" 4K at 3.2833 (no grid) becomes 3.25 (3 is 9% off); its
+/// ASUS at 1.0703 becomes 1 (it was 1.0667 until 2026-11-19).
 pub fn on_grid_near(exact: f64) -> f64 {
+    let whole = exact.round().max(1.0);
+    if (whole - exact).abs() <= WHOLE_SLACK * exact {
+        return whole;
+    }
     let fine = crate::scale_in_120ths(exact);
     let best = [1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0]
         .iter()
@@ -316,8 +327,11 @@ mod tests {
     fn same_size_lands_on_the_grid_when_near() {
         // kepler's 14" 4K: 3.2833 has no grid; 3.25 (13/4) is 1% off.
         assert_eq!(on_grid_near(3.2833), 3.25);
-        // Its ASUS: 1.0703; 1 and 1.125 are 5 to 7% off, so its own.
-        assert_eq!(on_grid_near(1.0703), 128.0 / 120.0);
+        // Its ASUS: 1.0703; a whole number within 8% wins (Dave, 2026-11-19).
+        assert_eq!(on_grid_near(1.0703), 1.0);
+        assert_eq!(on_grid_near(2.15), 2.0);
+        // Beyond 8% the grid or the exact scale, as before.
+        assert_eq!(on_grid_near(1.10), crate::scale_in_120ths(1.10));
         // Already on it.
         assert_eq!(on_grid_near(4.0 / 3.0), crate::scale_in_120ths(4.0 / 3.0));
         // Whatever it gives has a grid, or is the exact scale.
