@@ -99,14 +99,18 @@ struct Bits<'a> {
 }
 
 impl Bits<'_> {
+    /// The next `n` bits (at most 32), zeros past the end.
     fn peek(&self, n: u32) -> u32 {
-        let mut v = 0u32;
-        for i in 0..n as usize {
-            let p = self.pos + i;
-            let bit = self.data.get(p / 8).map_or(0, |b| (b >> (7 - p % 8)) & 1);
-            v = v << 1 | bit as u32;
+        if n == 0 {
+            return 0;
         }
-        v
+        // Five bytes from the current one cover any 32 bits at any offset.
+        let at = self.pos / 8;
+        let mut window = 0u64;
+        for k in 0..5 {
+            window = window << 8 | u64::from(self.data.get(at + k).copied().unwrap_or(0));
+        }
+        ((window << (24 + self.pos % 8)) >> (64 - n)) as u32
     }
 
     fn skip(&mut self, n: usize) {
@@ -270,14 +274,29 @@ fn row_2d(b: &mut Bits, reference: &[usize], columns: usize) -> Option<Vec<usize
     let mut a0: isize = -1;
     let mut black = false;
     let mut guard = 0;
+    // Every reference change before `lo` is at or left of a0. a0 only moves
+    // right on good data, so the search for b1 starts there instead of at
+    // the row's start (step 9: halftone scans have thousands of changes a
+    // row, and the scan from 0 made each row quadratic). If a0 moves left
+    // (a negative vertical step), it starts from 0 again: the same b1 as a
+    // whole scan, on any data.
+    let mut lo = 0;
+    let mut last_a0 = a0;
     while a0 < columns as isize {
         guard += 1;
         if guard > columns * 4 + 16 {
             return None;
         }
+        if a0 < last_a0 {
+            lo = 0;
+        }
+        last_a0 = a0;
+        while lo < reference.len() && reference[lo] as isize <= a0 {
+            lo += 1;
+        }
         // b1: the first change on the reference line right of a0 to the
         // other color; b2 the next one.
-        let mut i = 0;
+        let mut i = lo;
         while i < reference.len() && (reference[i] as isize <= a0 || (i % 2 == 1) != black) {
             i += 1;
         }

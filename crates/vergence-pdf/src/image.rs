@@ -153,7 +153,45 @@ fn decode_at(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8
     let mut comps = vec![0f64; n];
     // A cache for 8-bit single-component images (most gray and indexed ones).
     let mut cache: Vec<Option<[u8; 3]>> = if n == 1 && bpc <= 8 { vec![None; 256] } else { Vec::new() };
-    for y in 0..h {
+    // The common case, 8 bits a sample with the default decode and no color
+    // key, a byte at a time (step 9: a 36M-pixel RGB photo and its soft mask
+    // took 3 s bit by bit). Rows of 8-bit samples are byte-aligned, so the
+    // samples are simply consecutive; missing ones read as 0, as below.
+    // One-component images of 1, 2 or 4 bits too: each row starts on a
+    // byte, so a sample is a shift and a mask (a 33M-pixel fax page).
+    let fast = key.is_none() && decode_arr.is_empty() && ((n == 1 && bpc <= 8) || (bpc == 8 && matches!(cs, ColorSpace::Rgb | ColorSpace::Cmyk)));
+    let sample = |i: usize| data.get(i).copied().unwrap_or(0);
+    let (bpc_u, stride) = (bpc as usize, (w * bpc as usize).div_ceil(8));
+    for y in 0..if fast { h } else { 0 } {
+        for x in 0..w {
+            let (p, o) = ((y * w + x) * n, (y * w + x) * 4);
+            let rgb = match cs {
+                _ if n == 1 => {
+                    let bit = x * bpc_u;
+                    let r = (sample(y * stride + bit / 8) >> (8 - bpc_u - bit % 8)) & (max as u8);
+                    comps[0] = range(0).0 + r as f64 * (range(0).1 - range(0).0) / max;
+                    *cache[r as usize].get_or_insert_with(|| to_bytes(cs.to_rgb(&comps).unwrap_or([1.0; 3])))
+                }
+                ColorSpace::Rgb => [sample(p), sample(p + 1), sample(p + 2)],
+                ColorSpace::Cmyk => {
+                    // The same arithmetic as the general path's, so the same bytes.
+                    let v = |i: usize| (sample(i) as f64 / max) as f32;
+                    let k = v(p + 3);
+                    to_bytes([0, 1, 2].map(|c| (1.0 - v(p + c)) * (1.0 - k)))
+                }
+                // Not reached: the fast path takes one component, RGB or CMYK.
+                _ => [255; 3],
+            };
+            out[o..o + 3].copy_from_slice(&rgb);
+            out[o + 3] = 255;
+        }
+    }
+    // Colors already worked out, for 8-bit images of 2 to 4 components in a
+    // space that costs a function or a formula a pixel (step 9: a DeviceN
+    // cover ran its PostScript function for every pixel, 2 s a page).
+    let memo_on = bpc == 8 && (2..=4).contains(&n) && matches!(cs, ColorSpace::Tint { .. } | ColorSpace::Lab { .. });
+    let mut memo: std::collections::HashMap<u32, [u8; 3]> = std::collections::HashMap::new();
+    for y in 0..if fast { 0 } else { h } {
         for x in 0..w {
             for (k, r) in raw.iter_mut().enumerate() {
                 *r = bits.read(bpc as u32).unwrap_or(0);
@@ -164,6 +202,18 @@ fn decode_at(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8
             let rgb = if !cache.is_empty() {
                 let slot = raw[0] as usize;
                 *cache[slot].get_or_insert_with(|| to_bytes(cs.to_rgb(&comps).unwrap_or([1.0; 3])))
+            } else if memo_on {
+                let k = raw.iter().fold(0u32, |a, v| a << 8 | *v as u32);
+                match memo.get(&k) {
+                    Some(c) => *c,
+                    None => {
+                        let c = to_bytes(cs.to_rgb(&comps).unwrap_or([1.0; 3]));
+                        if memo.len() < MEMO_MAX {
+                            memo.insert(k, c);
+                        }
+                        c
+                    }
+                }
             } else {
                 to_bytes(cs.to_rgb(&comps).unwrap_or([1.0; 3]))
             };
@@ -218,7 +268,8 @@ fn decode_at(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8
 
 /// A JPEG: its samples, then the usual path with the dictionary adjusted
 /// to them (8 bits; the PDF's color space kept when its component count
-/// matches, else gray or RGB: a CMYK JPEG comes back converted).
+/// matches, else gray, RGB or CMYK by the JPEG's own count; CMYK as
+/// stored, the /Decode array applied as for any image).
 fn jpeg(doc: &Document, dict: &Dict, data: &[u8], resources: Option<&Dict>, depth: usize) -> Decoded {
     let Ok((w, h, channels, samples)) = vergence_decode::jpeg_samples(data) else { return Decoded::Undecoded(Some(b"DCTDecode".to_vec())) };
     let cs = ColorSpace::parse(&doc.get_in(dict, "ColorSpace"), doc, resources);
@@ -226,7 +277,12 @@ fn jpeg(doc: &Document, dict: &Dict, data: &[u8], resources: Option<&Dict>, dept
     let mut d: Dict = Dict(dict.0.iter().filter(|(k, _)| !matches!(k.as_slice(), b"Width" | b"Height" | b"BitsPerComponent" | b"Filter" | b"DecodeParms")).cloned().collect());
     if !keep {
         d.0.retain(|(k, _)| k != b"ColorSpace" && k != b"Decode");
-        d.0.push((b"ColorSpace".to_vec(), Object::Name(if channels == 1 { b"DeviceGray".to_vec() } else { b"DeviceRGB".to_vec() })));
+        let name: &[u8] = match channels {
+            1 => b"DeviceGray",
+            4 => b"DeviceCMYK",
+            _ => b"DeviceRGB",
+        };
+        d.0.push((b"ColorSpace".to_vec(), Object::Name(name.to_vec())));
     }
     d.0.push((b"Width".to_vec(), Object::Int(w as i64)));
     d.0.push((b"Height".to_vec(), Object::Int(h as i64)));
@@ -292,6 +348,9 @@ fn fax(doc: &Document, dict: &Dict, data: &[u8], parms: Option<&Dict>, resources
     d.0.push((b"BitsPerComponent".to_vec(), Object::Int(1)));
     decode_at(doc, &d, &samples, None, None, resources, depth)
 }
+
+/// The most colors remembered for one image.
+const MEMO_MAX: usize = 1 << 20;
 
 fn to_bytes(c: [f32; 3]) -> [u8; 3] {
     c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)

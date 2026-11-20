@@ -368,3 +368,45 @@ selection order; color management beyond the simple formulas.
   test file (the PDF icon): thumbnails, and the R56's first page in
   Space's preview. Space shows the first page only for now. Tests on all
   four machines.
+- **Step 9, part 1** (2026-11-20 morning): the corpus checks.
+  examples/pdfcheck.rs (`render` the first, middle and last page of every
+  file into a folder with an index, `time`, `compare` two folders pixel
+  for pixel) and tools/pdfcheck/ (pdfjs-render.mjs draws the same pages
+  with pdf.js 5.7 under Node, score.mjs ranks the pages by how far apart
+  they are and makes side-by-side pictures of the worst; a check tool on
+  Hubble only, never shipped: Node, pdfjs-dist and @napi-rs/canvas
+  installed there with npm in ~/pdfcheck/pdfjs). The reference pictures
+  are ~/pdfcheck/ref2 on Hubble (4,170 pages at 1.5x; pages over 16M
+  pixels drawn smaller); after a change, `render` into a new folder and
+  `compare`. Corpus: 1,544 files, 4,170 pages, no panics, one file
+  needing a password. By eye against pdf.js, worst first:
+  - **Fixed: CMYK JPEGs.** The `image` crate's RGB assumed Adobe's
+    inverted CMYK, so plain CMYK photos came out black or negative (the
+    bash Cookbook, the ARRL Antenna Book, the TS-890S manual, Eaton,
+    Yamaha, Times Microwave: 148 pages changed). vergence-decode's
+    jpeg_samples now calls zune-jpeg, the decoder `image` used, directly
+    (Dave, 2026-11-20; docs/borrowed-review.md) for CMYK as stored, YCCK
+    turned into CMYK, the PDF's /Decode applied as for any image.
+  - **Faster, the same pixels** (all 4,170 pages compared equal before
+    and after): 8-bit RGB, CMYK and gray images and 1-, 2- and 4-bit
+    one-component images read a byte at a time (a 36M-pixel photo with
+    its soft mask: 3.2 s to 0.16 s); the CCITT decoder's b1 search no
+    longer starts each step at the row's start (halftone scans: quadratic
+    rows) and peeks 32 bits at once (3.5 s to 0.38 s a Collins page);
+    DeviceN and Lab images remember colors already worked out (a cover's
+    PostScript function a pixel: 2.0 s to 0.26 s).
+  - **Kept by Dave's choice:** CMYK by the simple formula; pdf.js fits a
+    print profile, so its rich blacks are dark gray-blue and its CMYK
+    colors softer. Not a bug, out of milestone 1 (color management).
+  - **Not ours:** pdf.js under Node left some CCITT and JBIG2 scans blank
+    (the RF Exposure book, QST reviews, the TR-7950 manual); ours checked
+    by eye. JPEG 2000 pictures are the placeholder (as decided).
+  - **Open: soft masks, blend modes, transparency groups.** Step 3 has
+    them and they were never built (its progress note: "Not yet"); the
+    corpus shows them (the Hacking VoIP cover's luminosity soft mask,
+    Multiply at 0.75). Step 9's second part, before the milestone closes.
+  Timing on kepler (i5-8500T), 4,170 pages at 1.5x: median 20.6 ms, 84%
+  under 100 ms, 90th percentile 148 ms; the slowest are huge pages (the
+  TH-F6 schematic, 70 by 50 inches: 7 s) and big scans, decoded at full
+  size before drawing (decoding at the drawn size would be the next
+  speed-up). Tests on all four machines.

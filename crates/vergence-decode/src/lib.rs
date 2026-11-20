@@ -192,22 +192,54 @@ fn resized(w: u32, h: u32, rgba: Vec<u8>, to: (u32, u32)) -> Vec<u8> {
 }
 
 /// A JPEG's samples as stored, for the PDF reader (PDF milestone 1, step
-/// 5): width, height, channels (1 gray, 3 RGB; CMYK comes converted to
-/// RGB) and the bytes, rows from the top. No EXIF turning: a picture inside
-/// a PDF is placed by the page, not by its tags. Memory is bounded.
+/// 5): width, height, channels (1 gray, 3 RGB, 4 CMYK) and the bytes, rows
+/// from the top. No EXIF turning: a picture inside a PDF is placed by the
+/// page, not by its tags. Memory is bounded.
+///
+/// CMYK comes as stored, never inverted for an Adobe marker: inside a PDF
+/// the image's /Decode array says that, as pdf.js reads it (step 9: the
+/// `image` crate's RGB assumed Adobe's inverted CMYK and turned plain CMYK
+/// photos black or negative). YCCK (Adobe transform 2) is turned into CMYK
+/// here: its Y, Cb, Cr to RGB, then C, M, Y = 255 - R, G, B, K kept. So
+/// zune-jpeg is called directly, the decoder `image` itself uses (Dave,
+/// 2026-11-20; docs/borrowed-review.md).
 pub fn jpeg_samples(data: &[u8]) -> Result<(u32, u32, u8, Vec<u8>), String> {
-    let mut reader = image::ImageReader::with_format(std::io::Cursor::new(data), image::ImageFormat::Jpeg);
-    let mut limits = image::Limits::default();
-    limits.max_alloc = Some(256 << 20);
-    limits.max_image_width = Some(32_768);
-    limits.max_image_height = Some(32_768);
-    reader.limits(limits);
-    let img = reader.decode().map_err(|e| e.to_string())?;
-    let (w, h) = (img.width(), img.height());
-    Ok(match img {
-        image::DynamicImage::ImageLuma8(b) => (w, h, 1, b.into_raw()),
-        other => (w, h, 3, other.to_rgb8().into_raw()),
-    })
+    use zune_core::colorspace::ColorSpace as Cs;
+    let options = || {
+        zune_core::options::DecoderOptions::default()
+            .set_strict_mode(false)
+            .set_max_width(32_768)
+            .set_max_height(32_768)
+    };
+    let mut probe = zune_jpeg::JpegDecoder::new_with_options(zune_core::bytestream::ZCursor::new(data), options());
+    probe.decode_headers().map_err(|e| format!("{e:?}"))?;
+    let (w, h) = probe.dimensions().ok_or("no size")?;
+    let input = probe.input_colorspace().ok_or("no color space")?;
+    // Four components out as they are (zune-jpeg copies them when asked for
+    // the space they are in); one as gray; anything else as RGB.
+    let (out, channels) = match input {
+        Cs::CMYK | Cs::YCCK => (input, 4u8),
+        Cs::Luma => (Cs::Luma, 1),
+        _ => (Cs::RGB, 3),
+    };
+    if w.saturating_mul(h).saturating_mul(channels as usize) > 256 << 20 {
+        return Err("too large".into());
+    }
+    let mut decoder = zune_jpeg::JpegDecoder::new_with_options(zune_core::bytestream::ZCursor::new(data), options().jpeg_set_out_colorspace(out));
+    let mut samples = decoder.decode().map_err(|e| format!("{e:?}"))?;
+    if samples.len() != w * h * channels as usize {
+        return Err("short picture".into());
+    }
+    if input == Cs::YCCK {
+        for px in samples.chunks_exact_mut(4) {
+            let (y, cb, cr) = (px[0] as f32, px[1] as f32 - 128.0, px[2] as f32 - 128.0);
+            let rgb = [y + 1.402 * cr, y - 0.344_136 * cb - 0.714_136 * cr, y + 1.772 * cb];
+            for (c, v) in px[..3].iter_mut().zip(rgb) {
+                *c = 255 - v.round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    Ok((w as u32, h as u32, channels, samples))
 }
 
 /// Decodes a picture's bytes, here (the helper's work; tests call it too).

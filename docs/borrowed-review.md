@@ -172,7 +172,12 @@ large), or limit what we accept and draw it with vergence-render.
 Decoding wallpapers and pictures, reading cursor themes. Files milestone 1
 (Dave, 2026-11-15) turns on `image`'s GIF and WebP decoders (the `gif` and
 `image-webp` crates, pure Rust, MIT / Apache-2.0) for Close-Up, run in the
-decode helper; BMP is decoded by our own code. Review: the image
+decode helper; BMP is decoded by our own code. Since 2026-11-20 (Dave,
+PDF milestone 1 step 9) vergence-decode also calls `zune-jpeg` and
+`zune-core` (MIT / Apache-2.0 / Zlib), the JPEG decoder `image` already
+used, directly: the PDF reader needs a JPEG's CMYK samples as stored, and
+`image` only hands out RGB (it turned plain CMYK photos in PDFs black or
+negative). No new code came in, only the direct use. Review: the image
 decoders read untrusted files, so they belong to the isolation work in
 whitepaper §6.10 whichever way this goes; png and xcursor are small enough
 to replace.

@@ -10,3 +10,6 @@ description = "Pictures decoded apart: a helper process with nothing else to do,
 vergence-types.workspace = true
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 resvg = "0.45"
+# The JPEG decoder `image` uses, called directly for the PDF reader's raw CMYK (Dave, 2026-11-20).
+zune-jpeg = "0.5"
+zune-core = "0.5"
