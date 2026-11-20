@@ -27,6 +27,7 @@ pub mod filter;
 pub mod font;
 pub mod function;
 pub mod image;
+pub mod jbig2;
 pub mod lexer;
 pub mod object;
 pub mod render;

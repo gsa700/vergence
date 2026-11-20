@@ -266,3 +266,16 @@ selection order; color management beyond the simple formulas.
   check and a fuzz test. Seen: the ARRL archive's QST TS-850S review
   cover (scanned ad column). Corpus: no panics. Left in step 5: JBIG2 (12
   files), JPEG 2000 placeholder (30 files, as Dave chose).
+- **Step 5, part 3** (2026-11-20 night): jbig2.rs, our own JBIG2 decoder:
+  the MQ arithmetic decoder (T.88 Annex H.2's test sequence decodes
+  exactly), integer and symbol-ID decoding, generic regions (templates
+  0-3, TPGDON, MMR through ccitt.rs), refinement, arithmetic symbol
+  dictionaries with aggregation, text regions, stripes, /JBIG2Globals;
+  bounded (pixels, symbols, instances, a decision budget) and fuzzed. In
+  the corpus all 12 JBIG2 files are arithmetic coded; one (684938.pdf)
+  also has Huffman text regions, not yet decoded, and no file uses
+  halftones. Seen: the Transistor Radio Handbook (symbols and text), the
+  TS-830S service manual (MMR and arithmetic), the Collins 30L-1 book
+  cover. Corpus: no panics; 63 tests on all three. Left in step 5: the
+  JPEG 2000 placeholder (30 files; the Icom receivers brochure is nearly
+  all JPX), Huffman JBIG2.

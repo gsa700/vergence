@@ -5,8 +5,9 @@
 //! masks (/SMask). JPEG (DCTDecode) through vergence-decode's decoder
 //! (the image crate, borrowed), its samples then going the same way as
 //! any; CCITT fax (ccitt.rs, ours) the same way as 1-bit samples; JPEG
-//! 2000 is a placeholder for now (Dave, 2026-11-19) and JBIG2 still to
-//! come: those come back as [`Decoded::Undecoded`].
+//! 2000 is a placeholder for now (Dave, 2026-11-19); JBIG2 through
+//! jbig2.rs (ours), arithmetic-coded streams so far. What cannot be
+//! decoded comes back as [`Decoded::Undecoded`].
 
 use crate::color::ColorSpace;
 use crate::filter;
@@ -93,6 +94,9 @@ fn decode_at(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8
     }
     if image_filter == Some(b"CCITTFaxDecode") {
         return fax(doc, dict, data, parms, resources, depth);
+    }
+    if image_filter == Some(b"JBIG2Decode") {
+        return jbig2(doc, dict, data, parms, resources, depth);
     }
     if let Some(f) = image_filter {
         return Decoded::Undecoded(Some(f.to_vec()));
@@ -227,6 +231,33 @@ fn jpeg(doc: &Document, dict: &Dict, data: &[u8], resources: Option<&Dict>, dept
     d.0.push((b"Width".to_vec(), Object::Int(w as i64)));
     d.0.push((b"Height".to_vec(), Object::Int(h as i64)));
     d.0.push((b"BitsPerComponent".to_vec(), Object::Int(8)));
+    decode_at(doc, &d, &samples, None, None, resources, depth)
+}
+
+/// JBIG2: the page decoded (with /JBIG2Globals), turned into 1-bit rows
+/// with 0 black, as PDF's samples are, sized to the image's own Width and
+/// Height.
+fn jbig2(doc: &Document, dict: &Dict, data: &[u8], parms: Option<&Dict>, resources: Option<&Dict>, depth: usize) -> Decoded {
+    let globals = parms.and_then(|p| match doc.get_in(p, "JBIG2Globals") {
+        Object::Stream(s) => Some(doc.stream(&s).data),
+        _ => None,
+    });
+    let Some(page) = crate::jbig2::decode(globals.as_deref(), data) else { return Decoded::Undecoded(Some(b"JBIG2Decode".to_vec())) };
+    let w = doc.get_in(dict, "Width").as_int().filter(|w| *w > 0).map_or(page.w, |w| w as usize).min(1 << 16);
+    let h = doc.get_in(dict, "Height").as_int().filter(|h| *h > 0).map_or(page.h, |h| h as usize).min(1 << 16);
+    let stride = w.div_ceil(8);
+    let mut samples = vec![0xFFu8; stride * h];
+    for y in 0..h.min(page.h) {
+        for x in 0..w.min(page.w) {
+            if page.px[y * page.w + x] == 1 {
+                samples[y * stride + x / 8] &= !(0x80 >> (x % 8));
+            }
+        }
+    }
+    let mut d: Dict = Dict(dict.0.iter().filter(|(k, _)| !matches!(k.as_slice(), b"Width" | b"Height" | b"BitsPerComponent" | b"Filter" | b"DecodeParms")).cloned().collect());
+    d.0.push((b"Width".to_vec(), Object::Int(w as i64)));
+    d.0.push((b"Height".to_vec(), Object::Int(h as i64)));
+    d.0.push((b"BitsPerComponent".to_vec(), Object::Int(1)));
     decode_at(doc, &d, &samples, None, None, resources, depth)
 }
 
