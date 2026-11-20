@@ -29,6 +29,7 @@ pub mod function;
 pub mod helper;
 pub mod image;
 pub mod jbig2;
+pub mod jpx;
 pub mod lexer;
 pub mod object;
 pub mod outline;

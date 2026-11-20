@@ -98,6 +98,9 @@ fn decode_at(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8
     if image_filter == Some(b"JBIG2Decode") {
         return jbig2(doc, dict, data, parms, resources, depth);
     }
+    if image_filter == Some(b"JPXDecode") {
+        return jpx(doc, dict, data, resources, depth);
+    }
     if let Some(f) = image_filter {
         return Decoded::Undecoded(Some(f.to_vec()));
     }
@@ -264,6 +267,80 @@ fn decode_at(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8
         }
     }
     Decoded::Color(Image { width: w, height: h, data: out })
+}
+
+/// A JPEG 2000 picture (jpx.rs): its channels, then the usual path. The
+/// color space is the PDF's if it gives one, else the JP2 file's, else by
+/// the channel count; /Decode is ignored, as PDF says for JPXDecode. An
+/// opacity channel (JP2's cdef, or the one past the colors when
+/// /SMaskInData asks) fades the picture as a soft mask would.
+fn jpx(doc: &Document, dict: &Dict, data: &[u8], resources: Option<&Dict>, depth: usize) -> Decoded {
+    let undecoded = || Decoded::Undecoded(Some(b"JPXDecode".to_vec()));
+    let Ok(p) = crate::jpx::decode(data) else { return undecoded() };
+    let cs = ColorSpace::parse(&doc.get_in(dict, "ColorSpace"), doc, resources);
+    let wants_alpha = doc.get_in(dict, "SMaskInData").as_int().unwrap_or(0) != 0;
+    let n_from = |count: usize| match count {
+        0 => 0,
+        1 | 2 => 1,
+        3 => 3,
+        _ => 4,
+    };
+    let n = match (&cs, p.color) {
+        (Some(c), _) => c.components(),
+        (None, Some(crate::jpx::Jp2Color::Gray)) => 1,
+        (None, Some(crate::jpx::Jp2Color::Rgb)) => 3,
+        (None, Some(crate::jpx::Jp2Color::Cmyk)) => 4,
+        (None, None) => n_from(p.channels.len() - usize::from(p.alpha.is_some())),
+    };
+    let alpha = p.alpha.or_else(|| (wants_alpha && p.channels.len() > n).then_some(n));
+    let colors: Vec<&crate::jpx::Channel> = p.channels.iter().enumerate().filter(|(i, _)| Some(*i) != alpha).map(|(_, c)| c).take(n).collect();
+    if n == 0 || colors.len() < n {
+        return undecoded();
+    }
+    // Indexed pictures keep their numbers; the rest are scaled to 8 bits.
+    let indexed = matches!(cs, Some(ColorSpace::Indexed { .. }));
+    let to8 = |v: u16, depth: u8| -> u8 {
+        if indexed {
+            v.min(255) as u8
+        } else if depth >= 8 {
+            (v >> (depth - 8)).min(255) as u8
+        } else {
+            let max = (1u32 << depth) - 1;
+            ((v as u32 * 255 + max / 2) / max.max(1)).min(255) as u8
+        }
+    };
+    let mut samples = Vec::with_capacity(p.width * p.height * n);
+    for i in 0..p.width * p.height {
+        for c in &colors {
+            samples.push(to8(c.data.get(i).copied().unwrap_or(0), c.depth));
+        }
+    }
+    let mut d: Dict = Dict(dict.0.iter().filter(|(k, _)| !matches!(k.as_slice(), b"Width" | b"Height" | b"BitsPerComponent" | b"Filter" | b"DecodeParms" | b"Decode" | b"SMaskInData")).cloned().collect());
+    if cs.is_none() {
+        d.0.retain(|(k, _)| k != b"ColorSpace");
+        let name: &[u8] = match n {
+            1 => b"DeviceGray",
+            4 => b"DeviceCMYK",
+            _ => b"DeviceRGB",
+        };
+        d.0.push((b"ColorSpace".to_vec(), Object::Name(name.to_vec())));
+    }
+    d.0.push((b"Width".to_vec(), Object::Int(p.width as i64)));
+    d.0.push((b"Height".to_vec(), Object::Int(p.height as i64)));
+    d.0.push((b"BitsPerComponent".to_vec(), Object::Int(8)));
+    let out = decode_at(doc, &d, &samples, None, None, resources, depth);
+    match (alpha.and_then(|a| p.channels.get(a)), out) {
+        (Some(a), Decoded::Color(mut img)) => {
+            for (px, v) in img.data.as_chunks_mut::<4>().0.iter_mut().zip(&a.data) {
+                let k = to8(*v, a.depth) as u32;
+                for c in px.iter_mut() {
+                    *c = ((*c as u32 * k + 127) / 255) as u8;
+                }
+            }
+            Decoded::Color(img)
+        }
+        (_, out) => out,
+    }
 }
 
 /// A JPEG: its samples, then the usual path with the dictionary adjusted

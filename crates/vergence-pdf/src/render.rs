@@ -12,7 +12,7 @@
 //! the clip, and transparency groups painted with alpha, a blend mode or a
 //! soft mask drawn apart and composited once. Not yet: knockout groups and
 //! a non-isolated group's backdrop (drawn as isolated), mesh shadings
-//! (types 4 to 7: skipped), JPEG 2000 (a light gray box stands in).
+//! (types 4 to 7: skipped). A picture we cannot decode is a light gray box.
 
 use std::collections::HashSet;
 use std::rc::Rc;

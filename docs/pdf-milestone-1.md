@@ -136,7 +136,8 @@ selection order; color management beyond the simple formulas.
 1. *Answered: Close-Up.* **Close-Up or an app of its own?** Recommended: Close-Up, as the
    wishlist suggests and Preview does on the Mac (one viewer for pictures
    and documents); its window grows a sidebar for PDFs only.
-2. *Answered: a placeholder for now.* **JPEG 2000** (scanned documents, some archives): our own decoder (a
+2. *Answered: a placeholder for now; then our own decoder (Dave,
+   2026-11-20), built in step 9.* **JPEG 2000** (scanned documents, some archives): our own decoder (a
    large job, wavelet and entropy coding) late in the milestone, or show
    such pictures as a gray box with a note until then?
 3. *Answered: drawn signature first.* **Signing in milestone 2:** a drawn or typed signature placed on the
@@ -433,3 +434,36 @@ selection order; color management beyond the simple formulas.
   Control) breaks such ties, and on every page checked it draws what we
   now draw. The Hacking VoIP cover's picture is JPEG 2000 (the
   placeholder); the transparency around it is right.
+- **Step 9, part 3** (2026-11-20 midday): JPEG 2000, our own decoder
+  (Dave: "go ahead with our own decoder"), jpx.rs: JP2 boxes (jp2c, colr
+  with sRGB, gray, CMYK and sYCC, pclr and cmap palettes, cdef opacity) or
+  a bare codestream; SIZ, COD, COC, QCD, QCC in the main and tile headers;
+  tiles and tile-parts, components with their own sampling, layers, all
+  five progression orders (by the reference grid's precinct places),
+  precincts, SOP and EPH; packet headers (tag trees, the pass codewords,
+  Lblock, one length per segment); tier 1 with jbig2.rs's MQ coder (the
+  same coder, now shared): significance, refinement and cleanup passes,
+  run-length mode, every code-block style (bypass with raw passes, reset,
+  terminate all, vertically causal, segmentation symbols); each
+  coefficient reconstructed halfway into the last plane it was coded in;
+  dequantization (E.1); the inverse 5/3 (exact integers) and 9/7
+  wavelets with symmetric extension; RCT and ICT; DC shifts. image.rs's
+  jpx(): the PDF's color space first, then the JP2 file's, then by
+  count; /Decode ignored as PDF says; Indexed samples kept as numbers;
+  /SMaskInData's opacity channel. Not read: ROI shifts, packed packet
+  headers (PPM/PPT: refused, the gray box), POC.
+  Tests: 14 files made by OpenJPEG's opj_compress from synthetic pictures
+  (testdata/jpx/make.sh, on Hubble; OpenJPEG only makes the test files,
+  nothing of it is used): the lossless ones (every progression order,
+  tiles with offsets, precincts, SOP/EPH, layers, all code-block styles,
+  no wavelet levels, 12 bits, subsampling, JP2) come back exactly; the
+  lossy ones within 1 of OpenJPEG's own decoding; damage fuzzed (20,000
+  rounds, no panic). Corpus: 46 pages changed, all checked against
+  PDFKit (the Hacking VoIP cover, the Icom catalog's photos, the
+  IC-2300H review, the K4 magazine cover, the BAMA page): the pictures
+  match. Pages with JPEG 2000 pictures: median 166 ms on Hubble, most of
+  it drawing pages that are themselves huge (300 dpi scans stored at
+  2480 by 3508 points).
+  Seen on the way, for later: big pictures drawn much smaller are point
+  sampled, so a scan's thin text breaks up (PDFKit averages); the Icom
+  catalog's title is missing but one letter (a font, not the picture).

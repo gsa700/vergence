@@ -91,9 +91,10 @@ const QE: [(u32, u8, u8, bool); 47] = [
     (0x0005, 45, 42, false), (0x0001, 45, 43, false), (0x5601, 46, 46, false),
 ];
 
-/// The MQ decoder (Annex E, the software conventions of E.3). A context's
+/// The MQ decoder (Annex E, the software conventions of E.3), JPEG 2000's
+/// too (jpx.rs: T.800 Annex C is the same coder). A context's
 /// state is one byte: its table index shifted left once, its MPS in bit 0.
-struct Mq<'a> {
+pub(crate) struct Mq<'a> {
     data: &'a [u8],
     bp: usize,
     c_high: u32,
@@ -104,7 +105,7 @@ struct Mq<'a> {
 }
 
 impl<'a> Mq<'a> {
-    fn new(data: &'a [u8]) -> Mq<'a> {
+    pub(crate) fn new(data: &'a [u8]) -> Mq<'a> {
         let mut m = Mq { data, bp: 0, c_high: 0, c_low: 0, a: 0, ct: 0, left: BUDGET };
         m.c_high = m.byte(0);
         m.byte_in();
@@ -145,7 +146,7 @@ impl<'a> Mq<'a> {
         self.left == 0
     }
 
-    fn bit(&mut self, cx: &mut [u8], i: usize) -> u8 {
+    pub(crate) fn bit(&mut self, cx: &mut [u8], i: usize) -> u8 {
         if self.left == 0 {
             return 0;
         }
