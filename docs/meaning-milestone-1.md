@@ -77,7 +77,16 @@ off daily from the first step:
    types into the person's window: its actions arrive as actions, not as
    input. The server draws a brief ring on each node an agent acts on, in
    the agent's own color, so the person can watch or carry on beside it.
-6. **The adapter: vergence-agent-mcp.** A small program speaking the Model
+   **Time running out** (Dave, 2026-11-20: "add 1 and 2 with step 5"): in
+   a timed grant's last 5 minutes the agent tile turns to a warning (and
+   comes out of the drawer, as tiles in trouble do), its card offering one
+   more timed span at a press, nothing stopped; when the time is up, the
+   question says so ("Claude's time with Calculator is up. Keep allowing
+   it?"), the same row of buttons, the waiting request run on the answer.
+6. **Time left, told to the agent** (Dave: "3 with step 6"): replies and
+   the change log carry the minutes a timed grant has left, so an agent
+   can ask for more before a long step instead of being stopped halfway.
+   **The adapter: vergence-agent-mcp.** A small program speaking the Model
    Context Protocol (JSON-RPC over its standard input and output, our own
    JSON code) on one side and the agent interface on the other: tools for
    windows, tree, find, act, wait, picture. Any MCP agent (Claude Code
