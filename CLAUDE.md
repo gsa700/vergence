@@ -124,9 +124,9 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   2026-11-19 and went back to Fedora the same night). Up since 2026-11-20:
   ssh by key as `apollo` (apollo.home.arpa), Rust by rustup (`.
   ~/.cargo/env`), build in ~/src/vergence (`tools/sync-hubble.sh apollo`),
-  Vergence installed under /usr/local (vdm enabled under systemd, the
-  login screen at boot not yet on), no passwordless sudo: Dave's test
-  password, never stored. Fedora needs nmap-ncat for vctl. Its tests and
+  Vergence installed under /usr/local, the VDM login screen at boot (VT
+  7, on the ASUS VS229 by HDMI), passwordless sudo (Dave, 2026-11-20:
+  /etc/sudoers.d/90-derickson-test). Fedora needs nmap-ncat for vctl. Its tests and
   the display suite pass (10 of 10, the HD 530 on Mesa 26.2). Hubble (Void) stays.
 - **Three platforms, one code base** (Dave, 2026-11-09; replaces "FreeBSD
   first" of 2026-11-06). The primary development platform is **Linux without
