@@ -191,6 +191,25 @@ fn resized(w: u32, h: u32, rgba: Vec<u8>, to: (u32, u32)) -> Vec<u8> {
     }
 }
 
+/// A JPEG's samples as stored, for the PDF reader (PDF milestone 1, step
+/// 5): width, height, channels (1 gray, 3 RGB; CMYK comes converted to
+/// RGB) and the bytes, rows from the top. No EXIF turning: a picture inside
+/// a PDF is placed by the page, not by its tags. Memory is bounded.
+pub fn jpeg_samples(data: &[u8]) -> Result<(u32, u32, u8, Vec<u8>), String> {
+    let mut reader = image::ImageReader::with_format(std::io::Cursor::new(data), image::ImageFormat::Jpeg);
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(256 << 20);
+    limits.max_image_width = Some(32_768);
+    limits.max_image_height = Some(32_768);
+    reader.limits(limits);
+    let img = reader.decode().map_err(|e| e.to_string())?;
+    let (w, h) = (img.width(), img.height());
+    Ok(match img {
+        image::DynamicImage::ImageLuma8(b) => (w, h, 1, b.into_raw()),
+        other => (w, h, 3, other.to_rgb8().into_raw()),
+    })
+}
+
 /// Decodes a picture's bytes, here (the helper's work; tests call it too).
 pub fn decode_bytes(data: &[u8], at_least: Option<(u32, u32)>) -> Result<Picture, String> {
     use image::{AnimationDecoder, ImageDecoder};

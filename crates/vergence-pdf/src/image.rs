@@ -2,8 +2,10 @@
 //! RGBA for the rasterizer: samples of 1 to 16 bits per component in any
 //! color space, /Decode arrays, stencil masks (/ImageMask), color-key
 //! masks (/Mask as an array), explicit masks (/Mask as a stream) and soft
-//! masks (/SMask). JPEG and the other picture codecs are step 5: until
-//! then such an image comes back as [`Decoded::Undecoded`].
+//! masks (/SMask). JPEG (DCTDecode) through vergence-decode's decoder
+//! (the image crate, borrowed), its samples then going the same way as
+//! any; JPEG 2000 is a placeholder for now (Dave, 2026-11-19), CCITT and
+//! JBIG2 still to come: those come back as [`Decoded::Undecoded`].
 
 use crate::color::ColorSpace;
 use crate::filter;
@@ -85,6 +87,9 @@ pub fn decode(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u
 /// `depth` 1 for a mask: a mask's own masks are never followed (a file
 /// could make one its own).
 fn decode_at(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8]>, resources: Option<&Dict>, depth: usize) -> Decoded {
+    if image_filter == Some(b"DCTDecode") {
+        return jpeg(doc, dict, data, resources, depth);
+    }
     if let Some(f) = image_filter {
         return Decoded::Undecoded(Some(f.to_vec()));
     }
@@ -201,6 +206,24 @@ fn decode_at(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8
         }
     }
     Decoded::Color(Image { width: w, height: h, data: out })
+}
+
+/// A JPEG: its samples, then the usual path with the dictionary adjusted
+/// to them (8 bits; the PDF's color space kept when its component count
+/// matches, else gray or RGB: a CMYK JPEG comes back converted).
+fn jpeg(doc: &Document, dict: &Dict, data: &[u8], resources: Option<&Dict>, depth: usize) -> Decoded {
+    let Ok((w, h, channels, samples)) = vergence_decode::jpeg_samples(data) else { return Decoded::Undecoded(Some(b"DCTDecode".to_vec())) };
+    let cs = ColorSpace::parse(&doc.get_in(dict, "ColorSpace"), doc, resources);
+    let keep = cs.as_ref().is_some_and(|c| c.components() == channels as usize);
+    let mut d: Dict = Dict(dict.0.iter().filter(|(k, _)| !matches!(k.as_slice(), b"Width" | b"Height" | b"BitsPerComponent" | b"Filter" | b"DecodeParms")).cloned().collect());
+    if !keep {
+        d.0.retain(|(k, _)| k != b"ColorSpace" && k != b"Decode");
+        d.0.push((b"ColorSpace".to_vec(), Object::Name(if channels == 1 { b"DeviceGray".to_vec() } else { b"DeviceRGB".to_vec() })));
+    }
+    d.0.push((b"Width".to_vec(), Object::Int(w as i64)));
+    d.0.push((b"Height".to_vec(), Object::Int(h as i64)));
+    d.0.push((b"BitsPerComponent".to_vec(), Object::Int(8)));
+    decode_at(doc, &d, &samples, None, resources, depth)
 }
 
 fn to_bytes(c: [f32; 3]) -> [u8; 3] {

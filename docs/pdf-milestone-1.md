@@ -3,7 +3,7 @@
 Status: **accepted 2026-11-19** (Dave: "close-up, drawn signature first,
 placeholder for jpeg 2000"; the corpus: "use the PDFs in my Documents
 folder for testing"). Steps 1 to 3 built 2026-11-19, step 4 part 1 the
-same night, parts 2 and 3 too (below): step 4 done; step 5, pictures, next.
+same night, parts 2 and 3 too: step 4 done; step 5 under way (below).
 
 ## What Dave asked for
 
@@ -249,3 +249,11 @@ selection order; color management beyond the simple formulas.
   bullets). Seen by eye: the Kantronics KPC-3+ sheet (Type 1), an Omron
   relay datasheet (Type 3 and Symbol/Dingbats: the bullets and "VSWR
   ≤1.2" right). Corpus: no panics. 54 tests on all three.
+- **Step 5, part 1** (2026-11-20 night): JPEG. vergence-decode's
+  jpeg_samples (the image crate, as the plan says; no EXIF turning, 256 MB
+  cap) gives a JPEG's samples; image.rs runs them through the usual path,
+  the PDF's color space kept when its component count matches (CMYK
+  JPEGs come converted to RGB), masks kept. Seen: the Motorola R56
+  cover's photo collage, the Omron relay photo. In the corpus: DCTDecode
+  in 679 files, CCITTFaxDecode in 160, JPXDecode in 30 (placeholder, as
+  Dave chose), JBIG2Decode in 12. CCITT next.
