@@ -702,7 +702,8 @@ fn a_wrapping_row_makes_lines() {
 #[test]
 fn a_text_area_is_drawn() {
     use vergence_render::Cpu;
-    let theme = Theme::default();
+    // Monospace at 13, as the geometry below expects (the desktop's is 16 by default).
+    let theme = Theme { mono_size: 13.0, ..Theme::default() };
     let mut fonts = Fonts::system();
     let text: String = (1..=40).map(|i| if i == 3 { "\tA long line that has to wrap at the edge of the area, more than once, because it goes on and on.\n".to_string() } else { format!("line {i}\n") }).collect();
     let doc = crate::TextDoc::new(&text);

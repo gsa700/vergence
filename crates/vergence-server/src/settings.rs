@@ -229,7 +229,10 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
 /// The desktop's fonts when settings.toml names none: sizes as on a screen
 /// at its calculated scale, which each screen's text factor keeps them
 /// (Dave, 2026-11-18: 11 and 12, Hubble's).
-pub const DEFAULT_FONT: &str = "Inter Variable 11";
+/// In points, as every app reads them (text milestone 1, step 5): 10 is
+/// 13.3, a hair over the 13 our apps drew the interface at before (Dave,
+/// 2026-11-19: "should we just use 10?"); 12 is Terminal's 16.
+pub const DEFAULT_FONT: &str = "Inter Variable 10";
 pub const DEFAULT_MONO: &str = "JetBrains Mono 12";
 
 fn load() -> Map {

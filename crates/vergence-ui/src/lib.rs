@@ -232,6 +232,70 @@ pub fn table_value(text: &str, section: &str, key: &str) -> Option<String> {
     found
 }
 
+/// The desktop's fonts (text milestone 1, step 5): the interface's and the
+/// monospace one's family and size, from settings.toml's "Gtk/FontName" and
+/// "Gtk/MonospaceFontName" ("Inter Variable 9.75"). The number is **points
+/// at 96 to the inch**, as GTK reads it (Dave, 2026-11-19), so a size here
+/// is points * 96 / 72 in reference units: 9.75 is 13, 12 is 16.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopFonts {
+    pub family: String,
+    pub size: f32,
+    pub mono: String,
+    pub mono_size: f32,
+}
+
+/// What a setup with no font settings shows: 13 for the interface, 16
+/// (JetBrains Mono 12) for monospace, the server's defaults.
+pub const DEFAULT_TEXT: f32 = 13.0;
+pub const DEFAULT_MONO_TEXT: f32 = 16.0;
+
+/// A font name's family and its size in reference units (points * 96/72);
+/// no number or a size out of reason: `units` for the size.
+pub fn font_name(value: &str, family: &str, units: f32) -> (String, f32) {
+    let value = value.trim();
+    match value.rsplit_once(' ') {
+        Some((name, size)) if size.parse::<f32>().is_ok_and(|s| (4.0..=96.0).contains(&s)) => (name.trim().to_string(), size.parse::<f32>().unwrap_or(0.0) * 96.0 / 72.0),
+        _ if !value.is_empty() => (value.to_string(), units),
+        _ => (family.to_string(), units),
+    }
+}
+
+impl DesktopFonts {
+    /// From settings.toml's text.
+    pub fn from_text(text: &str) -> DesktopFonts {
+        let value = |key: &str| {
+            text.lines().find_map(|line| {
+                let (k, v) = line.split_once('=')?;
+                (k.trim().trim_matches('"') == key).then(|| v.trim().trim_matches('"').to_string())
+            })
+        };
+        let (family, size) = font_name(&value("Gtk/FontName").unwrap_or_default(), "sans-serif", DEFAULT_TEXT);
+        let (mono, mono_size) = font_name(&value("Gtk/MonospaceFontName").unwrap_or_default(), "monospace", DEFAULT_MONO_TEXT);
+        DesktopFonts { family, size, mono, mono_size }
+    }
+
+    /// The desktop's, read again only when settings.toml has changed.
+    pub fn current() -> DesktopFonts {
+        use std::sync::Mutex;
+        static KEPT: Mutex<Option<(Option<std::time::SystemTime>, DesktopFonts)>> = Mutex::new(None);
+        let path = std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+            .map(|b| b.join("vergence/settings.toml"));
+        let stamp = path.as_ref().and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok());
+        let mut kept = KEPT.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, fonts)) = kept.as_ref()
+            && *at == stamp
+        {
+            return fonts.clone();
+        }
+        let fonts = DesktopFonts::from_text(&path.and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default());
+        *kept = Some((stamp, fonts.clone()));
+        fonts
+    }
+}
+
 /// The app's own light or dark for `key` ("style" for its content,
 /// "bar-style" for its window bar) in its table.
 pub fn app_pick(text: &str, section: &str, key: &str) -> Pick {
@@ -2104,4 +2168,19 @@ fn as_root() -> bool {
     }
     // SAFETY: geteuid(2) takes nothing and cannot fail.
     unsafe { geteuid() == 0 }
+}
+
+#[cfg(test)]
+mod font_tests {
+    use super::*;
+
+    #[test]
+    fn desktop_fonts_are_points() {
+        let f = DesktopFonts::from_text("\"Gtk/FontName\" = \"Inter Variable 9.75\"\n\"Gtk/MonospaceFontName\" = \"JetBrains Mono 12\"\n");
+        assert_eq!((f.family.as_str(), f.size), ("Inter Variable", 13.0));
+        assert_eq!((f.mono.as_str(), f.mono_size), ("JetBrains Mono", 16.0));
+        let none = DesktopFonts::from_text("");
+        assert_eq!((none.family.as_str(), none.size, none.mono.as_str(), none.mono_size), ("sans-serif", DEFAULT_TEXT, "monospace", DEFAULT_MONO_TEXT));
+        assert_eq!(font_name("Noto Sans", "x", 13.0), ("Noto Sans".to_string(), 13.0), "no number: the default size");
+    }
 }

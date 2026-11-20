@@ -272,7 +272,9 @@ impl EditWindow {
     /// How a document's area shows and edits, from the settings.
     fn options_for(&self, t: &DocTab) -> AreaOptions {
         let size = self.setting("text-size").and_then(|s| s.parse::<f32>().ok()).filter(|s| (6.0..=72.0).contains(s));
-        let base = size.unwrap_or_else(|| self.theme().text_size);
+        // Its own size, else the desktop's monospace font's (Gtk/MonospaceFontName,
+        // as Terminal; text milestone 1, step 5).
+        let base = size.unwrap_or_else(|| self.theme().mono_size);
         AreaOptions {
             font: self.setting("font").filter(|f| !f.is_empty()).unwrap_or_else(|| "monospace".into()),
             size: Some((base * self.zoom).clamp(6.0, 96.0)),

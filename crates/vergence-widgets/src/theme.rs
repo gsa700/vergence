@@ -17,9 +17,14 @@ pub struct Theme {
     pub dim: Color,
     pub text: Color,
     pub hover: Color,
-    /// The interface font's family, and the size of text that names none.
+    /// The interface font's family, and the size of text that names none
+    /// (the desktop's, Gtk/FontName in points: vergence_ui::DesktopFonts).
     pub font: String,
     pub text_size: f32,
+    /// The monospace font's family and size (Gtk/MonospaceFontName), for
+    /// text areas in monospace (Edit), before the screen's text factor.
+    pub mono: String,
+    pub mono_size: f32,
     /// The screen's text factor (vergence_ui::Frame::text), already in
     /// `text_size`; for sizes an app names itself (vergence_look::text_size).
     pub text_factor: f32,
@@ -60,7 +65,9 @@ impl Theme {
             text: c(p.text),
             hover: Color { a: p.hover_alpha, ..c(p.hover) },
             font: "sans-serif".into(),
-            text_size: 13.0,
+            text_size: vergence_ui::DEFAULT_TEXT,
+            mono: "monospace".into(),
+            mono_size: vergence_ui::DEFAULT_MONO_TEXT,
             text_factor: 1.0,
             opacity: 1.0,
             double_click: 400,
@@ -114,11 +121,20 @@ impl Theme {
         let mut t = Theme::new(dark, accent.unwrap_or(c(vergence_look::ACCENT)), high);
         t.reduced_motion = motion;
         t.double_click = double_click;
+        t.set_fonts(&vergence_ui::DesktopFonts::current());
         t.opacity = vergence_ui::opacity_setting(text, section);
         let on = |v: Option<String>| v.map(|v| v != "false");
         t.tint_mix = tint_amount(vergence_ui::table_value(text, "[appearance]", "tint-amount").as_deref());
         t.spell = on(vergence_ui::table_value(text, section, "spellcheck")).or_else(|| on(vergence_ui::table_value(text, "[text]", "spellcheck"))).unwrap_or(true);
         t
+    }
+
+    /// The desktop's fonts (text milestone 1, step 5).
+    pub fn set_fonts(&mut self, f: &vergence_ui::DesktopFonts) {
+        self.font = f.family.clone();
+        self.text_size = f.size.clamp(6.0, 48.0);
+        self.mono = f.mono.clone();
+        self.mono_size = f.mono_size.clamp(6.0, 72.0);
     }
 
     /// The page's ground, as opaque as the theme says.

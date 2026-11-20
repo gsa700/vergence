@@ -3170,10 +3170,13 @@ impl Program for App {
         t.tint_mix = vergence_widgets::tint_amount(vergence_ui::table_value(&text, "[appearance]", "tint-amount").as_deref());
         t.spell = vergence_ui::table_value(&text, "[settings]", "spellcheck").or_else(|| vergence_ui::table_value(&text, "[text]", "spellcheck")).is_none_or(|v| v != "false");
         t.opacity = vergence_ui::opacity_setting(&text, "[settings]");
-        let (family, _) = theme::split_font(&theme::get(&self.xsettings, theme::FONT));
-        if !family.trim().is_empty() {
-            t.font = family.trim().to_string();
-        }
+        // The desktop's fonts as every app reads them (points; text milestone 1, step 5).
+        let fonts = vergence_ui::DesktopFonts::from_text(&format!(
+            "\"Gtk/FontName\" = \"{}\"\n\"Gtk/MonospaceFontName\" = \"{}\"\n",
+            theme::get(&self.xsettings, theme::FONT),
+            theme::get(&self.xsettings, theme::MONO)
+        ));
+        t.set_fonts(&fonts);
         t
     }
 

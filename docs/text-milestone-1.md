@@ -1,7 +1,7 @@
 # Text milestone 1: kerning, weight, sharp text at low density, optical sizes
 
 Status: **accepted 2026-11-19** (Dave: "do both, make the milestone doc and
-then go ahead"). Steps 1 to 4 built 2026-11-19 (step 3 by pixel size,
+then go ahead"). Steps 1 to 5 built 2026-11-19 (step 3 by pixel size,
 not screen scale: below 24 px to the em; hint.rs; the GPU reads the CPU's
 coverage tables as a texture since) (kerning matches
 HarfBuzz at weights 400, 700, 900; GPU and CPU agree within one step; tests
@@ -100,7 +100,15 @@ Found, worst first:
    in points (whole numbers, clamped to the axis), so Inter's headings use
    its display cut. Layout and raster agree because the size picks the
    instance before either. Faces are cached per (file, weight, opsz).
-5. **The size in Settings** (waits on question 1).
+5. **The size in Settings** (built: points at 96 to the inch, Dave's
+   answer to question 1). vergence_ui::DesktopFonts reads Gtk/FontName and
+   Gtk/MonospaceFontName for every app (Theme::from_desktop; the settings
+   app too); text areas in monospace and Edit follow the monospace size
+   unless they have their own; the server's default interface font is
+   "Inter Variable 10" (13.3, a hair over the old fixed 13; Dave: "should we
+   just use 10?"). Converted so nothing visibly changed (Dave: "set it to
+   whatever corresponds to the current view"): Hubble's interface 11 -> 10,
+   its monospace 12 and Edit's own 15 kept; kepler and techbench already 10.
 6. **Line spacing in Edit** (waits on question 2).
 7. **Checks.** A type sample (vergence-ui example `typesample`: Inter and
    JetBrains Mono at 11 to 28, kerning pairs, light and dark) shot with
@@ -123,7 +131,7 @@ Found, worst first:
 
 ## Questions for Dave
 
-1. **What the number in Settings' font means.** (a) Points at 96 per inch,
+1. *Answered: points.* **What the number in Settings' font means.** (a) Points at 96 per inch,
    as GTK reads it, so our apps and GTK apps agree; the default becomes
    "Inter Variable 10" (13.3, about today's 13). (b) Drop the number from
    the picker and keep size in Accessibility's Size. Recommended: (a).
