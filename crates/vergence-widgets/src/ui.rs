@@ -58,6 +58,8 @@ pub struct Meaning {
     pub bounds: Rect,
     /// How many widgets with a meaning it is inside.
     pub depth: usize,
+    /// What it offers to choose from (a choice's items), by name.
+    pub items: Vec<String>,
 }
 
 /// A field's own copy of its text while it is being typed in.
@@ -2336,7 +2338,11 @@ impl<M: Clone> Ui<M> {
             }
             let named = |fallback: String| n.name.clone().unwrap_or(fallback);
             let bounds = self.shown(i);
-            let mk = |role, name, value: Option<String>, states| Some(Meaning { id, parent, role, name, value, states, bounds, depth });
+            let items = match &n.what {
+                What::Choice { options, .. } => options.clone(),
+                _ => Vec::new(),
+            };
+            let mk = |role, name, value: Option<String>, states| Some(Meaning { id, parent, role, name, value, states, bounds, depth, items: items.clone() });
             let off = |usable: bool, states: &mut Vec<&'static str>| {
                 if !usable {
                     states.insert(0, "off");

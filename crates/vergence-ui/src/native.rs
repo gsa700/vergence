@@ -979,9 +979,14 @@ fn meaning_request(window: u32, tree: &MeaningTree) -> WinRequest {
             y: n.y as f64,
             w: n.w as f64,
             h: n.h as f64,
+            items: {
+                // A choice's items, within their share: a long list is cut.
+                let mut room = MEANING_TEXT * 8;
+                n.items.iter().take(vergence_protocol::window::MAX_ITEMS).map(|i| cut(i)).take_while(|i| room.checked_sub(i.len() + 4).map(|r| room = r).is_some()).collect()
+            },
         };
         // Its share of the frame: ids and bounds, the strings with their lengths.
-        let size = 8 + 8 + 32 + 4 * (3 + node.states.len()) + 1 + node.role.len() + node.name.len() + node.value.as_ref().map_or(0, String::len) + node.states.iter().map(String::len).sum::<usize>();
+        let size = 8 + 8 + 32 + 4 * (4 + node.states.len() + node.items.len()) + 1 + node.role.len() + node.name.len() + node.value.as_ref().map_or(0, String::len) + node.states.iter().map(String::len).sum::<usize>() + node.items.iter().map(String::len).sum::<usize>();
         if used + size > MEANING_BUDGET {
             break;
         }
@@ -997,7 +1002,7 @@ mod tests {
     use super::*;
 
     fn node(i: u64, name_len: usize) -> crate::MeaningNode {
-        crate::MeaningNode { id: i + 1, parent: 0, role: "label".into(), name: "n".repeat(name_len), value: Some("v".repeat(name_len)), states: vec!["focused".into(); 20], x: 0.0, y: 0.0, w: 1.0, h: 1.0 }
+        crate::MeaningNode { id: i + 1, parent: 0, role: "label".into(), name: "n".repeat(name_len), value: Some("v".repeat(name_len)), states: vec!["focused".into(); 20], x: 0.0, y: 0.0, w: 1.0, h: 1.0, items: vec![] }
     }
 
     #[test]

@@ -271,6 +271,12 @@ impl NativeWindow {
         self.state.lock().unwrap().title.clone()
     }
 
+    /// Its meaning as last sent (Contract 3): the focused widget, the caret
+    /// in window points, the tree.
+    pub fn meaning(&self) -> Option<(u64, Option<(f64, f64, f64, f64)>, Vec<vergence_protocol::window::Node>)> {
+        self.state.lock().unwrap().meaning.clone()
+    }
+
     pub fn size(&self) -> Size<i32, Logical> {
         self.state.lock().unwrap().size
     }
@@ -720,8 +726,13 @@ impl Server {
                 }
             }
             WinRequest::Meaning { window, focus, caret, nodes } => {
-                if let Some(Win::Native(n)) = self.natives.get(&(client, window)) {
-                    n.state.lock().unwrap().meaning = Some((focus, caret, nodes));
+                if let Some(w) = self.natives.get(&(client, window)).cloned()
+                    && let Win::Native(n) = &w
+                {
+                    let new = (focus, caret, nodes);
+                    let old = std::mem::replace(&mut n.state.lock().unwrap().meaning, Some(new.clone()));
+                    let loc = self.space.element_location(&w).unwrap_or_default();
+                    self.meaning_changed(client, window, old.as_ref(), &new, (loc.x as f64, loc.y as f64));
                 }
             }
             WinRequest::Copy { kinds, .. } => self.native_copy(client, kinds),

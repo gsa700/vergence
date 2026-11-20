@@ -345,6 +345,9 @@ impl Server {
                 self.native_modifiers(&new);
                 self.input.keyboard_native = Some(new);
             }
+            // The meaning's readers follow the keyboard (meaning.rs).
+            let (client, window) = self.input.keyboard_native.as_ref().and_then(crate::win::Win::native).map_or((0, 0), |n| (n.client, n.id));
+            self.meaning_log.push(crate::meaning::Change::Window { client, window });
         }
         let id = self.win_id(window);
         self.input.seat.focus(Some(id));

@@ -29,6 +29,9 @@
 //   act <i> <node> set|choose <value...>     meaning node (`tree` shows the ids;
 //                                            Contract 3, bus v24): its serial
 //   acted <serial>       that action's answer (ok, why not, or waiting)
+//   find <path>          widgets by path: "Calculator > 7", "* > button:Save"
+//   focused              the focused widget and the caret, on the screens
+//   changes [since]      what changed in the meaning since a number
 //   restart              exit with status 75 (the launcher starts the new build)
 //   quit                 exit
 //
@@ -239,6 +242,16 @@ impl Server {
                     None => format!("window {i}: not a native window (only they have meaning)"),
                 }
             }
+            // The server's model of meaning (meaning milestone 1, step 2; meaning.rs).
+            "find" => {
+                let path = args.join(" ");
+                if path.is_empty() {
+                    return "find <path>: \"Calculator > 7\", \"Windows > switch:Minimize\", \"* > button:Save\"".into();
+                }
+                self.meaning_find_report(&path)
+            }
+            "focused" => self.meaning_focus_report(),
+            "changes" => self.meaning_changes_report(args.first().and_then(|a| a.parse().ok()).unwrap_or(0)),
             "acted" => {
                 let Some(serial) = args.first().and_then(|a| a.parse::<u32>().ok()) else { return "acted <serial>".into() };
                 match self.act_answer(serial) {

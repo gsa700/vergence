@@ -147,3 +147,18 @@ unnecessary for now); voice control.
   its items, "Window keys" focused, an unknown node refused. Seen too: a
   choice's items are not in the tree yet (step 2's model should carry
   them).
+- **Step 2** (2026-11-20 afternoon): the server's model of meaning, in
+  the server's meaning.rs. Bus v25: `window::Node::items`, what a choice
+  offers (vergence-widgets fills it from a choice's options; cut to its
+  share of the frame). Paths: a window's title or app id ("*" any), then
+  widgets by name, "role:name" or "role:", each anywhere below the last,
+  case not minded ("Calculator > 7", "Windows > switch:Minimize", "* >
+  button:Save"); answers with the window's index, the node, its place on
+  the screens in logical points and the screen's name. The focused widget
+  of the window with the keyboard, with its caret on the screens. A log
+  of changes (the keyboard's window, a window's focus, its caret on the
+  screens, its tree), the last 1024 by number, for readers to follow.
+  `vctl find <path>`, `vctl focused`, `vctl changes [since]`. Tests: the
+  paths (names, roles, below a part, case, nothing), the window part, the
+  log. Seen headless on Hubble: a switch found by path, every choice with
+  its items, focus moved by an action and the log saying so.

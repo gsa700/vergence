@@ -98,6 +98,9 @@ pub struct Server {
     /// Actions sent to native windows by their meaning, and their answers
     /// (Contract 3, meaning milestone 1; native.rs).
     pub acts: crate::native::Acts,
+    /// What changed in the windows' meaning, for readers to follow
+    /// (meaning milestone 1, step 2; meaning.rs).
+    pub meaning_log: crate::meaning::MeaningLog,
     /// Windows' pictures (thumbs.rs), and those still to save for `vctl
     /// thumb`: the window, the room's side in pixels, the name.
     pub thumbs: crate::thumbs::Thumbs,
@@ -314,6 +317,7 @@ impl Server {
             shot_pending: Vec::new(),
             picture_pending: Vec::new(),
             acts: Default::default(),
+            meaning_log: Default::default(),
             thumbs: Default::default(),
             picker: None,
             overview: None,

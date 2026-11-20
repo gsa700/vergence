@@ -50,6 +50,7 @@ mod touch;
 mod pointer;
 mod win;
 mod native;
+mod meaning;
 mod sound;
 mod switch;
 mod thumbs;

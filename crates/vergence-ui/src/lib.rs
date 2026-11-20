@@ -83,6 +83,8 @@ pub struct MeaningNode {
     pub y: f32,
     pub w: f32,
     pub h: f32,
+    /// What it offers to choose from, by name (a choice's items).
+    pub items: Vec<String>,
 }
 
 /// A window's whole meaning: its widgets, the focused one's id (0: none) and

@@ -263,7 +263,7 @@ fn window_messages_with_descriptors() {
     let seeds: Vec<WinRequest> = vec![
         WinRequest::Create { serial: 1, window: 1, role: "main".into(), token: String::new(), title: "t".into(), width: 640.0, height: 480.0, parent: 0, place: Place::Anywhere },
         WinRequest::Attach { window: 1, buffer: Buffer::Shm { fd: pipe(), width: 64, height: 32, stride: 256, format: 0 }, damage: vec![Damage { x: 0, y: 0, w: 8, h: 8 }] },
-        WinRequest::Meaning { window: 1, focus: 2, caret: None, nodes: vec![Node { id: 2, parent: 0, role: "button".into(), name: "OK".into(), value: None, states: vec![], x: 0.0, y: 0.0, w: 10.0, h: 10.0 }] },
+        WinRequest::Meaning { window: 1, focus: 2, caret: None, nodes: vec![Node { id: 2, parent: 0, role: "button".into(), name: "OK".into(), value: None, states: vec![], x: 0.0, y: 0.0, w: 10.0, h: 10.0, items: vec!["One".into(), "Two".into()] }] },
         WinRequest::Copy { input_serial: 3, kinds: vec!["text/plain".into()] },
         WinRequest::Style { window: 1, kind: vergence_protocol::window::WinKind::Dialog, modal: true, min: (320.0, 200.0), max: (1100.0, 0.0) },
         WinRequest::Bar {

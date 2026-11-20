@@ -52,12 +52,13 @@
 //! Version 23 (overview milestone 1, step 6): `WinRequest::GroundClicked`,
 //! the desktop's bare ground clicked (the windows move aside). Version 24
 //! (meaning milestone 1, step 1): `WinEvent::Act` and `WinRequest::Acted`,
-//! a widget acted on by its meaning node (`window::Action`).
+//! a widget acted on by its meaning node (`window::Action`). Version 25
+//! (step 2): `window::Node::items`, what a choice offers.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 24;
+pub const VERSION: u32 = 25;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

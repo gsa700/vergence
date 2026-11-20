@@ -476,6 +476,7 @@ impl<P: Program> vergence_ui::App for Host<P> {
                 y: m.bounds.y,
                 w: m.bounds.w,
                 h: m.bounds.h,
+                items: m.items,
             });
         }
         if self.meaning_sent.as_ref() == Some(&tree) {

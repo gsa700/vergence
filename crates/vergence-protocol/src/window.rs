@@ -74,6 +74,9 @@ pub const MAX_PLANES: usize = 4;
 pub const MAX_KINDS: usize = 32;
 pub const MAX_NODES: usize = 4096;
 pub const MAX_STATES: usize = 16;
+/// The most items a node lists (a choice's), and the most room they take
+/// together (bus v25).
+pub const MAX_ITEMS: usize = 512;
 /// A picture's longest side, in pixels.
 pub const MAX_SIDE: u32 = 16_384;
 /// A bar's tabs, a tab title's bytes, and the program's own tab-menu entries.
@@ -200,6 +203,9 @@ pub struct Node {
     pub y: f64,
     pub w: f64,
     pub h: f64,
+    /// What it offers to choose from, by name (a choice's items; bus v25):
+    /// what [`Action::Choose`] takes.
+    pub items: Vec<String>,
 }
 
 /// What an agent asks a window's widget to do (Contract 3, bus v24,
@@ -928,6 +934,10 @@ impl WinRequest {
                         e.str(s);
                     }
                     e.f64(n.x).f64(n.y).f64(n.w).f64(n.h);
+                    e.count(n.items.len());
+                    for i in &n.items {
+                        e.str(i);
+                    }
                 }
                 e
             }
@@ -1101,7 +1111,12 @@ impl WinRequest {
                     }
                     let states = (0..ns).map(|_| d.str()).collect::<Result<_, _>>()?;
                     let (x, y, w, h) = (finite(d.f64()?, "bounds")?, finite(d.f64()?, "bounds")?, finite(d.f64()?, "bounds")?, finite(d.f64()?, "bounds")?);
-                    nodes.push(Node { id, parent, role, name, value, states, x, y, w, h });
+                    let ni = d.count(4)?;
+                    if ni > MAX_ITEMS {
+                        return Err(WireError::TooLong(ni));
+                    }
+                    let items = (0..ni).map(|_| d.str()).collect::<Result<_, _>>()?;
+                    nodes.push(Node { id, parent, role, name, value, states, x, y, w, h, items });
                 }
                 WinRequest::Meaning { window, focus, caret, nodes }
             }
@@ -1628,7 +1643,10 @@ mod tests {
                 window: 1,
                 focus: 3,
                 caret: Some((1.0, 2.0, 1.5, 14.0)),
-                nodes: vec![Node { id: 3, parent: 0, role: "button".into(), name: "Save".into(), value: None, states: vec!["focused".into()], x: 1.0, y: 2.0, w: 30.0, h: 20.0 }],
+                nodes: vec![
+                    Node { id: 3, parent: 0, role: "button".into(), name: "Save".into(), value: None, states: vec!["focused".into()], x: 1.0, y: 2.0, w: 30.0, h: 20.0, items: vec![] },
+                    Node { id: 4, parent: 0, role: "choice".into(), name: "Font".into(), value: Some("Inter".into()), states: vec![], x: 1.0, y: 30.0, w: 90.0, h: 20.0, items: vec!["Inter".into(), "JetBrains Mono".into()] },
+                ],
             },
             WinRequest::Copy { input_serial: 5, kinds: vec!["text/plain;charset=utf-8".into()] },
             WinRequest::Paste { serial: 8, kind: "text/plain".into() },
