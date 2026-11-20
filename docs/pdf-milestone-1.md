@@ -257,3 +257,12 @@ selection order; color management beyond the simple formulas.
   cover's photo collage, the Omron relay photo. In the corpus: DCTDecode
   in 679 files, CCITTFaxDecode in 160, JPXDecode in 30 (placeholder, as
   Dave chose), JBIG2Decode in 12. CCITT next.
+- **Step 5, part 2** (2026-11-20 night): ccitt.rs, our own CCITT fax
+  decoder (T.4/T.6: Group 3 1D and 2D, Group 4; EndOfLine,
+  EncodedByteAlign, EndOfBlock, BlackIs1), the run-length tables written
+  as bit strings. Tested against libtiff: one 3000 x 40 bitmap with runs
+  past the extended codes, encoded by tiffcp in all three schemes
+  (testdata/ccitt-*), decodes to the bitmap pixel for pixel; a prefix-code
+  check and a fuzz test. Seen: the ARRL archive's QST TS-850S review
+  cover (scanned ad column). Corpus: no panics. Left in step 5: JBIG2 (12
+  files), JPEG 2000 placeholder (30 files, as Dave chose).

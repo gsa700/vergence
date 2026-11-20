@@ -19,6 +19,7 @@
 //! [`Document::needs_password`] and [`Document::unlock`] for the rest.
 //! Strings are decrypted as objects are read, streams before their filters.
 
+pub mod ccitt;
 pub mod color;
 pub mod content;
 pub mod crypt;
