@@ -34,6 +34,11 @@ impl Server {
         let Some(keys) = self.input.keys.as_mut() else { return };
         let key = keys.feed(code, pressed);
         let mods = keys.mods();
+        // A lock key: the keyboards' lights follow (a mini keyboard's built-in
+        // keypad goes by its Num Lock light).
+        if key.mods_changed {
+            self.update_lock_lights();
+        }
         // The elevation prompt takes every key while it shows (elevate.rs).
         if self.elevating() {
             if let Some(k) = self.seat.get_keyboard() {

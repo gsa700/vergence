@@ -179,6 +179,8 @@ pub struct Server {
     pub touch: crate::touch::Touch,
     /// Mice and touchpads, kept to be given the settings again when they change (pointer.rs).
     pub pointer_devices: Vec<smithay::reexports::input::Device>,
+    /// Every keyboard, for its lock lights (pointer.rs `update_lock_lights`).
+    pub keyboard_devices: Vec<smithay::reexports::input::Device>,
     /// Touch panels present, by name (look milestone 1: a screen with one
     /// gets the Large size of controls when its setting is Automatic).
     pub touch_panels: Vec<String>,
@@ -347,6 +349,7 @@ impl Server {
             desktop_hidden: Vec::new(),
             pinged: Default::default(),
             pointer_devices: Vec::new(),
+            keyboard_devices: Vec::new(),
             touch_panels: Vec::new(),
             inputs: Default::default(),
             network_note: None,

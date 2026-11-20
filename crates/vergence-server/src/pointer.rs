@@ -62,10 +62,17 @@ impl Server {
         }
     }
 
-    /// A device appeared: a pointing one gets the settings and is kept.
+    /// A device appeared: a keyboard is kept and its lights set from our
+    /// state (nothing else sets them: with libinput they are the
+    /// compositor's to drive); a pointing one gets the settings and is kept.
     pub fn pointer_device_added(&mut self, mut d: Device) {
         tracing::info!("input: device {:?} (touch {}, pointer {}, keyboard {})", d.name(), d.has_capability(DeviceCapability::Touch), d.has_capability(DeviceCapability::Pointer), d.has_capability(DeviceCapability::Keyboard));
         self.inputs_device_added(&d);
+        if d.has_capability(DeviceCapability::Keyboard) {
+            self.keys_ready();
+            d.led_update(self.lock_lights());
+            self.keyboard_devices.push(d.clone());
+        }
         if d.has_capability(DeviceCapability::Touch) && !self.touch_panels.contains(&d.name().to_string()) {
             tracing::info!("touch: panel {:?} present", d.name());
             self.touch_panels.push(d.name().to_string());
@@ -81,6 +88,7 @@ impl Server {
 
     pub fn pointer_device_removed(&mut self, d: &Device) {
         self.inputs_device_removed(d);
+        self.keyboard_devices.retain(|k| k != d);
         if d.has_capability(DeviceCapability::Touch) {
             let name = d.name().to_string();
             self.touch_panels.retain(|n| *n != name);
@@ -88,6 +96,25 @@ impl Server {
             self.redraw_all();
         }
         self.pointer_devices.retain(|k| k != d);
+    }
+
+    /// The lock lights our keyboard state calls for (all off before the first key).
+    pub fn lock_lights(&self) -> smithay::reexports::input::Led {
+        use smithay::reexports::input::Led;
+        let (num, caps, scroll) = self.input.keys.as_ref().map_or((false, false, false), |k| k.leds());
+        let mut l = Led::empty();
+        l.set(Led::NUMLOCK, num);
+        l.set(Led::CAPSLOCK, caps);
+        l.set(Led::SCROLLLOCK, scroll);
+        l
+    }
+
+    /// Every keyboard's lights set again (a lock key changed them).
+    pub fn update_lock_lights(&mut self) {
+        let l = self.lock_lights();
+        for d in &mut self.keyboard_devices {
+            d.led_update(l);
+        }
     }
 
     /// The settings changed: every pointing device gets them again.

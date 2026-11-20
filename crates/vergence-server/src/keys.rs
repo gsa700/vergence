@@ -61,6 +61,12 @@ impl Keys {
         )
     }
 
+    /// Which lock lights should be on: Num Lock, Caps Lock, Scroll Lock.
+    pub fn leds(&self) -> (bool, bool, bool) {
+        let on = |name: &str| self.state.led_name_is_active(name);
+        (on(xkb::LED_NAME_NUM), on(xkb::LED_NAME_CAPS), on(xkb::LED_NAME_SCROLL))
+    }
+
     /// The modifiers in effect, for the seat.
     pub fn mods(&self) -> vergence_seat::keyboard::Mods {
         let on = |name: &str| self.state.mod_name_is_active(name, xkb::STATE_MODS_EFFECTIVE);
@@ -113,6 +119,28 @@ mod tests {
 
     /// Every letter the seat decides on reaches it as that letter, in either
     /// case (Super+L once came through as Other: VDM milestone 1, 2026-11-16).
+    /// The lights follow the locks (2026-11-20, apollo: a mini keyboard's
+    /// Num Lock light, left on from boot and never set by us, kept its
+    /// letters typing keypad digits).
+    #[test]
+    fn the_lights_follow_the_locks() {
+        use super::Keys;
+        use xkbcommon::xkb;
+        let ctx = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+        let km = xkb::Keymap::new_from_names(&ctx, "", "", "us", "", None, xkb::KEYMAP_COMPILE_NO_FLAGS).unwrap();
+        let mut k = Keys::from_text(km.get_as_string(xkb::KEYMAP_FORMAT_TEXT_V1)).unwrap();
+        assert_eq!(k.leds(), (false, false, false));
+        // Caps Lock (evdev 58) and Num Lock (69), each pressed and let go.
+        for code in [58u32, 69] {
+            k.feed((code + 8).into(), true);
+            k.feed((code + 8).into(), false);
+        }
+        assert_eq!(k.leds(), (true, true, false));
+        k.feed(77u32.into(), true);
+        k.feed(77u32.into(), false);
+        assert_eq!(k.leds(), (false, true, false));
+    }
+
     #[test]
     fn the_seats_letters_reach_it() {
         for (syms, key) in [((k::KEY_d, k::KEY_D), Key::D), ((k::KEY_l, k::KEY_L), Key::L), ((k::KEY_q, k::KEY_Q), Key::Q)] {
