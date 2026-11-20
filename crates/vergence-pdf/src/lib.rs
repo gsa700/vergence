@@ -33,6 +33,7 @@ pub mod lexer;
 pub mod object;
 pub mod outline;
 pub mod render;
+pub mod text;
 pub mod xref;
 
 #[cfg(test)]
@@ -43,7 +44,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 pub use filter::Decoded;
-pub use render::{page_size, render_page, render_region};
+pub use render::{page_size, page_text, render_page, render_region};
 use lexer::Lexer;
 pub use object::{Dict, Object, Ref, Stream};
 use xref::Entry;

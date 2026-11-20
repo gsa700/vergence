@@ -15,7 +15,9 @@
 //!   drawn at the screen's pixels; a sidebar (S) with the pages'
 //!   thumbnails and the outline; links followed (an address outside the
 //!   document is asked about first); passwords asked for; each document's
-//!   page and zoom remembered.
+//!   page and zoom remembered; text selected by dragging on it, copied
+//!   (Ctrl+C), the page's text selected (Ctrl+A), and Find (Ctrl+F) across
+//!   the whole document, every match marked.
 //! - **Text**: shown read-only in the toolkit's text area, with "Open in Text
 //!   Editor".
 //! - **Anything else**: says what it is and offers the app chosen for it.
@@ -70,6 +72,11 @@ mod cmd {
     pub const OPEN_WITH: u32 = 14;
     pub const FIT_PAGE: u32 = 15;
     pub const SIDEBAR: u32 = 16;
+    pub const COPY: u32 = 17;
+    pub const SELECT_ALL: u32 = 18;
+    pub const FIND: u32 = 19;
+    pub const FIND_NEXT: u32 = 20;
+    pub const FIND_PREVIOUS: u32 = 21;
     pub const SETTINGS: u32 = 40;
     pub const ABOUT: u32 = 41;
 }
@@ -238,6 +245,8 @@ struct Viewer {
     ctrl: bool,
     /// The status line's page number while it is being typed.
     page_field: Option<String>,
+    /// Text to put on the clipboard (the window does it in update).
+    copy_out: Option<String>,
     /// The PDF place saved last: path, page, mode.
     saved_place: Option<(PathBuf, usize, String)>,
     /// A PDF's sidebar: shown, and showing the outline (else the pages).
@@ -249,6 +258,10 @@ struct Viewer {
     press_at: Option<((f32, f32), bool)>,
     /// An address outside the document a link asked to open, waiting for a yes.
     pending_uri: Option<String>,
+    /// The Find bar, shown with its query.
+    finding: Option<String>,
+    /// Dragging out a text selection (not panning).
+    selecting: bool,
 }
 
 /// Addresses a PDF's links may open (through vergence-open, after asking).
@@ -282,6 +295,8 @@ enum Msg {
     Outline(usize),
     OpenUri,
     CancelUri,
+    FindText(String),
+    FindDone,
     OpenWith,
     OpenInEditor,
 }
@@ -306,12 +321,15 @@ impl Viewer {
             animating: false,
             ctrl: false,
             page_field: None,
+            copy_out: None,
             saved_place: None,
             sidebar: false,
             contents: false,
             thumb_area: Rc::new(Cell::new(Rect::new(0.0, 0.0, 1.0, 1.0))),
             press_at: None,
             pending_uri: None,
+            finding: None,
+            selecting: false,
         }
     }
 
@@ -493,9 +511,56 @@ impl Viewer {
             }
             cmd::TURN_LEFT | cmd::TURN_RIGHT => {}
             cmd::SIDEBAR => self.sidebar = !self.sidebar,
+            cmd::COPY | cmd::SELECT_ALL | cmd::FIND | cmd::FIND_NEXT | cmd::FIND_PREVIOUS => return self.pdf_text_command(id),
             _ => return false,
         }
         self.follow_thumb();
+        true
+    }
+
+    /// Copy, Select All and Find.
+    fn pdf_text_command(&mut self, id: u32) -> bool {
+        let r = self.area.get();
+        let finding = self.finding.is_some();
+        let (mut copy, mut find) = (None, None);
+        let Some(d) = self.pdf_mut() else { return false };
+        match id {
+            cmd::COPY => copy = d.selected_text(),
+            cmd::SELECT_ALL => {
+                let c = d.current(r);
+                d.select_page(c);
+            }
+            cmd::FIND => {
+                if !finding {
+                    // Starts with the selection's text when it is short.
+                    let q = d.selected_text().filter(|t| t.len() <= 80 && !t.contains('\n')).unwrap_or_default();
+                    d.start_search(&q);
+                    find = Some(q);
+                }
+            }
+            cmd::FIND_NEXT | cmd::FIND_PREVIOUS => {
+                let step = if id == cmd::FIND_NEXT { 1 } else { -1 };
+                let next = match d.found {
+                    Some(i) => i as isize + step,
+                    // The first match at or after the place in view.
+                    None => {
+                        let c = d.current(r);
+                        let se = d.shared.search.lock().unwrap_or_else(|e| e.into_inner());
+                        let i = se.matches.iter().position(|m| m.0 >= c).unwrap_or(0) as isize;
+                        drop(se);
+                        if step < 0 { i - 1 } else { i }
+                    }
+                };
+                d.show_match(next, r);
+            }
+            _ => return false,
+        }
+        if copy.is_some() {
+            self.copy_out = copy;
+        }
+        if find.is_some() {
+            self.finding = find;
+        }
         true
     }
 
@@ -740,6 +805,9 @@ impl Viewer {
 
     fn run(&mut self, id: u32, window: &mut Window) {
         if self.pdf_run(id) {
+            if let Some(t) = self.copy_out.take() {
+                window.copy(&t);
+            }
             self.place_soon(window);
             window.redraw();
             return;
@@ -850,7 +918,7 @@ impl Viewer {
                     w.wake();
                 }
             }
-            layout.draw(scene, r, scale.max(0.25), ground.unwrap_or(theme.page));
+            layout.draw(scene, r, scale.max(0.25), ground.unwrap_or(theme.page), theme.accent);
         })
         .on_touch(|t| Some(Msg::Touch(t)))
         .width(Length::FILL)
@@ -915,6 +983,41 @@ impl Viewer {
         column(vec![head, rule(), body]).width(Length::Fixed(pdf::THUMB_W + 48.0)).height(Length::FILL)
     }
 
+    /// The Find bar: the query, how it is going, previous and next.
+    fn find_bar(&self, q: &str, d: &pdf::Pdf) -> Element<Msg> {
+        let se = d.shared.search.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let n = se.matches.len();
+        let how = if se.query.is_empty() {
+            String::new()
+        } else if se.done && se.chars_seen == 0 {
+            "This PDF has no text to search: its pages are pictures (a scan).".to_string()
+        } else if se.done && n == 0 {
+            "Not found".to_string()
+        } else {
+            let at = d.found.map_or(String::new(), |i| format!("{} of ", i + 1));
+            let going = if se.done { String::new() } else { format!(" (searching, page {} of {})", se.next, d.pages.len()) };
+            format!("{at}{n} found{going}")
+        };
+        let small = |text: &str, m: Option<Msg>| {
+            let b = button(label(text).size(12.0)).padding(Padding::hv(2.0, 10.0)).name(text);
+            match m {
+                Some(m) => b.on_press(m),
+                None => b,
+            }
+        };
+        let row_items: Vec<Element<Msg>> = vec![
+            label("Find").size(12.0).dim(),
+            field(q.to_string(), Msg::FindText).autofocus().on_submit(Msg::Run(cmd::FIND_NEXT)).name("Find").width(Length::Fixed(260.0)),
+            small("Previous", (n > 0).then_some(Msg::Run(cmd::FIND_PREVIOUS))),
+            small("Next", (n > 0).then_some(Msg::Run(cmd::FIND_NEXT))),
+            label(how).size(12.0).dim().elide().width(Length::FILL),
+            small("Done", Some(Msg::FindDone)),
+        ];
+        // A key of its own: its field is new when the bar opens (and so
+        // takes the keyboard), not mistaken for what stood in its place.
+        panel(row(row_items).spacing(10.0).align(Align::Center).width(Length::FILL)).radius(0.0).padding(Padding { top: 4.0, bottom: 4.0, left: 12.0, right: 12.0 }).width(Length::FILL).key(0x4649_4e44)
+    }
+
     /// A PDF's toolbar: pages, zoom (width, whole page, actual size); Open at the end.
     fn pdf_toolbar(&self, d: &pdf::Pdf, th: &Theme) -> Element<Msg> {
         use vergence_widgets::toolbar::{Icon, flexible, group, tool, toggle, toolbar};
@@ -931,6 +1034,7 @@ impl Viewer {
                 tool(Icon::Actual, "Actual size", Some(Msg::Run(cmd::ACTUAL))),
             ]),
             flexible(),
+            toggle(Icon::Search, "Find", self.finding.is_some(), if self.finding.is_some() { Msg::FindDone } else { Msg::Run(cmd::FIND) }),
             tool(Icon::Open, "Open…", Some(Msg::Run(cmd::OPEN))),
         ];
         toolbar(items, th)
@@ -1084,6 +1188,10 @@ impl Program for Viewer {
             all.push(self.toolbar(tab, t));
         }
         all.push(panel(body).padding(Padding { top: if self.preview { t.top } else { 0.0 }, ..Padding::default() }).radius(0.0).width(Length::FILL).height(Length::FILL));
+        if !self.preview && let (Some(q), Content::Pdf(d)) = (&self.finding, &tab.content) {
+            all.push(rule());
+            all.push(self.find_bar(q, d));
+        }
         if !self.preview {
             all.push(rule());
             all.push(self.status(tab, t));
@@ -1112,16 +1220,38 @@ impl Program for Viewer {
                     self.drag = Some(((x, y), t.pan));
                 }
                 if self.is_pdf() {
-                    // A PDF pans by the drag's steps; no double-click zoom.
+                    // A PDF: a press on text starts a selection, anywhere
+                    // else a drag pans; no double-click zoom.
                     self.drag = Some(((x, y), (0.0, 0.0)));
                     self.last_press = None;
                     self.press_at = Some(((x, y), false));
+                    let r = self.area.get();
+                    let spot = self.front_tab().and_then(|t| match &t.content {
+                        Content::Pdf(d) => d.text_at(r, r.x + x, r.y + y),
+                        _ => None,
+                    });
+                    self.selecting = spot.is_some();
+                    if let Some(d) = self.pdf_mut() {
+                        d.selection = spot.map(|s| pdf::Selection { anchor: s, head: s });
+                    }
                 }
             }
             Msg::Touch(Touch::Move { x, y, pressed }) => {
                 let r = self.area.get();
                 self.pointer.set((r.x + x, r.y + y));
-                if pressed
+                if pressed && self.selecting {
+                    if let Some(((px, py), moved)) = &mut self.press_at
+                        && ((x - *px).powi(2) + (y - *py).powi(2)).sqrt() > 4.0
+                    {
+                        *moved = true;
+                    }
+                    if let Some(d) = self.pdf_mut()
+                        && let Some(spot) = d.spot_near(r, r.x + x, r.y + y)
+                        && let Some(sel) = &mut d.selection
+                    {
+                        sel.head = spot;
+                    }
+                } else if pressed
                     && let Some(((sx, sy), _)) = self.drag
                     && let Some(d) = self.pdf_mut()
                 {
@@ -1146,6 +1276,14 @@ impl Program for Viewer {
             }
             Msg::Touch(Touch::Release { .. }) => {
                 self.drag = None;
+                let was_selecting = std::mem::take(&mut self.selecting);
+                // A click (no drag) clears a selection begun by it.
+                if was_selecting
+                    && matches!(self.press_at, Some((_, false)))
+                    && let Some(d) = self.pdf_mut()
+                {
+                    d.selection = None;
+                }
                 // A click on a PDF page (no drag): a link there is followed.
                 if let Some(((x, y), false)) = self.press_at.take() {
                     let r = self.area.get();
@@ -1162,6 +1300,7 @@ impl Program for Viewer {
             Msg::Touch(Touch::Leave) => {
                 self.drag = None;
                 self.press_at = None;
+                self.selecting = false;
             }
             Msg::Run(c) => return self.run(c, window),
             Msg::Password(p) => {
@@ -1201,6 +1340,18 @@ impl Program for Viewer {
                 }
             }
             Msg::CancelUri => self.pending_uri = None,
+            Msg::FindText(q) => {
+                if let Some(d) = self.pdf_mut() {
+                    d.start_search(&q);
+                }
+                self.finding = Some(q);
+            }
+            Msg::FindDone => {
+                self.finding = None;
+                if let Some(d) = self.pdf_mut() {
+                    d.start_search("");
+                }
+            }
             Msg::PageField(text) => self.page_field = Some(text.chars().filter(char::is_ascii_digit).take(6).collect()),
             Msg::GoToPage => {
                 let r = self.area.get();
@@ -1226,6 +1377,33 @@ impl Program for Viewer {
         }
         if self.front_tab().is_some_and(|t| matches!(t.content, Content::Locked { .. })) {
             return false;
+        }
+        if self.is_pdf()
+            && let Input::Key { sym, pressed: true, modifiers: m, .. } = input
+        {
+            const ESCAPE: u32 = 0xff1b;
+            const F3: u32 = 0xffc0;
+            let c = match *sym {
+                0x63 | 0x43 if m.ctrl => Some(cmd::COPY),
+                0x61 | 0x41 if m.ctrl => Some(cmd::SELECT_ALL),
+                0x66 | 0x46 if m.ctrl => Some(cmd::FIND),
+                0x67 | 0x47 if m.ctrl => Some(if m.shift { cmd::FIND_PREVIOUS } else { cmd::FIND_NEXT }),
+                F3 => Some(if m.shift { cmd::FIND_PREVIOUS } else { cmd::FIND_NEXT }),
+                ESCAPE => {
+                    if self.finding.is_some() {
+                        self.update(Msg::FindDone, window);
+                    } else if let Some(d) = self.pdf_mut() {
+                        d.selection = None;
+                        window.redraw();
+                    }
+                    return true;
+                }
+                _ => None,
+            };
+            if let Some(c) = c {
+                self.run(c, window);
+                return true;
+            }
         }
         if self.is_pdf() && self.pdf_input(input, window) {
             self.place_soon(window);
@@ -1433,6 +1611,10 @@ impl Program for Viewer {
                 C::own(cmd::FIT, "View", "Fit to the width", "0").checked(d.mode == pdf::Mode::Width),
                 C::own(cmd::FIT_PAGE, "View", "The whole page", "W").checked(d.mode == pdf::Mode::Page),
                 C::own(cmd::SIDEBAR, "View", "Sidebar", "S").checked(self.sidebar).featured(),
+                C::role(cmd::COPY, Role::Copy),
+                C::role(cmd::SELECT_ALL, Role::SelectAll),
+                C::role(cmd::FIND, Role::Find).featured(),
+                C::role(cmd::FIND_NEXT, Role::FindNext),
                 C::own(cmd::ACTUAL, "View", "Actual size", "1"),
                 C::own(cmd::NEXT, "Go", "Next page", "Right").featured(),
                 C::own(cmd::PREVIOUS, "Go", "Previous page", "Left"),

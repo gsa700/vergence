@@ -26,6 +26,9 @@
 //! - `L` page u32: its links. Answer: a u32 count, then each link's
 //!   rectangle (4 f32, points from the page's top left as shown), a kind
 //!   byte (0 a page: u32 page and f32 top; 1 an address: u16 length, UTF-8).
+//! - `T` page u32: its text layer. Answer: a u32 count, then each
+//!   character's box (4 f32, points from the page's top left as shown)
+//!   and text (u16 length, UTF-8).
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -135,6 +138,28 @@ fn decode_outline(b: &[u8]) -> Option<Vec<Entry>> {
         let level = t.u8()?;
         let target = t.target()?;
         out.push(Entry { level, title: t.str()?, target });
+    }
+    Some(out)
+}
+
+fn encode_text(chars: &[crate::text::Char]) -> Vec<u8> {
+    let mut out = (chars.len() as u32).to_be_bytes().to_vec();
+    for c in chars {
+        for v in c.rect {
+            out.extend(v.to_be_bytes());
+        }
+        put_str(&mut out, &c.text);
+    }
+    out
+}
+
+fn decode_text(b: &[u8]) -> Option<Vec<crate::text::Char>> {
+    let mut t = Take(b);
+    let n = t.u32()? as usize;
+    let mut out = Vec::with_capacity(n.min(crate::text::MAX_CHARS));
+    for _ in 0..n {
+        let rect = [t.f32()?, t.f32()?, t.f32()?, t.f32()?];
+        out.push(crate::text::Char { rect, text: t.str()? });
     }
     Some(out)
 }
@@ -269,6 +294,12 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write) -> std::io::Result<
             b'O' => {
                 let d = doc.as_ref().ok_or("no document")?;
                 Ok(encode_outline(&crate::outline::outline(d, &pages)))
+            }
+            b'T' => {
+                let d = doc.as_ref().ok_or("no document")?;
+                let page = body.get(0..4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize).ok_or("a bad request")?;
+                let p = pages.get(page).ok_or("no such page")?;
+                Ok(encode_text(&crate::page_text(d, p)))
             }
             b'L' => {
                 let d = doc.as_ref().ok_or("no document")?;
@@ -444,6 +475,12 @@ impl Viewer {
         decode_outline(&b).ok_or_else(|| Error::Crashed("a garbled answer".into()))
     }
 
+    /// Page `page`'s text layer.
+    pub fn text(&mut self, page: usize) -> Result<Vec<crate::text::Char>, Error> {
+        let b = self.request(b'T', &(page as u32).to_be_bytes())?;
+        decode_text(&b).ok_or_else(|| Error::Crashed("a garbled answer".into()))
+    }
+
     /// Page `page`'s links.
     pub fn links(&mut self, page: usize) -> Result<Vec<Link>, Error> {
         let b = self.request(b'L', &(page as u32).to_be_bytes())?;
@@ -579,6 +616,8 @@ mod tests {
         let links = vec![Link { rect: [1.0, 2.0, 3.0, 4.0], action: Action::GoTo(Target { page: 7, top: None }) }, Link { rect: [5.0, 6.0, 7.0, 8.0], action: Action::Uri("https://example.org/".into()) }];
         assert_eq!(decode_links(&encode_links(&links)), Some(links));
         assert_eq!(decode_links(&[0, 0, 0, 5]), None);
+        let chars = vec![crate::text::Char { text: "ﬁ".into(), rect: [1.0, 2.0, 3.0, 4.0] }];
+        assert_eq!(decode_text(&encode_text(&chars)), Some(chars));
     }
 
     #[test]

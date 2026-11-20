@@ -336,3 +336,20 @@ selection order; color management beyond the simple formulas.
   open (through vergence-open). Seen in a headless session: the R56
   manual's table of contents links, its outline, thumbnails. Step 6 is
   done but for checking it on the real screens.
+- **Step 7** (2026-11-20 night): text. vergence-pdf's text.rs and
+  render.rs's page_text: the page run without painting (no images
+  decoded), every character's text (ToUnicode or encoding) and box,
+  overprinted characters kept once; joined with the spaces and line
+  breaks the positions imply; finding with case and white space folded;
+  a selection's text and boxes; the helper's `T` request; examples/pdftext.
+  4 ms for an R56 page. Close-Up: a drag that starts on text selects it
+  (across pages, in drawn order), anywhere else pans; a click clears it
+  or follows a link; Ctrl+C copies, Ctrl+A selects the page in view,
+  Escape clears; Find (Ctrl+F, the toolbar's search button, starting from
+  a short selection) searches every page on the worker after the view,
+  marks every match (the shown one orange), Enter/Ctrl+G/F3 next,
+  Shift for previous, "N of M found (searching, page X of Y)", and a
+  document without text says it is pictures (a scan) instead of "Not
+  found". Seen headless on Hubble: "grounding" 2,040 times in the R56
+  manual in about 5 s; a selection copied and pasted into Edit, lines
+  intact. Tests on all four machines (apollo, Fedora, joined).

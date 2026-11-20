@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 use vergence_pdf::outline::{Action, Entry, Link, Target};
+use vergence_pdf::text::{self, Char};
 use vergence_scene::{Color, Image, Rect, Scene};
 use vergence_widgets::Waker;
 
@@ -41,6 +42,48 @@ enum Job {
     Thumb(usize, f32),
     /// A page's links.
     Links(usize),
+    /// A page's text layer (for selecting).
+    Text(usize),
+    /// A page searched for the current query (its generation).
+    Search(usize, u64),
+}
+
+/// A place in the text: page and character.
+pub type Spot = (usize, usize);
+
+/// A selection: where it began and where it reaches now (either order).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Selection {
+    pub anchor: Spot,
+    pub head: Spot,
+}
+
+impl Selection {
+    /// Its first and last spot, in reading order.
+    pub fn span(&self) -> (Spot, Spot) {
+        if self.anchor <= self.head { (self.anchor, self.head) } else { (self.head, self.anchor) }
+    }
+
+    /// The characters it covers on `page` of `n`, if any.
+    pub fn on_page(&self, page: usize, n: usize) -> Option<(usize, usize)> {
+        let (a, b) = self.span();
+        if n == 0 || page < a.0 || page > b.0 {
+            return None;
+        }
+        Some((if page == a.0 { a.1 } else { 0 }, if page == b.0 { b.1.min(n - 1) } else { n - 1 }))
+    }
+}
+
+/// The search: its query and generation, the matches so far (page, boxes),
+/// how far it has gone, and whether any page had text at all.
+#[derive(Debug, Clone, Default)]
+pub struct Search {
+    pub query: String,
+    pub generation: u64,
+    pub matches: Vec<(usize, Vec<[f32; 4]>)>,
+    pub next: usize,
+    pub chars_seen: usize,
+    pub done: bool,
 }
 
 /// The sidebar's thumbnails: the widest box, in points, and the gap.
@@ -79,6 +122,9 @@ pub struct Shared {
     links: Mutex<HashMap<usize, Vec<Link>>>,
     /// The outline, once the worker has read it.
     pub outline: Mutex<Option<Arc<Vec<Entry>>>>,
+    /// The text layers of the pages near sight.
+    pub texts: Mutex<HashMap<usize, Arc<Vec<Char>>>>,
+    pub search: Mutex<Search>,
     /// Pages the helper could not draw, and why.
     failed: Mutex<HashMap<usize, String>>,
     closed: AtomicBool,
@@ -87,7 +133,7 @@ pub struct Shared {
 
 impl Shared {
     fn new(waker: Option<Waker>) -> Shared {
-        Shared { wanted: Mutex::new(Vec::new()), ready: Condvar::new(), done: Mutex::new(HashMap::new()), tiles: Mutex::new(HashMap::new()), side: Mutex::new(Vec::new()), thumbs: Mutex::new(HashMap::new()), links: Mutex::new(HashMap::new()), outline: Mutex::new(None), failed: Mutex::new(HashMap::new()), closed: AtomicBool::new(false), waker: Mutex::new(waker) }
+        Shared { wanted: Mutex::new(Vec::new()), ready: Condvar::new(), done: Mutex::new(HashMap::new()), tiles: Mutex::new(HashMap::new()), side: Mutex::new(Vec::new()), thumbs: Mutex::new(HashMap::new()), links: Mutex::new(HashMap::new()), outline: Mutex::new(None), texts: Mutex::new(HashMap::new()), search: Mutex::new(Search::default()), failed: Mutex::new(HashMap::new()), closed: AtomicBool::new(false), waker: Mutex::new(waker) }
     }
 
     fn wake(&self) {
@@ -104,6 +150,7 @@ impl Shared {
 /// The worker: draws what is wanted, newest wishes first, until the
 /// document closes (the helper goes with it).
 fn work(mut viewer: vergence_pdf::helper::Viewer, shared: Arc<Shared>) {
+    let pages_n = viewer.info.pages.len();
     let outline = viewer.outline().unwrap_or_default();
     *shared.outline.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(outline));
     shared.wake();
@@ -116,6 +163,19 @@ fn work(mut viewer: vergence_pdf::helper::Viewer, shared: Arc<Shared>) {
                 }
                 if !w.is_empty() {
                     break w.remove(0);
+                }
+                // The search, a page at a time, after the view and before thumbnails.
+                {
+                    let mut se = shared.search.lock().unwrap_or_else(|e| e.into_inner());
+                    if !se.done && !se.query.is_empty() {
+                        if se.next < pages_n {
+                            se.next += 1;
+                            break Job::Search(se.next - 1, se.generation);
+                        }
+                        se.done = true;
+                        drop(se);
+                        shared.wake();
+                    }
                 }
                 let mut side = shared.side.lock().unwrap_or_else(|e| e.into_inner());
                 if !side.is_empty() {
@@ -142,6 +202,29 @@ fn work(mut viewer: vergence_pdf::helper::Viewer, shared: Arc<Shared>) {
                 (page, viewer.render(page, scale, None).map(|t| {
                     shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).insert(page, Arc::new(Image { width: t.width, height: t.height, rgba: t.rgba }));
                 }))
+            }
+            Job::Text(page) => {
+                let t = viewer.text(page).unwrap_or_default();
+                shared.texts.lock().unwrap_or_else(|e| e.into_inner()).insert(page, Arc::new(t));
+                shared.wake();
+                continue;
+            }
+            Job::Search(page, generation) => {
+                let query = shared.search.lock().unwrap_or_else(|e| e.into_inner()).query.clone();
+                let chars = viewer.text(page).unwrap_or_default();
+                let found: Vec<Vec<[f32; 4]>> = text::find(&chars, &query).into_iter().map(|(a, b)| text::boxes(&chars, a, b)).collect();
+                let mut se = shared.search.lock().unwrap_or_else(|e| e.into_inner());
+                if se.generation == generation {
+                    se.chars_seen += chars.len();
+                    let had = se.matches.len();
+                    se.matches.extend(found.into_iter().map(|b| (page, b)));
+                    // Woken for the first matches and every so often after.
+                    if (had == 0 && !se.matches.is_empty()) || page % 25 == 24 {
+                        drop(se);
+                        shared.wake();
+                    }
+                }
+                continue;
             }
             Job::Links(page) => {
                 let l = viewer.links(page).unwrap_or_default();
@@ -189,6 +272,10 @@ pub struct Layout {
     pub restore: Option<usize>,
     /// The sidebar's thumbnails scrolled this far, in points.
     pub thumb_top: f32,
+    /// The text selected, if any.
+    pub selection: Option<Selection>,
+    /// The search match shown (an index into the matches).
+    pub found: Option<usize>,
 }
 
 /// An open PDF: its layout, and its worker and helper until dropped.
@@ -239,14 +326,14 @@ pub fn start(viewer: vergence_pdf::helper::Viewer, waker: Option<Waker>) -> Resu
     let shared = Arc::new(Shared::new(waker));
     let s = shared.clone();
     std::thread::spawn(move || work(viewer, s));
-    Ok(Pdf(Layout { pages, shared, mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0 }))
+    Ok(Pdf(Layout { pages, shared, mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0, selection: None, found: None }))
 }
 
 impl Layout {
     /// For tests: pages with no helper behind them.
     #[cfg(test)]
     fn sized(pages: Vec<(f32, f32)>) -> Layout {
-        Layout { pages: Arc::new(pages), shared: Arc::new(Shared::new(None)), mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0 }
+        Layout { pages: Arc::new(pages), shared: Arc::new(Shared::new(None)), mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0, selection: None, found: None }
     }
 
     /// Each page's top in the document, in points.
@@ -366,7 +453,7 @@ impl Layout {
 
     /// Draws the pages in `r` and asks the worker for what is missing.
     #[allow(clippy::needless_range_loop)]
-    pub fn draw(&self, scene: &mut Scene, r: Rect, scale: f32, ground: Color) {
+    pub fn draw(&self, scene: &mut Scene, r: Rect, scale: f32, ground: Color, accent: Color) {
         scene.push_clip(r, 0.0);
         scene.fill(r, ground);
         let z = self.zoom(r);
@@ -375,6 +462,8 @@ impl Layout {
         let done = self.shared.done.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let failed: Vec<usize> = self.shared.failed.lock().unwrap_or_else(|e| e.into_inner()).keys().copied().collect();
         let tiles = self.shared.tiles.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let texts = self.shared.texts.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let search = self.shared.search.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let mut wanted = Vec::new();
         let mut tile_jobs = Vec::new();
         let mut keep_tiles: Vec<TileKey> = Vec::new();
@@ -390,6 +479,24 @@ impl Layout {
             }
             if failed.contains(&p) {
                 scene.fill(dest, Color::rgba(0xd0, 0x30, 0x30, 0x30));
+            }
+            let to_window = |b: &[f32; 4]| Rect::new(dest.x + b[0] * z, dest.y + b[1] * z, (b[2] - b[0]) * z, (b[3] - b[1]) * z);
+            // Search matches: yellow, the one shown orange.
+            for (i, (mp, bs)) in search.matches.iter().enumerate() {
+                if *mp == p {
+                    let c = if self.found == Some(i) { Color::rgba(0xff, 0x8c, 0x00, 0x90) } else { Color::rgba(0xff, 0xd6, 0x00, 0x70) };
+                    for b in bs {
+                        scene.fill(to_window(b), c);
+                    }
+                }
+            }
+            // The selection, in the accent.
+            if let (Some(sel), Some(chars)) = (self.selection, texts.get(&p))
+                && let Some((a, b)) = sel.on_page(p, chars.len())
+            {
+                for bx in text::boxes(chars, a, b) {
+                    scene.fill(to_window(&bx), Color::rgba(accent.r, accent.g, accent.b, 0x60));
+                }
             }
             let s = page_scale(pw, ph, z * scale);
             if !done.get(&p).is_some_and(|d| close_enough(d.0, s)) && !failed.contains(&p) {
@@ -429,7 +536,7 @@ impl Layout {
             wanted.push(Job::Page(last + 1, page_scale(pw, ph, z * scale)));
         }
         let page_of = |j: &Job| match j {
-            Job::Page(p, _) | Job::Tile(p, ..) | Job::Thumb(p, _) | Job::Links(p) => *p,
+            Job::Page(p, _) | Job::Tile(p, ..) | Job::Thumb(p, _) | Job::Links(p) | Job::Text(p) | Job::Search(p, _) => *p,
         };
         wanted.sort_by_key(|j| (page_of(j) as isize - middle as isize).unsigned_abs());
         // Page pictures first (they cover the page soonest), then its tiles.
@@ -438,7 +545,9 @@ impl Layout {
         // Links of the pages in sight (quick), before any picture.
         {
             let links = self.shared.links.lock().unwrap_or_else(|e| e.into_inner());
-            let missing: Vec<Job> = (first..=last).filter(|p| !links.contains_key(p)).map(Job::Links).collect();
+            let texts = self.shared.texts.lock().unwrap_or_else(|e| e.into_inner());
+            let mut missing: Vec<Job> = (first..=last).filter(|p| !links.contains_key(p)).map(Job::Links).collect();
+            missing.extend((first..=last).filter(|p| !texts.contains_key(p)).map(Job::Text));
             wanted.splice(0..0, missing);
         }
         {
@@ -450,6 +559,7 @@ impl Layout {
         }
         // Pages far from sight are forgotten.
         let keep = first.saturating_sub(3)..=last + 3;
+        self.shared.texts.lock().unwrap_or_else(|e| e.into_inner()).retain(|p, _| keep.contains(p) || self.selection.is_some_and(|s| s.on_page(*p, usize::MAX).is_some()));
         self.shared.done.lock().unwrap_or_else(|e| e.into_inner()).retain(|p, _| keep.contains(p));
         // Tiles: only those of this zoom in sight.
         if tiles.len() > keep_tiles.len() {
@@ -479,6 +589,86 @@ impl Layout {
         let (p, px, py) = self.hit(r, x, y)?;
         let links = self.shared.links.lock().unwrap_or_else(|e| e.into_inner());
         links.get(&p)?.iter().rev().find(|l| px >= l.rect[0] && px <= l.rect[2] && py >= l.rect[1] && py <= l.rect[3]).map(|l| l.action.clone())
+    }
+
+    /// The text under a window point: on a character (a little grown), its
+    /// page and the nearest character.
+    pub fn text_at(&self, r: Rect, x: f32, y: f32) -> Option<Spot> {
+        let (p, px, py) = self.hit(r, x, y)?;
+        let texts = self.shared.texts.lock().unwrap_or_else(|e| e.into_inner());
+        let chars = texts.get(&p)?;
+        text::on_text(chars, px, py).then(|| text::nearest(chars, px, py)).flatten().map(|i| (p, i))
+    }
+
+    /// The nearest character to a window point on whatever page it is over
+    /// (a selection being dragged).
+    pub fn spot_near(&self, r: Rect, x: f32, y: f32) -> Option<Spot> {
+        let (p, px, py) = self.hit(r, x, y)?;
+        let texts = self.shared.texts.lock().unwrap_or_else(|e| e.into_inner());
+        text::nearest(texts.get(&p)?, px, py).map(|i| (p, i))
+    }
+
+    /// The selected text, pages joined by line breaks; None with nothing
+    /// selected or a page of it not read yet.
+    pub fn selected_text(&self) -> Option<String> {
+        let sel = self.selection?;
+        let (a, b) = sel.span();
+        let texts = self.shared.texts.lock().unwrap_or_else(|e| e.into_inner());
+        let mut parts = Vec::new();
+        for p in a.0..=b.0 {
+            let chars = texts.get(&p)?;
+            if let Some((x, y)) = sel.on_page(p, chars.len()) {
+                parts.push(text::selected(chars, x, y));
+            }
+        }
+        Some(parts.join("\n")).filter(|t| !t.is_empty())
+    }
+
+    /// All of page `p`'s text selected (if it has been read).
+    pub fn select_page(&mut self, p: usize) -> bool {
+        let n = self.shared.texts.lock().unwrap_or_else(|e| e.into_inner()).get(&p).map_or(0, |c| c.len());
+        if n == 0 {
+            return false;
+        }
+        self.selection = Some(Selection { anchor: (p, 0), head: (p, n - 1) });
+        true
+    }
+
+    /// A new search (or none, for an empty query); the worker goes through
+    /// every page.
+    pub fn start_search(&mut self, query: &str) {
+        let mut se = self.shared.search.lock().unwrap_or_else(|e| e.into_inner());
+        let generation = se.generation + 1;
+        *se = Search { query: query.trim().to_string(), generation, done: query.trim().is_empty(), ..Search::default() };
+        drop(se);
+        self.found = None;
+        self.shared.ready.notify_all();
+    }
+
+    /// Match `i` (wrapping) brought into view; the index shown.
+    pub fn show_match(&mut self, i: isize, r: Rect) -> Option<usize> {
+        let (n, m) = {
+            let se = self.shared.search.lock().unwrap_or_else(|e| e.into_inner());
+            let n = se.matches.len();
+            if n == 0 {
+                return None;
+            }
+            let k = i.rem_euclid(n as isize) as usize;
+            (k, se.matches[k].clone())
+        };
+        let (page, boxes) = m;
+        let top = boxes.first().map(|b| b[1]).unwrap_or(0.0);
+        let z = self.zoom(r);
+        // Into view unless it already is, a third of the way down.
+        let tops = self.tops();
+        let y = tops[page] + top;
+        let view = (self.top, self.top + (r.h - 2.0 * MARGIN) / z);
+        if y < view.0 || y + 20.0 > view.1 {
+            self.top = y - (r.h / 3.0) / z;
+            self.clamp(r);
+        }
+        self.found = Some(n);
+        Some(n)
     }
 
     /// A destination: its page, and the spot on it when it names one.
@@ -767,6 +957,17 @@ mod tests {
         d.show_thumb(0, r);
         assert_eq!(d.thumb_top, 0.0);
         assert_eq!(d.thumb_at(r, THUMB_GAP + 10.0), Some(0));
+    }
+
+    #[test]
+    fn selections_across_pages() {
+        let s = Selection { anchor: (3, 10), head: (1, 4) };
+        assert_eq!(s.span(), ((1, 4), (3, 10)));
+        assert_eq!(s.on_page(0, 50), None);
+        assert_eq!(s.on_page(1, 50), Some((4, 49)));
+        assert_eq!(s.on_page(2, 50), Some((0, 49)));
+        assert_eq!(s.on_page(3, 50), Some((0, 10)));
+        assert_eq!(s.on_page(3, 5), Some((0, 4)));
     }
 
     #[test]

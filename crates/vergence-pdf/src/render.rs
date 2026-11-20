@@ -64,7 +64,7 @@ pub fn render_region(doc: &Document, page: &Page, scale: f64, region: Option<(us
     let mut base = page_transform(b, page.rotate, scale);
     base.e -= x as f64;
     base.f -= y as f64;
-    let mut r = Renderer { doc, canvas, ops: 0, forms: HashSet::new(), base, fonts: std::collections::HashMap::new() };
+    let mut r = Renderer { doc, canvas, ops: 0, forms: HashSet::new(), base, fonts: std::collections::HashMap::new(), text_only: false, chars: Vec::new() };
     let resources = Rc::new(page.resources.clone().unwrap_or_default());
     let mut gs = State::new(base, Clip::full(pw, ph), resources.clone());
     // The page's box clips everything drawn on it.
@@ -75,6 +75,20 @@ pub fn render_region(doc: &Document, page: &Page, scale: f64, region: Option<(us
     r.run(&data, gs.clone(), 0);
     r.annotations(page, &gs);
     Some(r.canvas)
+}
+
+/// The page's text layer: every character shown, with its box in points
+/// from the page's top left as shown, in the order drawn.
+pub fn page_text(doc: &Document, page: &Page) -> Vec<crate::text::Char> {
+    let b = page_box(page);
+    let Some(canvas) = Canvas::new(1, 1) else { return Vec::new() };
+    let base = page_transform(b, page.rotate, 1.0);
+    let mut r = Renderer { doc, canvas, ops: 0, forms: HashSet::new(), base, fonts: std::collections::HashMap::new(), text_only: true, chars: Vec::new() };
+    let resources = Rc::new(page.resources.clone().unwrap_or_default());
+    let gs = State::new(base, Clip::full(1, 1), resources);
+    let data = doc.contents(page);
+    r.run(&data, gs, 0);
+    crate::text::dedupe(r.chars)
 }
 
 /// The visible box: CropBox within MediaBox, else MediaBox.
@@ -168,6 +182,9 @@ struct Renderer<'d> {
     base: Transform,
     /// Fonts loaded on this page, by object number (or by name if direct).
     fonts: std::collections::HashMap<Vec<u8>, Rc<Font>>,
+    /// Gathering the text layer: nothing painted, every character kept.
+    text_only: bool,
+    chars: Vec<crate::text::Char>,
 }
 
 fn num(o: Option<&Object>) -> f64 {
@@ -311,7 +328,9 @@ impl Renderer<'_> {
                     }
                 }
                 b"BI" => {
-                    if let (Some(Object::Dict(d)), Some(Object::String(data))) = (a.first(), a.get(1)) {
+                    if let (Some(Object::Dict(d)), Some(Object::String(data))) = (a.first(), a.get(1))
+                        && !self.text_only
+                    {
                         let decoded = image::inline(self.doc, d, data, Some(&gs.resources));
                         self.image(decoded, &gs, matches!(d.get("I").or_else(|| d.get("Interpolate")), Some(Object::Bool(true))));
                     }
@@ -419,6 +438,25 @@ impl Renderer<'_> {
         let mode = t.mode;
         for (code, is_space) in font.codes(s) {
             let w0 = font.width(code);
+            if self.text_only {
+                if self.chars.len() < crate::text::MAX_CHARS
+                    && let Some(text) = font.text(code).filter(|t| !t.is_empty() && !t.chars().all(char::is_control))
+                {
+                    // The glyph's box in text space: its width, a usual
+                    // ascent and descent, through to the page.
+                    let trm = Transform::new(t.size * t.scale, 0.0, 0.0, t.size, 0.0, t.rise).then(tm).then(&gs.ctm);
+                    let corners = [(0.0, -0.2), (w0.max(0.0), -0.2), (0.0, 0.8), (w0.max(0.0), 0.8)].map(|(x, y)| trm.apply(Point::new(x, y)));
+                    let (x0, x1) = corners.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.x), a.1.max(p.x)));
+                    let (y0, y1) = corners.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.y), a.1.max(p.y)));
+                    let rect = [x0 as f32, y0 as f32, x1 as f32, y1 as f32];
+                    if rect.iter().all(|v| v.is_finite()) {
+                        self.chars.push(crate::text::Char { text, rect });
+                    }
+                }
+                let tx = (w0 * t.size + t.char_spacing + if is_space { t.word_spacing } else { 0.0 }) * t.scale;
+                *tm = Transform::translate(tx, 0.0).then(tm);
+                continue;
+            }
             if font.is_type3() {
                 // A Type 3 glyph is a content stream in glyph space.
                 if mode != 3 && mode != 7
@@ -493,6 +531,9 @@ impl Renderer<'_> {
     }
 
     fn fill(&mut self, path: &Path, rule: FillRule, gs: &State, depth: usize) {
+        if self.text_only {
+            return;
+        }
         let p = &gs.fill_paint;
         if let ColorSpace::Pattern(base) = p.space.as_ref() {
             let Some(name) = p.pattern.as_ref().and_then(Object::as_name) else { return };
@@ -507,6 +548,9 @@ impl Renderer<'_> {
     }
 
     fn stroke(&mut self, path: &Path, gs: &State) {
+        if self.text_only {
+            return;
+        }
         // A pattern stroke is drawn in black for now (rare in practice).
         let rgb = match gs.stroke_paint.space.as_ref() {
             ColorSpace::Pattern(_) => Some([0.0; 3]),
@@ -524,6 +568,9 @@ impl Renderer<'_> {
         match s.dict.name("Subtype") {
             Some(b"Image") => {
                 let smooth = matches!(self.doc.get_in(&s.dict, "Interpolate"), Object::Bool(true));
+                if self.text_only {
+                    return;
+                }
                 let decoded = image::from_stream(self.doc, &s, Some(&gs.resources));
                 self.image(decoded, gs, smooth);
             }
@@ -564,6 +611,9 @@ impl Renderer<'_> {
 
     /// An image in the unit square of user space.
     fn image(&mut self, decoded: Decoded, gs: &State, smooth: bool) {
+        if self.text_only {
+            return;
+        }
         let to_device = |w: usize, h: usize, ctm: &Transform| Transform::new(1.0 / w as f64, 0.0, 0.0, -1.0 / h as f64, 0.0, 1.0).then(ctm);
         match decoded {
             Decoded::Color(img) => {
@@ -614,6 +664,9 @@ impl Renderer<'_> {
     /// A shading within `path` (through `path_t`), in shading space `space`.
     #[allow(clippy::too_many_arguments)]
     fn shade(&mut self, sh: &Object, path: &Path, path_t: &Transform, rule: FillRule, space: &Transform, gs: &State, alpha: f32) {
+        if self.text_only {
+            return;
+        }
         let doc = self.doc;
         let sh = doc.resolve(sh);
         let Some(d) = sh.as_dict().cloned() else { return };
@@ -697,7 +750,7 @@ impl Renderer<'_> {
         }
         let Some(cell_canvas) = Canvas::new(cw, ch) else { return };
         let cell_t = Transform::new(k, 0.0, 0.0, -k, -bbox[0] * k, bbox[1] * k + ystep * k);
-        let mut sub = Renderer { doc, canvas: cell_canvas, ops: self.ops, forms: std::mem::take(&mut self.forms), base: cell_t, fonts: std::mem::take(&mut self.fonts) };
+        let mut sub = Renderer { doc, canvas: cell_canvas, ops: self.ops, forms: std::mem::take(&mut self.forms), base: cell_t, fonts: std::mem::take(&mut self.fonts) , text_only: false, chars: Vec::new() };
         if let Some(r) = reference {
             sub.forms.insert(r.num);
         }
