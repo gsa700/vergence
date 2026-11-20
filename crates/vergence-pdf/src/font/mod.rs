@@ -3,11 +3,13 @@
 //! names, /Widths) and composite ones (Type 0: a CMap from codes to CIDs,
 //! a CIDFont's /W and its CID-to-glyph map).
 //!
-//! Glyph programs: embedded TrueType (truetype.rs, ours) now; CFF, Type 1
-//! and Type 3 are the next parts of step 4. A font that is not embedded is
+//! Glyph programs: embedded TrueType (truetype.rs) and CFF (cff.rs: bare
+//! in FontFile3 or inside OpenType), both ours; Type 1 and Type 3 are the
+//! next part of step 4. A font that is not embedded is
 //! drawn with a substitute from the system (metric-compatible ones first),
 //! stretched to the PDF's widths so lines keep their length.
 
+pub mod cff;
 pub mod encoding;
 pub mod truetype;
 
@@ -20,6 +22,7 @@ use vergence_raster::{Path, Transform};
 
 use crate::object::{Dict, Object};
 use crate::Document;
+use cff::Cff;
 use truetype::TrueType;
 
 /// A glyph's outline in text space units of one em (y up), shared.
@@ -27,6 +30,7 @@ pub type Glyph = Rc<Path>;
 
 enum Program {
     TrueType(TrueType),
+    Cff(Box<Cff>),
     None,
 }
 
@@ -236,6 +240,11 @@ impl Font {
     }
 
     fn make_glyph(&self, code: u32) -> Option<Path> {
+        if let Program::Cff(cff) = &self.program {
+            let gid = self.cff_gid(cff, code)?;
+            let m = cff.matrix;
+            return Some(cff.outline(gid)?.transformed(&Transform::new(m[0], m[1], m[2], m[3], m[4], m[5])));
+        }
         let (tt, stretch) = match (&self.program, &self.substitute) {
             (Program::TrueType(t), _) => (t, false),
             (Program::None, Some(t)) => (t.as_ref(), true),
@@ -253,6 +262,15 @@ impl Font {
             1.0
         };
         Some(path.transformed(&Transform::scale(k * sx, k)))
+    }
+
+    /// The glyph for `code` in a CFF program: a name-keyed font by the
+    /// encoding's glyph name, else its own encoding; a CID-keyed one by CID.
+    fn cff_gid(&self, cff: &Cff, code: u32) -> Option<u16> {
+        match &self.kind {
+            Kind::Composite { .. } => cff.gid_of_cid(self.cid(code)),
+            Kind::Simple { names, .. } => names.get(code as usize).cloned().flatten().and_then(|n| cff.gid_of_name(&n)).or_else(|| cff.gid_of_code(code)),
+        }
     }
 
     /// The glyph index for `code` in `tt` (ISO 32000-2 §9.6.5.4 for simple
@@ -309,13 +327,23 @@ fn base_name(d: &Dict) -> String {
 
 fn embedded(doc: &Document, descriptor: &Dict) -> Program {
     for key in ["FontFile2", "FontFile3"] {
-        if let Object::Stream(s) = doc.get_in(descriptor, key) {
-            // FontFile3 may hold an OpenType font; bare CFF waits for its reader.
-            if let Some(tt) = TrueType::parse(doc.stream(&s).data)
-                && tt.cff.is_none()
-            {
-                return Program::TrueType(tt);
+        let Object::Stream(s) = doc.get_in(descriptor, key) else { continue };
+        let data = doc.stream(&s).data;
+        // FontFile3: bare CFF (/Type1C, /CIDFontType0C), or an OpenType font.
+        if key == "FontFile3" && matches!(s.dict.name("Subtype"), Some(b"Type1C" | b"CIDFontType0C")) {
+            if let Some(c) = Cff::parse(data) {
+                return Program::Cff(Box::new(c));
             }
+            continue;
+        }
+        if let Some(tt) = TrueType::parse(data) {
+            if let Some((o, l)) = tt.cff {
+                if let Some(c) = tt.data().get(o..o + l).and_then(|b| Cff::parse(b.to_vec())) {
+                    return Program::Cff(Box::new(c));
+                }
+                continue;
+            }
+            return Program::TrueType(tt);
         }
     }
     Program::None

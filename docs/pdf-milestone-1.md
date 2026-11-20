@@ -3,7 +3,7 @@
 Status: **accepted 2026-11-19** (Dave: "close-up, drawn signature first,
 placeholder for jpeg 2000"; the corpus: "use the PDFs in my Documents
 folder for testing"). Steps 1 to 3 built 2026-11-19, step 4 part 1 the
-same night (below); step 4 part 2 (CFF, composite CFF fonts) next.
+same night, part 2 too (below); step 4 part 3 (Type 1, Type 3, ToUnicode) next.
 
 ## What Dave asked for
 
@@ -228,3 +228,14 @@ selection order; color management beyond the simple formulas.
   (question for Dave: ship Liberation, OFL, like Inter?). In the
   sandboxed helper (step 6) substitutes must be opened before it limits
   itself.
+- **Step 4, part 2** (2026-11-19 night): font/cff.rs, our own CFF reader
+  and Type 2 charstring interpreter (INDEXes, DICTs with reals, charsets
+  0/1/2, encodings with supplements, private dicts and subroutines with
+  their bias, CID-keyed fonts with FDArray and FDSelect, hint masks, widths,
+  flex, `endchar` accents); FontFile3 /Type1C and /CIDFontType0C and
+  OpenType fonts with a CFF table. A hand-made CFF in the tests, and a
+  fuzz test. Seen by eye: the ICOM cover's model name in its logo font, a
+  Motorola R56 page of tables and body text. Corpus: every first page,
+  no panics. CFF standard strings 229-390 (the expert set) not kept.
+  Liberation 2.1.5 shipped in data/fonts the same night (Dave: "ship
+  Liberation").
