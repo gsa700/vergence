@@ -139,6 +139,8 @@ impl Server {
                 }
                 self.sound_tile_now();
             }
+            // An agent's timed grant, one more span (agents.rs).
+            ("agent", "extend") => self.agent_extend(),
             _ => tracing::debug!("applets: {tile} has no control {control}"),
         }
     }

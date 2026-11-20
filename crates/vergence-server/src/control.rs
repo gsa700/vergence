@@ -34,6 +34,7 @@
 //   changes [since]      what changed in the meaning since a number
 //   agents               agents' grants, the question showing, requests waiting
 //   agent-answer deny|now|session|always|hour   answer it (tests)
+//   tile-action <tile> <control> [value]   a control on one of the desktop's own cards, as a press would
 //   restart              exit with status 75 (the launcher starts the new build)
 //   quit                 exit
 //
@@ -267,6 +268,12 @@ impl Server {
             }
             "shelf" => self.shelf_report(),
             "tiles" => self.tiles_report(),
+            "tile-action" => {
+                let (Some(tile), Some(control)) = (args.first(), args.get(1)) else { return "tile-action <tile> <control> [value]".into() };
+                let value = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(0.0);
+                self.desktop_tile_action(tile, control, value);
+                format!("tile-action {tile} {control}: done")
+            }
             // The lock: `lock` alone reports; `lock now` asks to lock, as Super+L does.
             "lock" => {
                 if args.first() == Some(&"now") {

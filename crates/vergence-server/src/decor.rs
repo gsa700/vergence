@@ -1118,6 +1118,15 @@ impl Server {
         {
             elements.push(SceneElement::Memory(e));
         }
+        // Rings where agents act, in front of the windows (agents.rs).
+        let rings = self.agent_ring_elements(renderer, out, scale);
+        let elements = if rings.is_empty() {
+            elements
+        } else {
+            let mut front = rings;
+            front.extend(elements);
+            front
+        };
         // The elevation prompt, over all of it (elevate.rs).
         if self.elevating() {
             let mut front = self.elevate_elements(renderer, out, scale);

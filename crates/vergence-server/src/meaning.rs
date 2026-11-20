@@ -418,6 +418,14 @@ impl Server {
                 }
                 let app = w.native().map(|n| n.app_id.clone()).unwrap_or_default();
                 self.agent_log(id, &app, &format!("{action:?} #{node}"));
+                // A ring where it acts, for the person to see (step 5).
+                if let Some((_, _, nodes)) = w.native().and_then(|n| n.meaning())
+                    && let Some(m) = nodes.iter().find(|m| m.id == node)
+                {
+                    let loc = self.space.element_location(&w).unwrap_or_default();
+                    let name = self.bus_agent_name(id).unwrap_or_default();
+                    self.agent_ring(&name, (loc.x as f64 + m.x, loc.y as f64 + m.y, m.w, m.h));
+                }
                 if self.send_act(&w, node, action, Some((id, serial))).is_none() {
                     reply(self, AgentEvent::Acted { serial, ok: false, why: "not a native window".into() });
                 }

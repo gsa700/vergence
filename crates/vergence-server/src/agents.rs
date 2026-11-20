@@ -56,6 +56,8 @@ pub fn agents_settings() -> (bool, u64) {
 }
 /// An agent counts as working this long after its last request (the tile).
 const WORKING_SECS: u64 = 120;
+/// A timed grant's last minutes: the tile warns, and offers more.
+const ENDING_MINUTES: u64 = 5;
 /// The most requests waiting for the person's answer.
 const PENDING_MAX: usize = 256;
 
@@ -78,6 +80,8 @@ pub enum May {
     Yes,
     No,
     Ask,
+    /// A timed grant ran out: asked again, saying so.
+    Expired,
 }
 
 /// The buttons, left to right.
@@ -121,6 +125,8 @@ struct Question {
     client: u32,
     app: String,
     shown: String,
+    /// Its timed grant ran out (the question says so).
+    expired: bool,
 }
 
 #[derive(Default)]
@@ -140,6 +146,33 @@ pub struct Agents {
     buttons: Vec<(usize, Rectangle<i32, Logical>)>,
     dim: Option<(Id, CommitCounter)>,
     picture: Option<(u64, MemoryRenderBuffer)>,
+    /// The rings where agents acted (step 5), and whether their timer runs.
+    rings: Vec<Ring>,
+    ring_timer: bool,
+}
+
+/// A ring where an agent acted: on the screens, its color, when, its picture.
+struct Ring {
+    at: (f64, f64, f64, f64),
+    color: (u8, u8, u8),
+    since: Instant,
+    picture: Option<(u64, MemoryRenderBuffer)>,
+}
+
+/// How long a ring stays, then fades; how often it is drawn while it does.
+const RING_HOLD: std::time::Duration = std::time::Duration::from_millis(600);
+const RING_FADE: std::time::Duration = std::time::Duration::from_millis(600);
+const RING_STEP: std::time::Duration = std::time::Duration::from_millis(16);
+/// Room around what it rings, in points; the most rings at once.
+const RING_PAD: f64 = 4.0;
+const RINGS_MAX: usize = 32;
+
+/// An agent's own color, the same each time for the same name: one of a
+/// few that read on light and dark alike.
+fn ring_color(agent: &str) -> (u8, u8, u8) {
+    const COLORS: [(u8, u8, u8); 6] = [(0x1f, 0xa9, 0x9a), (0xf0, 0x86, 0x22), (0x8e, 0x5c, 0xf0), (0xe0, 0x45, 0x86), (0x3f, 0xa3, 0x44), (0x2f, 0x7f, 0xf0)];
+    let h = agent.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3));
+    COLORS[(h % COLORS.len() as u64) as usize]
 }
 
 fn now_secs() -> u64 {
@@ -247,7 +280,7 @@ impl Agents {
             Some(Span::Until(_)) => {
                 self.grants.remove(&(agent.to_string(), app.to_string()));
                 self.save();
-                May::Ask
+                May::Expired
             }
         }
     }
@@ -277,12 +310,12 @@ impl Server {
                 Some(true)
             }
             May::No => Some(false),
-            May::Ask => {
+            may @ (May::Ask | May::Expired) => {
                 if self.agents.pending.len() >= PENDING_MAX {
                     return Some(false);
                 }
                 self.agents.pending.push_back((client, app.to_string(), request.clone()));
-                let q = Question { agent, client, app: app.to_string(), shown: shown.to_string() };
+                let q = Question { agent, client, app: app.to_string(), shown: shown.to_string(), expired: may == May::Expired };
                 if !self.agents.asking.iter().any(|a| a.agent == q.agent && a.app == q.app) {
                     let first = self.agents.asking.is_empty();
                     self.agents.asking.push_back(q);
@@ -438,22 +471,39 @@ impl Server {
         if self.agents.tile_up && self.agents.last.as_ref().is_none_or(|(_, _, t)| t.elapsed().as_secs() >= WORKING_SECS) {
             self.agents.tile_up = false;
             self.tile_remove(crate::tiles::Owner::Desktop, "agent");
-        } else if self.agents.tile_up && now_secs().is_multiple_of(30) {
-            self.agent_tile();
+        } else if self.agents.tile_up {
+            let ending = self.agents.last.as_ref().and_then(|(a, p, _)| self.agents.minutes_left(a, p)).is_some_and(|m| m <= ENDING_MINUTES + 1);
+            if ending || now_secs().is_multiple_of(30) {
+                self.agent_tile();
+            }
         }
     }
 
     fn agent_tile(&mut self) {
         let Some((agent, app, _)) = self.agents.last.clone() else { return };
         let shown = self.app_shown_name(&app);
-        let left = self.agents.minutes_left(&agent, &app).map(|m| format!(", {m} min left")).unwrap_or_default();
+        let minutes = self.agents.minutes_left(&agent, &app);
+        let left = minutes.map(|m| format!(", {m} min left")).unwrap_or_default();
+        // Its last minutes: the tile in trouble, and one more span at a press.
+        let ending = minutes.is_some_and(|m| m <= ENDING_MINUTES);
+        let (state, label) = match minutes {
+            Some(m) if ending => (vergence_protocol::tile::TileState::Problem, format!("{m} min left")),
+            _ => (vergence_protocol::tile::TileState::Warning, format!("using {shown}")),
+        };
+        let controls = if minutes.is_some() {
+            let more = timed_label(agents_settings().1).replacen("For ", "", 1);
+            vec![vergence_protocol::tile::Control { id: "extend".into(), label: format!("Allow {more} more"), kind: vergence_protocol::tile::ControlKind::Button }]
+        } else {
+            Vec::new()
+        };
+        let title = if ending { format!("{agent}'s time with {shown} is nearly up") } else { format!("{agent} is using {shown}") };
         let tile = vergence_protocol::tile::Tile {
             id: "agent".into(),
             value: agent.chars().take(12).collect(),
-            label: format!("using {shown}"),
-            state: vergence_protocol::tile::TileState::Warning,
+            label,
+            state,
             group: "System".into(),
-            card: vergence_protocol::tile::Card { title: format!("{agent} is using {shown}"), big: String::new(), rows: vec![("Allowed".into(), format!("{}{left}", self.agent_span_word(&agent, &app)))], chart: Vec::new(), controls: Vec::new(), note: "Settings > Privacy > Agents takes it back.".into() },
+            card: vergence_protocol::tile::Card { title, big: String::new(), rows: vec![("Allowed".into(), format!("{}{left}", self.agent_span_word(&agent, &app)))], chart: Vec::new(), controls, note: "Settings > Privacy > Agents takes it back.".into() },
             page: "agents".into(),
         };
         self.agents.tile_up = true;
@@ -523,7 +573,7 @@ impl Server {
         self.agents.panel = panel;
         self.agents.buttons = local.iter().map(|(i, x, w)| (*i, Rectangle::new((at.0 + x, at.1 + row_y).into(), (*w, BUTTON_H).into()))).collect();
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (focus, light, scale.to_bits(), accent.r, accent.g, accent.b, &q.agent, &q.shown, &timed).hash(&mut h);
+        (focus, light, scale.to_bits(), accent.r, accent.g, accent.b, &q.agent, &q.shown, &timed, q.expired).hash(&mut h);
         let key = h.finish();
         if self.agents.picture.as_ref().map(|(k, _)| *k) != Some(key) {
             let s = vergence_look::shelf_look(light);
@@ -534,13 +584,17 @@ impl Server {
             scene.fill_rounded(SceneRect::new(0.0, 0.0, w, hh), 14.0, ink(s.menu));
             scene.stroke(SceneRect::new(0.0, 0.0, w, hh), 14.0, vergence_look::EDGE, ink(s.edge));
             let m = fonts.metrics(bold, 18.0);
-            let heading: String = format!("{} wants to use {}", q.agent, q.shown).chars().take(64).collect();
+            let heading: String = if q.expired { format!("{}'s time with {} is up", q.agent, q.shown) } else { format!("{} wants to use {}", q.agent, q.shown) }.chars().take(64).collect();
             vergence_render::text(&mut scene, fonts, bold, 18.0, ink(s.menu_ink), ScenePoint::new(PAD as f32, (PAD as f32 + m.ascent).round()), &heading);
             let m = fonts.metrics(face, TEXT);
             let (a, b) = (s.menu_ink, s.menu_ink_off);
             let soft = Color::rgb(((a.0 as u16 + b.0 as u16) / 2) as u8, ((a.1 as u16 + b.1 as u16) / 2) as u8, ((a.2 as u16 + b.2 as u16) / 2) as u8);
             let shown: String = q.shown.chars().take(40).collect();
-            let lines = [format!("It can read {shown}'s windows and press, type and choose in them."), "You'll see a ring where it acts. A secret field stays secret.".to_string()];
+            let lines = if q.expired {
+                [format!("Keep allowing it to read {shown}'s windows and press, type and choose in them?"), "What it was doing waits for your answer.".to_string()]
+            } else {
+                [format!("It can read {shown}'s windows and press, type and choose in them."), "You'll see a ring where it acts. A secret field stays secret.".to_string()]
+            };
             for (k, line) in lines.iter().enumerate() {
                 vergence_render::text(&mut scene, fonts, face, TEXT, soft, ScenePoint::new(PAD as f32, (PAD as f32 + 30.0 + 19.0 * k as f32 + m.ascent).round()), line);
             }
@@ -613,6 +667,92 @@ impl Server {
                 }
             }
         }
+    }
+
+    /// The agent tile's "Allow ... more": the working agent's timed grant
+    /// for its app goes on by one more span, from when it would have ended.
+    pub fn agent_extend(&mut self) {
+        let Some((agent, app, _)) = self.agents.last.clone() else { return };
+        let key = (agent.clone(), app.clone());
+        let Some(Span::Until(t)) = self.agents.grants.get(&key).copied() else { return };
+        let until = t.max(now_secs()) + agents_settings().1 * 60;
+        self.agents.grants.insert(key, Span::Until(until));
+        self.agents.save();
+        self.agent_log_named(&agent, &app, "extended from the tile");
+        tracing::info!("agents: {agent:?} and {app:?} extended");
+        self.agent_tile();
+    }
+
+    fn agent_log_named(&mut self, agent: &str, app: &str, what: &str) {
+        if cfg!(test) {
+            return;
+        }
+        let Some(dir) = state_dir() else { return };
+        if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).mode(0o600).open(dir.join("agents.log")) {
+            let _ = writeln!(f, "{}\t{}\t{}\t{}", utc(now_secs()), clean(agent), clean(app), clean(what));
+        }
+    }
+
+    /// A ring where an agent acts (step 5): `at` on the screens, in the
+    /// agent's own color; held, then faded.
+    pub fn agent_ring(&mut self, agent: &str, at: (f64, f64, f64, f64)) {
+        if at.2 <= 0.0 || at.3 <= 0.0 || !at.0.is_finite() || !at.1.is_finite() {
+            return;
+        }
+        let color = ring_color(agent);
+        self.agents.rings.retain(|r| r.since.elapsed() < RING_HOLD + RING_FADE);
+        if self.agents.rings.len() >= RINGS_MAX {
+            self.agents.rings.remove(0);
+        }
+        self.agents.rings.push(Ring { at, color, since: Instant::now(), picture: None });
+        if !self.agents.ring_timer {
+            self.agents.ring_timer = true;
+            use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+            let _ = self.loop_handle.insert_source(Timer::from_duration(RING_STEP), |_, _, st| {
+                st.agents.rings.retain(|r| r.since.elapsed() < RING_HOLD + RING_FADE);
+                st.redraw_all();
+                if st.agents.rings.is_empty() {
+                    st.agents.ring_timer = false;
+                    return TimeoutAction::Drop;
+                }
+                TimeoutAction::ToDuration(RING_STEP)
+            });
+        }
+        self.redraw_all();
+    }
+
+    /// The rings on this screen, in front of the windows.
+    pub fn agent_ring_elements(&mut self, renderer: &mut GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Vec<SceneElement> {
+        let motion = self.motion_wanted();
+        let mut elements = Vec::new();
+        let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
+        for r in self.agents.rings.iter_mut() {
+            let t = r.since.elapsed();
+            if t >= RING_HOLD + RING_FADE {
+                continue;
+            }
+            let alpha = if !motion || t <= RING_HOLD { 1.0 } else { 1.0 - (t - RING_HOLD).as_secs_f32() / RING_FADE.as_secs_f32() };
+            let (x, y, w, h) = (r.at.0 - RING_PAD, r.at.1 - RING_PAD, r.at.2 + 2.0 * RING_PAD, r.at.3 + 2.0 * RING_PAD);
+            let o = out.to_f64();
+            if x + w < o.loc.x || y + h < o.loc.y || x > o.loc.x + o.size.w || y > o.loc.y + o.size.h {
+                continue;
+            }
+            if r.picture.as_ref().map(|(k, _)| *k) != Some(scale.to_bits()) {
+                let mut scene = Scene::new(w as f32, h as f32);
+                let (c0, c1, c2) = r.color;
+                scene.stroke(SceneRect::new(1.5, 1.5, w as f32 - 3.0, h as f32 - 3.0), 9.0, 3.0, Color::rgb(c0, c1, c2));
+                let Ok(p) = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)) else { continue };
+                let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
+                r.picture = Some((scale.to_bits(), buffer));
+            }
+            let Some((_, buffer)) = r.picture.as_ref() else { continue };
+            let loc = Point::<f64, Logical>::from((x - o.loc.x, y - o.loc.y)).to_physical(scale);
+            let size = smithay::utils::Size::<i32, Logical>::from((w.round() as i32, h.round() as i32));
+            if let Ok(e) = MemoryRenderBufferRenderElement::from_buffer(renderer, loc, buffer, Some(alpha), None, Some(size), Kind::Unspecified) {
+                elements.push(SceneElement::Memory(e));
+            }
+        }
+        elements
     }
 
     /// For `vctl agents`: the grants, the questions, the waiting requests.
@@ -689,7 +829,7 @@ mod tests {
         assert_eq!(a.may("Claude", 4, "calc"), May::Yes);
         assert_eq!(a.minutes_left("Claude", "calc"), Some(10));
         a.grants.insert(("Claude".into(), "calc".into()), Span::Until(now_secs().saturating_sub(1)));
-        assert_eq!(a.may("Claude", 4, "calc"), May::Ask, "an hour that has passed asks again");
+        assert_eq!(a.may("Claude", 4, "calc"), May::Expired, "an hour that has passed asks again, saying so");
         assert!(!a.grants.contains_key(&("Claude".into(), "calc".into())));
         a.grants.insert(("Claude".into(), "calc".into()), Span::Never);
         assert_eq!(a.may("Claude", 4, "calc"), May::No);

@@ -243,3 +243,19 @@ unnecessary for now); voice control.
   (kept across the session's restart) taken back from the page, the
   agent asked again with "For 30 minutes" on the button, the switch off
   refusing it.
+- **Step 5** (2026-11-20 afternoon): seen, not felt, and time running
+  out (agents.rs). Every action an agent sends puts a ring on the widget
+  it acts on, in the agent's own color (one of six, the same for the same
+  name), 4 points around it, held 0.6 s then faded over 0.6 s (with Reduce
+  motion, held then gone), in front of the windows and behind the
+  dialogs; the person's pointer and keyboard are never touched. A timed
+  grant's last 5 minutes: the agent tile turns to a problem ("4 min
+  left", out of the drawer) and its card offers "Allow 30 minutes more"
+  (the timed length), which goes on from when it would have ended,
+  nothing stopped, logged. When the time is up the question says so:
+  "Claude's time with Calculator is up", "Keep allowing it ...? What it
+  was doing waits for your answer." `vctl tile-action <tile> <control>`
+  presses a desktop card's control (tests). Seen headless on Hubble: the
+  ring on the pressed 5 (picture checked), the tile at 4 minutes left,
+  extended to 64, the expired question (picture checked) answered and
+  its waiting press done.
