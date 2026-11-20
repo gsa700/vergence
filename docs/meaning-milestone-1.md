@@ -103,7 +103,19 @@ off daily from the first step:
 8. **A focus ring the server draws** (setting, off by default): the same
    clear ring around the focused control in every native window, from the
    tree, for keyboard users and in the magnifier.
-9. **Checks.** A display-suite scenario (the magnifier following a caret
+9. **A security review by Fable** (Dave, 2026-11-20: "hand this
+   feature set off to Fable for a security review"), after step 6, when
+   the whole surface exists: the bus's agent interface, the permission
+   gate and its dialog, the grants file and the log, the toolkit's
+   actions, the MCP adapter. Fable gets the code and the threat model (a
+   hostile program of the person's own, a misbehaving agent, a dialog
+   faked, secret fields, exhaustion, the files), not our conclusions.
+   Known before it starts: an agent's name is its own word, so a program
+   calling itself "Claude" gets Claude's grants; grants should follow
+   something the server can check (the program by its peer credentials,
+   or a token given at the answer). Its findings are fixed before the
+   milestone closes.
+   **Checks.** A display-suite scenario (the magnifier following a caret
    in a headless session, pixel-checked); the agent interface driven end
    to end by vergence-agent-mcp against Edit, the settings app and
    FileView; the permission dialog's refusals; tests and the suite on all
