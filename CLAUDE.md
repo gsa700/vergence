@@ -119,10 +119,10 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   **techbench**, a FreeBSD workstation (done 2026-11-17; an NVIDIA card,
   GTX 960 on the legacy 580 driver first, is still to come). Techbench's
   old ITX hardware becomes the hamshack's Windows PC; the spare Lenovo Tiny
-  (M910q, HD 530) gets **Debian 13** for the systemd/logind side (Dave,
-  2026-11-19, over Fedora: it also tests an older kernel and Mesa than
-  Void's rolling ones); until it joins there is no systemd machine in the
-  test set. Hubble (Void) stays.
+  (M910q, HD 530) gets **Fedora 45** for the systemd/logind side (Dave,
+  2026-11-20, netinst, a minimal install; he chose Debian on 2026-11-19
+  and went back to Fedora the same night); until it joins there is no
+  systemd machine in the test set. Hubble (Void) stays.
 - **Three platforms, one code base** (Dave, 2026-11-09; replaces "FreeBSD
   first" of 2026-11-06). The primary development platform is **Linux without
   systemd: Void (glibc) on Hubble**, reinstalled from FreeBSD on 2026-11-09
@@ -162,7 +162,7 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   the platforms must differ, say so in the code and the docs. VMs are for
   build checks only. A milestone is done when it builds and passes
   its tests on all three and has run on the FreeBSD machines (and the
-  Debian one, once the Tiny has it).
+  Fedora one, once the Tiny has it).
 - **Installing on a system**: `cargo build --release`, then `sudo tools/install.sh`
   (binaries, `vergence-session` and the `vergence` console command in
   /usr/local/bin, a Wayland session file, seatd enabled where there is no
