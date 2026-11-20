@@ -184,6 +184,8 @@ if [ -z "$destdir" ]; then
     done
 fi
 install -m 755 "$here/vctl" "$bin/vctl"
+# vctl talks to the control socket through nc (Fedora installs none by default).
+command -v nc >/dev/null 2>&1 || echo "vctl: needs nc (Fedora: dnf install nmap-ncat; Void: xbps-install openbsd-netcat)" >&2
 # Lab tiles (dock milestone 1): a NUT UPS and a demonstration tile, scripts on vtile.
 install -d -m 755 "$libexec"
 install -m 755 "$here/lab/ups-tile" "$libexec/ups-tile"
