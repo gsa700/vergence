@@ -1124,6 +1124,12 @@ impl Server {
             front.extend(elements);
             return front;
         }
+        // An agent's question, over all of it (agents.rs).
+        if self.agents_asking() {
+            let mut front = self.agent_dialog_elements(renderer, out, scale);
+            front.extend(elements);
+            return front;
+        }
         // The log out dialog, over all of it (session_dialog.rs).
         if self.session_dialog.open {
             let mut front = self.session_dialog_elements(renderer, out, scale);

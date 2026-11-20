@@ -473,6 +473,11 @@ impl Server {
     }
 
     /// The connection is finished: drop its state and its write source.
+    /// The name an agent gave (agents.rs), if this client is one.
+    pub fn bus_agent_name(&self, id: u32) -> Option<String> {
+        self.bus.clients.get(&id).and_then(|c| c.agent.clone())
+    }
+
     fn bus_forget(&mut self, id: u32) {
         if let Some(c) = self.bus.clients.remove(&id) {
             if let Some(t) = c.write_source {
@@ -483,6 +488,7 @@ impl Server {
         // Its native windows go with it (native.rs), and its tiles (tiles.rs).
         self.native_forget(id);
         self.tiles_forget(id);
+        self.agents_forget(id);
     }
 
     /// The monitors as the bus describes them, left to right.

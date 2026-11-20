@@ -101,6 +101,8 @@ pub struct Server {
     /// What changed in the windows' meaning, for readers to follow
     /// (meaning milestone 1, step 2; meaning.rs).
     pub meaning_log: crate::meaning::MeaningLog,
+    /// Agents' grants, the person's questions, the agent tile (agents.rs).
+    pub agents: crate::agents::Agents,
     /// Windows' pictures (thumbs.rs), and those still to save for `vctl
     /// thumb`: the window, the room's side in pixels, the name.
     pub thumbs: crate::thumbs::Thumbs,
@@ -318,6 +320,7 @@ impl Server {
             picture_pending: Vec::new(),
             acts: Default::default(),
             meaning_log: Default::default(),
+            agents: Default::default(),
             thumbs: Default::default(),
             picker: None,
             overview: None,

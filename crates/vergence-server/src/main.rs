@@ -51,6 +51,7 @@ mod pointer;
 mod win;
 mod native;
 mod meaning;
+mod agents;
 mod sound;
 mod switch;
 mod thumbs;

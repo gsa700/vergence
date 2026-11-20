@@ -32,6 +32,8 @@
 //   find <path>          widgets by path: "Calculator > 7", "* > button:Save"
 //   focused              the focused widget and the caret, on the screens
 //   changes [since]      what changed in the meaning since a number
+//   agents               agents' grants, the question showing, requests waiting
+//   agent-answer deny|now|session|always|hour   answer it (tests)
 //   restart              exit with status 75 (the launcher starts the new build)
 //   quit                 exit
 //
@@ -251,6 +253,8 @@ impl Server {
                 self.meaning_find_report(&path)
             }
             "focused" => self.meaning_focus_report(),
+            "agents" => self.agents_report(),
+            "agent-answer" => self.agent_answer_by_word(args.first().copied().unwrap_or("")),
             "changes" => self.meaning_changes_report(args.first().and_then(|a| a.parse().ok()).unwrap_or(0)),
             "acted" => {
                 let Some(serial) = args.first().and_then(|a| a.parse::<u32>().ok()) else { return "acted <serial>".into() };

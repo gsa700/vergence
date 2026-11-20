@@ -224,7 +224,7 @@ impl Server {
         }
         // The log out dialog, or the elevation prompt: everything is theirs
         // while one shows (session_dialog.rs, elevate.rs).
-        if self.session_dialog.open || self.elevating() {
+        if self.session_dialog.open || self.elevating() || self.agents_asking() {
             return Some(Target::Server(Part::Session));
         }
         // The overview has the whole screen but the dock (overview.rs).
@@ -318,6 +318,7 @@ impl Server {
         self.app_menu_hover(pos);
         self.notify_hover(pos);
         self.session_dialog_hover(pos);
+        self.agent_dialog_hover(pos);
         self.shelf_hover(pos);
         self.picker_hover(pos);
         self.overview_hover(pos);
@@ -589,6 +590,7 @@ impl Server {
             Target::Server(Part::Drawer) if pressed && button == vergence_seat::BTN_LEFT => self.drawer_press(pos),
             Target::Server(Part::Drawer) if !pressed => self.drawer_release(pos),
             Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT && self.elevating() => self.elevate_press(pos),
+            Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT && self.agents_asking() => self.agent_dialog_press(pos),
             Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT => self.session_dialog_press(pos),
             // The login screen's people and session line (greeter.rs).
             Target::Server(Part::Lock) if pressed && button == vergence_seat::BTN_LEFT && crate::greeter() => self.greeter_press(pos),

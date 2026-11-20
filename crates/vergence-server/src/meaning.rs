@@ -323,6 +323,44 @@ impl Server {
         use vergence_protocol::bus::{ErrorCode, ServerMsg};
         let reply = |s: &mut Server, e: AgentEvent| s.bus_send(id, ServerMsg::Agent(e));
         let refuse = |s: &mut Server, serial: u32, code: ErrorCode, message: String| s.bus_send(id, ServerMsg::Error { serial, code, message });
+        // Permission (agents.rs): the app a request is about must be
+        // allowed; the person is asked first if nothing says yet, and the
+        // request waits for the answer.
+        let mut apps: Vec<String> = Vec::new();
+        match &r {
+            AgentRequest::Tree { client, window, .. } | AgentRequest::Act { client, window, .. } => {
+                apps.extend(self.natives.get(&(*client, *window)).and_then(|w| w.native()).map(|n| n.app_id.clone()));
+            }
+            AgentRequest::Focused { .. } => {
+                apps.extend(self.input.keyboard_native.as_ref().and_then(|w| w.native()).map(|n| n.app_id.clone()));
+            }
+            // A search in named windows asks about their apps; one across
+            // every window ("*") only shows the apps already allowed.
+            AgentRequest::Find { path, .. } => {
+                let (wpart, _) = parse(path);
+                if wpart != "*" {
+                    for l in self.meaning_windows() {
+                        if window_matches(&wpart, &l.title, &l.app_id) && !apps.contains(&l.app_id) {
+                            apps.push(l.app_id);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        for app in &apps {
+            let shown = self.app_shown_name(app);
+            match self.agent_gate(id, app, &shown, &r) {
+                None => return,
+                Some(true) => {}
+                Some(false) if matches!(r, AgentRequest::Find { .. }) => {}
+                Some(false) => {
+                    self.agent_log(id, app, "refused: not allowed");
+                    let name = self.bus_agent_name(id).unwrap_or_default();
+                    return refuse(self, r.serial(), ErrorCode::Denied, format!("{name} may not use {shown}"));
+                }
+            }
+        }
         match r {
             AgentRequest::Hello { .. } => {}
             AgentRequest::Windows { serial } => {
@@ -354,8 +392,14 @@ impl Server {
                 reply(self, AgentEvent::Tree { serial, client, window, title: n.title(), focus, caret, nodes });
             }
             AgentRequest::Find { serial, path } => {
+                let mut allowed = Vec::new();
+                for f in self.meaning_find(&path) {
+                    if self.agent_may_quietly(id, &f.app_id) {
+                        allowed.push(f);
+                    }
+                }
                 let mut used = 256;
-                let found: Vec<_> = self.meaning_find(&path).iter().map(|f| self.agent_found(f)).take(MAX_LISTED).take_while(|f| (used + node_size(&f.node) + f.title.len() + 32 <= REPLY_BUDGET).then(|| used += node_size(&f.node) + f.title.len() + 32).is_some()).collect();
+                let found: Vec<_> = allowed.iter().map(|f| self.agent_found(f)).take(MAX_LISTED).take_while(|f| (used + node_size(&f.node) + f.title.len() + 32 <= REPLY_BUDGET).then(|| used += node_size(&f.node) + f.title.len() + 32).is_some()).collect();
                 reply(self, AgentEvent::Found { serial, found });
             }
             AgentRequest::Focused { serial } => {
@@ -374,6 +418,8 @@ impl Server {
                 if secret && matches!(action, vergence_protocol::window::Action::Set(_)) {
                     return reply(self, AgentEvent::Acted { serial, ok: false, why: "a secret field is not set by agents".into() });
                 }
+                let app = w.native().map(|n| n.app_id.clone()).unwrap_or_default();
+                self.agent_log(id, &app, &format!("{action:?} #{node}"));
                 if self.send_act(&w, node, action, Some((id, serial))).is_none() {
                     reply(self, AgentEvent::Acted { serial, ok: false, why: "not a native window".into() });
                 }

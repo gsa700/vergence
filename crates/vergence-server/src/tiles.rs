@@ -181,6 +181,8 @@ pub fn state_ink(state: TileState, light: bool, usual: vergence_look::Rgb) -> Co
 impl Server {
     /// Once a second (with the dock's tick): the clock, when its minute changes.
     pub fn tiles_tick(&mut self) {
+        // The agent tile goes when its agent rests (agents.rs).
+        self.agents_tick();
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
         if self.tiles.minute == Some(secs / 60) {
             return;

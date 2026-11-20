@@ -189,3 +189,31 @@ unnecessary for now); voice control.
   (not felt), so `focused` follows only the window the person uses.
   Not yet: a window's picture for windows without meaning (step 3, part
   2: a picture needs a descriptor beside the frame).
+- **Step 4, part 1** (2026-11-20 afternoon): permission, in the server's
+  agents.rs. An agent's first request about an app (a tree, an action,
+  the focused widget, a search in a named window) waits while the server
+  asks the person in its own dialog, drawn as the log out dialog is:
+  "Claude wants to use Calculator", one row of buttons (Dave: "one row of
+  buttons"), Don't allow on the left, Just now, Until I log out, Always
+  and For an hour (the default, Enter) on the right, Escape Don't allow,
+  every key and press its own while it shows, questions one at a time.
+  The answer runs the waiting requests or refuses them ("the person did
+  not allow Other to use Calculator"). Grants per agent name and app:
+  Just now ends with the agent's connection, Until I log out with the
+  session, For an hour (60 minutes for now) is checked at each request
+  and asks again once past; Always, Never and timed ones kept in
+  ~/.local/state/vergence/agents.tsv (0600; tests never write it). A
+  search across every window shows only the apps already allowed and
+  never asks. The tile "Claude, using Calculator" (group System, the time
+  a timed grant has left on its card) while an agent has worked in the
+  last two minutes. agents.log (0600): every question and answer, every
+  action, every refusal, with the time in UTC. `vctl agents`, `vctl
+  agent-answer deny|now|session|always|hour` (headless tests). Tests:
+  the file's lines (a tab in a name cannot split one), what each grant
+  says (per agent, per app, per connection, an hour past), the log's
+  times. Seen headless on Hubble: the dialog (picture checked), a press
+  waiting and then done, the next asked for nothing, another agent
+  refused, its search across windows empty and unasked, the tile, the
+  log. Still on only where the control socket is: part 2 brings Privacy
+  > Agents (every grant, taken back, all at once; the timed length) and
+  the bus messages it needs, then agents can be on everywhere.

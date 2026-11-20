@@ -51,6 +51,13 @@ impl Server {
             }
             return self.elevate_key(key.sym, key.typed, pressed);
         }
+        // An agent's question takes every key while it shows (agents.rs).
+        if self.agents_asking() && !self.lock.on {
+            if let Some(k) = self.seat.get_keyboard() {
+                k.input::<(), _>(self, code, state, SERIAL_COUNTER.next_serial(), time, |_, _, _| FilterResult::Intercept(()));
+            }
+            return self.agent_dialog_key(key.sym, pressed);
+        }
         // The log out dialog takes every key while it is open (session_dialog.rs).
         if self.session_dialog.open && !self.lock.on {
             if let Some(k) = self.seat.get_keyboard() {
