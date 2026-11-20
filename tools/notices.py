@@ -37,6 +37,8 @@ VENDORED = [
      "data/fonts/InterVariable.ttf and InterVariable-Italic.ttf, Inter 4.1 from rsms/inter's release, unchanged; installed in share/vergence/fonts."),
     ("JetBrains Mono, the monospace font (SIL Open Font License 1.1)", "data/fonts/JetBrainsMono-OFL.txt",
      "data/fonts/JetBrainsMono-Variable.ttf and JetBrainsMono-Variable-Italic.ttf, JetBrains Mono 2.304's variable fonts from JetBrains/JetBrainsMono's release, unchanged but for the file names; installed in share/vergence/fonts."),
+    ("Liberation Sans, Serif and Mono, the PDF reader's stand-ins for Helvetica, Times and Courier (SIL Open Font License 1.1)", "data/fonts/Liberation-OFL.txt",
+     "data/fonts/Liberation{Sans,Serif,Mono}-{Regular,Bold,Italic,BoldItalic}.ttf, Liberation 2.1.5 from liberationfonts/liberation-fonts's release (liberation-fonts-ttf-2.1.5.tar.gz), unchanged; installed in share/vergence/fonts."),
 ]
 
 

@@ -21,7 +21,7 @@
 #   share/icons/hicolor/scalable/apps/       their icons (data/icons, drawn by the project)
 #   share/doc/vergence/                      LICENSE-APACHE, LICENSE-GPL, THIRD-PARTY-NOTICES.md
 #   share/vergence/words/                    the spelling list (data/words/en_US.txt, from SCOWL) and its terms
-#   share/vergence/fonts/                    Inter and JetBrains Mono (data/fonts), with their licenses
+#   share/vergence/fonts/                    Inter, JetBrains Mono and Liberation (data/fonts), with their licenses
 #   share/vergence/icons/{places,kinds}/     Vergence's own icons for places and files (data/icons)
 #   share/icons/Vergence/                    the Vergence icon theme: our apps, places, kinds of files, and the pointers (drawn at install)
 #   libexec/vergence/ups-tile, vtile-demo  lab tiles on the dock from scripts (tools/lab)
@@ -100,7 +100,7 @@ if [ -n "$uninstall" ]; then
     rm -f "$libexec/ups-tile" "$libexec/vtile-demo"
     rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
     [ -z "$destdir" ] && rm -f /etc/fonts/conf.d/90-vergence-fonts.conf /usr/local/etc/fonts/conf.d/90-vergence-fonts.conf
-    rm -f "$fonts"/InterVariable*.ttf "$fonts"/JetBrainsMono-Variable*.ttf "$fonts"/Inter-OFL.txt "$fonts"/JetBrainsMono-OFL.txt
+    rm -f "$fonts"/InterVariable*.ttf "$fonts"/JetBrainsMono-Variable*.ttf "$fonts"/Liberation*.ttf "$fonts"/Inter-OFL.txt "$fonts"/JetBrainsMono-OFL.txt "$fonts"/Liberation-OFL.txt
     rm -rf "$ownicons" "$cursortheme"
     rmdir "$words" "$fonts" "$destdir$prefix/share/vergence" 2>/dev/null || true
     rmdir "$libexec" 2>/dev/null || true
@@ -141,7 +141,9 @@ install -m 644 "$root/data/words/en_US.txt" "$words/en_US.txt"
 install -m 644 "$root/data/words/SCOWL-COPYRIGHT.txt" "$words/SCOWL-COPYRIGHT.txt"
 # Vergence's own fonts (Dave, 2026-11-16: a uniform look): Inter and JetBrains
 # Mono with their licenses (SIL OFL 1.1); a family the system has itself is
-# the system's copy, these the fallback (vergence-text db.rs).
+# the system's copy, these the fallback (vergence-text db.rs). Liberation
+# Sans, Serif and Mono (Dave, 2026-11-19): the PDF reader's metric-compatible
+# stand-ins for Helvetica, Times and Courier when a PDF does not embed them.
 install -d -m 755 "$fonts"
 # The pointers: drawn by vergence-harness from their own SVG (the theme the
 # server picks when none is chosen; it inherits Adwaita for rare shapes).
@@ -173,11 +175,11 @@ if [ -z "$destdir" ]; then
     for conf in /etc/fonts/conf.d /usr/local/etc/fonts/conf.d; do
         [ -d "$conf" ] || continue
         printf '%s\n' '<?xml version="1.0"?>' '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">' \
-            "<!-- Vergence's own fonts, Inter and JetBrains Mono (tools/install.sh writes it) -->" \
+            "<!-- Vergence's own fonts, Inter, JetBrains Mono and Liberation (tools/install.sh writes it) -->" \
             "<fontconfig><dir>$prefix/share/vergence/fonts</dir></fontconfig>" > "$conf/90-vergence-fonts.conf"
         chmod 644 "$conf/90-vergence-fonts.conf"
         command -v fc-cache >/dev/null 2>&1 && fc-cache -f "$prefix/share/vergence/fonts" >/dev/null 2>&1
-        echo "fonts: Inter and JetBrains Mono registered with fontconfig ($conf/90-vergence-fonts.conf)"
+        echo "fonts: Inter, JetBrains Mono and Liberation registered with fontconfig ($conf/90-vergence-fonts.conf)"
     done
 fi
 install -m 755 "$here/vctl" "$bin/vctl"

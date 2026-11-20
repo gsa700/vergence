@@ -63,6 +63,17 @@ f115aaa1…1063f2. Dave, 2026-11-16: a uniform look on every system is
 code that reads and draws them is ours (crates/vergence-text); a family
 the system has itself is used from the system, ours the fallback.
 
+**Liberation 2.1.5** (SIL OFL 1.1, with the Reserved Font Name
+"Liberation"; added 2026-11-19, Dave: "ship Liberation"): Liberation Sans,
+Serif and Mono, regular, bold, italic and bold italic (twelve TTFs, about
+4.2 MB) with Liberation-OFL.txt, from liberationfonts/liberation-fonts's
+release asset liberation-fonts-ttf-2.1.5.tar.gz (SHA-256 7191c669…8f25d0),
+unchanged. Why: the PDF reader draws a font a PDF does not embed with a
+stand-in, and these are metric-compatible with Helvetica, Times and
+Courier, so lines keep their length and shape on every machine (only
+Hubble had them installed). Read and drawn by our own code
+(crates/vergence-pdf font/truetype.rs).
+
 Review: the roadmap's "fonts of our own: not every font, just a few"
 (Dave, 2026-11-14) would replace these; until then they are the default.
 The OFL lets them be shipped with the software and modified under another
