@@ -45,7 +45,11 @@ const TIME_LIMIT: c_uint = 120;
 /// How long the client has for each message.
 const IO_LIMIT: Duration = Duration::from_secs(90);
 /// The longest pause after failures, in seconds.
-const MAX_PAUSE: u64 = 300;
+const MAX_PAUSE: u64 = 60;
+/// Wrong answers in a row that cost nothing beyond PAM's own delay (typos).
+const FREE_TRIES: u32 = 3;
+/// Failures are forgotten after this long without another, in seconds.
+const FORGET_AFTER: u64 = 15 * 60;
 
 unsafe extern "C" {
     fn fork() -> c_int;
@@ -230,9 +234,19 @@ fn allowed_cached(cache: &mut Option<(std::time::Instant, Result<String, String>
     r
 }
 
-/// The pause after `failures` wrong answers in a row: 1, 2, 4 ... seconds, at most MAX_PAUSE.
+/// The pause after `failures` wrong answers in a row: none for the first
+/// FREE_TRIES (a typo, a lock key left on), then 5, 15, 30 seconds, then
+/// MAX_PAUSE. Gentler than it was (1, 2, 4 ... 300 s from the first): on
+/// apollo, 2026-11-20, a keyboard light gone wrong cost Dave six tries and
+/// a 256 s wait. A guesser at the console still gets about one try a minute.
 fn pause_after(failures: u32) -> u64 {
-    if failures == 0 { 0 } else { (1u64 << (failures - 1).min(16)).min(MAX_PAUSE) }
+    match failures.saturating_sub(FREE_TRIES) {
+        0 => 0,
+        1 => 5,
+        2 => 15,
+        3 => 30,
+        _ => MAX_PAUSE,
+    }
 }
 
 /// Failures in a row per uid and until when it must wait (unix seconds),
@@ -281,10 +295,19 @@ impl Pauses {
 
     fn failed(&mut self, uid: u32) {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        self.failed_at(uid, now);
+        self.save();
+    }
+
+    /// A failure at `now`: counted on from the last one, unless that was
+    /// FORGET_AFTER ago or more (then it is the first again).
+    fn failed_at(&mut self, uid: u32, now: u64) {
         let e = self.by_uid.entry(uid).or_insert((0, 0));
+        if e.0 > 0 && now >= e.1.saturating_add(FORGET_AFTER) {
+            e.0 = 0;
+        }
         e.0 = e.0.saturating_add(1);
         e.1 = now + pause_after(e.0);
-        self.save();
     }
 
     fn succeeded(&mut self, uid: u32) {
@@ -2066,6 +2089,20 @@ mod tests {
     /// left a zombie until the session ends (Hubble, 2026-11-17: two of
     /// Firefox's sat below a session's worker). This binary has no other
     /// tests, so the test process may become a reaper itself.
+    #[test]
+    fn pauses_are_gentle_then_firm_and_forgotten() {
+        assert_eq!((1..=8).map(pause_after).collect::<Vec<_>>(), vec![0, 0, 0, 5, 15, 30, 60, 60]);
+        let mut p = Pauses { by_uid: HashMap::new() };
+        for _ in 0..4 {
+            p.failed_at(1000, 10_000);
+        }
+        assert_eq!(p.by_uid[&1000], (4, 10_005));
+        // A quarter of an hour after the last pause ended: the count starts again.
+        p.failed_at(1000, 10_005 + FORGET_AFTER);
+        assert_eq!(p.by_uid[&1000].0, 1);
+        assert_eq!(p.by_uid[&1000].1, 10_005 + FORGET_AFTER);
+    }
+
     #[test]
     // Both children are reaped by waitpid, not by Child::wait.
     #[allow(clippy::zombie_processes)]

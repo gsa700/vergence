@@ -817,3 +817,14 @@ changes. These stay open as checks by hand.
    and X11 sessions. *Suggested: (b).*
 6. **Order:** (a) the lock screen first (step 1, used every day), then the
    login screen; (b) the login screen first. *Suggested: (a).*
+
+- **A gentler pause** (Dave, 2026-11-20: "fix the lockout pause first"):
+  on apollo, a keyboard light gone wrong (Num Lock lit before the server,
+  never set by it; fixed in 27c205f) cost Dave six refused tries and a
+  wait of 256 s, still there after a restart. Now: the first three wrong
+  answers in a row cost nothing beyond PAM's own delay (typos, a lock key
+  left on), then 5, 15 and 30 s, then 60 s at most (was 1, 2, 4 ... 300 s
+  from the first); the count is forgotten after a quarter of an hour
+  without a failure. It is still kept in STATE_DIR/pause across restarts,
+  so restarting vdm does not buy more fast tries. Test
+  pauses_are_gentle_then_firm_and_forgotten.
