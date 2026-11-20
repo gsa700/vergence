@@ -275,6 +275,15 @@ impl Server {
                     self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message: format!("no tile {tile:?} of yours") });
                 }
             }
+            // Privacy > Agents (agents.rs; bus v27).
+            ClientMsg::ListGrants { serial } => {
+                let grants = self.agents_grants();
+                self.bus_send(id, ServerMsg::Grants { serial, grants });
+            }
+            ClientMsg::RevokeGrants { serial, agent, app } => {
+                self.agents_revoke(&agent, &app);
+                self.bus_send(id, ServerMsg::Done { serial });
+            }
             ClientMsg::ListPlaces { serial } => {
                 let apps = self.places_apps();
                 self.bus_send(id, ServerMsg::Places { serial, apps });
@@ -337,7 +346,7 @@ impl Server {
             ClientMsg::Agent(vergence_protocol::agent::AgentRequest::Hello { serial, name }) => {
                 let name: String = name.trim().chars().filter(|c| !c.is_control()).collect();
                 if !crate::meaning::agents_allowed() {
-                    return self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message: "agents are off: the person allows them (until then, only in a development session)".into() });
+                    return self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message: "agents are turned off (Settings > Privacy > Agents)".into() });
                 }
                 if name.is_empty() {
                     return self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::BadMessage, message: "an agent needs a name".into() });
@@ -349,6 +358,9 @@ impl Server {
                 self.bus_send(id, ServerMsg::Done { serial });
             }
             ClientMsg::Agent(r) => {
+                if !crate::meaning::agents_allowed() {
+                    return self.bus_send(id, ServerMsg::Error { serial: r.serial(), code: ErrorCode::Denied, message: "agents are turned off (Settings > Privacy > Agents)".into() });
+                }
                 if self.bus.clients.get(&id).is_none_or(|c| c.agent.is_none()) {
                     return self.bus_send(id, ServerMsg::Error { serial: r.serial(), code: ErrorCode::Denied, message: "say who the agent is first (the agent interface's Hello)".into() });
                 }

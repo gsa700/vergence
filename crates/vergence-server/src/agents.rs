@@ -40,8 +40,20 @@ use vergence_scene::{Color, Point as ScenePoint, Rect as SceneRect, Scene};
 
 use crate::{Server, decor::SceneElement};
 
-/// How long "For an hour" lasts (Privacy > Agents will set it: step 4, part 2).
+/// How long a timed grant lasts unless Privacy > Agents says otherwise.
 pub const TIMED_MINUTES: u64 = 60;
+
+/// desktop.toml's [agents]: whether agents may ask at all (Privacy > Agents'
+/// switch, on by default) and how long a timed grant lasts (15 minutes to
+/// a day).
+pub fn agents_settings() -> (bool, u64) {
+    let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let table = text.parse::<toml::Table>().ok();
+    let t = table.as_ref().and_then(|t| t.get("agents")).and_then(|a| a.as_table());
+    let enabled = t.and_then(|t| t.get("enabled")).and_then(|v| v.as_bool()).unwrap_or(true);
+    let minutes = t.and_then(|t| t.get("timed-minutes")).and_then(|v| v.as_integer()).map_or(TIMED_MINUTES, |m| m.clamp(15, 24 * 60) as u64);
+    (enabled, minutes)
+}
 /// An agent counts as working this long after its last request (the tile).
 const WORKING_SECS: u64 = 120;
 /// The most requests waiting for the person's answer.
@@ -79,6 +91,17 @@ enum Button {
 }
 
 const BUTTONS: [(Button, &str); 5] = [(Button::DontAllow, "Don't allow"), (Button::JustNow, "Just now"), (Button::Session, "Until I log out"), (Button::Always, "Always"), (Button::Hour, "For an hour")];
+
+/// The timed button's words for a length: "For an hour", "For 30 minutes",
+/// "For 4 hours", "For a day".
+fn timed_label(minutes: u64) -> String {
+    match minutes {
+        60 => "For an hour".into(),
+        1440 => "For a day".into(),
+        m if m % 60 == 0 => format!("For {} hours", m / 60),
+        m => format!("For {m} minutes"),
+    }
+}
 /// The default: For an hour.
 const DEFAULT: usize = 4;
 const W: i32 = 640;
@@ -330,7 +353,7 @@ impl Server {
             Button::JustNow => Some(Span::Connection(q.client)),
             Button::Session => Some(Span::Session),
             Button::Always => Some(Span::Always),
-            Button::Hour => Some(Span::Until(now_secs() + TIMED_MINUTES * 60)),
+            Button::Hour => Some(Span::Until(now_secs() + agents_settings().1 * 60)),
         };
         tracing::info!("agents: {:?} and {:?}: {:?}", q.agent, q.app, span);
         if let Some(s) = span {
@@ -430,8 +453,8 @@ impl Server {
             label: format!("using {shown}"),
             state: vergence_protocol::tile::TileState::Warning,
             group: "System".into(),
-            card: vergence_protocol::tile::Card { title: format!("{agent} is using {shown}"), big: String::new(), rows: vec![("Allowed".into(), format!("{}{left}", self.agent_span_word(&agent, &app)))], chart: Vec::new(), controls: Vec::new(), note: "Privacy > Agents takes it back (coming).".into() },
-            page: String::new(),
+            card: vergence_protocol::tile::Card { title: format!("{agent} is using {shown}"), big: String::new(), rows: vec![("Allowed".into(), format!("{}{left}", self.agent_span_word(&agent, &app)))], chart: Vec::new(), controls: Vec::new(), note: "Settings > Privacy > Agents takes it back.".into() },
+            page: "agents".into(),
         };
         self.agents.tile_up = true;
         self.tile_set(crate::tiles::Owner::Desktop, tile);
@@ -478,11 +501,13 @@ impl Server {
         let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
         let face = fonts.face("sans-serif", 400, false)?;
         let bold = fonts.face("sans-serif", 600, false).unwrap_or(face);
+        let timed = timed_label(agents_settings().1);
+        let label_of = |b: Button, l: &'static str| -> String { if b == Button::Hour { timed.clone() } else { l.to_string() } };
         let widths: Vec<i32> = BUTTONS
             .iter()
             .map(|(b, label)| {
                 let (f, side) = if *b == Button::Hour { (bold, DEFAULT_SIDE) } else { (face, BUTTON_SIDE) };
-                (fonts.layout(f, TEXT, label).1 + 2.0 * side).ceil() as i32
+                (fonts.layout(f, TEXT, &label_of(*b, label)).1 + 2.0 * side).ceil() as i32
             })
             .collect();
         let row_y = H - PAD - BUTTON_H;
@@ -498,7 +523,7 @@ impl Server {
         self.agents.panel = panel;
         self.agents.buttons = local.iter().map(|(i, x, w)| (*i, Rectangle::new((at.0 + x, at.1 + row_y).into(), (*w, BUTTON_H).into()))).collect();
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (focus, light, scale.to_bits(), accent.r, accent.g, accent.b, &q.agent, &q.shown).hash(&mut h);
+        (focus, light, scale.to_bits(), accent.r, accent.g, accent.b, &q.agent, &q.shown, &timed).hash(&mut h);
         let key = h.finish();
         if self.agents.picture.as_ref().map(|(k, _)| *k) != Some(key) {
             let s = vergence_look::shelf_look(light);
@@ -528,10 +553,10 @@ impl Server {
                 if *i == focus {
                     scene.stroke(SceneRect::new(r.x - 2.0, r.y - 2.0, r.w + 4.0, r.h + 4.0), 10.0, 2.0, ink(s.menu_ink));
                 }
-                let label = BUTTONS[*i].1;
-                let lw = fonts.layout(f, TEXT, label).1;
+                let label = label_of(BUTTONS[*i].0, BUTTONS[*i].1);
+                let lw = fonts.layout(f, TEXT, &label).1;
                 let lm = fonts.metrics(f, TEXT);
-                vergence_render::text(&mut scene, fonts, f, TEXT, text, ScenePoint::new((r.x + (r.w - lw) / 2.0).round(), (r.y + (r.h - lm.ascent - lm.descent) / 2.0 + lm.ascent).round()), label);
+                vergence_render::text(&mut scene, fonts, f, TEXT, text, ScenePoint::new((r.x + (r.w - lw) / 2.0).round(), (r.y + (r.h - lm.ascent - lm.descent) / 2.0 + lm.ascent).round()), &label);
             }
             let p = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, Color::rgba(0, 0, 0, 0)).ok()?;
             let buffer = MemoryRenderBuffer::from_slice(&p.data, Fourcc::Abgr8888, (p.width as i32, p.height as i32), 1, Transform::Normal, None);
@@ -542,6 +567,52 @@ impl Server {
         let b = (panel.loc + panel.size.to_point() - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         let src = Rectangle::<f64, Logical>::from_size(((b.x - a.x) as f64, (b.y - a.y) as f64).into());
         MemoryRenderBufferRenderElement::from_buffer(renderer, a.to_f64(), buffer, None, Some(src), Some(panel.size), Kind::Unspecified).ok().map(SceneElement::Memory)
+    }
+
+    /// Every grant, for Privacy > Agents (bus v27).
+    pub fn agents_grants(&mut self) -> Vec<vergence_protocol::bus::Grant> {
+        self.agents.load();
+        let now = now_secs();
+        let working = self.agents.last.as_ref().filter(|(_, _, t)| t.elapsed().as_secs() < WORKING_SECS).map(|(a, p, _)| (a.clone(), p.clone()));
+        let mut out: Vec<vergence_protocol::bus::Grant> = self
+            .agents
+            .grants
+            .iter()
+            .filter(|(_, s)| !matches!(s, Span::Until(t) if *t <= now))
+            .map(|((a, p), s)| {
+                let (span, left) = match s {
+                    Span::Connection(_) => ("just now", 0),
+                    Span::Until(t) => ("timed", t.saturating_sub(now).div_ceil(60) as u32),
+                    Span::Session => ("session", 0),
+                    Span::Always => ("always", 0),
+                    Span::Never => ("never", 0),
+                };
+                vergence_protocol::bus::Grant { agent: a.clone(), app: p.clone(), shown: self.app_shown_name(p), span: span.into(), minutes_left: left, working: working.as_ref() == Some(&(a.clone(), p.clone())) }
+            })
+            .collect();
+        out.sort_by_key(|g| (g.agent.to_lowercase(), g.shown.to_lowercase()));
+        out
+    }
+
+    /// Takes grants back (Privacy > Agents): one, an agent's (`app` empty)
+    /// or all (both empty). The agent tile goes if its agent lost its grant.
+    pub fn agents_revoke(&mut self, agent: &str, app: &str) {
+        self.agents.load();
+        let before = self.agents.grants.len();
+        self.agents.grants.retain(|(a, p), _| !((agent.is_empty() || a == agent) && (app.is_empty() || p == app)));
+        if self.agents.grants.len() != before {
+            tracing::info!("agents: grants taken back ({agent:?}, {app:?})");
+            self.agents.save();
+            if let Some((a, p, _)) = &self.agents.last
+                && !self.agents.grants.contains_key(&(a.clone(), p.clone()))
+            {
+                self.agents.last = None;
+                if self.agents.tile_up {
+                    self.agents.tile_up = false;
+                    self.tile_remove(crate::tiles::Owner::Desktop, "agent");
+                }
+            }
+        }
     }
 
     /// For `vctl agents`: the grants, the questions, the waiting requests.

@@ -258,12 +258,10 @@ impl Server {
     }
 }
 
-/// Whether agents may use the interface: until the person can allow them
-/// (step 4, the permission dialog), only in a development session, where
-/// the control socket is on too and the security model is already set
-/// aside for testing (control.rs).
+/// Whether agents may use the interface: Privacy > Agents' switch (on by
+/// default; every app is still asked about first, agents.rs).
 pub fn agents_allowed() -> bool {
-    crate::control::enabled()
+    crate::agents::agents_settings().0
 }
 
 /// How much of a reply's frame its list may fill (frames are at most 64 KB).

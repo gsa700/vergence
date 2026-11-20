@@ -41,6 +41,8 @@ mod single;
 use notify::NotifyMsg;
 mod places;
 use places::PlacesMsg;
+mod privacy;
+use privacy::PrivacyMsg;
 mod apps;
 use apps::AppsMsg;
 mod defaults;
@@ -399,6 +401,8 @@ enum Page {
     DateTime,
     LockScreen,
     Login,
+    /// Privacy > Agents: what agents may use (privacy.rs; meaning milestone 1).
+    Agents,
     /// The battery and the GPUs (battery.rs); only where there is a battery.
     Battery,
     Sound,
@@ -431,6 +435,8 @@ enum Message {
     HandedOver(Vec<String>),
     /// Window places on the Windows page (places.rs).
     Places(PlacesMsg),
+    /// Privacy > Agents (privacy.rs).
+    Privacy(PrivacyMsg),
     /// The Apps page (apps.rs).
     Apps(AppsMsg),
     /// The Default apps page (defaults.rs).
@@ -632,6 +638,8 @@ struct App {
     mode_ask: bool,
     /// Window places from the server (places.rs); None until read.
     places: Option<Vec<(String, u32)>>,
+    /// The agents' grants (Privacy > Agents; privacy.rs), once read.
+    grants: Option<Vec<vergence_protocol::bus::Grant>>,
     /// Forget pressed: the dialog to open ("" for every app).
     places_ask: Option<String>,
     /// `--forget <app>` from the dock: asked once the list has come.
@@ -848,6 +856,7 @@ impl App {
             mode_pending: None,
             mode_ask: false,
             places: None,
+            grants: None,
             places_ask: None,
             places_from_dock: None,
             app_open: None,
@@ -1057,6 +1066,9 @@ impl App {
         if matches!(p, Page::Windows | Page::Apps | Page::AppPage) {
             places::fetch(self.mail.clone());
         }
+        if p == Page::Agents {
+            privacy::fetch(self.mail.clone());
+        }
         if p == Page::Notifications {
             self.notify_apps = notify::read_apps();
         }
@@ -1091,6 +1103,7 @@ impl App {
             Message::Lock(m) => self.lock_message(m),
             Message::HandedOver(args) => self.apply_args(&args),
             Message::Places(m) => self.places_message(m),
+            Message::Privacy(m) => self.privacy_message(m),
             Message::Apps(m) => self.apps_message(m),
             Message::Defaults(m) => self.defaults_message(m),
             Message::Reread => self.reread(),
@@ -1742,6 +1755,7 @@ impl App {
             .collect()),
             ("Sound", vec![("Sound".into(), Page::Sound, Icon::Sound, "sound volume output speaker headphones mute audio")]),
             ("Accessibility", vec![("Accessibility".into(), Page::Accessibility, Icon::Accessibility, "accessibility contrast motion transparency size")]),
+            ("Privacy", vec![("Agents".into(), Page::Agents, Icon::Lock, "agents agent assistant ai claude automation permission allow take back grants privacy mcp")]),
             ("System", vec![
                 ("Energy".into(), Page::Energy, Icon::Energy, "energy power sleep screens off idle"),
                 ("Date & Time".into(), Page::DateTime, Icon::Clock, "date time clock zone timezone 24 hour am pm calendar"),
@@ -3104,6 +3118,7 @@ impl Program for App {
             Page::Notifications => "Notifications".into(),
             Page::DateTime => "Date & Time".into(),
             Page::LockScreen => "Lock Screen".into(),
+            Page::Agents => "Agents".into(),
             Page::Login => "Login".into(),
             Page::Apps => "Apps".into(),
             Page::DefaultApps => "Default apps".into(),
@@ -3169,6 +3184,7 @@ impl Program for App {
             Page::Notifications => self.notifications_page(),
             Page::DateTime => self.datetime_page(),
             Page::LockScreen => self.lock_page(),
+            Page::Agents => self.agents_page(),
             Page::Login => self.login_page(),
             Page::Apps => self.apps_page(),
             Page::DefaultApps => self.defaults_page(),

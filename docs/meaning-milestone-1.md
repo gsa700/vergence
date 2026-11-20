@@ -217,3 +217,20 @@ unnecessary for now); voice control.
   log. Still on only where the control socket is: part 2 brings Privacy
   > Agents (every grant, taken back, all at once; the timed length) and
   the bus messages it needs, then agents can be on everywhere.
+- **Step 4, part 2** (2026-11-20 afternoon): Privacy > Agents. Bus v27:
+  `ClientMsg::ListGrants` and `ServerMsg::Grants` (each agent and app,
+  its name for people, just now / timed / session / always / never, the
+  minutes a timed one has left, whether it is working now),
+  `ClientMsg::RevokeGrants` (one, an agent's, or all). The settings
+  app's privacy.rs, a new Privacy group: "Agents may ask" (desktop.toml
+  [agents] enabled, on by default; off refuses every agent, even one at
+  work), "A timed answer lasts" (15 minutes to a day, [agents]
+  timed-minutes; the question's button says it: "For 30 minutes"), and
+  what agents may use, each with Take back and Take back all, nothing
+  asked first. The agent tile's card opens the page. **The development
+  gate is gone**: agents may ask in every session, each app asked about
+  first. Seen headless on Hubble: the page with a grant ("For 60 more
+  minutes. Working now."), the timed length set to 30 minutes, the grant
+  (kept across the session's restart) taken back from the page, the
+  agent asked again with "For 30 minutes" on the button, the switch off
+  refusing it.
