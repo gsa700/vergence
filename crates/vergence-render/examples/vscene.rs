@@ -4,6 +4,8 @@
 //!     cargo run --release -p vergence-render --example vscene -- term out.png --scale 3
 //!     cargo run --release -p vergence-render --example vscene -- shapes out.png --scale 2 --threads 1
 //!
+//! `type` is text milestone 1's type sample (960 x 600; light and dark
+//! halves) for before-and-after shots of text changes.
 //! `term` is the stress test's window (toolkit milestone 1): 1264 x 706
 //! reference units of terminal, every cell its own colors and its own
 //! character. `shapes` is one of everything. `--size WxH` changes the
@@ -15,6 +17,9 @@ use std::time::Instant;
 use vergence_render::{Cpu, Gpu, text};
 use vergence_scene::{Color, Image, Point, Rect, Scene};
 use vergence_text::Fonts;
+
+#[path = "shared/typesample.rs"]
+mod typesample;
 
 struct Rng(u64);
 
@@ -145,7 +150,11 @@ fn main() {
     let out = args.get(1).filter(|a| !a.starts_with("--")).cloned();
     let scale: f32 = option("--scale").and_then(|v| v.parse().ok()).unwrap_or(1.0);
     let cpu = option("--threads").and_then(|v| v.parse().ok()).map(Cpu::with_threads).unwrap_or_default();
-    let (w, h) = option("--size").and_then(|v| v.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))).unwrap_or(if which == "term" { (1264.0, 706.0) } else { (660.0, 440.0) });
+    let (w, h) = option("--size").and_then(|v| v.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))).unwrap_or(match which {
+        "term" => (1264.0, 706.0),
+        "type" => (960.0, 600.0),
+        _ => (660.0, 440.0),
+    });
 
     let t = Instant::now();
     let mut fonts = Fonts::system();
@@ -153,6 +162,11 @@ fn main() {
     let t = Instant::now();
     let (scene, cells, cell_h) = match which {
         "term" => term(&mut fonts, w, h),
+        "type" => {
+            let mut s = Scene::new(w, h);
+            typesample::draw(&mut s, &mut fonts, w, h);
+            (s, 0, 20.0)
+        }
         _ => (shapes(&mut fonts, w, h), 0, 20.0),
     };
     let built = t.elapsed();

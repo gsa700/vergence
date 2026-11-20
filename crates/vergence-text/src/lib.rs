@@ -9,7 +9,8 @@
 //! - [`Fonts::glyph`] turns a character into a glyph of that face, or of the
 //!   nearest face that has the character (fallback), remembered per character.
 //! - [`Fonts::layout`] places a line of text: runs of glyphs, one run per
-//!   face, with kerning. Sizes and positions are in whatever unit the size
+//!   face, with kerning (the font's `GPOS` kerning, read by kern.rs, else
+//!   its legacy `kern` table). Sizes and positions are in whatever unit the size
 //!   was given in (reference units for a scene).
 //! - [`Fonts::raster`] is the glyph cache: a glyph's coverage as a bitmap for
 //!   one size in pixels and one of four sub-pixel positions. **Color is not
@@ -27,6 +28,7 @@
 //! and treats every file as untrusted.
 
 pub mod db;
+pub mod kern;
 pub mod sfnt;
 
 #[cfg(test)]
@@ -101,6 +103,18 @@ struct Loaded {
     weight: u16,
     font: FontVec,
     units: f32,
+    /// Its `GPOS` kerning at its own weight (None: the legacy `kern` table, if any).
+    kerning: Option<kern::Kerning>,
+}
+
+impl Loaded {
+    /// The kerning between two glyphs, in font units.
+    fn kern(&self, a: u32, b: u32) -> f32 {
+        match &self.kerning {
+            Some(k) => k.pair(glyph_id(a).0, glyph_id(b).0),
+            None => self.font.kern_unscaled(glyph_id(a), glyph_id(b)),
+        }
+    }
 }
 
 /// How many glyphs the cache's quick front holds (a power of two).
@@ -177,12 +191,15 @@ impl Fonts {
         if std::fs::metadata(&e.path).ok()?.len() > MAX_FONT_FILE {
             return None;
         }
-        let mut font = FontVec::try_from_vec_and_index(std::fs::read(&e.path).ok()?, e.info.index).ok()?;
+        let bytes = std::fs::read(&e.path).ok()?;
+        let settings: &[([u8; 4], f32)] = if e.info.weight_axis.is_some() { &[(*b"wght", weight as f32)] } else { &[] };
+        let kerning = kern::Kerning::read(&bytes, e.info.index, &kern::coordinates(&bytes, e.info.index, settings));
+        let mut font = FontVec::try_from_vec_and_index(bytes, e.info.index).ok()?;
         if e.info.weight_axis.is_some() {
             font.set_variation(b"wght", weight as f32);
         }
         let units = font.units_per_em().filter(|u| *u > 0.0)?;
-        Some(Loaded { entry, weight, font, units })
+        Some(Loaded { entry, weight, font, units, kerning })
     }
 
     /// The face's name, for a scene's font table.
@@ -243,7 +260,7 @@ impl Fonts {
             if let Some((pf, pg)) = prev
                 && pf == f
             {
-                pen += l.font.kern_unscaled(glyph_id(pg), glyph_id(g)) * size / l.units;
+                pen += l.kern(pg, g) * size / l.units;
             }
             match runs.last_mut() {
                 Some(run) if run.face == f => run.glyphs.push(Placed { glyph: g, x: pen, y: 0.0 }),
