@@ -59,11 +59,12 @@
 //! the agents' grants for the settings app's Privacy > Agents page.
 //! Version 28 (step 6): an agent hears what it may do with each window's
 //! app and the minutes left (`agent::AgentWindow::allowed`, `AgentChange::Time`).
+//! Version 29 (the security review): `Grant::program`, `RevokeGrants::program`.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 28;
+pub const VERSION: u32 = 29;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -345,7 +346,7 @@ pub enum ClientMsg {
     /// Take grants back: one agent's for one app, every one of an agent's
     /// (`app` empty), or every grant (both empty). They ask again next
     /// time. Reply: Done.
-    RevokeGrants { serial: u32, agent: String, app: String },
+    RevokeGrants { serial: u32, agent: String, program: String, app: String },
     /// Windows (window.rs).
     Window(crate::window::WinRequest),
     /// An agent's request (agent.rs; meaning milestone 1, step 3).
@@ -356,6 +357,8 @@ pub enum ClientMsg {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Grant {
     pub agent: String,
+    /// The program the server saw run it (bus v29).
+    pub program: String,
     /// The app's id, and its name for people (a window title of it, else the id).
     pub app: String,
     pub shown: String,
@@ -570,9 +573,9 @@ impl ClientMsg {
                 e.u32(*serial);
                 e
             }
-            ClientMsg::RevokeGrants { serial, agent, app } => {
+            ClientMsg::RevokeGrants { serial, agent, program, app } => {
                 let mut e = Encoder::frame(op::REVOKE_GRANTS);
-                e.u32(*serial).str(agent).str(app);
+                e.u32(*serial).str(agent).str(program).str(app);
                 e
             }
             ClientMsg::ForgetPlaces { serial, app } => {
@@ -697,8 +700,8 @@ impl ClientMsg {
             op::LIST_GRANTS => Ok(ClientMsg::ListGrants { serial: d.u32().map_err(|e| bad(0, e))? }),
             op::REVOKE_GRANTS => {
                 let serial = d.u32().map_err(|e| bad(0, e))?;
-                let (agent, app) = (d.str().map_err(|e| bad(serial, e))?, d.str().map_err(|e| bad(serial, e))?);
-                Ok(ClientMsg::RevokeGrants { serial, agent, app })
+                let (agent, program, app) = (d.str().map_err(|e| bad(serial, e))?, d.str().map_err(|e| bad(serial, e))?, d.str().map_err(|e| bad(serial, e))?);
+                Ok(ClientMsg::RevokeGrants { serial, agent, program, app })
             }
             op::FORGET_PLACES => {
                 let serial = d.u32().map_err(|e| bad(0, e))?;
@@ -844,7 +847,7 @@ impl ServerMsg {
                 let mut e = Encoder::frame(op::GRANTS);
                 e.u32(*serial).count(grants.len());
                 for g in grants {
-                    e.str(&g.agent).str(&g.app).str(&g.shown).str(&g.span).u32(g.minutes_left).bool(g.working);
+                    e.str(&g.agent).str(&g.program).str(&g.app).str(&g.shown).str(&g.span).u32(g.minutes_left).bool(g.working);
                 }
                 e
             }
@@ -979,7 +982,7 @@ impl ServerMsg {
                 let n = d.count(16 + 5)?;
                 let mut grants = Vec::with_capacity(n);
                 for _ in 0..n {
-                    grants.push(Grant { agent: d.str()?, app: d.str()?, shown: d.str()?, span: d.str()?, minutes_left: d.u32()?, working: d.bool()? });
+                    grants.push(Grant { agent: d.str()?, program: d.str()?, app: d.str()?, shown: d.str()?, span: d.str()?, minutes_left: d.u32()?, working: d.bool()? });
                 }
                 ServerMsg::Grants { serial, grants }
             }
@@ -1086,7 +1089,7 @@ mod tests {
             ClientMsg::CloseNotification { serial: 16, id: 3 },
             ClientMsg::ListPlaces { serial: 17 },
             ClientMsg::ListGrants { serial: 40 },
-            ClientMsg::RevokeGrants { serial: 41, agent: "Claude".into(), app: String::new() },
+            ClientMsg::RevokeGrants { serial: 41, agent: "Claude".into(), program: "/usr/local/bin/vergence-agent-mcp".into(), app: String::new() },
             ClientMsg::ForgetPlaces { serial: 18, app: "vergence-term".into() },
             ClientMsg::ForgetPlaces { serial: 19, app: String::new() },
             ClientMsg::ListApps { serial: 22 },
@@ -1127,7 +1130,7 @@ mod tests {
             ServerMsg::Inputs { serial: 0, devices: Vec::new(), seen: Vec::new() },
             ServerMsg::Places { serial: 20, apps: vec![("vergence-term".into(), 3), ("firefox".into(), 1)] },
             ServerMsg::Places { serial: 21, apps: Vec::new() },
-            ServerMsg::Grants { serial: 40, grants: vec![Grant { agent: "Claude".into(), app: "vergence-calc".into(), shown: "Calculator".into(), span: "timed".into(), minutes_left: 42, working: true }] },
+            ServerMsg::Grants { serial: 40, grants: vec![Grant { agent: "Claude".into(), program: "/usr/local/bin/vergence-agent-mcp".into(), app: "vergence-calc".into(), shown: "Calculator".into(), span: "timed".into(), minutes_left: 42, working: true }] },
             ServerMsg::Alive { serial: 26 },
             ServerMsg::CardOpened { id: "ups".into() },
             ServerMsg::CardClosed { id: "ups".into() },

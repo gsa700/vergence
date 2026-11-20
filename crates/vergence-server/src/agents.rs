@@ -2,8 +2,10 @@
 // an agent's first request about an app asks the person, in a dialog the
 // server draws (no app can draw it), how long it may use that app: Just now
 // (until it disconnects), For an hour, Until I log out (this session),
-// Always, or Don't allow (asked again next time). Grants are per agent name
-// and per app; Always and Never and the timed ones are kept (0600) in
+// Always, or Don't allow (asked again after a minute). Grants are per agent
+// (the name it gave and the program the server saw run it: Fable's review,
+// a name alone is any program's word) and per app; Always and Never and the
+// timed ones are kept (0600) in
 // ~/.local/state/vergence/agents.tsv, the others in memory. A timed grant is
 // checked at each request, not by a timer. While an agent works a tile says
 // so ("Claude is using Calculator", and the time a timed grant has left);
@@ -11,8 +13,12 @@
 //
 // The dialog looks as the log out dialog does (session_dialog.rs): every
 // screen dimmed, a panel on the pointer's screen, one row of buttons (Dave,
-// 2026-11-20: "one row of buttons"), For an hour the default (Enter),
-// Escape Don't allow. Requests wait while it asks, and run when it answers.
+// 2026-11-20: "one row of buttons"). Enter and Escape mean Don't allow
+// (Dave, after the review: no keystroke meant for something else may
+// grant); nothing counts for a moment after a question appears; Space
+// answers nothing. The question names the app by its entry's name and id
+// and the agent by its name (cleaned, quoted) and program, in rows its
+// words cannot push out. Requests wait while it asks, and run when it answers.
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -47,6 +53,21 @@ pub const TIMED_MINUTES: u64 = 60;
 /// switch, on by default) and how long a timed grant lasts (15 minutes to
 /// a day).
 pub fn agents_settings() -> (bool, u64) {
+    // Read at most once a second (Fable's review: not a file read per request).
+    static CACHE: std::sync::Mutex<Option<(Instant, (bool, u64))>> = std::sync::Mutex::new(None);
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((t, v)) = *cache
+        && t.elapsed() < std::time::Duration::from_secs(1)
+        && !cfg!(test)
+    {
+        return v;
+    }
+    let v = read_agents_settings();
+    *cache = Some((Instant::now(), v));
+    v
+}
+
+fn read_agents_settings() -> (bool, u64) {
     let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
     let table = text.parse::<toml::Table>().ok();
     let t = table.as_ref().and_then(|t| t.get("agents")).and_then(|a| a.as_table());
@@ -54,6 +75,51 @@ pub fn agents_settings() -> (bool, u64) {
     let minutes = t.and_then(|t| t.get("timed-minutes")).and_then(|v| v.as_integer()).map_or(TIMED_MINUTES, |m| m.clamp(15, 24 * 60) as u64);
     (enabled, minutes)
 }
+/// Who an agent is: the name it gave (cleaned) and the program the server
+/// saw run it (its executable, from the bus socket's peer). Under one user
+/// this is attribution, not proof (whitepaper §7.4): a program can run the
+/// same executable; but a name alone no longer carries anyone's grants.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct Who {
+    pub name: String,
+    pub program: String,
+}
+
+/// An agent's name as shown: printable, no format or direction marks, at
+/// most 24 characters.
+pub fn clean_agent_name(name: &str) -> String {
+    let format = |c: char| matches!(c as u32, 0x00AD | 0x061C | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x206F | 0xFEFF | 0xFFF9..=0xFFFB);
+    let out: String = name.chars().filter(|c| !c.is_control() && !format(*c)).take(24).collect();
+    out.trim().to_string()
+}
+
+/// A grant's app key is "<app id> @ <program>" (meaning.rs agent_app_key); its id.
+pub fn app_id_of(key: &str) -> &str {
+    key.split(" @ ").next().unwrap_or(key)
+}
+
+/// A grant's app key's program.
+pub fn app_program_of(key: &str) -> &str {
+    key.split_once(" @ ").map_or("", |(_, p)| p)
+}
+
+/// agents.log past 4 MB becomes agents.log.1 (one kept).
+fn rotate_log(dir: &std::path::Path) {
+    let log = dir.join("agents.log");
+    if std::fs::metadata(&log).is_ok_and(|m| m.len() > 4 << 20) {
+        let _ = std::fs::rename(&log, dir.join("agents.log.1"));
+    }
+}
+
+/// How long nothing counts after a question appears.
+const ARMING: std::time::Duration = std::time::Duration::from_millis(1000);
+/// After Don't allow, the same agent's asks about the same app are refused
+/// without a question this long.
+const COOL_DOWN_SECS: u64 = 60;
+/// The most questions one connection may have waiting, and requests.
+const ASKS_PER_CLIENT: usize = 2;
+const PENDING_PER_CLIENT: usize = 16;
+
 /// An agent counts as working this long after its last request (the tile).
 const WORKING_SECS: u64 = 120;
 /// A timed grant's last minutes: the tile warns, and offers more.
@@ -106,10 +172,11 @@ fn timed_label(minutes: u64) -> String {
         m => format!("For {m} minutes"),
     }
 }
-/// The default: For an hour.
-const DEFAULT: usize = 4;
-const W: i32 = 640;
-const H: i32 = 170;
+/// The keyboard's default: Don't allow (Dave, after the review). The look
+/// is as he chose it: the timed answer still drawn as the suggested one.
+const DEFAULT: usize = 0;
+const W: i32 = 660;
+const H: i32 = 214;
 const PAD: i32 = 24;
 const BUTTON_H: i32 = 34;
 const BUTTON_GAP: i32 = 8;
@@ -121,7 +188,7 @@ const TEXT: f32 = 13.5;
 /// shown), and the agent's bus connection (for "Just now").
 #[derive(Debug, Clone, PartialEq)]
 struct Question {
-    agent: String,
+    agent: Who,
     client: u32,
     app: String,
     shown: String,
@@ -131,15 +198,21 @@ struct Question {
 
 #[derive(Default)]
 pub struct Agents {
-    /// By (agent name, app id).
-    grants: HashMap<(String, String), Span>,
+    /// By (agent, app id).
+    grants: HashMap<(Who, String), Span>,
+    /// When the person last said Don't allow to an agent about an app.
+    refused: HashMap<(Who, String), Instant>,
+    /// When the question showing appeared (nothing counts for ARMING).
+    armed: Option<Instant>,
     loaded: bool,
     /// Requests waiting for an answer: the agent's bus client, the app, the request.
     pending: VecDeque<(u32, String, AgentRequest)>,
     /// The questions, the first one showing.
     asking: VecDeque<Question>,
     /// Who worked last, with what app, and when (the tile).
-    last: Option<(String, String, Instant)>,
+    last: Option<(Who, String, Instant)>,
+    /// The grant the tile shows now (its card's "Allow ... more").
+    tiled: Option<(Who, String)>,
     tile_up: bool,
     focus: usize,
     panel: Rectangle<i32, Logical>,
@@ -150,7 +223,7 @@ pub struct Agents {
     rings: Vec<Ring>,
     ring_timer: bool,
     /// The minutes left each running-out grant was last told at.
-    told: HashMap<(String, String), u64>,
+    told: HashMap<(Who, String), u64>,
 }
 
 /// A ring where an agent acted: on the screens, its color, when, its picture.
@@ -191,12 +264,14 @@ fn clean(s: &str) -> String {
     s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
 }
 
-/// The file's lines: agent, app, and always, never or until <seconds>.
-fn parse(text: &str) -> HashMap<(String, String), Span> {
+/// The file's lines: agent's name, its program, app, and always, never or
+/// until <seconds>. (Lines of three fields, from before programs were
+/// kept, are dropped: those agents are asked again.)
+fn parse(text: &str) -> HashMap<(Who, String), Span> {
     let mut out = HashMap::new();
     for line in text.lines().take(10_000) {
         let mut f = line.split('\t');
-        let (Some(agent), Some(app), Some(v)) = (f.next(), f.next(), f.next()) else { continue };
+        let (Some(agent), Some(program), Some(app), Some(v)) = (f.next(), f.next(), f.next(), f.next()) else { continue };
         let span = match v.split_once(' ') {
             None if v == "always" => Span::Always,
             None if v == "never" => Span::Never,
@@ -206,12 +281,12 @@ fn parse(text: &str) -> HashMap<(String, String), Span> {
             },
             _ => continue,
         };
-        out.insert((agent.to_string(), app.to_string()), span);
+        out.insert((Who { name: agent.to_string(), program: program.to_string() }, app.to_string()), span);
     }
     out
 }
 
-fn render(grants: &HashMap<(String, String), Span>) -> String {
+fn render(grants: &HashMap<(Who, String), Span>) -> String {
     let mut lines: Vec<String> = grants
         .iter()
         .filter_map(|((a, p), s)| {
@@ -221,7 +296,7 @@ fn render(grants: &HashMap<(String, String), Span>) -> String {
                 Span::Until(t) => format!("until {t}"),
                 _ => return None,
             };
-            Some(format!("{}\t{}\t{v}", clean(a), clean(p)))
+            Some(format!("{}\t{}\t{}\t{v}", clean(&a.name), clean(&a.program), clean(p)))
         })
         .collect();
     lines.sort();
@@ -263,16 +338,22 @@ impl Agents {
         let Some(dir) = state_dir() else { return };
         let _ = std::fs::create_dir_all(&dir);
         let tmp = dir.join("agents.tsv.new");
-        let ok = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp).and_then(|mut f| f.write_all(render(&self.grants).as_bytes()));
+        let _ = std::fs::remove_file(&tmp);
+        let ok = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp).and_then(|mut f| {
+            f.write_all(render(&self.grants).as_bytes())?;
+            f.sync_all()
+        });
         if ok.is_ok() {
             let _ = std::fs::rename(&tmp, dir.join("agents.tsv"));
         }
     }
 
     /// What agent `agent` (bus client `client`) may do with `app` now.
-    fn may(&mut self, agent: &str, client: u32, app: &str) -> May {
+    fn may(&mut self, agent: &Who, client: u32, app: &str) -> May {
         self.load();
-        match self.grants.get(&(agent.to_string(), app.to_string())).copied() {
+        let key = (agent.clone(), app.to_string());
+        match self.grants.get(&key).copied() {
+            None if self.refused.get(&key).is_some_and(|t| t.elapsed().as_secs() < COOL_DOWN_SECS) => May::No,
             None => May::Ask,
             Some(Span::Never) => May::No,
             Some(Span::Always | Span::Session) => May::Yes,
@@ -280,7 +361,7 @@ impl Agents {
             Some(Span::Connection(_)) => May::Ask,
             Some(Span::Until(t)) if now_secs() < t => May::Yes,
             Some(Span::Until(_)) => {
-                self.grants.remove(&(agent.to_string(), app.to_string()));
+                self.grants.remove(&key);
                 self.save();
                 May::Expired
             }
@@ -288,8 +369,8 @@ impl Agents {
     }
 
     /// The minutes a timed grant has left, if the agent has one for the app.
-    fn minutes_left(&self, agent: &str, app: &str) -> Option<u64> {
-        match self.grants.get(&(agent.to_string(), app.to_string())) {
+    fn minutes_left(&self, agent: &Who, app: &str) -> Option<u64> {
+        match self.grants.get(&(agent.clone(), app.to_string())) {
             Some(Span::Until(t)) => Some(t.saturating_sub(now_secs()).div_ceil(60)),
             _ => None,
         }
@@ -304,7 +385,7 @@ impl Server {
     /// May the agent on bus client `client` use `app`? Asks the person (and
     /// keeps `request` to run after) when nothing says yet; None then.
     pub fn agent_gate(&mut self, client: u32, app: &str, shown: &str, request: &AgentRequest) -> Option<bool> {
-        let agent = self.bus_agent_name(client)?;
+        let agent = self.bus_agent_who(client)?;
         match self.agents.may(&agent, client, app) {
             May::Yes => {
                 self.agents.last = Some((agent, app.to_string(), Instant::now()));
@@ -313,12 +394,18 @@ impl Server {
             }
             May::No => Some(false),
             may @ (May::Ask | May::Expired) => {
-                if self.agents.pending.len() >= PENDING_MAX {
+                // Bounded per connection, so one cannot crowd out the rest.
+                let mine = self.agents.pending.iter().filter(|(c, _, _)| *c == client).count();
+                if self.agents.pending.len() >= PENDING_MAX || mine >= PENDING_PER_CLIENT {
+                    return Some(false);
+                }
+                let asked = self.agents.asking.iter().any(|a| a.agent == agent && a.app == app);
+                if !asked && self.agents.asking.iter().filter(|a| a.client == client).count() >= ASKS_PER_CLIENT {
                     return Some(false);
                 }
                 self.agents.pending.push_back((client, app.to_string(), request.clone()));
-                let q = Question { agent, client, app: app.to_string(), shown: shown.to_string(), expired: may == May::Expired };
-                if !self.agents.asking.iter().any(|a| a.agent == q.agent && a.app == q.app) {
+                if !asked {
+                    let q = Question { agent, client, app: app.to_string(), shown: shown.to_string(), expired: may == May::Expired };
                     let first = self.agents.asking.is_empty();
                     self.agents.asking.push_back(q);
                     if first {
@@ -333,7 +420,7 @@ impl Server {
     /// May the agent use `app` without asking (a search across windows skips
     /// the ones it may not, and never asks about them)?
     pub fn agent_may_quietly(&mut self, client: u32, app: &str) -> bool {
-        let Some(agent) = self.bus_agent_name(client) else { return false };
+        let Some(agent) = self.bus_agent_who(client) else { return false };
         self.agents.may(&agent, client, app) == May::Yes
     }
 
@@ -345,8 +432,10 @@ impl Server {
         let agent = self.bus_agent_name(client).unwrap_or_default();
         let Some(dir) = state_dir() else { return };
         let _ = std::fs::create_dir_all(&dir);
+        rotate_log(&dir);
         if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).mode(0o600).open(dir.join("agents.log")) {
-            let _ = writeln!(f, "{}\t{}\t{}\t{}", utc(now_secs()), clean(&agent), clean(app), clean(what));
+            let what: String = clean(what).chars().take(200).collect();
+            let _ = writeln!(f, "{}\t{}\t{}\t{what}", utc(now_secs()), clean(&agent), clean(app));
         }
     }
 
@@ -360,6 +449,8 @@ impl Server {
         if self.agents.asking.len() != before {
             if was_first {
                 self.agents.focus = DEFAULT;
+                self.agents.armed = Some(Instant::now());
+                self.agents.picture = None;
             }
             self.redraw_all();
         }
@@ -372,10 +463,18 @@ impl Server {
         self.card_close();
         self.drawer_close();
         self.agents.focus = DEFAULT;
+        self.agents.armed = Some(Instant::now());
         if let Some(q) = self.agents.asking.front() {
             tracing::info!("agents: asking whether {:?} may use {:?}", q.agent, q.app);
         }
         self.redraw_all();
+    }
+
+    /// Whether the question showing has been up long enough for an answer
+    /// to count (a key or press already on its way when it appeared is not
+    /// an answer).
+    fn agent_dialog_armed(&self) -> bool {
+        self.agents.armed.is_some_and(|t| t.elapsed() >= ARMING)
     }
 
     /// The person answered the question showing: the grant is kept, the
@@ -391,18 +490,21 @@ impl Server {
             Button::Hour => Some(Span::Until(now_secs() + agents_settings().1 * 60)),
         };
         tracing::info!("agents: {:?} and {:?}: {:?}", q.agent, q.app, span);
+        if span.is_none() {
+            self.agents.refused.insert((q.agent.clone(), q.app.clone()), Instant::now());
+        }
         if let Some(s) = span {
             self.agents.grants.insert((q.agent.clone(), q.app.clone()), s);
             if matches!(s, Span::Always | Span::Until(_)) {
                 self.agents.save();
             }
         }
-        self.agent_log(q.client, &q.app, &format!("asked: {}", BUTTONS.get(i).map_or("Don't allow", |b| b.1)));
+        self.agent_log_named(&q.agent.name, &q.app, &format!("asked ({}): {}", q.agent.program, BUTTONS.get(i).map_or("Don't allow", |b| b.1)));
         // The requests about this app from this agent, in order.
         let mut mine = Vec::new();
         let mut rest = VecDeque::new();
         for (c, app, r) in std::mem::take(&mut self.agents.pending) {
-            if app == q.app && self.bus_agent_name(c).as_deref() == Some(q.agent.as_str()) {
+            if app == q.app && self.bus_agent_who(c).as_ref() == Some(&q.agent) {
                 mine.push((c, r));
             } else {
                 rest.push_back((c, app, r));
@@ -410,34 +512,36 @@ impl Server {
         }
         self.agents.pending = rest;
         for (c, r) in mine {
-            if span.is_some() {
+            if span.is_some() && crate::meaning::agents_allowed() {
                 self.agent_request(c, r);
             } else {
                 let serial = r.serial();
                 self.agent_log(c, &q.app, "refused: the person did not allow it");
-                self.bus_send(c, vergence_protocol::bus::ServerMsg::Error { serial, code: vergence_protocol::bus::ErrorCode::Denied, message: format!("the person did not allow {} to use {}", q.agent, q.shown) });
+                self.bus_send(c, vergence_protocol::bus::ServerMsg::Error { serial, code: vergence_protocol::bus::ErrorCode::Denied, message: format!("the person did not allow {} to use {}", q.agent.name, q.shown) });
             }
         }
         self.agents.focus = DEFAULT;
         self.agents.picture = None;
+        self.agents.armed = Some(Instant::now());
         if let Some(next) = self.agents.asking.front() {
             tracing::info!("agents: asking whether {:?} may use {:?}", next.agent, next.app);
         }
         self.redraw_all();
     }
 
-    /// A key while it asks: every key is its (Escape: Don't allow; Enter:
-    /// the button with the focus, For an hour at first; Tab and the arrows).
+    /// A key while it asks: every key is its, none counting for a moment
+    /// after a question appears (Escape: Don't allow; Enter: the button with
+    /// the focus, Don't allow at first; Tab and the arrows; Space nothing).
     pub fn agent_dialog_key(&mut self, sym: u32, pressed: bool) {
         use xkbcommon::xkb::keysyms as k;
-        if !pressed {
+        if !pressed || !self.agent_dialog_armed() {
             return;
         }
         let n = BUTTONS.len();
         let a = &mut self.agents;
         match sym {
             k::KEY_Escape => return self.agent_answer(0),
-            k::KEY_Return | k::KEY_KP_Enter | k::KEY_space => {
+            k::KEY_Return | k::KEY_KP_Enter => {
                 let i = a.focus;
                 return self.agent_answer(i);
             }
@@ -463,6 +567,9 @@ impl Server {
     /// A press: a button answers; anywhere else does nothing (the question
     /// stays until it is answered).
     pub fn agent_dialog_press(&mut self, at: Point<f64, Logical>) {
+        if !self.agent_dialog_armed() {
+            return;
+        }
         if let Some(&(i, _)) = self.agents.buttons.iter().find(|(_, r)| r.to_f64().contains(at)) {
             self.agent_answer(i);
         }
@@ -471,7 +578,7 @@ impl Server {
     /// What the agent on bus client `client` may do with `app`: its span's
     /// word ("" if not asked yet) and the minutes a timed one has left.
     pub fn agent_grant_for(&mut self, client: u32, app: &str) -> (String, u32) {
-        let Some(agent) = self.bus_agent_name(client) else { return (String::new(), 0) };
+        let Some(agent) = self.bus_agent_who(client) else { return (String::new(), 0) };
         self.agents.load();
         let word = match self.agents.grants.get(&(agent.clone(), app.to_string())) {
             Some(Span::Connection(c)) if *c == client => "just now",
@@ -539,10 +646,11 @@ impl Server {
         } else {
             Vec::new()
         };
-        let title = if ending { format!("{agent}'s time with {shown} is nearly up") } else { format!("{agent} is using {shown}") };
+        let name = &agent.name;
+        let title = if ending { format!("{name}'s time with {shown} is nearly up") } else { format!("{name} is using {shown}") };
         let tile = vergence_protocol::tile::Tile {
             id: "agent".into(),
-            value: agent.chars().take(12).collect(),
+            value: agent.name.chars().take(12).collect(),
             label,
             state,
             group: "System".into(),
@@ -550,11 +658,12 @@ impl Server {
             page: "agents".into(),
         };
         self.agents.tile_up = true;
+        self.agents.tiled = Some((agent.clone(), app.clone()));
         self.tile_set(crate::tiles::Owner::Desktop, tile);
     }
 
-    fn agent_span_word(&self, agent: &str, app: &str) -> &'static str {
-        match self.agents.grants.get(&(agent.to_string(), app.to_string())) {
+    fn agent_span_word(&self, agent: &Who, app: &str) -> &'static str {
+        match self.agents.grants.get(&(agent.clone(), app.to_string())) {
             Some(Span::Always) => "always",
             Some(Span::Session) => "until you log out",
             Some(Span::Connection(_)) => "just now",
@@ -563,10 +672,23 @@ impl Server {
         }
     }
 
-    /// An app's name as people know it: a window's title of it if one is
-    /// open, else its id.
+    /// An app's name as people know it: its desktop entry's (by id, or the
+    /// id's last part), else its id. Never a window's title: that is the
+    /// app's own word, and a terminal's is whatever runs in it (Fable's review).
     pub fn app_shown_name(&self, app: &str) -> String {
-        self.space.elements().find_map(|w| w.native().filter(|n| n.app_id == app).map(|n| n.title())).filter(|t| !t.is_empty()).unwrap_or_else(|| app.to_string())
+        let app = app_id_of(app);
+        let low = app.to_lowercase();
+        self.shelf
+            .apps
+            .iter()
+            .find(|e| {
+                let id = e.id.to_lowercase();
+                id == low || id.rsplit('.').next() == Some(low.as_str())
+            })
+            .map(|e| e.name.clone())
+            .filter(|n| !n.trim().is_empty())
+            .map(|n| clean_agent_name(&n))
+            .unwrap_or_else(|| app.to_string())
     }
 
     /// In front of everything on a screen: the panel (on the pointer's
@@ -627,20 +749,23 @@ impl Server {
             scene.fill_rounded(SceneRect::new(0.0, 0.0, w, hh), 14.0, ink(s.menu));
             scene.stroke(SceneRect::new(0.0, 0.0, w, hh), 14.0, vergence_look::EDGE, ink(s.edge));
             let m = fonts.metrics(bold, 18.0);
-            let heading: String = if q.expired { format!("{}'s time with {} is up", q.agent, q.shown) } else { format!("{} wants to use {}", q.agent, q.shown) }.chars().take(64).collect();
+            // The heading in the desktop's words; the agent's name only quoted.
+            let shown: String = q.shown.chars().take(32).collect();
+            let heading: String = if q.expired { format!("An agent's time with {shown} is up") } else { format!("An agent wants to use {shown}") };
             vergence_render::text(&mut scene, fonts, bold, 18.0, ink(s.menu_ink), ScenePoint::new(PAD as f32, (PAD as f32 + m.ascent).round()), &heading);
             let m = fonts.metrics(face, TEXT);
             let (a, b) = (s.menu_ink, s.menu_ink_off);
             let soft = Color::rgb(((a.0 as u16 + b.0 as u16) / 2) as u8, ((a.1 as u16 + b.1 as u16) / 2) as u8, ((a.2 as u16 + b.2 as u16) / 2) as u8);
-            let shown: String = q.shown.chars().take(40).collect();
-            let lines = if q.expired {
-                [format!("Keep allowing it to read {shown}'s windows and press, type and choose in them?"), "What it was doing waits for your answer.".to_string()]
-            } else {
-                [format!("It can read {shown}'s windows and press, type and choose in them."), "You'll see a ring where it acts. A secret field stays secret.".to_string()]
-            };
-            for (k, line) in lines.iter().enumerate() {
-                vergence_render::text(&mut scene, fonts, face, TEXT, soft, ScenePoint::new(PAD as f32, (PAD as f32 + 30.0 + 19.0 * k as f32 + m.ascent).round()), line);
+            // Fixed rows: what each one says cannot push another out.
+            let program: String = q.agent.program.chars().rev().take(56).collect::<Vec<_>>().into_iter().rev().collect();
+            let rows = [("Agent", format!("\u{201c}{}\u{201d}", q.agent.name)), ("Program", if program.is_empty() { "not known".into() } else { program }), ("App", { let p = app_program_of(&q.app); let p = p.rsplit('/').next().unwrap_or(p); format!("{shown} ({}{})", app_id_of(&q.app).chars().take(32).collect::<String>(), if p.is_empty() { String::new() } else { format!(", {}", p.chars().take(24).collect::<String>()) }) })];
+            for (k, (label, value)) in rows.iter().enumerate() {
+                let y = (PAD as f32 + 32.0 + 19.0 * k as f32 + m.ascent).round();
+                vergence_render::text(&mut scene, fonts, face, TEXT, soft, ScenePoint::new(PAD as f32, y), label);
+                vergence_render::text(&mut scene, fonts, face, TEXT, ink(s.menu_ink), ScenePoint::new(PAD as f32 + 72.0, y), value);
             }
+            let line = if q.expired { "Keep allowing it to read the app's windows and act in them? What it was doing waits." } else { "It could read the app's windows and press, type and choose in them. A secret field stays secret." };
+            vergence_render::text(&mut scene, fonts, face, TEXT, soft, ScenePoint::new(PAD as f32, (PAD as f32 + 32.0 + 19.0 * 3.0 + 6.0 + m.ascent).round()), line);
             let plain = Color::rgba(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2, 20);
             for (i, x, bw) in &local {
                 let r = SceneRect::new(*x as f32, row_y as f32, *bw as f32, BUTTON_H as f32);
@@ -684,7 +809,7 @@ impl Server {
                     Span::Always => ("always", 0),
                     Span::Never => ("never", 0),
                 };
-                vergence_protocol::bus::Grant { agent: a.clone(), app: p.clone(), shown: self.app_shown_name(p), span: span.into(), minutes_left: left, working: working.as_ref() == Some(&(a.clone(), p.clone())) }
+                vergence_protocol::bus::Grant { agent: a.name.clone(), program: a.program.clone(), app: p.clone(), shown: self.app_shown_name(p), span: span.into(), minutes_left: left, working: working.as_ref() == Some(&(a.clone(), p.clone())) }
             })
             .collect();
         out.sort_by_key(|g| (g.agent.to_lowercase(), g.shown.to_lowercase()));
@@ -693,12 +818,13 @@ impl Server {
 
     /// Takes grants back (Privacy > Agents): one, an agent's (`app` empty)
     /// or all (both empty). The agent tile goes if its agent lost its grant.
-    pub fn agents_revoke(&mut self, agent: &str, app: &str) {
+    pub fn agents_revoke(&mut self, agent: &str, program: &str, app: &str) {
         self.agents.load();
         let before = self.agents.grants.len();
-        self.agents.grants.retain(|(a, p), _| !((agent.is_empty() || a == agent) && (app.is_empty() || p == app)));
+        self.agents.grants.retain(|(a, p), _| !((agent.is_empty() || a.name == agent) && (program.is_empty() || a.program == program) && (app.is_empty() || p == app)));
         if self.agents.grants.len() != before {
-            tracing::info!("agents: grants taken back ({agent:?}, {app:?})");
+            tracing::info!("agents: grants taken back ({agent:?}, {program:?}, {app:?})");
+            self.agent_log_named(agent, app, &format!("taken back from Privacy > Agents ({program})"));
             self.agents.save();
             if let Some((a, p, _)) = &self.agents.last
                 && !self.agents.grants.contains_key(&(a.clone(), p.clone()))
@@ -712,16 +838,17 @@ impl Server {
         }
     }
 
-    /// The agent tile's "Allow ... more": the working agent's timed grant
-    /// for its app goes on by one more span, from when it would have ended.
+    /// The agent tile's "Allow ... more": the timed grant the tile shows
+    /// goes on by one more span, from when it would have ended, never past
+    /// a day from now.
     pub fn agent_extend(&mut self) {
-        let Some((agent, app, _)) = self.agents.last.clone() else { return };
+        let Some((agent, app)) = self.agents.tiled.clone() else { return };
         let key = (agent.clone(), app.clone());
         let Some(Span::Until(t)) = self.agents.grants.get(&key).copied() else { return };
-        let until = t.max(now_secs()) + agents_settings().1 * 60;
+        let until = (t.max(now_secs()) + agents_settings().1 * 60).min(now_secs() + 24 * 3600);
         self.agents.grants.insert(key, Span::Until(until));
         self.agents.save();
-        self.agent_log_named(&agent, &app, "extended from the tile");
+        self.agent_log_named(&agent.name, &app, "extended from the tile");
         tracing::info!("agents: {agent:?} and {app:?} extended");
         self.agent_tile();
     }
@@ -731,17 +858,29 @@ impl Server {
             return;
         }
         let Some(dir) = state_dir() else { return };
+        rotate_log(&dir);
         if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).mode(0o600).open(dir.join("agents.log")) {
-            let _ = writeln!(f, "{}\t{}\t{}\t{}", utc(now_secs()), clean(agent), clean(app), clean(what));
+            let what: String = clean(what).chars().take(200).collect();
+            let _ = writeln!(f, "{}\t{}\t{}\t{what}", utc(now_secs()), clean(agent), clean(app));
         }
     }
 
     /// A ring where an agent acts (step 5): `at` on the screens, in the
     /// agent's own color; held, then faded.
-    pub fn agent_ring(&mut self, agent: &str, at: (f64, f64, f64, f64)) {
-        if at.2 <= 0.0 || at.3 <= 0.0 || !at.0.is_finite() || !at.1.is_finite() {
+    pub fn agent_ring(&mut self, agent: &str, at: (f64, f64, f64, f64), within: (f64, f64, f64, f64)) {
+        if !(at.0.is_finite() && at.1.is_finite() && at.2.is_finite() && at.3.is_finite()) {
             return;
         }
+        // Kept within the window (Fable's review: an app's word must not
+        // draw a ring over another app, nor a huge one).
+        let x0 = at.0.max(within.0);
+        let y0 = at.1.max(within.1);
+        let x1 = (at.0 + at.2).min(within.0 + within.2);
+        let y1 = (at.1 + at.3).min(within.1 + within.3);
+        if x1 - x0 < 1.0 || y1 - y0 < 1.0 {
+            return;
+        }
+        let at = (x0, y0, x1 - x0, y1 - y0);
         let color = ring_color(agent);
         self.agents.rings.retain(|r| r.since.elapsed() < RING_HOLD + RING_FADE);
         if self.agents.rings.len() >= RINGS_MAX {
@@ -806,13 +945,13 @@ impl Server {
             .grants
             .iter()
             .map(|((a, p), s)| match s {
-                Span::Until(t) => format!("{a:?} {p:?}: for {} more min", t.saturating_sub(now_secs()).div_ceil(60)),
-                s => format!("{a:?} {p:?}: {s:?}"),
+                Span::Until(t) => format!("{:?} ({}) {p:?}: for {} more min", a.name, a.program, t.saturating_sub(now_secs()).div_ceil(60)),
+                s => format!("{:?} ({}) {p:?}: {s:?}", a.name, a.program),
             })
             .collect();
         out.sort();
         if let Some(q) = self.agents.asking.front() {
-            out.push(format!("asking: {:?} wants to use {:?} ({} questions, {} requests waiting)", q.agent, q.shown, self.agents.asking.len(), self.agents.pending.len()));
+            out.push(format!("asking: {:?} ({}) wants to use {:?} ({} questions, {} requests waiting{})", q.agent.name, q.agent.program, q.shown, self.agents.asking.len(), self.agents.pending.len(), if self.agent_dialog_armed() { "" } else { "; not yet answerable" }));
         }
         if out.is_empty() {
             "no grants".into()
@@ -844,40 +983,61 @@ impl Server {
 mod tests {
     use super::*;
 
+    fn who(name: &str) -> Who {
+        Who { name: name.into(), program: "/usr/local/bin/vergence-agent-mcp".into() }
+    }
+
     #[test]
     fn grants_are_kept_and_read_back() {
         let mut g = HashMap::new();
-        g.insert(("Claude".to_string(), "vergence-calc".to_string()), Span::Always);
-        g.insert(("Claude".to_string(), "vergence-term".to_string()), Span::Never);
-        g.insert(("Other\tagent".to_string(), "x".to_string()), Span::Until(1_800_000_000));
-        g.insert(("Claude".to_string(), "vergence-edit".to_string()), Span::Session);
-        g.insert(("Claude".to_string(), "vergence-files".to_string()), Span::Connection(7));
+        g.insert((who("Claude"), "vergence-calc".to_string()), Span::Always);
+        g.insert((who("Claude"), "vergence-term".to_string()), Span::Never);
+        g.insert((who("Other\tagent"), "x".to_string()), Span::Until(1_800_000_000));
+        g.insert((who("Claude"), "vergence-edit".to_string()), Span::Session);
+        g.insert((who("Claude"), "vergence-files".to_string()), Span::Connection(7));
         let text = render(&g);
         let back = parse(&text);
         assert_eq!(back.len(), 3, "only always, never and timed ones are kept: {text}");
-        assert_eq!(back.get(&("Claude".into(), "vergence-calc".into())), Some(&Span::Always));
-        assert_eq!(back.get(&("Claude".into(), "vergence-term".into())), Some(&Span::Never));
-        assert_eq!(back.get(&("Other agent".into(), "x".into())), Some(&Span::Until(1_800_000_000)), "a tab in a name cannot split its line");
-        assert!(parse("junk\nClaude\tapp\tsometimes\nClaude\tapp\tuntil soon\n").is_empty());
+        assert_eq!(back.get(&(who("Claude"), "vergence-calc".into())), Some(&Span::Always));
+        assert_eq!(back.get(&(who("Claude"), "vergence-term".into())), Some(&Span::Never));
+        assert_eq!(back.get(&(who("Other agent"), "x".into())), Some(&Span::Until(1_800_000_000)), "a tab in a name cannot split its line");
+        assert!(parse("junk\nClaude\tapp\talways\nClaude\tp\tapp\tsometimes\n").is_empty(), "old three-field lines and nonsense are dropped");
     }
 
     #[test]
     fn what_a_grant_says() {
         let mut a = Agents { loaded: true, ..Default::default() };
-        assert_eq!(a.may("Claude", 3, "calc"), May::Ask);
-        a.grants.insert(("Claude".into(), "calc".into()), Span::Connection(3));
-        assert_eq!(a.may("Claude", 3, "calc"), May::Yes);
-        assert_eq!(a.may("Claude", 4, "calc"), May::Ask, "another connection is asked again");
-        a.grants.insert(("Claude".into(), "calc".into()), Span::Until(now_secs() + 600));
-        assert_eq!(a.may("Claude", 4, "calc"), May::Yes);
-        assert_eq!(a.minutes_left("Claude", "calc"), Some(10));
-        a.grants.insert(("Claude".into(), "calc".into()), Span::Until(now_secs().saturating_sub(1)));
-        assert_eq!(a.may("Claude", 4, "calc"), May::Expired, "an hour that has passed asks again, saying so");
-        assert!(!a.grants.contains_key(&("Claude".into(), "calc".into())));
-        a.grants.insert(("Claude".into(), "calc".into()), Span::Never);
-        assert_eq!(a.may("Claude", 4, "calc"), May::No);
-        assert_eq!(a.may("Other", 4, "calc"), May::Ask, "per agent");
-        assert_eq!(a.may("Claude", 4, "term"), May::Ask, "per app");
+        let c = who("Claude");
+        assert_eq!(a.may(&c, 3, "calc"), May::Ask);
+        a.grants.insert((c.clone(), "calc".into()), Span::Connection(3));
+        assert_eq!(a.may(&c, 3, "calc"), May::Yes);
+        assert_eq!(a.may(&c, 4, "calc"), May::Ask, "another connection is asked again");
+        let impostor = Who { name: "Claude".into(), program: "/tmp/evil".into() };
+        a.grants.insert((c.clone(), "calc".into()), Span::Always);
+        assert_eq!(a.may(&impostor, 4, "calc"), May::Ask, "the same name from another program has nothing");
+        a.grants.insert((c.clone(), "calc".into()), Span::Until(now_secs() + 600));
+        assert_eq!(a.may(&c, 4, "calc"), May::Yes);
+        assert_eq!(a.minutes_left(&c, "calc"), Some(10));
+        a.grants.insert((c.clone(), "calc".into()), Span::Until(now_secs().saturating_sub(1)));
+        assert_eq!(a.may(&c, 4, "calc"), May::Expired, "an hour that has passed asks again, saying so");
+        assert!(!a.grants.contains_key(&(c.clone(), "calc".into())));
+        a.grants.insert((c.clone(), "calc".into()), Span::Never);
+        assert_eq!(a.may(&c, 4, "calc"), May::No);
+        assert_eq!(a.may(&who("Other"), 4, "calc"), May::Ask, "per agent");
+        assert_eq!(a.may(&c, 4, "term"), May::Ask, "per app");
+        // Don't allow: refused quietly for a minute, then asked again.
+        a.refused.insert((c.clone(), "term".into()), Instant::now());
+        assert_eq!(a.may(&c, 4, "term"), May::No);
+        a.refused.insert((c.clone(), "term".into()), Instant::now() - std::time::Duration::from_secs(COOL_DOWN_SECS + 1));
+        assert_eq!(a.may(&c, 4, "term"), May::Ask);
+    }
+
+    #[test]
+    fn agent_names_are_cleaned() {
+        assert_eq!(clean_agent_name("  Claude  "), "Claude");
+        assert_eq!(clean_agent_name("Cl\u{202e}aude\u{200b}"), "Claude", "direction and zero-width marks go");
+        assert_eq!(clean_agent_name("System update: press Enter to continue now"), "System update: press Ent", "at most 24 characters");
+        assert_eq!(clean_agent_name("\u{7}\n"), "");
     }
 
     #[test]

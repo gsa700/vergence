@@ -324,3 +324,39 @@ unnecessary for now); voice control.
   agent commands (act, agent-answer, tile-action agent) only with
   VERGENCE_CONTROL=1 in the server's environment (headless tests), not
   through the control-socket file daily sessions use.
+- **The review's fixes** (2026-11-20, bus v29). (1) An agent is its name
+  and the program the server saw run it (`agents::Who`; the executable
+  from the bus peer's pid, `vergence_dm::elevate::program_path`): grants,
+  questions, the log and Privacy > Agents carry both, and a name from
+  another program has nothing; agents.tsv lines gained the program field
+  (old three-field lines are dropped, so those agents ask again). One
+  Hello per connection; ListGrants and RevokeGrants refused to agent
+  connections. Under one user this is attribution, not proof (§7.4).
+  (2) Enter and Escape mean Don't allow, Space nothing; nothing counts for
+  one second after each question appears (keys and presses); Don't allow
+  refuses the same agent and app quietly for a minute; at most two
+  questions and 16 waiting requests per connection. (3) The question's
+  heading is the desktop's ("An agent wants to use Calculator"), the app
+  named by its desktop entry, never a window title; fixed rows Agent
+  (quoted, format and direction marks stripped, 24 characters), Program,
+  App (entry name, id, program). (4) Grants are per app id and the app's
+  program (`agent_app_key`, "id @ program"). (5) Trees are repaired on
+  arrival (`native::sane_tree`: duplicate ids dropped, loops and depth
+  over 64 cut) and every search walks under a budget, only in the windows
+  the agent may use. (6) Windows shows titles only for allowed apps (else
+  the app's name); Changes carries focus, caret and tree changes only for
+  allowed windows. (7) Rings are clipped to their window. (8) 40 agent
+  requests a second (burst 80) per connection; log values cut at 200
+  characters; agents.log rotates at 4 MB; settings read at most once a
+  second. (9) Act carries the role and name the agent expects (`vagent
+  do` and the MCP adapter send them); the server refuses if the widget
+  changed. (10) Revokes are logged; waiting requests check the off
+  switch; nothing is read or done while locked (a headless session cannot
+  lock: checked by reading only); extend acts on the grant the tile shows,
+  never past a day; an action a window does not answer fails after 10 s;
+  agents.tsv written new at 0600 and synced. (11) vctl act, agent-answer
+  and tile-action agent only with VERGENCE_CONTROL=1 and no
+  ~/.config/vergence/control-socket. Tested headless on Hubble (an early
+  Enter ignored, a later Enter refuses, the cool-down, the same name
+  through vergence-agent-mcp asked again, 7×6=42 after the timed answer),
+  tests on all four.

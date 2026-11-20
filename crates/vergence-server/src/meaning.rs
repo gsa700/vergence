@@ -51,7 +51,7 @@ pub enum Change {
     Tree { client: u32, window: u32 },
     /// An agent's timed grant for an app is running out, or has (0): only
     /// that agent hears it (agents.rs).
-    Time { agent: String, app: String, minutes_left: u32 },
+    Time { agent: crate::agents::Who, app: String, minutes_left: u32 },
 }
 
 #[derive(Default)]
@@ -126,35 +126,57 @@ fn window_matches(part: &str, title: &str, app_id: &str) -> bool {
 /// The nodes (by their place in `nodes`) that the widget parts lead to:
 /// each part's matches below the previous part's (anywhere below, through
 /// the parent links). No parts: every node.
+/// The most steps one search may take (Fable's review: a crafted tree must
+/// not hold the server); past it, what was found so far is the answer.
+const FIND_BUDGET: usize = 2_000_000;
+
 fn find_in(nodes: &[Node], parts: &[Part]) -> Vec<usize> {
-    let below = |i: usize, ancestor: u64| -> bool {
-        let mut p = nodes[i].parent;
-        for _ in 0..64 {
-            if p == 0 {
-                return false;
+    // Trees arrive repaired (native.rs sane_tree): ids unique, parents
+    // without loops; still, each walk is bounded.
+    let index: std::collections::HashMap<u64, usize> = nodes.iter().enumerate().map(|(i, n)| (n.id, i)).collect();
+    let mut budget = FIND_BUDGET;
+    let mut current: Option<std::collections::HashSet<u64>> = None;
+    let mut last: Vec<usize> = Vec::new();
+    for p in parts {
+        let mut next = Vec::new();
+        for (i, n) in nodes.iter().enumerate() {
+            if budget == 0 {
+                break;
             }
-            if p == ancestor {
-                return true;
+            budget -= 1;
+            if !matches(p, n) {
+                continue;
             }
-            match nodes.iter().find(|n| n.id == p) {
-                Some(n) => p = n.parent,
-                None => return false,
+            let ok = match &current {
+                None => true,
+                Some(set) => {
+                    let mut q = n.parent;
+                    let mut found = false;
+                    for _ in 0..64 {
+                        if q == 0 || budget == 0 {
+                            break;
+                        }
+                        budget -= 1;
+                        if set.contains(&q) {
+                            found = true;
+                            break;
+                        }
+                        q = index.get(&q).map_or(0, |&k| nodes[k].parent);
+                    }
+                    found
+                }
+            };
+            if ok {
+                next.push(i);
             }
         }
-        false
-    };
-    let mut current: Option<Vec<usize>> = None;
-    for p in parts {
-        let next: Vec<usize> = (0..nodes.len())
-            .filter(|&i| matches(p, &nodes[i]))
-            .filter(|&i| current.as_ref().is_none_or(|c| c.iter().any(|&a| below(i, nodes[a].id))))
-            .collect();
         if next.is_empty() {
             return next;
         }
-        current = Some(next);
+        current = Some(next.iter().map(|&i| nodes[i].id).collect());
+        last = next;
     }
-    current.unwrap_or_else(|| (0..nodes.len()).collect())
+    if parts.is_empty() { (0..nodes.len()).collect() } else { last }
 }
 
 impl Server {
@@ -204,10 +226,21 @@ impl Server {
 
     /// The widgets a path leads to, in every window it names (see the top).
     pub fn meaning_find(&self, path: &str) -> Vec<Found> {
+        self.meaning_find_in(path, None)
+    }
+
+    /// As meaning_find, only in the windows `only` names (client, window),
+    /// if given: an agent searches only what it may use, before any work.
+    fn meaning_find_in(&self, path: &str, only: Option<&std::collections::HashSet<(u32, u32)>>) -> Vec<Found> {
         let (wpart, parts) = parse(path);
         let mut out = Vec::new();
         for l in self.meaning_windows() {
             if !window_matches(&wpart, &l.title, &l.app_id) {
+                continue;
+            }
+            if let (Some(set), Some(n)) = (only, l.win.native())
+                && !set.contains(&(n.client, n.id))
+            {
                 continue;
             }
             let nodes = &l.meaning.2;
@@ -318,6 +351,19 @@ impl Server {
         vergence_protocol::agent::AgentFound { client: f.client, window: f.window, title: f.title.clone(), node, screen: f.screen.clone().unwrap_or_default() }
     }
 
+    /// An app as grants know it: its id and the program the server saw run
+    /// it (Fable's review: an app id alone is any program's word).
+    pub fn agent_app_key(&self, app_client: u32, app_id: &str) -> String {
+        let program = self.bus_pid(app_client).and_then(vergence_dm::elevate::program_path).map(|p| p.display().to_string()).unwrap_or_default();
+        format!("{app_id} @ {program}")
+    }
+
+    /// The native windows an agent may read and use now, asking nothing.
+    fn agent_windows(&mut self, id: u32) -> std::collections::HashSet<(u32, u32)> {
+        let keys: Vec<((u32, u32), String)> = self.natives.keys().filter_map(|k| self.natives.get(k).and_then(|w| w.native()).map(|n| (*k, self.agent_app_key(n.client, &n.app_id)))).collect();
+        keys.into_iter().filter(|(_, key)| self.agent_may_quietly(id, key)).map(|(k, _)| k).collect()
+    }
+
     /// An agent's request (it has said who it is; bus.rs checks).
     pub fn agent_request(&mut self, id: u32, r: vergence_protocol::agent::AgentRequest) {
         use vergence_protocol::agent::{AgentChange, AgentEvent, AgentRequest, AgentWindow, MAX_LISTED};
@@ -328,12 +374,17 @@ impl Server {
         // allowed; the person is asked first if nothing says yet, and the
         // request waits for the answer.
         let mut apps: Vec<String> = Vec::new();
+        let key_of = |s: &Server, w: &Win| w.native().map(|n| s.agent_app_key(n.client, &n.app_id));
         match &r {
             AgentRequest::Tree { client, window, .. } | AgentRequest::Act { client, window, .. } => {
-                apps.extend(self.natives.get(&(*client, *window)).and_then(|w| w.native()).map(|n| n.app_id.clone()));
+                if let Some(w) = self.natives.get(&(*client, *window)).cloned() {
+                    apps.extend(key_of(self, &w));
+                }
             }
             AgentRequest::Focused { .. } => {
-                apps.extend(self.input.keyboard_native.as_ref().and_then(|w| w.native()).map(|n| n.app_id.clone()));
+                if let Some(w) = self.input.keyboard_native.clone() {
+                    apps.extend(key_of(self, &w));
+                }
             }
             // A search in named windows asks about their apps; one across
             // every window ("*") only shows the apps already allowed.
@@ -341,8 +392,11 @@ impl Server {
                 let (wpart, _) = parse(path);
                 if wpart != "*" {
                     for l in self.meaning_windows() {
-                        if window_matches(&wpart, &l.title, &l.app_id) && !apps.contains(&l.app_id) {
-                            apps.push(l.app_id);
+                        if window_matches(&wpart, &l.title, &l.app_id)
+                            && let Some(k) = key_of(self, &l.win)
+                            && !apps.contains(&k)
+                        {
+                            apps.push(k);
                         }
                     }
                 }
@@ -374,8 +428,13 @@ impl Server {
                     let (client, window, meaning) = w.native().map_or((0, 0, false), |n| (n.client, n.id, n.meaning().is_some()));
                     let at = (g.loc.x as f64, g.loc.y as f64, g.size.w as f64, g.size.h as f64);
                     let screen = self.screen_name_at(at.0 + at.2 / 2.0, at.1 + at.3 / 2.0);
-                    let (allowed, minutes_left) = self.agent_grant_for(id, &app_id);
-                    windows.push(AgentWindow { client, window, title: self.window_title(w), app_id, kind: kind.into(), keyboard: keyboard.as_ref() == Some(w), meaning, at, screen, allowed, minutes_left });
+                    let key = w.native().map(|n| self.agent_app_key(n.client, &n.app_id)).unwrap_or_default();
+                    let (allowed, minutes_left) = self.agent_grant_for(id, &key);
+                    // A window's title only where the agent may read its app
+                    // (Fable's review: titles are content); else its app's name.
+                    let may = !allowed.is_empty() && allowed != "never";
+                    let title = if may { self.window_title(w) } else { self.app_shown_name(&app_id) };
+                    windows.push(AgentWindow { client, window, title, app_id, kind: kind.into(), keyboard: keyboard.as_ref() == Some(w), meaning, at, screen, allowed, minutes_left });
                 }
                 reply(self, AgentEvent::Windows { serial, windows });
             }
@@ -395,12 +454,8 @@ impl Server {
                 reply(self, AgentEvent::Tree { serial, client, window, title: n.title(), focus, caret, nodes });
             }
             AgentRequest::Find { serial, path } => {
-                let mut allowed = Vec::new();
-                for f in self.meaning_find(&path) {
-                    if self.agent_may_quietly(id, &f.app_id) {
-                        allowed.push(f);
-                    }
-                }
+                let only = self.agent_windows(id);
+                let allowed = self.meaning_find_in(&path, Some(&only));
                 let mut used = 256;
                 let found: Vec<_> = allowed.iter().map(|f| self.agent_found(f)).take(MAX_LISTED).take_while(|f| (used + node_size(&f.node) + f.title.len() + 32 <= REPLY_BUDGET).then(|| used += node_size(&f.node) + f.title.len() + 32).is_some()).collect();
                 reply(self, AgentEvent::Found { serial, found });
@@ -412,7 +467,7 @@ impl Server {
                 };
                 reply(self, AgentEvent::Focused { serial, found, caret });
             }
-            AgentRequest::Act { serial, client, window, node, action } => {
+            AgentRequest::Act { serial, client, window, node, action, role, name } => {
                 let Some(w) = self.natives.get(&(client, window)).cloned() else {
                     return reply(self, AgentEvent::Acted { serial, ok: false, why: format!("no native window {client}/{window}") });
                 };
@@ -421,23 +476,35 @@ impl Server {
                 if secret && matches!(action, vergence_protocol::window::Action::Set(_)) {
                     return reply(self, AgentEvent::Acted { serial, ok: false, why: "a secret field is not set by agents".into() });
                 }
-                let app = w.native().map(|n| n.app_id.clone()).unwrap_or_default();
-                self.agent_log(id, &app, &format!("{action:?} #{node}"));
-                // A ring where it acts, for the person to see (step 5).
-                if let Some((_, _, nodes)) = w.native().and_then(|n| n.meaning())
-                    && let Some(m) = nodes.iter().find(|m| m.id == node)
-                {
-                    let loc = self.space.element_location(&w).unwrap_or_default();
-                    let name = self.bus_agent_name(id).unwrap_or_default();
-                    self.agent_ring(&name, (loc.x as f64 + m.x, loc.y as f64 + m.y, m.w, m.h));
+                // The widget must still be what the agent meant: ids are by
+                // place, and a window that changed may have moved them.
+                let current = w.native().and_then(|n| n.meaning()).and_then(|(_, _, nodes)| nodes.into_iter().find(|m| m.id == node));
+                let Some(m) = current else {
+                    return reply(self, AgentEvent::Acted { serial, ok: false, why: "no such widget now (the window changed)".into() });
+                };
+                if (!role.is_empty() && m.role != role) || (!name.is_empty() && m.name != name) {
+                    return reply(self, AgentEvent::Acted { serial, ok: false, why: format!("the widget changed: it is now the {} {:?}", m.role, m.name) });
                 }
+                let app = w.native().map(|n| n.app_id.clone()).unwrap_or_default();
+                self.agent_log(id, &app, &format!("{action:?} #{node} ({} {:?})", m.role, m.name));
+                // A ring where it acts, for the person to see (step 5), kept
+                // within the window.
+                let g = self.space.element_geometry(&w).unwrap_or_default();
+                let loc = self.space.element_location(&w).unwrap_or_default();
+                let agent = self.bus_agent_name(id).unwrap_or_default();
+                let win = (g.loc.x as f64, g.loc.y as f64, g.size.w as f64, g.size.h as f64);
+                self.agent_ring(&agent, (loc.x as f64 + m.x, loc.y as f64 + m.y, m.w, m.h), win);
                 if self.send_act(&w, node, action, Some((id, serial))).is_none() {
                     reply(self, AgentEvent::Acted { serial, ok: false, why: "not a native window".into() });
                 }
             }
             AgentRequest::Changes { serial, since } => {
                 let (changes, latest) = self.meaning_log.since(since);
-                let me = self.bus_agent_name(id).unwrap_or_default();
+                let me = self.bus_agent_who(id).unwrap_or_default();
+                // Only what happens in windows it may use (Fable's review:
+                // focus and caret elsewhere would tell typing's rhythm).
+                let mine = self.agent_windows(id);
+                let seen = |c: u32, w: u32| mine.contains(&(c, w));
                 let mut out = Vec::new();
                 let mut upto = since;
                 for (n, c) in changes.into_iter().take(MAX_LISTED) {
@@ -445,12 +512,14 @@ impl Server {
                     out.push((
                         n,
                         match c {
-                            Change::Window { client, window } => AgentChange::Window { client, window },
-                            Change::Focus { client, window, node } => AgentChange::Focus { client, window, node },
-                            Change::Caret { client, window, at } => AgentChange::Caret { client, window, at },
-                            Change::Tree { client, window } => AgentChange::Tree { client, window },
-                            // Only its own grants' time.
-                            Change::Time { agent, app, minutes_left } if agent == me => AgentChange::Time { app, minutes_left },
+                            Change::Window { client, window } if seen(client, window) => AgentChange::Window { client, window },
+                            Change::Window { .. } => AgentChange::Window { client: 0, window: 0 },
+                            Change::Focus { client, window, node } if seen(client, window) => AgentChange::Focus { client, window, node },
+                            Change::Caret { client, window, at } if seen(client, window) => AgentChange::Caret { client, window, at },
+                            Change::Tree { client, window } if seen(client, window) => AgentChange::Tree { client, window },
+                            Change::Focus { .. } | Change::Caret { .. } | Change::Tree { .. } => continue,
+                            // Only its own grants' time, by the app's id.
+                            Change::Time { agent, app, minutes_left } if agent == me => AgentChange::Time { app: app.split(" @ ").next().unwrap_or(&app).to_string(), minutes_left },
                             Change::Time { .. } => continue,
                         },
                     ));

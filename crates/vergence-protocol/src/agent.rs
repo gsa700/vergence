@@ -88,8 +88,11 @@ pub enum AgentRequest {
     Find { serial: u32, path: String },
     /// The focused widget and the caret. Reply: [`AgentEvent::Focused`].
     Focused { serial: u32 },
-    /// An action on a widget. Reply: [`AgentEvent::Acted`] once the window answers.
-    Act { serial: u32, client: u32, window: u32, node: u64, action: Action },
+    /// An action on a widget. Reply: [`AgentEvent::Acted`] once the window
+    /// answers. `role` and `name` are what the agent expects the widget to
+    /// be (empty: no check); ids are by place, so after the window changes an
+    /// id may name a neighbor, and the server refuses (bus v29).
+    Act { serial: u32, client: u32, window: u32, node: u64, action: Action, role: String, name: String },
     /// The changes after number `since`. Reply: [`AgentEvent::Changes`].
     Changes { serial: u32, since: u64 },
 }
@@ -195,10 +198,11 @@ impl AgentRequest {
                 e.u32(*serial);
                 e
             }
-            AgentRequest::Act { serial, client, window, node, action } => {
+            AgentRequest::Act { serial, client, window, node, action, role, name } => {
                 let mut e = Encoder::frame(op::ACT);
                 e.u32(*serial).u32(*client).u32(*window).u64(*node);
                 put_action(&mut e, action);
+                e.str(role).str(name);
                 e
             }
             AgentRequest::Changes { serial, since } => {
@@ -235,7 +239,8 @@ impl AgentRequest {
                 op::FOCUSED => AgentRequest::Focused { serial },
                 op::ACT => {
                     let (client, window, node) = (d.u32()?, d.u32()?, d.u64()?);
-                    AgentRequest::Act { serial, client, window, node, action: get_action(&mut d)? }
+                    let action = get_action(&mut d)?;
+                    AgentRequest::Act { serial, client, window, node, action, role: d.str()?, name: d.str()? }
                 }
                 op::CHANGES => AgentRequest::Changes { serial, since: d.u64()? },
                 other => return Err(WireError::UnknownOpcode(other)),
@@ -412,7 +417,7 @@ mod tests {
             AgentRequest::Tree { serial: 3, client: 4, window: 1 },
             AgentRequest::Find { serial: 4, path: "Calculator > button:7".into() },
             AgentRequest::Focused { serial: 5 },
-            AgentRequest::Act { serial: 6, client: 4, window: 1, node: 1 << 50, action: Action::Choose("Mono".into()) },
+            AgentRequest::Act { serial: 6, client: 4, window: 1, node: 1 << 50, action: Action::Choose("Mono".into()), role: "choice".into(), name: "Font".into() },
             AgentRequest::Changes { serial: 7, since: 123 },
         ] {
             let bytes = r.encode().unwrap();

@@ -95,9 +95,35 @@ pub struct Acts {
 }
 
 /// An action sent: the client and window it went to, its answer (done, or
-/// why not) once given, and the agent to pass the answer to (its bus client
-/// and the serial it asked with), if an agent asked.
-type ActSent = (u32, u32, Option<(bool, String)>, Option<(u32, u32)>);
+/// why not) once given, the agent to pass the answer to (its bus client and
+/// the serial it asked with), if an agent asked, and when it went.
+type ActSent = (u32, u32, Option<(bool, String)>, Option<(u32, u32)>, std::time::Instant);
+
+/// How long a window has to answer an action before it fails.
+const ACT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A tree as it came, made safe to walk (Fable's review): a node whose id
+/// came before is dropped, and a parent link that loops or runs deeper than
+/// 64 is cut (the node then hangs from the window itself).
+pub fn sane_tree(mut nodes: Vec<vergence_protocol::window::Node>) -> Vec<vergence_protocol::window::Node> {
+    let mut seen = std::collections::HashSet::new();
+    nodes.retain(|n| n.id != 0 && seen.insert(n.id));
+    let parent: std::collections::HashMap<u64, u64> = nodes.iter().map(|n| (n.id, n.parent)).collect();
+    for n in nodes.iter_mut() {
+        let mut p = n.parent;
+        let mut depth = 0;
+        let mut visited = std::collections::HashSet::new();
+        while p != 0 {
+            if p == n.id || !visited.insert(p) || depth > 64 || !parent.contains_key(&p) {
+                n.parent = 0;
+                break;
+            }
+            p = parent[&p];
+            depth += 1;
+        }
+    }
+    nodes
+}
 
 /// How many actions' answers are kept.
 const ACTS_KEPT: usize = 256;
@@ -735,7 +761,7 @@ impl Server {
                 if let Some(w) = self.natives.get(&(client, window)).cloned()
                     && let Win::Native(n) = &w
                 {
-                    let new = (focus, caret, nodes);
+                    let new = (focus, caret, sane_tree(nodes));
                     let old = n.state.lock().unwrap().meaning.replace(new.clone());
                     let loc = self.space.element_location(&w).unwrap_or_default();
                     self.meaning_changed(client, window, old.as_ref(), &new, (loc.x as f64, loc.y as f64));
@@ -781,9 +807,12 @@ impl Server {
         let (client, window) = (n.client, n.id);
         self.acts.next = self.acts.next.wrapping_add(1).max(1);
         let serial = self.acts.next;
-        self.acts.sent.insert(serial, (client, window, None, reply));
+        self.acts.sent.insert(serial, (client, window, None, reply, std::time::Instant::now()));
         while self.acts.sent.len() > ACTS_KEPT {
-            self.acts.sent.pop_first();
+            // The oldest goes; an agent still waiting on it hears so.
+            if let Some((_, (_, _, None, Some((agent, s)), _))) = self.acts.sent.pop_first() {
+                self.bus_send(agent, vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted { serial: s, ok: false, why: "too many actions at once".into() }));
+            }
         }
         self.bus_send(client, vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::Act { window, serial, node, action }));
         Some(serial)
@@ -801,6 +830,21 @@ impl Server {
         }
         for (agent, serial) in tell {
             self.bus_send(agent, vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted { serial, ok: false, why: "the window went away".into() }));
+        }
+    }
+
+    /// Actions their windows have not answered in time fail (each second,
+    /// with the dock's tick), and their agents hear so.
+    pub fn acts_timeout(&mut self) {
+        let mut tell = Vec::new();
+        for e in self.acts.sent.values_mut() {
+            if e.2.is_none() && e.4.elapsed() > ACT_TIMEOUT {
+                e.2 = Some((false, "the window did not answer".into()));
+                tell.extend(e.3);
+            }
+        }
+        for (agent, serial) in tell {
+            self.bus_send(agent, vergence_protocol::bus::ServerMsg::Agent(vergence_protocol::agent::AgentEvent::Acted { serial, ok: false, why: "the window did not answer".into() }));
         }
     }
 

@@ -60,6 +60,16 @@ const LINE_MAX: u64 = 64 * 1024;
 /// this long at most (owner-only; a stuck vctl, not an attack).
 const IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// Whether the commands that stand in for the person before agents (act,
+/// agent-answer, the agent tile's controls) are on: only where the server
+/// was started with VERGENCE_CONTROL=1 and the person has not turned the
+/// socket on for a daily session with the control-socket file (Dave, after
+/// Fable's review). Headless tests have no such file.
+fn agent_commands() -> bool {
+    let file = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config"))).map(|c| c.join("vergence/control-socket"));
+    enabled() && !file.is_some_and(|f| f.exists())
+}
+
 /// Is the control socket wanted? VERGENCE_CONTROL=1 only.
 pub fn enabled() -> bool {
     std::env::var("VERGENCE_CONTROL").is_ok_and(|v| v == "1")
@@ -226,6 +236,8 @@ impl Server {
             // Native windows' meaning (Contract 3, native.rs).
             "tree" => self.native_tree_report(),
             // An action on a widget by its meaning node (meaning milestone 1, step 1).
+            "act" | "agent-answer" if !agent_commands() => format!("{cmd}: only in a test session (VERGENCE_CONTROL=1 and no ~/.config/vergence/control-socket)"),
+            "tile-action" if args.first() == Some(&"agent") && !agent_commands() => "tile-action agent: only in a test session".into(),
             "act" => {
                 use vergence_protocol::window::Action;
                 let usage = "act <i> <node> press|focus|reveal, or act <i> <node> set|choose <value...>";

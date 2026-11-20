@@ -49,12 +49,15 @@ struct Conn {
     fds: std::collections::VecDeque<std::os::fd::OwnedFd>,
     /// Set by Hello: the app id the client gave (recorded, not trusted, §7.4).
     app_id: Option<String>,
-    /// Set by the agent interface's Hello: the name the agent gave, shown
-    /// to the person (meaning milestone 1, step 3; meaning.rs).
-    agent: Option<String>,
+    /// Set by the agent interface's Hello: the name the agent gave (cleaned)
+    /// and the program the server saw run it (agents.rs); once only.
+    agent: Option<crate::agents::Who>,
     uid: u32,
     /// The client's process id, from the socket's peer credentials.
     pid: Option<u32>,
+    /// Agent requests allowed now (a bucket refilled at AGENT_RATE a
+    /// second, up to AGENT_BURST) and when it was last filled.
+    agent_tokens: (f64, std::time::Instant),
     topics: HashSet<Topic>,
     /// What is waiting to be written: each message's bytes with the
     /// descriptors it carries (a native window's keymap, the clipboard's
@@ -113,6 +116,10 @@ pub fn listen(state: &mut Server) {
     }
 }
 
+/// Agent requests a second, and how many may come at once.
+const AGENT_RATE: f64 = 40.0;
+const AGENT_BURST: f64 = 80.0;
+
 impl Server {
     fn bus_accept(&mut self, stream: UnixStream) {
         let ours = crate::control::our_uid();
@@ -141,6 +148,7 @@ impl Server {
                 fds: Default::default(),
                 app_id: None,
                 agent: None,
+                agent_tokens: (AGENT_BURST, std::time::Instant::now()),
                 uid,
                 pid,
                 topics: HashSet::new(),
@@ -276,12 +284,16 @@ impl Server {
                 }
             }
             // Privacy > Agents (agents.rs; bus v27).
+            // Not for agents: they neither read nor change who may do what.
+            ClientMsg::ListGrants { serial } | ClientMsg::RevokeGrants { serial, .. } if c.agent.is_some() => {
+                self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message: "agents do not see or change grants".into() });
+            }
             ClientMsg::ListGrants { serial } => {
                 let grants = self.agents_grants();
                 self.bus_send(id, ServerMsg::Grants { serial, grants });
             }
-            ClientMsg::RevokeGrants { serial, agent, app } => {
-                self.agents_revoke(&agent, &app);
+            ClientMsg::RevokeGrants { serial, agent, program, app } => {
+                self.agents_revoke(&agent, &program, &app);
                 self.bus_send(id, ServerMsg::Done { serial });
             }
             ClientMsg::ListPlaces { serial } => {
@@ -344,16 +356,20 @@ impl Server {
             ClientMsg::Window(req) => self.native_request(id, req),
             // The agent interface (meaning milestone 1, step 3; meaning.rs).
             ClientMsg::Agent(vergence_protocol::agent::AgentRequest::Hello { serial, name }) => {
-                let name: String = name.trim().chars().filter(|c| !c.is_control()).collect();
+                let name = crate::agents::clean_agent_name(&name);
                 if !crate::meaning::agents_allowed() {
                     return self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::Denied, message: "agents are turned off (Settings > Privacy > Agents)".into() });
                 }
                 if name.is_empty() {
                     return self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::BadMessage, message: "an agent needs a name".into() });
                 }
+                if self.bus.clients.get(&id).is_some_and(|c| c.agent.is_some()) {
+                    return self.bus_send(id, ServerMsg::Error { serial, code: ErrorCode::BadMessage, message: "an agent says who it is once".into() });
+                }
                 if let Some(c) = self.bus.clients.get_mut(&id) {
-                    tracing::info!("bus: client {id} is the agent {name:?}");
-                    c.agent = Some(name);
+                    let program = c.pid.and_then(vergence_dm::elevate::program_path).map(|p| p.display().to_string()).unwrap_or_default();
+                    tracing::info!("bus: client {id} is the agent {name:?} ({program})");
+                    c.agent = Some(crate::agents::Who { name, program });
                 }
                 self.bus_send(id, ServerMsg::Done { serial });
             }
@@ -363,6 +379,20 @@ impl Server {
                 }
                 if self.bus.clients.get(&id).is_none_or(|c| c.agent.is_none()) {
                     return self.bus_send(id, ServerMsg::Error { serial: r.serial(), code: ErrorCode::Denied, message: "say who the agent is first (the agent interface's Hello)".into() });
+                }
+                // Bounded (Fable's review): a looping agent cannot hold the server.
+                if let Some(c) = self.bus.clients.get_mut(&id) {
+                    let (tokens, at) = c.agent_tokens;
+                    let tokens = (tokens + at.elapsed().as_secs_f64() * AGENT_RATE).min(AGENT_BURST);
+                    if tokens < 1.0 {
+                        c.agent_tokens = (tokens, std::time::Instant::now());
+                        return self.bus_send(id, ServerMsg::Error { serial: r.serial(), code: ErrorCode::Failed, message: "too many requests; slow down".into() });
+                    }
+                    c.agent_tokens = (tokens - 1.0, std::time::Instant::now());
+                }
+                // Nothing is read or done while the screen is locked.
+                if self.lock.on {
+                    return self.bus_send(id, ServerMsg::Error { serial: r.serial(), code: ErrorCode::Denied, message: "the screen is locked".into() });
                 }
                 self.agent_request(id, r);
             }
@@ -487,6 +517,11 @@ impl Server {
     /// The connection is finished: drop its state and its write source.
     /// The name an agent gave (agents.rs), if this client is one.
     pub fn bus_agent_name(&self, id: u32) -> Option<String> {
+        self.bus.clients.get(&id).and_then(|c| c.agent.as_ref().map(|w| w.name.clone()))
+    }
+
+    /// Who an agent is: its name and the program the server saw run it.
+    pub fn bus_agent_who(&self, id: u32) -> Option<crate::agents::Who> {
         self.bus.clients.get(&id).and_then(|c| c.agent.clone())
     }
 

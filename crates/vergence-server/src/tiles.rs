@@ -183,6 +183,7 @@ impl Server {
     pub fn tiles_tick(&mut self) {
         // The agent tile goes when its agent rests (agents.rs).
         self.agents_tick();
+        self.acts_timeout();
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
         if self.tiles.minute == Some(secs / 60) {
             return;

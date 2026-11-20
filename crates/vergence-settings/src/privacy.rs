@@ -28,11 +28,11 @@ pub fn fetch(mail: Mail) {
     });
 }
 
-/// Take grants back (an agent's for an app; all when both are empty), then read again.
-fn revoke(mail: Mail, agent: String, app: String) {
+/// Take grants back (an agent's for an app; all when everything is empty), then read again.
+fn revoke(mail: Mail, agent: String, program: String, app: String) {
     std::thread::spawn(move || {
         let Ok(mut bus) = vergence_protocol::Client::connect("vergence-settings") else { return };
-        let _ = bus.request(|serial| ClientMsg::RevokeGrants { serial, agent: agent.clone(), app: app.clone() });
+        let _ = bus.request(|serial| ClientMsg::RevokeGrants { serial, agent: agent.clone(), program: program.clone(), app: app.clone() });
         if let Ok(ServerMsg::Grants { grants, .. }) = bus.request(|serial| ClientMsg::ListGrants { serial }) {
             mail.send(Message::Privacy(PrivacyMsg::List(grants)));
         }
@@ -42,8 +42,8 @@ fn revoke(mail: Mail, agent: String, app: String) {
 #[derive(Debug, Clone)]
 pub enum PrivacyMsg {
     List(Vec<vergence_protocol::bus::Grant>),
-    /// Take back: agent and app ("" and "" for all).
-    Revoke(String, String),
+    /// Take back: agent, its program and app (all empty for all).
+    Revoke(String, String, String),
     Enabled(bool),
     Timed(i64),
 }
@@ -65,7 +65,7 @@ impl App {
     pub fn privacy_message(&mut self, m: PrivacyMsg) {
         match m {
             PrivacyMsg::List(g) => self.grants = Some(g),
-            PrivacyMsg::Revoke(agent, app) => revoke(self.mail.clone(), agent, app),
+            PrivacyMsg::Revoke(agent, program, app) => revoke(self.mail.clone(), agent, program, app),
             PrivacyMsg::Enabled(on) => self.save_table("agents", |t| {
                 t.insert("enabled".into(), on.into());
             }),
@@ -86,15 +86,16 @@ impl App {
                 let mut rows: Vec<Element<Message>> = list
                     .iter()
                     .map(|g| {
-                        let title = format!("{} and {}", g.agent, g.shown);
-                        let control = button(label("Take back")).on_press(Message::Privacy(PrivacyMsg::Revoke(g.agent.clone(), g.app.clone()))).name(format!("Take back {}'s use of {}", g.agent, g.shown));
-                        setting(&title, &span_words(g), control)
+                        let title = format!("\u{201c}{}\u{201d} and {}", g.agent, g.shown);
+                        let control = button(label("Take back")).on_press(Message::Privacy(PrivacyMsg::Revoke(g.agent.clone(), g.program.clone(), g.app.clone()))).name(format!("Take back {}'s use of {}", g.agent, g.shown));
+                        let detail = format!("{} Program: {}.", span_words(g), if g.program.is_empty() { "not known" } else { &g.program });
+                        setting(&title, &detail, control)
                     })
                     .collect();
                 rows.push(setting(
                     "Every agent",
                     "Each asks again the next time it wants an app.",
-                    button(label("Take back all")).on_press(Message::Privacy(PrivacyMsg::Revoke(String::new(), String::new()))).name("Take back every agent's use of every app"),
+                    button(label("Take back all")).on_press(Message::Privacy(PrivacyMsg::Revoke(String::new(), String::new(), String::new()))).name("Take back every agent's use of every app"),
                 ));
                 self.group(Some("What agents may use"), rows)
             }

@@ -481,23 +481,23 @@ fn call(bus: &mut Bus, name: &str, args: &J) -> Result<String, String> {
                 "choose" => return Err("choose needs the item's name in value".into()),
                 other => return Err(format!("no action {other:?}: press, focus, reveal, set, choose")),
             };
-            let (client, window, node) = if let Some(path) = args.get("path").and_then(J::str) {
+            let (client, window, node, role, wname) = if let Some(path) = args.get("path").and_then(J::str) {
                 let found = match bus.ask(|serial| AgentRequest::Find { serial, path: path.to_string() })? {
                     AgentEvent::Found { found, .. } => found,
                     other => return Err(format!("unexpected {other:?}")),
                 };
                 match found.as_slice() {
-                    [one] => (one.client, one.window, one.node.id),
+                    [one] => (one.client, one.window, one.node.id, one.node.role.clone(), one.node.name.clone()),
                     [] => return Err(format!("nothing at {path:?} (in apps you may use)")),
                     many => return Err(format!("{} widgets at {path:?}; name one exactly (a fuller path, or window and node):\n{}", many.len(), many.iter().map(found_text).collect::<Vec<_>>().join("\n"))),
                 }
             } else {
                 let (c, w) = window_id(args.get("window"))?;
                 let n = args.get("node").and_then(J::str).and_then(|n| n.trim().parse().ok()).ok_or("node is the widget's id, as a string")?;
-                (c, w, n)
+                (c, w, n, String::new(), String::new())
             };
             let since = latest(bus)?;
-            match bus.ask(|serial| AgentRequest::Act { serial, client, window, node, action })? {
+            match bus.ask(|serial| AgentRequest::Act { serial, client, window, node, action, role, name: wname })? {
                 AgentEvent::Acted { ok: true, .. } => {}
                 AgentEvent::Acted { why, .. } => return Err(format!("refused: {why}")),
                 other => return Err(format!("unexpected {other:?}")),

@@ -145,12 +145,12 @@ fn run(name: &str, args: &[String]) -> Result<String, String> {
                 many => return Err(format!("{} widgets at {path:?}; name one more exactly:\n{}", many.len(), many.iter().map(found_line).collect::<Vec<_>>().join("\n"))),
             };
             let action = action(verb, rest(3))?;
-            acted(ask(&mut c, |serial| AgentRequest::Act { serial, client: f.client, window: f.window, node: f.node.id, action })?)
+            acted(ask(&mut c, |serial| AgentRequest::Act { serial, client: f.client, window: f.window, node: f.node.id, action, role: f.node.role.clone(), name: f.node.name.clone() })?)
         }
         "act" => {
             let (client, window, node) = (num(1)? as u32, num(2)? as u32, num(3)?);
             let action = action(args.get(4).ok_or_else(usage)?, rest(5))?;
-            acted(ask(&mut c, |serial| AgentRequest::Act { serial, client, window, node, action })?)
+            acted(ask(&mut c, |serial| AgentRequest::Act { serial, client, window, node, action, role: String::new(), name: String::new() })?)
         }
         "changes" => {
             let since = args.get(1).and_then(|a| a.parse().ok()).unwrap_or(0);
