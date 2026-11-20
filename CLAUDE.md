@@ -125,10 +125,12 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   ssh by key as `apollo` (apollo.home.arpa), Rust by rustup (`.
   ~/.cargo/env`), build in ~/src/vergence (`tools/sync-hubble.sh apollo`),
   Vergence installed under /usr/local, passwordless sudo (Dave,
-  2026-11-20: /etc/sudoers.d/90-derickson-test). vdm is DISABLED there
-  (Dave, 2026-11-20 01:38: "shutdown vergence totally"): its login screen
-  rejected the right password (PAM itself accepts it; raw key events
-  clean; open bug, see memory), Fedora's kmscon console on tty1 again. Fedora needs nmap-ncat for vctl. Its tests and
+  2026-11-20: /etc/sudoers.d/90-derickson-test), the VDM login screen at
+  boot (VT 7, the ASUS VS229 by HDMI). Its first night the login screen
+  refused the right password: Num Lock lit before we started, a mini
+  keyboard's built-in keypad following the light, and our server never
+  driving the lights (fixed in 27c205f; Dave logged in at once after).
+  Fedora 45's console is kmscon (tty1), which reads the keyboards itself. Fedora needs nmap-ncat for vctl. Its tests and
   the display suite pass (10 of 10, the HD 530 on Mesa 26.2). Hubble (Void) stays.
 - **Three platforms, one code base** (Dave, 2026-11-09; replaces "FreeBSD
   first" of 2026-11-06). The primary development platform is **Linux without
