@@ -1,0 +1,9 @@
+[package]
+name = "vergence-pdf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Our own PDF reader (PDF milestone 1): objects, cross-references with repair, the page tree, stream filters; every file is untrusted input"
+
+[dependencies]

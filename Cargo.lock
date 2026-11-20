@@ -2268,6 +2268,10 @@ name = "vergence-net"
 version = "0.1.0"
 
 [[package]]
+name = "vergence-pdf"
+version = "0.1.0"
+
+[[package]]
 name = "vergence-power"
 version = "0.1.0"
 

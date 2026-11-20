@@ -2,7 +2,8 @@
 
 Status: **accepted 2026-11-19** (Dave: "close-up, drawn signature first,
 placeholder for jpeg 2000"; the corpus: "use the PDFs in my Documents
-folder for testing"). Not started: it follows text milestone 1.
+folder for testing"). Step 1, part 1 built 2026-11-19 (below); part 2,
+encryption, next.
 
 ## What Dave asked for
 
@@ -147,3 +148,23 @@ selection order; color management beyond the simple formulas.
    files, their pictures and anything drawn from them stay out of the
    repository and off GitHub.* **The corpus:** which PDFs of yours can be used for checks (they stay
    on Control and the dev boxes, never in the repository)?
+
+## Progress
+
+- **Step 1, part 1** (2026-11-19 night): crates/vergence-pdf, no
+  dependencies: lexer.rs (objects, strings with every escape, names with
+  #xx, nesting capped at 64, stray tokens skipped as readers do), xref.rs
+  (tables, xref streams, hybrid /XRefStm, /Prev chains with loop and depth
+  limits, offsets counted from a late %PDF header, the repair scan with
+  the trailer or catalog found), lib.rs (Document: objects at offsets and
+  in object streams, a wrong offset looked up by scanning, reference
+  cycles cut, the page tree with inheritance and cycle cuts, content
+  streams joined), filter/ (our own inflate, LZW with EarlyChange,
+  ASCIIHex, ASCII85, RunLength, PNG and TIFF predictors; image filters left
+  named for step 5). 23 tests, the fuzz test included, on Hubble, kepler
+  and techbench; examples/pdfcorpus.rs reads a folder of PDFs.
+  **The corpus** (1,544 of Dave's PDFs on Hubble, 25 s): all opened, no
+  panics, 232,890 pages; the 1,443 unencrypted files have pages and every
+  content stream decodes cleanly. Everything left (64 files with no pages
+  found, 2,805 content streams) is in the 101 encrypted files: part 2.
+  Slowest: a 2.1 s technical book (to look at with step 3).
