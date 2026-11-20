@@ -19,10 +19,15 @@
 //! [`Document::needs_password`] and [`Document::unlock`] for the rest.
 //! Strings are decrypted as objects are read, streams before their filters.
 
+pub mod color;
+pub mod content;
 pub mod crypt;
 pub mod filter;
+pub mod function;
+pub mod image;
 pub mod lexer;
 pub mod object;
+pub mod render;
 pub mod xref;
 
 #[cfg(test)]
@@ -33,6 +38,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 pub use filter::Decoded;
+pub use render::render_page;
 use lexer::Lexer;
 pub use object::{Dict, Object, Ref, Stream};
 use xref::Entry;

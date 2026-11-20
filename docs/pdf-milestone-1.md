@@ -2,8 +2,8 @@
 
 Status: **accepted 2026-11-19** (Dave: "close-up, drawn signature first,
 placeholder for jpeg 2000"; the corpus: "use the PDFs in my Documents
-folder for testing"). Steps 1 and 2 built 2026-11-19 (below); step 3,
-pages drawn, next.
+folder for testing"). Steps 1 to 3 built 2026-11-19 (below); step 4,
+text, next.
 
 ## What Dave asked for
 
@@ -192,3 +192,20 @@ selection order; color management beyond the simple formulas.
   clips intersected path by path, images through any transform with
   smoothing). Bounded and fuzzed; 20 tests on all three;
   examples/rastercard.rs draws a test card (checked by eye).
+- **Step 3** (2026-11-19 night): vergence-pdf's function.rs (types 0, 2, 3
+  and the PostScript calculator, bounded), color.rs (every space to sRGB;
+  ICC by component count, CMYK by formula), content.rs (operations and
+  inline images), image.rs (1 to 16 bits, Decode, stencils, color-key,
+  explicit and soft masks; picture codecs left for step 5), render.rs (the
+  interpreter: paths, painting, clipping after paint, the q/Q stack,
+  ExtGState, forms nested with cycles cut, images, axial, radial and
+  function-based shadings by `sh` and as patterns, tiling patterns drawn
+  once and repeated, constant alpha, annotations' normal appearances, page
+  rotation). vergence-raster gained Clip (a rectangle kept exact, else a
+  mask). 45 tests in vergence-pdf on all three. **The corpus**: every first
+  page of the 1,544 files drawn, no panics, about 40 ms a page; checked by
+  eye on Victron, ICOM and Motorola manuals (vector art, logos, shaded
+  illustrations right; text missing until step 4, JPEGs gray boxes until
+  step 5). Not yet: blend modes, soft-mask groups, knockout, mesh
+  shadings (4-7). Slowest pages about 3 s (many non-rectangular clips, each
+  a full-page mask: to bound by box in the speed-up).

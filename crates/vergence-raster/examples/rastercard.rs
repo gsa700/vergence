@@ -3,7 +3,7 @@
 //!
 //!     cargo run --release -p vergence-raster --example rastercard -- card.ppm
 
-use vergence_raster::{Canvas, Cap, FillRule, Join, Mask, Path, Stroke, Transform};
+use vergence_raster::{Canvas, Cap, Clip, FillRule, Join, Path, Stroke, Transform};
 
 fn main() {
     let out = std::env::args().nth(1).unwrap_or_else(|| "card.ppm".into());
@@ -28,10 +28,9 @@ fn main() {
     // Curves: a circle and a ring, clipped to a band.
     let mut ring = Path::new();
     ring.circle(380.0, 90.0, 60.0).circle(380.0, 90.0, 30.0);
-    let mut clip = Mask::full(w, h).unwrap();
     let mut band = Path::new();
     band.rect(320.0, 50.0, 120.0, 70.0);
-    clip.intersect(&band, &id, FillRule::NonZero);
+    let clip = Clip::full(w, h).intersect(&band, &id, FillRule::NonZero, w, h);
     c.fill(&ring, &id, FillRule::EvenOdd, [0.2, 0.6, 0.3, 1.0], Some(&clip));
     // A stretched pen: a circle stroked under a 3 x 1 scale.
     let mut small = Path::new();

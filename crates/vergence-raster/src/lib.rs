@@ -60,6 +60,80 @@ impl Mask {
     }
 }
 
+/// What a clip lets through: most clips in real pages are rectangles,
+/// kept exact and cheap; anything else becomes a [`Mask`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum Clip {
+    /// Device x0, y0, x1, y1.
+    Rect([f64; 4]),
+    Mask(Mask),
+}
+
+impl Clip {
+    /// The whole of a `width` x `height` target.
+    pub fn full(width: usize, height: usize) -> Clip {
+        Clip::Rect([0.0, 0.0, width as f64, height as f64])
+    }
+
+    /// How much of pixel `x`, `y` it lets through.
+    pub fn at(&self, x: usize, y: usize) -> f32 {
+        match self {
+            Clip::Rect([x0, y0, x1, y1]) => {
+                let (fx, fy) = (x as f64, y as f64);
+                let w = ((fx + 1.0).min(*x1) - fx.max(*x0)).max(0.0);
+                let h = ((fy + 1.0).min(*y1) - fy.max(*y0)).max(0.0);
+                (w * h) as f32
+            }
+            Clip::Mask(m) => m.at(x, y),
+        }
+    }
+
+    /// This clip narrowed to `path` through `t` (PDF's W and W*). A
+    /// rectangle within a rectangle stays a rectangle.
+    pub fn intersect(&self, path: &Path, t: &Transform, rule: FillRule, width: usize, height: usize) -> Clip {
+        if let (Clip::Rect(r), Some(n)) = (self, device_rect(path, t)) {
+            return Clip::Rect([r[0].max(n[0]), r[1].max(n[1]), r[2].min(n[2]).max(r[0].max(n[0])), r[3].min(n[3]).max(r[1].max(n[1]))]);
+        }
+        let Some(mut mask) = Mask::full(width, height) else { return Clip::Rect([0.0; 4]) };
+        if let Clip::Mask(old) = self {
+            mask.data.clone_from(&old.data);
+        } else {
+            for y in 0..height {
+                for x in 0..width {
+                    mask.data[y * width + x] = self.at(x, y);
+                }
+            }
+        }
+        mask.intersect(path, t, rule);
+        Clip::Mask(mask)
+    }
+}
+
+/// The device rectangle a path is, if it is one rectangle with sides along
+/// the axes (PDF's `re`, under a matrix without rotation).
+fn device_rect(path: &Path, t: &Transform) -> Option<[f64; 4]> {
+    let lines = path.flatten(t, TOLERANCE);
+    let [only] = lines.as_slice() else { return None };
+    let mut pts = only.points.clone();
+    if pts.len() == 5 && pts[0] == pts[4] {
+        pts.pop();
+    }
+    if pts.len() != 4 {
+        return None;
+    }
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
+    let axis = (0..4).all(|i| {
+        let (a, b) = (pts[i], pts[(i + 1) % 4]);
+        near(a.x, b.x) || near(a.y, b.y)
+    });
+    if !axis {
+        return None;
+    }
+    let (x0, x1) = (pts.iter().map(|p| p.x).fold(f64::MAX, f64::min), pts.iter().map(|p| p.x).fold(f64::MIN, f64::max));
+    let (y0, y1) = (pts.iter().map(|p| p.y).fold(f64::MAX, f64::min), pts.iter().map(|p| p.y).fold(f64::MIN, f64::max));
+    Some([x0, y0, x1, y1])
+}
+
 /// A picture to draw: premultiplied RGBA, rows from the top.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Image {
@@ -110,13 +184,13 @@ impl Canvas {
         }
     }
 
-    pub fn fill(&mut self, path: &Path, t: &Transform, rule: FillRule, color: Rgba, clip: Option<&Mask>) {
+    pub fn fill(&mut self, path: &Path, t: &Transform, rule: FillRule, color: Rgba, clip: Option<&Clip>) {
         if let Some(cov) = fill_coverage(path, t, rule, self.width, self.height) {
             self.paint(&cov, clip, &|_, _| premul(color));
         }
     }
 
-    pub fn stroke(&mut self, path: &Path, t: &Transform, style: &Stroke, color: Rgba, clip: Option<&Mask>) {
+    pub fn stroke(&mut self, path: &Path, t: &Transform, style: &Stroke, color: Rgba, clip: Option<&Clip>) {
         if let Some(cov) = stroke_coverage(path, style, t, self.width, self.height) {
             self.paint(&cov, clip, &|_, _| premul(color));
         }
@@ -124,7 +198,7 @@ impl Canvas {
 
     /// Paints `cov` (times the clip) with a color per pixel centre (device
     /// x, y), premultiplied: what shadings and patterns use.
-    pub fn paint(&mut self, cov: &Coverage, clip: Option<&Mask>, color: &dyn Fn(f64, f64) -> Rgba) {
+    pub fn paint(&mut self, cov: &Coverage, clip: Option<&Clip>, color: &dyn Fn(f64, f64) -> Rgba) {
         for row in 0..cov.h {
             let y = cov.y as usize + row;
             if y >= self.height {
@@ -151,7 +225,7 @@ impl Canvas {
     /// Draws `img` with `t` taking its pixel space (0..width, 0..height,
     /// rows from the top) to the canvas; `smooth` samples between pixels,
     /// `alpha` fades it. Only the device pixels it can reach are visited.
-    pub fn draw_image(&mut self, img: &Image, t: &Transform, smooth: bool, alpha: f32, clip: Option<&Mask>) {
+    pub fn draw_image(&mut self, img: &Image, t: &Transform, smooth: bool, alpha: f32, clip: Option<&Clip>) {
         if img.width == 0 || img.height == 0 || img.data.len() < img.width * img.height * 4 {
             return;
         }
@@ -243,14 +317,21 @@ mod tests {
         let mut sq = Path::new();
         sq.rect(5.0, 5.0, 20.0, 20.0);
         // A clip to the left half of the square.
-        let mut clip = Mask::full(40, 40).unwrap();
         let mut left = Path::new();
         left.rect(0.0, 0.0, 15.0, 40.0);
-        clip.intersect(&left, &Transform::IDENTITY, FillRule::NonZero);
+        let clip = Clip::full(40, 40).intersect(&left, &Transform::IDENTITY, FillRule::NonZero, 40, 40);
+        assert!(matches!(clip, Clip::Rect(_)), "a rectangle stays a rectangle");
         c.fill(&sq, &Transform::IDENTITY, FillRule::NonZero, RED, Some(&clip));
         assert_eq!(c.pixel(10, 10), [255, 0, 0, 255]);
         assert_eq!(c.pixel(20, 10), [255, 255, 255, 255], "clipped away");
         assert_eq!(c.pixel(2, 2), [255, 255, 255, 255]);
+        // A circle clip becomes a mask, and still clips.
+        let mut round = Path::new();
+        round.circle(20.0, 20.0, 5.0);
+        let clip = Clip::full(40, 40).intersect(&round, &Transform::IDENTITY, FillRule::NonZero, 40, 40);
+        assert!(matches!(clip, Clip::Mask(_)));
+        assert_eq!(clip.at(20, 20), 1.0);
+        assert_eq!(clip.at(2, 2), 0.0);
     }
 
     #[test]

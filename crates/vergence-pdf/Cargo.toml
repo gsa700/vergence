@@ -7,3 +7,4 @@ publish.workspace = true
 description = "Our own PDF reader (PDF milestone 1): objects, cross-references with repair, the page tree, stream filters; every file is untrusted input"
 
 [dependencies]
+vergence-raster.workspace = true

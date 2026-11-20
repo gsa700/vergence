@@ -1,0 +1,222 @@
+//! Image XObjects and inline images (ISO 32000-2 §8.9) into premultiplied
+//! RGBA for the rasterizer: samples of 1 to 16 bits per component in any
+//! color space, /Decode arrays, stencil masks (/ImageMask), color-key
+//! masks (/Mask as an array), explicit masks (/Mask as a stream) and soft
+//! masks (/SMask). JPEG and the other picture codecs are step 5: until
+//! then such an image comes back as [`Decoded::Undecoded`].
+
+use crate::color::ColorSpace;
+use crate::filter;
+use crate::function::Bits;
+use crate::object::{Dict, Object};
+use crate::Document;
+use vergence_raster::Image;
+
+/// The most samples an image may have.
+pub const MAX_PIXELS: usize = 1 << 26;
+
+pub enum Decoded {
+    /// Colors with their alpha.
+    Color(Image),
+    /// A stencil: alpha only (0 to 255 per pixel), painted in the fill color.
+    Stencil { width: usize, height: usize, alpha: Vec<u8> },
+    /// Encoded with a picture codec not read yet (named), or unreadable.
+    Undecoded(Option<Vec<u8>>),
+}
+
+/// The full names of an inline image's abbreviated keys and values.
+pub fn expand_inline(d: &Dict) -> Dict {
+    let key = |k: &[u8]| -> Vec<u8> {
+        match k {
+            b"BPC" => b"BitsPerComponent".to_vec(),
+            b"CS" => b"ColorSpace".to_vec(),
+            b"D" => b"Decode".to_vec(),
+            b"DP" => b"DecodeParms".to_vec(),
+            b"F" => b"Filter".to_vec(),
+            b"H" => b"Height".to_vec(),
+            b"IM" => b"ImageMask".to_vec(),
+            b"I" => b"Interpolate".to_vec(),
+            b"W" => b"Width".to_vec(),
+            other => other.to_vec(),
+        }
+    };
+    let value = |v: &Object| -> Object {
+        match v {
+            Object::Name(n) => Object::Name(match n.as_slice() {
+                b"G" => b"DeviceGray".to_vec(),
+                b"RGB" => b"DeviceRGB".to_vec(),
+                b"CMYK" => b"DeviceCMYK".to_vec(),
+                b"I" => b"Indexed".to_vec(),
+                b"AHx" => b"ASCIIHexDecode".to_vec(),
+                b"A85" => b"ASCII85Decode".to_vec(),
+                b"LZW" => b"LZWDecode".to_vec(),
+                b"Fl" => b"FlateDecode".to_vec(),
+                b"RL" => b"RunLengthDecode".to_vec(),
+                b"CCF" => b"CCITTFaxDecode".to_vec(),
+                b"DCT" => b"DCTDecode".to_vec(),
+                other => other.to_vec(),
+            }),
+            Object::Array(a) => Object::Array(a.iter().map(|x| if let Object::Name(_) = x { value_name(x) } else { x.clone() }).collect()),
+            other => other.clone(),
+        }
+    };
+    Dict(d.0.iter().map(|(k, v)| (key(k), value(v))).collect())
+}
+
+fn value_name(x: &Object) -> Object {
+    match x {
+        Object::Name(n) if n == b"I" => Object::Name(b"Indexed".to_vec()),
+        Object::Name(n) if n == b"RGB" => Object::Name(b"DeviceRGB".to_vec()),
+        Object::Name(n) if n == b"G" => Object::Name(b"DeviceGray".to_vec()),
+        Object::Name(n) if n == b"CMYK" => Object::Name(b"DeviceCMYK".to_vec()),
+        Object::Name(n) if n == b"Fl" => Object::Name(b"FlateDecode".to_vec()),
+        Object::Name(n) if n == b"DCT" => Object::Name(b"DCTDecode".to_vec()),
+        Object::Name(n) if n == b"A85" => Object::Name(b"ASCII85Decode".to_vec()),
+        other => other.clone(),
+    }
+}
+
+/// An image from its dictionary and its bytes after the non-picture
+/// filters (`data`; `image_filter` names a picture codec left to apply).
+pub fn decode(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8]>, resources: Option<&Dict>) -> Decoded {
+    decode_at(doc, dict, data, image_filter, resources, 0)
+}
+
+/// `depth` 1 for a mask: a mask's own masks are never followed (a file
+/// could make one its own).
+fn decode_at(doc: &Document, dict: &Dict, data: &[u8], image_filter: Option<&[u8]>, resources: Option<&Dict>, depth: usize) -> Decoded {
+    if let Some(f) = image_filter {
+        return Decoded::Undecoded(Some(f.to_vec()));
+    }
+    let num = |k: &str| doc.get_in(dict, k).as_int();
+    let (Some(w), Some(h)) = (num("Width"), num("Height")) else { return Decoded::Undecoded(None) };
+    if w <= 0 || h <= 0 || (w as usize).saturating_mul(h as usize) > MAX_PIXELS {
+        return Decoded::Undecoded(None);
+    }
+    let (w, h) = (w as usize, h as usize);
+    let stencil = matches!(doc.get_in(dict, "ImageMask"), Object::Bool(true));
+    let decode_arr: Vec<f64> = match doc.get_in(dict, "Decode") {
+        Object::Array(a) => a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect(),
+        _ => Vec::new(),
+    };
+    if stencil {
+        // One bit per sample; by default a 0 bit paints.
+        let paint_on = if decode_arr.first().copied().unwrap_or(0.0) == 1.0 { 1 } else { 0 };
+        let mut bits = Bits::new(data);
+        let mut alpha = vec![0u8; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let b = bits.read(1).unwrap_or(1 - paint_on);
+                alpha[y * w + x] = if b == paint_on { 255 } else { 0 };
+            }
+            bits.align();
+        }
+        return Decoded::Stencil { width: w, height: h, alpha };
+    }
+    let cs = ColorSpace::parse(&doc.get_in(dict, "ColorSpace"), doc, resources).unwrap_or(ColorSpace::Gray);
+    let bpc = num("BitsPerComponent").unwrap_or(8);
+    if ![1, 2, 4, 8, 16].contains(&bpc) {
+        return Decoded::Undecoded(None);
+    }
+    let n = cs.components().max(1);
+    let max = ((1u32 << bpc) - 1) as f64;
+    // The default decode: 0..1 for each component, 0..2^bpc-1 for Indexed.
+    let range = |i: usize| -> (f64, f64) {
+        match (decode_arr.get(2 * i), decode_arr.get(2 * i + 1)) {
+            (Some(a), Some(b)) => (*a, *b),
+            _ if matches!(cs, ColorSpace::Indexed { .. }) => (0.0, max),
+            _ => (0.0, 1.0),
+        }
+    };
+    let ranges: Vec<(f64, f64)> = (0..n).map(range).collect();
+    // A color-key mask: samples within these raw ranges are transparent.
+    let key: Option<Vec<u64>> = match doc.get_in(dict, "Mask") {
+        Object::Array(a) => Some(a.iter().filter_map(|x| doc.resolve(x).as_int()).map(|v| v.max(0) as u64).collect()),
+        _ => None,
+    };
+    let mut out = vec![0u8; w * h * 4];
+    let mut bits = Bits::new(data);
+    let mut raw = vec![0u64; n];
+    let mut comps = vec![0f64; n];
+    // A cache for 8-bit single-component images (most gray and indexed ones).
+    let mut cache: Vec<Option<[u8; 3]>> = if n == 1 && bpc <= 8 { vec![None; 256] } else { Vec::new() };
+    for y in 0..h {
+        for x in 0..w {
+            for (k, r) in raw.iter_mut().enumerate() {
+                *r = bits.read(bpc as u32).unwrap_or(0);
+                let (d0, d1) = ranges[k];
+                comps[k] = d0 + *r as f64 * (d1 - d0) / max;
+            }
+            let keyed = key.as_ref().is_some_and(|k| k.len() >= 2 * n && raw.iter().enumerate().all(|(i, v)| *v >= k[2 * i] && *v <= k[2 * i + 1]));
+            let rgb = if !cache.is_empty() {
+                let slot = raw[0] as usize;
+                *cache[slot].get_or_insert_with(|| to_bytes(cs.to_rgb(&comps).unwrap_or([1.0; 3])))
+            } else {
+                to_bytes(cs.to_rgb(&comps).unwrap_or([1.0; 3]))
+            };
+            let i = (y * w + x) * 4;
+            if !keyed {
+                out[i..i + 3].copy_from_slice(&rgb);
+                out[i + 3] = 255;
+            }
+        }
+        bits.align();
+    }
+    // A soft mask or an explicit (stencil) mask: alpha from another image.
+    let smask = doc.get_in(dict, "SMask");
+    let mask = if depth > 0 {
+        None
+    } else {
+        match &smask {
+        Object::Stream(_) => Some((smask.clone(), true)),
+            _ => match doc.get_in(dict, "Mask") {
+                m @ Object::Stream(_) => Some((m, false)),
+                _ => None,
+            },
+        }
+    };
+    if let Some((Object::Stream(s), soft)) = mask {
+        let d = doc.stream(&s);
+        let alpha = match decode_at(doc, &s.dict, &d.data, d.image.as_ref().map(|(n, _)| n.as_slice()), resources, depth + 1) {
+            Decoded::Color(img) if soft => Some((img.width, img.height, img.data.as_chunks::<4>().0.iter().map(|p| p[0]).collect::<Vec<u8>>())),
+            Decoded::Stencil { width, height, alpha } => Some((width, height, alpha)),
+            _ => None,
+        };
+        if let Some((mw, mh, a)) = alpha {
+            // Resampled to the image's size if it differs.
+            for y in 0..h {
+                for x in 0..w {
+                    let (sx, sy) = (x * mw / w, y * mh / h);
+                    let i = (y * w + x) * 4;
+                    out[i + 3] = ((out[i + 3] as u32 * a[sy * mw + sx] as u32) / 255) as u8;
+                }
+            }
+        }
+    }
+    // Premultiplied.
+    for p in out.as_chunks_mut::<4>().0 {
+        let a = p[3] as u32;
+        for c in &mut p[..3] {
+            *c = ((*c as u32 * a + 127) / 255) as u8;
+        }
+    }
+    Decoded::Color(Image { width: w, height: h, data: out })
+}
+
+fn to_bytes(c: [f32; 3]) -> [u8; 3] {
+    c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+}
+
+/// An image XObject's stream, decoded.
+pub fn from_stream(doc: &Document, s: &crate::object::Stream, resources: Option<&Dict>) -> Decoded {
+    let d = doc.stream(s);
+    decode(doc, &s.dict, &d.data, d.image.as_ref().map(|(n, _)| n.as_slice()), resources)
+}
+
+/// An inline image's dictionary and data.
+pub fn inline(doc: &Document, dict: &Dict, data: &[u8], resources: Option<&Dict>) -> Decoded {
+    let dict = expand_inline(dict);
+    let (names, parms) = filter::filters_of(&dict);
+    let d = filter::decode(data, &names, &parms);
+    decode(doc, &dict, &d.data, d.image.as_ref().map(|(n, _)| n.as_slice()), resources)
+}

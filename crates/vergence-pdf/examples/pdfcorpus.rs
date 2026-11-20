@@ -46,6 +46,7 @@ struct Totals {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let list = args.iter().any(|a| a == "--list");
+    let render = args.iter().any(|a| a == "--render");
     let mut files = Vec::new();
     for a in args.iter().filter(|a| !a.starts_with("--")) {
         walk(Path::new(a), &mut files);
@@ -72,6 +73,10 @@ fn main() {
                 {
                     bad += 1;
                 }
+            }
+            // The first page drawn at 1x (step 3), when asked.
+            if render && let Some(p) = pages.first() {
+                let _ = vergence_pdf::render_page(&doc, p, 1.0);
             }
             Ok::<_, Error>((doc.repaired(), doc.encrypted(), pages.len(), empty, bad, doc.needs_password(), doc.encryption_revision()))
         });
