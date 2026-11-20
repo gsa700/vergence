@@ -269,8 +269,8 @@ pub struct OutputInfo {
     pub modes: Vec<ModeInfo>,
     pub mode: u32,
     /// The screen's calculated scale over its base scale (version 22): how
-    /// much smaller than calculated its text would be. Its text factor is
-    /// this to the power of `[displays] text-strength`.
+    /// much smaller than calculated its text is. Information only since
+    /// 2026-11-19: the text factor it once drove is gone (always 1).
     pub text_ratio: f64,
 }
 

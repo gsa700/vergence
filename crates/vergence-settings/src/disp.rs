@@ -23,41 +23,6 @@ pub fn size(desktop: &Table) -> f64 {
     desktop.get("displays").and_then(|d| d.get("size")).and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64))).unwrap_or(1.0)
 }
 
-/// How much of the text a smaller chosen scale takes away is given back
-/// (`[displays] text-strength`, 0 none .. 1 all): the server's default when
-/// unset (its displays.rs TEXT_STRENGTH).
-pub const TEXT_STRENGTH: f64 = 0.25;
-
-pub fn text_strength(desktop: &Table) -> f64 {
-    desktop
-        .get("displays")
-        .and_then(|d| d.get("text-strength"))
-        .and_then(|v| v.as_float().or(v.as_integer().map(|i| i as f64)))
-        .filter(|v| v.is_finite())
-        .unwrap_or(TEXT_STRENGTH)
-        .clamp(0.0, 1.0)
-}
-
-/// Kept only when it is not the default, so a later default reaches it.
-pub fn set_text_strength(desktop: &mut Table, v: f64) {
-    let d = displays_mut(desktop);
-    let v = (v.clamp(0.0, 1.0) * 100.0).round() / 100.0;
-    if (v - TEXT_STRENGTH).abs() < 1e-6 {
-        d.remove("text-strength");
-    } else {
-        d.insert("text-strength".into(), v.into());
-    }
-}
-
-/// A screen's text factor from its ratio (OutputInfo::text_ratio) at a
-/// strength: the server's displays.rs text_factor.
-pub fn text_factor(ratio: f64, strength: f64) -> f64 {
-    if !(ratio.is_finite() && ratio > 0.0) {
-        return 1.0;
-    }
-    ratio.powf(strength.clamp(0.0, 1.0)).clamp(vergence_protocol::window::MIN_TEXT, vergence_protocol::window::MAX_TEXT)
-}
-
 /// "Windows the same size on every screen" (`[displays] same-size`), off by default.
 pub fn same_size(desktop: &Table) -> bool {
     desktop.get("displays").and_then(|d| d.get("same-size")).and_then(Value::as_bool).unwrap_or(false)
@@ -283,22 +248,6 @@ pub fn set_arrangement(desktop: &mut Table, setup: &str, screens: &[Rect]) {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn text_strength_is_kept_only_off_the_default() {
-        let mut d = Table::new();
-        assert_eq!(text_strength(&d), TEXT_STRENGTH);
-        set_text_strength(&mut d, 0.75);
-        assert_eq!(text_strength(&d), 0.75);
-        set_text_strength(&mut d, 0.0);
-        assert_eq!(text_strength(&d), 0.0, "off is kept");
-        set_text_strength(&mut d, TEXT_STRENGTH);
-        assert!(d.get("displays").and_then(|t| t.get("text-strength")).is_none());
-        // The LG at 133% (ratio 1.27): half 1.13, off 1, full 1.27.
-        assert!((text_factor(1.27, 0.5) - 1.127).abs() < 0.001);
-        assert_eq!(text_factor(1.27, 0.0), 1.0);
-        assert!((text_factor(1.27, 1.0) - 1.27).abs() < 1e-9);
-        assert_eq!(text_factor(f64::NAN, 0.5), 1.0);
-    }
 
     use super::*;
 

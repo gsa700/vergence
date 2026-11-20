@@ -169,7 +169,7 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   create ~/.config/vergence/control-socket or start with VERGENCE_CONTROL=1. A
   checkout's tools/vergence-session is a development session (socket on).
   **The server and the apps speak one exact bus protocol version** (the
-  server refuses any other: vergence-protocol `bus::VERSION`, 23 since 2026-11-18 evening (the desktop's ground click; 22 the text slider; 21 earlier that day, the text factor; 20 since 2026-11-16 evening, File Viewer's right-click menu; 19 earlier that day, dock milestone 1's live tiles; 18 on 2026-11-15, files milestone 1's desktop menu; 17, 16 and 15 earlier that day); 13 since
+  server refuses any other: vergence-protocol `bus::VERSION`, 23 since 2026-11-18 evening (the desktop's ground click; 22 the text slider; 21 earlier that day, the text factor, both unused since 2026-11-19 when "Text on scaled screens" was removed (the fields stay, text always 1); 20 since 2026-11-16 evening, File Viewer's right-click menu; 19 earlier that day, dock milestone 1's live tiles; 18 on 2026-11-15, files milestone 1's desktop menu; 17, 16 and 15 earlier that day); 13 since
   2026-11-14), so they are installed together (install.sh does) and, when
   packages come (xbps template, FreeBSD port, Fedora spec), **each requires
   the other at the same version** (Dave, 2026-11-14: "lets make sure they are

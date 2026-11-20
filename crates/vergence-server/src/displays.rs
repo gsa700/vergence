@@ -43,11 +43,6 @@ pub struct DisplaysConfig {
     /// not the nearest whole number. desktop.toml `[displays] same-size`.
     #[serde(rename = "same-size")]
     pub same_size: Option<bool>,
-    /// How much of the text a chosen scale takes away is given back
-    /// (Scales::text): 0 none, 1 all, as a power of the ratio.
-    /// desktop.toml `[displays] text-strength`; TEXT_STRENGTH unset.
-    #[serde(rename = "text-strength")]
-    pub text_strength: Option<f64>,
     pub screen: Vec<ScreenConfig>,
     pub arrangement: Vec<Arrangement>,
 }
@@ -133,10 +128,6 @@ impl DisplaysConfig {
         self.screen.iter().find(|s| s.id == id).and_then(|s| s.mode.as_deref()).and_then(parse_mode)
     }
 
-    pub fn text_strength(&self) -> f64 {
-        self.text_strength.filter(|s| s.is_finite()).unwrap_or(TEXT_STRENGTH).clamp(0.0, 1.0)
-    }
-
     pub fn size(&self) -> f64 {
         self.size.filter(|s| s.is_finite()).unwrap_or(1.0).clamp(0.5, 3.0)
     }
@@ -170,21 +161,17 @@ impl DisplaysConfig {
         };
         let size = self.size();
         let how = if size != 1.0 { format!("{how}; size {}", pct(size)) } else { how };
-        // Text as large as the calculated scale would show it, whatever scale
-        // was chosen (Dave, 2026-11-18: per screen, full compensation): 133%
-        // on the LG, calculated 1.69, draws text 1.27 times its size. Before
-        // the size preference, which makes text larger with the rest.
-        // Full compensation was too much (Dave, 10:33: "maybe we adjust the
-        // ratio down a bit"): a smaller scale chosen for room is also a wish
-        // for smaller text, and the distances are guesses. So a part of it,
-        // as a power: the default 0.25 (Dave, 2026-11-18, "the best balance"
-        // on the LG at 133%) gives it 1.06x; 0.5 1.13x.
+        // Text is drawn at the size asked for on every screen. A text factor
+        // per screen ("Text on scaled screens", 2026-11-18) was taken out
+        // 2026-11-19 (Dave: "maybe we should dump that, it's confusing
+        // anyways combined with the other scaling"): each screen's scale and
+        // Accessibility's Size are the controls. The calculated scale over
+        // the base is still told (OutputInfo::text_ratio), for the curious.
         let text_ratio = match d.note {
             None => d.exact / base,
             Some(_) => 1.0,
         };
-        let text = text_factor(text_ratio, self.text_strength());
-        let how = if (text - 1.0).abs() >= 0.005 { format!("{how}; text {text:.2}x") } else { how };
+        let text = 1.0;
         Scales { shown: crate::scale_in_120ths(base * size), default, base, text, text_ratio, how }
     }
 
@@ -194,29 +181,14 @@ impl DisplaysConfig {
     }
 }
 
-use vergence_protocol::window::{MAX_TEXT, MIN_TEXT};
-
-/// How much of the lost text size a chosen scale gets back, unless
-/// desktop.toml says (DisplaysConfig::text_strength).
-pub const TEXT_STRENGTH: f64 = 0.25;
-
-/// A screen's text factor from its ratio (Scales::text_ratio) and the
-/// strength; the settings app works it out the same way (disp.rs).
-pub fn text_factor(ratio: f64, strength: f64) -> f64 {
-    if !(ratio.is_finite() && ratio > 0.0) {
-        return 1.0;
-    }
-    ratio.powf(strength.clamp(0.0, 1.0)).clamp(MIN_TEXT, MAX_TEXT)
-}
-
 /// A screen's scales (see scale_for).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scales {
     pub shown: f64,
     pub default: f64,
     pub base: f64,
-    /// Text drawn this much larger than its size says: `text_ratio` to the
-    /// power of the text strength (text_factor).
+    /// Text drawn this much larger than its size says: always 1 since
+    /// 2026-11-19 (bus v21's Configure::text kept, so no new bus version).
     pub text: f64,
     /// The calculated scale over the base (1 when the EDID has no size).
     pub text_ratio: f64,
@@ -374,29 +346,14 @@ mod tests {
     }
 
     #[test]
-    fn text_follows_the_calculated_scale() {
-        let lg = |c: &DisplaysConfig| c.scale_for("lg", "DP-1", (3840, 2160), Some((600, 340))).text;
-        let near = |a: f64, b: f64| (a - b).abs() < 0.01;
-        // techbench's LG (162 ppi, calculated 1.69) chosen at 133%: 1.27 lost,
-        // a quarter of it back by default (1.27^0.25 = 1.06), half at 0.5, all at 1.
-        let c = cfg("[[displays.screen]]\nid = \"lg\"\nscale = 1.3333333333\n");
-        assert!(near(lg(&c), 1.062), "{}", lg(&c));
-        let half = cfg("[displays]\ntext-strength = 0.5\n[[displays.screen]]\nid = \"lg\"\nscale = 1.3333333333\n");
-        assert!(near(lg(&half), 1.127), "{}", lg(&half));
-        let full = cfg("[displays]\ntext-strength = 1.0\n[[displays.screen]]\nid = \"lg\"\nscale = 1.3333333333\n");
-        assert!(near(lg(&full), 1.27), "{}", lg(&full));
-        let off = cfg("[displays]\ntext-strength = 0\n[[displays.screen]]\nid = \"lg\"\nscale = 1.3333333333\n");
-        assert_eq!(lg(&off), 1.0);
-        // At its default 200% the text is drawn a little smaller.
-        assert!(near(lg(&DisplaysConfig::default()), 0.959), "{}", lg(&DisplaysConfig::default()));
-        // The size preference does not take it back: text grows with the rest.
-        let c = cfg("[displays]\nsize = 1.25\n[[displays.screen]]\nid = \"lg\"\nscale = 1.3333333333\n");
-        assert!(near(lg(&c), 1.062));
-        // Hubble's panel at a laptop's distance: 1.04, a quarter of it 1.01.
-        let s = DisplaysConfig::default().scale_for("p", "eDP-1", (1920, 1080), Some((344, 193)));
-        assert!(near(s.text, 1.01), "{}", s.text);
-        // No size from the EDID: as given.
-        assert_eq!(DisplaysConfig::default().scale_for("x", "HDMI-A-1", (1920, 1080), None).text, 1.0);
+    fn text_is_drawn_at_its_size_on_every_screen() {
+        // techbench's LG (calculated 1.69) chosen at 133%: text as given; the
+        // ratio is still told. An old desktop.toml's text-strength is ignored.
+        let c = cfg("[displays]\ntext-strength = 0.5\n[[displays.screen]]\nid = \"lg\"\nscale = 1.3333333333\n");
+        let s = c.scale_for("lg", "DP-1", (3840, 2160), Some((600, 340)));
+        assert_eq!(s.text, 1.0);
+        assert!((s.text_ratio - 1.27).abs() < 0.01, "{}", s.text_ratio);
+        assert!(!s.how.contains("text"), "{}", s.how);
     }
 
     #[test]

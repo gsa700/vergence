@@ -10,7 +10,7 @@ scenario() {
     sleep 1
     s2=$(screen_scale MEM-2)
     check "$(yes_if "near '$(win_field W scale)' '$s2' 0.0001")" "on the second, its scale $s2: $(win_field W scale)"
-    check "$(yes_if "near '$(win_field W text)' 0.959 0.005")" "and its text, 0.96x at 200% of a 27\" 4K: $(win_field W text)"
+    check "$(yes_if "near '$(win_field W text)' 1.0 0.001")" "and its text, 1.0x at 200% of a 27\" 4K: $(win_field W text)"
     set -- $(win_geo W)
     p=$(picture W window)
     px=$("$HARNESS" same "$p" "$p" | sed -E 's/^PASS ([0-9]+)x([0-9]+).*/\1 \2/')
