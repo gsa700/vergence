@@ -295,3 +295,32 @@ unnecessary for now); voice control.
   question then done, x, 6, =, find answering "7×6" and "42" at once (no
   frame-old read), windows "allowed for 60 more min"; a grant 4 minutes
   from its end told by wait ("ends in 4 min; ask the person for more").
+- **Fable's security review** (2026-11-20, after step 6; read-only, the
+  code and the threat model only). Confirmed, to fix before closing:
+  (1, high) grants follow a self-chosen name, the grant list is open to
+  any client, a connection can say Hello again under another name, the
+  adapter defaults to "Claude"; (2, high) the question can be answered by
+  accident (every key taken at once, Enter and Space grant the timed
+  default, no arming delay, the next question at once in the same place,
+  Don't allow stores nothing so a refused agent asks again without end);
+  (3, high) the question can misname what it grants (a window title, the
+  app's own words; the agent's name can fill the heading or hide
+  characters); (4) app ids are self-declared; (5) one search over a
+  crafted tree (deep or cyclic parents) can freeze the server, no grant
+  needed; (6) the window list and the change log read every window
+  unasked; (7) rings take app-declared bounds unclipped and unbounded;
+  (8) no rate limits, whole Set values logged, no rotation, settings read
+  per request, one shared pending queue; (9) an action can land on a
+  neighbor after a layout moves ids; (10, low) revoke open to all, waiting
+  requests skip the off switch, acting while locked, extend aimed at the
+  last worker, silent reply drops and no act timeout in the adapter, no
+  fsync and 0600 only at creation; (11) the control socket bypasses it
+  all and the daily machines keep it on. Done well: secret fields guarded
+  twice, only the target window answers, bounded input, budgeted replies,
+  files written beside and renamed.
+  **Dave's calls** (2026-11-20): Enter in the agent question means Don't
+  allow (the row and look unchanged; granting takes a press or Tab, a
+  pause before input counts, Space answers nothing); the control socket's
+  agent commands (act, agent-answer, tile-action agent) only with
+  VERGENCE_CONTROL=1 in the server's environment (headless tests), not
+  through the control-socket file daily sessions use.
