@@ -114,20 +114,20 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   did not write, for later review and possible rewrite: docs/borrowed-review.md
   (Dave, 2026-11-11); add to it when anything borrowed comes in. OS interfaces (DRM/KMS,
   evdev, GBM, EGL, Vulkan) are not borrowing.
-- **Planned platform change** (Dave, 2026-11-17; not done yet, see
-  docs/freebsd-workstation.md): Hambench's ATX hardware (i9-13900K, UHD 770,
-  Intel SFP+ card) becomes a FreeBSD workstation and the primary development
-  platform, with an NVIDIA card (GTX 960 on the legacy 580 driver first).
-  Techbench's ITX hardware becomes the hamshack's Windows PC, so Fedora
-  leaves Techbench; a Lenovo Tiny gets Fedora for the systemd/logind side.
-  Hubble (Void) stays. Until the swap, the paragraph below holds.
+- **Platform change** (Dave, 2026-11-17, see docs/freebsd-workstation.md):
+  Hambench's ATX hardware (i9-13900K, UHD 770, Intel SFP+ card) became
+  **techbench**, a FreeBSD workstation (done 2026-11-17; an NVIDIA card,
+  GTX 960 on the legacy 580 driver first, is still to come). Techbench's
+  old ITX hardware becomes the hamshack's Windows PC; a Lenovo Tiny is
+  planned to get Fedora for the systemd/logind side, so until then there is
+  no systemd machine in the test set. Hubble (Void) stays.
 - **Three platforms, one code base** (Dave, 2026-11-09; replaces "FreeBSD
   first" of 2026-11-06). The primary development platform is **Linux without
   systemd: Void (glibc) on Hubble**, reinstalled from FreeBSD on 2026-11-09
   because the work ahead (GPUs, several cards, explicit sync, suspend soak) is
   where FreeBSD's drm-kmod lagged and its tools are thin. **FreeBSD** stays a
   real-hardware platform on **kepler**: since 2026-11-12 the Lenovo Tiny that
-  was Hubble's (i5-8500T, Intel UHD 630, the 14" 4K touch monitor; 10.0.1.31;
+  was Hubble's (i5-8500T, Intel UHD 630, the 14" 4K touch monitor;
   FreeBSD 15.1 on ZFS reinstalled that day; the M910q with the HD 530 it ran on
   from 2026-11-10 is a spare). Its touch panel comes up in HID mouse mode on
   FreeBSD (touches as one absolute mouse): a devd rule,
@@ -138,30 +138,29 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   sudo; Vergence installed under /usr/local, `vergence` from its text
   console starts the session, and ~/.config/vergence/control-socket is
   there so `vctl` works). **canary**, the FreeBSD VM that was the build gate
-  while FreeBSD had no hardware, is **dropped** (Dave, 2026-11-10): kepler
-  covers FreeBSD; the VM is not synced or tested any more. (It has no
+  while FreeBSD had no hardware, was dropped (Dave, 2026-11-10) and is back
+  since 2026-11-18 only to run the display suite in software (no GPU). (It has no
   display device; a session there was the server nested in its Xfce, see
-  docs/toolkit-milestone-1.md, "canary in software".) The second Linux is
-  **Fedora on
-  Techbench** (Fedora 45, Intel UHD 770), replacing Debian 13, which had been
-  picked for hosting the X11 daemon. Techbench is Dave's workstation, not a
-  project machine: Rust and -devel packages only (dnf needs his sudo), build
-  in ~/src/vergence (`tools/sync-hubble.sh techbench`). GNOME and GDM were
-  removed 2026-11-16 (Dave): log in on a text console and `exec vergence`
-  (the installed build) until the VDM login screen takes over (step 7).
-  Fedora 45's consoles were kmscon, which holds the GPU (the server failed
-  "Device or resource busy", and kmscon kept its picture on screen after a
-  switch away); since 2026-11-16 kmscon is off (kmsconvt@tty1 disabled,
-  /etc/systemd/system/autovt@.service links getty@.service) and every
-  console is agetty on the kernel's frame buffer console. To put kmscon
-  back: link autovt@.service to kmsconvt@.service and enable kmsconvt@tty1.
-  Its disk is LUKS-encrypted: no autologin there, ever (Dave's rule). Log ~/.local/state/vergence/server.log, `vctl` as on
-  Hubble (socket in /run/user/1000). Techbench is normally headless: the two
-  monitors move between it and Hubble. Keep
+  docs/toolkit-milestone-1.md, "canary in software".) **techbench** is FreeBSD's second machine since
+  2026-11-17: FreeBSD 15.1 on ZFS over GELI on the i9-13900K with the UHD
+  770 (drm-kmod `kld_list="i915kms"`, seatd, autofs, vdm enabled in
+  rc.conf). It was Fedora 45 from 2026-11-08 (with GNOME and GDM until
+  2026-11-16). Techbench is Dave's workstation, not a project machine:
+  normally no root for Claude (every step that needs root is product
+  evidence); for testing Dave gave a test password for sudo (installs), not
+  stored anywhere: ask him in a later session. Rust by rustup (`.
+  ~/.cargo/env` over ssh), build in ~/src/vergence (`tools/sync-hubble.sh
+  techbench`), Vergence installed under /usr/local, the VDM login screen at
+  boot, ~/.config/vergence/control-socket there so `vctl` works. Its disk
+  is encrypted: no autologin there, ever (Dave's rule). Log
+  ~/.local/state/vergence/server.log. The monitors (2026-11-19): the LG 27"
+  4K on techbench (scale 1.3333), the ASUS VS229 on kepler (scale 1, since
+  "the same size" snaps to whole scales within 8%). Keep
   Linux-only interfaces (udev, systemd, logind, /sys) out of the core; where
   the platforms must differ, say so in the code and the docs. VMs are for
   build checks only. A milestone is done when it builds and passes
-  its tests on all three and has run on the FreeBSD and Fedora machines.
+  its tests on all three and has run on the FreeBSD machines (and the
+  Fedora one, once the Tiny has it).
 - **Installing on a system**: `cargo build --release`, then `sudo tools/install.sh`
   (binaries, `vergence-session` and the `vergence` console command in
   /usr/local/bin, a Wayland session file, seatd enabled where there is no
