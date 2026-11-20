@@ -1,6 +1,6 @@
 [package]
 name = "vergence-sound"
-description = "Vergence's sound: outputs by name, which one is the default, volume and mute (OSS on FreeBSD, ALSA on Linux)"
+description = "Vergence's sound: outputs by name, which one is the default, volume and mute (OSS on FreeBSD, ALSA on Linux, a sound server by the PulseAudio protocol)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

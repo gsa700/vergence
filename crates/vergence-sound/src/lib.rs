@@ -4,7 +4,9 @@
 //!
 //! One interface, [`Sound`], and a back end per system, chosen at run time:
 //! OSS on FreeBSD ([`oss`], step 1); ALSA on Linux without a sound server
-//! (step 2). PipeWire waits for a client of our own (Dave, 2026-11-11).
+//! (step 2); with one (PipeWire or PulseAudio, the platform's standard on
+//! Fedora), the PulseAudio protocol both speak ([`pulse`], our own client,
+//! 2026-11-20).
 //! Volume and mute need no privilege on either; FreeBSD's default output
 //! needs root: the helper `sound-default` (step 5, [`oss::helper_main`]).
 
@@ -14,6 +16,8 @@ use std::io;
 pub mod oss;
 #[cfg(target_os = "linux")]
 pub mod alsa;
+#[cfg(target_os = "linux")]
+pub mod pulse;
 
 /// One output, as the page shows it.
 #[derive(Debug, Clone, PartialEq)]
@@ -80,10 +84,10 @@ pub fn open() -> Option<Box<dyn Sound>> {
     }
     #[cfg(target_os = "linux")]
     {
-        // A sound server owns the devices when one runs: PipeWire waits for a
-        // client of our own (Dave, 2026-11-11), PulseAudio likewise.
+        // A sound server owns the devices when one runs: we ask it, as
+        // every program's sound goes through it.
         if pipewire_running() {
-            return None;
+            return pulse::Pulse::open().map(|p| Box::new(p) as Box<dyn Sound>);
         }
         alsa::Alsa::open().map(|a| Box::new(a) as Box<dyn Sound>)
     }

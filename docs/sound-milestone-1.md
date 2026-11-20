@@ -236,3 +236,24 @@ service, ALSA's `alsactl`) still restores levels at boot.
   video). On kepler as derickson: pcm0 and back to pcm3 by `vsound default`;
   `pcm9`, `1;x` and two arguments refused; `nobody` cannot execute it.
   332 tests green on Hubble, kepler and Techbench.
+
+## 2026-11-20: a sound server's outputs (the PulseAudio protocol)
+
+Found checking "Sound on Linux!!" (Dave's wishlist-2): on apollo (Fedora
+45), PipeWire runs from the systemd user session, and vergence-sound
+stepped aside whenever a sound server owned the devices ("PipeWire waits
+for a client of our own", 2026-11-11), so the volume keys, the Sound tile
+and the Sound page did nothing there while PipeWire's own volume sat at
+40%. Dave: "build the pulse client". vergence-sound's pulse.rs is our own
+client of the PulseAudio native protocol (version 32), which PulseAudio
+and pipewire-pulse both speak: the socket in `$XDG_RUNTIME_DIR/pulse/native`
+(or a local `$PULSE_SERVER`), the cookie when there is one; sinks as
+outputs (named by their active port, "Speakers"), their volume (100 = the
+server's normal), mute and the default sink set on the server, so every
+program follows; the test tone a playback stream written as the server
+asks, drained, deleted. Tried on apollo's PipeWire 1.6.11: listed, volume
+41 and back to 40, mute on and off (wpctl agreeing), the default set, the
+tone into a temporary null sink (1.6 s, nothing heard). Hubble (Void)
+keeps plain ALSA: no sound server there, and Void's Firefox speaks ALSA
+itself. Not yet: following the server's changes by subscription (the
+reading thread asks again, as for ALSA), PipeWire's own protocol.
