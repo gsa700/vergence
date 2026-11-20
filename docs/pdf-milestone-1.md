@@ -2,8 +2,8 @@
 
 Status: **accepted 2026-11-19** (Dave: "close-up, drawn signature first,
 placeholder for jpeg 2000"; the corpus: "use the PDFs in my Documents
-folder for testing"). Step 1, part 1 built 2026-11-19 (below); part 2,
-encryption, next.
+folder for testing"). Step 1 built 2026-11-19 (below); step 2, our
+own path renderer, next.
 
 ## What Dave asked for
 
@@ -168,3 +168,15 @@ selection order; color management beyond the simple formulas.
   content stream decodes cleanly. Everything left (64 files with no pages
   found, 2,805 content streams) is in the 101 encrypted files: part 2.
   Slowest: a 2.1 s technical book (to look at with step 3).
+- **Step 1, part 2** (2026-11-19 night): crypt/, the standard security
+  handler, revisions 2 to 6: our own MD5, SHA-256/384/512 (constants
+  computed exactly, not typed), RC4 and AES-128/256 (S-box from its
+  definition; CBC both ways for revision 6's hash), checked against the
+  published vectors; keys by algorithms 2, 2.A and 2.B, the user password
+  then the owner's, crypt filters (V2, AESV2, AESV3, Identity), unencrypted
+  xref streams and metadata kept so. The empty user password is tried at
+  open; Document::needs_password and unlock for the rest. 29 tests on all
+  three. **The corpus**: 100 of the 101 encrypted files open by
+  themselves (revision 2: 16, 3: 22, 4: 62, 6: 1); one personal document
+  has a real user password and correctly asks for it. 238,301 pages,
+  every content stream decoding cleanly.

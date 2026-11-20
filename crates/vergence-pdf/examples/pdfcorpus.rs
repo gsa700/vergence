@@ -33,6 +33,8 @@ struct Totals {
     encrypted: usize,
     no_pages: usize,
     no_pages_plain: usize,
+    locked: usize,
+    revisions: std::collections::BTreeMap<i64, usize>,
     bad_plain: usize,
     pages_plain: usize,
     pages: usize,
@@ -71,7 +73,7 @@ fn main() {
                     bad += 1;
                 }
             }
-            Ok::<_, Error>((doc.repaired(), doc.encrypted(), pages.len(), empty, bad))
+            Ok::<_, Error>((doc.repaired(), doc.encrypted(), pages.len(), empty, bad, doc.needs_password(), doc.encryption_revision()))
         });
         let took = at.elapsed();
         t.slowest.push((took, f.clone()));
@@ -92,7 +94,14 @@ fn main() {
                 t.no_catalog += 1;
                 println!("no catalog  {}", f.display());
             }
-            Ok(Ok((repaired, encrypted, pages, empty, bad))) => {
+            Ok(Ok((repaired, encrypted, pages, empty, bad, locked, revision))) => {
+                t.locked += locked as usize;
+                if let Some(r) = revision {
+                    *t.revisions.entry(r).or_default() += 1;
+                }
+                if locked {
+                    println!("needs a password  {}", f.display());
+                }
                 t.opened += 1;
                 t.repaired += repaired as usize;
                 t.encrypted += encrypted as usize;
@@ -120,6 +129,7 @@ fn main() {
     println!("opened {}  (repaired {}, encrypted {}, with no pages {})", t.opened, t.repaired, t.encrypted, t.no_pages);
     println!("not PDF {}  no catalog {}  PANICS {}", t.not_pdf, t.no_catalog, t.panics);
     println!("pages {}  (empty content {}; content streams that did not decode cleanly {})", t.pages, t.empty_pages, t.bad_streams);
+    println!("encrypted by revision {:?}; need a password {}", t.revisions, t.locked);
     println!("not encrypted: pages {}, files with no pages {}, content streams not clean {}", t.pages_plain, t.no_pages_plain, t.bad_plain);
     println!("slowest:");
     for (d, p) in &t.slowest {

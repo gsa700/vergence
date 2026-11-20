@@ -57,6 +57,9 @@ pub struct Stream {
     pub dict: Dict,
     pub start: usize,
     pub len: usize,
+    /// The indirect object it is, when read from the file directly: its
+    /// number keys its decryption in an encrypted file.
+    pub owner: Option<Ref>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

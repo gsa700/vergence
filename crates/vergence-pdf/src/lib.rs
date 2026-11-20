@@ -14,9 +14,12 @@
 //! (tests.rs) feed it damage. In Vergence this runs inside the sandboxed
 //! helper, never in Close-Up itself.
 //!
-//! Encrypted files: [`Document::encrypted`] says so; their strings and
-//! streams are not decrypted yet (step 1, part 2).
+//! Encrypted files (the standard security handler, crypt/): opened with
+//! the empty user password when that works, as most are;
+//! [`Document::needs_password`] and [`Document::unlock`] for the rest.
+//! Strings are decrypted as objects are read, streams before their filters.
 
+pub mod crypt;
 pub mod filter;
 pub mod lexer;
 pub mod object;
@@ -81,6 +84,11 @@ pub struct Document {
     reading: RefCell<HashSet<u32>>,
     /// Built when the table pointed somewhere wrong: every `n g obj`.
     scanned: RefCell<Option<Rc<HashMap<u32, Entry>>>>,
+    /// An encrypted file's handler, and its keys once a password worked.
+    security: Option<crypt::Security>,
+    keys: Option<crypt::Keys>,
+    /// The /Encrypt dictionary's own number: it is never encrypted.
+    encrypt_ref: Option<Ref>,
 }
 
 impl Document {
@@ -98,7 +106,11 @@ impl Document {
             object_streams: RefCell::new(HashMap::new()),
             reading: RefCell::new(HashSet::new()),
             scanned: RefCell::new(None),
+            security: None,
+            keys: None,
+            encrypt_ref: None,
         };
+        doc.set_up_security();
         if repaired {
             doc.add_object_stream_members();
         }
@@ -108,12 +120,47 @@ impl Document {
             doc.entries = t.entries;
             doc.trailer = t.trailer;
             doc.repaired = true;
+            doc.set_up_security();
             doc.add_object_stream_members();
         }
-        if doc.catalog().is_none() {
+        if doc.catalog().is_none() && !doc.needs_password() {
             return Err(Error::NoCatalog);
         }
         Ok(doc)
+    }
+
+    /// Reads /Encrypt and tries the empty user password.
+    fn set_up_security(&mut self) {
+        let Some(enc) = self.trailer.get("Encrypt").cloned() else { return };
+        self.encrypt_ref = enc.as_ref();
+        let Some(dict) = self.resolve(&enc).as_dict().cloned() else { return };
+        let id0 = match self.trailer.get("ID").map(|o| self.resolve(o)) {
+            Some(Object::Array(a)) => a.first().and_then(|o| o.as_bytes()).map(<[u8]>::to_vec).unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        self.security = crypt::Security::new(&dict, &id0);
+        self.keys = self.security.as_ref().and_then(|s| s.unlock(b""));
+        self.object_streams.borrow_mut().clear();
+    }
+
+    /// Whether the file is encrypted with a password it cannot be opened
+    /// without (or with a handler this reader does not have).
+    pub fn needs_password(&self) -> bool {
+        self.encrypted() && self.keys.is_none()
+    }
+
+    /// Tries `password` as the user's, then the owner's; true if it opened
+    /// the file.
+    pub fn unlock(&mut self, password: &[u8]) -> bool {
+        let Some(keys) = self.security.as_ref().and_then(|s| s.unlock(password)) else { return false };
+        self.keys = Some(keys);
+        self.object_streams.borrow_mut().clear();
+        true
+    }
+
+    /// The security handler's revision (2 to 6), for an encrypted file.
+    pub fn encryption_revision(&self) -> Option<i64> {
+        self.security.as_ref().map(crypt::Security::revision)
     }
 
     /// Whether the cross-references had to be rebuilt by scanning.
@@ -154,9 +201,23 @@ impl Document {
 
     fn read(&self, r: Ref) -> Object {
         match self.entries.get(&r.num).copied() {
-            Some(Entry::At { offset, .. }) => self.at(offset, r).or_else(|| self.by_scan(r)).unwrap_or(Object::Null),
+            Some(Entry::At { offset, .. }) => self.at(offset, r).or_else(|| self.by_scan(r)).map_or(Object::Null, |o| self.decrypted(o, r)),
             Some(Entry::InStream { stm, idx }) => self.in_stream(stm, idx, r.num).unwrap_or(Object::Null),
-            Some(Entry::Free) | None => self.by_scan(r).unwrap_or(Object::Null),
+            Some(Entry::Free) | None => self.by_scan(r).map_or(Object::Null, |o| self.decrypted(o, r)),
+        }
+    }
+
+    /// An object read from the file itself: its strings decrypted, a
+    /// stream marked with its number (decrypted when its data is asked
+    /// for). Objects inside object streams came decrypted with their stream.
+    fn decrypted(&self, o: Object, r: Ref) -> Object {
+        let mut o = o;
+        if let Object::Stream(s) = &mut o {
+            s.owner = Some(r);
+        }
+        match &self.keys {
+            Some(k) if Some(r) != self.encrypt_ref => decrypt_strings(o, k, r, 0),
+            _ => o,
         }
     }
 
@@ -275,7 +336,32 @@ impl Document {
             dict.0.push((b"DecodeParms".to_vec(), Object::Array(resolved)));
         }
         let (names, parms) = filter::filters_of(&dict);
+        let decrypted;
+        let raw = match (&self.keys, s.owner) {
+            (Some(k), Some(owner)) if self.stream_encrypted(&dict, &names, &parms, k) => {
+                decrypted = k.decrypt(k.streams, owner.num, owner.generation, raw);
+                &decrypted[..]
+            }
+            _ => raw,
+        };
         filter::decode(raw, &names, &parms)
+    }
+
+    /// Whether a stream's data is encrypted: not the cross-reference
+    /// streams, not metadata when /EncryptMetadata is false, not a stream
+    /// whose first filter is /Crypt with the Identity filter.
+    fn stream_encrypted(&self, dict: &Dict, names: &[Vec<u8>], parms: &[Option<Dict>], k: &crypt::Keys) -> bool {
+        if k.streams == crypt::Method::None || dict.name("Type") == Some(b"XRef") {
+            return false;
+        }
+        if dict.name("Type") == Some(b"Metadata") && !k.encrypt_metadata {
+            return false;
+        }
+        if names.first().map(Vec::as_slice) == Some(b"Crypt") {
+            let named = parms.first().cloned().flatten().and_then(|p| p.name("Name").map(<[u8]>::to_vec));
+            return named.as_deref().is_some_and(|n| n != b"Identity");
+        }
+        true
     }
 
     /// The pages in order, each with what it inherits (Resources,
@@ -340,6 +426,25 @@ impl Document {
             }
         }
         out
+    }
+}
+
+/// Every string inside `o` decrypted with object `r`'s key (nesting capped
+/// as the lexer caps it).
+fn decrypt_strings(o: Object, k: &crypt::Keys, r: Ref, depth: usize) -> Object {
+    if depth > lexer::MAX_DEPTH || k.strings == crypt::Method::None {
+        return o;
+    }
+    let dict = |d: Dict| Dict(d.0.into_iter().map(|(key, v)| (key, decrypt_strings(v, k, r, depth + 1))).collect());
+    match o {
+        Object::String(s) => Object::String(k.decrypt(k.strings, r.num, r.generation, &s)),
+        Object::Array(a) => Object::Array(a.into_iter().map(|v| decrypt_strings(v, k, r, depth + 1)).collect()),
+        Object::Dict(d) => Object::Dict(dict(d)),
+        Object::Stream(mut s) => {
+            s.dict = dict(s.dict);
+            Object::Stream(s)
+        }
+        other => other,
     }
 }
 

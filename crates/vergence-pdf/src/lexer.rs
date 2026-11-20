@@ -272,7 +272,7 @@ impl<'a> Lexer<'a> {
         };
         self.pos = start + len;
         self.keyword(b"endstream");
-        Object::Stream(Stream { dict, start, len })
+        Object::Stream(Stream { dict, start, len, owner: None })
     }
 
     /// After `/`: the name's bytes, #xx decoded.
