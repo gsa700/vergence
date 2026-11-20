@@ -383,7 +383,7 @@ impl Font {
                     }
                 }
                 if let Some(u) = uni
-                    && let Some(g) = tt.lookup(3, 1, u as u32).or_else(|| tt.lookup(0, 3, u as u32)).or_else(|| tt.lookup(0, 4, u as u32))
+                    && let Some(g) = tt.lookup_unicode(u as u32)
                 {
                     return Some(g);
                 }

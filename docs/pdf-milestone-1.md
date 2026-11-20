@@ -1,9 +1,16 @@
 # PDF milestone 1: our own PDF engine, and PDFs in Close-Up
 
-Status: **accepted 2026-11-19** (Dave: "close-up, drawn signature first,
+Status: **closed 2026-11-20** (Dave: "fix the Icom title then close
+it"). Accepted 2026-11-19 (Dave: "close-up, drawn signature first,
 placeholder for jpeg 2000"; the corpus: "use the PDFs in my Documents
-folder for testing"). Steps 1 to 3 built 2026-11-19, step 4 part 1 the
-same night, parts 2 and 3 too: step 4 done; step 5 under way (below).
+folder for testing"). All nine steps built 2026-11-19/20, steps 6 to 8
+checked by hand by Dave, step 9's corpus checks done (below), and JPEG 2000
+our own after all. Carried forward to the next PDF milestone: JBIG2
+Huffman-coded text regions and halftone regions, knockout groups and a
+non-isolated group's backdrop, mesh shadings (types 4 to 7), JPEG 2000's
+ROI shifts, packed packet headers and POC, CMYK through a print profile
+(Dave kept the simple formula), drawing huge pages faster (decode at the
+drawn size).
 
 ## What Dave asked for
 
@@ -477,3 +484,15 @@ selection order; color management beyond the simple formulas.
   TM-V71 modification sheet, the Collins 51S-1 cover). Cost: the Collins
   page 376 ms before, 400 ms after (its three 33M-pixel scans are
   averaged once each). Test: one-pixel columns shrunk ten times are gray.
+- **Steps 6 to 8 checked by hand** (Dave, 2026-11-20 midday: "6 7 8
+  yes"): Close-Up's PDF view, text selection and Find, and FileView's
+  PDF thumbnails and previews, used on the real screens while step 9 was
+  being built.
+- **Step 9, part 5** (2026-11-20 afternoon): the Icom catalog's title.
+  Its TrueType subset's only cmap is the Unicode platform's (0, 1)
+  (Unicode 1.1), which we never tried, so all but one letter (code 97 by
+  luck as glyph 97) missed. truetype.rs's lookup_unicode tries (3, 10),
+  (3, 1), then every (0, *); a test builds a font per cmap. 7 corpus pages
+  changed (Icom and spec-sheet titles now drawn), nothing else. examples/
+  pdffonts.rs lists a page's fonts and how they are embedded, and can save
+  the programs. Then the milestone closed.

@@ -85,6 +85,14 @@ impl TrueType {
         self.cmaps.iter().any(|c| c.0 == p && c.1 == e)
     }
 
+    /// A Unicode character through whichever Unicode cmap the font has:
+    /// Windows' full range (3, 10) or BMP (3, 1), then any of the Unicode
+    /// platform's encodings (0, *), wider ranges first (step 9: a subset
+    /// with only (0, 1), Unicode 1.1, drew one letter of a title).
+    pub fn lookup_unicode(&self, u: u32) -> Option<u16> {
+        [(3, 10), (3, 1), (0, 6), (0, 4), (0, 3), (0, 2), (0, 1), (0, 0)].iter().find_map(|&(p, e)| self.lookup(p, e, u))
+    }
+
     /// `code` through the cmap subtable for platform `p`, encoding `e`.
     pub fn lookup(&self, p: u16, e: u16, code: u32) -> Option<u16> {
         let &(_, _, at) = self.cmaps.iter().find(|c| c.0 == p && c.1 == e)?;
@@ -319,4 +327,56 @@ fn simple(g: &[u8], contours: usize, m: &[f64; 6], path: &mut Path, total: &mut 
         path.close();
     }
     Some(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A font of nothing but a glyf table and one cmap subtable (platform
+    /// `p`, encoding `e`, format 4) mapping 'A'..'Z' to glyphs 3..28.
+    fn font_with_cmap(p: u16, e: u16) -> TrueType {
+        let mut sub = Vec::new();
+        let segs: [(u16, u16, u16); 2] = [(0x41, 0x5A, 3u16.wrapping_sub(0x41)), (0xFFFF, 0xFFFF, 1)];
+        sub.extend_from_slice(&4u16.to_be_bytes());
+        sub.extend_from_slice(&((16 + 8 * segs.len()) as u16).to_be_bytes());
+        sub.extend_from_slice(&[0, 0]);
+        sub.extend_from_slice(&((2 * segs.len()) as u16).to_be_bytes());
+        sub.extend_from_slice(&[0; 6]);
+        segs.iter().for_each(|s| sub.extend_from_slice(&s.1.to_be_bytes()));
+        sub.extend_from_slice(&[0, 0]);
+        segs.iter().for_each(|s| sub.extend_from_slice(&s.0.to_be_bytes()));
+        segs.iter().for_each(|s| sub.extend_from_slice(&s.2.to_be_bytes()));
+        segs.iter().for_each(|_| sub.extend_from_slice(&[0, 0]));
+        let mut cmap = vec![0, 0, 0, 1];
+        cmap.extend_from_slice(&p.to_be_bytes());
+        cmap.extend_from_slice(&e.to_be_bytes());
+        cmap.extend_from_slice(&12u32.to_be_bytes());
+        cmap.extend_from_slice(&sub);
+        let tables: [(&[u8; 4], Vec<u8>); 2] = [(b"cmap", cmap), (b"glyf", vec![0; 4])];
+        let mut font = vec![0, 1, 0, 0, 0, tables.len() as u8, 0, 0, 0, 0, 0, 0];
+        let mut at = 12 + 16 * tables.len();
+        let mut body = Vec::new();
+        for (tag, data) in &tables {
+            font.extend_from_slice(*tag);
+            font.extend_from_slice(&[0; 4]);
+            font.extend_from_slice(&(at as u32).to_be_bytes());
+            font.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            body.extend_from_slice(data);
+            at += data.len();
+        }
+        font.extend_from_slice(&body);
+        TrueType::parse(font).unwrap()
+    }
+
+    #[test]
+    fn every_unicode_cmap_is_tried() {
+        for (p, e) in [(3, 1), (3, 10), (0, 0), (0, 1), (0, 3), (0, 4)] {
+            let tt = font_with_cmap(p, e);
+            assert_eq!(tt.lookup_unicode('H' as u32), Some(3 + 7), "cmap ({p}, {e})");
+            assert_eq!(tt.lookup_unicode('a' as u32), None, "cmap ({p}, {e}): not mapped");
+        }
+        // A symbol-encoded (3, 0) table is not Unicode.
+        assert_eq!(font_with_cmap(3, 0).lookup_unicode('H' as u32), None);
+    }
 }
