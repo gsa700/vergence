@@ -24,6 +24,7 @@
 pub mod blur;
 pub mod cpu;
 pub mod round;
+pub mod textlook;
 mod gl;
 pub mod gpu;
 

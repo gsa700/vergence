@@ -139,6 +139,7 @@ flat in vec4 v_uv;
 flat in vec4 v_clip;
 flat in vec4 v_clip_param;
 out vec4 o_color;
+//_TEXT_LOOK_
 
 float edge(float lo, float hi, float p) {
     return clamp(min(p + 1.0, hi) - max(p, lo), 0.0, 1.0);
@@ -176,7 +177,7 @@ void main() {
         float t = len2 > 0.0 ? clamp(dot(q, d) / len2, 0.0, 1.0) : 0.0;
         c = 0.5 - (length(q - d * t) - v_param.y);
     } else if (kind == 3) {
-        c = texelFetch(u_atlas, ivec2(p - v_uv.zw + v_uv.xy), 0).r;
+        c = text_cover(texelFetch(u_atlas, ivec2(p - v_uv.zw + v_uv.xy), 0).r, color.rgb);
     } else {
         // A picture stretched to v_shape: between four of its pixels, mixed
         // with alpha multiplied in so a clear one's color does not bleed.
@@ -392,6 +393,9 @@ impl Gpu {
             (gl.glUseProgram)(program);
             (gl.glUniform1i)((gl.glGetUniformLocation)(program, c"u_atlas".as_ptr()), 0);
             (gl.glUniform1i)((gl.glGetUniformLocation)(program, c"u_image".as_ptr()), 1);
+            // Glyph coverage by the ink (textlook.rs), the same as the CPU's tables.
+            let (gamma, contrast) = crate::textlook::look();
+            (gl.glUniform2f)((gl.glGetUniformLocation)(program, c"u_text".as_ptr()), gamma, contrast);
             let size_uniform = (gl.glGetUniformLocation)(program, c"u_size".as_ptr());
 
             let (mut vertex_array, mut buffer) = (0, 0);
@@ -878,7 +882,7 @@ impl Gpu {
                     shape = [*ax, *ay, *bx, *by];
                     param = [KIND_LINE, *half, 0.0, 0.0];
                 }
-                Shape::Glyph { x, y, bitmap } => {
+                Shape::Glyph { x, y, bitmap, .. } => {
                     let at = self.atlas.place(&self.gl, bitmap).ok_or(GpuError::Unsupported("atlas full"))?;
                     uv = [at.0 as f32, at.1 as f32, *x as f32, *y as f32];
                     param = [KIND_GLYPH, 0.0, 0.0, 0.0];
@@ -1076,7 +1080,7 @@ unsafe fn link(gl: &Gles) -> Result<u32, GpuError> {
             Ok(shader)
         };
         let vertex = compile(gl::GL_VERTEX_SHADER, VERTEX)?;
-        let fragment = match compile(gl::GL_FRAGMENT_SHADER, FRAGMENT) {
+        let fragment = match compile(gl::GL_FRAGMENT_SHADER, &FRAGMENT.replace("//_TEXT_LOOK_", crate::textlook::GLSL)) {
             Ok(f) => f,
             Err(e) => {
                 (gl.glDeleteShader)(vertex);

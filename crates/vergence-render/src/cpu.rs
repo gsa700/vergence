@@ -109,8 +109,10 @@ pub(crate) enum Shape {
     Stroke(RRect, Option<RRect>),
     /// A line from a to b, `half` its width.
     Line { ax: f32, ay: f32, bx: f32, by: f32, half: f32 },
-    /// A glyph's coverage with its top-left pixel at x, y.
-    Glyph { x: i32, y: i32, bitmap: Arc<Bitmap> },
+    /// A glyph's coverage with its top-left pixel at x, y, and what each
+    /// coverage value paints for its ink (textlook.rs; the GPU works it out
+    /// in its shader instead).
+    Glyph { x: i32, y: i32, bitmap: Arc<Bitmap>, curve: Arc<[u8; 256]> },
     Image { to: RRect, image: usize, opacity: f32 },
     /// A grid of cells left as it is in the scene (the command at this
     /// place in its list), for a renderer that makes its own shapes of it:
@@ -205,6 +207,15 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
     let whole = [0, 0, w as i32, h as i32];
     let mut prims: Vec<Prim> = Vec::with_capacity(scene.commands.len());
     let mut chains: Vec<Vec<RRect>> = vec![Vec::new()];
+    // Each ink's coverage table (textlook.rs), made once per color a frame.
+    let (gamma, contrast) = crate::textlook::look();
+    let mut curves: std::collections::HashMap<[u8; 3], Arc<[u8; 256]>> = std::collections::HashMap::new();
+    let mut curve = |c: &Color| -> Arc<[u8; 256]> {
+        curves
+            .entry([c.r, c.g, c.b])
+            .or_insert_with(|| Arc::new(crate::textlook::table(crate::textlook::luminance(c.r as f32 / 255.0, c.g as f32 / 255.0, c.b as f32 / 255.0), gamma, contrast)))
+            .clone()
+    };
     // The scissor rectangle and the chain in force, one entry per open clip.
     let mut clips: Vec<([i32; 4], u32)> = vec![(whole, 0)];
     for (at, command) in scene.commands.iter().enumerate() {
@@ -245,7 +256,7 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
                     let Some(bitmap) = fonts.raster(face, g.id, size * scale, sub) else { continue };
                     let (px, py) = (whole_x as i32 + bitmap.left, baseline as i32 + bitmap.top);
                     let bounds = [px, py, px + bitmap.width as i32, py + bitmap.height as i32];
-                    add(Shape::Glyph { x: px, y: py, bitmap }, straight(color, order), bounds);
+                    add(Shape::Glyph { x: px, y: py, bitmap, curve: curve(color) }, straight(color, order), bounds);
                 }
             }
             Command::Image { image, rect, opacity } => {
@@ -327,7 +338,7 @@ pub(crate) fn prepare<'a>(scene: &'a Scene, fonts: &mut Fonts, scale: f32, w: u3
                         let Some(bitmap) = fonts.raster(face, cell.glyph, size * scale, sub) else { continue };
                         let (px, py) = (whole_x as i32 + bitmap.left, line + bitmap.top);
                         let bounds = [px, py, px + bitmap.width as i32, py + bitmap.height as i32];
-                        add(Shape::Glyph { x: px, y: py, bitmap }, straight(&cell.ink, order), bounds);
+                        add(Shape::Glyph { x: px, y: py, bitmap, curve: curve(&cell.ink) }, straight(&cell.ink, order), bounds);
                     }
                 }
             }
@@ -405,11 +416,11 @@ impl Prepared<'_> {
                     0.5 - ((ex * ex + ey * ey).sqrt() - half)
                 });
             }
-            Shape::Glyph { x: gx, y: gy, bitmap } => {
+            Shape::Glyph { x: gx, y: gy, bitmap, curve } => {
                 let w = bitmap.width as usize;
                 let line = &bitmap.alpha[(y - gy) as usize * w..][..w];
                 for x in x0.max(*gx)..x1.min(gx + w as i32) {
-                    let mut a = line[(x - gx) as usize] as u32;
+                    let mut a = curve[line[(x - gx) as usize] as usize] as u32;
                     if a != 0 && !chain.is_empty() {
                         a = to255(a as f32 / 255.0 * chain_cover(chain, x, y));
                     }
