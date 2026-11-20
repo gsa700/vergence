@@ -96,11 +96,20 @@ pub fn config_from(text: &str) -> Config {
     }
 }
 
+fn focus_ring_wanted() -> bool {
+    let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    text.parse::<toml::Table>().ok().and_then(|t| t.get("appearance").and_then(|a| a.get("focus-ring")).and_then(|v| v.as_bool())).unwrap_or(false)
+}
+
 fn load_config() -> Config {
     config_from(&crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default())
 }
 
 pub struct Zoom {
+    /// The server's own focus ring (step 8): desktop.toml [appearance]
+    /// focus-ring, off by default.
+    pub focus_ring: bool,
+    ring_ids: [Id; 4],
     /// The settings as last read (a change to `on`, `level` or `style`
     /// there applies; the keys change only what is shown now).
     config: Config,
@@ -128,6 +137,8 @@ impl Default for Zoom {
     fn default() -> Zoom {
         let c = if cfg!(test) { Config::default() } else { load_config() };
         Zoom {
+            focus_ring: !cfg!(test) && focus_ring_wanted(),
+            ring_ids: [Id::new(), Id::new(), Id::new(), Id::new()],
             config: c,
             on: c.on,
             lens: c.lens,
@@ -152,6 +163,11 @@ pub use vergence_seat::keyboard::ZoomKey;
 impl Server {
     /// desktop.toml changed (or the session started).
     pub fn zoom_reload(&mut self) {
+        let ring = focus_ring_wanted();
+        if ring != self.zoom.focus_ring {
+            self.zoom.focus_ring = ring;
+            self.redraw_all();
+        }
         let c = load_config();
         let old = self.zoom.config;
         if c == old {
@@ -314,6 +330,45 @@ impl Server {
         out.extend(scaled(solid(&z.ground_id, lens, ground), 1.0, screen));
         out.extend(back.into_iter().filter_map(|e| scaled(e, 1.0, screen)));
         out
+    }
+
+    /// The focus ring (step 8): around the focused control of the window
+    /// with the keyboard, from its meaning tree, in the accent, kept inside
+    /// the window; nothing for a control that fills most of it (a page, a
+    /// text area: the window itself says that). Placed by the scene just in
+    /// front of that window's picture, so windows in front cover it.
+    pub fn focus_ring_elements(&self, w: &crate::win::Win, out: Rectangle<i32, Logical>, scale: f64) -> Vec<crate::decor::SceneElement> {
+        if !self.zoom.focus_ring || self.input.keyboard_native.as_ref() != Some(w) {
+            return Vec::new();
+        }
+        let Some(n) = w.native() else { return Vec::new() };
+        let Some((focus, _, nodes)) = n.meaning() else { return Vec::new() };
+        let Some(node) = nodes.iter().find(|m| m.id == focus && focus != 0) else { return Vec::new() };
+        let Some(geo) = self.space.element_geometry(w) else { return Vec::new() };
+        let (ww, wh) = (geo.size.w as f64, geo.size.h as f64);
+        if node.w * node.h > 0.6 * ww * wh || node.w < 1.0 || node.h < 1.0 {
+            return Vec::new();
+        }
+        // Points on the desktop: 2 out from the control, 3 wide; the tree
+        // counts from the picture's top (meaning_origin).
+        let (gap, t) = (2.0, 3.0);
+        let (ox, oy) = self.meaning_origin(w);
+        let x0 = (ox + node.x - gap - t).max(geo.loc.x as f64);
+        let y0 = (oy + node.y - gap - t).max(geo.loc.y as f64);
+        let x1 = (ox + node.x + node.w + gap + t).min(geo.loc.x as f64 + ww);
+        let y1 = (oy + node.y + node.h + gap + t).min(geo.loc.y as f64 + wh);
+        if x1 - x0 < 2.0 * t || y1 - y0 < 2.0 * t {
+            return Vec::new();
+        }
+        let a = self.accent();
+        let color = [a.r as f32 / 255.0, a.g as f32 / 255.0, a.b as f32 / 255.0, 1.0];
+        let px = |x: f64, y: f64, w: f64, h: f64| {
+            let p0: Point<i32, Physical> = Point::<f64, Logical>::from((x - out.loc.x as f64, y - out.loc.y as f64)).to_physical(scale).to_i32_round();
+            let p1: Point<i32, Physical> = Point::<f64, Logical>::from((x + w - out.loc.x as f64, y + h - out.loc.y as f64)).to_physical(scale).to_i32_round();
+            Rectangle::<i32, Physical>::new(p0, Size::from(((p1.x - p0.x).max(1), (p1.y - p0.y).max(1))))
+        };
+        let sides = [px(x0, y0, x1 - x0, t), px(x0, y1 - t, x1 - x0, t), px(x0, y0 + t, t, y1 - y0 - 2.0 * t), px(x1 - t, y0 + t, t, y1 - y0 - 2.0 * t)];
+        self.zoom.ring_ids.iter().zip(sides).map(|(id, r)| crate::decor::SceneElement::Solid(SolidColorRenderElement::new(id.clone(), r, self.zoom.commit, color, Kind::Unspecified))).collect()
     }
 
     /// For `vctl zoom`.

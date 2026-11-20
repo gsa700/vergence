@@ -96,13 +96,18 @@ struct Part {
     name: Option<String>,
 }
 
+/// The toolkit's roles with a space in them (vergence-widgets ui.rs).
+const ROLES_OF_TWO_WORDS: [&str; 3] = ["text area", "text field", "scroll area"];
+
 fn part(s: &str) -> Part {
     let s = s.trim();
     if s == "*" {
         return Part { role: None, name: None };
     }
     match s.split_once(':') {
-        Some((r, n)) if !r.contains(' ') => Part { role: Some(r.trim().to_lowercase()), name: (!n.trim().is_empty()).then(|| n.trim().to_lowercase()) },
+        // A role is one word, or one of the toolkit's roles of two
+        // ("text area"); anything else before a colon is part of a name.
+        Some((r, n)) if !r.trim().contains(' ') || ROLES_OF_TWO_WORDS.contains(&r.trim().to_lowercase().as_str()) => Part { role: Some(r.trim().to_lowercase()), name: (!n.trim().is_empty() && n.trim() != "*").then(|| n.trim().to_lowercase()) },
         _ => Part { role: None, name: Some(s.to_lowercase()) },
     }
 }
@@ -218,8 +223,8 @@ impl Server {
         for (i, w) in self.space.elements().enumerate() {
             let Some(n) = w.native() else { continue };
             let Some(meaning) = n.meaning() else { continue };
-            let loc = self.space.element_location(w).unwrap_or_default();
-            out.push(Listed { win: w.clone(), index: Some(i), title: n.title(), app_id: n.app_id.clone(), origin: (loc.x as f64, loc.y as f64), meaning });
+            let origin = self.meaning_origin(w);
+            out.push(Listed { win: w.clone(), index: Some(i), title: n.title(), app_id: n.app_id.clone(), origin, meaning });
         }
         out
     }
@@ -363,6 +368,15 @@ impl Server {
         vergence_protocol::agent::AgentFound { client: f.client, window: f.window, title: f.title.clone(), node, screen: f.screen.clone().unwrap_or_default() }
     }
 
+    /// Where a native window's meaning is measured from on the desktop: its
+    /// picture's top left, which for a window drawing under its bar is that
+    /// much above the window's place (its tree's y counts from there).
+    pub fn meaning_origin(&self, w: &Win) -> (f64, f64) {
+        let loc = self.space.element_location(w).unwrap_or_default();
+        let inset = w.native().map_or(0, |n| n.inset());
+        (loc.x as f64, (loc.y - inset) as f64)
+    }
+
     /// An app as grants know it: its id and the program the server saw run
     /// it (Fable's review: an app id alone is any program's word).
     pub fn agent_app_key(&self, app_client: u32, app_id: &str) -> String {
@@ -458,8 +472,7 @@ impl Server {
                 let Some((focus, caret, nodes)) = n.meaning() else {
                     return refuse(self, serial, ErrorCode::Failed, "that window has sent no meaning".into());
                 };
-                let loc = self.space.element_location(&w).unwrap_or_default();
-                let origin = (loc.x as f64, loc.y as f64);
+                let origin = self.meaning_origin(&w);
                 let mut used = 256;
                 let nodes: Vec<Node> = nodes.iter().map(|m| on_screens(m, origin)).take_while(|m| (used + node_size(m) <= REPLY_BUDGET).then(|| used += node_size(m)).is_some()).collect();
                 let caret = caret.map(|(x, y, cw, ch)| (origin.0 + x, origin.1 + y, cw, ch));
@@ -502,10 +515,10 @@ impl Server {
                 // A ring where it acts, for the person to see (step 5), kept
                 // within the window.
                 let g = self.space.element_geometry(&w).unwrap_or_default();
-                let loc = self.space.element_location(&w).unwrap_or_default();
+                let loc = self.meaning_origin(&w);
                 let agent = self.bus_agent_name(id).unwrap_or_default();
                 let win = (g.loc.x as f64, g.loc.y as f64, g.size.w as f64, g.size.h as f64);
-                self.agent_ring(&agent, (loc.x as f64 + m.x, loc.y as f64 + m.y, m.w, m.h), win);
+                self.agent_ring(&agent, (loc.0 + m.x, loc.1 + m.y, m.w, m.h), win);
                 if self.send_act(&w, node, action, Some((id, serial))).is_none() {
                     reply(self, AgentEvent::Acted { serial, ok: false, why: "not a native window".into() });
                 }
@@ -594,6 +607,10 @@ mod tests {
         assert_eq!(ids("W > Keys > switch:Minimize"), Vec::<u64>::new(), "not below Keys");
         assert_eq!(ids("W > Nothing"), Vec::<u64>::new());
         assert_eq!(ids("W").len(), 8, "a window alone: all of it");
+        assert_eq!(ids("W > button:*"), vec![5, 7], "a role with any name");
+        assert_eq!(ids("W > scroll area:Page"), vec![1], "a role of two words");
+        assert_eq!(ids("W > scroll area:*"), vec![1]);
+        assert_eq!(parse("W > Time left: 5 min").1[0].name.as_deref(), Some("time left: 5 min"), "words before a colon that are no role are a name");
     }
 
     #[test]

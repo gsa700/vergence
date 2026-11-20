@@ -1059,8 +1059,10 @@ impl Server {
             }
             let Some(loc) = self.space.element_location(&w) else { continue };
             // A native window's picture (native.rs), drawn 1:1 at the scale it was
-            // drawn for, from the window's top left corner.
+            // drawn for, from the window's top left corner; the server's focus
+            // ring just in front of it (zoom.rs, step 8).
             if let Some(n) = w.native() {
+                elements.extend(self.focus_ring_elements(&w, out, scale));
                 if let Some(p) = n.picture() {
                     // A window that draws under its bar starts that much higher.
                     let top = Point::<i32, Logical>::from((loc.x, loc.y - n.inset()));

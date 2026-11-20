@@ -1758,7 +1758,7 @@ impl App {
             .chain(self.has_had(InputKind::Touchscreen).then(|| ("Touchscreen".into(), Page::Touchscreen, Icon::Touchscreen, "touchscreen touch screen panel finger tap press")))
             .collect()),
             ("Sound", vec![("Sound".into(), Page::Sound, Icon::Sound, "sound volume output speaker headphones mute audio")]),
-            ("Accessibility", vec![("Accessibility".into(), Page::Accessibility, Icon::Accessibility, "accessibility contrast motion transparency size zoom magnifier lens")]),
+            ("Accessibility", vec![("Accessibility".into(), Page::Accessibility, Icon::Accessibility, "accessibility contrast motion transparency size zoom magnifier lens focus ring")]),
             ("Privacy", vec![("Agents".into(), Page::Agents, Icon::Lock, "agents agent assistant ai claude automation permission allow take back grants privacy mcp")]),
             ("System", vec![
                 ("Energy".into(), Page::Energy, Icon::Energy, "energy power sleep screens off idle"),
@@ -1857,6 +1857,7 @@ impl App {
                     setting("High contrast", "Apps that support it draw stronger edges and text. The desktop's bars are solid.", switch(contrast, Message::Contrast).name("High contrast")),
                     setting("Reduce transparency", "Bars, the dock and menus are solid: nothing shows through them.", switch(transparency, Message::Transparency).name("Reduce transparency")),
                     setting("Size", &format!("Everything bigger on every screen, on top of each screen's own scale (Screens): {}%.", (self.size * 100.0).round()), size_slider(self.size)),
+                    self.focus_ring_row(),
                 ]),
                 self.zoom_group(),
                 self.group(Some("Motion"), vec![setting("Reduce motion", "Apps that support it turn off animations, and zooming jumps rather than glides.", switch(motion, Message::Motion).name("Reduce motion"))]),

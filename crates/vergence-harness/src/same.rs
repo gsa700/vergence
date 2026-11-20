@@ -18,14 +18,14 @@
 
 use std::path::Path;
 
-struct Pic {
-    w: i32,
-    h: i32,
-    rgba: Vec<u8>,
+pub(crate) struct Pic {
+    pub(crate) w: i32,
+    pub(crate) h: i32,
+    pub(crate) rgba: Vec<u8>,
 }
 
 impl Pic {
-    fn at(&self, x: i32, y: i32) -> Option<[u8; 4]> {
+    pub(crate) fn at(&self, x: i32, y: i32) -> Option<[u8; 4]> {
         if x < 0 || y < 0 || x >= self.w || y >= self.h {
             return None;
         }
@@ -34,7 +34,7 @@ impl Pic {
     }
 }
 
-fn load(path: &str) -> Result<Pic, Box<dyn std::error::Error>> {
+pub(crate) fn load(path: &str) -> Result<Pic, Box<dyn std::error::Error>> {
     let data = std::fs::read(Path::new(path)).map_err(|e| format!("{path}: {e}"))?;
     let p = vergence_decode::decode_bytes(&data, None).map_err(|e| format!("{path}: {e}"))?;
     let f = p.frames.into_iter().next().ok_or("no picture")?;

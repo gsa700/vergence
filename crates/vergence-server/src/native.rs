@@ -763,8 +763,8 @@ impl Server {
                 {
                     let new = (focus, caret, sane_tree(nodes));
                     let old = n.state.lock().unwrap().meaning.replace(new.clone());
-                    let loc = self.space.element_location(&w).unwrap_or_default();
-                    self.meaning_changed(client, window, old.as_ref(), &new, (loc.x as f64, loc.y as f64));
+                    let origin = self.meaning_origin(&w);
+                    self.meaning_changed(client, window, old.as_ref(), &new, origin);
                 }
             }
             WinRequest::Copy { kinds, .. } => self.native_copy(client, kinds),

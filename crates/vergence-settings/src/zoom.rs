@@ -13,6 +13,8 @@ pub enum ZoomMsg {
     Level(f64),
     Lens(bool),
     Follow(&'static str, bool),
+    /// The server's focus ring: [appearance] focus-ring.
+    FocusRing(bool),
 }
 
 fn table(d: &toml::Table) -> Option<&toml::Table> {
@@ -25,6 +27,11 @@ fn flag(d: &toml::Table, key: &str, default: bool) -> bool {
 
 impl App {
     pub fn zoom_message(&mut self, m: ZoomMsg) {
+        if let ZoomMsg::FocusRing(on) = m {
+            return self.save_table("appearance", |t| {
+                t.insert("focus-ring".into(), on.into());
+            });
+        }
         self.save_table("magnifier", |t| match m {
             ZoomMsg::On(on) => {
                 t.insert("on".into(), on.into());
@@ -38,7 +45,14 @@ impl App {
             ZoomMsg::Follow(key, on) => {
                 t.insert(key.into(), on.into());
             }
+            ZoomMsg::FocusRing(_) => {}
         });
+    }
+
+    /// The focus ring's row, for the Seeing group.
+    pub fn focus_ring_row(&self) -> Element<Message> {
+        let on = self.desktop.get("appearance").and_then(|a| a.get("focus-ring")).and_then(|v| v.as_bool()).unwrap_or(false);
+        setting("Show the focus ring", "A clear ring in the accent around the control the keyboard is on, the same in every Vergence app, the magnifier included.", switch(on, |on| Message::Zoom(ZoomMsg::FocusRing(on))).name("Show the focus ring"))
     }
 
     pub fn zoom_group(&self) -> Element<Message> {

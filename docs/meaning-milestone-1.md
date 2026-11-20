@@ -1,6 +1,8 @@
 # Meaning milestone 1: agents act by name, and the magnifier follows
 
-Status: **accepted 2026-11-20** (Dave: "Yes, we might also consider a
+Status: **closed 2026-11-20** (Dave: "close it when they pass": tests,
+the display suite's 11 scenarios and tools/agent-check.sh passed on
+Hubble, kepler, techbench and apollo). Was **accepted 2026-11-20** (Dave: "Yes, we might also consider a
 time based or session based permission option?": the MCP adapter in,
 asking per app, both magnifier styles, the name; grants for a time or a
 session added to step 4). The core-vision
@@ -386,3 +388,36 @@ unnecessary for now); voice control.
   switch, the keys; tests on all four, the display suite 10 of 10.
   Not yet: the Mac's other ways of following (keep the point in view,
   centered), several screens zoomed at once.
+- **Step 8, the server's focus ring** (2026-11-20). desktop.toml
+  `[appearance] focus-ring` (off by default; Accessibility > Seeing, "Show
+  the focus ring"): four solid edges in the accent, 3 points wide and 2
+  out from the focused control of the window with the keyboard, from its
+  meaning tree (zoom.rs `focus_ring_elements`), placed in the scene just in
+  front of that window's picture (decor.rs), so windows in front cover it,
+  and kept inside the window; nothing for a control filling most of the
+  window (a page, Edit's text area). The magnifier draws it larger with
+  the rest. Found with it: a window drawing under its bar measures its
+  tree from its picture's top, a bar's height above its place, and the
+  server's meaning code had used the place: found widgets' bounds, agent
+  rings and the magnifier's focus and caret were a bar too low in
+  Settings and Edit. One `meaning_origin` now does it for all. Tried
+  headless on Hubble (Settings, the switch turning it on, Tab moving it).
+- **Step 9, the checks** (2026-11-20). A display-suite scenario,
+  tools/display-suite/11-magnifier.sh: the test pattern zoomed 2x about a
+  point, checked pixel by pixel against the plain screen by a new
+  `vergence-harness zoomed <plain> <zoomed> <px> <py> <level>` (each pixel
+  of the zoomed shot against the plain one's at P + (q - P) / L, where the
+  plain one is flat; 0 of 2,060,640 differ on Hubble and kepler); the lens
+  showing something else; off again, the screen as it was (the dock's live
+  tiles aside); typing in Edit moving the point to its caret. The run
+  builds Edit too. tools/agent-check.sh: an MCP agent through
+  vergence-agent-mcp in a headless session, the answers by `vctl
+  agent-answer`: Edit's text set after Just now, the settings app refused
+  after Don't allow and refused again quietly at once (the switch never
+  pressed), FileView read after For an hour and the window list saying so,
+  a stale id refused, everything refused with agents off, agents.log
+  holding the answers and the action. Found by them: a path could not name
+  a role of two words ("text area:", "scroll area:", "text field:"), and
+  `role:*` matched only a widget named "*"; both fixed in meaning.rs, with
+  tests. Secret fields are refused by unit tests and step 1's checks, not
+  here (no app of ours has one on screen headless).
