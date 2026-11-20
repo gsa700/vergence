@@ -20,6 +20,12 @@
 //! - `R` page u32, scale f32 (pixels per point), x, y, width, height u32
 //!   (width 0: the whole page). Answer: width, height u32, then
 //!   premultiplied RGBA rows (opaque: pages have a white ground).
+//! - `O` the outline. Answer: a u32 count, then each entry's level (u8),
+//!   page (u32, all ones for none), top (f32, NaN for none) and title (u16
+//!   length, UTF-8).
+//! - `L` page u32: its links. Answer: a u32 count, then each link's
+//!   rectangle (4 f32, points from the page's top left as shown), a kind
+//!   byte (0 a page: u32 page and f32 top; 1 an address: u16 length, UTF-8).
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -65,6 +71,108 @@ impl Info {
         let pages = rest.as_chunks::<8>().0.iter().map(|c| (f(&c[..4]), f(&c[4..]))).collect();
         Some(Info { needs_password, pages })
     }
+}
+
+use crate::outline::{Action, Entry, Link, Target};
+
+fn put_str(out: &mut Vec<u8>, s: &str) {
+    let b = &s.as_bytes()[..s.len().min(u16::MAX as usize)];
+    out.extend((b.len() as u16).to_be_bytes());
+    out.extend(b);
+}
+
+fn put_target(out: &mut Vec<u8>, t: Option<Target>) {
+    out.extend(t.map_or(u32::MAX, |t| t.page as u32).to_be_bytes());
+    out.extend(t.and_then(|t| t.top).unwrap_or(f32::NAN).to_be_bytes());
+}
+
+/// Reading an answer: a cursor that says None past the end.
+struct Take<'a>(&'a [u8]);
+
+impl Take<'_> {
+    fn bytes(&mut self, n: usize) -> Option<&[u8]> {
+        if self.0.len() < n {
+            return None;
+        }
+        let (a, b) = self.0.split_at(n);
+        self.0 = b;
+        Some(a)
+    }
+    fn u8(&mut self) -> Option<u8> {
+        self.bytes(1).map(|b| b[0])
+    }
+    fn u32(&mut self) -> Option<u32> {
+        self.bytes(4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+    }
+    fn f32(&mut self) -> Option<f32> {
+        self.bytes(4).map(|b| f32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+    }
+    fn str(&mut self) -> Option<String> {
+        let n = self.bytes(2).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize)?;
+        self.bytes(n).map(|b| String::from_utf8_lossy(b).into_owned())
+    }
+    fn target(&mut self) -> Option<Option<Target>> {
+        let (page, top) = (self.u32()?, self.f32()?);
+        Some((page != u32::MAX).then(|| Target { page: page as usize, top: top.is_finite().then_some(top) }))
+    }
+}
+
+fn encode_outline(entries: &[Entry]) -> Vec<u8> {
+    let mut out = (entries.len() as u32).to_be_bytes().to_vec();
+    for e in entries {
+        out.push(e.level);
+        put_target(&mut out, e.target);
+        put_str(&mut out, &e.title);
+    }
+    out
+}
+
+fn decode_outline(b: &[u8]) -> Option<Vec<Entry>> {
+    let mut t = Take(b);
+    let n = t.u32()? as usize;
+    let mut out = Vec::with_capacity(n.min(65_536));
+    for _ in 0..n {
+        let level = t.u8()?;
+        let target = t.target()?;
+        out.push(Entry { level, title: t.str()?, target });
+    }
+    Some(out)
+}
+
+fn encode_links(links: &[Link]) -> Vec<u8> {
+    let mut out = (links.len() as u32).to_be_bytes().to_vec();
+    for l in links {
+        for v in l.rect {
+            out.extend(v.to_be_bytes());
+        }
+        match &l.action {
+            Action::GoTo(t) => {
+                out.push(0);
+                put_target(&mut out, Some(*t));
+            }
+            Action::Uri(u) => {
+                out.push(1);
+                put_str(&mut out, u);
+            }
+        }
+    }
+    out
+}
+
+fn decode_links(b: &[u8]) -> Option<Vec<Link>> {
+    let mut t = Take(b);
+    let n = t.u32()? as usize;
+    let mut out = Vec::with_capacity(n.min(4096));
+    for _ in 0..n {
+        let rect = [t.f32()?, t.f32()?, t.f32()?, t.f32()?];
+        let action = match t.u8()? {
+            0 => Action::GoTo(t.target()??),
+            1 => Action::Uri(t.str()?),
+            _ => return None,
+        };
+        out.push(Link { rect, action });
+    }
+    Some(out)
 }
 
 /// A page or a part of it, drawn.
@@ -157,6 +265,15 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write) -> std::io::Result<
                 out.extend((c.height as u32).to_be_bytes());
                 out.extend_from_slice(&c.data);
                 Ok(out)
+            }
+            b'O' => {
+                let d = doc.as_ref().ok_or("no document")?;
+                Ok(encode_outline(&crate::outline::outline(d, &pages)))
+            }
+            b'L' => {
+                let d = doc.as_ref().ok_or("no document")?;
+                let page = body.get(0..4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize).ok_or("a bad request")?;
+                Ok(encode_links(&crate::outline::links(d, &pages, page)))
             }
             _ => Err("an unknown request".into()),
         }))
@@ -321,6 +438,18 @@ impl Viewer {
         }
     }
 
+    /// The outline (bookmarks); empty if the document has none.
+    pub fn outline(&mut self) -> Result<Vec<Entry>, Error> {
+        let b = self.request(b'O', &[])?;
+        decode_outline(&b).ok_or_else(|| Error::Crashed("a garbled answer".into()))
+    }
+
+    /// Page `page`'s links.
+    pub fn links(&mut self, page: usize) -> Result<Vec<Link>, Error> {
+        let b = self.request(b'L', &(page as u32).to_be_bytes())?;
+        decode_links(&b).ok_or_else(|| Error::Crashed("a garbled answer".into()))
+    }
+
     /// Page `page` (from 0) at `scale` pixels per point, whole or only
     /// `region` (x, y, width, height in those pixels).
     pub fn render(&mut self, page: usize, scale: f32, region: Option<(u32, u32, u32, u32)>) -> Result<Tile, Error> {
@@ -441,6 +570,15 @@ mod tests {
         assert_eq!(px(&a[2].1, 20, 15, 15), 0);
         assert_eq!(px(&a[2].1, 20, 2, 2), 255);
         assert_eq!(a[3].0, 1);
+    }
+
+    #[test]
+    fn outline_and_links_cross_the_pipe() {
+        let entries = vec![Entry { level: 0, title: "Intro".into(), target: Some(Target { page: 2, top: Some(10.5) }) }, Entry { level: 1, title: "No place".into(), target: None }];
+        assert_eq!(decode_outline(&encode_outline(&entries)), Some(entries));
+        let links = vec![Link { rect: [1.0, 2.0, 3.0, 4.0], action: Action::GoTo(Target { page: 7, top: None }) }, Link { rect: [5.0, 6.0, 7.0, 8.0], action: Action::Uri("https://example.org/".into()) }];
+        assert_eq!(decode_links(&encode_links(&links)), Some(links));
+        assert_eq!(decode_links(&[0, 0, 0, 5]), None);
     }
 
     #[test]

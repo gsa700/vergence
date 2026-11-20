@@ -318,3 +318,21 @@ selection order; color management beyond the simple formulas.
   not the exact spot in it); the status line's page number is a field
   (type a number, Enter). Still in step 6: the sidebar (thumbnails,
   outline), links.
+- **Step 6, part 4** (2026-11-20 night): the outline and links.
+  vergence-pdf's outline.rs: text strings (UTF-16BE, UTF-8, PDFDocEncoding),
+  destinations (arrays with XYZ/FitH/FitR tops turned into points from
+  the page's top as shown, names through /Dests and the /Names tree with
+  its limits, dictionaries with /D), the outline tree (cycles cut, depth
+  and count bounded), each page's links (GoTo, URI, the Named page
+  actions); the helper's `O` and `L` requests. Corpus: 306 files with an
+  outline, 48,715 entries, 195,398 links read, no panics. Close-Up: a
+  sidebar (S, the toolbar's first button, the app menu) with the pages'
+  thumbnails (drawn on the worker after the view's pages, the current one
+  marked and kept in sight; click to go) and, where there is one, the
+  outline (Contents: indented, cut with "…", the entry for the place in
+  view marked and scrolled to); a click on a link goes to its place (the
+  spot on the page when it names one); an address outside the document is
+  asked about in the status line first, and only http(s), mailto and ftp
+  open (through vergence-open). Seen in a headless session: the R56
+  manual's table of contents links, its outline, thumbnails. Step 6 is
+  done but for checking it on the real screens.

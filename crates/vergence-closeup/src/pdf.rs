@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
+use vergence_pdf::outline::{Action, Entry, Link, Target};
 use vergence_scene::{Color, Image, Rect, Scene};
 use vergence_widgets::Waker;
 
@@ -36,7 +37,15 @@ enum Job {
     Page(usize, f32),
     /// One tile of a page at a scale: its column and row.
     Tile(usize, f32, u32, u32),
+    /// A page's thumbnail for the sidebar, at a scale.
+    Thumb(usize, f32),
+    /// A page's links.
+    Links(usize),
 }
+
+/// The sidebar's thumbnails: the widest box, in points, and the gap.
+pub const THUMB_W: f32 = 132.0;
+pub const THUMB_GAP: f32 = 16.0;
 
 /// A tile's key: page, scale in thousandths, column, row.
 type TileKey = (usize, u32, u32, u32);
@@ -64,6 +73,12 @@ pub struct Shared {
     /// The latest picture of each page and the scale it was drawn at.
     done: Mutex<HashMap<usize, (f32, Arc<Image>)>>,
     tiles: Mutex<HashMap<TileKey, Arc<Image>>>,
+    /// The sidebar's wishes (thumbnails), after the view's.
+    side: Mutex<Vec<Job>>,
+    thumbs: Mutex<HashMap<usize, Arc<Image>>>,
+    links: Mutex<HashMap<usize, Vec<Link>>>,
+    /// The outline, once the worker has read it.
+    pub outline: Mutex<Option<Arc<Vec<Entry>>>>,
     /// Pages the helper could not draw, and why.
     failed: Mutex<HashMap<usize, String>>,
     closed: AtomicBool,
@@ -72,7 +87,7 @@ pub struct Shared {
 
 impl Shared {
     fn new(waker: Option<Waker>) -> Shared {
-        Shared { wanted: Mutex::new(Vec::new()), ready: Condvar::new(), done: Mutex::new(HashMap::new()), tiles: Mutex::new(HashMap::new()), failed: Mutex::new(HashMap::new()), closed: AtomicBool::new(false), waker: Mutex::new(waker) }
+        Shared { wanted: Mutex::new(Vec::new()), ready: Condvar::new(), done: Mutex::new(HashMap::new()), tiles: Mutex::new(HashMap::new()), side: Mutex::new(Vec::new()), thumbs: Mutex::new(HashMap::new()), links: Mutex::new(HashMap::new()), outline: Mutex::new(None), failed: Mutex::new(HashMap::new()), closed: AtomicBool::new(false), waker: Mutex::new(waker) }
     }
 
     fn wake(&self) {
@@ -89,6 +104,9 @@ impl Shared {
 /// The worker: draws what is wanted, newest wishes first, until the
 /// document closes (the helper goes with it).
 fn work(mut viewer: vergence_pdf::helper::Viewer, shared: Arc<Shared>) {
+    let outline = viewer.outline().unwrap_or_default();
+    *shared.outline.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(outline));
+    shared.wake();
     loop {
         let job = {
             let mut w = shared.wanted.lock().unwrap_or_else(|e| e.into_inner());
@@ -99,6 +117,11 @@ fn work(mut viewer: vergence_pdf::helper::Viewer, shared: Arc<Shared>) {
                 if !w.is_empty() {
                     break w.remove(0);
                 }
+                let mut side = shared.side.lock().unwrap_or_else(|e| e.into_inner());
+                if !side.is_empty() {
+                    break side.remove(0);
+                }
+                drop(side);
                 w = shared.ready.wait(w).unwrap_or_else(|e| e.into_inner());
             }
         };
@@ -111,6 +134,19 @@ fn work(mut viewer: vergence_pdf::helper::Viewer, shared: Arc<Shared>) {
                 (page, viewer.render(page, scale, None).map(|t| {
                     shared.done.lock().unwrap_or_else(|e| e.into_inner()).insert(page, (scale, Arc::new(Image { width: t.width, height: t.height, rgba: t.rgba })));
                 }))
+            }
+            Job::Thumb(page, scale) => {
+                if shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).contains_key(&page) {
+                    continue;
+                }
+                (page, viewer.render(page, scale, None).map(|t| {
+                    shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).insert(page, Arc::new(Image { width: t.width, height: t.height, rgba: t.rgba }));
+                }))
+            }
+            Job::Links(page) => {
+                let l = viewer.links(page).unwrap_or_default();
+                shared.links.lock().unwrap_or_else(|e| e.into_inner()).insert(page, l);
+                continue;
             }
             Job::Tile(page, scale, tx, ty) => {
                 let key = tile_key(page, scale, tx, ty);
@@ -151,6 +187,8 @@ pub struct Layout {
     pub pan_x: f32,
     /// A page to go to once the view has a place (a remembered one).
     pub restore: Option<usize>,
+    /// The sidebar's thumbnails scrolled this far, in points.
+    pub thumb_top: f32,
 }
 
 /// An open PDF: its layout, and its worker and helper until dropped.
@@ -201,14 +239,14 @@ pub fn start(viewer: vergence_pdf::helper::Viewer, waker: Option<Waker>) -> Resu
     let shared = Arc::new(Shared::new(waker));
     let s = shared.clone();
     std::thread::spawn(move || work(viewer, s));
-    Ok(Pdf(Layout { pages, shared, mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None }))
+    Ok(Pdf(Layout { pages, shared, mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0 }))
 }
 
 impl Layout {
     /// For tests: pages with no helper behind them.
     #[cfg(test)]
     fn sized(pages: Vec<(f32, f32)>) -> Layout {
-        Layout { pages: Arc::new(pages), shared: Arc::new(Shared::new(None)), mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None }
+        Layout { pages: Arc::new(pages), shared: Arc::new(Shared::new(None)), mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0 }
     }
 
     /// Each page's top in the document, in points.
@@ -391,12 +429,18 @@ impl Layout {
             wanted.push(Job::Page(last + 1, page_scale(pw, ph, z * scale)));
         }
         let page_of = |j: &Job| match j {
-            Job::Page(p, _) | Job::Tile(p, ..) => *p,
+            Job::Page(p, _) | Job::Tile(p, ..) | Job::Thumb(p, _) | Job::Links(p) => *p,
         };
         wanted.sort_by_key(|j| (page_of(j) as isize - middle as isize).unsigned_abs());
         // Page pictures first (they cover the page soonest), then its tiles.
         tile_jobs.sort_by_key(|j| (page_of(j) as isize - middle as isize).unsigned_abs());
         wanted.extend(tile_jobs);
+        // Links of the pages in sight (quick), before any picture.
+        {
+            let links = self.shared.links.lock().unwrap_or_else(|e| e.into_inner());
+            let missing: Vec<Job> = (first..=last).filter(|p| !links.contains_key(p)).map(Job::Links).collect();
+            wanted.splice(0..0, missing);
+        }
         {
             let mut w = self.shared.wanted.lock().unwrap_or_else(|e| e.into_inner());
             if *w != wanted {
@@ -410,6 +454,135 @@ impl Layout {
         // Tiles: only those of this zoom in sight.
         if tiles.len() > keep_tiles.len() {
             self.shared.tiles.lock().unwrap_or_else(|e| e.into_inner()).retain(|k, _| keep_tiles.contains(k));
+        }
+        scene.pop_clip();
+    }
+}
+
+impl Layout {
+    /// The page and the point on it (points from its top left) under a
+    /// window point, if any.
+    pub fn hit(&self, r: Rect, x: f32, y: f32) -> Option<(usize, f32, f32)> {
+        let z = self.zoom(r);
+        let tops = self.tops();
+        let (first, last) = self.in_sight(r);
+        (first..=last).find_map(|p| {
+            let (pw, ph) = self.pages[p];
+            let (dx, dy) = (r.x + (r.w - pw * z) / 2.0 + self.pan_x, r.y + MARGIN + (tops[p] - self.top) * z);
+            let (px, py) = ((x - dx) / z, (y - dy) / z);
+            (px >= 0.0 && py >= 0.0 && px <= pw && py <= ph).then_some((p, px, py))
+        })
+    }
+
+    /// What the link under a window point does, if there is one.
+    pub fn link_at(&self, r: Rect, x: f32, y: f32) -> Option<Action> {
+        let (p, px, py) = self.hit(r, x, y)?;
+        let links = self.shared.links.lock().unwrap_or_else(|e| e.into_inner());
+        links.get(&p)?.iter().rev().find(|l| px >= l.rect[0] && px <= l.rect[2] && py >= l.rect[1] && py <= l.rect[3]).map(|l| l.action.clone())
+    }
+
+    /// A destination: its page, and the spot on it when it names one.
+    pub fn go_to_target(&mut self, t: Target, r: Rect) {
+        let page = t.page.min(self.pages.len() - 1);
+        match t.top {
+            Some(top) => {
+                let z = self.zoom(r);
+                self.top = self.tops()[page] + top.clamp(0.0, self.pages[page].1) - 8.0 / z;
+                self.clamp(r);
+            }
+            None => self.go_to(page, r),
+        }
+    }
+
+    /// Each thumbnail's size, in points.
+    fn thumb_size(&self, p: usize) -> (f32, f32) {
+        let (pw, ph) = self.pages[p];
+        let k = (THUMB_W / pw).min(THUMB_W * 1.5 / ph);
+        (pw * k, ph * k)
+    }
+
+    fn thumb_tops(&self) -> Vec<f32> {
+        let mut y = THUMB_GAP;
+        (0..self.pages.len())
+            .map(|p| {
+                let t = y;
+                y += self.thumb_size(p).1 + THUMB_GAP;
+                t
+            })
+            .collect()
+    }
+
+    fn thumbs_total(&self) -> f32 {
+        (0..self.pages.len()).map(|p| self.thumb_size(p).1 + THUMB_GAP).sum::<f32>() + THUMB_GAP
+    }
+
+    /// The thumbnails kept within the strip.
+    pub fn clamp_thumbs(&mut self, r: Rect) {
+        self.thumb_top = self.thumb_top.clamp(0.0, (self.thumbs_total() - r.h).max(0.0));
+    }
+
+    /// The strip scrolled so page `p`'s thumbnail shows.
+    pub fn show_thumb(&mut self, p: usize, r: Rect) {
+        let Some(&t) = self.thumb_tops().get(p) else { return };
+        let h = self.thumb_size(p).1;
+        if t < self.thumb_top + THUMB_GAP {
+            self.thumb_top = t - THUMB_GAP;
+        } else if t + h > self.thumb_top + r.h - THUMB_GAP {
+            self.thumb_top = t + h + THUMB_GAP - r.h;
+        }
+        self.clamp_thumbs(r);
+    }
+
+    /// The page whose thumbnail is at window y.
+    pub fn thumb_at(&self, r: Rect, y: f32) -> Option<usize> {
+        let at = y - r.y + self.thumb_top;
+        let tops = self.thumb_tops();
+        (0..self.pages.len()).find(|&p| at >= tops[p] - THUMB_GAP / 2.0 && at <= tops[p] + self.thumb_size(p).1 + THUMB_GAP / 2.0)
+    }
+
+    /// The sidebar's thumbnails, the current page marked; asks for the
+    /// ones in sight.
+    #[allow(clippy::needless_range_loop)]
+    pub fn draw_thumbs(&self, scene: &mut Scene, r: Rect, scale: f32, current: usize, ground: Color, accent: Color) {
+        scene.push_clip(r, 0.0);
+        scene.fill(r, ground);
+        let tops = self.thumb_tops();
+        let thumbs = self.shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let mut wanted = Vec::new();
+        let (mut first, mut last) = (usize::MAX, 0);
+        for p in 0..self.pages.len() {
+            let (w, h) = self.thumb_size(p);
+            let y = r.y + tops[p] - self.thumb_top;
+            if y + h < r.y || y > r.y + r.h {
+                continue;
+            }
+            (first, last) = (first.min(p), last.max(p));
+            let dest = Rect::new(r.x + (r.w - w) / 2.0, y, w, h);
+            if p == current {
+                scene.stroke(Rect::new(dest.x - 3.0, dest.y - 3.0, dest.w + 6.0, dest.h + 6.0), 3.0, 2.0, accent);
+            }
+            scene.fill(Rect::new(dest.x + 1.0, dest.y + 1.5, w, h), Color::rgba(0, 0, 0, 0x50));
+            scene.fill(dest, Color::rgb(0xff, 0xff, 0xff));
+            match thumbs.get(&p) {
+                Some(img) => {
+                    let id = scene.image(img.clone());
+                    scene.draw_image(id, dest, 1.0);
+                }
+                None => wanted.push(Job::Thumb(p, round3(w * scale.max(0.25) / self.pages[p].0))),
+            }
+        }
+        {
+            let mut side = self.shared.side.lock().unwrap_or_else(|e| e.into_inner());
+            if *side != wanted {
+                *side = wanted;
+                self.shared.ready.notify_all();
+            }
+        }
+        if first != usize::MAX {
+            let keep = first.saturating_sub(30)..=last + 30;
+            if thumbs.keys().any(|p| !keep.contains(p)) {
+                self.shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).retain(|p, _| keep.contains(p));
+            }
         }
         scene.pop_clip();
     }
@@ -568,6 +741,32 @@ mod tests {
         let doc_y = d.top + (at - MARGIN) / z0;
         d.set_mode(Mode::Zoom(2.0), Some(at), r);
         assert!((d.top + (at - MARGIN) / 2.0 - doc_y).abs() < 1e-3);
+    }
+
+    #[test]
+    fn hits_links_and_targets() {
+        let mut d = Layout::sized(vec![LETTER; 3]);
+        let r = place();
+        // Width fit at zoom 1: page 0 at x 16, y 16.
+        assert_eq!(d.hit(r, 16.0 + 100.0, 16.0 + 50.0), Some((0, 100.0, 50.0)));
+        assert_eq!(d.hit(r, 5.0, 50.0), None);
+        d.shared.links.lock().unwrap().insert(0, vec![Link { rect: [90.0, 40.0, 200.0, 60.0], action: Action::Uri("https://example.org/".into()) }]);
+        assert_eq!(d.link_at(r, 116.0, 66.0), Some(Action::Uri("https://example.org/".into())));
+        assert_eq!(d.link_at(r, 116.0, 166.0), None);
+        d.go_to_target(Target { page: 1, top: Some(100.0) }, r);
+        assert!((d.top - (792.0 + GAP + 100.0 - 8.0)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn thumbnails_follow_the_page() {
+        let mut d = Layout::sized(vec![LETTER; 50]);
+        let r = Rect::new(0.0, 0.0, 180.0, 600.0);
+        d.show_thumb(20, r);
+        let p = d.thumb_at(r, 300.0).unwrap();
+        assert!((17..=21).contains(&p), "{p}");
+        d.show_thumb(0, r);
+        assert_eq!(d.thumb_top, 0.0);
+        assert_eq!(d.thumb_at(r, THUMB_GAP + 10.0), Some(0));
     }
 
     #[test]

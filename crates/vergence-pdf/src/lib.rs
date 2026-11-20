@@ -31,6 +31,7 @@ pub mod image;
 pub mod jbig2;
 pub mod lexer;
 pub mod object;
+pub mod outline;
 pub mod render;
 pub mod xref;
 

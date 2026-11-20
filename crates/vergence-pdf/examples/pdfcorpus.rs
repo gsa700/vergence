@@ -43,6 +43,11 @@ struct Totals {
     slowest: Vec<(Duration, PathBuf)>,
 }
 
+thread_local! {
+    /// Outline entries, links, and files with an outline, over the run.
+    static OUTLINE: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let list = args.iter().any(|a| a == "--list");
@@ -78,6 +83,10 @@ fn main() {
             if render && let Some(p) = pages.first() {
                 let _ = vergence_pdf::render_page(&doc, p, 1.0);
             }
+            // The outline and every page's links (step 6).
+            let entries = vergence_pdf::outline::outline(&doc, &pages);
+            let links: usize = (0..pages.len()).map(|i| vergence_pdf::outline::links(&doc, &pages, i).len()).sum();
+            OUTLINE.with(|o| o.set((o.get().0 + entries.len(), o.get().1 + links, o.get().2 + usize::from(!entries.is_empty()))));
             Ok::<_, Error>((doc.repaired(), doc.encrypted(), pages.len(), empty, bad, doc.needs_password(), doc.encryption_revision()))
         });
         let took = at.elapsed();
@@ -133,6 +142,8 @@ fn main() {
     println!("\n{} files in {:.1} s", t.files, started.elapsed().as_secs_f64());
     println!("opened {}  (repaired {}, encrypted {}, with no pages {})", t.opened, t.repaired, t.encrypted, t.no_pages);
     println!("not PDF {}  no catalog {}  PANICS {}", t.not_pdf, t.no_catalog, t.panics);
+    let (entries, links, with) = OUTLINE.with(|o| o.get());
+    println!("outlines: {with} files, {entries} entries; links: {links}");
     println!("pages {}  (empty content {}; content streams that did not decode cleanly {})", t.pages, t.empty_pages, t.bad_streams);
     println!("encrypted by revision {:?}; need a password {}", t.revisions, t.locked);
     println!("not encrypted: pages {}, files with no pages {}, content streams not clean {}", t.pages_plain, t.no_pages_plain, t.bad_plain);
