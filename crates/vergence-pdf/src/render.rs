@@ -398,7 +398,25 @@ impl Renderer<'_> {
         let mode = t.mode;
         for (code, is_space) in font.codes(s) {
             let w0 = font.width(code);
-            if mode != 3
+            if font.is_type3() {
+                // A Type 3 glyph is a content stream in glyph space.
+                if mode != 3 && mode != 7
+                    && let Some((t3, proc_obj)) = font.type3(code)
+                    && let Object::Stream(st) = self.doc.resolve(&proc_obj)
+                {
+                    let trm = Transform::new(t.size * t.scale, 0.0, 0.0, t.size, 0.0, t.rise).then(tm);
+                    let mut inner = gs.clone();
+                    inner.ctm = t3.matrix.then(&trm).then(&gs.ctm);
+                    if let Some(r) = &t3.resources {
+                        inner.resources = Rc::new(r.clone());
+                    }
+                    inner.text = TextState::default();
+                    let data = self.doc.stream(&st).data;
+                    if depth < MAX_FORM_DEPTH {
+                        self.run(&data, inner, depth + 1);
+                    }
+                }
+            } else if mode != 3
                 && let Some(g) = font.glyph(code)
             {
                 let trm = Transform::new(t.size * t.scale, 0.0, 0.0, t.size, 0.0, t.rise).then(tm);

@@ -3,7 +3,7 @@
 Status: **accepted 2026-11-19** (Dave: "close-up, drawn signature first,
 placeholder for jpeg 2000"; the corpus: "use the PDFs in my Documents
 folder for testing"). Steps 1 to 3 built 2026-11-19, step 4 part 1 the
-same night, part 2 too (below); step 4 part 3 (Type 1, Type 3, ToUnicode) next.
+same night, parts 2 and 3 too (below): step 4 done; step 5, pictures, next.
 
 ## What Dave asked for
 
@@ -239,3 +239,13 @@ selection order; color management beyond the simple formulas.
   no panics. CFF standard strings 229-390 (the expert set) not kept.
   Liberation 2.1.5 shipped in data/fonts the same night (Dave: "ship
   Liberation").
+- **Step 4, part 3** (2026-11-19 night): font/type1.rs, our own Type 1
+  reader (the clear part's encoding and matrix, eexec binary or hex,
+  lenIV, Subrs, CharStrings) and charstring interpreter (flex and hint
+  replacement through othersubrs 0-3, div, seac); Type 3 glyphs run as
+  content streams in glyph space; ToUnicode (bfchar, bfrange with arrays
+  and counting) and Font::text for the text layer; Symbol and ZapfDingbats
+  not embedded read through their own encodings (Greek, math signs,
+  bullets). Seen by eye: the Kantronics KPC-3+ sheet (Type 1), an Omron
+  relay datasheet (Type 3 and Symbol/Dingbats: the bullets and "VSWR
+  ≤1.2" right). Corpus: no panics. 54 tests on all three.

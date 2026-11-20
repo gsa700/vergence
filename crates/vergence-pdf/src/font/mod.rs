@@ -3,15 +3,18 @@
 //! names, /Widths) and composite ones (Type 0: a CMap from codes to CIDs,
 //! a CIDFont's /W and its CID-to-glyph map).
 //!
-//! Glyph programs: embedded TrueType (truetype.rs) and CFF (cff.rs: bare
-//! in FontFile3 or inside OpenType), both ours; Type 1 and Type 3 are the
-//! next part of step 4. A font that is not embedded is
+//! Glyph programs, all ours: embedded TrueType (truetype.rs), CFF (cff.rs:
+//! bare in FontFile3 or inside OpenType), Type 1 (type1.rs); Type 3 glyphs
+//! are content streams the renderer runs ([`Font::type3`]). Every font can
+//! say what text a code stands for ([`Font::text`]: ToUnicode, else the
+//! glyph name), for selection and search. A font that is not embedded is
 //! drawn with a substitute from the system (metric-compatible ones first),
 //! stretched to the PDF's widths so lines keep their length.
 
 pub mod cff;
 pub mod encoding;
 pub mod truetype;
+pub mod type1;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -24,6 +27,7 @@ use crate::object::{Dict, Object};
 use crate::Document;
 use cff::Cff;
 use truetype::TrueType;
+use type1::Type1;
 
 /// A glyph's outline in text space units of one em (y up), shared.
 pub type Glyph = Rc<Path>;
@@ -31,7 +35,15 @@ pub type Glyph = Rc<Path>;
 enum Program {
     TrueType(TrueType),
     Cff(Box<Cff>),
+    Type1(Box<Type1>),
     None,
+}
+
+/// A Type 3 font: glyphs as content streams in glyph space.
+pub struct Type3 {
+    pub procs: Dict,
+    pub matrix: Transform,
+    pub resources: Option<Dict>,
 }
 
 /// How a composite font's bytes become CIDs.
@@ -54,20 +66,35 @@ pub struct Font {
     substitute: Option<Rc<TrueType>>,
     missing_width: f64,
     cache: RefCell<HashMap<u32, Option<Glyph>>>,
+    /// ToUnicode: code to text.
+    to_unicode: HashMap<u32, String>,
+    type3: Option<Type3>,
 }
 
 impl Font {
     /// From a font dictionary.
     pub fn load(doc: &Document, d: &Dict) -> Font {
         let subtype = d.name("Subtype").unwrap_or(b"").to_vec();
-        if subtype == b"Type0" {
-            return Self::composite(doc, d);
+        let mut font = if subtype == b"Type0" { Self::composite(doc, d) } else { Self::simple(doc, d, subtype == b"Type3") };
+        if let Object::Stream(s) = doc.get_in(d, "ToUnicode") {
+            font.to_unicode = parse_to_unicode(&doc.stream(&s).data);
         }
+        font
+    }
+
+    fn simple(doc: &Document, d: &Dict, type3: bool) -> Font {
         let descriptor = doc.get_in(d, "FontDescriptor").as_dict().cloned().unwrap_or_default();
         let flags = descriptor.int("Flags").unwrap_or(0);
         let symbolic = flags & 4 != 0;
-        let program = embedded(doc, &descriptor);
+        let program = if type3 { Program::None } else { embedded(doc, &descriptor) };
         let base = base_name(d);
+        // Type 3: glyph space to text space by its own matrix; widths in glyph space.
+        let type3 = type3.then(|| {
+            let v: Vec<f64> = doc.get_in(d, "FontMatrix").as_array().map(|a| a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect()).unwrap_or_default();
+            let matrix = if v.len() == 6 && v.iter().all(|x| x.is_finite()) { Transform::new(v[0], v[1], v[2], v[3], v[4], v[5]) } else { Transform::new(0.001, 0.0, 0.0, 0.001, 0.0, 0.0) };
+            Type3 { procs: doc.get_in(d, "CharProcs").as_dict().cloned().unwrap_or_default(), matrix, resources: doc.get_in(d, "Resources").as_dict().cloned() }
+        });
+        let width_scale = type3.as_ref().map_or(0.001, |t| t.matrix.a);
         // The encoding: a base, then /Differences.
         let enc = doc.get_in(d, "Encoding");
         let (base_enc, diffs) = match &enc {
@@ -86,6 +113,31 @@ impl Font {
         let mut names: Vec<Option<String>> = table.iter().map(|n| (!n.is_empty()).then(|| n.to_string())).collect();
         if symbolic && base_enc.is_none() {
             names = vec![None; 256];
+        }
+        // Symbol and ZapfDingbats not embedded: their own encodings, as
+        // characters a substitute has (Greek, math signs, the common bullets).
+        if matches!(program, Program::None) && type3.is_none() {
+            let lower = base.to_ascii_lowercase();
+            let special: Option<fn(u8) -> Option<char>> = if lower.starts_with("symbol") {
+                Some(symbol_char)
+            } else if lower.contains("dingbats") {
+                Some(dingbat_char)
+            } else {
+                None
+            };
+            if let Some(map) = special {
+                for (code, n) in names.iter_mut().enumerate() {
+                    if let Some(c) = map(code as u8) {
+                        *n = Some(format!("uni{:04X}", c as u32));
+                    }
+                }
+            }
+        }
+        // A Type 1 font with no base encoding of the PDF's own starts from its built-in one.
+        if let Program::Type1(t) = &program
+            && base_enc.is_none()
+        {
+            names = t.encoding.clone();
         }
         if let Some(diffs) = diffs {
             let mut code = 0usize;
@@ -109,15 +161,15 @@ impl Font {
                 if let Some(x) = doc.resolve(v).as_f64()
                     && first + i < 256
                 {
-                    widths[first + i] = Some(x / 1000.0);
+                    widths[first + i] = Some(x * width_scale);
                 }
             }
         }
         let substitute = match program {
-            Program::None => substitute(&base, flags),
+            Program::None if type3.is_none() => substitute(&base, flags),
             _ => None,
         };
-        Font { kind: Kind::Simple { names, widths, symbolic }, program, substitute, missing_width: descriptor.get("MissingWidth").and_then(Object::as_f64).unwrap_or(0.0) / 1000.0, cache: RefCell::new(HashMap::new()) }
+        Font { kind: Kind::Simple { names, widths, symbolic }, program, substitute, missing_width: descriptor.get("MissingWidth").and_then(Object::as_f64).unwrap_or(0.0) / 1000.0, cache: RefCell::new(HashMap::new()), to_unicode: HashMap::new(), type3 }
     }
 
     fn composite(doc: &Document, d: &Dict) -> Font {
@@ -166,7 +218,7 @@ impl Font {
             Program::None => substitute(&base_name(d), flags),
             _ => None,
         };
-        Font { kind: Kind::Composite { cmap, cid_to_gid, widths, default }, program, substitute, missing_width: default, cache: RefCell::new(HashMap::new()) }
+        Font { kind: Kind::Composite { cmap, cid_to_gid, widths, default }, program, substitute, missing_width: default, cache: RefCell::new(HashMap::new()), to_unicode: HashMap::new(), type3: None }
     }
 
     /// The codes in a string, each with whether it is the single-byte
@@ -239,7 +291,36 @@ impl Font {
         g
     }
 
+    /// A Type 3 font's glyph for `code` (its content stream) and its matrix.
+    pub fn type3(&self, code: u32) -> Option<(&Type3, Object)> {
+        let t = self.type3.as_ref()?;
+        let Kind::Simple { names, .. } = &self.kind else { return None };
+        let name = names.get(code as usize).cloned().flatten()?;
+        Some((t, t.procs.get(&name)?.clone()))
+    }
+
+    pub fn is_type3(&self) -> bool {
+        self.type3.is_some()
+    }
+
+    /// The text `code` stands for: ToUnicode first, else the glyph name.
+    pub fn text(&self, code: u32) -> Option<String> {
+        if let Some(t) = self.to_unicode.get(&code) {
+            return Some(t.clone());
+        }
+        match &self.kind {
+            Kind::Simple { names, .. } => names.get(code as usize).cloned().flatten().and_then(|n| encoding::unicode_of(&n)).map(String::from),
+            Kind::Composite { .. } => None,
+        }
+    }
+
     fn make_glyph(&self, code: u32) -> Option<Path> {
+        if let Program::Type1(t) = &self.program {
+            let Kind::Simple { names, .. } = &self.kind else { return None };
+            let name = names.get(code as usize).cloned().flatten().filter(|n| t.has(n)).or_else(|| t.encoding.get(code as usize).cloned().flatten())?;
+            let m = t.matrix;
+            return Some(t.outline(&name)?.transformed(&Transform::new(m[0], m[1], m[2], m[3], m[4], m[5])));
+        }
         if let Program::Cff(cff) = &self.program {
             let gid = self.cff_gid(cff, code)?;
             let m = cff.matrix;
@@ -316,6 +397,116 @@ impl Font {
     }
 }
 
+/// The Symbol font's encoding, as far as text needs it: Greek letters on
+/// the Latin ones, and the common signs.
+fn symbol_char(code: u8) -> Option<char> {
+    const UPPER: &str = "ΑΒΧΔΕΦΓΗΙϑΚΛΜΝΟΠΘΡΣΤΥςΩΞΨΖ";
+    const LOWER: &str = "αβχδεφγηιϕκλμνοπθρστυϖωξψζ";
+    let pick = |s: &str, i: u8| s.chars().nth(i as usize);
+    match code {
+        b'A'..=b'Z' => pick(UPPER, code - b'A'),
+        b'a'..=b'z' => pick(LOWER, code - b'a'),
+        0x20..=0x40 | 0x5B | 0x5D | 0x5F | 0x7B..=0x7D => {
+            Some(match code {
+                0x22 => '∀',
+                0x24 => '∃',
+                0x27 => '∋',
+                0x2A => '∗',
+                0x2D => '−',
+                0x40 => '≅',
+                0x5C => '∴',
+                0x5E => '⊥',
+                _ => code as char,
+            })
+        }
+        0xA1 => Some('ϒ'),
+        0xA2 => Some('′'),
+        0xA3 => Some('≤'),
+        0xA4 => Some('⁄'),
+        0xA5 => Some('∞'),
+        0xA7 => Some('♣'),
+        0xA8 => Some('♦'),
+        0xA9 => Some('♥'),
+        0xAA => Some('♠'),
+        0xAB => Some('↔'),
+        0xAC => Some('←'),
+        0xAD => Some('↑'),
+        0xAE => Some('→'),
+        0xAF => Some('↓'),
+        0xB0 => Some('°'),
+        0xB1 => Some('±'),
+        0xB2 => Some('″'),
+        0xB3 => Some('≥'),
+        0xB4 => Some('×'),
+        0xB5 => Some('∝'),
+        0xB6 => Some('∂'),
+        0xB7 => Some('•'),
+        0xB8 => Some('÷'),
+        0xB9 => Some('≠'),
+        0xBA => Some('≡'),
+        0xBB => Some('≈'),
+        0xBC => Some('…'),
+        0xC5 => Some('⊕'),
+        0xC6 => Some('∅'),
+        0xC7 => Some('∩'),
+        0xC8 => Some('∪'),
+        0xD1 => Some('∇'),
+        0xD2 | 0xE2 => Some('®'),
+        0xD3 | 0xE3 => Some('©'),
+        0xD4 | 0xE4 => Some('™'),
+        0xD5 => Some('∏'),
+        0xD6 => Some('√'),
+        0xD7 => Some('⋅'),
+        0xD8 => Some('¬'),
+        0xD9 => Some('∧'),
+        0xDA => Some('∨'),
+        0xDB => Some('⇔'),
+        0xDC => Some('⇐'),
+        0xDD => Some('⇑'),
+        0xDE => Some('⇒'),
+        0xDF => Some('⇓'),
+        0xE0 => Some('◊'),
+        0xE5 => Some('∑'),
+        0xF2 => Some('∫'),
+        _ => None,
+    }
+}
+
+/// ZapfDingbats' common marks (bullets, boxes, checks, arrows); the rest
+/// are drawn as nothing rather than as the wrong letter.
+fn dingbat_char(code: u8) -> Option<char> {
+    Some(match code {
+        0x20 => ' ',
+        0x33 => '✓',
+        0x34 => '✔',
+        0x35 => '✕',
+        0x36 => '✖',
+        0x37 => '✗',
+        0x38 => '✘',
+        0x48 => '★',
+        0x6C => '●',
+        0x6D => '❍',
+        0x6E => '■',
+        0x6F => '❏',
+        0x70 => '❐',
+        0x71 => '❑',
+        0x72 => '❒',
+        0x73 => '▲',
+        0x74 => '▼',
+        0x75 => '◆',
+        0x76 => '❖',
+        0x77 => '◗',
+        0xA8 => '♣',
+        0xA9 => '♦',
+        0xAA => '♥',
+        0xAB => '♠',
+        0xD5 => '→',
+        0xE0 => '➠',
+        0xE8 => '➨',
+        _ => return None,
+    })
+}
+
 /// The font's /BaseFont without a subset tag ("ABCDEF+Helvetica").
 fn base_name(d: &Dict) -> String {
     let n = d.name("BaseFont").map(|b| String::from_utf8_lossy(b).into_owned()).unwrap_or_default();
@@ -326,6 +517,12 @@ fn base_name(d: &Dict) -> String {
 }
 
 fn embedded(doc: &Document, descriptor: &Dict) -> Program {
+    if let Object::Stream(s) = doc.get_in(descriptor, "FontFile") {
+        let length1 = doc.get_in(&s.dict, "Length1").as_int().unwrap_or(0).max(0) as usize;
+        if let Some(t) = Type1::parse(&doc.stream(&s).data, length1) {
+            return Program::Type1(Box::new(t));
+        }
+    }
     for key in ["FontFile2", "FontFile3"] {
         let Object::Stream(s) = doc.get_in(descriptor, key) else { continue };
         let data = doc.stream(&s).data;
@@ -395,6 +592,65 @@ thread_local! {
     static FONT_DB: vergence_text::db::FontDb = vergence_text::db::FontDb::system();
 }
 
+/// A ToUnicode CMap: codes to text (UTF-16BE), from bfchar and bfrange.
+fn parse_to_unicode(data: &[u8]) -> HashMap<u32, String> {
+    let mut out = HashMap::new();
+    let code = |o: &Object| -> Option<u32> { o.as_bytes().filter(|b| !b.is_empty() && b.len() <= 4).map(|b| b.iter().fold(0u32, |a, x| a << 8 | *x as u32)) };
+    let text = |b: &[u8]| -> String {
+        let units: Vec<u16> = b.chunks(2).map(|c| if c.len() == 2 { u16::from_be_bytes([c[0], c[1]]) } else { c[0] as u16 }).collect();
+        String::from_utf16_lossy(&units)
+    };
+    for op in crate::content::parse(data) {
+        match op.name.as_slice() {
+            b"endbfchar" => {
+                for pair in op.args.chunks(2) {
+                    if let [c, t] = pair
+                        && let (Some(c), Some(t)) = (code(c), t.as_bytes())
+                    {
+                        out.insert(c, text(t));
+                    }
+                }
+            }
+            b"endbfrange" => {
+                for t3 in op.args.chunks(3) {
+                    let [lo, hi, dst] = t3 else { continue };
+                    let (Some(lo), Some(hi)) = (code(lo), code(hi)) else { continue };
+                    if hi < lo || hi - lo > 65_535 {
+                        continue;
+                    }
+                    match dst {
+                        // A start value whose last unit counts up.
+                        Object::String(start) if !start.is_empty() => {
+                            for (k, c) in (lo..=hi).enumerate() {
+                                let mut b = start.clone();
+                                let n = b.len();
+                                let last = if n >= 2 { u16::from_be_bytes([b[n - 2], b[n - 1]]) } else { b[0] as u16 };
+                                let v = last.wrapping_add(k as u16);
+                                if n >= 2 {
+                                    b[n - 2..].copy_from_slice(&v.to_be_bytes());
+                                } else {
+                                    b[0] = v as u8;
+                                }
+                                out.insert(c, text(&b));
+                            }
+                        }
+                        Object::Array(list) => {
+                            for (c, t) in (lo..=hi).zip(list.iter()) {
+                                if let Some(t) = t.as_bytes() {
+                                    out.insert(c, text(t));
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// An embedded CMap's code space and CID ranges (begincodespacerange,
 /// begincidrange, begincidchar); anything else is passed over.
 fn parse_cmap(data: &[u8]) -> CMap {
@@ -450,11 +706,30 @@ mod tests {
     #[test]
     fn an_embedded_cmap_maps_codes_to_cids() {
         let cmap = parse_cmap(b"1 begincodespacerange <00> <7F> <8000> <FFFF> endcodespacerange 2 begincidrange <20> <7E> 1 <8140> <817E> 633 endcidrange 1 begincidchar <8150> 999 endcidchar");
-        let font = Font { kind: Kind::Composite { cmap, cid_to_gid: None, widths: vec![], default: 1.0 }, program: Program::None, substitute: None, missing_width: 1.0, cache: RefCell::new(HashMap::new()) };
+        let font = Font { kind: Kind::Composite { cmap, cid_to_gid: None, widths: vec![], default: 1.0 }, program: Program::None, substitute: None, missing_width: 1.0, cache: RefCell::new(HashMap::new()), to_unicode: HashMap::new(), type3: None };
         let codes = font.codes(b"A\x81\x41 ");
         assert_eq!(codes, vec![(0x41, false), (0x8141, false), (0x20, true)]);
         assert_eq!(font.cid(0x41), 34);
         assert_eq!(font.cid(0x8141), 634);
+    }
+
+    #[test]
+    fn to_unicode_maps() {
+        let m = parse_to_unicode(b"2 beginbfchar <03> <0041> <04> <00660069> endbfchar 1 beginbfrange <10> <12> <0061> <20> <21> [<0058> <0059>] endbfrange");
+        assert_eq!(m.get(&3).map(String::as_str), Some("A"));
+        assert_eq!(m.get(&4).map(String::as_str), Some("fi"), "a ligature is two letters");
+        assert_eq!(m.get(&0x11).map(String::as_str), Some("b"));
+        assert_eq!(m.get(&0x21).map(String::as_str), Some("Y"));
+    }
+
+    #[test]
+    fn symbol_and_dingbats() {
+        assert_eq!(symbol_char(0xA3), Some('≤'));
+        assert_eq!(symbol_char(b'm'), Some('μ'));
+        assert_eq!(symbol_char(b'W'), Some('Ω'));
+        assert_eq!(dingbat_char(b'n'), Some('■'));
+        assert_eq!(dingbat_char(b'l'), Some('●'));
+        assert_eq!(dingbat_char(b'Z'), None);
     }
 
     #[test]
