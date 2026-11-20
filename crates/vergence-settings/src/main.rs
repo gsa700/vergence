@@ -2705,18 +2705,41 @@ impl App {
             "Screens",
             "Drag the screens to where they sit on your desk. Each one's scale is worked out from its size and how far away it is, or chosen here.",
             {
-                items.push(self.group(None, vec![
-                    setting(
-                        "Windows the same size on every screen",
-                        "Each screen at its calculated scale (a whole scale where it is within 8%, the sharpest; else within 2%, where that keeps windows on whole pixels), so a window looks the same size moving between them. Off: the nearest whole scale where it is close, the sharpest; on, apps that draw only at whole scales may look a little soft.",
-                        switch(disp::same_size(&self.desktop), Message::SameSize).name("Windows the same size on every screen"),
-                    ),
-                    self.text_row(),
-                ]));
+                // Out of the way (Dave, 2026-11-19: "move it to advanced and
+                // show each screen"): the scales above are the setting most
+                // people need; these two fine-tune them.
+                items.push(self.advanced("screens", vec![self.same_size_row(), self.text_row()]));
                 items.push(self.status_line());
                 items
             },
         )
+    }
+
+    /// "Windows the same size on every screen", with what each screen has
+    /// now and why, so a soft screen says so (Dave, 2026-11-19).
+    fn same_size_row(&self) -> Element<Message> {
+        let on = disp::same_size(&self.desktop);
+        let screens: Vec<String> = self
+            .outputs
+            .iter()
+            .map(|o| {
+                let why = if disp::screen(&self.desktop, &o.id).1.is_some() {
+                    "chosen"
+                } else if o.base_scale.fract() == 0.0 {
+                    "sharpest"
+                } else if on {
+                    "the same size as the others"
+                } else {
+                    "its own scale"
+                };
+                format!("{} {:.0}% ({why})", screen_label(o), o.base_scale * 100.0)
+            })
+            .collect();
+        let note = format!(
+            "On: each screen at its calculated scale, so a window keeps its size moving between screens; a whole scale wins where it is within 8%. Off: the nearest whole scale where it is close, the sharpest. Now: {}.",
+            if screens.is_empty() { "no screens".to_string() } else { screens.join(", ") }
+        );
+        setting("Windows the same size on every screen", &note, switch(on, Message::SameSize).name("Windows the same size on every screen"))
     }
 
     /// "Text on scaled screens" (Dave, 2026-11-18): how much of the text a
@@ -2792,14 +2815,6 @@ impl App {
                     if is_main { "The dock stands on it, and its wallpaper is the default for the others." } else { "Make it the main screen: the dock moves to it, and its wallpaper becomes the default." },
                     if is_main { label("Main screen").dim() } else { button(label("Make main screen").size(12.0)).padding(Padding::hv(4.0, 12.0)).on_press(Message::MakePrimary) },
                 ));
-            } else {
-                // With one screen it still decides for the screens it meets later.
-                rows.push(setting(
-                    "Windows the same size on every screen",
-                    "This screen and any other at its calculated scale (or within 2%, for whole pixels), so a window looks the same size on each; off, the nearest whole scale where close, the sharpest.",
-                    switch(disp::same_size(&self.desktop), Message::SameSize).name("Windows the same size on every screen"),
-                ));
-                rows.push(self.text_row());
             }
             rows.extend(mode_rows);
             // A screen on one GPU drawn by another (GPUs milestone 1) says so up front.
@@ -2819,7 +2834,10 @@ impl App {
         }
         // How the scale was found and what the screen is, for the curious.
         if let Some(o) = o {
-            let mut rows = vec![setting("How the scale was found", &o.note, space())];
+            // With one screen the fine-tuning lives here (with several, on the
+            // Screens page's own Advanced): it still decides for screens met later.
+            let mut rows = if multi { Vec::new() } else { vec![self.same_size_row(), self.text_row()] };
+            rows.push(setting("How the scale was found", &o.note, space()));
             if !o.shown_by.is_empty() {
                 let g = if o.shown_by == o.drawn_by { o.shown_by.clone() } else { format!("Shown by {}, drawn by {}", o.shown_by, o.drawn_by) };
                 rows.push(setting("Graphics", &g, space()));
