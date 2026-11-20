@@ -2177,6 +2177,7 @@ name = "vergence-closeup"
 version = "0.1.0"
 dependencies = [
  "vergence-decode",
+ "vergence-pdf",
  "vergence-scene",
  "vergence-types",
  "vergence-ui",

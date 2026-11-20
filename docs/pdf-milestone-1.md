@@ -292,3 +292,18 @@ selection order; color management beyond the simple formulas.
   confined helper (seccomp on Hubble, Capsicum on kepler and techbench);
   examples/pdfhelper draws through it (a non-embedded Helvetica drawn by
   its substitute under Capsicum on kepler). install.sh installs it.
+- **Step 6, part 2** (2026-11-20 night): Close-Up opens PDFs
+  (vergence-closeup pdf.rs): pages in a column, scrolled continuously; fit
+  to the width (the default), the whole page (W), actual size (1), zoom
+  (+/-, Ctrl+wheel about the pointer); the wheel, arrows, Page Up/Down,
+  Space and dragging scroll; Home/End; Left/Right a page when it fits
+  whole; Previous/Next page in the toolbar and the app menu; "Page N of
+  M" and the zoom in the status line. A worker thread owns the helper and
+  draws the pages in sight at the screen's pixels, the middle one first
+  and the next one ahead; a page shows its last picture scaled until the
+  sharp one comes; far pages are forgotten; a page the helper could not
+  draw is tinted and says why in the status line. Seen in a headless
+  session on Hubble: the Motorola R56 manual (518 pages) at width and
+  page fits, stepping pages. Still to come in step 6: tiles past 16 M
+  pixels a page, the password field, the sidebar (thumbnails, outline),
+  links, go to page, each document's page and zoom remembered.

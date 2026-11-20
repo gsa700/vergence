@@ -14,6 +14,7 @@ vergence-widgets.workspace = true
 vergence-scene.workspace = true
 vergence-decode.workspace = true
 vergence-types.workspace = true
+vergence-pdf.workspace = true
 
 [[bin]]
 name = "vergence-closeup"

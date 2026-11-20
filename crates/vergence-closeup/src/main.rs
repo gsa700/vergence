@@ -9,6 +9,10 @@
 //!   and actual size; turned a quarter either way; GIF and WebP animations
 //!   played; transparency over a checkerboard. Left and Right step through
 //!   the pictures of the file's folder in File Viewer's order.
+//! - **PDFs** (read and drawn by vergence-pdf's confined helper, never in
+//!   this process; pdf.rs): pages in a column, scrolled continuously, fit
+//!   to the width (the default), the whole page, actual size or any zoom;
+//!   drawn at the screen's pixels.
 //! - **Text**: shown read-only in the toolkit's text area, with "Open in Text
 //!   Editor".
 //! - **Anything else**: says what it is and offers the app chosen for it.
@@ -22,6 +26,7 @@
 //!   pictures stay at actual size, animations; desktop.toml `[closeup]`.
 
 mod hand;
+mod pdf;
 mod pictures;
 
 use std::cell::{Cell, RefCell};
@@ -58,6 +63,7 @@ mod cmd {
     pub const NEXT: u32 = 10;
     pub const PREVIOUS: u32 = 11;
     pub const OPEN_WITH: u32 = 14;
+    pub const FIT_PAGE: u32 = 15;
     pub const SETTINGS: u32 = 40;
     pub const ABOUT: u32 = 41;
 }
@@ -67,6 +73,7 @@ enum Loaded {
     /// Width, height, and each frame's delay and levels (pictures.rs).
     Picture { width: u32, height: u32, frames: Vec<(u32, Vec<Arc<Image>>)> },
     Text { text: String, cut: bool },
+    Pdf(pdf::Pdf),
     /// Why it cannot be shown here, and whether another app might.
     Problem { why: String, elsewhere: bool },
 }
@@ -99,6 +106,7 @@ enum Content {
     Loading,
     Picture { width: u32, height: u32, frames: Vec<(u32, Vec<Arc<Image>>)> },
     Text { doc: TextDoc, cut: bool },
+    Pdf(pdf::Pdf),
     Problem { why: String, elsewhere: bool },
 }
 
@@ -114,7 +122,12 @@ fn load(path: PathBuf, id: u32, shared: &Shared, waker: Option<Waker>) {
     let out = shared.loaded.clone();
     std::thread::spawn(move || {
         let mime = vergence_types::of_file(&path);
-        let loaded = if mime.starts_with("image/") {
+        let loaded = if mime == "application/pdf" {
+            match pdf::open(&path, waker.clone()) {
+                Ok(d) => Loaded::Pdf(d),
+                Err(why) => Loaded::Problem { why: format!("“{}” could not be shown: {why}", path.file_name().unwrap_or_default().to_string_lossy()), elsewhere: true },
+            }
+        } else if mime.starts_with("image/") {
             match vergence_decode::decode_file(&path, None) {
                 Ok(p) => {
                     let (w, h) = (p.width, p.height);
@@ -209,6 +222,8 @@ struct Viewer {
     last_press: Option<std::time::Instant>,
     prefs_open: Rc<Cell<bool>>,
     animating: bool,
+    /// Ctrl held (the wheel zooms a PDF then; scroll events carry no keys).
+    ctrl: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -238,6 +253,7 @@ impl Viewer {
             last_press: None,
             prefs_open: Rc::new(Cell::new(false)),
             animating: false,
+            ctrl: false,
         }
     }
 
@@ -345,6 +361,133 @@ impl Viewer {
         t.pan = clamp_pan(r, dw, dh, pan);
     }
 
+    /// The front PDF, if the front file is one.
+    fn pdf_mut(&mut self) -> Option<&mut pdf::Pdf> {
+        match &mut self.front_mut()?.content {
+            Content::Pdf(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    fn is_pdf(&self) -> bool {
+        self.front_tab().is_some_and(|t| matches!(t.content, Content::Pdf(_)))
+    }
+
+    /// A PDF command (zoom, pages); false if the front file is not a PDF.
+    fn pdf_run(&mut self, id: u32) -> bool {
+        let r = self.area.get();
+        let Some(d) = self.pdf_mut() else { return false };
+        let z = d.zoom(r);
+        match id {
+            cmd::ZOOM_IN => d.set_mode(pdf::Mode::Zoom(z * 1.25), None, r),
+            cmd::ZOOM_OUT => d.set_mode(pdf::Mode::Zoom(z / 1.25), None, r),
+            cmd::FIT => d.set_mode(pdf::Mode::Width, None, r),
+            cmd::FIT_PAGE => d.set_mode(pdf::Mode::Page, None, r),
+            cmd::ACTUAL => d.set_mode(pdf::Mode::Zoom(1.0), None, r),
+            cmd::NEXT => {
+                let c = d.current(r);
+                d.go_to(c + 1, r);
+            }
+            cmd::PREVIOUS => {
+                let c = d.current(r);
+                d.go_to(c.saturating_sub(1), r);
+            }
+            cmd::TURN_LEFT | cmd::TURN_RIGHT => {}
+            _ => return false,
+        }
+        true
+    }
+
+    /// A PDF's wheel and keys: the wheel scrolls (Ctrl: zooms about the
+    /// pointer); arrows, Page Up/Down and Space scroll; Home and End go to
+    /// the first and last page; Left and Right go a page when it fits whole.
+    fn pdf_input(&mut self, input: &Input, window: &mut Window) -> bool {
+        let r = self.area.get();
+        let ctrl = self.ctrl;
+        let Some(d) = self.pdf_mut() else { return false };
+        match input {
+            Input::Scroll { x, y, dx, dy } => {
+                if *x < r.x || *x > r.x + r.w || *y < r.y || *y > r.y + r.h {
+                    return false;
+                }
+                if ctrl {
+                    let z = d.zoom(r);
+                    let k = 1.0015f32.powf(-dy.clamp(-200.0, 200.0) * 10.0);
+                    d.set_mode(pdf::Mode::Zoom(z * k), Some(*y), r);
+                } else {
+                    d.scroll(*dy, *dx, r);
+                }
+            }
+            Input::Key { sym, pressed: true, modifiers: m, text, .. } if !m.ctrl && !m.alt => {
+                const LEFT: u32 = 0xff51;
+                const UP: u32 = 0xff52;
+                const RIGHT: u32 = 0xff53;
+                const DOWN: u32 = 0xff54;
+                const PAGE_UP: u32 = 0xff55;
+                const PAGE_DOWN: u32 = 0xff56;
+                const HOME: u32 = 0xff50;
+                const END: u32 = 0xff57;
+                let screen = r.h - 2.0 * pdf::MARGIN - 40.0;
+                let command = match (*sym, text.as_deref().unwrap_or("")) {
+                    (UP, _) => {
+                        d.scroll(-48.0, 0.0, r);
+                        None
+                    }
+                    (DOWN, _) => {
+                        d.scroll(48.0, 0.0, r);
+                        None
+                    }
+                    (PAGE_UP, _) => {
+                        d.scroll(-screen, 0.0, r);
+                        None
+                    }
+                    (PAGE_DOWN, _) => {
+                        d.scroll(screen, 0.0, r);
+                        None
+                    }
+                    (0x20, _) => {
+                        d.scroll(if m.shift { -screen } else { screen }, 0.0, r);
+                        None
+                    }
+                    (HOME, _) => {
+                        d.go_to(0, r);
+                        None
+                    }
+                    (END, _) => {
+                        let last = d.pages.len() - 1;
+                        d.go_to(last, r);
+                        None
+                    }
+                    (LEFT | RIGHT, _) if d.page_fits(r) => {
+                        let c = d.current(r);
+                        d.go_to(if *sym == LEFT { c.saturating_sub(1) } else { c + 1 }, r);
+                        None
+                    }
+                    (LEFT, _) => {
+                        d.scroll(0.0, 48.0, r);
+                        None
+                    }
+                    (RIGHT, _) => {
+                        d.scroll(0.0, -48.0, r);
+                        None
+                    }
+                    (_, "+" | "=") => Some(cmd::ZOOM_IN),
+                    (_, "-") => Some(cmd::ZOOM_OUT),
+                    (_, "0") => Some(cmd::FIT),
+                    (_, "1") => Some(cmd::ACTUAL),
+                    (_, "w" | "W") => Some(cmd::FIT_PAGE),
+                    _ => return false,
+                };
+                if let Some(c) = command {
+                    self.pdf_run(c);
+                }
+            }
+            _ => return false,
+        }
+        window.redraw();
+        true
+    }
+
     fn fit(&mut self) {
         if let Some(t) = self.front_mut() {
             t.zoom = None;
@@ -403,7 +546,7 @@ impl Viewer {
             }
         })
         .multiple(true)
-        .filters(vec![vergence_widgets::filedialog::Filter::of_types("Pictures", &["image/*"]), vergence_widgets::filedialog::Filter::of_types("Text", &["text/plain"]), vergence_widgets::filedialog::Filter::new("All files", &[])]);
+        .filters(vec![vergence_widgets::filedialog::Filter::of_types("Pictures and PDFs", &["image/*", "application/pdf"]), vergence_widgets::filedialog::Filter::of_types("PDF documents", &["application/pdf"]), vergence_widgets::filedialog::Filter::of_types("Text", &["text/plain"]), vergence_widgets::filedialog::Filter::new("All files", &[])]);
         if let Some(dir) = dir {
             d = d.folder(&dir);
         }
@@ -454,6 +597,10 @@ impl Viewer {
     }
 
     fn run(&mut self, id: u32, window: &mut Window) {
+        if self.pdf_run(id) {
+            window.redraw();
+            return;
+        }
         match id {
             cmd::NEW_WINDOW => {
                 let w = Viewer::new(self.shared.clone(), false);
@@ -480,7 +627,7 @@ impl Viewer {
             cmd::OPEN_WITH => self.open_with(false),
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
-                let about = vergence_widgets::about::About::new(APP_ID, "Close-Up", env!("CARGO_PKG_VERSION"), "A file's contents in full: pictures (PNG, JPEG, GIF, WebP, BMP, SVG), decoded apart from the app, and text. The step after FileView's Preview.", self.theme());
+                let about = vergence_widgets::about::About::new(APP_ID, "Close-Up", env!("CARGO_PKG_VERSION"), "A file's contents in full: pictures (PNG, JPEG, GIF, WebP, BMP, SVG) and PDF documents, read apart from the app, and text. The step after FileView's Preview.", self.theme());
                 window.open_window(vergence_widgets::window(about));
             }
             _ => {}
@@ -543,8 +690,55 @@ impl Viewer {
         .height(Length::FILL)
     }
 
+    fn pdf_view(&self, d: &pdf::Pdf) -> Element<Msg> {
+        let layout = d.0.clone();
+        let scale = self.scale;
+        let area = self.area.clone();
+        let waker = self.waker.clone();
+        let ground = match self.setting("ground").as_deref() {
+            Some("light") => Some(Color::rgb(0xe4, 0xe4, 0xe6)),
+            Some("window") => None,
+            _ => Some(Color::rgb(0x2a, 0x2a, 0x2c)),
+        };
+        drawing(move |scene, _, r, theme| {
+            if area.get() != r {
+                area.set(r);
+                if let Some(w) = &waker {
+                    w.wake();
+                }
+            }
+            layout.draw(scene, r, scale.max(0.25), ground.unwrap_or(theme.page));
+        })
+        .on_touch(|t| Some(Msg::Touch(t)))
+        .width(Length::FILL)
+        .height(Length::FILL)
+    }
+
+    /// A PDF's toolbar: pages, zoom (width, whole page, actual size); Open at the end.
+    fn pdf_toolbar(&self, d: &pdf::Pdf, th: &Theme) -> Element<Msg> {
+        use vergence_widgets::toolbar::{Icon, flexible, group, tool, toggle, toolbar};
+        let r = self.area.get();
+        let c = d.current(r);
+        let items = vec![
+            group(vec![tool(Icon::Previous, "Previous page", (c > 0).then_some(Msg::Run(cmd::PREVIOUS))), tool(Icon::Next, "Next page", (c + 1 < d.pages.len()).then_some(Msg::Run(cmd::NEXT)))]),
+            group(vec![
+                tool(Icon::ZoomOut, "Zoom out", Some(Msg::Run(cmd::ZOOM_OUT))),
+                tool(Icon::ZoomIn, "Zoom in", Some(Msg::Run(cmd::ZOOM_IN))),
+                toggle(Icon::Fit, "Fit to the width", d.mode == pdf::Mode::Width, Msg::Run(cmd::FIT)),
+                toggle(Icon::Fit, "The whole page", d.mode == pdf::Mode::Page, Msg::Run(cmd::FIT_PAGE)),
+                tool(Icon::Actual, "Actual size", Some(Msg::Run(cmd::ACTUAL))),
+            ]),
+            flexible(),
+            tool(Icon::Open, "Open…", Some(Msg::Run(cmd::OPEN))),
+        ];
+        toolbar(items, th)
+    }
+
     /// The toolbar: through the folder, zoom, turn; Open at the end.
     fn toolbar(&self, t: &Tab, th: &Theme) -> Element<Msg> {
+        if let Content::Pdf(d) = &t.content {
+            return self.pdf_toolbar(d, th);
+        }
         use vergence_widgets::toolbar::{Icon, flexible, group, tool, toggle, toolbar};
         let picture = matches!(t.content, Content::Picture { .. });
         let on = |c: u32| picture.then_some(Msg::Run(c));
@@ -582,6 +776,19 @@ impl Viewer {
                     && let Some(i) = list.iter().position(|p| *p == t.path)
                 {
                     items.push(label(format!("{} of {}", i + 1, list.len())).size(12.0).dim());
+                }
+            }
+            Content::Pdf(d) => {
+                let r = self.area.get();
+                items.push(label(format!("Page {} of {}", d.current(r) + 1, d.pages.len())).size(12.0).dim());
+                let mode = match d.mode {
+                    pdf::Mode::Width => " (width)",
+                    pdf::Mode::Page => " (page)",
+                    pdf::Mode::Zoom(_) => "",
+                };
+                items.push(label(format!("{:.0}%{mode}", d.zoom(r) * 100.0)).size(12.0).dim());
+                if let Some(why) = d.shared.failure(d.current(r)) {
+                    items.push(label(why).size(12.0).dim());
                 }
             }
             Content::Text { cut, .. } => {
@@ -635,6 +842,7 @@ impl Program for Viewer {
             Content::Loading => panel(label("Opening…").size(13.0).dim()).padding(24.0).width(Length::FILL).height(Length::FILL),
             Content::Picture { width, height, frames } => self.picture_view(tab, *width, *height, frames),
             Content::Text { doc, .. } => text_area(doc).key(tab.id as u64).name(tab.name()),
+            Content::Pdf(d) => self.pdf_view(d),
             Content::Problem { why, elsewhere } => {
                 let mut items: Vec<Element<Msg>> = vec![label(why.clone()).size(13.0).wrap().width(Length::FILL)];
                 if *elsewhere {
@@ -675,11 +883,22 @@ impl Program for Viewer {
                 } else if let Some(t) = self.front_tab() {
                     self.drag = Some(((x, y), t.pan));
                 }
+                if self.is_pdf() {
+                    // A PDF pans by the drag's steps; no double-click zoom.
+                    self.drag = Some(((x, y), (0.0, 0.0)));
+                    self.last_press = None;
+                }
             }
             Msg::Touch(Touch::Move { x, y, pressed }) => {
                 let r = self.area.get();
                 self.pointer.set((r.x + x, r.y + y));
-                if pressed && let Some(((sx, sy), start)) = self.drag {
+                if pressed
+                    && let Some(((sx, sy), _)) = self.drag
+                    && let Some(d) = self.pdf_mut()
+                {
+                    d.scroll(sy - y, x - sx, r);
+                    self.drag = Some(((x, y), (0.0, 0.0)));
+                } else if pressed && let Some(((sx, sy), start)) = self.drag {
                     let (scale, small) = (self.scale, self.small_actual());
                     if let Some(t) = self.front_mut()
                         && let Content::Picture { width, height, .. } = &t.content
@@ -698,6 +917,15 @@ impl Program for Viewer {
     }
 
     fn input(&mut self, input: &Input, window: &mut Window) -> bool {
+        if let Input::Key { sym, pressed, modifiers, .. } = input {
+            self.ctrl = if matches!(*sym, 0xffe3 | 0xffe4) { *pressed } else { modifiers.ctrl };
+        }
+        if let Input::Focus(false) = input {
+            self.ctrl = false;
+        }
+        if self.is_pdf() && self.pdf_input(input, window) {
+            return true;
+        }
         match input {
             // The wheel zooms about the pointer.
             Input::Scroll { x, y, dy, .. } if *dy != 0.0 => {
@@ -802,8 +1030,8 @@ impl Program for Viewer {
     }
 
     fn woken(&mut self, window: &mut Window) -> bool {
-        // Woken by the drawing (its place changed) at the least: look again.
-        let mut changed = self.reread() || self.front_tab().is_some_and(|t| matches!(t.content, Content::Picture { .. }));
+        // Woken by the drawing (its place changed) or a PDF's page drawn: look again.
+        let mut changed = self.reread() || self.front_tab().is_some_and(|t| matches!(t.content, Content::Picture { .. } | Content::Pdf(_)));
         let asked: Vec<Vec<PathBuf>> = std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
         for paths in asked {
             self.take(&paths, false, window);
@@ -826,6 +1054,7 @@ impl Program for Viewer {
                         let options = AreaOptions { editable: false, complete: false, spell: false, current_line: false, ..AreaOptions::default() };
                         Content::Text { doc: TextDoc::with_options(&text, options), cut }
                     }
+                    Loaded::Pdf(d) => Content::Pdf(d),
                     Loaded::Problem { why, elsewhere } => Content::Problem { why, elsewhere },
                 };
                 t.frame = 0;
@@ -878,6 +1107,17 @@ impl Program for Viewer {
             C::role(cmd::CLOSE_TAB, Role::CloseWindow),
             C::own(cmd::OPEN_WITH, "File", "Open with its app", ""),
         ];
+        if let Some(Content::Pdf(d)) = self.front_tab().map(|t| &t.content) {
+            list.extend([
+                C::role(cmd::ZOOM_IN, Role::ZoomIn).featured(),
+                C::role(cmd::ZOOM_OUT, Role::ZoomOut).featured(),
+                C::own(cmd::FIT, "View", "Fit to the width", "0").checked(d.mode == pdf::Mode::Width),
+                C::own(cmd::FIT_PAGE, "View", "The whole page", "W").checked(d.mode == pdf::Mode::Page),
+                C::own(cmd::ACTUAL, "View", "Actual size", "1"),
+                C::own(cmd::NEXT, "Go", "Next page", "Right").featured(),
+                C::own(cmd::PREVIOUS, "Go", "Previous page", "Left"),
+            ]);
+        }
         if picture {
             list.extend([
                 C::role(cmd::ZOOM_IN, Role::ZoomIn).featured(),
