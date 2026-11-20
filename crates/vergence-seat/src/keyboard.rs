@@ -19,7 +19,9 @@
 //! 8. Alt+Tab (Alt+Shift+Tab backwards) begins switching among every
 //!    window; Alt+` (the key above Tab) among the focused application's.
 //! 8b. Super+Tab opens the overview (overview milestone 1); while it is
-//!    open every key is its (Super+Tab again closes it there).
+//!     open every key is its (Super+Tab again closes it there).
+//! 8c. Super+Alt with =, -, 8 or L is the magnifier's (meaning milestone
+//!     1, step 7), whatever is open; their releases go nowhere.
 //! 9. Super with an arrow is a window key (snap, maximize, restore);
 //!    Super+D shows the desktop (files milestone 1), and again brings the
 //!    windows back.
@@ -57,6 +59,11 @@ pub enum Key {
     /// The L key (Super+L: lock the screen), and Q (Ctrl+Super+Q, the Mac's).
     L,
     Q,
+    /// = (and + and the keypad's +), - (and the keypad's), 8 (and *): the
+    /// magnifier's keys with Super+Alt.
+    Equal,
+    Minus,
+    Eight,
     /// Delete (Ctrl+Alt+Delete: the session dialog).
     Delete,
     /// The power key (XF86PowerOff): the session dialog too.
@@ -71,6 +78,15 @@ pub enum WindowKey {
     Right,
     Up,
     Down,
+}
+
+/// A magnifier key: Super+Alt with =, -, 8 or L.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZoomKey {
+    In,
+    Out,
+    Toggle,
+    Lens,
 }
 
 /// What Alt+Tab's switching is to do.
@@ -123,6 +139,8 @@ pub enum KeyOut {
     Window(WindowKey),
     /// Super+D: every window out of the way, or back.
     ShowDesktop,
+    /// The magnifier.
+    Zoom(ZoomKey),
     /// Super+Tab: the overview opens.
     Overview,
     /// The open overview's: the server gives it the key's symbol and character.
@@ -189,6 +207,18 @@ impl Seat {
                 Key::Vt(n) if pressed && (1..=12).contains(&n) => KeyOut::Vt(n),
                 _ => KeyOut::Locked,
             };
+        }
+        if mods.logo && mods.alt && !mods.ctrl && matches!(key, Key::Equal | Key::Minus | Key::Eight | Key::L) && self.keyboard.switching.is_none() {
+            self.keyboard.super_alone = false;
+            if !pressed {
+                return KeyOut::Swallow;
+            }
+            return KeyOut::Zoom(match key {
+                Key::Equal => ZoomKey::In,
+                Key::Minus => ZoomKey::Out,
+                Key::Eight => ZoomKey::Toggle,
+                _ => ZoomKey::Lens,
+            });
         }
         if pressed && mods.logo && !mods.alt && !mods.shift && ((key == Key::L && !mods.ctrl) || (key == Key::Q && mods.ctrl)) {
             self.keyboard.super_alone = false;
@@ -342,10 +372,28 @@ impl Seat {
 mod tests {
     use crate::test_util::*;
     use crate::*;
-    use keyboard::{Key, KeyOut, Mods, Switch, WindowKey};
+    use keyboard::{Key, KeyOut, Mods, Switch, WindowKey, ZoomKey};
 
     fn none() -> Mods {
         Mods::default()
+    }
+
+    #[test]
+    fn super_alt_keys_are_the_magnifiers_whatever_is_open() {
+        let mut seat = Seat::new();
+        seat.focus(Some(W1));
+        let sa = Mods { logo: true, alt: true, ..none() };
+        assert_eq!(seat.key(Key::Eight, true, sa), KeyOut::Zoom(ZoomKey::Toggle));
+        assert_eq!(seat.key(Key::Eight, false, sa), KeyOut::Swallow, "its release goes nowhere");
+        assert_eq!(seat.key(Key::Equal, true, sa), KeyOut::Zoom(ZoomKey::In));
+        assert_eq!(seat.key(Key::Minus, true, sa), KeyOut::Zoom(ZoomKey::Out));
+        assert_eq!(seat.key(Key::L, true, sa), KeyOut::Zoom(ZoomKey::Lens), "Super+Alt+L is the lens, not the lock");
+        assert_eq!(seat.key(Key::L, true, Mods { logo: true, ..none() }), KeyOut::Lock, "Super+L still locks");
+        assert_eq!(seat.key(Key::Equal, true, Mods { alt: true, ..none() }), KeyOut::Forward(Some(W1)), "Alt+= is the window's");
+        seat.menu_opened(Menu::Popup);
+        assert_eq!(seat.key(Key::Equal, true, sa), KeyOut::Zoom(ZoomKey::In), "with the apps popup open too");
+        seat.lock();
+        assert_eq!(seat.key(Key::Eight, true, sa), KeyOut::Locked);
     }
 
     #[test]

@@ -20,6 +20,7 @@ mod grid;
 #[cfg(test)]
 mod geometry_tests;
 mod xsettings;
+mod zoom;
 mod control;
 mod text;
 mod place;

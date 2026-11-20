@@ -479,6 +479,7 @@ impl<P: Program> vergence_ui::App for Host<P> {
                 items: m.items,
             });
         }
+        tree.caret = self.ui.caret().map(|r| (r.x, r.y, r.w, r.h));
         if self.meaning_sent.as_ref() == Some(&tree) {
             return None;
         }

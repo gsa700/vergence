@@ -267,6 +267,24 @@ impl Server {
             }
             "focused" => self.meaning_focus_report(),
             "agents" => self.agents_report(),
+            // The magnifier (zoom.rs): its state, its keys, or a point of
+            // interest as the focus or caret would set it.
+            "zoom" => {
+                use crate::zoom::ZoomKey;
+                match args.as_slice() {
+                    [] => {}
+                    ["in"] => self.zoom_key(ZoomKey::In),
+                    ["out"] => self.zoom_key(ZoomKey::Out),
+                    ["toggle"] => self.zoom_key(ZoomKey::Toggle),
+                    ["lens"] => self.zoom_key(ZoomKey::Lens),
+                    [by @ ("focus" | "caret"), x, y] => match (x.parse::<f64>(), y.parse::<f64>()) {
+                        (Ok(x), Ok(y)) => self.zoom_follow(if *by == "focus" { "focus" } else { "caret" }, (x, y)),
+                        _ => return "zoom focus|caret <x> <y>".into(),
+                    },
+                    _ => return "zoom [in|out|toggle|lens|focus <x> <y>|caret <x> <y>]".into(),
+                }
+                self.zoom_report()
+            }
             "agent-answer" => self.agent_answer_by_word(args.first().copied().unwrap_or("")),
             "changes" => self.meaning_changes_report(args.first().and_then(|a| a.parse().ok()).unwrap_or(0)),
             "acted" => {

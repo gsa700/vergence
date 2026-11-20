@@ -103,6 +103,8 @@ pub struct Server {
     pub meaning_log: crate::meaning::MeaningLog,
     /// Agents' grants, the person's questions, the agent tile (agents.rs).
     pub agents: crate::agents::Agents,
+    /// The magnifier (zoom.rs).
+    pub zoom: crate::zoom::Zoom,
     /// Windows' pictures (thumbs.rs), and those still to save for `vctl
     /// thumb`: the window, the room's side in pixels, the name.
     pub thumbs: crate::thumbs::Thumbs,
@@ -321,6 +323,7 @@ impl Server {
             acts: Default::default(),
             meaning_log: Default::default(),
             agents: Default::default(),
+            zoom: Default::default(),
             thumbs: Default::default(),
             picker: None,
             overview: None,

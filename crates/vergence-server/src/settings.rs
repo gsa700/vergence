@@ -352,6 +352,8 @@ impl Server {
                 state.notify_reload();
                 // Wallpaper tint's switch (tint.rs).
                 state.tint_reload();
+                // The magnifier's [magnifier] (zoom.rs).
+                state.zoom_reload();
                 // X11 applications turned on (state.rs).
                 state.x11_follow();
                 let new = load();

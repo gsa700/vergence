@@ -375,6 +375,9 @@ pub struct Doc {
     marks: Vec<(Pos, Pos)>,
     /// The likely end of the word just typed, shown after the caret.
     ghost: Option<String>,
+    /// Where the caret was drawn last frame (window points), for the
+    /// window's meaning (the magnifier follows it); None when not shown.
+    pub(crate) caret_drawn: Option<Rect>,
     /// Space may take the ghost: what was typed is no word of its own
     /// (Dave, 2026-11-18: Space takes it, as macOS; "in" must stay "in").
     ghost_space: bool,
@@ -413,6 +416,7 @@ impl Doc {
             words: Vec::new(),
             marks: Vec::new(),
             ghost: None,
+            caret_drawn: None,
             ghost_space: false,
             list: None,
             words_from: None,
@@ -1895,6 +1899,7 @@ impl Doc {
         let cy = v.y + PAD_Y + self.line_y(self.caret.line) + row as f32 * line_h;
         let cx = text_x - self.xscroll + x;
         let caret_seen = cy + line_h > r.y && cy < r.y + r.h && cx >= text_clip.x;
+        self.caret_drawn = (focused && caret_seen).then(|| Rect::new(cx.round() - 0.5, cy + 1.0, 1.5, line_h - 2.0));
         let base = |y: f32| y + ((line_h - (m.ascent + m.descent)) / 2.0 + m.ascent).round();
         if focused && !selected && caret_seen {
             if let Some(g) = &self.ghost {

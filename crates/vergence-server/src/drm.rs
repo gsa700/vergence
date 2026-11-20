@@ -48,7 +48,7 @@ use smithay::{
         input::Libinput,
         rustix::fs::OFlags,
     },
-    utils::{DeviceFd, Transform},
+    utils::{DeviceFd, Logical, Point, Rectangle, Transform},
     wayland::fractional_scale::with_fractional_scale,
 };
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
@@ -67,6 +67,26 @@ smithay::backend::renderer::element::render_elements! {
     Scene = crate::decor::SceneElement,
     PointerTheme = MemoryRenderBufferRenderElement<GlesRenderer>,
     PointerSurface = WaylandSurfaceRenderElement<GlesRenderer>,
+    /// Through the magnifier (zoom.rs).
+    Zoomed = crate::zoom::Zoomed,
+}
+
+/// A screen's elements, front first: the pointer (unless a finger pointed
+/// last, touch.rs) and the scene.
+fn screen_elements(state: &mut Server, renderer: &mut GlesRenderer, output: &Output, geo: Rectangle<i32, Logical>, scale: f64, pointer_at: Point<f64, Logical>) -> Vec<crate::zoom::Inner> {
+    let mut elements = Vec::new();
+    if geo.to_f64().contains(pointer_at) && !state.touch.fingers_last {
+        let at = (pointer_at - geo.loc.to_f64()).to_physical(smithay::utils::Scale::from(scale));
+        let time = state.start_time.elapsed();
+        for d in state.pointer_image.elements(renderer, at, scale, time) {
+            elements.push(match d {
+                crate::cursor::Drawn::Theme(e) => crate::zoom::Inner::PointerTheme(e),
+                crate::cursor::Drawn::Surface(e) => crate::zoom::Inner::PointerSurface(e),
+            });
+        }
+    }
+    elements.extend(state.scene(renderer, output, scale).into_iter().map(crate::zoom::Inner::Scene));
+    elements
 }
 
 type Manager = DrmOutputManager<GbmAllocator<DrmDeviceFd>, GbmFramebufferExporter<DrmDeviceFd>, (), DrmDeviceFd>;
@@ -966,21 +986,25 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
     s.last = std::time::Instant::now();
     let output = s.output.clone();
     let Some(geo) = state.space.output_geometry(&output) else { return };
-    let scale = smithay::utils::Scale::from(s.scale);
-
-    let mut elements: Vec<OutputElements> = Vec::new();
-    // No pointer is drawn while a finger was the last to point (touch.rs).
-    if geo.to_f64().contains(pointer_at) && !state.touch.fingers_last {
-        let at = (pointer_at - geo.loc.to_f64()).to_physical(scale);
-        let time = state.start_time.elapsed();
-        for d in state.pointer_image.elements(&mut b.renderer, at, s.scale, time) {
-            elements.push(match d {
-                crate::cursor::Drawn::Theme(e) => OutputElements::PointerTheme(e),
-                crate::cursor::Drawn::Surface(e) => OutputElements::PointerSurface(e),
-            });
+    let scale = s.scale;
+    // The magnifier follows the pointer that moved (zoom.rs).
+    state.zoom_pointer(pointer_at);
+    let front = screen_elements(state, &mut b.renderer, &output, geo, scale, pointer_at);
+    let elements: Vec<OutputElements> = match state.zoom_here(geo) {
+        None => front
+            .into_iter()
+            .map(|e| match e {
+                crate::zoom::Inner::Scene(e) => OutputElements::Scene(e),
+                crate::zoom::Inner::PointerTheme(e) => OutputElements::PointerTheme(e),
+                crate::zoom::Inner::PointerSurface(e) => OutputElements::PointerSurface(e),
+            })
+            .collect(),
+        Some(lens) => {
+            let back = if lens { screen_elements(state, &mut b.renderer, &output, geo, scale, pointer_at) } else { Vec::new() };
+            let ground = state.background_color(&s.connector);
+            state.zoom_frame(front, back, geo, scale, ground).into_iter().map(OutputElements::Zoomed).collect()
         }
-    }
-    elements.extend(state.scene(&mut b.renderer, &output, s.scale).into_iter().map(OutputElements::Scene));
+    };
 
     // The control socket's `shot`: this monitor's frame, rendered once more
     // offscreen; for a screen on another GPU, the very buffer copied to it last

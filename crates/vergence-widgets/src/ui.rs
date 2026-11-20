@@ -212,6 +212,9 @@ pub struct Ui<M> {
     open: Option<Open>,
     /// When the caret was last shown at once (it blinks from there).
     blink: Instant,
+    /// Where the focused field's caret was drawn last (window points), for
+    /// the window's meaning: the magnifier follows it.
+    caret_at: std::cell::Cell<Option<Rect>>,
     steady: bool,
     /// The longest time between the clicks of a double-click.
     double: Duration,
@@ -251,6 +254,7 @@ impl<M> Default for Ui<M> {
             drag: None,
             open: None,
             blink: Instant::now(),
+            caret_at: std::cell::Cell::new(None),
             steady: false,
             double: Duration::from_millis(400),
             click: None,
@@ -1953,6 +1957,7 @@ impl<M: Clone> Ui<M> {
     /// Draws the widgets into `scene`.
     pub fn draw(&mut self, scene: &mut Scene, fonts: &mut Fonts, theme: &Theme) {
         let now = Instant::now();
+        self.caret_at.set(None);
         self.spell = theme.spell;
         let face = |fonts: &mut Fonts, weight: u16| fonts.face(&theme.font, weight, false).or_else(|| fonts.face("sans-serif", weight, false));
         let mut ink: Vec<Color> = Vec::with_capacity(self.nodes.len());
@@ -2138,6 +2143,9 @@ impl<M: Clone> Ui<M> {
                             shift = cx;
                         }
                         shift = shift.clamp(0.0, (total - inner.w + 2.0).max(0.0));
+                        if focused {
+                            self.caret_at.set(Some(Rect::new((inner.x + cx - shift).clamp(inner.x, inner.x + inner.w), r.y + 4.0, 1.5, (r.h - 8.0).max(1.0))));
+                        }
                         scene.push_clip(inner, 0.0);
                         if focused && caret != anchor {
                             let (a, b) = (at(caret.min(anchor)), at(caret.max(anchor)));
@@ -2231,6 +2239,9 @@ impl<M: Clone> Ui<M> {
                     // The part of it under the window's bar (look milestone 1).
                     let inset = (self.under_bar - r.y).max(0.0);
                     doc.borrow_mut().draw(scene, fonts, r, inset, theme, focused, self.caret_on());
+                    if focused {
+                        self.caret_at.set(doc.borrow().caret_drawn);
+                    }
                     if ringed {
                         ring(scene, r, 0.0);
                     }
@@ -2308,6 +2319,12 @@ impl<M: Clone> Ui<M> {
             }
         }
         scene.pop_clip();
+    }
+
+    /// Where the focused field's or text area's caret was drawn last
+    /// (window points), if one was.
+    pub fn caret(&self) -> Option<Rect> {
+        self.caret_at.get()
     }
 
     /// Every widget's meaning, in reading order.

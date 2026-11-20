@@ -360,3 +360,29 @@ unnecessary for now); voice control.
   Enter ignored, a later Enter refuses, the cool-down, the same name
   through vergence-agent-mcp asked again, 7×6=42 after the timed answer),
   tests on all four.
+- **Step 7, the magnifier** (2026-11-20). The server's zoom.rs: every
+  element of the screen's frame scaled about the point of interest
+  (smithay's RescaleRenderElement, cropped by CropRenderElement), so the
+  point stays where it is on the real screen and the pointer, drawn
+  through the same scaling, stays over what it is over: clicks need no
+  translation. Full screen (default) or a lens (480x270 points, a blue
+  frame, the screen as it is behind it; the screen's elements made twice).
+  The point: the pointer, the focused control's middle or the caret,
+  whichever moved last, each one switchable; focus and caret from the
+  window with the keyboard's meaning tree (meaning.rs). The toolkit now
+  sends the caret it draws (fields and the text area: vergence-widgets
+  `Ui::caret`, `TextDoc` caret_drawn); it was never filled before. Keys
+  in the seat (vergence-seat `ZoomKey`): Super+Alt+= in (turns it on),
+  Super+Alt+- out (off past 1.25x), Super+Alt+8 on and off, Super+Alt+L
+  the lens; whatever is open, not while locked. Smooth on the GPU (eased,
+  16 ms steps; jumps under Reduce motion; following the pointer has no
+  lag), levels 1.25 to 20. desktop.toml `[magnifier]` on, level, style,
+  follow-pointer, follow-focus, follow-caret, lens-width, lens-height;
+  the Accessibility page's Zoom group (settings zoom.rs) writes them; the
+  keys change only what is shown now. `vctl zoom [in|out|toggle|lens|focus
+  X Y|caret X Y]`. Pixels for now: textures drawn larger, the frost's
+  grain with them. Tried headless on Hubble: full screen at 2x over
+  Calculator, the lens, Edit's caret followed while typing, the page's
+  switch, the keys; tests on all four, the display suite 10 of 10.
+  Not yet: the Mac's other ways of following (keep the point in view,
+  centered), several screens zoomed at once.

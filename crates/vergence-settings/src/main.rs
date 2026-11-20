@@ -43,6 +43,8 @@ mod places;
 use places::PlacesMsg;
 mod privacy;
 use privacy::PrivacyMsg;
+mod zoom;
+use zoom::ZoomMsg;
 mod apps;
 use apps::AppsMsg;
 mod defaults;
@@ -437,6 +439,7 @@ enum Message {
     Places(PlacesMsg),
     /// Privacy > Agents (privacy.rs).
     Privacy(PrivacyMsg),
+    Zoom(ZoomMsg),
     /// The Apps page (apps.rs).
     Apps(AppsMsg),
     /// The Default apps page (defaults.rs).
@@ -1104,6 +1107,7 @@ impl App {
             Message::HandedOver(args) => self.apply_args(&args),
             Message::Places(m) => self.places_message(m),
             Message::Privacy(m) => self.privacy_message(m),
+            Message::Zoom(m) => self.zoom_message(m),
             Message::Apps(m) => self.apps_message(m),
             Message::Defaults(m) => self.defaults_message(m),
             Message::Reread => self.reread(),
@@ -1754,7 +1758,7 @@ impl App {
             .chain(self.has_had(InputKind::Touchscreen).then(|| ("Touchscreen".into(), Page::Touchscreen, Icon::Touchscreen, "touchscreen touch screen panel finger tap press")))
             .collect()),
             ("Sound", vec![("Sound".into(), Page::Sound, Icon::Sound, "sound volume output speaker headphones mute audio")]),
-            ("Accessibility", vec![("Accessibility".into(), Page::Accessibility, Icon::Accessibility, "accessibility contrast motion transparency size")]),
+            ("Accessibility", vec![("Accessibility".into(), Page::Accessibility, Icon::Accessibility, "accessibility contrast motion transparency size zoom magnifier lens")]),
             ("Privacy", vec![("Agents".into(), Page::Agents, Icon::Lock, "agents agent assistant ai claude automation permission allow take back grants privacy mcp")]),
             ("System", vec![
                 ("Energy".into(), Page::Energy, Icon::Energy, "energy power sleep screens off idle"),
@@ -1854,7 +1858,8 @@ impl App {
                     setting("Reduce transparency", "Bars, the dock and menus are solid: nothing shows through them.", switch(transparency, Message::Transparency).name("Reduce transparency")),
                     setting("Size", &format!("Everything bigger on every screen, on top of each screen's own scale (Screens): {}%.", (self.size * 100.0).round()), size_slider(self.size)),
                 ]),
-                self.group(Some("Motion"), vec![setting("Reduce motion", "Apps that support it turn off animations.", switch(motion, Message::Motion).name("Reduce motion"))]),
+                self.zoom_group(),
+                self.group(Some("Motion"), vec![setting("Reduce motion", "Apps that support it turn off animations, and zooming jumps rather than glides.", switch(motion, Message::Motion).name("Reduce motion"))]),
                 self.group(None, vec![setting("Fonts", "The interface and monospace fonts and their sizes are in Theme and fonts.", button(label("Theme and fonts")).on_press(Message::Go(Page::Theme)).name("Open Theme and fonts"))]),
                 self.status_line(),
             ],

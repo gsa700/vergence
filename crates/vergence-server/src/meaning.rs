@@ -190,8 +190,20 @@ impl Server {
         if old_focus != Some(new.0) {
             self.meaning_log.push(Change::Focus { client, window, node: new.0 });
         }
+        // The magnifier follows the window with the keyboard's focus and
+        // caret (zoom.rs): the focused control's middle, then the caret's.
+        let keyboard = self.input.keyboard_native.as_ref().and_then(|w| w.native()).is_some_and(|n| n.client == client && n.id == window);
+        if keyboard
+            && old_focus != Some(new.0)
+            && let Some(n) = new.2.iter().find(|n| n.id == new.0)
+        {
+            self.zoom_follow("focus", (origin.0 + n.x + n.w / 2.0, origin.1 + n.y + n.h / 2.0));
+        }
         if old_caret != new.1 {
             let at = new.1.map(|(x, y, w, h)| (origin.0 + x, origin.1 + y, w, h));
+            if keyboard && let Some((x, y, w, h)) = at {
+                self.zoom_follow("caret", (x + w / 2.0, y + h / 2.0));
+            }
             self.meaning_log.push(Change::Caret { client, window, at });
         }
         if old_nodes != Some(&new.2) {
