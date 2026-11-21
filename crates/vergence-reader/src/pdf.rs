@@ -88,6 +88,8 @@ pub struct Search {
     pub query: String,
     pub generation: u64,
     pub matches: Vec<(usize, Vec<[f32; 4]>)>,
+    /// Each match with some of the text around it, for the sidebar's results.
+    pub snippets: Vec<String>,
     pub next: usize,
     pub chars_seen: usize,
     pub done: bool,
@@ -285,12 +287,15 @@ fn work(mut viewer: vergence_pdf::helper::Viewer, shared: Arc<Shared>) {
             Job::Search(page, generation) => {
                 let query = shared.search.lock().unwrap_or_else(|e| e.into_inner()).query.clone();
                 let chars = viewer.text(page).unwrap_or_default();
-                let found: Vec<Vec<[f32; 4]>> = text::find(&chars, &query).into_iter().map(|(a, b)| text::boxes(&chars, a, b)).collect();
+                let spans = text::find(&chars, &query);
+                let found: Vec<Vec<[f32; 4]>> = spans.iter().map(|&(a, b)| text::boxes(&chars, a, b)).collect();
+                let snippets: Vec<String> = spans.iter().map(|&(a, b)| snippet(&chars, a, b)).collect();
                 let mut se = shared.search.lock().unwrap_or_else(|e| e.into_inner());
                 if se.generation == generation {
                     se.chars_seen += chars.len();
                     let had = se.matches.len();
                     se.matches.extend(found.into_iter().map(|b| (page, b)));
+                    se.snippets.extend(snippets);
                     // Woken for the first matches and every so often after.
                     if (had == 0 && !se.matches.is_empty()) || page % 25 == 24 {
                         drop(se);
@@ -1001,6 +1006,25 @@ impl Layout {
     }
 }
 
+/// A match with up to 40 characters either side, on one line, cut at words.
+pub fn snippet(chars: &[Char], a: usize, b: usize) -> String {
+    if chars.is_empty() {
+        return String::new();
+    }
+    let (start, end) = (a.saturating_sub(40), (b + 40).min(chars.len() - 1));
+    let raw = text::selected(chars, start, end).split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut words: Vec<&str> = raw.split(' ').collect();
+    // The first and last words may be cut: dropped, unless that leaves too little.
+    if start > 0 && words.len() > 3 {
+        words.remove(0);
+    }
+    if end + 1 < chars.len() && words.len() > 3 {
+        words.pop();
+    }
+    let body = words.join(" ");
+    format!("{}{body}{}", if start > 0 { "…" } else { "" }, if end + 1 < chars.len() { "…" } else { "" })
+}
+
 /// Pixels per point for a page drawn at `want`, within [`MAX_PAGE_PIXELS`]
 /// and rounded so small changes do not redraw it.
 fn page_scale(w: f32, h: f32, want: f32) -> f32 {
@@ -1246,6 +1270,18 @@ mod tests {
         let t = turn_image(img, 90);
         assert_eq!((t.width, t.height), (1, 2));
         assert_eq!(&t.rgba[..4], &[1, 1, 1, 1], "the left pixel at the top");
+    }
+
+    #[test]
+    fn a_match_with_the_words_around_it() {
+        let text = "Early one morning in the spring the quick brown fox jumps over the lazy dog and keeps running far away from the farm";
+        let chars: Vec<Char> = text.chars().enumerate().map(|(i, c)| Char { text: c.to_string(), rect: [i as f32 * 5.0, 0.0, i as f32 * 5.0 + 5.0, 10.0] }).collect();
+        let at = text.find("lazy").unwrap();
+        let s = snippet(&chars, at, at + 3);
+        assert!(s.contains("lazy dog"), "{s}");
+        assert!(s.starts_with('…') && s.ends_with('…'), "cut both sides: {s}");
+        assert!(!s.contains("  "));
+        assert_eq!(snippet(&chars[..9], 0, 4), "Early one", "the whole text: no dots");
     }
 
     #[test]

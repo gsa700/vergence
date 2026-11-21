@@ -166,9 +166,9 @@ struct Viewer {
     copy_out: Option<String>,
     /// The place saved last: path, page, mode.
     saved_place: Option<(PathBuf, usize, String)>,
-    /// The sidebar: shown, and showing the outline (else the pages).
+    /// The sidebar: shown, and what it shows.
     sidebar: bool,
-    contents: bool,
+    side: Side,
     /// The thumbnails' place as last drawn.
     thumb_area: Rc<Cell<Rect>>,
     /// A press on a page: where, and whether it moved since (a drag, not a click).
@@ -200,6 +200,14 @@ fn with_place(mut d: pdf::Pdf, path: &Path) -> pdf::Pdf {
     d
 }
 
+/// What the sidebar shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Side {
+    Pages,
+    Contents,
+    Results,
+}
+
 #[derive(Debug, Clone)]
 enum Msg {
     Touch(Touch),
@@ -210,10 +218,12 @@ enum Msg {
     PageField(String),
     GoToPage,
     ThumbTouch(Touch),
-    /// The sidebar's tab: true for the outline.
-    SideTab(bool),
+    /// The sidebar's tab.
+    SideTab(Side),
     /// An outline entry chosen (its index).
     Outline(usize),
+    /// A search result chosen (its index).
+    Result(usize),
     OpenUri,
     CancelUri,
     FindText(String),
@@ -240,7 +250,7 @@ impl Viewer {
             copy_out: None,
             saved_place: None,
             sidebar: false,
-            contents: false,
+            side: Side::Pages,
             thumb_area: Rc::new(Cell::new(Rect::new(0.0, 0.0, 1.0, 1.0))),
             press_at: None,
             pending_uri: None,
@@ -540,7 +550,7 @@ impl Viewer {
         match input {
             Input::Scroll { x, y, dx, dy } => {
                 let tr = self.thumb_area.get();
-                if self.sidebar && !self.contents && *x >= tr.x && *x <= tr.x + tr.w && *y >= tr.y && *y <= tr.y + tr.h {
+                if self.sidebar && self.side == Side::Pages && *x >= tr.x && *x <= tr.x + tr.w && *y >= tr.y && *y <= tr.y + tr.h {
                     let Some(d) = self.pdf_mut() else { return false };
                     d.thumb_top += dy;
                     d.clamp_thumbs(tr);
@@ -726,18 +736,52 @@ impl Viewer {
         .height(Length::FILL)
     }
 
-    /// The sidebar: the pages' thumbnails, or the outline.
+    /// The sidebar: the pages' thumbnails, the outline, or find's results.
     fn sidebar_view(&self, d: &pdf::Pdf) -> Element<Msg> {
         let outline = d.shared.outline.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let has_outline = outline.as_ref().is_some_and(|o| !o.is_empty());
-        let contents = self.contents && has_outline;
+        let searching = self.finding.as_ref().is_some_and(|q| !q.trim().is_empty());
+        let side = match self.side {
+            Side::Contents if !has_outline => Side::Pages,
+            Side::Results if !searching => Side::Pages,
+            s => s,
+        };
+        let contents = side == Side::Contents;
         let tab = |text: &str, on: bool, m: Msg| button(label(text).size(12.0)).look(if on { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(3.0, 10.0)).on_press(m).name(text);
-        let mut tabs = vec![tab("Pages", !contents, Msg::SideTab(false))];
+        let mut tabs = vec![tab("Pages", side == Side::Pages, Msg::SideTab(Side::Pages))];
         if has_outline {
-            tabs.push(tab("Contents", contents, Msg::SideTab(true)));
+            tabs.push(tab("Contents", contents, Msg::SideTab(Side::Contents)));
+        }
+        if searching {
+            tabs.push(tab("Results", side == Side::Results, Msg::SideTab(Side::Results)));
         }
         let head = panel(row(tabs).spacing(6.0)).radius(0.0).padding(Padding::hv(6.0, 8.0)).width(Length::FILL);
-        let body: Element<Msg> = if contents {
+        let body: Element<Msg> = if side == Side::Results {
+            let se = d.shared.search.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let items: Vec<Element<Msg>> = se
+                .matches
+                .iter()
+                .zip(se.snippets.iter())
+                .enumerate()
+                .take(2000)
+                .map(|(i, ((page, _), text))| {
+                    let look = if d.found == Some(i) { ButtonLook::Chosen } else { ButtonLook::Plain };
+                    let head = label(format!("Page {}", page + 1)).size(11.0);
+                    let head = if d.found == Some(i) { head } else { head.dim() };
+                    let lines = column(vec![head, label(text.clone()).size(12.0).wrap().width(Length::FILL)]).spacing(1.0).width(Length::FILL);
+                    let mut b = button(lines).look(look).padding(Padding::hv(4.0, 8.0)).width(Length::FILL).on_press(Msg::Result(i)).name(format!("Page {}: {text}", page + 1));
+                    if d.found == Some(i) {
+                        b = b.key(2_000_000 + i as u64).keep_in_view();
+                    }
+                    b
+                })
+                .collect();
+            if items.is_empty() {
+                panel(label(if se.done { "Not found" } else { "Searching…" }).size(12.0).dim()).padding(12.0).width(Length::FILL).height(Length::FILL)
+            } else {
+                scroll(column(items).spacing(1.0).width(Length::FILL))
+            }
+        } else if contents {
             // The entry for the place in view: the last one starting at or
             // above a quarter of the way down the window.
             let r = self.area.get();
@@ -1052,7 +1096,18 @@ impl Program for Viewer {
                 self.place_soon(window);
             }
             Msg::ThumbTouch(_) => return,
-            Msg::SideTab(contents) => self.contents = contents,
+            Msg::SideTab(side) => self.side = side,
+            Msg::Result(i) => {
+                if self.front_tab().is_some_and(|t| matches!(&t.content, Content::Pdf(d) if d.found != Some(i))) {
+                    self.mark();
+                }
+                let r = self.area.get();
+                if let Some(d) = self.pdf_mut() {
+                    d.show_match(i as isize, r);
+                }
+                self.follow_thumb();
+                self.place_soon(window);
+            }
             Msg::Outline(i) => {
                 let target = self.front_tab().and_then(|t| match &t.content {
                     Content::Pdf(d) => d.shared.outline.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|o| o.get(i)).and_then(|e| e.target),
@@ -1074,6 +1129,9 @@ impl Program for Viewer {
             Msg::FindText(q) => {
                 if let Some(d) = self.pdf_mut() {
                     d.start_search(&q);
+                }
+                if self.sidebar && !q.trim().is_empty() {
+                    self.side = Side::Results;
                 }
                 self.finding = Some(q);
             }

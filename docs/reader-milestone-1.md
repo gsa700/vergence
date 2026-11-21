@@ -116,3 +116,11 @@ signing (question 2). Printing (no printing system yet). Video (Close-Up's).
   toolbar icons (vergence-widgets): FitWidth, OnePage, Continuous,
   TwoPages. Tried headless on Hubble: two pages, one page turned right.
   Tests for spreads, the one page's edges and turning.
+- **Step 3, the sidebar** (2026-11-20). Pages (thumbnails, turned with
+  the pages) and Contents (the outline) as before, and **Results** while a
+  search is on: each match with its page and up to 40 characters either
+  side on one line, cut at words (pdf.rs `snippet`, made by the worker as
+  it searches); a click goes there (Back returns), the match shown is
+  marked and kept in sight; typing a search with the sidebar open turns
+  it to Results. Tried headless on Hubble: "lookup" in a 253-page manual,
+  57 found, listed with their text.
