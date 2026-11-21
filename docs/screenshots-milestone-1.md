@@ -1,6 +1,8 @@
 # Screenshots milestone 1: the Mac's keys, built into the server
 
-Status: **questions answered 2026-11-20** (all four as recommended:
+Status: **closed 2026-11-21** (Dave: "close it"), all eight steps in;
+not done: the camera's sound (no sound playback yet). Next: recording, its
+own milestone with our own video encoder. Earlier: **questions answered 2026-11-20** (all four as recommended:
 recording its own milestone next, with our own encoder; Close-Up's crop
 and rotate now, markup later; other programs through the portal, each
 asked first; a window with its shadow, Alt+click without). An app milestone,
