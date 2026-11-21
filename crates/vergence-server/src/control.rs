@@ -482,12 +482,27 @@ impl Server {
                         Some(w) => What::Window(w),
                         None => return "capture window I (an index from vctl windows)".into(),
                     },
-                    _ => return "capture screen [NAME] | screens | area X Y W H | window I  [--pointer] [--no-shadow] [--to FILE]".into(),
+                    _ => return "capture screen [NAME] | screens | area X Y W H | window I  [--pointer] [--no-shadow] [--to FILE | --clip]".into(),
                 };
-                let req = Request { what, dest: to.map_or(Dest::Folder, Dest::Path), pointer: flag("--pointer"), shadow: !flag("--no-shadow") };
+                let dest = if flag("--clip") { Dest::Clipboard } else { to.map_or(Dest::Folder, Dest::Path) };
+                let req = Request { what, dest, pointer: flag("--pointer"), shadow: !flag("--no-shadow") };
                 match self.capture_ask(req) {
                     Ok(paths) => paths.iter().map(|p| format!("capture: {}", p.display())).collect::<Vec<_>>().join("\n"),
                     Err(e) => format!("capture: {e}"),
+                }
+            }
+            // What the clipboard holds and from whom (a picture: its size).
+            "clipboard" => {
+                use smithay::wayland::selection::data_device::current_data_device_selection_userdata;
+                match current_data_device_selection_userdata(&self.seat).as_deref() {
+                    None => "clipboard: a Wayland program's, or nothing".into(),
+                    Some(crate::native::ClipOwner::X11) => "clipboard: an X11 program's".into(),
+                    Some(crate::native::ClipOwner::Native(c)) => format!("clipboard: native client {c}'s"),
+                    Some(crate::native::ClipOwner::Server(t)) => format!("clipboard: the server's text, {} bytes", t.len()),
+                    Some(crate::native::ClipOwner::Picture(png)) => {
+                        let size = (png.len() >= 24 && png.starts_with(b"\x89PNG")).then(|| (u32::from_be_bytes(png[16..20].try_into().unwrap()), u32::from_be_bytes(png[20..24].try_into().unwrap())));
+                        format!("clipboard: the server's picture, image/png, {} bytes, {:?}", png.len(), size)
+                    }
                 }
             }
             "picture" => {

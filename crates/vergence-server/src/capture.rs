@@ -47,6 +47,8 @@ pub enum Dest {
     Folder,
     /// A file named by the caller (vctl, tests).
     Path(PathBuf),
+    /// The clipboard, as image/png (Ctrl with the keys, step 3).
+    Clipboard,
 }
 
 #[derive(Clone)]
@@ -85,6 +87,8 @@ impl Server {
             _ => vec![String::new()],
         };
         let paths: Vec<PathBuf> = match &req.dest {
+            // One picture to the clipboard (every screen: the first).
+            Dest::Clipboard => vec![PathBuf::new()],
             Dest::Path(p) => screens.iter().map(|s| if s.is_empty() || screens.len() == 1 { p.clone() } else { with_suffix(p, s) }).collect(),
             Dest::Folder => {
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
@@ -136,6 +140,16 @@ fn free_name(dir: &std::path::Path, stem: &str, waiting: &[PathBuf]) -> PathBuf 
 fn with_suffix(p: &std::path::Path, s: &str) -> PathBuf {
     let stem = p.file_stem().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default();
     p.with_file_name(format!("{stem} ({s}).png"))
+}
+
+/// A capture as PNG bytes (for the clipboard).
+pub fn png_bytes(w: u32, h: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    let mut enc = png::Encoder::new(&mut out, w, h);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header().and_then(|mut wr| wr.write_image_data(rgba)).map_err(|e| e.to_string())?;
+    Ok(out)
 }
 
 /// Writes a capture's PNG off the main thread: the folder made 0700 if new,
@@ -367,9 +381,7 @@ impl Server {
     }
 
     fn capture_now(&mut self, what: What, clip: bool) {
-        // To the clipboard with step 3; to a file until then.
-        let _ = clip;
-        let req = Request { what, dest: Dest::Folder, pointer: false, shadow: true };
+        let req = Request { what, dest: if clip { Dest::Clipboard } else { Dest::Folder }, pointer: false, shadow: true };
         if let Err(e) = self.capture_ask(req) {
             tracing::info!("screenshot: {e}");
         }
@@ -422,8 +434,7 @@ impl Server {
         self.capture_pick = None;
         self.redraw_all();
         if let Some(w) = w {
-            let req = Request { what: What::Window(w), dest: Dest::Folder, pointer: false, shadow: !alt };
-            let _ = clip;
+            let req = Request { what: What::Window(w), dest: if clip { Dest::Clipboard } else { Dest::Folder }, pointer: false, shadow: !alt };
             if let Err(e) = self.capture_ask(req) {
                 tracing::info!("screenshot: {e}");
             }

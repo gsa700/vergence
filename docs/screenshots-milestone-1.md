@@ -138,4 +138,15 @@ Recording, by question 1. OCR (text out of a capture) and the Mac's
   (250x250), Space and a click on Calculator's bar (362x598 with Alt),
   Escape (nothing taken). Seat test: the keys, release swallowed, Super+3
   without Shift the program's, the picker's keys.
+- **Step 3, the clipboard** (2026-11-20). With Ctrl (Ctrl+Super+Shift+3,
+  Ctrl+Super+Shift+4 and its picker) a capture goes to the clipboard, not
+  a file: made PNG on a thread, then the server holds the clipboard itself
+  (native.rs `ClipOwner::Picture`, `server_copy_picture`) and offers
+  image/png to native apps, Wayland programs and X11 programs alike (the
+  same three roads its own text takes); asked for as any other kind,
+  nothing is written. `vctl capture ... --clip`, and `vctl clipboard` says
+  what the clipboard holds (a picture: its bytes and size). Tried headless
+  on Hubble: Ctrl+Super+Shift+3 (a 1920x1080 PNG on the clipboard),
+  Ctrl+Super+Shift+4, Space and a click (Calculator, 410x646), no files
+  written.
 

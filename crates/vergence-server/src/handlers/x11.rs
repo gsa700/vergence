@@ -259,6 +259,7 @@ impl XwmHandler for Server {
         let native = match current_data_device_selection_userdata(&self.seat).as_deref() {
             Some(crate::native::ClipOwner::Native(c)) => Some(*c),
             Some(crate::native::ClipOwner::Server(text)) => return crate::native::write_clip_text(text.clone(), fd),
+            Some(crate::native::ClipOwner::Picture(png)) => return crate::native::write_clip_picture(png.clone(), &mime_type, fd),
             _ => None,
         };
         if let Some(c) = native {

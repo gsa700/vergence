@@ -1580,6 +1580,29 @@ fn run_captures(state: &mut Server, renderer: &mut GlesRenderer, pointer_at: Poi
             }
             What::Window(w) => taken.push(window_pixels(state, renderer, &outputs, w, req.shadow)),
         }
+        if matches!(req.dest, crate::capture::Dest::Clipboard) {
+            match taken.into_iter().next() {
+                // Made PNG on a thread, put on the clipboard on the main loop.
+                Some(Ok((w, h, rgba))) => {
+                    let (tx, rx) = smithay::reexports::calloop::channel::channel::<Vec<u8>>();
+                    let _ = state.loop_handle.insert_source(rx, |ev, _, st| {
+                        if let smithay::reexports::calloop::channel::Event::Msg(png) = ev {
+                            tracing::info!("screenshot: to the clipboard ({} KB)", png.len() >> 10);
+                            st.server_copy_picture(png);
+                        }
+                    });
+                    std::thread::spawn(move || match crate::capture::png_bytes(w as u32, h as u32, &rgba) {
+                        Ok(png) => {
+                            let _ = tx.send(png);
+                        }
+                        Err(e) => tracing::warn!("screenshot to the clipboard: {e}"),
+                    });
+                }
+                Some(Err(e)) => tracing::warn!("screenshot to the clipboard: {e}"),
+                None => {}
+            }
+            continue;
+        }
         for (t, path) in taken.into_iter().zip(paths) {
             match t {
                 Ok((w, h, rgba)) => crate::capture::save(Taken { w: w as u32, h: h as u32, rgba, path }, |r| match r {

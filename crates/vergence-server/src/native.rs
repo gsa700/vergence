@@ -263,6 +263,22 @@ pub enum ClipOwner {
     /// The server's own text (what was copied from the app menu's search
     /// field, 2026-11-18), written to whoever pastes.
     Server(Arc<String>),
+    /// A picture the server put there (a screenshot with Ctrl, 2026-11-20),
+    /// as PNG: written to whoever pastes it as image/png.
+    Picture(Arc<Vec<u8>>),
+}
+
+/// The server's own picture (PNG) to a paste's pipe, on a thread of its
+/// own; asked for as anything but image/png, nothing is written.
+pub fn write_clip_picture(png: Arc<Vec<u8>>, kind: &str, fd: std::os::fd::OwnedFd) {
+    if kind != "image/png" {
+        return;
+    }
+    let _ = std::thread::Builder::new().name("clipboard".into()).spawn(move || {
+        use std::io::Write;
+        let mut f = std::fs::File::from(fd);
+        let _ = f.write_all(&png);
+    });
 }
 
 /// The kinds of text the server offers when it holds the clipboard.
@@ -1429,6 +1445,18 @@ impl Server {
         self.native_clipboard_offer(kinds);
     }
 
+    /// The server puts a picture (PNG bytes) on the clipboard itself (a
+    /// screenshot with Ctrl), for every kind of client.
+    pub fn server_copy_picture(&mut self, png: Vec<u8>) {
+        use smithay::wayland::selection::{SelectionTarget, data_device::set_data_device_selection};
+        let kinds = vec!["image/png".to_string()];
+        set_data_device_selection(&self.display_handle, &self.seat, kinds.clone(), ClipOwner::Picture(Arc::new(png)));
+        if let Some(xwm) = self.xwm.as_mut() {
+            let _ = xwm.new_selection(SelectionTarget::Clipboard, Some(kinds.clone()));
+        }
+        self.native_clipboard_offer(kinds);
+    }
+
     /// The clipboard's text for the server itself (Paste in the app menu's
     /// search field): asked of whoever holds it through a pipe, read on a
     /// thread, and handed to `then` on the main loop.
@@ -1450,6 +1478,7 @@ impl Server {
                 None => Err("X11 is gone".into()),
             },
             Some(ClipOwner::Server(_)) => Ok(()),
+            Some(ClipOwner::Picture(_)) => Err("a picture, not text".into()),
             None => request_data_device_client_selection(&self.seat, kind, write).map_err(|e| format!("{e:?}")),
         };
         if let Err(e) = sent {
@@ -1492,6 +1521,10 @@ impl Server {
             }
             Some(ClipOwner::Server(text)) => {
                 write_clip_text(text, write);
+                Ok(())
+            }
+            Some(ClipOwner::Picture(png)) => {
+                write_clip_picture(png, &kind, write);
                 Ok(())
             }
             Some(ClipOwner::X11) => match self.xwm.as_mut() {
