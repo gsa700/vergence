@@ -23,6 +23,15 @@
 //! rect = f32 x y w h    point = f32 x y    color = u8 r g b a
 //! ```
 //!
+//! **Version 2, for the native window protocol** (display lists milestone
+//! 1, step 1): the same, but each image begins with a u64 key the sender
+//! chose and a kind byte: 0, its pixels follow (u32 width, u32 height,
+//! RGBA), and the reader keeps them under the key; 1, nothing follows: the
+//! picture sent earlier under that key. So a frame names a picture it has
+//! sent before (a page, an icon) instead of sending it again.
+//! [`Scene::encode_keyed`] and [`Scene::decode_keyed`]; version 1 stays for
+//! files and anything that keeps no pictures.
+//!
 //! Nothing may follow the last command. A reader that meets a version or an
 //! opcode it does not know refuses the scene: skipping a drawing command
 //! would show a different picture, which is worse than showing none.
@@ -32,6 +41,7 @@
 //! reserves memory, and it returns only scenes that pass [`Scene::validate`].
 
 use std::fmt;
+use std::sync::Arc;
 
 use crate::{
     Cell, Color, Command, FontRef, Glyph, Image, MAX_COMMANDS, MAX_FAMILY, MAX_FONTS, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_RUN_GLYPHS, MAX_SCENE_GLYPHS,
@@ -77,6 +87,8 @@ pub enum DecodeError {
     Trailing,
     /// It parsed, but it is not a valid scene.
     Invalid(SceneError),
+    /// A picture named by a key the reader does not keep (version 2).
+    UnknownImage(u64),
 }
 
 impl fmt::Display for DecodeError {
@@ -91,6 +103,7 @@ impl fmt::Display for DecodeError {
             DecodeError::Flag => write!(f, "bad flag"),
             DecodeError::Trailing => write!(f, "bytes after the scene"),
             DecodeError::Invalid(e) => write!(f, "invalid scene: {e}"),
+            DecodeError::UnknownImage(k) => write!(f, "picture {k:#x} was never sent"),
         }
     }
 }
@@ -112,6 +125,10 @@ impl Writer {
     fn u16(&mut self, v: u16) {
         self.0.extend_from_slice(&v.to_le_bytes());
     }
+    fn u64(&mut self, v: u64) {
+        self.0.extend_from_slice(&v.to_le_bytes());
+    }
+
     fn u32(&mut self, v: u32) {
         self.0.extend_from_slice(&v.to_le_bytes());
     }
@@ -153,6 +170,10 @@ impl<'a> Reader<'a> {
         let b = self.take(2)?;
         Ok(u16::from_le_bytes([b[0], b[1]]))
     }
+    fn u64(&mut self) -> Result<u64, DecodeError> {
+        Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
+    }
+
     fn u32(&mut self) -> Result<u32, DecodeError> {
         let b = self.take(4)?;
         Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
@@ -188,10 +209,24 @@ impl Scene {
     /// The scene as bytes. The scene is checked first: an invalid scene is
     /// never written.
     pub fn encode(&self) -> Result<Vec<u8>, SceneError> {
+        self.encode_as(None)
+    }
+
+    /// The scene as version 2 bytes: image `i` under `keys[i]`, its pixels
+    /// sent only if `sent(key)` says the reader does not have them yet.
+    pub fn encode_keyed(&self, keys: &[u64], sent: &dyn Fn(u64) -> bool) -> Result<Vec<u8>, SceneError> {
+        if keys.len() != self.images.len() {
+            return Err(SceneError::BadImage(keys.len().min(self.images.len())));
+        }
+        self.encode_as(Some((keys, sent)))
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn encode_as(&self, keyed: Option<(&[u64], &dyn Fn(u64) -> bool)>) -> Result<Vec<u8>, SceneError> {
         self.validate()?;
         let mut w = Writer(Vec::with_capacity(64 + self.commands.len() * 24));
         w.0.extend_from_slice(&MAGIC);
-        w.u16(VERSION);
+        w.u16(if keyed.is_some() { WIRE_VERSION } else { VERSION });
         w.f32(self.width);
         w.f32(self.height);
         w.u32(self.fonts.len() as u32);
@@ -202,7 +237,15 @@ impl Scene {
             w.0.extend_from_slice(f.family.as_bytes());
         }
         w.u32(self.images.len() as u32);
-        for im in &self.images {
+        for (i, im) in self.images.iter().enumerate() {
+            if let Some((keys, sent)) = keyed {
+                w.u64(keys[i]);
+                if sent(keys[i]) {
+                    w.u8(1);
+                    continue;
+                }
+                w.u8(0);
+            }
             w.u32(im.width);
             w.u32(im.height);
             w.0.extend_from_slice(&im.rgba);
@@ -281,12 +324,24 @@ impl Scene {
     /// Reads a scene from bytes that may come from anyone. Never panics, and
     /// never reserves more memory than the bytes given could fill.
     pub fn decode(bytes: &[u8]) -> Result<Scene, DecodeError> {
+        Self::decode_as(bytes, None).map(|d| d.scene)
+    }
+
+    /// Reads version 2 bytes: pictures named by key come from `kept`; the
+    /// pictures sent whole come back with their keys, for the reader to keep.
+    pub fn decode_keyed(bytes: &[u8], kept: &dyn Fn(u64) -> Option<Arc<Image>>) -> Result<Keyed, DecodeError> {
+        Self::decode_as(bytes, Some(kept))
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn decode_as(bytes: &[u8], kept: Option<&dyn Fn(u64) -> Option<Arc<Image>>>) -> Result<Keyed, DecodeError> {
         let mut r = Reader { buf: bytes };
         if r.take(4)? != MAGIC {
             return Err(DecodeError::Magic);
         }
         let version = r.u16()?;
-        if version != VERSION {
+        let want = if kept.is_some() { WIRE_VERSION } else { VERSION };
+        if version != want {
             return Err(DecodeError::Version(version));
         }
         let width = r.f32()?;
@@ -306,10 +361,24 @@ impl Scene {
             fonts.push(FontRef { family, weight, italic });
         }
 
-        let n = r.count(MAX_IMAGES, MIN_IMAGE, "images")?;
+        // A kept picture's entry is 9 bytes (key and kind), a sent one more.
+        let n = r.count(MAX_IMAGES, if kept.is_some() { 9 } else { MIN_IMAGE }, "images")?;
         let mut images = Vec::with_capacity(n);
+        let (mut keys, mut new) = (Vec::new(), Vec::new());
         let mut image_bytes = 0usize;
         for i in 0..n {
+            if let Some(kept) = kept {
+                let key = r.u64()?;
+                keys.push(key);
+                match r.u8()? {
+                    0 => {}
+                    1 => {
+                        images.push(kept(key).ok_or(DecodeError::UnknownImage(key))?);
+                        continue;
+                    }
+                    _ => return Err(DecodeError::Flag),
+                }
+            }
             let width = r.u32()?;
             let height = r.u32()?;
             let len = image_len(width, height).ok_or(DecodeError::Invalid(SceneError::BadImage(i)))?;
@@ -317,7 +386,11 @@ impl Scene {
             if image_bytes > MAX_IMAGE_BYTES {
                 return Err(DecodeError::TooMany("image bytes"));
             }
-            images.push(Image { width, height, rgba: r.take(len)?.to_vec() }.into());
+            let im: Arc<Image> = Image { width, height, rgba: r.take(len)?.to_vec() }.into();
+            if let Some(&key) = keys.last().filter(|_| kept.is_some()) {
+                new.push((key, im.clone()));
+            }
+            images.push(im);
         }
 
         let n = r.count(MAX_COMMANDS, MIN_COMMAND, "commands")?;
@@ -372,9 +445,21 @@ impl Scene {
         }
         let scene = Scene { width, height, fonts, images, commands };
         scene.validate()?;
-        Ok(scene)
+        Ok(Keyed { scene, keys, new })
     }
 }
+
+/// A version 2 scene read: the scene, each image's key (in the scene's
+/// order), and the pictures sent whole this time, to be kept by key.
+#[derive(Debug)]
+pub struct Keyed {
+    pub scene: Scene,
+    pub keys: Vec<u64>,
+    pub new: Vec<(u64, Arc<Image>)>,
+}
+
+/// The version of the keyed wire form (pictures kept by key).
+pub const WIRE_VERSION: u16 = 2;
 
 #[cfg(test)]
 mod tests {
@@ -409,6 +494,53 @@ mod tests {
         let bytes = s.encode().unwrap();
         assert_eq!(&bytes[..4], b"VSCN");
         assert_eq!(Scene::decode(&bytes), Ok(s));
+    }
+
+    #[test]
+    fn pictures_sent_once_then_named_by_key() {
+        use std::collections::HashMap;
+        let s = sample();
+        let mut kept: HashMap<u64, Arc<Image>> = HashMap::new();
+        // First: the picture goes whole, and is kept.
+        let first = s.encode_keyed(&[0xA1], &|k| kept.contains_key(&k)).unwrap();
+        assert_eq!(u16::from_le_bytes([first[4], first[5]]), WIRE_VERSION);
+        let d = Scene::decode_keyed(&first, &|k| kept.get(&k).cloned()).unwrap();
+        assert_eq!(d.scene, s);
+        assert_eq!(d.keys, vec![0xA1]);
+        assert_eq!(d.new.len(), 1);
+        kept.extend(d.new);
+        // Then: named only, the frame smaller by its pixels.
+        let second = s.encode_keyed(&[0xA1], &|k| kept.contains_key(&k)).unwrap();
+        assert_eq!(first.len() - second.len(), 4 + 4 + 16);
+        let d = Scene::decode_keyed(&second, &|k| kept.get(&k).cloned()).unwrap();
+        assert_eq!(d.scene, s, "the same scene, the picture from what was kept");
+        assert!(d.new.is_empty());
+        // A key never sent is refused, not guessed.
+        let empty: HashMap<u64, Arc<Image>> = HashMap::new();
+        assert_eq!(Scene::decode_keyed(&second, &|k| empty.get(&k).cloned()).err(), Some(DecodeError::UnknownImage(0xA1)));
+        // Versions do not mix: a keyed scene is not a file's, nor the other way.
+        assert_eq!(Scene::decode(&second).err(), Some(DecodeError::Version(WIRE_VERSION)));
+        assert_eq!(Scene::decode_keyed(&s.encode().unwrap(), &|_| None).err(), Some(DecodeError::Version(VERSION)));
+        assert!(s.encode_keyed(&[], &|_| false).is_err(), "a key for every picture");
+    }
+
+    #[test]
+    fn keyed_scenes_from_anyone_never_panic() {
+        let s = sample();
+        let bytes = s.encode_keyed(&[7], &|_| false).unwrap();
+        for cut in 0..bytes.len() {
+            let _ = Scene::decode_keyed(&bytes[..cut], &|_| None);
+        }
+        let mut x = 0x2545_f491u32;
+        for _ in 0..20_000 {
+            let mut b = bytes.clone();
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            let i = x as usize % b.len();
+            b[i] ^= (x >> 8) as u8;
+            let _ = Scene::decode_keyed(&b, &|_| Some(Arc::new(Image { width: 1, height: 1, rgba: vec![0; 4] })));
+        }
     }
 
     #[test]

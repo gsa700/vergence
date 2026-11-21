@@ -190,6 +190,31 @@ struct State {
     terminal: bool,
     /// Its bar's style, as it asked (app settings milestone 1).
     bar_style: vergence_protocol::window::BarStyle,
+    /// Its last display list, if it sent one (display lists milestone 1),
+    /// and the pictures it sent whole, kept by key with their bytes.
+    scene: Option<Arc<vergence_scene::Scene>>,
+    scene_images: std::collections::HashMap<u64, Arc<vergence_scene::Image>>,
+    scene_image_bytes: usize,
+    /// Scenes taken, and refused (with the last reason), for vctl.
+    scenes: u64,
+    scene_refused: Option<(u64, String)>,
+}
+
+/// The most picture bytes one window may have kept for its scenes.
+const SCENE_KEPT_BYTES: usize = 512 << 20;
+
+/// A memfd's first `len` bytes (a scene), read at once: the client may
+/// reuse it as soon as the message is read. Refused if the file is shorter.
+fn read_memfd(fd: &vergence_protocol::window::Fd, len: u32) -> Result<Vec<u8>, String> {
+    use std::os::unix::fs::FileExt;
+    let file = std::fs::File::from(fd.0.try_clone().map_err(|e| e.to_string())?);
+    let size = file.metadata().map_err(|e| e.to_string())?.len();
+    if size < len as u64 {
+        return Err(format!("the scene's file has {size} bytes, not {len}"));
+    }
+    let mut buf = vec![0u8; len as usize];
+    file.read_exact_at(&mut buf, 0).map_err(|e| e.to_string())?;
+    Ok(buf)
 }
 
 /// Native windows' share of the pointer and the keyboard (step 4).
@@ -300,6 +325,50 @@ impl NativeWindow {
 
     /// Its meaning as last sent (Contract 3): the focused widget, the caret
     /// in window points, the tree.
+    /// Its last display list, if any.
+    pub fn scene(&self) -> Option<Arc<vergence_scene::Scene>> {
+        self.state.lock().unwrap().scene.clone()
+    }
+
+    /// For vctl: its scenes so far, the last one's size, the pictures kept,
+    /// and the last refusal.
+    pub fn scene_report(&self) -> Option<String> {
+        let st = self.state.lock().unwrap();
+        if st.scenes == 0 && st.scene_refused.is_none() {
+            return None;
+        }
+        let last = st.scene.as_ref().map_or(String::new(), |s| format!(", {} commands, {:.0}x{:.0}", s.commands.len(), s.width, s.height));
+        let refused = st.scene_refused.as_ref().map_or(String::new(), |(n, why)| format!(", {n} refused (last: {why})"));
+        Some(format!("scenes {}{last}, {} pictures kept ({} KB){refused}", st.scenes, st.scene_images.len(), st.scene_image_bytes >> 10))
+    }
+
+    /// A display list sent (Scene): read, its pictures resolved from those
+    /// kept, checked (vergence-scene never returns an invalid scene), kept.
+    fn take_scene(&self, fd: &vergence_protocol::window::Fd, len: u32, forget: &[u64]) -> Result<(), String> {
+        let bytes = read_memfd(fd, len)?;
+        let mut st = self.state.lock().unwrap();
+        for k in forget {
+            if let Some(im) = st.scene_images.remove(k) {
+                st.scene_image_bytes -= im.rgba.len();
+            }
+        }
+        let kept = &st.scene_images;
+        let d = vergence_scene::Scene::decode_keyed(&bytes, &|k| kept.get(&k).cloned()).map_err(|e| e.to_string())?;
+        let more: usize = d.new.iter().filter(|(k, _)| !st.scene_images.contains_key(k)).map(|(_, im)| im.rgba.len()).sum();
+        if st.scene_image_bytes + more > SCENE_KEPT_BYTES {
+            return Err(format!("more than {} MB of pictures kept", SCENE_KEPT_BYTES >> 20));
+        }
+        for (k, im) in d.new {
+            if let Some(old) = st.scene_images.insert(k, im.clone()) {
+                st.scene_image_bytes -= old.rgba.len();
+            }
+            st.scene_image_bytes += im.rgba.len();
+        }
+        st.scene = Some(Arc::new(d.scene));
+        st.scenes += 1;
+        Ok(())
+    }
+
     pub fn meaning(&self) -> Option<crate::meaning::WindowMeaning> {
         self.state.lock().unwrap().meaning.clone()
     }
@@ -468,6 +537,11 @@ impl Server {
                         commands: Vec::new(),
                         terminal: false,
                         bar_style: Default::default(),
+                        scene: None,
+                        scene_images: std::collections::HashMap::new(),
+                        scene_image_bytes: 0,
+                        scenes: 0,
+                        scene_refused: None,
                     }),
                     user_data: UserDataMap::new(),
                 });
@@ -744,6 +818,20 @@ impl Server {
             }
             // An answer to an action (bus v24): kept for its sender; only the
             // window it was sent to can answer it.
+            // A window as a display list (display lists milestone 1): kept;
+            // drawn from step 2. A scene that fails is refused and logged,
+            // the window keeps what it showed.
+            WinRequest::Scene { window, fd, len, forget } => {
+                if let Some(w) = self.natives.get(&(client, window)).cloned()
+                    && let Some(n) = w.native()
+                    && let Err(why) = n.take_scene(&fd, len, &forget)
+                {
+                    tracing::warn!("native: client {client} window {window}: scene refused: {why}");
+                    let mut st = n.state.lock().unwrap();
+                    let count = st.scene_refused.as_ref().map_or(0, |r| r.0) + 1;
+                    st.scene_refused = Some((count, why));
+                }
+            }
             WinRequest::Acted { window, serial, ok, why } => {
                 if let Some(entry) = self.acts.sent.get_mut(&serial)
                     && entry.0 == client

@@ -71,6 +71,10 @@ impl FdSource for NoFds {
 // Limits, besides the frame's 64 KB.
 pub const MAX_DAMAGE: usize = 256;
 pub const MAX_PLANES: usize = 4;
+/// The largest scene, in bytes (its pictures included), and the most keys
+/// one Scene forgets.
+pub const MAX_SCENE_BYTES: u32 = 300 << 20;
+pub const MAX_FORGET: usize = 4096;
 pub const MAX_KINDS: usize = 32;
 pub const MAX_NODES: usize = 4096;
 pub const MAX_STATES: usize = 16;
@@ -317,6 +321,14 @@ pub enum WinRequest {
     /// The answer to [`WinEvent::Act`] with this serial (bus v24): done, or
     /// why not ("it is off", "no such node").
     Acted { window: u32, serial: u32, ok: bool, why: String },
+    /// The window as a display list (display lists milestone 1, bus v30):
+    /// a scene in vergence-scene's keyed wire form (version 2), `len` bytes
+    /// at the start of the memfd `fd`, read when the server reads this
+    /// message (the client may reuse it at once). Pictures sent whole in it
+    /// are kept by their keys until `forget` names them; a later scene may
+    /// name them by key alone. In place of a picture (Attach) until the next
+    /// Attach or Scene.
+    Scene { window: u32, fd: Fd, len: u32, forget: Vec<u64> },
 }
 
 /// A line of a window's right-click menu ([`WinRequest::Menu`]).
@@ -644,6 +656,7 @@ pub(crate) mod op {
     pub const MENU: u16 = 124;
     pub const GROUND_CLICKED: u16 = 125;
     pub const ACTED: u16 = 126;
+    pub const SCENE: u16 = 127;
     // Server to client.
     pub const CREATED: u16 = 100;
     pub const CONFIGURE: u16 = 101;
@@ -1075,6 +1088,15 @@ impl WinRequest {
                 e.u32(*window).u32(*serial).bool(*ok).str(why);
                 e
             }
+            WinRequest::Scene { window, fd, len, forget } => {
+                let mut e = Encoder::frame(op::SCENE);
+                fds.push(fd.raw());
+                e.u8(1).u32(*window).u32(*len).u32(forget.len() as u32);
+                for k in forget {
+                    e.u64(*k);
+                }
+                e
+            }
             WinRequest::BarStyle { window, style } => {
                 let mut e = Encoder::frame(op::BAR_STYLE);
                 e.u32(*window).u8(match style {
@@ -1240,6 +1262,22 @@ impl WinRequest {
             }
             op::GROUND_CLICKED => WinRequest::GroundClicked { window: d.u32()? },
             op::ACTED => WinRequest::Acted { window: d.u32()?, serial: d.u32()?, ok: d.bool()?, why: d.str()? },
+            op::SCENE => {
+                let mut got = take(fds, &mut d)?;
+                if got.len() != 1 {
+                    return Err(WireError::BadValue("a scene's descriptor"));
+                }
+                let (window, len) = (d.u32()?, d.u32()?);
+                if len > MAX_SCENE_BYTES {
+                    return Err(WireError::TooLong(len as usize));
+                }
+                let n = d.count(8)?;
+                if n > MAX_FORGET {
+                    return Err(WireError::TooLong(n));
+                }
+                let forget = (0..n).map(|_| d.u64()).collect::<Result<_, WireError>>()?;
+                WinRequest::Scene { window, fd: got.remove(0), len, forget }
+            }
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -1700,6 +1738,7 @@ mod tests {
             WinRequest::GroundClicked { window: 1 },
             WinRequest::Acted { window: 1, serial: 7, ok: false, why: "it is off".into() },
             WinRequest::Acted { window: 2, serial: 8, ok: true, why: String::new() },
+            WinRequest::Scene { window: 1, fd: a.clone(), len: 4096, forget: vec![7, 1 << 63] },
             WinRequest::Menu {
                 window: 1,
                 x: 12.0,

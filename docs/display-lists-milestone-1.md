@@ -110,4 +110,20 @@ menus) as scenes (they are drawn in the server already, at each scale).
 
 ## Progress
 
-(none yet)
+- **Step 1, scenes on the wire** (2026-11-20, bus v30). vergence-scene's
+  keyed wire form, version 2 (`Scene::encode_keyed`, `decode_keyed`, the
+  `Keyed` result): each picture under a key the sender chose, sent whole
+  once (the reader keeps it) and then named by key alone; a key never sent
+  is refused (`DecodeError::UnknownImage`); version 1 stays for files.
+  `WinRequest::Scene { window, fd, len, forget }`: the scene in a memfd
+  (read at once, at most 300 MB), keys to forget (at most 4096). The
+  server reads it, resolves its pictures from those it keeps for the
+  window (at most 512 MB), decodes and validates it (vergence-scene never
+  returns an invalid scene) and keeps the latest per window; a refused
+  scene is logged and counted, and the window keeps what it showed.
+  Nothing is drawn from scenes yet (step 2). `vctl windows` reports each
+  window's scenes ("scenes 210, 3 commands, 480x320, 0 pictures kept").
+  vnative `--gpu --scene` sends its scene after each picture. Tests: keyed
+  round trip, pictures named by key, unknown keys refused, versions kept
+  apart, 20,000 damaged keyed scenes decoded without a panic; the
+  protocol's round trip with the new message.

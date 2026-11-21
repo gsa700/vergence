@@ -2,7 +2,10 @@
 //! step 3), to try the server's side before the toolkit has a native road.
 //!
 //!     vnative [--title T] [--size WxH] [--frames N] [--short-file] [--gpu]
-//!             [--role R] [--place MONITOR_ID:X,Y]
+//!             [--scene] [--role R] [--place MONITOR_ID:X,Y]
+//!
+//! `--scene` (with `--gpu`): after each picture, the same scene as a
+//! display list too (bus v30 `Scene`, display lists milestone 1).
 //!
 //! It asks for a window, draws a gradient with a border at the scale it is
 //! told, and then moves a bar one step for every frame the server offers,
@@ -46,6 +49,8 @@ use vergence_text::Fonts;
 struct GpuDraw {
     gpu: Gpu,
     fonts: Fonts,
+    /// Also send each frame's scene (--scene).
+    send_scene: bool,
     buffers: Vec<GpuBuffer>,
     next: usize,
     size: (f64, f64),
@@ -84,6 +89,13 @@ impl GpuDraw {
         let buffer = Buffer::Dmabuf { planes: vec![plane], width: b.width, height: b.height, format: b.format, modifier: b.modifier };
         c.send(&ClientMsg::Window(WinRequest::Attach { window: WINDOW, buffer, damage: Vec::new() }))?;
         self.next = (self.next + 1) % self.buffers.len();
+        if self.send_scene {
+            let bytes = scene.encode_keyed(&[], &|_| false).map_err(|e| format!("scene: {e}"))?;
+            let mut shm = ShmFile::new(bytes.len())?;
+            shm.bytes()[..bytes.len()].copy_from_slice(&bytes);
+            let fd = Fd(std::sync::Arc::new(unsafe_dup(shm.fd())?));
+            c.send(&ClientMsg::Window(WinRequest::Scene { window: WINDOW, fd, len: bytes.len() as u32, forget: Vec::new() }))?;
+        }
         Ok(())
     }
 }
@@ -194,7 +206,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut gpu = if args.iter().any(|a| a == "--gpu") {
         let g = Gpu::new().map_err(|e| format!("no GPU renderer: {e:?}"))?;
         println!("drawing on the GPU: {}", g.description());
-        Some(GpuDraw { gpu: g, fonts: Fonts::system(), buffers: Vec::new(), next: 0, size: (width, height), scale: 1.0 })
+        Some(GpuDraw { gpu: g, fonts: Fonts::system(), send_scene: args.iter().any(|a| a == "--scene"), buffers: Vec::new(), next: 0, size: (width, height), scale: 1.0 })
     } else {
         None
     };
