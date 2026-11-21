@@ -152,7 +152,9 @@ impl Server {
             self.dbus_request_response(conn, &handle, 2, Value::Array("{sv}".into(), Vec::new()));
             return Ok(handle);
         }
-        let always = self.portal_shots.always.get_or_insert_with(|| grants_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse_grants(&t)).unwrap_or_default());
+        // Read each time: Settings > Screenshots takes grants back in the file.
+        let always = grants_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse_grants(&t)).unwrap_or_default();
+        self.portal_shots.always = Some(always.clone());
         if always.contains_key(&program) {
             self.portal_shot_start(asked);
         } else if self.portal_shots.refused.get(&program).is_some_and(|t| t.elapsed() < COOL_DOWN) || self.portal_shots.asking.len() >= WAITING_MAX {
@@ -248,9 +250,10 @@ impl Server {
         match choice {
             1 | 2 => {
                 if choice == 2 {
-                    let g = self.portal_shots.always.get_or_insert_with(HashMap::new);
+                    let mut g = grants_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse_grants(&t)).unwrap_or_default();
                     g.insert(a.program.clone(), a.name.clone());
-                    write_grants(g);
+                    write_grants(&g);
+                    self.portal_shots.always = Some(g);
                 }
                 tracing::info!("portal: {} allowed ({})", a.name, if choice == 2 { "always" } else { "once" });
                 self.portal_shot_start(a);

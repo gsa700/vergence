@@ -120,10 +120,56 @@ impl Server {
     }
 }
 
-/// ~/Pictures/Screenshots/<date>.
+/// Settings > Screenshots (step 8): desktop.toml [screenshots].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Config {
+    /// Super+Shift+3 takes every screen (else the one under the pointer).
+    pub every_screen: bool,
+    /// Where they go: a path, "~/" for the home folder.
+    pub folder: String,
+    /// A folder for each day inside it.
+    pub per_day: bool,
+    /// The floating thumbnail after each capture.
+    pub thumbnail: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config { every_screen: false, folder: "~/Pictures/Screenshots".into(), per_day: true, thumbnail: true }
+    }
+}
+
+pub fn config_from(text: &str) -> Config {
+    let mut c = Config::default();
+    let Some(t) = text.parse::<toml::Table>().ok().and_then(|t| t.get("screenshots").and_then(|s| s.as_table()).cloned()) else { return c };
+    let flag = |k: &str, d: bool| t.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
+    c.every_screen = flag("every-screen", c.every_screen);
+    c.per_day = flag("per-day", c.per_day);
+    c.thumbnail = flag("thumbnail", c.thumbnail);
+    if let Some(f) = t.get("folder").and_then(|v| v.as_str()).map(str::trim).filter(|f| !f.is_empty() && (f.starts_with('/') || f.starts_with("~/"))) {
+        c.folder = f.to_string();
+    }
+    c
+}
+
+/// Read when a capture is asked for (desktop.toml is small).
+pub fn config() -> Config {
+    config_from(&crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default())
+}
+
+/// The folder a capture goes to: the setting's (~/Pictures/Screenshots by
+/// default), and the day's inside it unless that is turned off.
 pub fn folder(l: &vergence_shell::tiles::Local) -> PathBuf {
+    folder_in(&config(), l)
+}
+
+pub fn folder_in(c: &Config, l: &vergence_shell::tiles::Local) -> PathBuf {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"));
-    home.join("Pictures/Screenshots").join(format!("{:04}-{:02}-{:02}", l.year, l.month + 1, l.mday))
+    let base = match c.folder.strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None => PathBuf::from(&c.folder),
+    };
+    if c.per_day { base.join(format!("{:04}-{:02}-{:02}", l.year, l.month + 1, l.mday)) } else { base }
 }
 
 /// `<stem>.png` in `dir`, or `<stem> (2).png` and on if taken (on disk or
@@ -330,7 +376,12 @@ mod tests {
     #[test]
     fn the_folder_is_the_day() {
         let l = vergence_shell::tiles::Local { year: 2026, month: 10, mday: 20, wday: 5, hour: 23, min: 1, sec: 19 };
-        assert!(folder(&l).ends_with("Pictures/Screenshots/2026-11-20"));
+        assert!(folder_in(&Config::default(), &l).ends_with("Pictures/Screenshots/2026-11-20"));
+        let c = config_from("[screenshots]\nfolder = \"~/Desktop\"\nper-day = false\nevery-screen = true\nthumbnail = false\n");
+        assert_eq!(c, Config { every_screen: true, folder: "~/Desktop".into(), per_day: false, thumbnail: false });
+        assert!(folder_in(&c, &l).ends_with("Desktop"));
+        // A folder that is neither absolute nor in the home folder is ignored.
+        assert_eq!(config_from("[screenshots]\nfolder = \"../x\"\n").folder, "~/Pictures/Screenshots");
     }
 
     #[test]
@@ -423,7 +474,7 @@ impl Server {
     /// Settings > Screenshots: Super+Shift+3 takes every screen (step 8;
     /// desktop.toml `[screenshots] every-screen`).
     fn capture_every_screen(&self) -> bool {
-        false
+        config().every_screen
     }
 
     fn capture_now(&mut self, what: What, clip: bool) {
@@ -718,6 +769,10 @@ impl Server {
     /// A capture was saved (or put on the clipboard): its thumbnail floats.
     pub fn shot_show(&mut self, path: Option<PathBuf>, w: usize, h: usize, rgba: Vec<u8>, scale: f64) {
         use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
+        // Settings > Screenshots can turn it off.
+        if !config().thumbnail {
+            return;
+        }
         let Some((geo, _)) = self.shot_screen() else { return };
         let area = self.work_area(geo);
         let (pw, ph) = ((w as f64 / scale).round() as i32, (h as f64 / scale).round() as i32);

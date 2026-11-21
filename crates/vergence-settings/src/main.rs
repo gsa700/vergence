@@ -35,10 +35,12 @@ mod wall;
 mod battery;
 mod modes;
 mod notify;
+mod shots;
 mod datetime;
 mod lockscreen;
 mod single;
 use notify::NotifyMsg;
+use shots::ShotsMsg;
 mod places;
 use places::PlacesMsg;
 mod privacy;
@@ -186,6 +188,7 @@ enum Icon {
     Battery,
     About,
     Notifications,
+    Screenshot,
     Apps,
     Clock,
     Lock,
@@ -205,6 +208,7 @@ impl Icon {
             Icon::Energy | Icon::Battery => Color::rgb(0x3f, 0x9a, 0x3a),
             Icon::About => Color::rgb(0x70, 0x74, 0x7c),
             Icon::Notifications => Color::rgb(0xe5, 0x48, 0x3a),
+            Icon::Screenshot => Color::rgb(0x3a, 0x42, 0x50),
             Icon::Clock => Color::rgb(0x70, 0x74, 0x7c),
             Icon::Lock => Color::rgb(0x3d, 0x6b, 0xb8),
         }
@@ -346,6 +350,19 @@ fn icon_mark<M: 'static>(icon: Icon) -> Element<M> {
                 line(scene, (6.5, 9.5), (11.0, 9.5));
                 line(scene, (6.5, 12.3), (12.5, 12.3));
             }
+            // A camera in a selection's corners (the Screenshot app's).
+            Icon::Screenshot => {
+                line(scene, (3.5, 7.0), (3.5, 3.5));
+                line(scene, (3.5, 3.5), (7.0, 3.5));
+                line(scene, (13.0, 3.5), (16.5, 3.5));
+                line(scene, (16.5, 3.5), (16.5, 7.0));
+                line(scene, (16.5, 13.0), (16.5, 16.5));
+                line(scene, (16.5, 16.5), (13.0, 16.5));
+                line(scene, (7.0, 16.5), (3.5, 16.5));
+                line(scene, (3.5, 16.5), (3.5, 13.0));
+                scene.fill_rounded(Rect::new(x + 6.0, y + 7.5, 8.0, 6.0), 1.2, w);
+                scene.fill_rounded(Rect::new(x + 8.4, y + 6.4, 3.2, 1.6), 0.6, w);
+            }
             // A clock face with its hands.
             Icon::Clock => {
                 scene.stroke(Rect::new(x + 3.5, y + 3.5, 13.0, 13.0), 6.5, 1.4, w);
@@ -399,6 +416,8 @@ enum Page {
     Energy,
     /// Do not disturb, how long, which corner (notify.rs).
     Notifications,
+    /// What Super+Shift+3 takes, where screenshots go, the programs allowed (shots.rs).
+    Screenshots,
     /// The dock's clock and the time zone (datetime.rs; dock milestone 1).
     DateTime,
     LockScreen,
@@ -431,6 +450,7 @@ enum Page {
 enum Message {
     /// The Notifications page (notify.rs).
     Notify(NotifyMsg),
+    Shots(ShotsMsg),
     Clock(datetime::ClockMsg),
     Lock(lockscreen::LockMsg),
     /// Another start's arguments (single.rs): its page, then forward.
@@ -631,6 +651,8 @@ struct App {
     battery: battery::BatteryPage,
     /// Apps that have sent cards, newest first (notify.rs, read when the page opens).
     notify_apps: Vec<(String, u64)>,
+    /// The programs allowed to take screenshots (shots.rs), read when the page opens.
+    shot_grants: Vec<(String, String)>,
     /// What vdm said about logging in (the Login page), or why it could not be asked.
     login: Result<lockscreen::LoginState, String>,
     /// Every applet the desktop has seen: tile id, name, who supplies it
@@ -854,6 +876,7 @@ impl App {
             wifi: Default::default(),
             battery: Default::default(),
             notify_apps: Vec::new(),
+            shot_grants: Vec::new(),
             login: Err(String::new()),
             applets: Vec::new(),
             mode_pending: None,
@@ -1075,6 +1098,9 @@ impl App {
         if p == Page::Notifications {
             self.notify_apps = notify::read_apps();
         }
+        if p == Page::Screenshots {
+            self.shot_grants = shots::read_grants();
+        }
         if p == Page::Dock {
             self.applets = read_applets();
         }
@@ -1102,6 +1128,7 @@ impl App {
             Message::Wifi(m) => self.wifi_handle(m),
             Message::BatterySample => self.battery_sample(),
             Message::Notify(m) => self.notify_message(m),
+            Message::Shots(m) => self.shots_message(m),
             Message::Clock(m) => self.clock_message(m),
             Message::Lock(m) => self.lock_message(m),
             Message::HandedOver(args) => self.apply_args(&args),
@@ -1745,6 +1772,7 @@ impl App {
                 ("Windows".into(), Page::Windows, Icon::Windows, "window title bar buttons controls minimize maximize close snap snapping alt tab keys x11"),
                 ("Dock".into(), Page::Dock, Icon::Dock, "dock shelf pin hide opacity gap size bigger smaller edge desktop icons super d"),
                 ("Notifications".into(), Page::Notifications, Icon::Notifications, "notifications cards alerts do not disturb quiet corner banner"),
+                ("Screenshots".into(), Page::Screenshots, Icon::Screenshot, "screenshot screenshots screen shot capture picture print screen folder thumbnail clipboard super shift 3 4 5 portal programs allowed"),
                 ("Apps".into(), Page::Apps, Icon::Apps, "apps applications title bar light dark firefox per app own settings"),
                 ("Default apps".into(), Page::DefaultApps, Icon::Apps, "default apps applications open with browser mail text pictures pdf music video folders file types"),
             ]),
@@ -3122,6 +3150,7 @@ impl Program for App {
             Page::Sound => "Sound".into(),
             Page::Energy => "Energy".into(),
             Page::Notifications => "Notifications".into(),
+            Page::Screenshots => "Screenshots".into(),
             Page::DateTime => "Date & Time".into(),
             Page::LockScreen => "Lock Screen".into(),
             Page::Agents => "Agents".into(),
@@ -3188,6 +3217,7 @@ impl Program for App {
             Page::Touchscreen => self.touchscreen_page(),
             Page::Energy => self.energy(),
             Page::Notifications => self.notifications_page(),
+            Page::Screenshots => self.screenshots_page(),
             Page::DateTime => self.datetime_page(),
             Page::LockScreen => self.lock_page(),
             Page::Agents => self.agents_page(),

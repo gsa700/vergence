@@ -247,4 +247,22 @@ Recording, by question 1. OCR (text out of a capture) and the Mac's
   again within the minute, refused without asking), Always allow (a PNG
   answered; the next request answered without asking), interactive with
   Escape (cancelled), PickColor (the ground's color, 0.102 each).
+- **Step 8, settings and checks** (2026-11-21). The server reads
+  desktop.toml `[screenshots]` at each capture (capture.rs `config`):
+  `every-screen` (Super+Shift+3 takes every screen, default false),
+  `folder` ("~/Pictures/Screenshots" by default; absolute or "~/" only),
+  `per-day` (a folder for each day, default true), `thumbnail` (default
+  true). The allowed programs' file is read at each portal request, so a
+  grant taken back holds at once. Settings > Screenshots (vergence-settings
+  shots.rs, under Desktop, its own icon): the keys said at the top; what
+  Super+Shift+3 takes; Save to (Pictures › Screenshots, Desktop, Downloads
+  › Screenshots, or a folder set by hand, shown as it is); a folder for
+  each day; the thumbnail; Programs that may take screenshots, each with
+  Take back, and Take back all. Not done: the camera's sound (Vergence
+  plays no sounds yet). Display-suite scenario 14-screenshots: the screen
+  captured is the screen shown (the dock's live tiles aside: 0 pixels
+  different on Hubble), the window alone with its bar and border, its
+  shadow 24 points around, an area across a 1x and a 2x screen taken at
+  2x (800x600). Tests: the settings read back, a folder neither absolute
+  nor in the home folder ignored.
 
