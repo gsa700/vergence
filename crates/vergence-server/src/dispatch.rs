@@ -295,12 +295,14 @@ impl Server {
 
     /// The pointer's picture for what it is on: a window edge's arrows, a
     /// native window's own shape; a Wayland surface sets its own.
-    fn pointer_picture(&mut self, under: Option<Target>) {
+    fn pointer_picture(&mut self, under: Option<Target>, pos: Point<f64, Logical>) {
         let icon = match under {
             Some(Target::Surface(..)) => return,
             Some(Target::Server(Part::Edge(_, e))) => crate::decor::edge_icon(e.into()),
             // Super+Shift+4: a crosshair for an area, the arrow for a window.
             Some(Target::Server(Part::Capture)) if self.capture_pick.as_ref().is_some_and(|p| !p.window) => CursorIcon::Crosshair,
+            // The screenshot bar's grip: a hand (closed while dragging).
+            Some(Target::Server(Part::Capture)) if self.bar_cursor(pos).is_some() => self.bar_cursor(pos).unwrap_or(CursorIcon::Default),
             Some(Target::Native(id)) => self.input.wins.get(&id).and_then(|w| w.native()).map(|n| n.cursor()).unwrap_or(CursorIcon::Default),
             _ => CursorIcon::Default,
         };
@@ -331,7 +333,10 @@ impl Server {
         self.notify_hover(pos);
         self.session_dialog_hover(pos);
         self.agent_dialog_hover(pos);
-        self.shelf_hover(pos);
+        // Not while the screenshot picker or bar has the screen (capture.rs).
+        if !self.capture_picking() {
+            self.shelf_hover(pos);
+        }
         self.picker_hover(pos);
         self.overview_hover(pos);
         self.capture_pick_hover(pos);
@@ -342,7 +347,10 @@ impl Server {
     pub(crate) fn pointer_follow(&mut self, pos: Point<f64, Logical>, time: InputTime, under: Option<Target>) {
         let (grab, held, focus) = (self.input.seat.grab(), self.input.seat.buttons_held(), self.input.seat.pointer_focus());
         if grab.is_none() && !held {
-            self.pointer_picture(under);
+            self.pointer_picture(under, pos);
+        } else if let Some(icon) = self.bar_cursor(pos).filter(|i| *i == CursorIcon::Grabbing) {
+            // The screenshot bar dragged by its grip: the closed hand.
+            self.pointer_image.status = CursorImageStatus::Named(icon);
         }
         // Smithay's pointer follows every motion (the pointer is drawn where it
         // is). When the seat sends this motion to a surface, or Smithay's drag

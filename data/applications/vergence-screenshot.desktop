@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Screenshot
+Comment=Take a picture of the screen, a window or an area (Super+Shift+3, 4 and 5)
+Exec=vergence-screenshot
+Icon=vergence-screenshot
+Terminal=false
+Categories=Utility;Graphics;
+Keywords=screenshot;screen shot;capture;grab;picture;snip;print screen;record;
+StartupWMClass=vergence-screenshot

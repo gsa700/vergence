@@ -319,7 +319,9 @@ mod tests {
     #[test]
     fn the_bars_choices_are_read_back() {
         let c = parse_choices("mode = area\ntimer = 10\nto = clipboard\npointer = true\n");
-        assert_eq!(c, Choices { mode: Mode::Area, timer: 10, clip: true, pointer: true });
+        assert_eq!(c, Choices { mode: Mode::Area, timer: 10, clip: true, pointer: true, place: None });
+        assert_eq!(parse_choices("place = 120, 640\n").place, Some((120, 640)));
+        assert_eq!(parse_choices("place = -5,x\n").place, None);
         assert_eq!(parse_choices("timer = 7\nmode = nonsense\n"), Choices::default());
     }
 
@@ -476,6 +478,13 @@ impl Server {
     }
 
     pub fn capture_pick_release(&mut self, pos: smithay::utils::Point<f64, Logical>) {
+        // The bar let go after a drag: its place kept.
+        if let Some(b) = self.capture_bar.as_mut()
+            && b.grab.take().is_some()
+        {
+            write_choices(&b.choices);
+            return;
+        }
         let Some(p) = self.capture_pick.as_ref() else { return };
         let Some(start) = p.start else { return };
         let clip = p.clip;
@@ -802,11 +811,15 @@ pub struct Choices {
     pub timer: u8,
     pub clip: bool,
     pub pointer: bool,
+    /// Where the bar was dragged to, from its screen's corner (points);
+    /// None: centered above the dock (Dave, 2026-11-21: "can the screenshot
+    /// bar be made movable by dragging it like a window?").
+    pub place: Option<(i32, i32)>,
 }
 
 impl Default for Choices {
     fn default() -> Self {
-        Choices { mode: Mode::Screen, timer: 0, clip: false, pointer: false }
+        Choices { mode: Mode::Screen, timer: 0, clip: false, pointer: false, place: None }
     }
 }
 
@@ -831,6 +844,9 @@ pub fn parse_choices(text: &str) -> Choices {
             },
             ("to", t) => c.clip = t == "clipboard",
             ("pointer", t) => c.pointer = t == "true",
+            ("place", t) => {
+                c.place = t.split_once(',').and_then(|(x, y)| Some((x.trim().parse::<i32>().ok()?.clamp(0, 100_000), y.trim().parse::<i32>().ok()?.clamp(0, 100_000))));
+            }
             _ => {}
         }
     }
@@ -849,7 +865,10 @@ fn write_choices(c: &Choices) {
         Mode::Window => "window",
         Mode::Area => "area",
     };
-    let text = format!("mode = {mode}\ntimer = {}\nto = {}\npointer = {}\n", c.timer, if c.clip { "clipboard" } else { "file" }, c.pointer);
+    let mut text = format!("mode = {mode}\ntimer = {}\nto = {}\npointer = {}\n", c.timer, if c.clip { "clipboard" } else { "file" }, c.pointer);
+    if let Some((x, y)) = c.place {
+        text.push_str(&format!("place = {x},{y}\n"));
+    }
     if let Ok(mut f) = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&p) {
         use std::io::Write;
         let _ = f.write_all(text.as_bytes());
@@ -866,10 +885,18 @@ pub struct Bar {
     hover: Option<Btn>,
     /// Counting down: when it captures.
     pub countdown: Option<std::time::Instant>,
+    /// Being dragged: where the pointer took hold of it, from its corner.
+    grab: Option<(f64, f64)>,
     picture: Option<(u64, smithay::backend::renderer::element::memory::MemoryRenderBuffer, (i32, i32))>,
 }
 
 const BAR_H: i32 = 44;
+/// The grip at its left end, to drag it by (Dave: "maybe a little 'handle'
+/// on the left end?").
+const GRIP_W: i32 = 18;
+/// The line of keys under the bar.
+const HINT_H: i32 = 26;
+const HINT: &str = "Super+Shift+3 the screen  \u{00b7}  Super+Shift+4 an area (Space: a window)  \u{00b7}  add Ctrl for the clipboard";
 const BAR_PAD: i32 = 6;
 
 fn label(b: Btn, c: &Choices, secs_left: Option<u64>) -> String {
@@ -903,14 +930,20 @@ impl Server {
             choices.clip = true;
         }
         let Some(screen) = self.output_at_pointer() else { return };
-        self.capture_bar = Some(Bar { choices, screen, rect: Rectangle::default(), buttons: Vec::new(), hover: None, countdown: None, picture: None });
+        self.capture_bar = Some(Bar { choices, screen, rect: Rectangle::default(), buttons: Vec::new(), hover: None, countdown: None, grab: None, picture: None });
         self.bar_layout();
         self.redraw_all();
     }
 
     fn bar_layout(&mut self) {
-        let font = self.title_font.as_ref();
-        let width = |s: &str| font.map(|f| f.width(s)).unwrap_or(s.chars().count() as f32 * 7.0);
+        // Measured as drawn (bar_element): 13 points, sans-serif 500.
+        let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
+        let face = fonts.face("sans-serif", 500, false);
+        let measured: std::collections::HashMap<String, f32> = {
+            let all = ["Screen", "All screens", "Window", "Area", "No timer", "5 s timer", "10 s timer", "To file", "To clipboard", "No pointer", "With pointer", "Capture", "10\u{2026}", "\u{2715}"];
+            all.iter().map(|t| (t.to_string(), face.map_or(t.chars().count() as f32 * 7.5, |f| fonts.layout(f, 13.0, t).1))).collect()
+        };
+        let width = |s: &str| measured.get(s).copied().unwrap_or(s.chars().count() as f32 * 7.5);
         let Some(bar) = self.capture_bar.as_ref() else { return };
         let c = bar.choices;
         let order = [Btn::Close, Btn::Mode(Mode::Screen), Btn::Mode(Mode::Screens), Btn::Mode(Mode::Window), Btn::Mode(Mode::Area), Btn::Timer, Btn::Dest, Btn::Pointer, Btn::Capture];
@@ -925,11 +958,29 @@ impl Server {
             all.iter().map(|x| width(&label(b, x, None)).ceil() as i32).max().unwrap_or(20) + 24
         };
         let ws: Vec<i32> = order.iter().map(|&b| widest(b)).collect();
-        let total: i32 = ws.iter().sum::<i32>() + BAR_PAD * (order.len() as i32 + 1) + 2 * 12;
-        let area = self.work_area(bar.screen);
+        // The buttons, the pads between and around them, the three gaps.
+        let total: i32 = GRIP_W + ws.iter().sum::<i32>() + BAR_PAD * (order.len() as i32 + 1) + 3 * 12;
+        let screen = bar.screen;
+        let place = bar.choices.place;
+        let area = self.work_area(screen);
         let x = area.loc.x + (area.size.w - total) / 2;
-        let y = area.loc.y + area.size.h - BAR_H - 24;
-        let mut bx = x + BAR_PAD;
+        // Above the dock when it is on this screen (even one that hides or
+        // lets windows over it), with room for the hint line under the bar.
+        let mut bottom = area.loc.y + area.size.h;
+        if self.shelf_screen() == Some(screen)
+            && let Some(dock) = self.shelf_dock(self.shelf.apps.len())
+            && dock.loc.y > screen.loc.y + screen.size.h / 2
+        {
+            bottom = bottom.min(dock.loc.y);
+        }
+        let mut y = bottom - BAR_H - HINT_H - 20;
+        let mut x = x;
+        // Where it was dragged to, kept on the screen.
+        if let Some((px, py)) = place {
+            x = (screen.loc.x + px).clamp(screen.loc.x, screen.loc.x + (screen.size.w - total).max(0));
+            y = (screen.loc.y + py).clamp(screen.loc.y, screen.loc.y + (screen.size.h - BAR_H - HINT_H).max(0));
+        }
+        let mut bx = x + GRIP_W + BAR_PAD;
         let mut buttons = Vec::new();
         for (i, (&b, &w)) in order.iter().zip(&ws).enumerate() {
             // A gap between the modes, the options and Capture.
@@ -945,6 +996,17 @@ impl Server {
         bar.picture = None;
     }
 
+    /// Over the grip, or dragging: the pointer's hand (open, or closed).
+    pub fn bar_cursor(&self, pos: smithay::utils::Point<f64, Logical>) -> Option<smithay::input::pointer::CursorIcon> {
+        use smithay::input::pointer::CursorIcon;
+        let b = self.capture_bar.as_ref().filter(|b| b.countdown.is_none())?;
+        if b.grab.is_some() {
+            return Some(CursorIcon::Grabbing);
+        }
+        let grip = Rectangle::<i32, Logical>::new(b.rect.loc, (GRIP_W + BAR_PAD, b.rect.size.h).into());
+        grip.to_f64().contains(pos).then_some(CursorIcon::Grab)
+    }
+
     pub fn bar_is_open(&self) -> bool {
         self.capture_bar.as_ref().is_some_and(|b| b.countdown.is_none())
     }
@@ -958,6 +1020,22 @@ impl Server {
 
     pub fn bar_hover(&mut self, pos: smithay::utils::Point<f64, Logical>) {
         let Some(b) = self.capture_bar.as_mut() else { return };
+        // Dragged: it and its buttons go with the pointer, on its screen.
+        if let Some((gx, gy)) = b.grab {
+            let s = b.screen;
+            let nx = ((pos.x - gx).round() as i32).clamp(s.loc.x, s.loc.x + (s.size.w - b.rect.size.w).max(0));
+            let ny = ((pos.y - gy).round() as i32).clamp(s.loc.y, s.loc.y + (s.size.h - b.rect.size.h - HINT_H).max(0));
+            let (dx, dy) = (nx - b.rect.loc.x, ny - b.rect.loc.y);
+            if (dx, dy) != (0, 0) {
+                b.rect.loc += (dx, dy).into();
+                for (_, r) in b.buttons.iter_mut() {
+                    r.loc += (dx, dy).into();
+                }
+                b.choices.place = Some((nx - s.loc.x, ny - s.loc.y));
+                self.redraw_all();
+            }
+            return;
+        }
         let h = b.buttons.iter().find(|(_, r)| r.to_f64().contains(pos)).map(|(k, _)| *k);
         if h != b.hover {
             b.hover = h;
@@ -973,7 +1051,11 @@ impl Server {
         if !b.rect.to_f64().contains(pos) {
             return self.bar_close();
         }
-        let Some(btn) = b.buttons.iter().find(|(_, r)| r.to_f64().contains(pos)).map(|(k, _)| *k) else { return };
+        let Some(btn) = b.buttons.iter().find(|(_, r)| r.to_f64().contains(pos)).map(|(k, _)| *k) else {
+            // Its own ground: taken hold of, to drag it.
+            b.grab = Some((pos.x - b.rect.loc.x as f64, pos.y - b.rect.loc.y as f64));
+            return;
+        };
         let c = &mut b.choices;
         match btn {
             Btn::Mode(m) => c.mode = m,
@@ -1085,16 +1167,24 @@ impl Server {
         let key = {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            (format!("{:?}{:?}{:?}", b.choices, b.hover, left), scale.to_bits(), light, (accent.r, accent.g, accent.b)).hash(&mut h);
+            // Not its place: a drag moves the same picture.
+            let c = Choices { place: None, ..b.choices };
+            (format!("{c:?}{:?}{left:?}", b.hover), scale.to_bits(), light, (accent.r, accent.g, accent.b)).hash(&mut h);
             h.finish()
         };
         if b.picture.as_ref().is_none_or(|(k, ..)| *k != key) {
             let (rw, rh) = (b.rect.size.w as f32, b.rect.size.h as f32);
-            let mut scene = vergence_scene::Scene::new(rw, rh);
+            let mut scene = vergence_scene::Scene::new(rw, rh + HINT_H as f32);
             let s = vergence_look::shelf_look(light);
             scene.fill_rounded(vergence_scene::Rect::new(0.0, 0.0, rw, rh), 10.0, vergence_scene::Color::rgba(s.menu.0, s.menu.1, s.menu.2, 240));
             scene.stroke(vergence_scene::Rect::new(0.0, 0.0, rw, rh), 10.0, 1.0, vergence_scene::Color::rgba(128, 128, 128, 90));
             let ink = vergence_scene::Color::rgb(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2);
+            // The grip: two columns of three dots.
+            let dot = vergence_scene::Color::rgba(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2, 110);
+            for (i, j) in (0..2).flat_map(|i| (0..3).map(move |j| (i, j))) {
+                let (cx, cy) = (BAR_PAD as f32 + 5.0 + i as f32 * 5.0, rh / 2.0 - 5.0 + j as f32 * 5.0);
+                scene.fill_rounded(vergence_scene::Rect::new(cx - 1.25, cy - 1.25, 2.5, 2.5), 1.25, dot);
+            }
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             let face = fonts.face("sans-serif", 500, false);
             for (btn, r) in &b.buttons {
@@ -1119,6 +1209,16 @@ impl Server {
                     vergence_render::text(&mut scene, fonts, face, size, fg, at, &t);
                 }
             }
+            // The keys, so the bar teaches them, on a pill under it.
+            if let Some(face) = face {
+                let size = 12.0;
+                let (_, tw) = fonts.layout(face, size, HINT);
+                let m = fonts.metrics(face, size);
+                let (pw, ph) = ((tw + 20.0).min(rw), m.ascent + m.descent + 8.0);
+                let pill = vergence_scene::Rect::new(((rw - pw) / 2.0).round(), rh + 6.0, pw, ph);
+                scene.fill_rounded(pill, ph / 2.0, vergence_scene::Color::rgba(s.menu.0, s.menu.1, s.menu.2, 220));
+                vergence_render::text(&mut scene, fonts, face, size, vergence_scene::Color::rgba(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2, 200), vergence_scene::Point::new(pill.x + 10.0, (pill.y + 4.0 + m.ascent).round()), HINT);
+            }
             let pic = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)).ok()?;
             let buffer = MemoryRenderBuffer::from_slice(&pic.data, smithay::backend::allocator::Fourcc::Abgr8888, (pic.width as i32, pic.height as i32), 1, smithay::utils::Transform::Normal, None);
             self.capture_bar.as_mut()?.picture = Some((key, buffer, (pic.width as i32, pic.height as i32)));
@@ -1127,6 +1227,7 @@ impl Server {
         let (_, buffer, px) = b.picture.as_ref()?;
         let whole = Rectangle::<f64, Logical>::from_size((px.0 as f64, px.1 as f64).into());
         let loc = (b.rect.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
-        MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), buffer, None, Some(whole), Some(b.rect.size), Kind::Unspecified).ok().map(crate::decor::SceneElement::Memory)
+        let size = smithay::utils::Size::<i32, Logical>::from((b.rect.size.w, b.rect.size.h + HINT_H));
+        MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), buffer, None, Some(whole), Some(size), Kind::Unspecified).ok().map(crate::decor::SceneElement::Memory)
     }
 }

@@ -317,6 +317,15 @@ impl Server {
                 Ok(_) => self.bus_send(id, ServerMsg::Done { serial }),
                 Err(message) => self.bus_send(id, ServerMsg::Error { serial, code: vergence_protocol::bus::ErrorCode::Denied, message }),
             },
+            // The Screenshot app opens the bar (capture.rs; bus v32).
+            ClientMsg::ScreenshotBar { serial } => {
+                if self.lock.on || crate::greeter() {
+                    self.bus_send(id, ServerMsg::Error { serial, code: vergence_protocol::bus::ErrorCode::Denied, message: "the screen is locked".into() });
+                } else {
+                    self.bar_open(false);
+                    self.bus_send(id, ServerMsg::Done { serial });
+                }
+            }
             // Files and links opened by type (files milestone 1; shelf.rs).
             ClientMsg::Open { serial, items, app } => match self.open_items(&items, &app) {
                 Ok(()) => self.bus_send(id, ServerMsg::Done { serial }),

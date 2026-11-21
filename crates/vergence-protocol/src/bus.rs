@@ -62,11 +62,12 @@
 //! Version 29 (the security review): `Grant::program`, `RevokeGrants::program`.
 //! Version 30 (display lists milestone 1): `window::WinRequest::Scene`, a window as a display list.
 //! Version 31 (display lists step 6): `window::WinEvent::ScenesOff`, the server stops drawing a window's scenes.
+//! Version 32 (screenshots milestone 1): `ClientMsg::ScreenshotBar`, the Screenshot app opens the bar.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 31;
+pub const VERSION: u32 = 32;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -349,6 +350,10 @@ pub enum ClientMsg {
     /// (`app` empty), or every grant (both empty). They ask again next
     /// time. Reply: Done.
     RevokeGrants { serial: u32, agent: String, program: String, app: String },
+    /// Open the screenshot bar (Super+Shift+5's), on the screen under the
+    /// pointer (bus v32; the Screenshot app). Reply: Done, or an error
+    /// (locked, at the login screen).
+    ScreenshotBar { serial: u32 },
     /// Windows (window.rs).
     Window(crate::window::WinRequest),
     /// An agent's request (agent.rs; meaning milestone 1, step 3).
@@ -463,6 +468,7 @@ mod op {
     pub const REMOVE_TILE: u16 = 16;
     pub const LIST_GRANTS: u16 = 17;
     pub const REVOKE_GRANTS: u16 = 18;
+    pub const SCREENSHOT_BAR: u16 = 19;
     // Server to client.
     pub const WELCOME: u16 = 1;
     pub const PONG: u16 = 2;
@@ -590,6 +596,11 @@ impl ClientMsg {
                 e.u32(*serial);
                 e
             }
+            ClientMsg::ScreenshotBar { serial } => {
+                let mut e = Encoder::frame(op::SCREENSHOT_BAR);
+                e.u32(*serial);
+                e
+            }
             ClientMsg::ForceQuit { serial, app } => {
                 let mut e = Encoder::frame(op::FORCE_QUIT);
                 e.u32(*serial).str(app);
@@ -711,6 +722,7 @@ impl ClientMsg {
                 Ok(ClientMsg::ForgetPlaces { serial, app })
             }
             op::LIST_APPS => Ok(ClientMsg::ListApps { serial: d.u32().map_err(|e| bad(0, e))? }),
+            op::SCREENSHOT_BAR => Ok(ClientMsg::ScreenshotBar { serial: d.u32().map_err(|e| bad(0, e))? }),
             op::FORCE_QUIT => {
                 let serial = d.u32().map_err(|e| bad(0, e))?;
                 let app = d.str().map_err(|e| bad(serial, e))?;
@@ -1096,6 +1108,7 @@ mod tests {
             ClientMsg::ForgetPlaces { serial: 19, app: String::new() },
             ClientMsg::ListApps { serial: 22 },
             ClientMsg::ForceQuit { serial: 23, app: "firefox".into() },
+            ClientMsg::ScreenshotBar { serial: 24 },
             ClientMsg::Alive { serial: 25 },
             ClientMsg::Open { serial: 26, items: vec!["/home/u/a b.png".into(), "https://example.org".into()], app: String::new() },
             ClientMsg::Open { serial: 27, items: vec![], app: "firefox.desktop".into() },

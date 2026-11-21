@@ -185,4 +185,46 @@ Recording, by question 1. OCR (text out of a capture) and the Mac's
   Escape, Enter taking the screen, a 5 s timer (nothing at 3 s, the file
   at 7 s, no bar in it), Window through the bar taking Calculator. Test:
   the choices read back, nonsense ignored.
+- **Step 6, Close-Up's minor edits** (2026-11-21; crop and rotate, markup
+  later as Dave chose). vergence-closeup: a Crop tool (vergence-widgets
+  toolbar `Icon::Crop`; C, or the Picture menu): drag over the part to
+  keep (the rest dimmed, an outline), then Enter, Ctrl+K or the status
+  line's Crop button; Escape lets go. Turning a still picture now counts
+  as an edit too (an animation's turn stays for looking, and animations
+  can't be cropped: saving would lose them). Edited, the status line
+  offers Save (Ctrl+S, the Save role): a PNG is written back in place
+  (beside it and moved, its permissions kept), any other kind as
+  "<name> (edited).png" beside it, which the window then shows (a JPEG is
+  not made again). Closing with edits asks, as Edit does (Don't save,
+  Cancel, Save); Next and Previous wait until the edits are saved.
+  pictures.rs `crop`, `copy_name`, `save_png` (png, already the server's).
+  Tried headless on kepler: a 1920x1080 capture opened, C, a drag, Enter,
+  Ctrl+S: saved as 400x240 in place, still 0600. Tests: crop takes the
+  part, a PNG saved reads back the same, the copy's name.
+- **The Screenshot app, and the bar fixed** (2026-11-21, Dave: "How will
+  users know about all this? Maybe we should make a little utility that
+  calls the bar directly and let's the user know about the rest? Also,
+  the bar is over the dock and they are interacting and the 'Capture'
+  button at the right end is off the right edge of the bar itself").
+  **Screenshot** (vergence-protocol src/bin vergence-screenshot.rs, its
+  desktop entry in Utilities, its own icon: a camera in a selection's
+  corners) opens the bar over the bus (v32 `ClientMsg::ScreenshotBar`) and
+  ends, as the Mac's Screenshot app; found by typing "screenshot" in Apps,
+  pinnable to the dock. The bar now shows the keys on a line under it
+  ("Super+Shift+3 the screen · Super+Shift+4 an area (Space: a window) ·
+  add Ctrl for the clipboard"), so whoever opens it learns them. Fixed:
+  its width counted two of its three gaps and measured labels in another
+  font than drawn (Capture stuck out); it stands above the dock when the
+  dock is at the bottom of its screen (even one that hides); the dock
+  takes no hover while the picker or the bar is open.
+  The bar can be dragged by its ground (anywhere but a button), as a
+  window by its bar (Dave, 2026-11-21: "can the screenshot bar be made
+  movable by dragging it like a window?"); it stays on its screen and
+  opens where it was left next time (`place` in the kept choices, from the
+  screen's corner, kept on the screen). Tried headless on Hubble: dragged
+  up and left, "place = 357,180" kept, opened there again.
+  A grip at its left end (two columns of dots; Dave: "maybe a little
+  'handle' on the left end?"): the pointer's open hand over it, closed
+  while the bar is dragged (dispatch.rs passes the motion's point to the
+  pointer's picture, and sets the closed hand while a button is held).
 
