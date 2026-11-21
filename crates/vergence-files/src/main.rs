@@ -1822,9 +1822,21 @@ impl Viewer {
                 // A key of its own: the path row stood in its place, and a field
                 // taken for the same widget would not take the keyboard.
                 Some(text) => items.push(field(text.clone(), Msg::PathTyped).on_submit(Msg::PathGo).autofocus().key(0x7061_7468).width(Length::FILL).name("Path")),
+                // The crumbs in a box drawn as the field is (Dave, 2026-11-21:
+                // "It's not obvious I can click there and enter a path"), the
+                // same height, so nothing moves when it becomes the field.
                 None => {
                     crumbs.push(button(space().width(Length::FILL)).look(ButtonLook::Plain).width(Length::FILL).on_press(Msg::PathEdit).name("Type a path"));
-                    items.push(row(crumbs).spacing(2.0).align(Align::Center).width(Length::FILL));
+                    let edge = if t.high_contrast { t.text } else { t.line };
+                    items.push(
+                        panel(row(crumbs).spacing(2.0).align(Align::Center).width(Length::FILL))
+                            .color(t.page)
+                            .edge(edge, 1.0)
+                            .padding(Padding::hv(0.0, 4.0))
+                            .align(Align::Center)
+                            .width(Length::FILL)
+                            .height(Length::Fixed(26.0)),
+                    );
                 }
             }
         } else {
