@@ -422,8 +422,9 @@ pub struct Layout {
     pub top: f32,
     /// Sideways, in window points, when the pages are wider than the window.
     pub pan_x: f32,
-    /// A page to go to once the view has a place (a remembered one).
-    pub restore: Option<usize>,
+    /// A place to go to once the view has its size (kept from the last
+    /// run): the page, and how far down its row the view's top was.
+    pub restore: Option<(usize, f32)>,
     /// The sidebar's thumbnails scrolled this far, in points.
     pub thumb_top: f32,
     /// The text selected, if any.
@@ -637,6 +638,26 @@ impl Layout {
         let wide = self.widest() * z + 2.0 * MARGIN;
         let room = (wide - r.w).max(0.0) / 2.0;
         self.pan_x = self.pan_x.clamp(-room, room);
+    }
+
+    /// Where the view's top is: the first page of the row there, and how
+    /// far down that row, in points (session milestone 1: kept across a
+    /// restart, so a document comes back scrolled to where it was).
+    pub fn place(&self) -> (usize, f32) {
+        let rows = self.rows();
+        let tops = self.row_tops();
+        let row = tops.iter().rposition(|&t| t <= self.top + 0.5).unwrap_or(0).min(rows.len().saturating_sub(1));
+        (rows.get(row).map_or(0, |r| r.start), (self.top - tops.get(row).copied().unwrap_or(0.0)).max(0.0))
+    }
+
+    /// Back to a place given by [`Layout::place`].
+    pub fn go_to_place(&mut self, p: usize, within: f32, r: Rect) {
+        self.go_to(p, r);
+        if within > 0.5 && within.is_finite() {
+            let row = self.row_of(p.min(self.pages.len() - 1)).min(self.rows().len() - 1);
+            self.top = self.row_tops()[row] + within;
+            self.clamp(r);
+        }
     }
 
     /// Page `p`'s row at the top of the view (centered when it fits whole).
@@ -1207,7 +1228,10 @@ fn round3(s: f32) -> f32 {
     (s * k).round() / k
 }
 
-/// Each document's page and zoom: ~/.local/state/vergence/reader-places
+/// Each document's zoom (and the page it was left at, no longer gone to: a
+/// document the user opens starts at its first page, session milestone 1;
+/// the page after a restart is kept with the window, keep.rs):
+/// ~/.local/state/vergence/reader-places
 /// (Close-Up's closeup-pdf-places, taken over once when Reader first looks),
 /// owner-only, a line each (page, mode, path), newest first, at most 500.
 pub mod places {
@@ -1227,7 +1251,7 @@ pub mod places {
         Some(new)
     }
 
-    fn mode_text(m: Mode) -> String {
+    pub fn mode_text(m: Mode) -> String {
         match m {
             Mode::Width => "width".into(),
             Mode::Page => "page".into(),
@@ -1235,7 +1259,7 @@ pub mod places {
         }
     }
 
-    fn parse_mode(s: &str) -> Option<Mode> {
+    pub fn parse_mode(s: &str) -> Option<Mode> {
         match s {
             "width" => Some(Mode::Width),
             "page" => Some(Mode::Page),

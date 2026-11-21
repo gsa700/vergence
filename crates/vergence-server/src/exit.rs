@@ -32,6 +32,11 @@ impl Server {
         self.session_tick();
         self.resume.exiting = true;
         for w in &windows {
+            // Our own windows are told the close is the session's (bus v33):
+            // what they keep stays for the next session.
+            if let Some(n) = w.native() {
+                self.bus_send(n.client, vergence_protocol::bus::ServerMsg::Window(vergence_protocol::window::WinEvent::SessionEnding { window: n.id }));
+            }
             self.close_window(w);
         }
         let started = Instant::now();

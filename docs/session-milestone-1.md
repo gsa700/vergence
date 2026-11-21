@@ -1,7 +1,8 @@
 # Session milestone 1: back as it was, or fresh
 
-Status: **agreed 2026-11-21** (Dave: "yes, add it to the plan, build it
-where you think it makes sense"). Built before files milestone 3, because
+Status: **all steps in 2026-11-21**; Dave's hands-on pass and a real
+logout on kepler still open (see Progress). Agreed 2026-11-21 (Dave: "yes,
+add it to the plan, build it where you think it makes sense"). Built before files milestone 3, because
 that milestone's first step keeps FileView's tabs across restarts and
 should keep them by these rules from the start. Small: four steps and the
 checks.
@@ -107,3 +108,54 @@ Edit's caret on a file closed and opened again (it opens at the top
 already); Close-Up (pictures have no place inside them); the terminal's
 scrollback across restarts; FileView, which follows these rules in files
 milestone 3 (its kept tabs, step 1; its folders' scroll places, step 2).
+
+## Progress
+
+All built 2026-11-21, the same afternoon as the plan. Tests pass on Hubble,
+kepler, techbench and apollo; display-suite scenario 15 (tools/display-suite/15-session.sh) passes.
+
+- **Step 1.** The server sets `VERGENCE_SESSION` (16 random hex digits,
+  new for every server start) for everything it starts. The toolkit's
+  named scrolls: `Program::scroll_to` (places to go to, taken at the next
+  layout where the scroll with that `Element::name` appears) and
+  `Program::scrolled` (told once for each change); `Ui::set_scroll_place`
+  and `Ui::scroll_places` underneath. The shared module is
+  `vergence_widgets::session` rather than a vergence-types `kept`
+  (vergence-types is about file types, and every app has the toolkit):
+  `[session]` keys, `id()`, `still_kept`, `ending`, `write_private`.
+- **Found while building: an exit looked like the user closing every
+  window.** Exit Vergence, Restart and Shut Down ask each window to close as
+  its close button does (exit.rs), so Reader and Edit dropped the windows
+  they kept, and nothing came back after a logout. **Bus v33**:
+  `WinEvent::SessionEnding { window }`, sent by the server just before an
+  exit's Close; `App::session_ending` / `Program::session_ending` in the
+  toolkit; Reader, Edit and Settings keep what they have when the close
+  follows within 15 seconds (`session::ending`; an exit that stopped over a
+  question leaves later closes the user's). On the native road only.
+- **Step 2, Reader.** reader-session keeps each tab's place ("at <page>
+  <within> <zoom>" after its "tab" line; a file from before still reads),
+  written with the page and zoom 0.7 s after scrolling stops
+  (`Layout::place`, `go_to_place`). A start from the kept session goes
+  back there; an open by the user starts at page 1, at the document's last
+  zoom (reader-places now gives only the zoom). `[session] places = false`
+  reopens at the top; `restore = false` forgets the kept windows.
+- **Step 3, Settings** (crates/vergence-settings/src/keep.rs,
+  ~/.local/state/vergence/settings-page): the page by its sidebar name (or
+  the app whose page is open) and the scroll, written on a page change, and
+  at most once a second while scrolling, with a last write a second after
+  it stops; at a close by the user with the time and the session id.
+  A `--page`/`--app` start is never overridden.
+- **Step 4, Settings > Session** (System group; the Session group left the
+  Dock page): When Vergence starts; Return to where I was in documents
+  (shown only while apps are reopened); Remember the page after closing
+  (Never, 10 minutes, 30 minutes, 1 hour, Until the next session); a button
+  to the Windows page for window places. It uses the Apps icon for now.
+- **Step 5, checks.** Scenario 15: Reader killed at a page of the
+  whitepaper comes back at it; its tab closed (Ctrl+W) and the file opened
+  again starts at page 1; Settings killed on the Windows page scrolled to
+  its end comes back on it, scrolled; the Session page's rows. By hand in a
+  headless session on Hubble: Settings closed with the close button
+  reopens on its page within the time, at the front page for another session or
+  after the time. **Still open:** a real logout (Exit Vergence) on kepler
+  with Reader and Settings open, which needs bus v33 installed and the
+  session restarted; Dave's hands-on pass.

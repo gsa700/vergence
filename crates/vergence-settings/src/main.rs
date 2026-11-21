@@ -42,6 +42,8 @@ mod single;
 use notify::NotifyMsg;
 use shots::ShotsMsg;
 mod places;
+/// Where the app was, for the next start (session milestone 1).
+mod keep;
 use places::PlacesMsg;
 mod privacy;
 use privacy::PrivacyMsg;
@@ -422,6 +424,9 @@ enum Page {
     DateTime,
     LockScreen,
     Login,
+    /// What comes back when Vergence starts, and when an app opens again
+    /// (session milestone 1; keep.rs, vergence-widgets session.rs).
+    Session,
     /// Privacy > Agents: what agents may use (privacy.rs; meaning milestone 1).
     Agents,
     /// The battery and the GPUs (battery.rs); only where there is a battery.
@@ -528,6 +533,12 @@ enum Message {
     /// Icons on the desktop (files milestone 1, step 9): desktop.toml `[desktop] icons`.
     DesktopIcons(bool),
     Restore(usize),
+    /// `[session] places`: reopened documents go back to their place.
+    SessionPlaces(bool),
+    /// A second after a scroll that was not written yet: write it (keep.rs).
+    KeepPlace,
+    /// `[session] settings-keep`, an index into KEEP_CHOICES.
+    SettingsKeep(usize),
     DockScreen(usize),
     DockGap(f32),
     DockOpacity(f32),
@@ -672,6 +683,17 @@ struct App {
     /// The app whose page is open (apps.rs).
     app_open: Option<String>,
     page: Page,
+    /// A place to scroll the page to, kept from the last run (keep.rs):
+    /// taken by the toolkit at the next layout.
+    kept_scroll: Option<f32>,
+    /// How far the page is scrolled, as the toolkit last told.
+    scrolled_to: f32,
+    /// What keep.rs last wrote, and when.
+    kept_written: Option<(keep::Kept, std::time::Instant)>,
+    /// When the session said it is ending (the close after it is the session's).
+    ending: Option<std::time::Instant>,
+    /// A KeepPlace is on its way (a scroll not yet written).
+    keep_waiting: bool,
     /// The Sound page (vergence-sound): the system, read when the page opens,
     /// and its outputs as last read.
     sound: Option<Box<dyn vergence_sound::Sound>>,
@@ -886,6 +908,11 @@ impl App {
             places_ask: None,
             places_from_dock: None,
             app_open: None,
+            kept_scroll: None,
+            scrolled_to: 0.0,
+            kept_written: None,
+            ending: None,
+            keep_waiting: false,
             accent_text: appearance_text(&desktop, "accent"),
             size: disp::size(&desktop) as f32,
             sleep_cmd: energy_cmd(&desktop),
@@ -1080,6 +1107,51 @@ impl App {
         }
     }
 
+    /// Where the app is now, for keep.rs: the page by its sidebar name, or
+    /// the app whose page is open, and how far it is scrolled.
+    fn kept_now(&self, closed: Option<(u64, String)>) -> keep::Kept {
+        let app = (self.page == Page::AppPage).then(|| self.app_open.clone()).flatten();
+        let page = self.page_groups().into_iter().flat_map(|(_, rows)| rows).find(|(_, p, ..)| *p == self.page).map(|(n, ..)| n);
+        keep::Kept { page, app, scroll: self.scrolled_to, closed }
+    }
+
+    /// Writes where the app is, if it changed: at once for a new page, at
+    /// most once a second while it is only scrolled.
+    fn keep_place(&mut self) {
+        let now = self.kept_now(None);
+        let due = match &self.kept_written {
+            None => true,
+            Some((k, _)) if k.page != now.page || k.app != now.app => true,
+            Some((k, at)) => (k.scroll - now.scroll).abs() >= 1.0 && at.elapsed() >= std::time::Duration::from_secs(1),
+        };
+        if due {
+            keep::save(&now);
+            self.kept_written = Some((now, std::time::Instant::now()));
+        } else if !self.keep_waiting && self.kept_written.as_ref().is_some_and(|(k, _)| (k.scroll - now.scroll).abs() >= 1.0) {
+            // Scrolled again within the second: written once it has passed,
+            // so where the scrolling stopped is what is kept.
+            self.keep_waiting = true;
+            let mail = self.mail.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1100));
+                mail.send(Message::KeepPlace);
+            });
+        }
+    }
+
+    /// Opens where the last run was, if that is to be used now (keep.rs).
+    fn open_kept(&mut self, k: keep::Kept) {
+        let args: Vec<String> = match (&k.app, &k.page) {
+            (Some(a), _) => vec!["--app".into(), a.clone()],
+            (None, Some(p)) => vec!["--page".into(), p.clone()],
+            _ => return,
+        };
+        self.apply_args(&args);
+        if k.scroll > 0.0 {
+            self.kept_scroll = Some(k.scroll);
+        }
+    }
+
     fn open(&mut self, p: Page) {
         self.page = p;
         self.reread();
@@ -1138,6 +1210,10 @@ impl App {
             Message::Apps(m) => self.apps_message(m),
             Message::Defaults(m) => self.defaults_message(m),
             Message::Reread => self.reread(),
+            Message::KeepPlace => {
+                self.keep_waiting = false;
+                self.keep_place();
+            }
             Message::Resolution(i) => self.pick_mode(Some(i), None),
             Message::Refresh(i) => self.pick_mode(None, Some(i)),
             Message::KeepMode(keep) => self.settle_mode(keep),
@@ -1160,6 +1236,18 @@ impl App {
                 let t = d.entry("desktop").or_insert_with(|| toml::Value::Table(toml::Table::new()));
                 if let Some(t) = t.as_table_mut() {
                     t.insert("icons".into(), on.into());
+                }
+            }),
+            Message::SessionPlaces(on) => self.save(|d| {
+                let t = d.entry("session").or_insert_with(|| toml::Value::Table(toml::Table::new()));
+                if let Some(t) = t.as_table_mut() {
+                    t.insert("places".into(), on.into());
+                }
+            }),
+            Message::SettingsKeep(i) => self.save(|d| {
+                let t = d.entry("session").or_insert_with(|| toml::Value::Table(toml::Table::new()));
+                if let Some(t) = t.as_table_mut() {
+                    t.insert("settings-keep".into(), KEEP_CHOICES[i.min(KEEP_CHOICES.len() - 1)].1.into());
                 }
             }),
             Message::Restore(i) => self.save(|d| {
@@ -1793,6 +1881,7 @@ impl App {
                 ("Date & Time".into(), Page::DateTime, Icon::Clock, "date time clock zone timezone 24 hour am pm calendar"),
                 ("Lock Screen".into(), Page::LockScreen, Icon::Lock, "lock screen password idle sleep super l security"),
                 ("Login".into(), Page::Login, Icon::Lock, "login log in automatic autologin login screen boot password vdm"),
+                ("Session".into(), Page::Session, Icon::Apps, "session restore reopen restart start apps windows documents place page remember forget log out"),
             ]
             .into_iter()
             .chain(self.has_battery().then(|| ("Battery".into(), Page::Battery, Icon::Battery, "battery charge power watts time left health gpu graphics nvidia")))
@@ -2542,7 +2631,7 @@ impl App {
         self.page_layout(
             "Dock",
             "Where the dock sits and how it looks, and its applets. Drag an icon to move it, onto the dock to pin it, off the dock to remove it. It follows at once.",
-            vec![self.group(Some("Place"), place), self.group(Some("Look"), look), self.group(Some("Applets"), applets), self.desktop_group(), self.session_group(), self.status_line()],
+            vec![self.group(Some("Place"), place), self.group(Some("Look"), look), self.group(Some("Applets"), applets), self.desktop_group(), self.status_line()],
         )
     }
 
@@ -2559,17 +2648,44 @@ impl App {
         )
     }
 
-    /// Session restore (desktop.toml `[session] restore`): the apps open at
-    /// the end of a session started again at the next, or none.
-    fn session_group(&self) -> Element<Message> {
-        let on = self.desktop.get("session").and_then(|d| d.get("restore")).and_then(|v| v.as_bool()).unwrap_or(true);
-        self.group(
-            Some("Session"),
-            vec![setting(
-                "When Vergence starts",
-                "Reopen the applications that were open when you last exited (their windows go back where they were), or start with none open.",
-                choice(vec!["Reopen the apps that were open".into(), "Start with no apps open".into()], Some(if on { 0 } else { 1 }), Message::Restore).width(Length::Fixed(260.0)).name("When Vergence starts"),
-            )],
+    /// The Session page (session milestone 1; Dave, 2026-11-21): desktop.toml
+    /// `[session]` restore (moved here from the Dock page), places and
+    /// settings-keep. Window places themselves are on the Windows page.
+    fn session_page(&self) -> Element<Message> {
+        let s = self.desktop.get("session");
+        let restore = s.and_then(|d| d.get("restore")).and_then(|v| v.as_bool()).unwrap_or(true);
+        let places = s.and_then(|d| d.get("places")).and_then(|v| v.as_bool()).unwrap_or(true);
+        let keep = s.and_then(|d| d.get("settings-keep")).and_then(|v| v.as_integer()).unwrap_or(vergence_widgets::session::SETTINGS_KEEP);
+        let keep_at = KEEP_CHOICES.iter().position(|(_, m)| *m == keep);
+        let mut start = vec![setting(
+            "When Vergence starts",
+            "Reopen the apps that were open when the last session ended, with their windows and documents, or start with none open. Apps then also forget the windows they kept.",
+            choice(vec!["Reopen the apps that were open".into(), "Start with no apps open".into()], Some(if restore { 0 } else { 1 }), Message::Restore).width(Length::Fixed(260.0)).name("When Vergence starts"),
+        )];
+        if restore {
+            start.push(setting(
+                "Return to where I was in documents",
+                "After a restart, a logout or a power cut, documents come back scrolled to where they were. A document you close yourself opens at its start next time.",
+                switch(places, Message::SessionPlaces).name("Return to where I was in documents"),
+            ));
+        }
+        let keep_names: Vec<String> = KEEP_CHOICES.iter().map(|(n, _)| n.to_string()).collect();
+        self.page_layout(
+            "Session",
+            "What comes back when Vergence starts, and when you open an app again.",
+            vec![
+                self.group(Some("Starting"), start),
+                self.group(Some("Settings"), vec![setting(
+                    "Remember the page after closing",
+                    "Settings opens again on the page and at the place you left, for this long. A new session always starts at the first page.",
+                    choice(keep_names, keep_at, Message::SettingsKeep).width(Length::Fixed(220.0)).name("Remember the page after closing"),
+                )]),
+                self.group(Some("Windows"), vec![setting(
+                    "Window places",
+                    "Where each app's windows open is remembered for each set of screens. They can be forgotten on the Windows page.",
+                    button(label("Windows")).on_press(Message::Go(Page::Windows)).name("Open the Windows page"),
+                )]),
+            ],
         )
     }
 
@@ -3153,6 +3269,7 @@ impl Program for App {
             Page::Screenshots => "Screenshots".into(),
             Page::DateTime => "Date & Time".into(),
             Page::LockScreen => "Lock Screen".into(),
+            Page::Session => "Session".into(),
             Page::Agents => "Agents".into(),
             Page::Login => "Login".into(),
             Page::Apps => "Apps".into(),
@@ -3220,6 +3337,7 @@ impl Program for App {
             Page::Screenshots => self.screenshots_page(),
             Page::DateTime => self.datetime_page(),
             Page::LockScreen => self.lock_page(),
+            Page::Session => self.session_page(),
             Page::Agents => self.agents_page(),
             Page::Login => self.login_page(),
             Page::Apps => self.apps_page(),
@@ -3256,6 +3374,34 @@ impl Program for App {
         Some(vergence_ui::Bar::Tools { buttons: Vec::new(), from: (SIDEBAR_W + 1.0) as f64 })
     }
 
+    fn scroll_to(&mut self) -> Vec<(String, f32)> {
+        // The page's scroll is named by its title (page_layout).
+        self.kept_scroll.take().map(|s| vec![(self.title(), s)]).unwrap_or_default()
+    }
+
+    fn scrolled(&mut self, name: &str, offset: f32) {
+        if name == self.title() {
+            self.scrolled_to = offset;
+            self.keep_place();
+        }
+    }
+
+    fn session_ending(&mut self) {
+        self.ending = Some(std::time::Instant::now());
+        // Where it is, as it is: no "closed", so the next session opens here.
+        let now = self.kept_now(None);
+        keep::save(&now);
+        self.kept_written = Some((now, std::time::Instant::now()));
+    }
+
+    fn closed(&mut self) {
+        if vergence_widgets::session::ending(self.ending) {
+            return;
+        }
+        // Closed by the user: kept for a while in this session (keep.rs).
+        keep::save(&self.kept_now(Some((vergence_widgets::session::now(), vergence_widgets::session::id()))));
+    }
+
     fn update(&mut self, m: Message, window: &mut Window) {
         let was = self.page;
         if matches!(m, Message::KeepMode(_)) {
@@ -3272,7 +3418,10 @@ impl Program for App {
         // The window is named after its page (Alt+Tab, the dock; the bar draws no title).
         if self.page != was {
             window.set_title(&self.title());
+            // A new page starts at its top (the toolkit tells otherwise).
+            self.scrolled_to = 0.0;
         }
+        self.keep_place();
     }
 
     fn waker(&mut self, waker: Waker) {
@@ -3587,6 +3736,10 @@ fn bus_outputs(mail: Mail) {
     });
 }
 
+/// Settings > Session's "Remember the page after closing": the names
+/// shown and the minutes (`[session] settings-keep`; -1 until the next session).
+const KEEP_CHOICES: [(&str, i64); 5] = [("Never", 0), ("10 minutes", 10), ("30 minutes", 30), ("1 hour", 60), ("Until the next session", vergence_widgets::session::UNTIL_NEXT_SESSION)];
+
 fn main() -> std::io::Result<()> {
     if std::env::args().any(|a| a == "--version" || a == "-V") {
         println!("vergence-settings {}", env!("CARGO_PKG_VERSION"));
@@ -3615,6 +3768,12 @@ fn main() -> std::io::Result<()> {
     app.battery.power = vergence_power::power();
     // Whether there is Wi-Fi, for the sidebar.
     app.read_interfaces();
+    // Where the last run was, unless this start asks for a page (keep.rs).
+    if !args.iter().any(|a| a == "--page" || a == "--app")
+        && let Some(k) = keep::load()
+    {
+        app.open_kept(k);
+    }
     app.apply_args(&args);
     // Only one System Settings (single.rs): this one now takes later starts'.
     let mail = app.mail.clone();

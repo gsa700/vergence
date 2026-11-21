@@ -132,6 +132,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Set WAYLAND_DISPLAY to our socket name, so child processes connect to Server rather
     // than the host compositor
     unsafe { std::env::set_var("WAYLAND_DISPLAY", &state.socket_name) };
+    // This session's id, for what the apps keep (session milestone 1): a
+    // page the settings app kept at a close is used again only in the same
+    // session. New for every server start, nested runs included.
+    unsafe { std::env::set_var("VERGENCE_SESSION", session_id()) };
 
     // Our file dialog for apps not ours, if asked for (portal.rs): the
     // environment that makes GTK and Qt ask the portal.
@@ -229,6 +233,19 @@ pub fn no_terminal(cmd: &mut std::process::Command) {
 /// with no controlling terminal (VDM milestone 1, review C6: found on kepler, every
 /// app had the console as its controlling terminal and could open /dev/tty, which
 /// a lock screen must not allow), reaped when it exits.
+/// Sixteen hex digits from the system's random source (the time and the
+/// process if it cannot be read).
+fn session_id() -> String {
+    use std::io::Read;
+    let mut b = [0u8; 8];
+    let random = std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut b)).is_ok();
+    if !random {
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+        b = (t ^ ((std::process::id() as u64) << 32)).to_le_bytes();
+    }
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
 pub fn spawn(cmd: &mut std::process::Command) -> std::io::Result<u32> {
     // The login screen starts nothing, whatever asks (review C3).
     if greeter() {

@@ -27,6 +27,7 @@ pub mod edit;
 pub mod filedialog;
 pub mod files;
 pub mod prefs;
+pub mod session;
 pub mod textarea;
 pub mod toolbar;
 mod layout;
@@ -121,6 +122,11 @@ pub trait Program {
     /// The window has closed while the program runs on.
     fn closed(&mut self) {}
 
+    /// The session is ending: the close that follows is the session's, not
+    /// the user's, so what the program keeps of the window stays for the
+    /// next session (session milestone 1).
+    fn session_ending(&mut self) {}
+
     /// The toolkit's number for this window, as tab events name another
     /// window of the program (`TabEvent::Join`'s `into`).
     fn opened(&mut self, _id: u32) {}
@@ -182,6 +188,18 @@ pub trait Program {
     fn fit_content(&self) -> bool {
         false
     }
+
+    /// Places to scroll to, by the scroll's name ([`Element::name`]), asked
+    /// each time the tree is built: a page kept from the last run, say
+    /// (session milestone 1). Each is taken at the next layout where its
+    /// scroll appears, and kept to its content.
+    fn scroll_to(&mut self) -> Vec<(String, f32)> {
+        Vec::new()
+    }
+
+    /// A named scroll moved: how far down it is, in points. Told after the
+    /// frame is laid out, once for each change.
+    fn scrolled(&mut self, _name: &str, _offset: f32) {}
 
     /// Another thread used the [`Waker`]. True if the state changed.
     fn woken(&mut self, _window: &mut Window) -> bool {
@@ -276,6 +294,8 @@ struct Host<P: Program> {
     fit: FitToContent,
     /// The means to come back with the window (for the fit's request).
     waker: Option<Waker>,
+    /// Each named scroll's place as last told to the program (Program::scrolled).
+    scrolls_told: std::collections::HashMap<String, f32>,
 }
 
 /// The toolkit's timer for touch and hold, and how long a finger is held.
@@ -417,6 +437,10 @@ impl<P: Program> vergence_ui::App for Host<P> {
 
     fn closed(&mut self) {
         self.program.closed();
+    }
+
+    fn session_ending(&mut self) {
+        self.program.session_ending();
     }
 
     fn opened(&mut self, id: u32) {
@@ -637,6 +661,9 @@ impl<P: Program> Host<P> {
                 self.theme = self.theme.tinted(c);
             }
             self.tint = frame.tint;
+            for (name, offset) in self.program.scroll_to() {
+                self.ui.set_scroll_place(&name, offset);
+            }
             let root = self.program.view(&self.theme);
             let mut measure = FontsMeasure { fonts, family: &self.theme.font };
             self.ui.layout(root, frame.width, frame.height, &mut measure, self.theme.text_size);
@@ -669,6 +696,12 @@ impl<P: Program> Host<P> {
             }
         }
         self.ui.advance(Instant::now());
+        for (name, offset) in self.ui.scroll_places() {
+            if self.scrolls_told.get(&name) != Some(&offset) {
+                self.program.scrolled(&name, offset);
+                self.scrolls_told.insert(name, offset);
+            }
+        }
         let mut scene = Scene::new(frame.width, frame.height);
         self.ui.draw(&mut scene, fonts, &self.theme);
         scene
@@ -680,7 +713,7 @@ impl<P: Program> Host<P> {
 pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
     let theme = program.theme();
     let title_sent = program.title();
-    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None, fit: FitToContent::Wanted, waker: None })
+    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None, fit: FitToContent::Wanted, waker: None, scrolls_told: Default::default() })
 }
 
 /// Opens the program's window and runs until it is closed. `size` is the
@@ -688,7 +721,7 @@ pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
 pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {
     let theme = program.theme();
     let title_sent = program.title();
-    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None, fit: FitToContent::Wanted, waker: None };
+    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None, fit: FitToContent::Wanted, waker: None, scrolls_told: Default::default() };
     vergence_ui::run(&mut host, size)
 }
 

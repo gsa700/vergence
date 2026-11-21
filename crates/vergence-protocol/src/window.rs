@@ -629,6 +629,10 @@ pub enum WinEvent {
     /// display lists step 6: one too costly, or drawing it too slow): send
     /// pixels for it from now on. `why` is for the log.
     ScenesOff { window: u32, why: String },
+    /// The session is ending (bus v33, session milestone 1): the Close that
+    /// follows is the session's, not the user's, so what the program keeps
+    /// of this window stays for the next session.
+    SessionEnding { window: u32 },
 }
 
 pub(crate) mod op {
@@ -698,6 +702,7 @@ pub(crate) mod op {
     pub const DRAG_ENDED: u16 = 133;
     pub const ACT: u16 = 134;
     pub const SCENES_OFF: u16 = 135;
+    pub const SESSION_ENDING: u16 = 136;
 
     /// Whether an opcode is a window message's (either way).
     pub fn is_window(opcode: u16) -> bool {
@@ -1472,6 +1477,11 @@ impl WinEvent {
                 put_action(&mut e, action);
                 e
             }
+            WinEvent::SessionEnding { window } => {
+                let mut e = Encoder::frame(op::SESSION_ENDING);
+                e.u32(*window);
+                e
+            }
             WinEvent::ScenesOff { window, why } => {
                 let mut e = Encoder::frame(op::SCENES_OFF);
                 e.u32(*window).str(why);
@@ -1586,6 +1596,7 @@ impl WinEvent {
                 WinEvent::Act { window, serial, node, action }
             }
             op::SCENES_OFF => WinEvent::ScenesOff { window: d.u32()?, why: d.str()? },
+            op::SESSION_ENDING => WinEvent::SessionEnding { window: d.u32()? },
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -1841,6 +1852,7 @@ mod tests {
             WinEvent::Act { window: 1, serial: 10, node: 4, action: Action::Choose("JetBrains Mono".into()) },
             WinEvent::Act { window: 1, serial: 11, node: 5, action: Action::Reveal },
             WinEvent::ScenesOff { window: 1, why: "too costly to draw".into() },
+            WinEvent::SessionEnding { window: 2 },
         ];
         for m in all {
             let (bytes, fds) = m.encode().unwrap();

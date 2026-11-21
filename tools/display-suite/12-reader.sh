@@ -6,7 +6,7 @@
 # Close-Up handing a PDF to Reader.
 scenario() {
     headless "1920x1080 531x299@60" || { check 0 "headless session"; return; }
-    rm -f "$HOME/.cache/vergence-headless/home/.local/state/vergence/reader-places"
+    rm -f "$HOME/.cache/vergence-headless/home/.local/state/vergence/reader-places" "$HOME/.cache/vergence-headless/home/.local/state/vergence/reader-session"
     doc=$ROOT/docs/Vergence-Whitepaper.pdf
     small=$OUT/small.pdf
     # A one-page PDF of its own (the reader repairs its offsets).

@@ -194,6 +194,10 @@ pub struct Ui<M> {
     ring: bool,
     fields: HashMap<Id, FieldState>,
     scrolls: HashMap<Id, ScrollState>,
+    /// Places to scroll to, by the scroll's name (Element::name), taken at
+    /// the next layout where it appears (session milestone 1: a page kept
+    /// from the last run, or from a close a while ago).
+    scroll_wanted: HashMap<String, f32>,
     /// The strip at the window's top under the server's bar (look milestone
     /// 1): scroll bars start below it (Dave, 2026-11-14: they went under the
     /// title bar).
@@ -248,6 +252,7 @@ impl<M> Default for Ui<M> {
             ring: false,
             fields: HashMap::new(),
             scrolls: HashMap::new(),
+            scroll_wanted: HashMap::new(),
             under_bar: 0.0,
             text_factor: 1.0,
             server_menus: false,
@@ -437,6 +442,10 @@ impl<M: Clone> Ui<M> {
                 }
                 What::Scroll { content } => {
                     let s = self.scrolls.entry(n.id).or_default();
+                    if let Some(wanted) = n.name.as_ref().and_then(|name| self.scroll_wanted.remove(name)) {
+                        s.offset = wanted;
+                        s.velocity = 0.0;
+                    }
                     s.offset = s.offset.clamp(0.0, (content - n.rect.h).max(0.0));
                 }
                 What::Switch { on, .. } => {
@@ -583,6 +592,23 @@ impl<M: Clone> Ui<M> {
             p = self.nodes[q].parent;
         }
         None
+    }
+
+    /// Scrolls the place named `name` to `offset` points from its top at the
+    /// next layout where it appears (kept to its content).
+    pub fn set_scroll_place(&mut self, name: &str, offset: f32) {
+        if offset.is_finite() {
+            self.scroll_wanted.insert(name.to_string(), offset.max(0.0));
+        }
+    }
+
+    /// Each named scrolling place and how far it is scrolled, in points.
+    pub fn scroll_places(&self) -> Vec<(String, f32)> {
+        self.nodes
+            .iter()
+            .filter(|n| matches!(n.what, What::Scroll { .. }))
+            .filter_map(|n| Some((n.name.clone()?, self.scrolls.get(&n.id).map_or(0.0, |s| s.offset))))
+            .collect()
     }
 
     /// Moves scrolling place `i` by `dy`; true if it moved.

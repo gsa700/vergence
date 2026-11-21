@@ -725,8 +725,15 @@ pub trait App {
 
     /// The window has closed (the user closed it, or the program did) while
     /// the program runs on. Not called when the program is ended from outside
-    /// (a logout): what it keeps of its windows then stays for next time.
+    /// (a crash, a power cut): what it keeps of its windows then stays for
+    /// next time. An exit (Exit Vergence, Restart, Shut Down) closes windows
+    /// as the user would, but tells each first ([`App::session_ending`]).
     fn closed(&mut self) {}
+
+    /// The session is ending: the close that follows is the session's, so
+    /// what the program keeps of the window stays for the next session
+    /// (session milestone 1). On the native road only.
+    fn session_ending(&mut self) {}
 
     /// Where the window asks to be when it opens (Contract 2).
     fn place(&self) -> Place {

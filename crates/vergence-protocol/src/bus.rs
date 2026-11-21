@@ -63,11 +63,12 @@
 //! Version 30 (display lists milestone 1): `window::WinRequest::Scene`, a window as a display list.
 //! Version 31 (display lists step 6): `window::WinEvent::ScenesOff`, the server stops drawing a window's scenes.
 //! Version 32 (screenshots milestone 1): `ClientMsg::ScreenshotBar`, the Screenshot app opens the bar.
+//! Version 33 (session milestone 1): `window::WinEvent::SessionEnding`, the close that follows is the session's.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 32;
+pub const VERSION: u32 = 33;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

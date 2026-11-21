@@ -792,6 +792,9 @@ impl<'a> Native<'a> {
             // The server will not draw this window's scenes (one too costly,
             // or too slow): its own pixels from now on; the refused frame
             // will have no Frame, so another is drawn at once.
+            // An exit is closing the session's windows (bus v33): the close
+            // after this is not the user's (App::session_ending).
+            WinEvent::SessionEnding { window } => self.with_window(window, |app, _| app.session_ending())?,
             WinEvent::ScenesOff { window, why } => {
                 if let Some(i) = self.index(window) {
                     eprintln!("vergence-ui: window {window}: the server draws its scenes no more ({why}); drawing its pixels");

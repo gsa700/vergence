@@ -121,6 +121,10 @@ struct Tab {
     /// A document read again: its view to put back (zoom, view, turn,
     /// night, page) once it is open.
     keep: Option<(pdf::Mode, pdf::View, u16, bool, usize)>,
+    /// Its place kept from the last run (the window came back after a
+    /// restart), gone to once it is open; None: opened by the user, it
+    /// starts at the first page.
+    kept: Option<keep::Place>,
 }
 
 /// A file's modified time and length, to see that it changed.
@@ -131,7 +135,7 @@ fn stamp_of(path: &Path) -> Option<(SystemTime, u64)> {
 
 fn new_tab(id: u32, path: PathBuf) -> Tab {
     let stamp = stamp_of(&path);
-    Tab { id, path, content: Content::Loading, back: Vec::new(), forward: Vec::new(), stamp, keep: None }
+    Tab { id, path, content: Content::Loading, back: Vec::new(), forward: Vec::new(), stamp, keep: None, kept: None }
 }
 
 enum Content {
@@ -204,6 +208,9 @@ fn desktop_text() -> (String, Option<SystemTime>) {
 
 struct Viewer {
     shared: SharedRef,
+    /// When the session said it is ending (an exit closes the window next):
+    /// the close is then the session's, and the window stays kept.
+    ending: Option<std::time::Instant>,
     /// This window's id with the server, once it has one.
     me: Option<u32>,
     /// Its token, for window memory to put it back (keep.rs).
@@ -284,11 +291,23 @@ fn openable(uri: &str) -> bool {
     ["http://", "https://", "mailto:", "ftp://"].iter().any(|s| lower.starts_with(s))
 }
 
-/// A document with its remembered page and zoom, to be gone to once placed.
-fn with_place(mut d: pdf::Pdf, path: &Path) -> pdf::Pdf {
-    if let Some((page, mode)) = pdf::places::load(path) {
+/// A document as it opens (session milestone 1; Dave, 2026-11-21: after
+/// a restart "bring it back JUST like it was ... scrolled to where they
+/// were", but "if I close it by choice and reopen it sometime later, I
+/// think it should open at the first page"). Kept from the last run: its
+/// zoom and place, gone to once placed (unless `[session] places` is
+/// false). Opened by the user: the first page, at the zoom it was last read at.
+fn with_place(mut d: pdf::Pdf, path: &Path, kept: Option<&keep::Place>) -> pdf::Pdf {
+    if let Some((_, mode)) = pdf::places::load(path) {
         d.mode = mode;
-        d.restore = Some(page.min(d.pages.len() - 1));
+    }
+    if let Some(k) = kept
+        && vergence_widgets::session::places()
+    {
+        if let Some(mode) = pdf::places::parse_mode(&k.mode) {
+            d.mode = mode;
+        }
+        d.restore = Some((k.page.min(d.pages.len() - 1), k.within));
     }
     d
 }
@@ -329,6 +348,7 @@ impl Viewer {
         let (desktop, stamp) = desktop_text();
         Viewer {
             shared,
+            ending: None,
             me: None,
             token: String::new(),
             tabs: Vec::new(),
@@ -440,8 +460,11 @@ impl Viewer {
     fn from_snap(shared: SharedRef, snap: &keep::Snap) -> Viewer {
         let mut v = Viewer::new(shared);
         v.token = snap.token.clone();
-        for p in &snap.tabs {
-            v.queue(p.clone());
+        for t in &snap.tabs {
+            v.queue(t.path.clone());
+            if let Some(last) = v.tabs.last_mut() {
+                last.kept = t.at.clone();
+            }
         }
         if let Some(t) = v.tabs.get(snap.front) {
             v.front = t.id;
@@ -455,7 +478,23 @@ impl Viewer {
         if self.token.is_empty() {
             return;
         }
-        let tabs: Vec<PathBuf> = self.tabs.iter().map(|t| t.path.clone()).collect();
+        // Each document with its place: where it is shown, or (not open
+        // yet) the place it was kept with.
+        let tabs: Vec<keep::KeptTab> = self
+            .tabs
+            .iter()
+            .map(|t| {
+                let at = match &t.content {
+                    Content::Pdf(d) if d.restore.is_none() => {
+                        let (page, within) = d.place();
+                        Some(keep::Place { page, within: (within * 10.0).round() / 10.0, mode: pdf::places::mode_text(d.mode) })
+                    }
+                    Content::Pdf(d) => d.restore.map(|(page, within)| keep::Place { page, within, mode: pdf::places::mode_text(d.mode) }),
+                    _ => t.kept.clone(),
+                };
+                keep::KeptTab { path: t.path.clone(), at }
+            })
+            .collect();
         let front = self.tabs.iter().position(|t| t.id == self.front).unwrap_or(0);
         let snap = keep::Snap { token: self.token.clone(), tabs, front };
         let mut s = self.shared.borrow_mut();
@@ -588,6 +627,8 @@ impl Viewer {
             pdf::places::save(&t.path, page, mode);
             self.saved_place = Some(key);
         }
+        // The place within the window kept too, for a restart.
+        self.keep();
     }
 
     /// Tries the typed password on a locked document; opens it if it is right.
@@ -600,7 +641,7 @@ impl Viewer {
         match v.unlock(typed.as_bytes()) {
             Ok(true) => {
                 t.content = match pdf::start(v, waker) {
-                    Ok(d) => Content::Pdf(with_place(d, &t.path)),
+                    Ok(d) => Content::Pdf(with_place(d, &t.path, t.kept.take().as_ref())),
                     Err(why) => Content::Problem { why, elsewhere: false },
                 }
             }
@@ -1322,9 +1363,19 @@ impl Program for Viewer {
         self.keep();
     }
 
+    fn session_ending(&mut self) {
+        self.ending = Some(std::time::Instant::now());
+        // Its place as it is now, for the next session.
+        self.keep();
+    }
+
     fn closed(&mut self) {
         let mut s = self.shared.borrow_mut();
         s.windows.retain(|(id, _)| Some(*id) != self.me);
+        // Closed for an exit: kept for the next session (bus v33).
+        if vergence_widgets::session::ending(self.ending) {
+            return;
+        }
         // Closed by the user: it is not kept.
         s.snaps.retain(|(id, _)| Some(*id) != self.me);
         let all: Vec<keep::Snap> = s.snaps.iter().map(|(_, w)| w.clone()).collect();
@@ -1719,7 +1770,7 @@ impl Program for Viewer {
         for (id, loaded) in done {
             if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
                 t.content = match loaded {
-                    Loaded::Pdf(d) => Content::Pdf(with_place(d, &t.path)),
+                    Loaded::Pdf(d) => Content::Pdf(with_place(d, &t.path, t.kept.take().as_ref())),
                     Loaded::Locked(v) => Content::Locked { viewer: Some(v), password: String::new(), wrong: false },
                     Loaded::Problem { why, elsewhere } => Content::Problem { why, elsewhere },
                 };
@@ -1745,9 +1796,9 @@ impl Program for Viewer {
         // A remembered page, gone to once the view has its place.
         if r.w > 1.0
             && let Some(d) = self.pdf_mut()
-            && let Some(page) = d.restore.take()
+            && let Some((page, within)) = d.restore.take()
         {
-            d.go_to(page, r);
+            d.go_to_place(page, within, r);
             changed = true;
         }
         // Documents opened, moved or closed: kept for the next start.
@@ -1868,7 +1919,14 @@ fn main() {
     let shared = Rc::new(RefCell::new(Shared { inbox: Arc::default(), loaded: Arc::default(), next_tab: 0, windows: Vec::new(), transfers: Vec::new(), snaps: Vec::new(), pending: Vec::new() }));
     // The windows kept from the last run come back, the first here and the
     // rest once it is open; files named on the command line join the first.
-    let mut kept = keep::load();
+    // `[session] restore = false`: the windows kept are forgotten, not
+    // reopened when Reader is next started by hand (session milestone 1).
+    let mut kept = if vergence_widgets::session::restore() {
+        keep::load()
+    } else {
+        keep::save(&[]);
+        Vec::new()
+    };
     let mut viewer = if kept.is_empty() {
         Viewer::new(shared.clone())
     } else {

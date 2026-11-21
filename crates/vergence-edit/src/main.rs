@@ -218,6 +218,9 @@ struct Asking {
 
 struct EditWindow {
     shared: SharedRef,
+    /// When the session said it is ending (an exit closes the window next):
+    /// the close is then the session's, and the window stays kept.
+    ending: Option<std::time::Instant>,
     tabs: Vec<DocTab>,
     front: u32,
     me: Option<u32>,
@@ -261,7 +264,7 @@ impl EditWindow {
     fn new(shared: SharedRef, tabs: Vec<DocTab>) -> EditWindow {
         let (desktop, stamp) = desktop_text();
         let front = tabs.first().map_or(0, |t| t.id);
-        let mut w = EditWindow { shared, tabs, front, me: None, waker: None, desktop, stamp, zoom: 1.0, prefs_open: Rc::new(Cell::new(false)), asking: None, closing: Vec::new(), closing_window: false, notice: None, picking: None, find: None, focus_turn: 0, goto: None, token: String::new(), keep_pending: false, watching: false, page_drawn: Cell::new(None) };
+        let mut w = EditWindow { shared, ending: None, tabs, front, me: None, waker: None, desktop, stamp, zoom: 1.0, prefs_open: Rc::new(Cell::new(false)), asking: None, closing: Vec::new(), closing_window: false, notice: None, picking: None, find: None, focus_turn: 0, goto: None, token: String::new(), keep_pending: false, watching: false, page_drawn: Cell::new(None) };
         if w.tabs.is_empty() {
             let t = w.untitled_tab();
             w.front = t.id;
@@ -1427,11 +1430,18 @@ impl Program for EditWindow {
         self.register();
     }
 
+    fn session_ending(&mut self) {
+        self.ending = Some(std::time::Instant::now());
+    }
+
     fn closed(&mut self) {
         let mut s = self.shared.borrow_mut();
         s.windows.retain(|(id, _)| Some(*id) != self.me);
         // Closed by the user (its questions answered): it is not kept.
-        s.snaps.retain(|(id, _)| Some(*id) != self.me);
+        // Closed for an exit: kept for the next session (bus v33).
+        if !vergence_widgets::session::ending(self.ending) {
+            s.snaps.retain(|(id, _)| Some(*id) != self.me);
+        }
         let all: Vec<keep::WindowSnap> = s.snaps.iter().map(|(_, w)| w.clone()).collect();
         keep::save(&all);
         // Hand-overs go to another window now.

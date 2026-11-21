@@ -506,6 +506,25 @@ fn long_page() -> Element<Msg> {
 }
 
 #[test]
+fn a_named_scroll_goes_to_a_kept_place() {
+    let named = || long_page().name("Page");
+    let mut ui = laid(named(), 200.0, 100.0);
+    assert_eq!(ui.scroll_places(), vec![("Page".to_string(), 0.0)]);
+    // Asked for before a layout: taken at it, once, and kept to the content.
+    ui.set_scroll_place("Page", 240.0);
+    ui.layout(named(), 200.0, 100.0, &mut Fixed, 10.0);
+    assert_eq!(ui.scroll_places(), vec![("Page".to_string(), 240.0)]);
+    ui.input(&Input::Scroll { x: 20.0, y: 50.0, dx: 0.0, dy: -15.0 });
+    ui.layout(named(), 200.0, 100.0, &mut Fixed, 10.0);
+    assert_eq!(ui.scroll_offset(), 210.0, "taken once, not again");
+    ui.set_scroll_place("Page", 9000.0);
+    ui.layout(named(), 200.0, 100.0, &mut Fixed, 10.0);
+    assert_eq!(ui.scroll_offset(), 700.0, "held at the end");
+    // A scroll with no name is not told.
+    assert!(laid(long_page(), 200.0, 100.0).scroll_places().is_empty());
+}
+
+#[test]
 fn a_page_scrolls() {
     // 40 rows of 20: 800 tall in 100.
     let mut ui = laid(long_page(), 200.0, 100.0);
