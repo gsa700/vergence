@@ -16,10 +16,13 @@ Decided already:
   for packages, `--uninstall`).
 
 To settle:
-1. **Which platforms get packages first.** This follows the open platform
-   question (2026-11-21: one main platform, and which Linux beside
-   FreeBSD). Candidates today: Void (xbps template), FreeBSD (a port, and
-   pkg), Fedora (an RPM spec).
+1. *Settled 2026-11-21:* **FreeBSD first, Void second** (Dave: "The goal
+   is not to exclude other platforms but to minimize our testing and
+   distribution support requirements. If someone wants to port it to their
+   systemd distro they can, but they support that not me and you."). So the
+   packages are a FreeBSD port (and pkg) first, then an xbps template for
+   Void, and nothing else from us. FreeBSD defines what a feature is; Void
+   gets Linux equivalents where they exist.
 2. **One package or several**: server + apps + vdm as one, or split (the
    login manager is root and optional; the apps could be wanted under other
    desktops).
@@ -76,6 +79,6 @@ reads well; getting started depends on knowing the lab):
 
 ## Order (proposed)
 
-Settle the platforms (1.1) first, since packaging follows from it. Do the
+The platforms (1.1) are settled. Do the
 tree work (2) before the first package, so the source a package points at
 is the one people will read. Going public (3) comes last.

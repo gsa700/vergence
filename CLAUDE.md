@@ -138,6 +138,12 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   driving the lights (fixed in 27c205f; Dave logged in at once after).
   Fedora 45's console is kmscon (tty1), which reads the keyboards itself. Fedora needs nmap-ncat for vctl. Its tests and
   the display suite pass (10 of 10, the HD 530 on Mesa 26.2). Hubble (Void) stays.
+- **FreeBSD first, Void second** (Dave, 2026-11-21; docs/release-pathway.md): FreeBSD is
+  the main platform and defines what a feature is; Void (glibc) is the supported Linux,
+  building and tested, with equivalents where they exist; other distributions may be
+  ported by others, who support them ("they support that not me and you"). Packages:
+  a FreeBSD port first, then an xbps template. The history below is how the machines
+  came to be.
 - **Three platforms, one code base** (Dave, 2026-11-09; replaces "FreeBSD
   first" of 2026-11-06). The primary development platform is **Linux without
   systemd: Void (glibc) on Hubble**, reinstalled from FreeBSD on 2026-11-09
