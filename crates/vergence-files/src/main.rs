@@ -33,6 +33,7 @@ mod keep;
 mod ops;
 mod props;
 mod search;
+mod sidebar;
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -110,6 +111,11 @@ mod cmd {
     pub const ROWS_MEDIUM: u32 = 63;
     pub const ROWS_LARGE: u32 = 64;
     pub const GROUP: u32 = 65;
+    // A sidebar row's menu (step 3), for the row it was opened on.
+    pub const SIDE_NEW_TAB: u32 = 70;
+    pub const SIDE_REMOVE: u32 = 71;
+    pub const SIDE_SHOW: u32 = 72;
+    pub const SIDE_HIDE_RECENT: u32 = 73;
     /// Open With's applications: this, plus their place in the list.
     pub const OPEN_WITH: u32 = 1000;
     pub const MAX_OPEN_WITH: usize = 16;
@@ -355,6 +361,22 @@ fn parse_df_free(text: &str) -> Option<u64> {
     Some(kb * 1024)
 }
 
+/// A section's fold mark: down when open, right when folded.
+fn fold_mark(open: bool) -> Element<Msg> {
+    drawing(move |scene, _, r: Rect, t: &Theme| {
+        let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+        let pts = if open { [(-3.0, -1.5), (0.0, 1.5), (3.0, -1.5)] } else { [(-1.5, -3.0), (1.5, 0.0), (-1.5, 3.0)] };
+        let p = |(dx, dy): (f32, f32)| vergence_scene::Point::new(cx + dx, cy + dy);
+        scene.line(p(pts[0]), p(pts[1]), 1.4, t.dim);
+        scene.line(p(pts[1]), p(pts[2]), 1.4, t.dim);
+    })
+    .width(Length::Fixed(12.0))
+    .height(Length::Fixed(12.0))
+}
+
+/// What a favorite being moved in the sidebar carries (its path).
+const SIDEBAR_KIND: &str = "application/x-vergence-sidebar";
+
 /// The home folder (or the root, where there is none).
 fn home() -> PathBuf {
     files::home().unwrap_or_else(|| PathBuf::from("/"))
@@ -377,6 +399,11 @@ struct Viewer {
     ending: Option<Instant>,
     /// The path being typed (the path row clicked, or Ctrl+L), Explorer's way.
     path_edit: Option<String>,
+    /// The sidebar's place in the window (drawn there, for drops on it), how
+    /// far its list is scrolled, and the row its menu was opened on.
+    side_rect: Rc<Cell<Rect>>,
+    side_scroll: f32,
+    side_target: Option<sidebar::Line>,
     /// Each folder's disk's free space (`df -kP`, read apart), and what was asked.
     free: Arc<Mutex<std::collections::HashMap<PathBuf, Option<u64>>>>,
     free_asked: RefCell<std::collections::HashSet<PathBuf>>,
@@ -494,11 +521,16 @@ enum Msg {
     NameCancel,
     StopJob,
     Run(u32),
-    Go(Place),
     /// The path row clicked: a field to type a path in; its text; Enter.
     PathEdit,
     PathTyped(String),
     PathGo,
+    /// A sidebar row (by its place in sidebar::lines): pressed, its menu,
+    /// pulled away to be moved; a heading pressed.
+    SideGo(usize),
+    SideMenu(usize),
+    SideDrag(usize),
+    SideFold(sidebar::Section),
     Click(usize),
     Sort(SortBy),
     Narrow(String),
@@ -606,6 +638,9 @@ impl Viewer {
             token: String::new(),
             ending: None,
             path_edit: None,
+            side_rect: Rc::new(Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0))),
+            side_scroll: 0.0,
+            side_target: None,
             free: Arc::default(),
             free_asked: RefCell::new(std::collections::HashSet::new()),
             desktop,
@@ -797,6 +832,141 @@ impl Viewer {
         }
     }
 
+    fn side_setup(&self) -> sidebar::Setup {
+        sidebar::setup(&self.desktop, SECTION)
+    }
+
+    /// The sidebar's Locations: the computer, its disks, the Trash, the network's places.
+    fn locations(&self) -> Vec<Place> {
+        let mine: Vec<PathBuf> = files::home().into_iter().chain(files::user_dirs().into_iter().map(|(_, p)| p)).collect();
+        self.places().into_iter().filter(|p| p.path.as_ref().is_some_and(|x| !mine.contains(x))).collect()
+    }
+
+    fn side_lines(&self) -> Vec<sidebar::Line> {
+        sidebar::lines(&self.side_setup(), &self.locations(), &files::recent_files())
+    }
+
+    fn set_favorites(&mut self, favs: &[PathBuf]) {
+        let items: Vec<String> = favs.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        self.write_key("favorites", Some(&sidebar::list_value(&items)));
+    }
+
+    /// A sidebar row pressed: a folder gone to, a file opened, Recent shown.
+    fn side_go(&mut self, i: usize) {
+        let Some(sidebar::Line::Item(_, item)) = self.side_lines().get(i).cloned() else { return };
+        match item.path {
+            None => self.go(Showing::Recent),
+            Some(p) if item.file => self.open_file(&p),
+            Some(p) => self.go(Showing::Folder(p)),
+        }
+    }
+
+    /// Opens a file with the app chosen for its type, and puts it among the recent ones.
+    fn open_file(&mut self, p: &Path) {
+        if let Some(dir) = p.parent() {
+            files::remember(APP_ID, dir, p);
+        }
+        if let Err(e) = open_files(&[p.to_path_buf()]) {
+            self.notice = Some(e);
+        }
+    }
+
+    /// A sidebar row's menu (Dave's list: Open in New Tab, Remove from
+    /// Sidebar, Show in its folder); the Recent heading's: Hide Recent.
+    fn side_menu(&self, line: &sidebar::Line) -> Vec<MenuLine> {
+        use sidebar::{Line, Section};
+        match line {
+            Line::Head(Section::Recent) => vec![MenuLine::item(cmd::SIDE_HIDE_RECENT, "Hide Recent", "")],
+            Line::Head(_) => Vec::new(),
+            Line::Item(sec, item) => {
+                let mut v = Vec::new();
+                if !item.file {
+                    v.push(MenuLine::item(cmd::SIDE_NEW_TAB, "Open in New Tab", ""));
+                }
+                if item.path.as_ref().is_some_and(|p| p.parent().is_some()) {
+                    v.push(MenuLine::item(cmd::SIDE_SHOW, "Show in Its Folder", ""));
+                }
+                if *sec == Section::Favorites {
+                    v.push(MenuLine::Separator);
+                    v.push(MenuLine::item(cmd::SIDE_REMOVE, "Remove from Sidebar", ""));
+                }
+                v
+            }
+        }
+    }
+
+    /// Where a drop on the sidebar at window point `y` goes among the favorites.
+    fn side_drop_index(&self, x: f32, y: f32) -> Option<usize> {
+        let r = self.side_rect.get();
+        if x < r.x || x >= r.x + r.w || y < r.y || y >= r.y + r.h {
+            return None;
+        }
+        let lines = self.side_lines();
+        sidebar::drop_index(&lines, sidebar::line_at(&lines, y - r.y + self.side_scroll))
+    }
+
+    /// The sidebar: its sections, each row of a fixed height (drops are
+    /// placed by where they are), in a place that remembers where it was drawn.
+    fn sidebar_view(&self, t: &Theme) -> Element<Msg> {
+        use sidebar::{Line, Section};
+        let here = self.front_tab().and_then(|t| t.dir().map(Path::to_path_buf));
+        let recent_here = self.front_tab().is_some_and(|t| t.showing == Showing::Recent);
+        let folded = self.side_setup().folded;
+        let mut rows: Vec<Element<Msg>> = Vec::new();
+        for (i, line) in self.side_lines().into_iter().enumerate() {
+            match line {
+                Line::Head(sec) => {
+                    let open = !folded.contains(&sec);
+                    let head = button(row(vec![label(sec.name()).size(10.5).dim().weight(600), space().width(Length::FILL), fold_mark(open)]).align(Align::Center).width(Length::FILL))
+                        .look(ButtonLook::Plain)
+                        .padding(Padding { top: 6.0, bottom: 2.0, left: 10.0, right: 6.0 })
+                        .height(Length::Fixed(sidebar::HEAD_H))
+                        .width(Length::FILL)
+                        .on_press(Msg::SideFold(sec))
+                        .on_menu(Msg::SideMenu(i))
+                        .name(format!("{} ({})", sec.name(), if open { "open" } else { "folded" }));
+                    rows.push(head);
+                }
+                Line::Item(sec, item) => {
+                    let chosen = match &item.path {
+                        None => recent_here,
+                        Some(p) => !item.file && Some(p) == here.as_ref(),
+                    };
+                    let icon = match &item.place {
+                        Some(p) => files::place_icon(p),
+                        None => item.path.clone().and_then(Entry::of).map_or(("mimes", "text"), |e| files::own_icon_name(e.kind())),
+                    };
+                    let mark = drawing(move |scene, _, r: Rect, _t: &Theme| {
+                        let side = r.w.min(r.h);
+                        if let Some(img) = files::own_icon(icon.0, icon.1, (side * 2.5).ceil() as u32) {
+                            let id = scene.image(img);
+                            scene.draw_image(id, Rect::new(r.x, r.y + (r.h - side) / 2.0, side, side), 1.0);
+                        }
+                    })
+                    .width(Length::Fixed(16.0))
+                    .height(Length::Fixed(16.0));
+                    let line = row(vec![mark, label(item.name.clone()).size(12.0).elide().width(Length::FILL)]).spacing(7.0).align(Align::Center).width(Length::FILL);
+                    let mut b = button(line)
+                        .look(if chosen { ButtonLook::Chosen } else { ButtonLook::Plain })
+                        .padding(Padding::hv(0.0, 8.0))
+                        .height(Length::Fixed(sidebar::ROW_H))
+                        .width(Length::FILL)
+                        .on_press(Msg::SideGo(i))
+                        .on_menu(Msg::SideMenu(i))
+                        .name(item.name.clone());
+                    if sec == Section::Favorites {
+                        b = b.on_drag(Msg::SideDrag(i));
+                    }
+                    rows.push(b);
+                }
+            }
+        }
+        let rect = self.side_rect.clone();
+        let place = drawing(move |_, _, r: Rect, _| rect.set(r)).width(Length::FILL).height(Length::FILL);
+        let list = panel(scroll(column(rows).width(Length::FILL)).name("Sidebar")).color(t.card).radius(8.0).padding(sidebar::PAD).width(Length::FILL).height(Length::FILL);
+        stack(vec![place, list]).width(Length::Fixed(176.0)).height(Length::FILL)
+    }
+
     /// The typed path gone to: a folder, or a file's folder with the file
     /// chosen; "~" is home. Not there: said, and the field stays to mend it.
     fn path_go(&mut self) {
@@ -963,6 +1133,12 @@ impl Viewer {
             return self.go(Showing::Folder(p));
         }
         let paths: Vec<PathBuf> = chosen.iter().filter(|e| !e.dir).map(|e| e.path.clone()).collect();
+        // Among the recent files (the sidebar's Recent), as the other apps put theirs.
+        for p in &paths {
+            if let Some(dir) = p.parent() {
+                files::remember(APP_ID, dir, p);
+            }
+        }
         if !paths.is_empty()
             && let Err(e) = open_files(&paths)
         {
@@ -1322,6 +1498,26 @@ impl Viewer {
                     self.notice = Some(format!("It could not be opened: {e}"));
                 }
             }
+            cmd::SIDE_NEW_TAB | cmd::SIDE_SHOW | cmd::SIDE_REMOVE => {
+                if let Some(sidebar::Line::Item(_, item)) = self.side_target.take() {
+                    match (id, item.path) {
+                        (cmd::SIDE_NEW_TAB, None) => self.new_tab(Showing::Recent),
+                        (cmd::SIDE_NEW_TAB, Some(p)) => self.new_tab(Showing::Folder(p)),
+                        (cmd::SIDE_SHOW, Some(p)) => {
+                            if let Some(dir) = p.parent() {
+                                self.go(Showing::Folder(dir.to_path_buf()));
+                                self.choose_only(p.clone());
+                            }
+                        }
+                        (cmd::SIDE_REMOVE, Some(p)) => {
+                            let favs: Vec<PathBuf> = sidebar::favorites(&self.side_setup()).into_iter().filter(|f| *f != p).collect();
+                            self.set_favorites(&favs);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            cmd::SIDE_HIDE_RECENT => self.write_key("recent", Some("false")),
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
                 let about = vergence_widgets::about::About::new(APP_ID, "FileView", env!("CARGO_PKG_VERSION"), "Vergence's file manager: your folders as a list or icons, Preview on the space bar, files opened with the apps chosen for them.", self.theme());
@@ -2152,10 +2348,7 @@ impl Program for Viewer {
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
-        let places = self.places();
-        let here = self.front_tab().and_then(|t| t.dir().map(Path::to_path_buf));
-        let sidebar = files::sidebar(&places, here.as_deref(), |p| Msg::Go(p.clone()), t);
-        let mut middle = if self.trash_window { vec![self.folder_view(t)] } else { vec![sidebar, self.folder_view(t)] };
+        let mut middle = if self.trash_window { vec![self.folder_view(t)] } else { vec![self.sidebar_view(t), self.folder_view(t)] };
         if self.pane && !self.trash_window {
             middle.push(self.pane_view(t));
         }
@@ -2196,10 +2389,39 @@ impl Program for Viewer {
     fn update(&mut self, m: Msg, window: &mut Window) {
         match m {
             Msg::Run(c) => return self.run(c, window),
-            Msg::Go(p) => self.go(p.path.map_or(Showing::Recent, Showing::Folder)),
             Msg::PathEdit => self.path_edit = Some(self.front_tab().and_then(|t| t.dir()).map(|d| d.display().to_string()).unwrap_or_default()),
             Msg::PathTyped(s) => self.path_edit = Some(s),
             Msg::PathGo => self.path_go(),
+            Msg::SideGo(i) => self.side_go(i),
+            Msg::SideFold(sec) => {
+                let mut s = self.side_setup();
+                if let Some(k) = s.folded.iter().position(|f| *f == sec) {
+                    s.folded.remove(k);
+                } else {
+                    s.folded.push(sec);
+                }
+                let names: Vec<String> = s.folded.iter().map(|f| f.name().to_string()).collect();
+                let v = sidebar::list_value(&names);
+                self.write_key("sidebar-folded", (!names.is_empty()).then_some(v.as_str()));
+            }
+            Msg::SideMenu(i) => {
+                let line = self.side_lines().get(i).cloned();
+                if let Some(lines) = line.as_ref().map(|l| self.side_menu(l))
+                    && !lines.is_empty()
+                {
+                    self.side_target = line;
+                    window.menu(self.menu_at.0, self.menu_at.1, lines);
+                }
+            }
+            Msg::SideDrag(i) => {
+                // A favorite pulled away: moved within the sidebar (a kind of
+                // its own: dropped on a folder it does nothing).
+                if let Some(sidebar::Line::Item(sidebar::Section::Favorites, item)) = self.side_lines().get(i)
+                    && let Some(p) = &item.path
+                {
+                    window.start_drag(&item.name, vec![(SIDEBAR_KIND.into(), p.to_string_lossy().into_owned().into_bytes())]);
+                }
+            }
             Msg::Click(k) => self.click(k),
             Msg::Sort(by) => self.sort = if self.sort.0 == by { (by, !self.sort.1) } else { (by, by == SortBy::Name) },
             Msg::Narrow(s) => {
@@ -2421,7 +2643,13 @@ impl Program for Viewer {
     }
 
     /// Files dragged here go into the folder shown: moved, or copied with Ctrl.
-    fn drag_over(&mut self, _x: f32, _y: f32, kinds: &[String], ctrl: bool) -> u8 {
+    fn drag_over(&mut self, x: f32, y: f32, kinds: &[String], ctrl: bool) -> u8 {
+        // Over the sidebar's favorites: a shortcut made, or a favorite moved;
+        // nothing on the disk changes (a copy, so the source keeps its files).
+        if !self.trash_window && self.side_rect.get().w > 0.0 && { let r = self.side_rect.get(); x >= r.x && x < r.x + r.w } {
+            let ours = kinds.iter().any(|k| k == SIDEBAR_KIND || k == "text/uri-list");
+            return if ours && self.side_drop_index(x, y).is_some() { vergence_ui::DROP_COPY } else { vergence_ui::DROP_NONE };
+        }
         if !kinds.iter().any(|k| k == "text/uri-list") || self.here().is_none() || self.job.is_some() {
             return vergence_ui::DROP_NONE;
         }
@@ -2432,7 +2660,23 @@ impl Program for Viewer {
         if ctrl { vergence_ui::DROP_COPY } else { vergence_ui::DROP_MOVE }
     }
 
-    fn dropped(&mut self, _x: f32, _y: f32, action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
+    fn dropped(&mut self, x: f32, y: f32, action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
+        // On the sidebar: into the favorites at the place dropped.
+        if !self.trash_window && { let r = self.side_rect.get(); r.w > 0.0 && x >= r.x && x < r.x + r.w } {
+            if let Some(at) = self.side_drop_index(x, y) {
+                let moved: Vec<PathBuf> = match items.iter().find(|(k, _)| k == SIDEBAR_KIND) {
+                    Some((_, v)) => vec![PathBuf::from(String::from_utf8_lossy(v).into_owned())],
+                    None => items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default(),
+                };
+                let moved: Vec<PathBuf> = moved.into_iter().filter(|p| p.is_absolute() && p.exists()).collect();
+                if !moved.is_empty() {
+                    let favs = sidebar::put(&sidebar::favorites(&self.side_setup()), &moved, at);
+                    self.set_favorites(&favs);
+                }
+            }
+            window.redraw();
+            return;
+        }
         let Some(dir) = self.here() else { return };
         let paths: Vec<PathBuf> = items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default();
         if paths.is_empty() {
@@ -2475,6 +2719,9 @@ impl Program for Viewer {
     }
 
     fn scrolled(&mut self, name: &str, offset: f32) {
+        if name == "Sidebar" {
+            self.side_scroll = offset;
+        }
         if name == "Folder"
             && let Some(t) = self.front_mut()
         {
@@ -2722,6 +2969,7 @@ impl Rows for FilesRows {
                     Row::new("hidden", "Hidden files", "Names that start with a dot.", Control::Switch { default: false }),
                     Row::new("row-size", "Row size", "How tall the list's rows are.", Control::Choose { choices: vec![Choice::text("Small", "small"), Choice::text("Medium", "medium"), Choice::text("Large", "large")], desktop: None, app_default: 1 }),
                     Row::new("group-by-kind", "Group by kind", "The list under headings: Folders, Documents, Pictures…", Control::Switch { default: false }),
+                    Row::new("recent", "Recent in the sidebar", "The files opened most lately, under the sidebar's Locations.", Control::Switch { default: true }),
                 ],
             },
             Part {

@@ -781,13 +781,20 @@ impl<'a> Native<'a> {
                 self.send(WinRequest::Acted { window, serial, ok, why })?;
             }
             // Drag and drop (files milestone 1, step 8).
+            // In the picture's own points, as the pointer's are: the strip
+            // under the server's bar (inset) counted in (files milestone 3:
+            // drops on FileView's sidebar landed a row too high without it).
             WinEvent::DragOver { window, x, y, kinds, mods } => {
+                let y = y + self.index(window).map_or(0.0, |i| self.windows[i].inset as f64);
                 let mut action = crate::DROP_NONE;
                 self.with_window(window, |app, _| action = app.drag_over(x as f32, y as f32, &kinds, mods & vergence_protocol::window::DRAG_CTRL != 0))?;
                 self.send(WinRequest::DragAccept { window, action })?;
             }
             WinEvent::DragLeave { window } => self.with_window(window, |app, _| app.drag_left())?,
-            WinEvent::DragDrop { window, x, y, action, items } => self.with_window(window, |app, w| app.dropped(x as f32, y as f32, action, &items, w))?,
+            WinEvent::DragDrop { window, x, y, action, items } => {
+                let y = y + self.index(window).map_or(0.0, |i| self.windows[i].inset as f64);
+                self.with_window(window, |app, w| app.dropped(x as f32, y as f32, action, &items, w))?
+            }
             WinEvent::DragEnded { window, action } => self.with_window(window, |app, w| app.drag_ended(action, w))?,
             // The server will not draw this window's scenes (one too costly,
             // or too slow): its own pixels from now on; the refused frame

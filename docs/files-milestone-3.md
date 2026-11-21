@@ -136,4 +136,30 @@ Close-Up).
   row at -496), Forward and Back the same, killed and started again the
   same. Tests on Hubble and techbench (the free space read from FreeBSD's
   df too); agent-check 0 failed.
+- **Step 3, the sidebar: in 2026-11-21** (crates/vergence-files/src/sidebar.rs).
+  FileView's own sidebar (the Open dialog keeps the shared one): Favorites
+  (Home and the user's folders at first; desktop.toml `[files] favorites`, a
+  list of paths, once changed), Locations (the computer, disks, the Trash,
+  the network's places), Recent (the six files opened most lately, which
+  FileView now adds to as the other apps do, and All recent). A heading
+  folds its section (`[files] sidebar-folded`). A favorite pulled away moves
+  within the sidebar (a drag kind of its own, application/x-vergence-sidebar:
+  dropped on a folder it does nothing); folders and files dragged from the
+  main view onto the favorites become shortcuts where dropped (accepted as a
+  copy, so nothing on the disk moves). Right click: Open in New Tab, Show in
+  Its Folder, Remove from Sidebar; on the Recent heading, Hide Recent;
+  FileView's settings have "Recent in the sidebar". Rows are of fixed heights
+  and the sidebar remembers where it was drawn and how far it is scrolled,
+  so a drop's place is worked out from where it is. A favorite that is not
+  Home or a user folder shows its kind's mark (as a place it was taken for a
+  disk). Found on the way, in the toolkit: drops came in without the strip
+  under the server's bar (the pointer's had it), so they landed a row too
+  high in any window drawn under its bar; vergence-ui's native road now adds
+  it (only FileView and the desktop, which has no bar, use where a drop is).
+  Checked in a headless session on Hubble with real drags (vctl pointer,
+  press, release): a folder from the list dropped between Home and Desktop
+  lands there; Pictures dragged onto the Favorites heading goes first;
+  Locations folds. Not checked by hand: the right-click menus' lines (the
+  headless session's menus are the server's). Tests on Hubble and techbench;
+  agent-check 0 failed.
 

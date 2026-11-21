@@ -281,7 +281,7 @@ pub fn places() -> Vec<Place> {
 /// Which of Vergence's own icons a place shows in the sidebar: the user's
 /// folders their own (by the names user_dirs gives them), the Trash full or
 /// empty, drives and the network theirs.
-fn place_icon(p: &Place) -> (&'static str, &'static str) {
+pub fn place_icon(p: &Place) -> (&'static str, &'static str) {
     if p.network {
         return ("places", "network");
     }
