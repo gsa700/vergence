@@ -262,6 +262,9 @@ struct Viewer {
     hand: bool,
     /// The pointer is over a scroll bar (the arrow there, Dave 2026-11-20).
     over_bar: bool,
+    /// The pointer is over a link: the pointing hand, as Preview and
+    /// browsers show (Dave, 2026-11-21).
+    over_link: bool,
 }
 
 /// The tool chosen last, kept for the next window and the next start
@@ -378,6 +381,7 @@ impl Viewer {
             thumb_bar_drag: None,
             hand: hand_remembered(),
             over_bar: false,
+            over_link: false,
         }
     }
 
@@ -1009,6 +1013,8 @@ impl Viewer {
         .cursor(match (self.hand, self.drag.is_some() && !self.selecting) {
             // Over a scroll bar (or holding one): the arrow, whatever the tool.
             _ if self.over_bar || self.bar_drag.is_some() => vergence_ui::Cursor::Default,
+            // Over a link, not dragging: the pointing hand, with either tool.
+            (_, false) if self.over_link && !self.selecting => vergence_ui::Cursor::Pointer,
             // The open hand; closed while it holds the pages (Dave, 2026-11-20).
             (true, true) => vergence_ui::Cursor::Grabbing,
             (true, false) => vergence_ui::Cursor::Grab,
@@ -1425,14 +1431,21 @@ impl Program for Viewer {
             // Passing over the page view: on a scroll bar, the arrow.
             Msg::Touch(Touch::Move { x, y, pressed: false }) => {
                 let r = self.area.get();
-                let over = self.front_tab().is_some_and(|t| matches!(&t.content, Content::Pdf(d) if d.bar_at(r, r.x + x, r.y + y).is_some()));
-                if over == self.over_bar {
+                let pdf = self.front_tab().and_then(|t| match &t.content {
+                    Content::Pdf(d) => Some(d),
+                    _ => None,
+                });
+                let over = pdf.is_some_and(|d| d.bar_at(r, r.x + x, r.y + y).is_some());
+                let link = !over && pdf.is_some_and(|d| d.link_at(r, r.x + x, r.y + y).is_some());
+                if over == self.over_bar && link == self.over_link {
                     return;
                 }
                 self.over_bar = over;
+                self.over_link = link;
             }
             Msg::Touch(Touch::Leave) if self.bar_drag.is_none() && self.drag.is_none() => {
                 self.over_bar = false;
+                self.over_link = false;
                 self.press_at = None;
                 self.selecting = false;
             }
