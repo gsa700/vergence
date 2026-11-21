@@ -43,7 +43,7 @@ use std::time::{Instant, SystemTime};
 
 use vergence_scene::{Color, Image, Rect};
 use vergence_ui::{AppCommand as C, Bar, BarStyle, BarTab, MenuLine, Modifiers, Role, TabEvent};
-use vergence_widgets::files::{self, Entry, Kind, ListLook, Place, RowSize, SortBy};
+use vergence_widgets::files::{self, Entry, GroupBy, Kind, ListLook, Place, RowSize, SortBy};
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
 use vergence_widgets::toolbar::{Icon, flexible, group, tool, toggle, toolbar};
 use vergence_widgets::{Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Waker, Window, button, column, drawing, field, label, panel, row, rule, scroll, space, stack};
@@ -110,7 +110,11 @@ mod cmd {
     pub const ROWS_SMALL: u32 = 62;
     pub const ROWS_MEDIUM: u32 = 63;
     pub const ROWS_LARGE: u32 = 64;
-    pub const GROUP: u32 = 65;
+    // Group by (files milestone 3, step 4).
+    pub const GROUP_KIND: u32 = 65;
+    pub const GROUP_DATE: u32 = 66;
+    pub const GROUP_SIZE: u32 = 67;
+    pub const GROUP_NONE: u32 = 68;
     // A sidebar row's menu (step 3), for the row it was opened on.
     pub const SIDE_NEW_TAB: u32 = 70;
     pub const SIDE_REMOVE: u32 = 71;
@@ -1034,7 +1038,7 @@ impl Viewer {
         // What is in the Trash is all shown: a hidden file thrown away is still there.
         let all = self.hidden || self.in_trash();
         let mut v: Vec<&Entry> = source.iter().filter(|e| all || !e.name.starts_with('.')).filter(|e| n.is_empty() || e.name.to_lowercase().contains(&n)).collect();
-        let group = self.shown_view() == ViewKind::List && self.list_look().group;
+        let group = if self.shown_view() == ViewKind::List { self.list_look().group } else { GroupBy::None };
         files::sort(&mut v, self.sort.0, self.sort.1, t.showing == Showing::Recent && self.search.is_none(), group);
         v.truncate(files::MAX_ROWS);
         v
@@ -1261,7 +1265,12 @@ impl Viewer {
             widths: self.widths,
             kind: true,
             stripes: true,
-            group: key("group-by-kind").as_deref() == Some("true"),
+            // By kind unless said (files milestone 3); the older switch's "false" kept.
+            group: match (key("group-by"), key("group-by-kind").as_deref()) {
+                (Some(g), _) => GroupBy::parse(&g),
+                (None, Some("false")) => GroupBy::None,
+                _ => GroupBy::Kind,
+            },
         }
     }
 
@@ -1487,9 +1496,17 @@ impl Viewer {
                 let words = format!("\"{}\"", size.word());
                 self.write_key("row-size", (size != RowSize::Medium).then_some(words.as_str()));
             }
-            cmd::GROUP => {
-                let on = !self.list_look().group;
-                self.write_key("group-by-kind", on.then_some("true"));
+            cmd::GROUP_KIND | cmd::GROUP_DATE | cmd::GROUP_SIZE | cmd::GROUP_NONE => {
+                let g = match id {
+                    cmd::GROUP_DATE => GroupBy::Date,
+                    cmd::GROUP_SIZE => GroupBy::Size,
+                    cmd::GROUP_NONE => GroupBy::None,
+                    _ => GroupBy::Kind,
+                };
+                // Kind is the default: no key; the older switch taken away.
+                let words = format!("\"{}\"", g.word());
+                self.write_key("group-by-kind", None);
+                self.write_key("group-by", (g != GroupBy::Kind).then_some(words.as_str()));
             }
             id if (cmd::OPEN_WITH..cmd::OPEN_WITH + cmd::MAX_OPEN_WITH as u32).contains(&id) => {
                 if let Some(app) = self.open_with.get((id - cmd::OPEN_WITH) as usize).cloned()
@@ -1604,7 +1621,15 @@ impl Viewer {
                     MenuLine::item(cmd::SORT_KIND, "Kind", "").checked(by == SortBy::Kind),
                 ],
             },
-            MenuLine::item(cmd::GROUP, "Group by Kind", "").checked(self.list_look().group),
+            MenuLine::Sub {
+                label: "Group By".into(),
+                lines: vec![
+                    MenuLine::item(cmd::GROUP_KIND, "Kind", "").checked(self.list_look().group == GroupBy::Kind),
+                    MenuLine::item(cmd::GROUP_DATE, "Date", "").checked(self.list_look().group == GroupBy::Date),
+                    MenuLine::item(cmd::GROUP_SIZE, "Size", "").checked(self.list_look().group == GroupBy::Size),
+                    MenuLine::item(cmd::GROUP_NONE, "None", "").checked(self.list_look().group == GroupBy::None),
+                ],
+            },
             MenuLine::item(cmd::HIDDEN, "Show Hidden Files", "Ctrl+H").checked(self.hidden),
         ];
         if trash {
@@ -2932,7 +2957,10 @@ impl Program for Viewer {
                 C::own(cmd::ROWS_SMALL, "View", "Small rows", "").checked(self.list_look().rows == RowSize::Small),
                 C::own(cmd::ROWS_MEDIUM, "View", "Medium rows", "").checked(self.list_look().rows == RowSize::Medium),
                 C::own(cmd::ROWS_LARGE, "View", "Large rows", "").checked(self.list_look().rows == RowSize::Large),
-                C::own(cmd::GROUP, "View", "Group by kind", "").checked(self.list_look().group),
+                C::own(cmd::GROUP_KIND, "View", "Group by kind", "").checked(self.list_look().group == GroupBy::Kind),
+                C::own(cmd::GROUP_DATE, "View", "Group by date", "").checked(self.list_look().group == GroupBy::Date),
+                C::own(cmd::GROUP_SIZE, "View", "Group by size", "").checked(self.list_look().group == GroupBy::Size),
+                C::own(cmd::GROUP_NONE, "View", "No groups", "").checked(self.list_look().group == GroupBy::None),
                 C::own(cmd::RELOAD, "View", "Read again", "Ctrl+R"),
                 C::own(cmd::BACK, "Go", "Back", "Alt+Left"),
                 C::own(cmd::FORWARD, "Go", "Forward", "Alt+Right"),
@@ -2968,7 +2996,7 @@ impl Rows for FilesRows {
                     Row::new("preview-pane", "Preview pane", "The chosen file at the window's right.", Control::Switch { default: false }),
                     Row::new("hidden", "Hidden files", "Names that start with a dot.", Control::Switch { default: false }),
                     Row::new("row-size", "Row size", "How tall the list's rows are.", Control::Choose { choices: vec![Choice::text("Small", "small"), Choice::text("Medium", "medium"), Choice::text("Large", "large")], desktop: None, app_default: 1 }),
-                    Row::new("group-by-kind", "Group by kind", "The list under headings: Folders, Documents, Pictures…", Control::Switch { default: false }),
+                    Row::new("group-by", "Group by", "The list under headings: by kind (Folders, Documents, Pictures…), by date (Today, Yesterday…), by size, or none.", Control::Choose { choices: vec![Choice::text("Kind", "kind"), Choice::text("Date", "date"), Choice::text("Size", "size"), Choice::text("None", "none")], desktop: None, app_default: 0 }),
                     Row::new("recent", "Recent in the sidebar", "The files opened most lately, under the sidebar's Locations.", Control::Switch { default: true }),
                 ],
             },

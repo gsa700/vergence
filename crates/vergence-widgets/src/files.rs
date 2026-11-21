@@ -68,8 +68,9 @@ impl RowSize {
     fn mark(self) -> f32 {
         match self {
             RowSize::Small => 1.0,
-            RowSize::Medium => 1.2,
-            RowSize::Large => 1.5,
+            // A little larger since files milestone 3 (Dave: "slightly taller rows, yes").
+            RowSize::Medium => 1.3,
+            RowSize::Large => 1.6,
         }
     }
 
@@ -90,6 +91,89 @@ pub const COLUMN_WIDTHS: [f32; 3] = [140.0, 80.0, 150.0];
 pub const COLUMN_MIN: f32 = 50.0;
 pub const COLUMN_MAX: f32 = 420.0;
 
+/// What the list's entries are grouped by, under headings (files milestone
+/// 3, step 4: by kind by default, as Finder separates by kind; Dave,
+/// 2026-11-21).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GroupBy {
+    None,
+    #[default]
+    Kind,
+    Date,
+    Size,
+}
+
+impl GroupBy {
+    /// From a setting's words ("kind", "date", "size", "none"); Kind otherwise.
+    pub fn parse(s: &str) -> GroupBy {
+        match s.trim().trim_matches('"') {
+            "none" => GroupBy::None,
+            "date" => GroupBy::Date,
+            "size" => GroupBy::Size,
+            _ => GroupBy::Kind,
+        }
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            GroupBy::None => "none",
+            GroupBy::Kind => "kind",
+            GroupBy::Date => "date",
+            GroupBy::Size => "size",
+        }
+    }
+}
+
+/// An entry's group: its place among the groups and the heading's words.
+/// By date as Finder: Today, Yesterday, the previous 7 and 30 days, earlier
+/// this year, then each year before, newest first. By size: folders, then
+/// the files biggest first in steps of ten.
+pub fn group_key(e: &Entry, by: GroupBy, now: SystemTime) -> (i64, String) {
+    match by {
+        GroupBy::None => (0, String::new()),
+        GroupBy::Kind => {
+            let (k, name) = group_of(e);
+            (k as i64, name.to_string())
+        }
+        GroupBy::Size => {
+            if e.dir {
+                return (0, "Folders".into());
+            }
+            const STEPS: [(u64, &str); 6] = [
+                (1 << 30, "More than 1 GB"),
+                (100 << 20, "100 MB to 1 GB"),
+                (10 << 20, "10 to 100 MB"),
+                (1 << 20, "1 to 10 MB"),
+                (100 << 10, "100 KB to 1 MB"),
+                (0, "Less than 100 KB"),
+            ];
+            let i = STEPS.iter().position(|(least, _)| e.size >= *least).unwrap_or(STEPS.len() - 1);
+            (1 + i as i64, STEPS[i].1.into())
+        }
+        GroupBy::Date => {
+            let secs = |t: SystemTime| t.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+            let Some(t) = e.changed else { return (9_999, "Some time".into()) };
+            let (Some(at), Some(today)) = (local(secs(t)), local(secs(now))) else { return (9_999, "Some time".into()) };
+            if (at.year, at.yday) == (today.year, today.yday) {
+                return (0, "Today".into());
+            }
+            if local(secs(now) - 86_400).is_some_and(|y| (y.year, y.yday) == (at.year, at.yday)) {
+                return (1, "Yesterday".into());
+            }
+            let days = (secs(now) - secs(t)) / 86_400;
+            if (0..7).contains(&days) {
+                (2, "Previous 7 Days".into())
+            } else if (0..30).contains(&days) {
+                (3, "Previous 30 Days".into())
+            } else if at.year == today.year {
+                (4, "Earlier This Year".into())
+            } else {
+                (10 + (today.year - at.year).max(0) as i64, at.year.to_string())
+            }
+        }
+    }
+}
+
 /// How the list looks (files milestone 2): row size, the columns' widths
 /// (as [`COLUMNS`]), whether the Kind column shows, striped rows, and the
 /// entries grouped by their family under headings.
@@ -99,12 +183,12 @@ pub struct ListLook {
     pub widths: [f32; 3],
     pub kind: bool,
     pub stripes: bool,
-    pub group: bool,
+    pub group: GroupBy,
 }
 
 impl Default for ListLook {
     fn default() -> ListLook {
-        ListLook { rows: RowSize::Medium, widths: COLUMN_WIDTHS, kind: true, stripes: true, group: false }
+        ListLook { rows: RowSize::Medium, widths: COLUMN_WIDTHS, kind: true, stripes: true, group: GroupBy::None }
     }
 }
 
@@ -204,10 +288,11 @@ pub fn recent() -> Vec<Entry> {
 
 /// Entries in order: folders first, then by `by` (names naturally), up or
 /// down; `keep` keeps the order they came in for names (the recent files);
-/// `group`: by their family first ([`group_of`]), each group sorted so.
-pub fn sort(v: &mut [&Entry], by: SortBy, up: bool, keep: bool, group: bool) {
+/// `group`: by their group first ([`group_key`]), each group sorted so.
+pub fn sort(v: &mut [&Entry], by: SortBy, up: bool, keep: bool, group: GroupBy) {
+    let now = SystemTime::now();
     v.sort_by(|a, b| {
-        let first = if group { group_of(a).0.cmp(&group_of(b).0) } else { b.dir.cmp(&a.dir) };
+        let first = if group != GroupBy::None { group_key(a, group, now).0.cmp(&group_key(b, group, now).0).then(b.dir.cmp(&a.dir)) } else { b.dir.cmp(&a.dir) };
         if first != std::cmp::Ordering::Equal {
             return first;
         }
@@ -375,7 +460,7 @@ pub struct View<'a, M> {
 /// The list (Details): headings that sort, with grips between them that
 /// change the columns' widths, then a row per entry: its mark, name, when it
 /// changed, its size and its kind; striped, grouped under headings if the
-/// look says, the stripes carried on into the room below the last row.
+/// look says.
 pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(SortBy) -> M) -> (Element<M>, Vec<Element<M>>) {
     let look = v.look;
     let rs = look.rows;
@@ -413,11 +498,12 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
     const STRIPE: Color = Color { r: 128, g: 128, b: 128, a: 18 };
     let mut rows = Vec::with_capacity(v.entries.len() + 8);
     let mut odd = false;
-    let mut group: Option<u8> = None;
+    let mut group: Option<i64> = None;
     let row_h = if v.folders { rs.height().max(36.0) } else { rs.height() };
+    let now = SystemTime::now();
     for (k, e) in v.entries.iter().enumerate() {
-        if look.group {
-            let (g, name) = group_of(e);
+        if look.group != GroupBy::None {
+            let (g, name) = group_key(e, look.group, now);
             if group != Some(g) {
                 group = Some(g);
                 odd = false;
@@ -485,26 +571,8 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
         }
         rows.push(b);
     }
-    // The stripes go on below the last row, through the room that is left.
-    if look.stripes {
-        let pitch = row_h + 1.0;
-        let first_odd = odd;
-        rows.push(
-            drawing(move |scene, _, r: Rect, _: &Theme| {
-                let mut y = r.y;
-                let mut on = first_odd;
-                while y < r.y + r.h {
-                    if on {
-                        scene.fill_rounded(Rect::new(r.x, y, r.w, row_h.min(r.y + r.h - y)), 6.0, STRIPE);
-                    }
-                    on = !on;
-                    y += pitch;
-                }
-            })
-            .width(Length::FILL)
-            .height(Length::FILL),
-        );
-    }
+    // The stripes stop at the last row (Dave, 2026-11-21: "stripes under
+    // files only"; files milestone 2 carried them on below).
     (head, rows)
 }
 
@@ -1233,12 +1301,37 @@ mod tests {
         let e = |name: &str, dir: bool, size: u64| Entry { name: name.into(), path: PathBuf::from(format!("/x/{name}")), dir, mime: kind_of(dir, name), size, changed: None };
         let all = [e("b10.txt", false, 5), e("b2.txt", false, 50), e("zeta", true, 0), e("Alpha", true, 0)];
         let mut v: Vec<&Entry> = all.iter().collect();
-        sort(&mut v, SortBy::Name, true, false, false);
+        sort(&mut v, SortBy::Name, true, false, GroupBy::None);
         assert_eq!(v.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["Alpha", "zeta", "b2.txt", "b10.txt"]);
-        sort(&mut v, SortBy::Size, false, false, false);
+        sort(&mut v, SortBy::Size, false, false, GroupBy::None);
         assert_eq!(v.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["Alpha", "zeta", "b2.txt", "b10.txt"], "folders stay first; biggest first");
         assert_eq!(all[2].kind(), Kind::Folder);
         assert_eq!(all[0].kind(), Kind::Text);
+    }
+
+    #[test]
+    fn groups_by_date_and_size_as_finder() {
+        let now = SystemTime::now();
+        let ago = |days: u64| Some(now - std::time::Duration::from_secs(days * 86_400 + 60));
+        let e = |name: &str, dir: bool, size: u64, changed| Entry { name: name.into(), path: PathBuf::from(format!("/x/{name}")), dir, mime: kind_of(dir, name), size, changed };
+        let g = |x: &Entry, by| group_key(x, by, now).1;
+        assert_eq!(g(&e("a", false, 0, Some(now)), GroupBy::Date), "Today");
+        assert_eq!(g(&e("a", false, 0, ago(3)), GroupBy::Date), "Previous 7 Days");
+        assert_eq!(g(&e("a", false, 0, ago(20)), GroupBy::Date), "Previous 30 Days");
+        assert_eq!(g(&e("a", false, 0, ago(800)), GroupBy::Date).len(), 4, "a year of its own");
+        assert_eq!(g(&e("a", false, 0, None), GroupBy::Date), "Some time");
+        assert_eq!(g(&e("d", true, 0, None), GroupBy::Size), "Folders");
+        assert_eq!(g(&e("a", false, 5 << 20, None), GroupBy::Size), "1 to 10 MB");
+        assert_eq!(g(&e("a", false, 12, None), GroupBy::Size), "Less than 100 KB");
+        // Newest groups first; by size the folders, then the biggest.
+        let all = [e("old", false, 1, ago(400)), e("new", false, 1 << 31, Some(now)), e("dir", true, 0, ago(10))];
+        let mut v: Vec<&Entry> = all.iter().collect();
+        sort(&mut v, SortBy::Name, true, false, GroupBy::Date);
+        assert_eq!(v.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["new", "dir", "old"]);
+        sort(&mut v, SortBy::Name, true, false, GroupBy::Size);
+        assert_eq!(v.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["dir", "new", "old"]);
+        assert_eq!(GroupBy::parse("\"date\""), GroupBy::Date);
+        assert_eq!(GroupBy::parse("anything"), GroupBy::Kind);
     }
 
     #[test]
@@ -1247,7 +1340,7 @@ mod tests {
         let all = [e("notes.txt", false), e("photo.png", false), e("Music", true), e("a.png", false), e("letter.odt", false)];
         let mut v: Vec<&Entry> = all.iter().collect();
         // By kind: folders first, then by what the type is called, then by name.
-        sort(&mut v, SortBy::Kind, true, false, false);
+        sort(&mut v, SortBy::Kind, true, false, GroupBy::None);
         assert_eq!(v[0].name, "Music");
         let kinds: Vec<String> = v[1..].iter().map(|e| kind_words(e).to_lowercase()).collect();
         let mut sorted = kinds.clone();
@@ -1256,7 +1349,7 @@ mod tests {
         let pngs: Vec<&str> = v.iter().filter(|e| e.name.ends_with(".png")).map(|e| e.name.as_str()).collect();
         assert_eq!(pngs, ["a.png", "photo.png"], "the same kind by name");
         // Grouped: Folders, Documents, Text, Pictures, each by name.
-        sort(&mut v, SortBy::Name, true, false, true);
+        sort(&mut v, SortBy::Name, true, false, GroupBy::Kind);
         assert_eq!(v.iter().map(|e| group_of(e).1).collect::<Vec<_>>(), ["Folders", "Documents", "Text", "Pictures", "Pictures"]);
         assert_eq!(kind_words(&all[2]), "Folder");
         // Widths from a setting, kept in bounds; the usual for what is missing.

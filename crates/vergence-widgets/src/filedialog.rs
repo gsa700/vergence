@@ -263,7 +263,7 @@ impl FileDialog {
             .filter(|e| narrow.is_empty() || e.name.to_lowercase().contains(&narrow))
             .collect();
         // Folders first (the recent files keep their order unless sorted).
-        crate::files::sort(&mut v, self.sort.0, self.sort.1, self.showing == Showing::Recent, false);
+        crate::files::sort(&mut v, self.sort.0, self.sort.1, self.showing == Showing::Recent, crate::files::GroupBy::None);
         v.truncate(MAX_ROWS);
         v
     }

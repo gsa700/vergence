@@ -162,4 +162,17 @@ Close-Up).
   Locations folds. Not checked by hand: the right-click menus' lines (the
   headless session's menus are the server's). Tests on Hubble and techbench;
   agent-check 0 failed.
+- **Step 4, the list: in 2026-11-21.** Group by Kind (the default: the
+  list under Folders, Documents, Text, Pictures...), Date (Finder's: Today,
+  Yesterday, Previous 7 Days, Previous 30 Days, Earlier This Year, then each
+  year), Size (Folders, then the files biggest first in steps of ten) or
+  None: vergence-widgets files.rs `GroupBy`, `group_key`; FileView's View
+  menu, the folder's right-click Group By, and its settings (`[files]
+  group-by`; the older `group-by-kind = false` still means none). The
+  stripes stop at the last row. Rows: Medium was already 30 points (the
+  plan's "about Finder's 24" was written against an older size), so the
+  rows stay and the marks grow a little (Medium 1.3, Large 1.6). The Open
+  dialog keeps its plain list. Checked in a headless session on Hubble: the
+  repository's folder grouped by kind, then by date. Tests on Hubble and
+  techbench; agent-check 0 failed.
 
