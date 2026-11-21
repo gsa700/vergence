@@ -99,6 +99,9 @@ pub struct Search {
 pub const THUMB_W: f32 = 132.0;
 pub const THUMB_GAP: f32 = 16.0;
 
+/// What a document says about itself: names and values.
+pub type Meta = Vec<(String, String)>;
+
 /// A page's picture: the scale it was drawn at, its look, the picture.
 type Drawn = (f32, Look, Arc<Image>);
 
@@ -227,7 +230,7 @@ pub struct Shared {
     /// The outline, once the worker has read it.
     pub outline: Mutex<Option<Arc<Vec<Entry>>>>,
     /// What the document says about itself (names and values), once read.
-    pub meta: Mutex<Option<Arc<Vec<(String, String)>>>>,
+    pub meta: Mutex<Option<Arc<Meta>>>,
     /// The text layers of the pages near sight.
     pub texts: Mutex<HashMap<usize, Arc<Vec<Char>>>>,
     pub search: Mutex<Search>,
