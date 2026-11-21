@@ -495,7 +495,6 @@ enum Msg {
     StopJob,
     Run(u32),
     Go(Place),
-    Crumb(PathBuf),
     /// The path row clicked: a field to type a path in; its text; Enter.
     PathEdit,
     PathTyped(String),
@@ -1782,60 +1781,30 @@ impl Viewer {
         if self.trash_window {
             items.clear();
         }
-        // The path: each folder from Home (or the computer) a button.
-        let mut crumbs: Vec<Element<Msg>> = Vec::new();
-        match tab.map(|t| &t.showing) {
-            Some(Showing::Recent) | None => crumbs.push(label("Recent").size(13.0).weight(600)),
-            // The Trash by its name, not the folders it is kept in.
-            Some(Showing::Folder(_)) if self.in_trash() => crumbs.push(label("Trash").size(13.0).weight(600)),
-            Some(Showing::Folder(dir)) => {
-                let home = files::home();
-                let (mut at, rest, first) = match home.as_ref().and_then(|h| dir.strip_prefix(h).ok().map(|r| (h.clone(), r.to_path_buf()))) {
-                    Some((h, r)) => (h, r, "Home".to_string()),
-                    None => (PathBuf::from("/"), dir.strip_prefix("/").map(Path::to_path_buf).unwrap_or_default(), "Computer".to_string()),
-                };
-                let mut parts = vec![(first, at.clone())];
-                for c in rest.components() {
-                    at = at.join(c);
-                    parts.push((c.as_os_str().to_string_lossy().into_owned(), at.clone()));
-                }
-                // A deep folder: its last few.
-                let skip = parts.len().saturating_sub(5);
-                if skip > 0 {
-                    crumbs.push(label("…").size(12.0).dim());
-                }
-                let n = parts.len();
-                for (i, (name, p)) in parts.into_iter().enumerate().skip(skip) {
-                    if i > skip || skip > 0 {
-                        crumbs.push(label("›").size(12.0).dim());
-                    }
-                    let last = i + 1 == n;
-                    crumbs.push(button(label(name.clone()).size(12.0).weight(if last { 600 } else { 400 })).look(ButtonLook::Plain).padding(Padding::hv(3.0, 6.0)).on_press(Msg::Crumb(p)).name(name));
-                }
-            }
-        }
-        // The path (Explorer's address bar, Dave 2026-11-21): the crumbs, and
-        // a click on the room after them makes it a field to type a path in
-        // (Ctrl+L too); Enter goes there, Escape lets go.
+        // The path (Dave, 2026-11-21): the folder's real path in a box drawn
+        // as the field is ("the folder name is right above it in the tab so
+        // here the real path makes more sense"); a click on it, or Ctrl+L,
+        // makes it the field to type a path in (Enter goes there, Escape lets
+        // go). Not a field all the time: the folder's keys (Backspace goes
+        // up, Delete trashes) must not act while a path is being typed.
         if !self.trash_window {
             match &self.path_edit {
-                // A key of its own: the path row stood in its place, and a field
+                // A key of its own: the box stood in its place, and a field
                 // taken for the same widget would not take the keyboard.
                 Some(text) => items.push(field(text.clone(), Msg::PathTyped).on_submit(Msg::PathGo).autofocus().key(0x7061_7468).width(Length::FILL).name("Path")),
-                // The crumbs in a box drawn as the field is (Dave, 2026-11-21:
-                // "It's not obvious I can click there and enter a path"), the
-                // same height, so nothing moves when it becomes the field.
                 None => {
-                    crumbs.push(button(space().width(Length::FILL)).look(ButtonLook::Plain).width(Length::FILL).on_press(Msg::PathEdit).name("Type a path"));
+                    let shown = match tab.map(|t| &t.showing) {
+                        Some(Showing::Folder(dir)) => dir.display().to_string(),
+                        _ => "Recent".to_string(),
+                    };
                     let edge = if t.high_contrast { t.text } else { t.line };
                     items.push(
-                        panel(row(crumbs).spacing(2.0).align(Align::Center).width(Length::FILL))
-                            .color(t.page)
-                            .edge(edge, 1.0)
-                            .padding(Padding::hv(0.0, 4.0))
-                            .align(Align::Center)
+                        button(panel(label(shown).elide().width(Length::FILL)).color(t.page).edge(edge, 1.0).padding(Padding::hv(0.0, 8.0)).align(Align::Center).width(Length::FILL).height(Length::Fixed(26.0)))
+                            .look(ButtonLook::Plain)
+                            .padding(Padding::all(0.0))
                             .width(Length::FILL)
-                            .height(Length::Fixed(26.0)),
+                            .on_press(Msg::PathEdit)
+                            .name("Path"),
                     );
                 }
             }
@@ -2228,7 +2197,6 @@ impl Program for Viewer {
         match m {
             Msg::Run(c) => return self.run(c, window),
             Msg::Go(p) => self.go(p.path.map_or(Showing::Recent, Showing::Folder)),
-            Msg::Crumb(p) => self.go(Showing::Folder(p)),
             Msg::PathEdit => self.path_edit = Some(self.front_tab().and_then(|t| t.dir()).map(|d| d.display().to_string()).unwrap_or_default()),
             Msg::PathTyped(s) => self.path_edit = Some(s),
             Msg::PathGo => self.path_go(),
