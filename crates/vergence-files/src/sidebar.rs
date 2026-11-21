@@ -21,8 +21,10 @@ use std::path::{Path, PathBuf};
 use vergence_widgets::files::{self, Place};
 
 /// A row's height, a heading's, and the padding around them, in points.
-pub const ROW_H: f32 = 26.0;
-pub const HEAD_H: f32 = 24.0;
+/// (Rows 28 and headings 26 since Dave's "bump up the font size in the left
+/// sidebar", 2026-11-21: names at 13 points, as Finder's, headings at 11.)
+pub const ROW_H: f32 = 28.0;
+pub const HEAD_H: f32 = 26.0;
 pub const PAD: f32 = 6.0;
 /// The most recent files shown.
 pub const RECENT_SHOWN: usize = 6;

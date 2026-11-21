@@ -929,7 +929,7 @@ impl Viewer {
             match line {
                 Line::Head(sec) => {
                     let open = !folded.contains(&sec);
-                    let head = button(row(vec![label(sec.name()).size(10.5).dim().weight(600), space().width(Length::FILL), fold_mark(open)]).align(Align::Center).width(Length::FILL))
+                    let head = button(row(vec![label(sec.name()).size(11.0).dim().weight(600), space().width(Length::FILL), fold_mark(open)]).align(Align::Center).width(Length::FILL))
                         .look(ButtonLook::Plain)
                         .padding(Padding { top: 6.0, bottom: 2.0, left: 10.0, right: 6.0 })
                         .height(Length::Fixed(sidebar::HEAD_H))
@@ -955,9 +955,9 @@ impl Viewer {
                             scene.draw_image(id, Rect::new(r.x, r.y + (r.h - side) / 2.0, side, side), 1.0);
                         }
                     })
-                    .width(Length::Fixed(16.0))
-                    .height(Length::Fixed(16.0));
-                    let line = row(vec![mark, label(item.name.clone()).size(12.0).elide().width(Length::FILL)]).spacing(7.0).align(Align::Center).width(Length::FILL);
+                    .width(Length::Fixed(18.0))
+                    .height(Length::Fixed(18.0));
+                    let line = row(vec![mark, label(item.name.clone()).size(13.0).elide().width(Length::FILL)]).spacing(8.0).align(Align::Center).width(Length::FILL);
                     let mut b = button(line)
                         .look(if chosen { ButtonLook::Chosen } else { ButtonLook::Plain })
                         .padding(Padding::hv(0.0, 8.0))
@@ -976,7 +976,7 @@ impl Viewer {
         let rect = self.side_rect.clone();
         let place = drawing(move |_, _, r: Rect, _| rect.set(r)).width(Length::FILL).height(Length::FILL);
         let list = panel(scroll(column(rows).width(Length::FILL)).name("Sidebar")).color(t.card).radius(8.0).padding(sidebar::PAD).width(Length::FILL).height(Length::FILL);
-        stack(vec![place, list]).width(Length::Fixed(176.0)).height(Length::FILL)
+        stack(vec![place, list]).width(Length::Fixed(184.0)).height(Length::FILL)
     }
 
     /// A double click's longest gap: the desktop's (Settings > Mouse), as
