@@ -246,6 +246,8 @@ struct Viewer {
     thumb_bar_drag: Option<f32>,
     /// The Hand: a drag always moves the pages (else text is selected).
     hand: bool,
+    /// The pointer is over a scroll bar (the arrow there, Dave 2026-11-20).
+    over_bar: bool,
 }
 
 /// The tool chosen last, kept for the next window and the next start
@@ -347,6 +349,7 @@ impl Viewer {
             bar_drag: None,
             thumb_bar_drag: None,
             hand: hand_remembered(),
+            over_bar: false,
         }
     }
 
@@ -923,6 +926,8 @@ impl Viewer {
         })
         .on_touch(|t| Some(Msg::Touch(t)))
         .cursor(match (self.hand, self.drag.is_some() && !self.selecting) {
+            // Over a scroll bar (or holding one): the arrow, whatever the tool.
+            _ if self.over_bar || self.bar_drag.is_some() => vergence_ui::Cursor::Default,
             // The open hand; closed while it holds the pages (Dave, 2026-11-20).
             (true, true) => vergence_ui::Cursor::Grabbing,
             (true, false) => vergence_ui::Cursor::Grab,
@@ -1183,9 +1188,11 @@ impl Program for Viewer {
         APP_ID.into()
     }
 
-    /// Dark under App default: pages read best on a dark ground.
+    /// Light under App default, with a dark bar (Dave, 2026-11-20: "the
+    /// light style with the dark toolbar as the app default... helps the app
+    /// stand out a bit"); the ground around the pages stays dark.
     fn theme(&self) -> Theme {
-        Theme::from_desktop(&self.desktop, true, SECTION)
+        Theme::from_desktop(&self.desktop, false, SECTION)
     }
 
     fn bar_style(&self) -> Option<BarStyle> {
@@ -1303,6 +1310,20 @@ impl Program for Viewer {
     fn update(&mut self, m: Msg, window: &mut Window) {
         match m {
             Msg::Touch(Touch::Press { x, y }) if self.bar_press(x, y) => {}
+            // Passing over the page view: on a scroll bar, the arrow.
+            Msg::Touch(Touch::Move { x, y, pressed: false }) => {
+                let r = self.area.get();
+                let over = self.front_tab().is_some_and(|t| matches!(&t.content, Content::Pdf(d) if d.bar_at(r, r.x + x, r.y + y).is_some()));
+                if over == self.over_bar {
+                    return;
+                }
+                self.over_bar = over;
+            }
+            Msg::Touch(Touch::Leave) if self.bar_drag.is_none() && self.drag.is_none() => {
+                self.over_bar = false;
+                self.press_at = None;
+                self.selecting = false;
+            }
             Msg::Touch(Touch::Move { x, y, pressed: true }) if self.bar_drag.is_some() => {
                 let r = self.area.get();
                 if let (Some((which, grab)), Some(d)) = (self.bar_drag, self.pdf_mut()) {
@@ -1750,7 +1771,7 @@ impl Rows for ReaderRows {
             Part {
                 title: "On this desktop".into(),
                 rows: vec![
-                    Row::new("style", "Style", "While the desktop's Style is App default.", Control::Choose { choices: styles.clone(), desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(locked.clone()),
+                    Row::new("style", "Style", "While the desktop's Style is App default.", Control::Choose { choices: styles.clone(), desktop: Some("Built-in (Light)".into()), app_default: 1 }).locked(locked.clone()),
                     Row::new("bar-style", "Title bar", "", Control::Choose { choices: styles, desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(locked),
                     Row::new("opacity", "Opacity", "30 to 100: how much of the window's ground shows.", Control::Percent { min: 30, desktop: format!("Desktop default ({:.0})", opacity * 100.0), now: (opacity * 100.0).round() as u32 }),
                     Row::new("", "Window places", "Where the desktop puts Reader's windows, for each set of screens.", Control::Button { label: "Forget…".into(), id: 1 }),
