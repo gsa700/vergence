@@ -127,3 +127,20 @@ menus) as scenes (they are drawn in the server already, at each scale).
   round trip, pictures named by key, unknown keys refused, versions kept
   apart, 20,000 damaged keyed scenes decoded without a panic; the
   protocol's round trip with the new message.
+- **Step 2, the server draws scenes** (2026-11-20). The server's scenes.rs:
+  a window's scene drawn with vergence-render's GPU renderer (its own
+  context, the apps' code) at the scale the window is shown at, into one
+  of three GPU buffers the window takes in turn; the buffer then becomes
+  the window's picture through the path an app's GPU picture takes
+  (native.rs `native_attach_gpu`), so the bar's frost, rounded corners, the
+  overview and the dock's pictures show it unchanged; the first picture,
+  attached or drawn, puts the window on the screen (`native_picture_came`,
+  shared). No GPU renderer (canary) or a failure: the CPU reference
+  renderer into memory (`VERGENCE_SCENES_CPU=1` forces it, for tests). A
+  scene brings its own ground (the toolkit's first fill, step 3) and is
+  drawn on clear. Not yet: drawing only what changed (the whole scene is
+  drawn each time, as the apps do now). `vctl scenes` says how scenes are
+  drawn and how many. vnative `--gpu --scene` now sends only its scene.
+  Tried headless on Hubble: a window drawn from its scene beside one
+  drawn by its program, alike; on the GPU (206 scenes) and forced to the
+  CPU (158).

@@ -625,28 +625,8 @@ impl Server {
                     tracing::warn!("native: client {client} window {window}: {e}; disconnecting");
                     return self.bus_end(client);
                 }
-                let show = {
-                    let mut s = n.state.lock().unwrap();
-                    s.frame_wanted = true;
-                    let was_shown = std::mem::replace(&mut s.shown, true);
-                    !was_shown
-                };
-                if show {
-                    let (place, maximized) = {
-                        let s = n.state.lock().unwrap();
-                        (s.place, s.place_maximized)
-                    };
-                    self.put(w.clone(), place, true);
-                    if maximized {
-                        self.toggle_maximize(&w);
-                    }
-                    // The desktop's icons: their place is the work area, not where it was asked (desktop.rs).
-                    if self.is_desktop(&w) {
-                        self.desktop_place(&w);
-                    }
-                    tracing::info!("native: {:?} window {window} shown at {},{}", n.app_id, place.x, place.y);
-                    self.window_opened(&w);
-                }
+                let n = n.clone();
+                self.native_picture_came(&w, &n, window);
             }
             WinRequest::Maximize { window, on } => {
                 let Some(w) = self.natives.get(&(client, window)).cloned() else { return };
@@ -822,14 +802,18 @@ impl Server {
             // drawn from step 2. A scene that fails is refused and logged,
             // the window keeps what it showed.
             WinRequest::Scene { window, fd, len, forget } => {
-                if let Some(w) = self.natives.get(&(client, window)).cloned()
-                    && let Some(n) = w.native()
-                    && let Err(why) = n.take_scene(&fd, len, &forget)
-                {
-                    tracing::warn!("native: client {client} window {window}: scene refused: {why}");
-                    let mut st = n.state.lock().unwrap();
-                    let count = st.scene_refused.as_ref().map_or(0, |r| r.0) + 1;
-                    st.scene_refused = Some((count, why));
+                let Some(w) = self.natives.get(&(client, window)).cloned() else { return };
+                let Win::Native(n) = &w else { return };
+                let n = n.clone();
+                let taken = n.take_scene(&fd, len, &forget).and_then(|()| self.native_draw_scene(&n));
+                match taken {
+                    Ok(()) => self.native_picture_came(&w, &n, window),
+                    Err(why) => {
+                        tracing::warn!("native: client {client} window {window}: scene refused: {why}");
+                        let mut st = n.state.lock().unwrap();
+                        let count = st.scene_refused.as_ref().map_or(0, |r| r.0) + 1;
+                        st.scene_refused = Some((count, why));
+                    }
                 }
             }
             WinRequest::Acted { window, serial, ok, why } => {
@@ -1028,8 +1012,45 @@ impl Server {
         Ok(())
     }
 
+    /// A new picture came (attached, or drawn from a scene): the next frame
+    /// is wanted, and the first one puts the window on the screen.
+    fn native_picture_came(&mut self, w: &Win, n: &Arc<NativeWindow>, window: u32) {
+        let show = {
+            let mut s = n.state.lock().unwrap();
+            s.frame_wanted = true;
+            let was_shown = std::mem::replace(&mut s.shown, true);
+            !was_shown
+        };
+        if show {
+            let (place, maximized) = {
+                let s = n.state.lock().unwrap();
+                (s.place, s.place_maximized)
+            };
+            self.put(w.clone(), place, true);
+            if maximized {
+                self.toggle_maximize(w);
+            }
+            // The desktop's icons: their place is the work area, not where it was asked (desktop.rs).
+            if self.is_desktop(w) {
+                self.desktop_place(w);
+            }
+            tracing::info!("native: {:?} window {window} shown at {},{}", n.app_id, place.x, place.y);
+            self.window_opened(w);
+        }
+    }
+
+    /// Pixels drawn by the server (a scene on the CPU: RGBA, premultiplied)
+    /// as the window's picture.
+    pub(crate) fn native_attach_pixels(&mut self, n: &NativeWindow, px: Size<i32, BufferCoords>, rgba: &[u8]) -> Result<(), String> {
+        let buffer = MemoryRenderBuffer::from_slice(rgba, Fourcc::Abgr8888, px, 1, Transform::Normal, None);
+        let mut s = n.state.lock().unwrap();
+        let logical = (points_of(px.w, s.scale), points_of(px.h, s.scale)).into();
+        s.picture = Some(Picture { content: Content::Memory(buffer), px, logical, format: 0 });
+        Ok(())
+    }
+
     /// A GPU buffer: checked and kept, to be imported when the scene is built.
-    fn native_attach_gpu(&mut self, n: &NativeWindow, planes: Vec<vergence_protocol::window::Plane>, width: u32, height: u32, format: u32, modifier: u64) -> Result<(), String> {
+    pub(crate) fn native_attach_gpu(&mut self, n: &NativeWindow, planes: Vec<vergence_protocol::window::Plane>, width: u32, height: u32, format: u32, modifier: u64) -> Result<(), String> {
         use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
         let fourcc = Fourcc::try_from(format).map_err(|_| format!("GPU picture format {format:#x} is unknown"))?;
         let mut b = Dmabuf::builder((width as i32, height as i32), fourcc, smithay::backend::allocator::Modifier::from(modifier), DmabufFlags::empty());
@@ -1063,6 +1084,7 @@ impl Server {
             self.input.keyboard_native = None;
         }
         n.kill();
+        self.scenes_forget(n.client, n.id);
         // The keyboard goes back where the person was (found 2026-11-15: after
         // the editor's Open dialog closed, keys went nowhere): to a dialog's
         // parent, else the window in front.

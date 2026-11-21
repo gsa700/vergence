@@ -267,6 +267,8 @@ impl Server {
             }
             "focused" => self.meaning_focus_report(),
             "agents" => self.agents_report(),
+            // Windows drawn from their scenes (scenes.rs).
+            "scenes" => self.scenes_report(),
             // The magnifier (zoom.rs): its state, its keys, or a point of
             // interest as the focus or caret would set it.
             "zoom" => {

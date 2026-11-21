@@ -45,6 +45,7 @@ mod elevate;
 mod actions;
 mod drawer;
 mod applets;
+mod scenes;
 mod session;
 mod launcher;
 mod touch;

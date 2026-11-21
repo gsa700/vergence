@@ -4,8 +4,8 @@
 //!     vnative [--title T] [--size WxH] [--frames N] [--short-file] [--gpu]
 //!             [--scene] [--role R] [--place MONITOR_ID:X,Y]
 //!
-//! `--scene` (with `--gpu`): after each picture, the same scene as a
-//! display list too (bus v30 `Scene`, display lists milestone 1).
+//! `--scene` (with `--gpu`): the window as a display list (bus v30 `Scene`,
+//! display lists milestone 1) in place of a picture: the server draws it.
 //!
 //! It asks for a window, draws a gradient with a border at the scale it is
 //! told, and then moves a bar one step for every frame the server offers,
@@ -83,19 +83,20 @@ impl GpuDraw {
         if let Some((x, y)) = pointer {
             scene.fill(Rect::new(x as f32 - DOT as f32 / 2.0, y as f32 - DOT as f32 / 2.0, DOT as f32, DOT as f32), Color::rgb(20, 20, 20));
         }
-        let b = &self.buffers[self.next];
-        self.gpu.draw_into(b, &scene, &mut self.fonts, self.scale as f32, Color::rgb(0, 0, 0)).map_err(|e| format!("GPU draw: {e:?}"))?;
-        let plane = Plane { fd: Fd(std::sync::Arc::new(b.fd.try_clone()?)), offset: b.offset, stride: b.stride };
-        let buffer = Buffer::Dmabuf { planes: vec![plane], width: b.width, height: b.height, format: b.format, modifier: b.modifier };
-        c.send(&ClientMsg::Window(WinRequest::Attach { window: WINDOW, buffer, damage: Vec::new() }))?;
-        self.next = (self.next + 1) % self.buffers.len();
         if self.send_scene {
             let bytes = scene.encode_keyed(&[], &|_| false).map_err(|e| format!("scene: {e}"))?;
             let mut shm = ShmFile::new(bytes.len())?;
             shm.bytes()[..bytes.len()].copy_from_slice(&bytes);
             let fd = Fd(std::sync::Arc::new(unsafe_dup(shm.fd())?));
             c.send(&ClientMsg::Window(WinRequest::Scene { window: WINDOW, fd, len: bytes.len() as u32, forget: Vec::new() }))?;
+            return Ok(());
         }
+        let b = &self.buffers[self.next];
+        self.gpu.draw_into(b, &scene, &mut self.fonts, self.scale as f32, Color::rgb(0, 0, 0)).map_err(|e| format!("GPU draw: {e:?}"))?;
+        let plane = Plane { fd: Fd(std::sync::Arc::new(b.fd.try_clone()?)), offset: b.offset, stride: b.stride };
+        let buffer = Buffer::Dmabuf { planes: vec![plane], width: b.width, height: b.height, format: b.format, modifier: b.modifier };
+        c.send(&ClientMsg::Window(WinRequest::Attach { window: WINDOW, buffer, damage: Vec::new() }))?;
+        self.next = (self.next + 1) % self.buffers.len();
         Ok(())
     }
 }

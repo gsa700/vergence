@@ -105,6 +105,8 @@ pub struct Server {
     pub agents: crate::agents::Agents,
     /// The magnifier (zoom.rs).
     pub zoom: crate::zoom::Zoom,
+    /// Windows drawn from their scenes (scenes.rs).
+    pub scenes: crate::scenes::Scenes,
     /// Windows' pictures (thumbs.rs), and those still to save for `vctl
     /// thumb`: the window, the room's side in pixels, the name.
     pub thumbs: crate::thumbs::Thumbs,
@@ -324,6 +326,7 @@ impl Server {
             meaning_log: Default::default(),
             agents: Default::default(),
             zoom: Default::default(),
+            scenes: Default::default(),
             thumbs: Default::default(),
             picker: None,
             overview: None,
