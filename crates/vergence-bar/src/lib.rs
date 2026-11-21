@@ -301,28 +301,36 @@ impl Layout {
 
     /// [`Layout::new`] at a size of controls (look milestone 1, step 8).
     pub fn sized(width: f32, count: usize, shown: usize, left: &[WinButton], right: &[WinButton], z: Sizes) -> Layout {
-        // As tall as the tabs and standing where they stand, at the bar's
-        // bottom edge, joined to the page (Dave, 2026-11-10).
-        let (buttons, start, end) = Layout::buttons(width, left, right, &z, z.bar_h - z.item_h);
+        // The tabs stand at the bar's bottom edge, joined to the page (Dave,
+        // 2026-11-10); the window's buttons in the bar's middle, as in a plain
+        // bar (Dave, 2026-11-21: "it feels like the close minimize are closer
+        // to the bottom of the titlebar": at the tabs' height they had 9
+        // points above and 3 below).
+        let (buttons, start, end) = Layout::buttons(width, left, right, &z, ((z.bar_h - z.item_h) / 2.0).round());
         // The tabs share what is left after +, down to a least width.
         let room = (end - start - z.plus_w - z.gap).max(0.0);
         let n = count.max(1) as f32;
         let tab_w = ((room - z.gap * n) / n).clamp(TAB_MIN, TAB_W);
         let controls_left = !left.is_empty();
-        let top = z.bar_h - z.item_h;
+        // The tabs a touch taller than the buttons, reaching up from the
+        // bottom edge, so they stand apart from the centered controls (Dave,
+        // 2026-11-21: "it is nice that the tab is a bit taller, I think it
+        // sets them off the controls"): 3 points at Standard and Large, 2 at Compact.
+        let tab_h = z.item_h + ((z.bar_h - z.item_h) * 0.4).round();
+        let top = z.bar_h - tab_h;
         let (mut tabs, mut closes) = (Vec::new(), Vec::new());
         let mut x = start;
         for i in 0..count {
-            let tab = Rect::new(x, top, tab_w, z.item_h);
+            let tab = Rect::new(x, top, tab_w, tab_h);
             let close = (tab_w >= CLOSE_NEEDS || (i == shown && tab_w >= 44.0)).then(|| {
                 let cx = if controls_left { tab.x + 4.0 } else { tab.x + tab_w - 24.0 };
-                Rect::new(cx, top + (z.item_h - 20.0) / 2.0, 20.0, 20.0)
+                Rect::new(cx, top + (tab_h - 20.0) / 2.0, 20.0, 20.0)
             });
             tabs.push(tab);
             closes.push(close);
             x += tab_w + z.gap;
         }
-        Layout { buttons, tabs, closes, plus: Rect::new(x, top, z.plus_w, z.item_h), title: None, tools: Vec::new(), controls_left, sizes: z }
+        Layout { buttons, tabs, closes, plus: Rect::new(x, top, z.plus_w, tab_h), title: None, tools: Vec::new(), controls_left, sizes: z }
     }
 
     /// The bar of a window without tabs: its buttons, and between them the
