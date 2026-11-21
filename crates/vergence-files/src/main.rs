@@ -148,7 +148,7 @@ enum ViewKind {
 }
 
 /// What a tab shows: a folder, or the recent files.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Showing {
     Folder(PathBuf),
     Recent,
@@ -174,13 +174,31 @@ struct Tab {
     /// In the Trash: where each item came from (its path in the Trash to
     /// the path it had).
     from: std::collections::HashMap<PathBuf, PathBuf>,
+    /// How far the folder is scrolled (points, as the toolkit last told),
+    /// where to scroll it at the next layout, and where each folder of its
+    /// history was left (files milestone 3, step 2: Back and Forward bring a
+    /// folder back at its place, for the session).
+    scroll: f32,
+    want: Option<f32>,
+    places: std::collections::HashMap<Showing, f32>,
 }
 
 impl Tab {
     fn new(id: u32, showing: Showing, sizes: Sizes) -> Tab {
-        let mut t = Tab { id, showing, back: Vec::new(), forward: Vec::new(), entries: Vec::new(), problem: None, stamp: None, chosen: Vec::new(), cursor: None, turn: 0, sizes, from: Default::default() };
+        let mut t = Tab { id, showing, back: Vec::new(), forward: Vec::new(), entries: Vec::new(), problem: None, stamp: None, chosen: Vec::new(), cursor: None, turn: 0, sizes, from: Default::default(), scroll: 0.0, want: None, places: Default::default() };
         t.read();
         t
+    }
+
+    /// Leaving the folder shown: its place remembered.
+    fn leave(&mut self) {
+        self.places.insert(self.showing.clone(), self.scroll);
+    }
+
+    /// Arrived at the folder shown: at its place if it was here before, else the top.
+    fn arrive(&mut self) {
+        self.scroll = self.places.get(&self.showing).copied().unwrap_or(0.0);
+        self.want = Some(self.scroll);
     }
 
     /// Counted sizes into the folders' entries, where the folder has not
@@ -246,8 +264,10 @@ impl Tab {
 
     fn go(&mut self, to: Showing) {
         if to != self.showing {
+            self.leave();
             self.back.push(std::mem::replace(&mut self.showing, to));
             self.forward.clear();
+            self.arrive();
         }
         self.chosen.clear();
         self.cursor = None;
@@ -320,6 +340,21 @@ fn lone_shared() -> SharedRef {
     Rc::new(RefCell::new(Shared::new()))
 }
 
+/// The free bytes of the file system `dir` is on, from `df -kP` (as
+/// vergence-sysinfo reads file systems, on Linux and FreeBSD alike).
+fn df_free(dir: &Path) -> Option<u64> {
+    let out = std::process::Command::new("df").arg("-kP").arg(dir).stderr(std::process::Stdio::null()).output().ok()?;
+    parse_df_free(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// `df -kP`'s second line: Filesystem, 1024-blocks, Used, Available, ... ;
+/// the Available column in bytes.
+fn parse_df_free(text: &str) -> Option<u64> {
+    let line = text.lines().nth(1)?;
+    let kb: u64 = line.split_whitespace().nth(3)?.parse().ok()?;
+    Some(kb * 1024)
+}
+
 /// The home folder (or the root, where there is none).
 fn home() -> PathBuf {
     files::home().unwrap_or_else(|| PathBuf::from("/"))
@@ -340,6 +375,11 @@ struct Viewer {
     me: Option<u32>,
     token: String,
     ending: Option<Instant>,
+    /// The path being typed (the path row clicked, or Ctrl+L), Explorer's way.
+    path_edit: Option<String>,
+    /// Each folder's disk's free space (`df -kP`, read apart), and what was asked.
+    free: Arc<Mutex<std::collections::HashMap<PathBuf, Option<u64>>>>,
+    free_asked: RefCell<std::collections::HashSet<PathBuf>>,
     desktop: String,
     stamp: Option<SystemTime>,
     waker: Option<Waker>,
@@ -456,6 +496,10 @@ enum Msg {
     Run(u32),
     Go(Place),
     Crumb(PathBuf),
+    /// The path row clicked: a field to type a path in; its text; Enter.
+    PathEdit,
+    PathTyped(String),
+    PathGo,
     Click(usize),
     Sort(SortBy),
     Narrow(String),
@@ -562,6 +606,9 @@ impl Viewer {
             me: None,
             token: String::new(),
             ending: None,
+            path_edit: None,
+            free: Arc::default(),
+            free_asked: RefCell::new(std::collections::HashSet::new()),
             desktop,
             stamp,
             waker: None,
@@ -668,11 +715,17 @@ impl Viewer {
     fn from_snap(shared: SharedRef, snap: &keep::Snap) -> Viewer {
         let mut v = Viewer::new(shared);
         v.token = snap.token.clone();
+        let places = vergence_widgets::session::places();
         for t in &snap.tabs {
-            v.new_tab(match t {
+            v.new_tab(match &t.what {
                 keep::Kept::Folder(p) => Showing::Folder(p.clone()),
                 keep::Kept::Recent => Showing::Recent,
             });
+            // Scrolled where it was (session milestone 1's rule 2).
+            if places && let Some(tab) = v.tabs.last_mut() {
+                tab.scroll = t.scroll;
+                tab.want = Some(t.scroll);
+            }
         }
         if let Some(t) = v.tabs.get(snap.front) {
             v.front = t.id;
@@ -686,12 +739,15 @@ impl Viewer {
         if self.token.is_empty() || self.trash_window {
             return;
         }
-        let tabs: Vec<keep::Kept> = self
+        let tabs: Vec<keep::KeptTab> = self
             .tabs
             .iter()
-            .map(|t| match &t.showing {
-                Showing::Folder(p) => keep::Kept::Folder(p.clone()),
-                Showing::Recent => keep::Kept::Recent,
+            .map(|t| keep::KeptTab {
+                what: match &t.showing {
+                    Showing::Folder(p) => keep::Kept::Folder(p.clone()),
+                    Showing::Recent => keep::Kept::Recent,
+                },
+                scroll: t.scroll.round(),
             })
             .collect();
         let front = self.tabs.iter().position(|t| t.id == self.front).unwrap_or(0);
@@ -731,12 +787,57 @@ impl Viewer {
     fn tab_changed(&mut self) {
         self.clear_narrow();
         self.preview = false;
+        self.path_edit = None;
         if let Some(t) = self.front_mut() {
+            // Back at the place this tab was scrolled to.
+            t.want = Some(t.scroll);
             let now = t.dir().and_then(|d| std::fs::metadata(d).and_then(|m| m.modified()).ok());
             if t.dir().is_none() || now != t.stamp {
                 t.read();
             }
         }
+    }
+
+    /// The typed path gone to: a folder, or a file's folder with the file
+    /// chosen; "~" is home. Not there: said, and the field stays to mend it.
+    fn path_go(&mut self) {
+        let Some(typed) = self.path_edit.clone() else { return };
+        let typed = typed.trim();
+        let p = match typed.strip_prefix('~') {
+            Some(rest) => home().join(rest.trim_start_matches('/')),
+            None => PathBuf::from(typed),
+        };
+        if !p.is_absolute() || !p.exists() {
+            self.notice = Some(format!("There is no folder or file at {typed}."));
+            return;
+        }
+        self.path_edit = None;
+        if p.is_dir() {
+            self.go(Showing::Folder(p));
+        } else if let Some(dir) = p.parent() {
+            self.go(Showing::Folder(dir.to_path_buf()));
+            self.choose_only(p.clone());
+        }
+    }
+
+    /// The free space of the disk the front folder is on, once read (a
+    /// worker runs `df -kP` for each folder the first time it is shown).
+    fn free_here(&self) -> Option<u64> {
+        let dir = self.here()?;
+        if let Some(n) = self.free.lock().unwrap_or_else(|e| e.into_inner()).get(&dir) {
+            return *n;
+        }
+        if self.free_asked.borrow_mut().insert(dir.clone()) {
+            let (free, waker) = (self.free.clone(), self.thumb_waker.clone());
+            std::thread::spawn(move || {
+                let n = df_free(&dir);
+                free.lock().unwrap_or_else(|e| e.into_inner()).insert(dir, n);
+                if let Some(w) = waker.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                    w.wake();
+                }
+            });
+        }
+        None
     }
 
     /// A tab from another window: this window's folder sizes from now on.
@@ -809,7 +910,9 @@ impl Viewer {
         if let Some(t) = self.front_mut()
             && let Some(s) = t.back.pop()
         {
+            t.leave();
             t.forward.push(std::mem::replace(&mut t.showing, s));
+            t.arrive();
             t.read();
         }
         self.clear_narrow();
@@ -819,7 +922,9 @@ impl Viewer {
         if let Some(t) = self.front_mut()
             && let Some(s) = t.forward.pop()
         {
+            t.leave();
             t.back.push(std::mem::replace(&mut t.showing, s));
+            t.arrive();
             t.read();
         }
         self.clear_narrow();
@@ -1709,32 +1814,26 @@ impl Viewer {
                 }
             }
         }
+        // The path (Explorer's address bar, Dave 2026-11-21): the crumbs, and
+        // a click on the room after them makes it a field to type a path in
+        // (Ctrl+L too); Enter goes there, Escape lets go.
         if !self.trash_window {
-            items.push(row(crumbs).spacing(2.0).align(Align::Center));
+            match &self.path_edit {
+                // A key of its own: the path row stood in its place, and a field
+                // taken for the same widget would not take the keyboard.
+                Some(text) => items.push(field(text.clone(), Msg::PathTyped).on_submit(Msg::PathGo).autofocus().key(0x7061_7468).width(Length::FILL).name("Path")),
+                None => {
+                    crumbs.push(button(space().width(Length::FILL)).look(ButtonLook::Plain).width(Length::FILL).on_press(Msg::PathEdit).name("Type a path"));
+                    items.push(row(crumbs).spacing(2.0).align(Align::Center).width(Length::FILL));
+                }
+            }
+        } else {
+            items.push(flexible());
         }
-        items.push(flexible());
         let any = tab.is_some_and(|t| !t.chosen.is_empty());
         let trash = self.in_trash();
-        if trash {
-            // The chosen ones put back or deleted; the whole Trash emptied
-            // (Dave, 2026-11-18: right click and each row have them too).
-            let full = tab.is_some_and(|t| !t.entries.is_empty());
-            items.push(button(label("Put Back").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(any, Msg::Run(cmd::RESTORE)).name("Put Back"));
-            items.push(button(label("Delete Forever…").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(any, Msg::Run(cmd::DELETE)).name("Delete Forever"));
-            items.push(button(label("Empty Trash…").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(full, Msg::Run(cmd::EMPTY_TRASH)).name("Empty Trash"));
-        } else {
-            items.push(group(vec![
-                tool(Icon::NewFolder, "New folder", self.here().is_some().then_some(Msg::Run(cmd::NEW_FOLDER))),
-                tool(Icon::Trash, "Move to the Trash", any.then_some(Msg::Run(cmd::TRASH))),
-            ]));
-        }
-        items.push(field(self.narrow.clone(), Msg::Narrow).placeholder(if trash { "Narrow the Trash" } else { "Narrow this folder" }).width(Length::Fixed(200.0)).name("Narrow"));
-        // With words typed: search the folders below too.
-        if !self.narrow.trim().is_empty() && self.here().is_some() {
-            let on = self.search.is_some();
-            items.push(button(label("In subfolders").size(11.5)).look(if on { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(4.0, 8.0)).on_press(Msg::SearchBelow).name("Search in subfolders"));
-        }
-        // The Trash is a list and shows its hidden files: those two are not its.
+        // The views and the panes, then what is done here, then the filter
+        // at the right (files milestone 3, step 2: Explorer's order).
         if !trash {
             items.push(group(vec![
                 toggle(Icon::List, "As a list", self.view == ViewKind::List, Msg::Run(cmd::LIST)),
@@ -1748,6 +1847,25 @@ impl Viewer {
             }
             items.push(group(panes));
         }
+        if trash {
+            // The chosen ones put back or deleted; the whole Trash emptied
+            // (Dave, 2026-11-18: right click and each row have them too).
+            let full = tab.is_some_and(|t| !t.entries.is_empty());
+            items.push(button(label("Put Back").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(any, Msg::Run(cmd::RESTORE)).name("Put Back"));
+            items.push(button(label("Delete Forever…").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(any, Msg::Run(cmd::DELETE)).name("Delete Forever"));
+            items.push(button(label("Empty Trash…").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press_if(full, Msg::Run(cmd::EMPTY_TRASH)).name("Empty Trash"));
+        } else {
+            items.push(group(vec![
+                tool(Icon::NewFolder, "New folder", self.here().is_some().then_some(Msg::Run(cmd::NEW_FOLDER))),
+                tool(Icon::Trash, "Move to the Trash", any.then_some(Msg::Run(cmd::TRASH))),
+            ]));
+        }
+        // With words typed: search the folders below too.
+        if !self.narrow.trim().is_empty() && self.here().is_some() {
+            let on = self.search.is_some();
+            items.push(button(label("In subfolders").size(11.5)).look(if on { ButtonLook::Chosen } else { ButtonLook::Plain }).padding(Padding::hv(4.0, 8.0)).on_press(Msg::SearchBelow).name("Search in subfolders"));
+        }
+        items.push(field(self.narrow.clone(), Msg::Narrow).placeholder(if trash { "Narrow the Trash" } else { "Narrow this folder" }).width(Length::Fixed(200.0)).name("Narrow"));
         toolbar(items, t)
     }
 
@@ -1820,11 +1938,11 @@ impl Viewer {
                 let (head, rows) = files::list(&v, self.sort, Msg::Sort);
                 let mut all = vec![head, rule()];
                 all.extend(body);
-                all.push(scroll(column(rows).spacing(1.0).width(Length::FILL)));
+                all.push(scroll(column(rows).spacing(1.0).width(Length::FILL)).name("Folder"));
                 column(all).spacing(2.0).width(Length::FILL).height(Length::FILL)
             }
             ViewKind::Icons => {
-                body.push(scroll(panel(files::icons(&v)).padding(6.0).width(Length::FILL)));
+                body.push(scroll(panel(files::icons(&v)).padding(6.0).width(Length::FILL)).name("Folder"));
                 column(body).spacing(2.0).width(Length::FILL).height(Length::FILL)
             }
         };
@@ -2086,7 +2204,11 @@ impl Program for Viewer {
             foot = format!("{foot} {} subfolders{}", if self.search_done { "found in" } else { "found so far in" }, if self.search_entries.len() >= search::MAX { " (the first 5000)" } else { "" });
         }
         all.push(rule());
-        all.push(panel(row(vec![space().width(Length::FILL), label(foot).size(12.0).dim()]).width(Length::FILL)).radius(0.0).padding(Padding { top: 3.0, bottom: 3.0, left: 12.0, right: 12.0 }).width(Length::FILL));
+        // How many and what is chosen at the left; the disk's free space at
+        // the right (files milestone 3, step 2).
+        let free = if self.trash_window { None } else { self.free_here() };
+        let free = free.map(|n| format!("{} free", files::size_words(n))).unwrap_or_default();
+        all.push(panel(row(vec![label(foot).size(12.0).dim(), space().width(Length::FILL), label(free).size(12.0).dim()]).width(Length::FILL)).radius(0.0).padding(Padding { top: 3.0, bottom: 3.0, left: 12.0, right: 12.0 }).width(Length::FILL));
         column(all).width(Length::FILL).height(Length::FILL)
     }
 
@@ -2095,6 +2217,9 @@ impl Program for Viewer {
             Msg::Run(c) => return self.run(c, window),
             Msg::Go(p) => self.go(p.path.map_or(Showing::Recent, Showing::Folder)),
             Msg::Crumb(p) => self.go(Showing::Folder(p)),
+            Msg::PathEdit => self.path_edit = Some(self.front_tab().and_then(|t| t.dir()).map(|d| d.display().to_string()).unwrap_or_default()),
+            Msg::PathTyped(s) => self.path_edit = Some(s),
+            Msg::PathGo => self.path_go(),
             Msg::Click(k) => self.click(k),
             Msg::Sort(by) => self.sort = if self.sort.0 == by { (by, !self.sort.1) } else { (by, by == SortBy::Name) },
             Msg::Narrow(s) => {
@@ -2245,8 +2370,20 @@ impl Program for Viewer {
             }
             return None;
         }
+        // The path being typed: Escape lets go; the field has the other keys.
+        if self.path_edit.is_some() {
+            if *sym == ESCAPE {
+                self.path_edit = None;
+                window.redraw();
+                return Some(true);
+            }
+            return None;
+        }
         let typing = !self.narrow.is_empty();
         match *sym {
+            s if m.ctrl && (s == 0x6c || s == 0x4c) && !self.trash_window => {
+                self.path_edit = Some(self.front_tab().and_then(|t| t.dir()).map(|d| d.display().to_string()).unwrap_or_default());
+            }
             ESCAPE if self.ask.is_some() => self.ask = None,
             DELETE if m.shift && !typing => self.run(cmd::DELETE, window),
             DELETE if !typing => self.run(cmd::TRASH, window),
@@ -2351,6 +2488,29 @@ impl Program for Viewer {
 
     fn resized(&mut self, width: f32, _height: f32) {
         self.width = width;
+    }
+
+    fn scroll_to(&mut self) -> Vec<(String, f32)> {
+        self.front_mut().and_then(|t| t.want.take()).map(|w| vec![("Folder".to_string(), w)]).unwrap_or_default()
+    }
+
+    fn scrolled(&mut self, name: &str, offset: f32) {
+        if name == "Folder"
+            && let Some(t) = self.front_mut()
+        {
+            t.scroll = offset;
+        }
+    }
+
+    /// The mouse's Back and Forward buttons (Linux's BTN_SIDE and
+    /// BTN_EXTRA) move through the tab's history, as in a browser.
+    fn input(&mut self, input: &Input, window: &mut Window) -> bool {
+        match input {
+            Input::Button { pressed: true, button: vergence_ui::Button::Other(0x113), .. } => self.run(cmd::BACK, window),
+            Input::Button { pressed: true, button: vergence_ui::Button::Other(0x114), .. } => self.run(cmd::FORWARD, window),
+            _ => return false,
+        }
+        true
     }
 
     fn waker(&mut self, waker: Waker) {
@@ -2480,6 +2640,8 @@ impl Program for Viewer {
             return false;
         }
         window.wake_after(WATCH_TIMER, WATCH_EVERY);
+        // Where the tabs are scrolled, kept (at most every WATCH_EVERY).
+        self.keep();
         // The folder changed on disk: read again.
         let Some(t) = self.front_mut() else { return false };
         let now = t.dir().and_then(|d| std::fs::metadata(d).and_then(|m| m.modified()).ok());
@@ -2724,6 +2886,36 @@ mod tests {
         assert_eq!((v.tabs.len(), v.pending.len()), (2, 1));
         v.narrow = "zzz".into();
         assert!(v.visible().is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn free_space_is_read_from_df() {
+        let text = "Filesystem     1024-blocks      Used Available Capacity Mounted on\n/dev/nvme0n1p2   479596204 201234567 254000000      45% /\n";
+        assert_eq!(parse_df_free(text), Some(254_000_000 * 1024));
+        assert_eq!(parse_df_free("only a heading\n"), None);
+        // The real thing, on whatever system this is.
+        assert!(df_free(&std::env::temp_dir()).is_some_and(|n| n > 0));
+    }
+
+    /// Back and Forward bring each folder back where it was scrolled; a
+    /// folder new to the tab starts at its top.
+    #[test]
+    fn folders_come_back_at_their_scroll_places() {
+        let dir = std::env::temp_dir().join(format!("vergence-files-places-{}", std::process::id()));
+        let (a, b) = (dir.join("a"), dir.join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let mut v = Viewer::new(shared());
+        v.open_paths(std::slice::from_ref(&a));
+        v.front_mut().unwrap().scroll = 300.0;
+        v.go(Showing::Folder(b.clone()));
+        assert_eq!(v.front_mut().unwrap().want.take(), Some(0.0), "a new folder: the top");
+        v.front_mut().unwrap().scroll = 75.0;
+        v.back();
+        assert_eq!(v.front_mut().unwrap().want.take(), Some(300.0));
+        v.forward();
+        assert_eq!(v.front_mut().unwrap().want.take(), Some(75.0));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -115,4 +115,25 @@ Close-Up).
   with the same one in front; Ctrl+W and Ctrl+T change what is kept.
   Tests on Hubble and techbench; agent-check 0 failed. The folders' scroll
   places come with step 2.
+- **Step 2, the toolbar row: in 2026-11-21.** Explorer's order: Back,
+  Forward, Up; the path (a click on the room after the folders, or Ctrl+L,
+  makes it a field: Enter goes to a folder, or a file's folder with the file
+  chosen, "~" is home; Escape lets go; a path not there is said); the views
+  and the panes; New Folder and Trash; the filter at the right. The status
+  line: the count and the choice at the left, the disk's free space at the
+  right (`df -kP`, read apart for each folder the first time, as
+  vergence-sysinfo reads file systems on both systems). The mouse's Back and
+  Forward (BTN_SIDE, BTN_EXTRA) move through the tab's history. Each folder
+  of a tab's history comes back at its scroll place (for the session), and
+  each tab's scroll place is kept across restarts ("at" lines in
+  files-session, written at most every 2 s; `[session] places = false`
+  starts at the top). The folder's scroll is the toolkit's named scroll
+  "Folder" (session milestone 1's Program::scroll_to/scrolled). Found on
+  the way: the path field took no keyboard, the path row having stood in
+  its place (the toolkit took them for one widget); a key of its own fixed
+  it. Checked in a headless session on Hubble: scrolled to the end of
+  crates, a path typed to docs, Back: crates at the same place (its first
+  row at -496), Forward and Back the same, killed and started again the
+  same. Tests on Hubble and techbench (the free space read from FreeBSD's
+  df too); agent-check 0 failed.
 
