@@ -455,6 +455,26 @@ pub struct View<'a, M> {
     /// A row's own controls at its end (its index, the entry), with the room
     /// they take kept in the headings too.
     pub trailing: Option<(Trailing<'a, M>, f32)>,
+    /// A name being changed in its row (rename in place, files milestone 3).
+    pub rename: Option<Rename<M>>,
+}
+
+/// A name being changed in place: the row, the text so far, what typing
+/// sends, and what Enter sends.
+pub struct Rename<M> {
+    pub row: usize,
+    pub text: String,
+    pub typed: fn(String) -> M,
+    pub done: M,
+}
+
+impl<M: Clone + 'static> Rename<M> {
+    /// The field in the name's place: a key of its own, so it is taken for a
+    /// new widget (and takes the keyboard) where the name stood.
+    fn field(&self, size: f32, width: Length) -> Element<M> {
+        let _ = size;
+        crate::field(self.text.clone(), self.typed).on_submit(self.done.clone()).autofocus().key(0x7265_6e61_6d65).width(width).name("New name")
+    }
 }
 
 /// The list (Details): headings that sort, with grips between them that
@@ -510,7 +530,11 @@ pub fn list<M: Clone + 'static>(v: &View<M>, sort: (SortBy, bool), by: impl Fn(S
                 rows.push(panel(label(name).size(11.0).weight(600).dim()).padding(Padding { top: if k == 0 { 2.0 } else { 12.0 }, bottom: 4.0, left: 10.0, right: 0.0 }).width(Length::FILL));
             }
         }
-        let mut name_col: Vec<Element<M>> = vec![label(e.name.clone()).size(rs.text()).elide().width(Length::FILL)];
+        let name_el = match &v.rename {
+            Some(r) if r.row == k => r.field(rs.text(), Length::FILL),
+            _ => label(e.name.clone()).size(rs.text()).elide().width(Length::FILL),
+        };
+        let mut name_col: Vec<Element<M>> = vec![name_el];
         if v.folders {
             let words = match v.under {
                 Some(f) => f(e),
@@ -589,7 +613,11 @@ pub fn icons<M: Clone + 'static>(v: &View<M>) -> Element<M> {
                 Some(img) => crate::picture(img).width(Length::Fixed(80.0)).height(Length::Fixed(52.0)),
                 None => entry_icon_sized(e, 3.0).width(Length::Fixed(80.0)).height(Length::Fixed(52.0)),
             };
-            let mut b = button(column(vec![mark, label(e.name.clone()).size(11.0).align(Align::Center).elide().width(Length::Fixed(88.0))]).spacing(4.0).align(Align::Center))
+            let name_el = match &v.rename {
+                Some(r) if r.row == k => r.field(11.0, Length::Fixed(88.0)),
+                _ => label(e.name.clone()).size(11.0).align(Align::Center).elide().width(Length::Fixed(88.0)),
+            };
+            let mut b = button(column(vec![mark, name_el]).spacing(4.0).align(Align::Center))
                 .look(if (v.chosen)(k, e) { ButtonLook::Chosen } else { ButtonLook::Plain })
                 .padding(Padding::hv(6.0, 4.0))
                 .on_press((v.click)(k))

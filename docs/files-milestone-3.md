@@ -175,4 +175,21 @@ Close-Up).
   dialog keeps its plain list. Checked in a headless session on Hubble: the
   repository's folder grouped by kind, then by date. Tests on Hubble and
   techbench; agent-check 0 failed.
+- **Step 5, rename in place: in 2026-11-21.** The one chosen item clicked
+  again with no keys held, then the double-click time passing with no
+  second click: its name becomes a field in its row (list and icons;
+  vergence-widgets files.rs `View::rename`, the field keyed so it takes the
+  keyboard where the name stood), its text chosen to be typed over. Enter
+  keeps it, Escape lets it go, anything else done (a click on another row,
+  a command, a tab) keeps it; a click on its own row leaves it be. F2 and
+  the menu's Rename do the same. A double click still opens. The
+  double-click time is the desktop's (Settings > Mouse), as the toolkit's
+  widgets use (FileView had its own 450 ms). New Folder and New File keep
+  the naming strip (there is no row yet). The click counts anywhere on the
+  chosen row, not only on its name (the list does not know where the name's
+  words end). Checked in a headless session on Hubble (a click, a pause, a
+  click, a pause: the field, Enter renamed it; F2 then Escape: nothing; F2,
+  typed, a click on another row: renamed), and by a test for the double
+  click (vctl's clicks come too slowly to make one). Tests on Hubble and
+  techbench; agent-check 0 failed.
 

@@ -513,7 +513,7 @@ impl Program for FileDialog {
         let visible = self.visible();
         let chosen = |k: usize, e: &Entry| self.selected == Some(k) || self.marked.contains(&e.path);
         let click = |k: usize| FileMsg::Click(k);
-        let view = crate::files::View { entries: &visible, chosen: &chosen, in_view: self.selected.map(|k| (k, self.turn.get() << 32 | k as u64)), click: &click, drag: None, folders: recent, thumb: None, menu: None, look: &crate::files::ListLook { rows: crate::files::RowSize::Small, kind: false, ..crate::files::ListLook::default() }, folder_size: None, grip: None, under: None, changed_heading: None, trailing: None };
+        let view = crate::files::View { entries: &visible, chosen: &chosen, in_view: self.selected.map(|k| (k, self.turn.get() << 32 | k as u64)), click: &click, drag: None, folders: recent, thumb: None, menu: None, look: &crate::files::ListLook { rows: crate::files::RowSize::Small, kind: false, ..crate::files::ListLook::default() }, folder_size: None, grip: None, under: None, changed_heading: None, trailing: None, rename: None };
         let (head, rows) = crate::files::list(&view, self.sort, FileMsg::Sort);
         let empty = rows.is_empty();
         let mut list: Vec<Element<FileMsg>> = vec![head, rule()];

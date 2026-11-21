@@ -56,6 +56,10 @@ const SECTION: &str = "[files]";
 /// How often the folder shown is looked at for changes.
 const WATCH_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
 const WATCH_TIMER: u64 = 1;
+/// A click on the one chosen item, then a pause: its name becomes a field
+/// (files milestone 3, step 5), unless a second click made it a double.
+const RENAME_TIMER: u64 = 2;
+/// A double click's longest gap when the desktop says none (Settings > Mouse does).
 const DOUBLE: std::time::Duration = std::time::Duration::from_millis(450);
 /// The preview pane's width.
 const PANE_W: f32 = 260.0;
@@ -432,6 +436,9 @@ struct Viewer {
     prefs_open: Rc<Cell<bool>>,
     ask: Option<Ask>,
     naming: Option<Naming>,
+    /// A click on the item already chosen alone, and when: renamed in place
+    /// once the double-click time has passed with no second click.
+    rename_after: Option<(PathBuf, Instant)>,
     job: Option<Job>,
     /// Pictures' thumbnails for the icon view, made in the background
     /// (vergence-thumbs; the freedesktop cache other desktops share).
@@ -665,6 +672,7 @@ impl Viewer {
             prefs_open: Rc::new(Cell::new(false)),
             ask: None,
             naming: None,
+            rename_after: None,
             job: None,
             thumbs,
             thumb_waker,
@@ -971,6 +979,27 @@ impl Viewer {
         stack(vec![place, list]).width(Length::Fixed(176.0)).height(Length::FILL)
     }
 
+    /// A double click's longest gap: the desktop's (Settings > Mouse), as
+    /// the toolkit's widgets use, so a slow double click opens rather than renames.
+    fn double_gap(&self) -> std::time::Duration {
+        match self.theme().double_click {
+            0 => DOUBLE,
+            ms => std::time::Duration::from_millis(ms.clamp(100, 2000) as u64),
+        }
+    }
+
+    /// The visible row whose name is being changed in place, if any.
+    fn renaming_row(&self) -> Option<usize> {
+        let target = self.naming.as_ref()?.rename.as_ref()?;
+        self.visible().iter().position(|e| e.path == *target)
+    }
+
+    /// The name of `p` made a field in its row.
+    fn start_rename(&mut self, p: PathBuf) {
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        self.naming = Some(Naming { rename: Some(p), text: name, file: false });
+    }
+
     /// The typed path gone to: a folder, or a file's folder with the file
     /// chosen; "~" is home. Not there: said, and the field stays to mend it.
     fn path_go(&mut self) {
@@ -1155,7 +1184,8 @@ impl Viewer {
         let visible: Vec<PathBuf> = self.visible().iter().map(|e| e.path.clone()).collect();
         let Some(p) = visible.get(k).cloned() else { return };
         let now = Instant::now();
-        let double = self.last_click.as_ref().is_some_and(|(t, q)| *q == p && now.duration_since(*t) < DOUBLE);
+        let gap = self.double_gap();
+        let double = self.last_click.as_ref().is_some_and(|(t, q)| *q == p && now.duration_since(*t) < gap);
         self.last_click = Some((now, p.clone()));
         let mods = self.mods;
         let Some(t) = self.front_mut() else { return };
@@ -1176,6 +1206,7 @@ impl Viewer {
             t.cursor = Some(p);
             if double {
                 self.last_click = None;
+                self.rename_after = None;
                 self.open_chosen();
             }
         }
@@ -1378,10 +1409,10 @@ impl Viewer {
                     self.start_paste(paths, dir, false, ops::Clash::KeepBoth);
                 }
             }
+            // F2 (Explorer's key) and the menu's Rename: the name a field in its row.
             cmd::RENAME => {
                 if let [one] = self.chosen_paths().as_slice() {
-                    let name = one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    self.naming = Some(Naming { rename: Some(one.clone()), text: name, file: false });
+                    self.start_rename(one.clone());
                 }
             }
             cmd::NEW_FOLDER => {
@@ -1955,7 +1986,7 @@ impl Viewer {
             }
             None => {}
         }
-        if let Some(n) = &self.naming {
+        if let Some(n) = self.naming.as_ref().filter(|n| n.rename.is_none() || self.renaming_row().is_none()) {
             out.push(strip(vec![
                 label(if n.rename.is_some() { "New name" } else if n.file { "New file" } else { "New folder" }).size(12.0),
                 field(n.text.clone(), Msg::NameTyped).on_submit(Msg::NameDone).autofocus().width(Length::FILL).name("Name"),
@@ -2126,6 +2157,7 @@ impl Viewer {
             under: if trash { Some(&under) } else { None },
             changed_heading: trash.then_some("Deleted"),
             trailing: if trash { Some((&row_tools, 2.0 * ROW_TOOL + 4.0)) } else { None },
+            rename: self.renaming_row().and_then(|row| self.naming.as_ref().map(|n| files::Rename { row, text: n.text.clone(), typed: Msg::NameTyped, done: Msg::NameDone })),
         };
         let mut body: Vec<Element<Msg>> = Vec::new();
         if let Some(p) = &tab.problem {
@@ -2285,6 +2317,10 @@ impl Program for Viewer {
     }
 
     fn tab(&mut self, event: TabEvent, window: &mut Window) {
+        // A name being changed is kept before the tabs change.
+        if self.renaming_row().is_some() {
+            self.name_done();
+        }
         match event {
             TabEvent::Chosen(id) => {
                 self.front = id;
@@ -2412,6 +2448,32 @@ impl Program for Viewer {
     }
 
     fn update(&mut self, m: Msg, window: &mut Window) {
+        // A name being changed in its row is kept when anything else is done
+        // (Dave's list: "a click elsewhere keeps it"); a click on its own row
+        // leaves it be.
+        if self.renaming_row().is_some() {
+            let own_row = matches!(m, Msg::Click(k) | Msg::DragRow(k) if Some(k) == self.renaming_row());
+            if own_row {
+                return;
+            }
+            if !matches!(m, Msg::NameTyped(_) | Msg::NameDone | Msg::NameCancel) {
+                self.name_done();
+            }
+        }
+        if let Msg::Click(k) = &m {
+            // The one chosen item clicked again, with no keys held: renamed after a pause.
+            let p = self.visible().get(*k).map(|e| e.path.clone());
+            let alone = p.is_some() && self.front_tab().is_some_and(|t| t.chosen.len() == 1 && t.chosen.first() == p.as_ref());
+            let plain = !self.mods.ctrl && !self.mods.shift;
+            self.rename_after = None;
+            if alone && plain && !self.trash_window && !self.in_trash() && self.front_tab().is_some_and(|t| t.dir().is_some()) {
+                self.rename_after = p.map(|p| (p, Instant::now()));
+                window.wake_after(RENAME_TIMER, self.double_gap() + std::time::Duration::from_millis(60));
+            }
+        }
+        if matches!(m, Msg::DragRow(_)) {
+            self.rename_after = None;
+        }
         match m {
             Msg::Run(c) => return self.run(c, window),
             Msg::PathEdit => self.path_edit = Some(self.front_tab().and_then(|t| t.dir()).map(|d| d.display().to_string()).unwrap_or_default()),
@@ -2888,6 +2950,17 @@ impl Program for Viewer {
     }
 
     fn timer(&mut self, id: u64, window: &mut Window) -> bool {
+        if id == RENAME_TIMER {
+            // Still the one chosen, and no second click came: its name a field.
+            let Some((p, at)) = self.rename_after.take() else { return false };
+            let still = self.front_tab().is_some_and(|t| t.chosen == [p.clone()]);
+            let latest = self.last_click.as_ref().is_some_and(|(t, q)| *q == p && *t >= at);
+            if still && latest && self.naming.is_none() && at.elapsed() >= self.double_gap() {
+                self.start_rename(p);
+                return true;
+            }
+            return false;
+        }
         if id != WATCH_TIMER {
             return false;
         }
@@ -3172,6 +3245,40 @@ mod tests {
         assert_eq!(v.front_mut().unwrap().want.take(), Some(300.0));
         v.forward();
         assert_eq!(v.front_mut().unwrap().want.take(), Some(75.0));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Rename in place (step 5): the one chosen item clicked again, then a
+    /// pause, makes its name a field; a double click opens it instead.
+    #[test]
+    fn a_second_click_and_a_pause_renames_a_double_click_opens() {
+        let dir = std::env::temp_dir().join(format!("vergence-files-ren-{}", std::process::id()));
+        let sub = dir.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        let mut v = Viewer::new(shared());
+        v.open_paths(std::slice::from_ref(&dir));
+        let mut w = Window::default();
+        // A double click on the chosen folder: it opens, nothing is renamed.
+        v.update(Msg::Click(0), &mut w);
+        std::thread::sleep(v.double_gap() + std::time::Duration::from_millis(50));
+        v.update(Msg::Click(0), &mut w);
+        v.update(Msg::Click(0), &mut w);
+        assert_eq!(v.front_tab().unwrap().showing, Showing::Folder(sub.clone()), "opened");
+        assert!(v.rename_after.is_none());
+        std::thread::sleep(v.double_gap() + std::time::Duration::from_millis(80));
+        assert!(!v.timer(RENAME_TIMER, &mut w) && v.naming.is_none(), "no rename after a double click");
+        // Back up: a click, a pause, a click, a pause: its name a field in its row.
+        v.back();
+        v.update(Msg::Click(0), &mut w);
+        std::thread::sleep(v.double_gap() + std::time::Duration::from_millis(50));
+        v.update(Msg::Click(0), &mut w);
+        std::thread::sleep(v.double_gap() + std::time::Duration::from_millis(80));
+        assert!(v.timer(RENAME_TIMER, &mut w));
+        assert_eq!(v.renaming_row(), Some(0));
+        // A click on another place keeps the name typed.
+        v.update(Msg::NameTyped("renamed".into()), &mut w);
+        v.update(Msg::Run(cmd::RELOAD), &mut w);
+        assert!(dir.join("renamed").is_dir() && v.naming.is_none());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
