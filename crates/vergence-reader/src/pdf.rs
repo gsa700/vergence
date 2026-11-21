@@ -8,6 +8,13 @@
 //! Past [`MAX_PAGE_PIXELS`] a page is drawn at that many pixels and, over
 //! it, the part in sight in [`TILE`]-pixel tiles at the screen's pixels.
 //! Each document's page and zoom are remembered (`places`).
+//!
+//! Reader milestone 1, step 2: pages in rows ([`View`]): one a row,
+//! scrolled (continuous), one at a time, or two side by side (a book's
+//! spread, the cover alone); and turned a quarter at a time (`turn`): the
+//! worker turns each picture it draws, and the text, links and matches,
+//! kept in the page's own coordinates, are turned where they are drawn or
+//! hit (no tiles while turned: the page picture alone).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,12 +41,12 @@ const MAX_TILES: usize = 96;
 /// Something for the worker to draw.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Job {
-    /// A whole page at a scale.
-    Page(usize, f32),
+    /// A whole page at a scale, turned (degrees).
+    Page(usize, f32, u16),
     /// One tile of a page at a scale: its column and row.
     Tile(usize, f32, u32, u32),
-    /// A page's thumbnail for the sidebar, at a scale.
-    Thumb(usize, f32),
+    /// A page's thumbnail for the sidebar, at a scale, turned.
+    Thumb(usize, f32, u16),
     /// A page's links.
     Links(usize),
     /// A page's text layer (for selecting).
@@ -90,11 +97,75 @@ pub struct Search {
 pub const THUMB_W: f32 = 132.0;
 pub const THUMB_GAP: f32 = 16.0;
 
+/// A page's picture: the scale it was drawn at, its turn, the picture.
+type Drawn = (f32, u16, Arc<Image>);
+
 /// A tile's key: page, scale in thousandths, column, row.
 type TileKey = (usize, u32, u32, u32);
 
 fn tile_key(page: usize, scale: f32, tx: u32, ty: u32) -> TileKey {
     (page, (scale * 1000.0).round() as u32, tx, ty)
+}
+
+/// How the pages are set out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    /// One page a row, scrolled through (the default).
+    Continuous,
+    /// One page at a time: scrolling stops at its edges, and goes on to the
+    /// next page past them.
+    Single,
+    /// Two pages a row, the first alone (a book's cover), then pairs.
+    Two,
+}
+
+/// A picture turned a quarter, half or three quarters clockwise.
+pub fn turn_image(img: Image, turn: u16) -> Image {
+    let (w, h) = (img.width as usize, img.height as usize);
+    if turn.is_multiple_of(360) || w == 0 || h == 0 {
+        return img;
+    }
+    let mut out = vec![0u8; w * h * 4];
+    let (ow, oh) = if turn == 180 { (w, h) } else { (h, w) };
+    for y in 0..h {
+        for x in 0..w {
+            let (nx, ny) = match turn {
+                90 => (h - 1 - y, x),
+                180 => (w - 1 - x, h - 1 - y),
+                _ => (y, w - 1 - x),
+            };
+            let (a, b) = ((y * w + x) * 4, (ny * ow + nx) * 4);
+            out[b..b + 4].copy_from_slice(&img.rgba[a..a + 4]);
+        }
+    }
+    Image { width: ow as u32, height: oh as u32, rgba: out }
+}
+
+/// A point of a page (w x h in its own points) as shown turned: clockwise.
+pub fn turn_point(turn: u16, w: f32, h: f32, x: f32, y: f32) -> (f32, f32) {
+    match turn {
+        90 => (h - y, x),
+        180 => (w - x, h - y),
+        270 => (y, w - x),
+        _ => (x, y),
+    }
+}
+
+/// A point shown on a turned page, in the page's own points.
+pub fn unturn_point(turn: u16, w: f32, h: f32, x: f32, y: f32) -> (f32, f32) {
+    match turn {
+        90 => (y, h - x),
+        180 => (w - x, h - y),
+        270 => (w - y, x),
+        _ => (x, y),
+    }
+}
+
+/// A box of a page ([x0, y0, x1, y1] in its own points) as shown turned.
+pub fn turn_box(turn: u16, w: f32, h: f32, b: &[f32; 4]) -> [f32; 4] {
+    let (ax, ay) = turn_point(turn, w, h, b[0], b[1]);
+    let (bx, by) = turn_point(turn, w, h, b[2], b[3]);
+    [ax.min(bx), ay.min(by), ax.max(bx), ay.max(by)]
 }
 
 /// How the zoom is chosen.
@@ -113,12 +184,12 @@ pub struct Shared {
     /// What to draw, most wanted first.
     wanted: Mutex<Vec<Job>>,
     ready: Condvar,
-    /// The latest picture of each page and the scale it was drawn at.
-    done: Mutex<HashMap<usize, (f32, Arc<Image>)>>,
+    /// The latest picture of each page, the scale it was drawn at and its turn.
+    done: Mutex<HashMap<usize, Drawn>>,
     tiles: Mutex<HashMap<TileKey, Arc<Image>>>,
     /// The sidebar's wishes (thumbnails), after the view's.
     side: Mutex<Vec<Job>>,
-    thumbs: Mutex<HashMap<usize, Arc<Image>>>,
+    thumbs: Mutex<HashMap<usize, (u16, Arc<Image>)>>,
     links: Mutex<HashMap<usize, Vec<Link>>>,
     /// The outline, once the worker has read it.
     pub outline: Mutex<Option<Arc<Vec<Entry>>>>,
@@ -186,21 +257,23 @@ fn work(mut viewer: vergence_pdf::helper::Viewer, shared: Arc<Shared>) {
             }
         };
         let (page, result) = match job {
-            Job::Page(page, scale) => {
-                let have = shared.done.lock().unwrap_or_else(|e| e.into_inner()).get(&page).map(|d| d.0);
-                if have.is_some_and(|s| close_enough(s, scale)) {
+            Job::Page(page, scale, turn) => {
+                let have = shared.done.lock().unwrap_or_else(|e| e.into_inner()).get(&page).map(|d| (d.0, d.1));
+                if have.is_some_and(|(s, t)| close_enough(s, scale) && t == turn) {
                     continue;
                 }
                 (page, viewer.render(page, scale, None).map(|t| {
-                    shared.done.lock().unwrap_or_else(|e| e.into_inner()).insert(page, (scale, Arc::new(Image { width: t.width, height: t.height, rgba: t.rgba })));
+                    let img = turn_image(Image { width: t.width, height: t.height, rgba: t.rgba }, turn);
+                    shared.done.lock().unwrap_or_else(|e| e.into_inner()).insert(page, (scale, turn, Arc::new(img)));
                 }))
             }
-            Job::Thumb(page, scale) => {
-                if shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).contains_key(&page) {
+            Job::Thumb(page, scale, turn) => {
+                if shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).get(&page).is_some_and(|t| t.0 == turn) {
                     continue;
                 }
                 (page, viewer.render(page, scale, None).map(|t| {
-                    shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).insert(page, Arc::new(Image { width: t.width, height: t.height, rgba: t.rgba }));
+                    let img = turn_image(Image { width: t.width, height: t.height, rgba: t.rgba }, turn);
+                    shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).insert(page, (turn, Arc::new(img)));
                 }))
             }
             Job::Text(page) => {
@@ -260,8 +333,13 @@ fn close_enough(a: f32, b: f32) -> bool {
 /// Where an open PDF is shown: cheap to copy into a drawing.
 #[derive(Clone)]
 pub struct Layout {
-    /// Each page's size as shown, in points.
+    /// Each page's size as shown (turned), in points.
     pub pages: Arc<Vec<(f32, f32)>>,
+    /// Each page's own size, in points.
+    pub sizes: Arc<Vec<(f32, f32)>>,
+    /// How the pages are set out, and turned (0, 90, 180, 270 clockwise).
+    pub view: View,
+    pub turn: u16,
     pub shared: Arc<Shared>,
     pub mode: Mode,
     /// The document's y (points, from the first page's top) at the top of the view.
@@ -322,39 +400,110 @@ pub fn start(viewer: vergence_pdf::helper::Viewer, waker: Option<Waker>) -> Resu
     if viewer.info.pages.is_empty() {
         return Err("This PDF has no pages.".into());
     }
-    let pages = Arc::new(viewer.info.pages.iter().map(|&(w, h)| (w.max(1.0), h.max(1.0))).collect());
+    let pages: Arc<Vec<(f32, f32)>> = Arc::new(viewer.info.pages.iter().map(|&(w, h)| (w.max(1.0), h.max(1.0))).collect());
     let shared = Arc::new(Shared::new(waker));
     let s = shared.clone();
     std::thread::spawn(move || work(viewer, s));
-    Ok(Pdf(Layout { pages, shared, mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0, selection: None, found: None }))
+    Ok(Pdf(Layout { sizes: pages.clone(), pages, view: View::Continuous, turn: 0, shared, mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0, selection: None, found: None }))
 }
 
 impl Layout {
     /// For tests: pages with no helper behind them.
     #[cfg(test)]
     fn sized(pages: Vec<(f32, f32)>) -> Layout {
-        Layout { pages: Arc::new(pages), shared: Arc::new(Shared::new(None)), mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0, selection: None, found: None }
+        let pages = Arc::new(pages);
+        Layout { sizes: pages.clone(), pages, view: View::Continuous, turn: 0, shared: Arc::new(Shared::new(None)), mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0, selection: None, found: None }
     }
 
-    /// Each page's top in the document, in points.
-    pub fn tops(&self) -> Vec<f32> {
+    /// The pages in rows, as the view sets them out.
+    pub fn rows(&self) -> Vec<std::ops::Range<usize>> {
+        let n = self.pages.len();
+        match self.view {
+            View::Continuous | View::Single => (0..n).map(|p| p..p + 1).collect(),
+            View::Two => {
+                let mut out = Vec::new();
+                out.push(0..1.min(n));
+                let mut p = 1;
+                while p < n {
+                    out.push(p..(p + 2).min(n));
+                    p += 2;
+                }
+                out
+            }
+        }
+    }
+
+    /// The row a page is in.
+    pub fn row_of(&self, p: usize) -> usize {
+        match self.view {
+            View::Two => p.div_ceil(2),
+            _ => p,
+        }
+    }
+
+    fn row_size(&self, row: &std::ops::Range<usize>) -> (f32, f32) {
+        let w = self.pages[row.clone()].iter().map(|p| p.0).sum::<f32>() + GAP * (row.len().saturating_sub(1)) as f32;
+        let h = self.pages[row.clone()].iter().map(|p| p.1).fold(0.0, f32::max);
+        (w, h)
+    }
+
+    /// Each row's top in the document, in points.
+    fn row_tops(&self) -> Vec<f32> {
         let mut y = 0.0;
-        self.pages
+        self.rows()
             .iter()
-            .map(|p| {
+            .map(|row| {
                 let t = y;
-                y += p.1 + GAP;
+                y += self.row_size(row).1 + GAP;
                 t
             })
             .collect()
     }
 
+    /// Each page's place in the document: its left edge from the middle of
+    /// the view, and its top (pages in a row share their row's top).
+    pub fn spots(&self) -> Vec<(f32, f32)> {
+        let mut out = vec![(0.0, 0.0); self.pages.len()];
+        for (row, top) in self.rows().iter().zip(self.row_tops()) {
+            let (rw, rh) = self.row_size(row);
+            let mut x = -rw / 2.0;
+            for p in row.clone() {
+                let (pw, ph) = self.pages[p];
+                // A page shorter than its row's tallest: centered in it.
+                out[p] = (x, top + (rh - ph) / 2.0);
+                x += pw + GAP;
+            }
+        }
+        out
+    }
+
+    /// Each page's top in the document, in points.
+    pub fn tops(&self) -> Vec<f32> {
+        self.spots().into_iter().map(|s| s.1).collect()
+    }
+
     pub fn total(&self) -> f32 {
-        self.pages.iter().map(|p| p.1 + GAP).sum::<f32>() - GAP
+        self.rows().iter().map(|row| self.row_size(row).1 + GAP).sum::<f32>() - GAP
     }
 
     fn widest(&self) -> f32 {
-        self.pages.iter().map(|p| p.0).fold(1.0, f32::max)
+        self.rows().iter().map(|row| self.row_size(row).0).fold(1.0, f32::max)
+    }
+
+    /// The pages turned to `turn` (0, 90, 180 or 270): their sizes as shown.
+    pub fn set_turn(&mut self, turn: u16, r: Rect) {
+        let current = self.current(r);
+        self.turn = turn % 360;
+        let t = self.turn;
+        self.pages = Arc::new(self.sizes.iter().map(|&(w, h)| if t == 90 || t == 270 { (h, w) } else { (w, h) }).collect());
+        self.go_to(current, r);
+    }
+
+    /// The pages set out anew, the current page kept in view.
+    pub fn set_view(&mut self, view: View, r: Rect) {
+        let current = self.current(r);
+        self.view = view;
+        self.go_to(current, r);
     }
 
     /// Document points per window point, in a place `r`.
@@ -363,53 +512,100 @@ impl Layout {
         match self.mode {
             Mode::Width => room.0 / self.widest(),
             Mode::Page => {
-                let p = self.pages[self.current(r).min(self.pages.len() - 1)];
-                (room.0 / p.0).min(room.1 / p.1)
+                let rows = self.rows();
+                let row = &rows[self.row_of(self.current(r).min(self.pages.len() - 1)).min(rows.len() - 1)];
+                let (w, h) = self.row_size(row);
+                (room.0 / w).min(room.1 / h)
             }
             Mode::Zoom(z) => z,
         }
         .clamp(MIN_ZOOM, MAX_ZOOM)
     }
 
-    /// The page at the middle of the view (by the zoom of Width or Zoom:
-    /// Page's zoom depends on it).
+    /// The first page of the row at the middle of the view (by the zoom of
+    /// Width or Zoom: Page's zoom depends on it).
     pub fn current(&self, r: Rect) -> usize {
         let z = match self.mode {
             Mode::Zoom(z) => z,
             _ => ((r.w - 2.0 * MARGIN).max(40.0) / self.widest()).clamp(MIN_ZOOM, MAX_ZOOM),
         };
         let mid = self.top + (r.h / 2.0 - MARGIN) / z;
-        let tops = self.tops();
-        tops.iter().rposition(|&t| t <= mid + GAP / 2.0).unwrap_or(0)
+        let row = self.row_tops().iter().rposition(|&t| t <= mid + GAP / 2.0).unwrap_or(0);
+        self.rows().get(row).map_or(0, |r| r.start)
+    }
+
+    /// The part of the document the view may show: all of it, or (one page
+    /// at a time) the current row.
+    fn bounds(&self, r: Rect) -> (f32, f32) {
+        if self.view == View::Single {
+            let rows = self.rows();
+            let row = self.row_of(self.current(r)).min(rows.len() - 1);
+            let top = self.row_tops()[row];
+            return (top, top + self.row_size(&rows[row]).1);
+        }
+        (0.0, self.total())
     }
 
     /// The view kept on the document.
     pub fn clamp(&mut self, r: Rect) {
         let z = self.zoom(r);
         let view = (r.h - 2.0 * MARGIN) / z;
-        let max = (self.total() - view).max(0.0);
-        self.top = if self.total() <= view { (self.total() - view) / 2.0 } else { self.top.clamp(0.0, max) };
+        let (a, b) = self.bounds(r);
+        let max = (b - view).max(a);
+        self.top = if b - a <= view { a - (view - (b - a)) / 2.0 } else { self.top.clamp(a, max) };
         let wide = self.widest() * z + 2.0 * MARGIN;
         let room = (wide - r.w).max(0.0) / 2.0;
         self.pan_x = self.pan_x.clamp(-room, room);
     }
 
-    /// Page `p` at the top of the view (centered when it fits whole).
+    /// Page `p`'s row at the top of the view (centered when it fits whole).
     pub fn go_to(&mut self, p: usize, r: Rect) {
         let p = p.min(self.pages.len() - 1);
-        let top = self.tops()[p];
-        // Page mode's zoom is the page's own: worked out with it current.
+        let rows = self.rows();
+        let row = self.row_of(p).min(rows.len() - 1);
+        let top = self.row_tops()[row];
+        // Page mode's zoom is the row's own: worked out with it current.
         self.top = top;
         let z = self.zoom(r);
         let view = (r.h - 2.0 * MARGIN) / z;
-        let h = self.pages[p].1;
+        let h = self.row_size(&rows[row]).1;
         self.top = if h <= view { top - (view - h) / 2.0 } else { top };
         self.clamp(r);
     }
 
+    /// Scrolled by window points; one page at a time, a scroll at the
+    /// page's edge goes on to the next page (or back to the one before).
     pub fn scroll(&mut self, dy: f32, dx: f32, r: Rect) {
         let z = self.zoom(r);
+        if self.view == View::Single && dy != 0.0 {
+            let view = (r.h - 2.0 * MARGIN) / z;
+            let (a, b) = self.bounds(r);
+            let at_end = self.top >= (b - view).max(a) - 0.5;
+            let at_start = self.top <= a + 0.5;
+            let rows = self.rows();
+            let row = self.row_of(self.current(r));
+            if dy > 0.0 && at_end && row + 1 < rows.len() {
+                self.go_to(rows[row + 1].start, r);
+                let (a, _) = self.bounds(r);
+                self.top = self.top.min(a);
+                self.clamp(r);
+                return;
+            }
+            if dy < 0.0 && at_start && row > 0 {
+                self.go_to(rows[row - 1].start, r);
+                let (_, b) = self.bounds(r);
+                self.top = (b - view).max(self.top);
+                self.clamp(r);
+                return;
+            }
+        }
+        // One page at a time: held within the page it was on.
+        let held = (self.view == View::Single).then(|| self.bounds(r));
         self.top += dy / z;
+        if let Some((a, b)) = held {
+            let view = (r.h - 2.0 * MARGIN) / z;
+            self.top = self.top.clamp(a, (b - view).max(a));
+        }
         self.pan_x -= dx;
         self.clamp(r);
     }
@@ -434,21 +630,33 @@ impl Layout {
         self.clamp(r);
     }
 
-    /// Whether the current page fits whole: then Left and Right go a page.
+    /// Whether the current row fits whole: then Left and Right go a page.
     pub fn page_fits(&self, r: Rect) -> bool {
         let z = self.zoom(r);
-        let p = self.pages[self.current(r)];
-        p.1 * z <= r.h - MARGIN && p.0 * z <= r.w
+        let rows = self.rows();
+        let (w, h) = self.row_size(&rows[self.row_of(self.current(r)).min(rows.len() - 1)]);
+        h * z <= r.h - MARGIN && w * z <= r.w
     }
 
     /// The pages in sight, `[first, last]`.
     pub fn in_sight(&self, r: Rect) -> (usize, usize) {
         let z = self.zoom(r);
         let (a, b) = (self.top - MARGIN / z, self.top + (r.h - MARGIN) / z);
-        let tops = self.tops();
-        let first = tops.iter().zip(self.pages.iter()).position(|(t, p)| t + p.1 >= a).unwrap_or(0);
-        let last = tops.iter().rposition(|&t| t <= b).unwrap_or(first).max(first);
+        let (lo, hi) = if self.view == View::Single { self.bounds(r) } else { (f32::MIN, f32::MAX) };
+        let spots = self.spots();
+        let shown = |p: usize| {
+            let (t, h) = (spots[p].1, self.pages[p].1);
+            t + h >= a.max(lo) && t <= b.min(hi)
+        };
+        let first = (0..self.pages.len()).find(|&p| shown(p)).unwrap_or(0);
+        let last = (first..self.pages.len()).take_while(|&p| shown(p) || spots[p].1 <= spots[first].1).last().unwrap_or(first).max(first);
         (first, last)
+    }
+
+    /// Where page `p` is drawn in the window, at zoom `z`.
+    pub fn dest(&self, r: Rect, z: f32, spots: &[(f32, f32)], p: usize) -> Rect {
+        let (pw, ph) = self.pages[p];
+        Rect::new(r.x + r.w / 2.0 + spots[p].0 * z + self.pan_x, r.y + MARGIN + (spots[p].1 - self.top) * z, pw * z, ph * z)
     }
 
     /// Draws the pages in `r` and asks the worker for what is missing.
@@ -457,8 +665,9 @@ impl Layout {
         scene.push_clip(r, 0.0);
         scene.fill(r, ground);
         let z = self.zoom(r);
+        let turn = self.turn;
         let (first, last) = self.in_sight(r);
-        let tops = self.tops();
+        let spots = self.spots();
         let done = self.shared.done.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let failed: Vec<usize> = self.shared.failed.lock().unwrap_or_else(|e| e.into_inner()).keys().copied().collect();
         let tiles = self.shared.tiles.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -470,17 +679,24 @@ impl Layout {
         let middle = self.current(r);
         for p in first..=last {
             let (pw, ph) = self.pages[p];
-            let dest = Rect::new(r.x + (r.w - pw * z) / 2.0 + self.pan_x, r.y + MARGIN + (tops[p] - self.top) * z, pw * z, ph * z);
+            let (sw, sh) = self.sizes[p];
+            let dest = self.dest(r, z, &spots, p);
             scene.fill(Rect::new(dest.x + 1.0, dest.y + 2.0, dest.w, dest.h), Color::rgba(0, 0, 0, 0x50));
             scene.fill(dest, Color::rgb(0xff, 0xff, 0xff));
-            if let Some((_, img)) = done.get(&p) {
+            if let Some((_, t, img)) = done.get(&p)
+                && *t == turn
+            {
                 let id = scene.image(img.clone());
                 scene.draw_image(id, dest, 1.0);
             }
             if failed.contains(&p) {
                 scene.fill(dest, Color::rgba(0xd0, 0x30, 0x30, 0x30));
             }
-            let to_window = |b: &[f32; 4]| Rect::new(dest.x + b[0] * z, dest.y + b[1] * z, (b[2] - b[0]) * z, (b[3] - b[1]) * z);
+            // Boxes in the page's own points, turned as the page is.
+            let to_window = |b: &[f32; 4]| {
+                let b = turn_box(turn, sw, sh, b);
+                Rect::new(dest.x + b[0] * z, dest.y + b[1] * z, (b[2] - b[0]) * z, (b[3] - b[1]) * z)
+            };
             // Search matches: yellow, the one shown orange.
             for (i, (mp, bs)) in search.matches.iter().enumerate() {
                 if *mp == p {
@@ -499,12 +715,13 @@ impl Layout {
                 }
             }
             let s = page_scale(pw, ph, z * scale);
-            if !done.get(&p).is_some_and(|d| close_enough(d.0, s)) && !failed.contains(&p) {
-                wanted.push(Job::Page(p, s));
+            if !done.get(&p).is_some_and(|d| close_enough(d.0, s) && d.1 == turn) && !failed.contains(&p) {
+                wanted.push(Job::Page(p, s, turn));
             }
-            // Deeper than a page picture goes: the part in sight in tiles.
+            // Deeper than a page picture goes: the part in sight in tiles
+            // (not while turned: the page picture alone).
             let deep = round3(z * scale);
-            if deep > s * 1.02 && !failed.contains(&p) {
+            if turn == 0 && deep > s * 1.02 && !failed.contains(&p) {
                 let k = deep / z; // pixels per window point
                 let vis = (dest.x.max(r.x), dest.y.max(r.y), (dest.x + dest.w).min(r.x + r.w), (dest.y + dest.h).min(r.y + r.h));
                 if vis.2 > vis.0 && vis.3 > vis.1 {
@@ -531,12 +748,12 @@ impl Layout {
             }
         }
         // The page below, ahead of being scrolled to.
-        if last + 1 < self.pages.len() && !done.contains_key(&(last + 1)) {
+        if last + 1 < self.pages.len() && !done.get(&(last + 1)).is_some_and(|d| d.1 == turn) {
             let (pw, ph) = self.pages[last + 1];
-            wanted.push(Job::Page(last + 1, page_scale(pw, ph, z * scale)));
+            wanted.push(Job::Page(last + 1, page_scale(pw, ph, z * scale), turn));
         }
         let page_of = |j: &Job| match j {
-            Job::Page(p, _) | Job::Tile(p, ..) | Job::Thumb(p, _) | Job::Links(p) | Job::Text(p) | Job::Search(p, _) => *p,
+            Job::Page(p, ..) | Job::Tile(p, ..) | Job::Thumb(p, ..) | Job::Links(p) | Job::Text(p) | Job::Search(p, _) => *p,
         };
         wanted.sort_by_key(|j| (page_of(j) as isize - middle as isize).unsigned_abs());
         // Page pictures first (they cover the page soonest), then its tiles.
@@ -572,15 +789,20 @@ impl Layout {
 impl Layout {
     /// The page and the point on it (points from its top left) under a
     /// window point, if any.
+    /// (In the page's own points: turned back if the page is turned.)
     pub fn hit(&self, r: Rect, x: f32, y: f32) -> Option<(usize, f32, f32)> {
         let z = self.zoom(r);
-        let tops = self.tops();
+        let spots = self.spots();
         let (first, last) = self.in_sight(r);
         (first..=last).find_map(|p| {
             let (pw, ph) = self.pages[p];
-            let (dx, dy) = (r.x + (r.w - pw * z) / 2.0 + self.pan_x, r.y + MARGIN + (tops[p] - self.top) * z);
-            let (px, py) = ((x - dx) / z, (y - dy) / z);
-            (px >= 0.0 && py >= 0.0 && px <= pw && py <= ph).then_some((p, px, py))
+            let d = self.dest(r, z, &spots, p);
+            let (px, py) = ((x - d.x) / z, (y - d.y) / z);
+            let (sw, sh) = self.sizes[p];
+            (px >= 0.0 && py >= 0.0 && px <= pw && py <= ph).then(|| {
+                let (ux, uy) = unturn_point(self.turn, sw, sh, px, py);
+                (p, ux, uy)
+            })
         })
     }
 
@@ -657,7 +879,8 @@ impl Layout {
             (k, se.matches[k].clone())
         };
         let (page, boxes) = m;
-        let top = boxes.first().map(|b| b[1]).unwrap_or(0.0);
+        let (sw, sh) = self.sizes[page];
+        let top = boxes.first().map(|b| turn_box(self.turn, sw, sh, b)[1]).unwrap_or(0.0);
         let z = self.zoom(r);
         // Into view unless it already is, a third of the way down.
         let tops = self.tops();
@@ -674,7 +897,7 @@ impl Layout {
     /// A destination: its page, and the spot on it when it names one.
     pub fn go_to_target(&mut self, t: Target, r: Rect) {
         let page = t.page.min(self.pages.len() - 1);
-        match t.top {
+        match t.top.filter(|_| self.turn == 0) {
             Some(top) => {
                 let z = self.zoom(r);
                 self.top = self.tops()[page] + top.clamp(0.0, self.pages[page].1) - 8.0 / z;
@@ -753,12 +976,12 @@ impl Layout {
             }
             scene.fill(Rect::new(dest.x + 1.0, dest.y + 1.5, w, h), Color::rgba(0, 0, 0, 0x50));
             scene.fill(dest, Color::rgb(0xff, 0xff, 0xff));
-            match thumbs.get(&p) {
-                Some(img) => {
+            match thumbs.get(&p).filter(|t| t.0 == self.turn) {
+                Some((_, img)) => {
                     let id = scene.image(img.clone());
                     scene.draw_image(id, dest, 1.0);
                 }
-                None => wanted.push(Job::Thumb(p, round3(w * scale.max(0.25) / self.pages[p].0))),
+                None => wanted.push(Job::Thumb(p, round3(w * scale.max(0.25) / self.pages[p].0), self.turn)),
             }
         }
         {
@@ -974,6 +1197,55 @@ mod tests {
         assert_eq!(s.on_page(2, 50), Some((0, 49)));
         assert_eq!(s.on_page(3, 50), Some((0, 10)));
         assert_eq!(s.on_page(3, 5), Some((0, 4)));
+    }
+
+    #[test]
+    fn two_pages_a_row_the_cover_alone() {
+        let mut d = Layout::sized(vec![LETTER; 5]);
+        let r = Rect::new(0.0, 0.0, 1300.0, 900.0);
+        d.set_view(View::Two, r);
+        assert_eq!(d.rows(), vec![0..1, 1..3, 3..5]);
+        let spots = d.spots();
+        assert_eq!(spots[1].1, spots[2].1, "a spread's pages share a top");
+        assert!(spots[1].0 < 0.0 && spots[2].0 > 0.0, "left and right of the middle");
+        assert!((spots[0].0 + LETTER.0 / 2.0).abs() < 1e-3, "the cover alone, centered");
+        // Fit to the width: a spread fills it.
+        assert!((d.zoom(r) - (1300.0 - 2.0 * MARGIN) / (2.0 * LETTER.0 + GAP)).abs() < 1e-4);
+        d.go_to(4, r);
+        assert_eq!(d.current(r), 3, "the row's first page");
+    }
+
+    #[test]
+    fn one_page_at_a_time_goes_on_at_its_edges() {
+        let mut d = Layout::sized(vec![LETTER; 4]);
+        let r = place();
+        d.set_view(View::Single, r);
+        d.scroll(1e6, 0.0, r);
+        assert_eq!(d.current(r), 0, "held at the page's end");
+        let (_, last) = d.in_sight(r);
+        assert_eq!(last, 0, "only the page shows");
+        d.scroll(10.0, 0.0, r);
+        assert_eq!(d.current(r), 1, "a scroll past its end: the next page");
+        d.scroll(-10.0, 0.0, r);
+        assert_eq!(d.current(r), 0, "and back past its start");
+    }
+
+    #[test]
+    fn turned_pages() {
+        let mut d = Layout::sized(vec![LETTER; 2]);
+        let r = place();
+        d.set_turn(90, r);
+        assert_eq!(d.pages[0], (792.0, 612.0));
+        // A point and its box turned and back.
+        for t in [0, 90, 180, 270] {
+            let (x, y) = turn_point(t, 612.0, 792.0, 100.0, 50.0);
+            assert_eq!(unturn_point(t, 612.0, 792.0, x, y), (100.0, 50.0), "{t}");
+        }
+        assert_eq!(turn_box(90, 612.0, 792.0, &[100.0, 50.0, 200.0, 60.0]), [732.0, 100.0, 742.0, 200.0]);
+        let img = Image { width: 2, height: 1, rgba: vec![1, 1, 1, 1, 2, 2, 2, 2] };
+        let t = turn_image(img, 90);
+        assert_eq!((t.width, t.height), (1, 2));
+        assert_eq!(&t.rgba[..4], &[1, 1, 1, 1], "the left pixel at the top");
     }
 
     #[test]

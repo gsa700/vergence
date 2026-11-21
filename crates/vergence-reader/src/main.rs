@@ -46,6 +46,8 @@ mod cmd {
     pub const ZOOM_OUT: u32 = 5;
     pub const FIT: u32 = 6;
     pub const ACTUAL: u32 = 7;
+    pub const TURN_RIGHT: u32 = 8;
+    pub const TURN_LEFT: u32 = 9;
     pub const NEXT: u32 = 10;
     pub const PREVIOUS: u32 = 11;
     pub const OPEN_WITH: u32 = 14;
@@ -56,6 +58,12 @@ mod cmd {
     pub const FIND: u32 = 19;
     pub const FIND_NEXT: u32 = 20;
     pub const FIND_PREVIOUS: u32 = 21;
+    pub const BACK: u32 = 22;
+    pub const FORWARD: u32 = 23;
+    pub const GO_TO_PAGE: u32 = 24;
+    pub const VIEW_CONTINUOUS: u32 = 25;
+    pub const VIEW_SINGLE: u32 = 26;
+    pub const VIEW_TWO: u32 = 27;
     pub const SETTINGS: u32 = 40;
     pub const ABOUT: u32 = 41;
 }
@@ -80,11 +88,14 @@ struct Shared {
 
 type SharedRef = Rc<RefCell<Shared>>;
 
-/// A tab: one document.
+/// A tab: one document, and the pages gone to by links, the outline,
+/// find and the page field (back and forward through them).
 struct Tab {
     id: u32,
     path: PathBuf,
     content: Content,
+    back: Vec<usize>,
+    forward: Vec<usize>,
 }
 
 enum Content {
@@ -168,6 +179,10 @@ struct Viewer {
     finding: Option<String>,
     /// Dragging out a text selection (not scrolling).
     selecting: bool,
+    /// The page field's key (a new one drops its focus, or with
+    /// `page_focus`, takes the keyboard: Go to Page).
+    page_key: u64,
+    page_focus: bool,
 }
 
 /// Addresses a document's links may open (through vergence-open, after asking).
@@ -231,6 +246,37 @@ impl Viewer {
             pending_uri: None,
             finding: None,
             selecting: false,
+            page_key: 0,
+            page_focus: false,
+        }
+    }
+
+    /// Before a jump (a link, the outline, find, the page field): the page
+    /// now, to come back to.
+    fn mark(&mut self) {
+        let r = self.area.get();
+        let Some(t) = self.front_mut() else { return };
+        let Content::Pdf(d) = &t.content else { return };
+        let here = d.current(r);
+        if t.back.last() != Some(&here) {
+            t.back.push(here);
+            if t.back.len() > 100 {
+                t.back.remove(0);
+            }
+        }
+        t.forward.clear();
+    }
+
+    /// Back (or forward) to the page gone from.
+    fn go_back(&mut self, forward: bool) {
+        let r = self.area.get();
+        let Some(t) = self.front_mut() else { return };
+        let Content::Pdf(d) = &mut t.content else { return };
+        let here = d.current(r);
+        let (from, to) = if forward { (&mut t.forward, &mut t.back) } else { (&mut t.back, &mut t.forward) };
+        if let Some(p) = from.pop() {
+            to.push(here);
+            d.go_to(p, r);
         }
     }
 
@@ -276,7 +322,7 @@ impl Viewer {
     /// A file shown once the window can be woken (its `waker` reads it).
     fn queue(&mut self, p: PathBuf) {
         let id = self.next_id();
-        self.tabs.push(Tab { id, path: p, content: Content::Loading });
+        self.tabs.push(Tab { id, path: p, content: Content::Loading, back: Vec::new(), forward: Vec::new() });
         self.front = id;
     }
 
@@ -290,7 +336,7 @@ impl Viewer {
             }
             let id = self.next_id();
             load(p.clone(), id, &self.shared.borrow(), self.waker.clone());
-            self.tabs.push(Tab { id, path: p, content: Content::Loading });
+            self.tabs.push(Tab { id, path: p, content: Content::Loading, back: Vec::new(), forward: Vec::new() });
             self.front = id;
         }
     }
@@ -378,6 +424,28 @@ impl Viewer {
                 d.go_to(c.saturating_sub(1), r);
             }
             cmd::SIDEBAR => self.sidebar = !self.sidebar,
+            cmd::TURN_RIGHT => {
+                let t = (d.turn + 90) % 360;
+                d.set_turn(t, r);
+            }
+            cmd::TURN_LEFT => {
+                let t = (d.turn + 270) % 360;
+                d.set_turn(t, r);
+            }
+            cmd::VIEW_CONTINUOUS => d.set_view(pdf::View::Continuous, r),
+            cmd::VIEW_SINGLE => d.set_view(pdf::View::Single, r),
+            cmd::VIEW_TWO => d.set_view(pdf::View::Two, r),
+            cmd::BACK | cmd::FORWARD => {
+                self.go_back(id == cmd::FORWARD);
+                self.follow_thumb();
+                return true;
+            }
+            cmd::GO_TO_PAGE => {
+                self.page_key += 1;
+                self.page_focus = true;
+                self.page_field = None;
+                return true;
+            }
             cmd::COPY | cmd::SELECT_ALL | cmd::FIND | cmd::FIND_NEXT | cmd::FIND_PREVIOUS => return self.pdf_text_command(id),
             _ => return false,
         }
@@ -387,6 +455,10 @@ impl Viewer {
 
     /// Copy, Select All and Find.
     fn pdf_text_command(&mut self, id: u32) -> bool {
+        // The first match gone to: where reading was is kept for Back.
+        if matches!(id, cmd::FIND_NEXT | cmd::FIND_PREVIOUS) && self.front_tab().is_some_and(|t| matches!(&t.content, Content::Pdf(d) if d.found.is_none())) {
+            self.mark();
+        }
         let r = self.area.get();
         let finding = self.finding.is_some();
         let (mut copy, mut find) = (None, None);
@@ -407,6 +479,7 @@ impl Viewer {
             }
             cmd::FIND_NEXT | cmd::FIND_PREVIOUS => {
                 let step = if id == cmd::FIND_NEXT { 1 } else { -1 };
+
                 let next = match d.found {
                     Some(i) => i as isize + step,
                     // The first match at or after the place in view.
@@ -445,6 +518,7 @@ impl Viewer {
         let r = self.area.get();
         match action {
             vergence_pdf::outline::Action::GoTo(t) => {
+                self.mark();
                 if let Some(d) = self.pdf_mut() {
                     d.go_to_target(t, r);
                 }
@@ -745,8 +819,10 @@ impl Viewer {
         panel(row(row_items).spacing(10.0).align(Align::Center).width(Length::FILL)).radius(0.0).padding(Padding { top: 4.0, bottom: 4.0, left: 12.0, right: 12.0 }).width(Length::FILL).key(0x4649_4e44)
     }
 
-    /// The toolbar: the sidebar, pages, zoom (width, whole page, actual
-    /// size); Find and Open at the end.
+    /// The toolbar: the sidebar; back and forward; the page (a field to
+    /// type one into) with previous and next; zoom (out, in, the width, the
+    /// whole page, actual size); the views (continuous, one page, two);
+    /// turning; Find and Open at the end.
     fn toolbar(&self, t: &Tab, th: &Theme) -> Element<Msg> {
         use vergence_widgets::toolbar::{Icon, flexible, group, tool, toggle, toolbar};
         let Content::Pdf(d) = &t.content else {
@@ -754,16 +830,33 @@ impl Viewer {
         };
         let r = self.area.get();
         let c = d.current(r);
+        let shown = self.page_field.clone().unwrap_or_else(|| (c + 1).to_string());
+        let mut page = field(shown, Msg::PageField).on_submit(Msg::GoToPage).name("Page number").width(Length::Fixed(48.0)).key(0x5041_4745_0000 + self.page_key);
+        if self.page_focus {
+            page = page.autofocus();
+        }
         let items = vec![
             toggle(Icon::Pane, "Sidebar", self.sidebar, Msg::Run(cmd::SIDEBAR)),
-            group(vec![tool(Icon::Previous, "Previous page", (c > 0).then_some(Msg::Run(cmd::PREVIOUS))), tool(Icon::Next, "Next page", (c + 1 < d.pages.len()).then_some(Msg::Run(cmd::NEXT)))]),
+            group(vec![tool(Icon::Back, "Back", (!t.back.is_empty()).then_some(Msg::Run(cmd::BACK))), tool(Icon::Forward, "Forward", (!t.forward.is_empty()).then_some(Msg::Run(cmd::FORWARD)))]),
+            group(vec![
+                tool(Icon::Previous, "Previous page", (c > 0).then_some(Msg::Run(cmd::PREVIOUS))),
+                page,
+                label(format!("of {}", d.pages.len())).size(12.0).dim(),
+                tool(Icon::Next, "Next page", (c + 1 < d.pages.len()).then_some(Msg::Run(cmd::NEXT))),
+            ]),
             group(vec![
                 tool(Icon::ZoomOut, "Zoom out", Some(Msg::Run(cmd::ZOOM_OUT))),
                 tool(Icon::ZoomIn, "Zoom in", Some(Msg::Run(cmd::ZOOM_IN))),
-                toggle(Icon::Fit, "Fit to the width", d.mode == pdf::Mode::Width, Msg::Run(cmd::FIT)),
+                toggle(Icon::FitWidth, "Fit to the width", d.mode == pdf::Mode::Width, Msg::Run(cmd::FIT)),
                 toggle(Icon::Fit, "The whole page", d.mode == pdf::Mode::Page, Msg::Run(cmd::FIT_PAGE)),
                 tool(Icon::Actual, "Actual size", Some(Msg::Run(cmd::ACTUAL))),
             ]),
+            group(vec![
+                toggle(Icon::Continuous, "Continuous", d.view == pdf::View::Continuous, Msg::Run(cmd::VIEW_CONTINUOUS)),
+                toggle(Icon::OnePage, "One page", d.view == pdf::View::Single, Msg::Run(cmd::VIEW_SINGLE)),
+                toggle(Icon::TwoPages, "Two pages", d.view == pdf::View::Two, Msg::Run(cmd::VIEW_TWO)),
+            ]),
+            group(vec![tool(Icon::TurnLeft, "Turn left", Some(Msg::Run(cmd::TURN_LEFT))), tool(Icon::TurnRight, "Turn right", Some(Msg::Run(cmd::TURN_RIGHT)))]),
             flexible(),
             toggle(Icon::Search, "Find", self.finding.is_some(), if self.finding.is_some() { Msg::FindDone } else { Msg::Run(cmd::FIND) }),
             tool(Icon::Open, "Open…", Some(Msg::Run(cmd::OPEN))),
@@ -775,10 +868,7 @@ impl Viewer {
         let mut items: Vec<Element<Msg>> = vec![label(t.name()).size(12.0).width(Length::FILL)];
         if let Content::Pdf(d) = &t.content {
             let r = self.area.get();
-            let shown = self.page_field.clone().unwrap_or_else(|| (d.current(r) + 1).to_string());
-            items.push(label("Page").size(12.0).dim());
-            items.push(field(shown, Msg::PageField).on_submit(Msg::GoToPage).name("Page number").width(Length::Fixed(52.0)));
-            items.push(label(format!("of {}", d.pages.len())).size(12.0).dim());
+            items.push(label(format!("Page {} of {}", d.current(r) + 1, d.pages.len())).size(12.0).dim());
             let mode = match d.mode {
                 pdf::Mode::Width => " (width)",
                 pdf::Mode::Page => " (page)",
@@ -952,6 +1042,7 @@ impl Program for Viewer {
             }
             Msg::Unlock => self.unlock(),
             Msg::ThumbTouch(Touch::Press { y, .. }) => {
+                self.mark();
                 let (r, tr) = (self.area.get(), self.thumb_area.get());
                 if let Some(d) = self.pdf_mut()
                     && let Some(p) = d.thumb_at(tr, tr.y + y)
@@ -995,11 +1086,16 @@ impl Program for Viewer {
             Msg::PageField(text) => self.page_field = Some(text.chars().filter(char::is_ascii_digit).take(6).collect()),
             Msg::GoToPage => {
                 let r = self.area.get();
-                if let Some(n) = self.page_field.take().and_then(|t| t.parse::<usize>().ok())
-                    && let Some(d) = self.pdf_mut()
-                {
-                    d.go_to(n.saturating_sub(1), r);
+                if let Some(n) = self.page_field.take().and_then(|t| t.parse::<usize>().ok()) {
+                    self.mark();
+                    if let Some(d) = self.pdf_mut() {
+                        d.go_to(n.saturating_sub(1), r);
+                    }
                 }
+                // A new field: the keyboard goes back to the pages.
+                self.page_key += 1;
+                self.page_focus = false;
+                self.follow_thumb();
                 self.place_soon(window);
             }
             Msg::OpenWith => self.open_with(),
@@ -1034,7 +1130,21 @@ impl Program for Viewer {
                 0x3d | 0x2b | KP_ADD if m.ctrl => Some(cmd::ZOOM_IN),
                 0x2d | KP_SUB if m.ctrl => Some(cmd::ZOOM_OUT),
                 0x30 if m.ctrl => Some(cmd::FIT),
+                0x67 | 0x47 if m.ctrl && m.alt => Some(cmd::GO_TO_PAGE),
+                0x72 | 0x52 if m.ctrl => Some(cmd::TURN_RIGHT),
+                0x6c | 0x4c if m.ctrl => Some(cmd::TURN_LEFT),
+                0x5b if m.ctrl => Some(cmd::BACK),
+                0x5d if m.ctrl => Some(cmd::FORWARD),
+                0xff51 if m.alt => Some(cmd::BACK),
+                0xff53 if m.alt => Some(cmd::FORWARD),
                 F3 => Some(if m.shift { cmd::FIND_PREVIOUS } else { cmd::FIND_NEXT }),
+                ESCAPE if self.page_focus => {
+                    self.page_key += 1;
+                    self.page_focus = false;
+                    self.page_field = None;
+                    window.redraw();
+                    return true;
+                }
                 ESCAPE if self.is_pdf() => {
                     if self.finding.is_some() {
                         self.update(Msg::FindDone, window);
@@ -1156,6 +1266,14 @@ impl Program for Viewer {
                 C::own(cmd::ACTUAL, "View", "Actual size", "1"),
                 C::own(cmd::NEXT, "Go", "Next page", "Right").featured(),
                 C::own(cmd::PREVIOUS, "Go", "Previous page", "Left"),
+                C::own(cmd::BACK, "Go", "Back", "Ctrl+["),
+                C::own(cmd::FORWARD, "Go", "Forward", "Ctrl+]"),
+                C::own(cmd::GO_TO_PAGE, "Go", "Go to Page…", "Ctrl+Alt+G"),
+                C::own(cmd::VIEW_CONTINUOUS, "View", "Continuous", "").checked(d.view == pdf::View::Continuous),
+                C::own(cmd::VIEW_SINGLE, "View", "One page", "").checked(d.view == pdf::View::Single),
+                C::own(cmd::VIEW_TWO, "View", "Two pages", "").checked(d.view == pdf::View::Two),
+                C::own(cmd::TURN_LEFT, "View", "Turn left", "Ctrl+L"),
+                C::own(cmd::TURN_RIGHT, "View", "Turn right", "Ctrl+R").featured(),
             ]);
         }
         list.extend([C::role(cmd::SETTINGS, Role::Settings), C::role(cmd::ABOUT, Role::About)]);

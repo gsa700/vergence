@@ -45,6 +45,14 @@ pub enum Icon {
     PutBack,
     /// Remove for good: a cross.
     Remove,
+    /// Fit to the width (arrows out to the sides).
+    FitWidth,
+    /// One page at a time.
+    OnePage,
+    /// Pages in a column, scrolled (continuous).
+    Continuous,
+    /// Two pages side by side (a book's spread).
+    TwoPages,
 }
 
 /// An icon at `size` points, in the theme's text color (dim when `dim`).
@@ -190,6 +198,26 @@ pub fn icon<M: 'static>(which: Icon, size: f32, dim: bool) -> Element<M> {
             Icon::Remove => {
                 line!((4.0, 4.0), (12.0, 12.0));
                 line!((12.0, 4.0), (4.0, 12.0));
+            }
+            Icon::FitWidth => {
+                line!((1.5, 8.0), (14.5, 8.0));
+                line!((1.5, 8.0), (4.0, 5.5));
+                line!((1.5, 8.0), (4.0, 10.5));
+                line!((14.5, 8.0), (12.0, 5.5));
+                line!((14.5, 8.0), (12.0, 10.5));
+                line!((1.5, 3.0), (1.5, 13.0));
+                line!((14.5, 3.0), (14.5, 13.0));
+            }
+            Icon::OnePage => {
+                scene.stroke(rect(4.0, 2.0, 8.0, 12.0), 1.0 * k, w, ink);
+            }
+            Icon::Continuous => {
+                scene.stroke(rect(4.0, 1.0, 8.0, 6.0), 1.0 * k, w, ink);
+                scene.stroke(rect(4.0, 9.0, 8.0, 6.0), 1.0 * k, w, ink);
+            }
+            Icon::TwoPages => {
+                scene.stroke(rect(1.5, 3.0, 6.0, 10.0), 1.0 * k, w, ink);
+                scene.stroke(rect(8.5, 3.0, 6.0, 10.0), 1.0 * k, w, ink);
             }
         }
     })

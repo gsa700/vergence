@@ -98,3 +98,21 @@ signing (question 2). Printing (no printing system yet). Video (Close-Up's).
   253-page manual from the corpus opened, fit to the width; Close-Up given
   the same file handed it to the running Reader and exited. Tests on all
   four.
+- **Step 2, a document's window** (2026-11-20). pdf.rs sets the pages
+  out in rows (`View`): continuous (one a row, scrolled), one page at a
+  time (scrolling held within the page, going on to the next past its end
+  and back past its start) and two pages (a book's spread, the cover
+  alone); each page's place is `spots` (its left edge from the middle, its
+  row's top), and the fit modes fit a row. Turned a quarter at a time
+  (`turn`, Ctrl+R and Ctrl+L): the worker turns each picture it draws,
+  text, links and matches stay in the page's own points and are turned
+  where drawn or hit (`turn_box`, `unturn_point`); no tiles while turned.
+  The toolbar: the sidebar; Back and Forward through pages gone to by
+  links, the outline, find's first match, thumbnails and the page field
+  (Ctrl+[ and Ctrl+], Alt+Left and Right); previous and next with the
+  page field between ("2 of 253"; Ctrl+Alt+G goes to it, Enter or Escape
+  hands the keys back to the pages); zoom out, in, the width, the whole
+  page, actual size; the three views; turning; Find and Open. New
+  toolbar icons (vergence-widgets): FitWidth, OnePage, Continuous,
+  TwoPages. Tried headless on Hubble: two pages, one page turned right.
+  Tests for spreads, the one page's edges and turning.
