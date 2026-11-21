@@ -220,6 +220,16 @@ impl Server {
         }
     }
 
+    /// The level a screen (`geo` on the desktop) is magnified at, once the
+    /// zoom has settled (display lists step 5): windows with scenes are then
+    /// drawn at that many times the screen's density, so the magnified
+    /// picture is sharp. None while it moves (the pictures are enlarged then)
+    /// or when the screen is not magnified.
+    pub fn zoom_sharp(&self, geo: Rectangle<i32, Logical>) -> Option<f64> {
+        let z = &self.zoom;
+        (!z.timer && z.on && z.shown > 1.0005 && geo.to_f64().contains(z.at)).then_some(z.shown)
+    }
+
     /// Whether anything is magnified now (or still settling).
     pub fn zoom_active(&self) -> bool {
         self.zoom.on || self.zoom.shown > 1.0005

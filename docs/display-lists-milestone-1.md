@@ -159,3 +159,26 @@ menus) as scenes (they are drawn in the server already, at each scale).
   the terminal (6 commands a frame: its grid is one Cells command), Reader
   (one page picture kept at a time, 4.9 MB, earlier pages let go), Edit.
   Tests on all four.
+- **Step 4, each screen at its own scale** (2026-11-20). A window's
+  picture is drawn at its own screen's scale; on any other screen of
+  another scale it overlaps, a window with a scene is drawn again from it
+  at that screen's scale (scenes.rs `scene_alt`: kept by window and scale
+  until the scene changes, two GPU buffers in turn, imported as a texture,
+  its own serials for the rounded corners' shader), and decor.rs draws
+  that half with it, so both halves are sharp. Drawn on the CPU (no GPU),
+  the other screen shows the picture stretched as before. `vctl scenes`
+  counts the windows drawn again. Tried headless on Hubble: Calculator
+  across a 1× and a 2× screen, its 2× half drawn from the scene (crisp)
+  against the same app on pixels (its 1× picture stretched, soft).
+- **Step 5, the magnifier sharp** (2026-11-20). Once the zoom has settled
+  (zoom.rs `zoom_sharp`: on, not moving, the point on this screen), a
+  window with a scene is drawn from it at the screen's density times the
+  level (scenes.rs `scene_alt`, step 4's), and decor.rs puts all of that
+  picture into the window's body: the magnifier then enlarges a picture
+  that already has that many pixels, so text is drawn sharp, not enlarged.
+  While the zoom moves, pictures are enlarged as before (a new large
+  picture every frame would cost too much). Windows without scenes (other
+  programs) are enlarged as before; past 8192 pixels a side (or 40 million
+  in all) a window is enlarged too (tiles later). Tried headless on
+  Hubble: Calculator magnified 3.1×, drawn from its scene (crisp digits
+  and borders) against the same app on pixels (soft).

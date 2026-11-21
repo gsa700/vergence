@@ -1069,21 +1069,34 @@ impl Server {
             // ring just in front of it (zoom.rs, step 8).
             if let Some(n) = w.native() {
                 elements.extend(self.focus_ring_elements(&w, out, scale));
+                // On a screen of another scale than its own, a window with a
+                // scene drawn again from it at this screen's (scenes.rs, step 4);
+                // on a magnified screen, at its density times the level, so
+                // the magnifier enlarges a sharp picture (step 5).
+                let sharp = self.zoom_sharp(out).unwrap_or(1.0);
+                let density = scale * sharp;
+                let alt = if (density - n.scale()).abs() > 1e-3 { self.scene_alt(renderer, n, density) } else { None };
                 if let Some(p) = n.picture() {
                     // A window that draws under its bar starts that much higher.
                     let top = Point::<i32, Logical>::from((loc.x, loc.y - n.inset()));
                     let at_f = (top - out.loc).to_f64().to_physical(scale);
                     let body_px = edges_px(top - out.loc, p.logical, scale);
-                    let whole = shown_px((p.px.w, p.px.h), body_px.size);
+                    let px = alt.as_ref().map_or(p.px, |a| a.px);
+                    // Drawn denser than the screen (magnified): all of it, into the body.
+                    let whole = if sharp > 1.0 && alt.is_some() { Rectangle::from_size((px.w as f64, px.h as f64).into()) } else { shown_px((px.w, px.h), body_px.size) };
                     match &p.content {
-                        crate::native::Content::Memory(buffer) => {
+                        crate::native::Content::Memory(buffer) if alt.is_none() => {
                             match MemoryRenderBufferRenderElement::from_buffer(renderer, at_f, buffer, None, Some(whole), Some(p.logical), Kind::Unspecified) {
                                 Ok(e) => elements.push(SceneElement::Memory(e)),
                                 Err(e) => tracing::warn!("native window picture: {e:?}"),
                             }
                         }
-                        crate::native::Content::Gpu(_) => {
-                            if let Some((t, gles, _, _)) = native_texture(renderer, &w) {
+                        _ => {
+                            let picked = match alt.clone() {
+                                Some(a) => Some((a.texture, a.gles, a.serial)),
+                                None => native_texture(renderer, &w).map(|(t, g, _, _)| (t, g, native_serial(&w))),
+                            };
+                            if let Some((t, gles, serial)) = picked {
                                 // Its bottom corners cut to the one radius, unless maximized.
                                 match round.as_ref().filter(|_| !self.restore.contains_key(&w) && self.frame_of(&w).is_some()) {
                                     Some(program) => {
@@ -1098,7 +1111,7 @@ impl Server {
                                         let dst = body_px;
                                         let src = Rectangle::<f64, smithay::utils::Buffer>::from_size((whole.size.w, whole.size.h).into());
                                         let slot = &mut self.decor.entry(w.clone()).or_insert_with(Decor::new).round;
-                                        elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(slot, dst, src, gles, native_serial(&w), program.clone(), uniforms)));
+                                        elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(slot, dst, src, gles, serial, program.clone(), uniforms)));
                                     }
                                     None => {
                                         let e = smithay::backend::renderer::element::texture::TextureRenderElement::from_texture_buffer(at_f, &t, None, Some(whole), Some(p.logical), Kind::Unspecified);
