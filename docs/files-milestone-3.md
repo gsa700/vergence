@@ -1,6 +1,6 @@
 # Files milestone 3: FileView, with the best of Explorer and Finder
 
-Status: **questions answered 2026-11-21** (Dave: 1 yes; 2 "recents should
+Status: **all steps in 2026-11-21**; Dave's hands-on pass open. Earlier: **questions answered 2026-11-21** (Dave: 1 yes; 2 "recents should
 probably exist, but I don't care for it and always turn it off. so lets
 have the option to do that"). An app milestone (after
 screenshots, which closed 2026-11-21), now after session milestone 1
@@ -192,4 +192,11 @@ Close-Up).
   typed, a click on another row: renamed), and by a test for the double
   click (vctl's clicks come too slowly to make one). Tests on Hubble and
   techbench; agent-check 0 failed.
+- **Step 6, checks: in 2026-11-21.** Display-suite scenario 16
+  (tools/display-suite/16-fileview.sh): two folders as two tabs of one
+  window, the toolbar row, the sidebar's sections, the list grouped by kind,
+  the free space, a folder handed over as a third tab and kept for a
+  restart, F2's field in its row. The full suite 16 of 16 on Hubble and
+  techbench; agent-check 0 failed. With it, Dave's ask: the sidebar's names
+  at 13 points (12 before), headings 11, marks 18, rows 28.
 
