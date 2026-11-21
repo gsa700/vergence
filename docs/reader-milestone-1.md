@@ -202,3 +202,10 @@ signing (question 2). Printing (no printing system yet). Video (Close-Up's).
   click with either. New toolbar icons: Hand, TextSelect. Tested: bars
   dragged to either end (pdf.rs test), headless a Text drag leaving the
   view where it was and a Hand drag moving it.
+- **After closing** (2026-11-20 night, Dave): the Hand's pointer an open
+  hand, closed while it holds the pages (the Vergence pointer theme's
+  grab and grabbing; the toolkit's `Cursor::Grabbing`); pointer shapes now
+  follow a press or a release without the mouse moving (toolkit
+  `App::cursor_now`, asked after each frame); and Reader remembers the
+  tool chosen last (~/.local/state/vergence/reader-tool) for new windows
+  and the next start.

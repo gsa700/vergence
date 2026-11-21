@@ -248,6 +248,27 @@ struct Viewer {
     hand: bool,
 }
 
+/// The tool chosen last, kept for the next window and the next start
+/// (Dave, 2026-11-20: "Reader should remember the last selected tool"):
+/// ~/.local/state/vergence/reader-tool, "hand" or "text".
+fn tool_file() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    Some(base.join("vergence/reader-tool"))
+}
+
+fn hand_remembered() -> bool {
+    tool_file().and_then(|f| std::fs::read_to_string(f).ok()).is_some_and(|t| t.trim() == "hand")
+}
+
+fn remember_tool(hand: bool) {
+    if let Some(f) = tool_file() {
+        if let Some(dir) = f.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(f, if hand { "hand\n" } else { "text\n" });
+    }
+}
+
 /// Addresses a document's links may open (through vergence-open, after asking).
 fn openable(uri: &str) -> bool {
     let lower = uri.to_ascii_lowercase();
@@ -325,7 +346,7 @@ impl Viewer {
             watching: false,
             bar_drag: None,
             thumb_bar_drag: None,
-            hand: false,
+            hand: hand_remembered(),
         }
     }
 
@@ -857,8 +878,10 @@ impl Viewer {
                 }
             }
             cmd::OPEN_WITH => self.open_with(),
-            cmd::TOOL_TEXT => self.hand = false,
-            cmd::TOOL_HAND => self.hand = true,
+            cmd::TOOL_TEXT | cmd::TOOL_HAND => {
+                self.hand = id == cmd::TOOL_HAND;
+                remember_tool(self.hand);
+            }
             cmd::INFO => {
                 if let Some(t) = self.front_tab()
                     && let Content::Pdf(d) = &t.content
