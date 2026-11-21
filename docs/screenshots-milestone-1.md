@@ -16,13 +16,15 @@ opens it in Close-up for viewing and minor edits"); where they go
 
 As on the Mac, Super standing in for Command:
 
-- **Super+Shift+3**: every screen, each its own file.
+- **Super+Shift+3**: the screen under the pointer (Dave, 2026-11-20:
+  the Mac takes every screen, but the second file is usually thrown
+  away); Settings > Screenshots can choose every screen, each its own file.
 - **Super+Shift+4**: drag out an area (crosshair, its size shown beside
   it; Escape cancels; Shift and Alt while dragging as on the Mac: one side
   fixed, from the center). **Space** turns it into a window picker: the
   window under the pointer lit, a click takes that window alone (its bar
   and its shadow, on a clear ground; Alt+click without the shadow).
-- **Super+Shift+5**: a small bar on the screen: whole screen, a window,
+- **Super+Shift+5**: a small bar on the screen: a screen, all screens, a window,
   an area; a timer (none, 5 s, 10 s); where to save; show the pointer or
   not; Capture. Recording's two buttons come with the recording milestone.
 - **Ctrl** with any of them: to the clipboard instead of a file (image/png,
@@ -37,7 +39,8 @@ As on the Mac, Super standing in for Command:
   FileView, Firefox); it goes after a few seconds, or swiped away. While a
   card shows, the next capture takes its place.
 - A camera's sound, as the Mac, off in Settings (and under Do Not Disturb).
-- Settings > Screenshots (or Keyboard > Shortcuts): the folder, a folder
+- Settings > Screenshots (or Keyboard > Shortcuts): what Super+Shift+3
+  takes (the screen under the pointer, or every screen), the folder, a folder
   per day or not, the sound, the card, the keys.
 
 Never while the screen is locked; the lock screen and the password dialogs
@@ -92,3 +95,30 @@ Recording, by question 1. OCR (text out of a capture) and the Mac's
    (b) not in this milestone.
 4. *Answered: as recommended.* **A window alone**: with its shadow on a clear ground, Alt+click
    without, as the Mac (recommended), or without the shadow by default?
+
+## Progress
+
+- **Step 1, capture in the server** (2026-11-20). crates/vergence-server
+  capture.rs: a request names a screen (the one under the pointer unless
+  named), every screen, an area in points, or a window alone; drm.rs
+  `run_captures` takes it on the next frame: a screen as it shows
+  (unmagnified, the pointer left out unless asked); an area as each
+  screen it touches shows its part, at the densest of their scales (a less
+  dense screen's part enlarged to it, as it really shows); a window alone
+  (the scene builds only its elements, `capture_only`), at the densest
+  scale of the screens it is on, so a window drawn from its scene is drawn
+  sharp there, on a clear ground with a soft shadow added (Vergence's
+  windows have none of their own; `--no-shadow` without). Files in
+  ~/Pictures/Screenshots/<date>/ as "Screenshot <date> at <h.m.s>.png",
+  " (2)" and on for the same second (names given lately count as taken
+  while their files are still written), every screen named by screen;
+  folder 0700, file 0600, written beside and moved into place, off the
+  main thread. Never while locked or at the login screen; the password
+  prompt is left out. `vctl capture screen [NAME] | screens | area X Y W H
+  | window I [--pointer] [--no-shadow] [--to FILE]`. Tried headless on
+  Hubble (a 1x and a 2x screen, Calculator across both): the screen, both
+  screens (1920x1080 and 3840x2160), an area across both (800x600 at 2x),
+  the window alone (820x1292 with its shadow, 724x1196 without), all
+  0600. Tests: names counting up, the day's folder, pasting one to one
+  and enlarged, the shadow around and below.
+

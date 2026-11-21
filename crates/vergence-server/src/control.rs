@@ -462,6 +462,34 @@ impl Server {
                 self.redraw_all();
                 format!("thumb {i}: {}", shot_dir().join(format!("{name}.png")).display())
             }
+            // Screenshots (capture.rs): `capture screen [NAME] | screens | area X Y
+            // W H | window I` with `--pointer`, `--no-shadow`, `--to FILE`;
+            // the files it will be written to (on the next frame, off the main thread).
+            "capture" => {
+                use crate::capture::{Dest, Request, What};
+                let flag = |f: &str| args.contains(&f);
+                let to = args.iter().position(|a| *a == "--to").and_then(|i| args.get(i + 1)).map(std::path::PathBuf::from);
+                let words: Vec<&str> = args.iter().copied().take_while(|a| !a.starts_with("--")).collect();
+                let num = |i: usize| words.get(i).and_then(|v| v.parse::<i32>().ok());
+                let what = match words.first().copied() {
+                    Some("screen") => What::Screen(words.get(1).map(|s| s.to_string())),
+                    Some("screens") => What::Screens,
+                    Some("area") => match (num(1), num(2), num(3), num(4)) {
+                        (Some(x), Some(y), Some(w), Some(h)) => What::Area(smithay::utils::Rectangle::new((x, y).into(), (w, h).into())),
+                        _ => return "capture area X Y W H".into(),
+                    },
+                    Some("window") => match num(1).and_then(|i| self.space.elements().nth(i as usize).cloned()) {
+                        Some(w) => What::Window(w),
+                        None => return "capture window I (an index from vctl windows)".into(),
+                    },
+                    _ => return "capture screen [NAME] | screens | area X Y W H | window I  [--pointer] [--no-shadow] [--to FILE]".into(),
+                };
+                let req = Request { what, dest: to.map_or(Dest::Folder, Dest::Path), pointer: flag("--pointer"), shadow: !flag("--no-shadow") };
+                match self.capture_ask(req) {
+                    Ok(paths) => paths.iter().map(|p| format!("capture: {}", p.display())).collect::<Vec<_>>().join("\n"),
+                    Err(e) => format!("capture: {e}"),
+                }
+            }
             "picture" => {
                 if self.backend.is_none() {
                     return "picture: only with --drm or --headless".into();

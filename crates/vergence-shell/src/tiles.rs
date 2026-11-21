@@ -27,6 +27,7 @@ pub struct Local {
     pub wday: i32,
     pub hour: i32,
     pub min: i32,
+    pub sec: i32,
 }
 
 const DAYS: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -337,7 +338,7 @@ pub fn now_at(secs: i64) -> Option<(Local, Local)> {
     let (mut l, mut u) = (blank(), blank());
     // SAFETY: each reads the time and fills a struct we own.
     let ok = unsafe { !localtime_r(&secs, &mut l).is_null() && !gmtime_r(&secs, &mut u).is_null() };
-    let take = |t: &Tm| Local { year: t.year + 1900, month: t.mon, mday: t.mday, wday: t.wday, hour: t.hour, min: t.min };
+    let take = |t: &Tm| Local { year: t.year + 1900, month: t.mon, mday: t.mday, wday: t.wday, hour: t.hour, min: t.min, sec: t.sec };
     ok.then(|| (take(&l), take(&u)))
 }
 
@@ -357,7 +358,7 @@ mod tests {
 
     #[test]
     fn the_clock_says_the_time_and_the_day() {
-        let local = Local { year: 2026, month: 10, mday: 16, wday: 1, hour: 8, min: 5 };
+        let local = Local { year: 2026, month: 10, mday: 16, wday: 1, hour: 8, min: 5, sec: 0 };
         let utc = Local { hour: 14, ..local };
         let t = clock(local, utc, ClockLook::default());
         assert_eq!((t.value.as_str(), t.label.as_str()), ("08:05", "Mon 16"));

@@ -1133,6 +1133,18 @@ impl Server {
                 self.native_send_configure(n);
             }
         }
+        // A window taken alone (capture.rs): its elements only.
+        if let Some(only) = self.capture_only.clone() {
+            let mut windows_part = elements.split_off(loop_start);
+            let len = windows_part.len();
+            return match spans.iter().position(|(w, _)| *w == only) {
+                Some(i) => {
+                    let end = spans.get(i + 1).map_or(len, |n| n.1 - loop_start);
+                    windows_part.drain(spans[i].1 - loop_start..end).collect()
+                }
+                None => Vec::new(),
+            };
+        }
         // The overview: its windows themselves, scaled into their places, in
         // front of the screen dimmed (overview.rs).
         if self.overview.is_some() {
@@ -1159,7 +1171,7 @@ impl Server {
             front
         };
         // The elevation prompt, over all of it (elevate.rs).
-        if self.elevating() {
+        if self.elevating() && !self.capturing {
             let mut front = self.elevate_elements(renderer, out, scale);
             front.extend(elements);
             return front;

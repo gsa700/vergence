@@ -1019,6 +1019,9 @@ fn render_with(state: &mut Server, b: &mut Backend, crtc: Key) {
         }
     }
 
+    // Screenshots asked for (capture.rs).
+    run_captures(state, &mut b.renderer, pointer_at);
+
     // The control socket's `picture`: windows' own pictures, alone, at scale 1.
     for (w, name) in std::mem::take(&mut state.picture_pending) {
         match crate::decor::picture_elements(&mut b.renderer, &w) {
@@ -1483,6 +1486,150 @@ fn capture(
         .map_err(|e| e.to_string())?;
     let bytes = renderer.map_texture(&mapping).map_err(|e| e.to_string())?;
     Ok(bytes.to_vec())
+}
+
+fn to_output(e: crate::zoom::Inner) -> OutputElements {
+    match e {
+        crate::zoom::Inner::Scene(e) => OutputElements::Scene(e),
+        crate::zoom::Inner::PointerTheme(e) => OutputElements::PointerTheme(e),
+        crate::zoom::Inner::PointerSurface(e) => OutputElements::PointerSurface(e),
+    }
+}
+
+/// A screen as it shows (unmagnified), the pointer at `pointer_at` (far
+/// away to leave it out): its size in pixels, its scale, its pixels.
+fn screen_pixels(state: &mut Server, renderer: &mut GlesRenderer, output: &Output, pointer_at: Point<f64, Logical>) -> Result<(usize, usize, f64, Vec<u8>), String> {
+    let geo = state.space.output_geometry(output).ok_or("a screen without a place")?;
+    let scale = output.current_scale().fractional_scale();
+    let size = output.current_mode().map(|m| m.size).ok_or("a screen without a mode")?;
+    let elements: Vec<OutputElements> = screen_elements(state, renderer, output, geo, scale, pointer_at).into_iter().map(to_output).collect();
+    let clear = state.background_color(&output.name());
+    let rgba = capture(renderer, &elements, size, scale, clear)?;
+    Ok((size.w as usize, size.h as usize, scale, rgba))
+}
+
+/// A picture's width and height in pixels and its RGBA pixels.
+type Pixels = (usize, usize, Vec<u8>);
+
+/// Screenshots asked for (capture.rs), taken from what the screens show now.
+fn run_captures(state: &mut Server, renderer: &mut GlesRenderer, pointer_at: Point<f64, Logical>) {
+    use crate::capture::{Taken, What};
+    if state.capture_pending.is_empty() {
+        return;
+    }
+    let asked = std::mem::take(&mut state.capture_pending);
+    state.capturing = true;
+    let outputs: Vec<Output> = state.space.outputs().cloned().collect();
+    let geo_of = |state: &Server, o: &Output| state.space.output_geometry(o).unwrap_or_default();
+    for (req, paths) in asked {
+        let p_at = if req.pointer { pointer_at } else { Point::from((-1.0e9, -1.0e9)) };
+        let mut taken: Vec<Result<Pixels, String>> = Vec::new();
+        match &req.what {
+            What::Screen(name) => {
+                let o = match name {
+                    Some(n) => outputs.iter().find(|o| o.name() == *n),
+                    None => outputs.iter().find(|o| geo_of(state, o).to_f64().contains(pointer_at)).or(outputs.first()),
+                };
+                taken.push(match o {
+                    Some(o) => screen_pixels(state, renderer, o, p_at).map(|(w, h, _, px)| (w, h, px)),
+                    None => Err("no such screen".into()),
+                });
+            }
+            What::Screens => {
+                for o in &outputs {
+                    taken.push(screen_pixels(state, renderer, o, p_at).map(|(w, h, _, px)| (w, h, px)));
+                }
+            }
+            What::Area(r) => {
+                // Each screen's part as it shows, at the densest scale touched.
+                let touched: Vec<&Output> = outputs.iter().filter(|o| geo_of(state, o).overlaps(*r)).collect();
+                let d = touched.iter().map(|o| o.current_scale().fractional_scale()).fold(0.0f64, f64::max);
+                if touched.is_empty() || r.size.w <= 0 || r.size.h <= 0 {
+                    taken.push(Err("the area is on no screen".into()));
+                } else {
+                    let (cw, ch) = ((r.size.w as f64 * d).round() as usize, (r.size.h as f64 * d).round() as usize);
+                    let mut canvas = vec![0u8; cw * ch * 4];
+                    let mut failed = None;
+                    for o in touched {
+                        let geo = geo_of(state, o);
+                        let Some(inter) = geo.intersection(*r) else { continue };
+                        match screen_pixels(state, renderer, o, p_at) {
+                            Ok((sw, sh, s, px)) => {
+                                let x0 = (((inter.loc.x - geo.loc.x) as f64) * s).round() as usize;
+                                let y0 = (((inter.loc.y - geo.loc.y) as f64) * s).round() as usize;
+                                let w = ((inter.size.w as f64 * s).round() as usize).min(sw.saturating_sub(x0));
+                                let h = ((inter.size.h as f64 * s).round() as usize).min(sh.saturating_sub(y0));
+                                let mut part = Vec::with_capacity(w * h * 4);
+                                for y in y0..y0 + h {
+                                    part.extend_from_slice(&px[(y * sw + x0) * 4..(y * sw + x0 + w) * 4]);
+                                }
+                                let at = ((inter.loc.x - r.loc.x) as f64 * d).round() as i64;
+                                let bt = ((inter.loc.y - r.loc.y) as f64 * d).round() as i64;
+                                crate::capture::paste(&mut canvas, cw, ch, &part, w, h, at, bt, d / s);
+                            }
+                            Err(e) => failed = Some(e),
+                        }
+                    }
+                    taken.push(match failed {
+                        Some(e) => Err(e),
+                        None => Ok((cw, ch, canvas)),
+                    });
+                }
+            }
+            What::Window(w) => taken.push(window_pixels(state, renderer, &outputs, w, req.shadow)),
+        }
+        for (t, path) in taken.into_iter().zip(paths) {
+            match t {
+                Ok((w, h, rgba)) => crate::capture::save(Taken { w: w as u32, h: h as u32, rgba, path }, |r| match r {
+                    Ok(p) => tracing::info!("screenshot: {}", p.display()),
+                    Err(e) => tracing::warn!("screenshot not saved: {e}"),
+                }),
+                Err(e) => tracing::warn!("screenshot {}: {e}", path.display()),
+            }
+        }
+    }
+    state.capturing = false;
+}
+
+/// A window alone (its bar, border, corners and content) on a clear
+/// ground, at the densest scale of the screens it is on; a soft shadow
+/// around it if asked.
+fn window_pixels(state: &mut Server, renderer: &mut GlesRenderer, outputs: &[Output], w: &crate::win::Win, shadow: bool) -> Result<Pixels, String> {
+    use crate::{decor::SceneElement, overview::WinParts};
+    use smithay::backend::renderer::element::{
+        Element,
+        utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
+    };
+    let wgeo = state.space.element_geometry(w).ok_or("the window is not on a screen")?;
+    let on: Vec<(&Output, i32)> = outputs
+        .iter()
+        .filter_map(|o| state.space.output_geometry(o).and_then(|g| g.intersection(wgeo)).map(|i| (o, i.size.w * i.size.h)))
+        .collect();
+    let main = on.iter().max_by_key(|(_, a)| *a).map(|(o, _)| (*o).clone()).ok_or("the window is on no screen")?;
+    let d = on.iter().map(|(o, _)| o.current_scale().fractional_scale()).fold(1.0f64, f64::max);
+    state.capture_only = Some(w.clone());
+    let els = state.scene(renderer, &main, d);
+    state.capture_only = None;
+    let k = smithay::utils::Scale::from(d);
+    let bx = els.iter().map(|e| e.geometry(k)).reduce(|a, b| a.merge(b)).filter(|b| b.size.w > 0 && b.size.h > 0).ok_or("the window has nothing drawn")?;
+    let placed: Vec<OutputElements> = els
+        .into_iter()
+        .filter_map(|e| {
+            let part = match e {
+                SceneElement::Surface(x) => WinParts::Surface(x),
+                SceneElement::Solid(x) => WinParts::Solid(x),
+                SceneElement::Memory(x) => WinParts::Memory(x),
+                SceneElement::Texture(x) => WinParts::Texture(x),
+                SceneElement::Shaded(x) => WinParts::Shaded(x),
+                SceneElement::Backdrop(x) => WinParts::Backdrop(x),
+                _ => return None,
+            };
+            Some(OutputElements::Scene(SceneElement::Placed(RelocateRenderElement::from_element(RescaleRenderElement::from_element(part, bx.loc, 1.0), Point::from((0, 0))  - bx.loc, Relocate::Relative))))
+        })
+        .collect();
+    let rgba = capture(renderer, &placed, bx.size, d, [0.0, 0.0, 0.0, 0.0])?;
+    let (cw, ch) = (bx.size.w as usize, bx.size.h as usize);
+    Ok(if shadow { crate::capture::with_shadow(cw, ch, &rgba, (24.0 * d).round() as usize) } else { (cw, ch, rgba) })
 }
 
 /// Energy (energy.rs): every monitor off. The CRTC is disabled (DPMS off) and its

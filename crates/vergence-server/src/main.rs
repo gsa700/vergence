@@ -1,6 +1,7 @@
 // Based on Smithay's smallvil example (MIT; see LICENSE-smithay.txt), adapted for Vergence.
 #![allow(irrefutable_let_patterns)]
 
+mod capture;
 mod handlers;
 
 mod dispatch;

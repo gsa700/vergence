@@ -95,6 +95,14 @@ pub struct Server {
     /// Windows whose own picture is still to save for `vctl picture`, and
     /// the name each is saved under (headless milestone 1, step 4).
     pub picture_pending: Vec<(Win, String)>,
+    /// Screenshots asked for, taken on the next frame, and the files each
+    /// goes to (capture.rs); while one is drawn, the window it takes alone
+    /// and whether the password prompt is left out.
+    pub capture_pending: Vec<(crate::capture::Request, Vec<std::path::PathBuf>)>,
+    pub capture_only: Option<Win>,
+    pub capturing: bool,
+    /// The last files named for screenshots (their names count as taken).
+    pub capture_given: Vec<std::path::PathBuf>,
     /// Actions sent to native windows by their meaning, and their answers
     /// (Contract 3, meaning milestone 1; native.rs).
     pub acts: crate::native::Acts,
@@ -322,6 +330,10 @@ impl Server {
             tints: Default::default(),
             shot_pending: Vec::new(),
             picture_pending: Vec::new(),
+            capture_pending: Vec::new(),
+            capture_only: None,
+            capturing: false,
+            capture_given: Vec::new(),
             acts: Default::default(),
             meaning_log: Default::default(),
             agents: Default::default(),
