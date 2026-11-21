@@ -54,8 +54,11 @@ fn arrow(_: usize) -> String {
 /// 2026-11-21, choosing it after "the pointer finger is unnaturally long
 /// ... make it match the hand"); the curled fingers show by their bumps
 /// along the top, no lines between them ("try removing the three bold lines").
+/// The index got back half of what that took off (Dave, 2026-11-21: "a
+/// little too short now. maybe add back half of what we removed"), the
+/// hand moved down 0.3 to make room for it.
 fn hand(_: usize) -> String {
-    parts(&[(8.0, 11.5, 17.5, 16.5, 6.5, 0.0), (8.8, 2.5, 3.8, 13.5, 1.9, 0.0), (12.9, 8.3, 4.0, 6.8, 2.0, 0.0), (17.0, 8.6, 4.0, 6.6, 2.0, 0.0), (21.0, 10.0, 3.8, 6.0, 1.9, 0.0), (5.0, 15.5, 4.0, 8.0, 2.0, -30.0)])
+    parts(&[(8.0, 11.8, 17.5, 16.5, 6.5, 0.0), (8.8, 1.3, 3.8, 15.0, 1.9, 0.0), (12.9, 8.6, 4.0, 6.8, 2.0, 0.0), (17.0, 8.9, 4.0, 6.6, 2.0, 0.0), (21.0, 10.3, 3.8, 6.0, 1.9, 0.0), (5.0, 15.8, 4.0, 8.0, 2.0, -30.0)])
 }
 
 /// Parts of a hand drawn as one, as Mac OS X's hands (Dave, 2026-11-21:
@@ -158,7 +161,7 @@ fn context(_: usize) -> String {
 fn shapes() -> Vec<Shape> {
     vec![
         Shape { names: &["default", "left_ptr", "arrow", "top_left_arrow"], hot: (3.0, 2.0), body: arrow, frames: 1 },
-        Shape { names: &["pointer", "hand2", "hand1", "pointing_hand"], hot: (10.7, 2.6), body: hand, frames: 1 },
+        Shape { names: &["pointer", "hand2", "hand1", "pointing_hand"], hot: (10.7, 1.4), body: hand, frames: 1 },
         Shape { names: &["grab", "openhand", "dnd-move", "dnd-none"], hot: (16.0, 14.0), body: open_hand, frames: 1 },
         Shape { names: &["grabbing", "closedhand"], hot: (16.0, 16.0), body: closed_hand, frames: 1 },
         Shape { names: &["text", "xterm", "ibeam", "vertical-text"], hot: (16.0, 16.0), body: ibeam, frames: 1 },
