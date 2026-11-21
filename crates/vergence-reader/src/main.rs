@@ -23,6 +23,7 @@
 
 mod hand;
 mod info;
+mod keep;
 mod pdf;
 
 use std::cell::{Cell, RefCell};
@@ -98,6 +99,10 @@ struct Shared {
     windows: Vec<(u32, Waker)>,
     /// Tabs dropped on another window: (into, at, the tab).
     transfers: Vec<(u32, u32, Tab)>,
+    /// What each window keeps for the next start (keep.rs), by its id; and
+    /// the windows kept from the last run still to open.
+    snaps: Vec<(u32, keep::Snap)>,
+    pending: Vec<keep::Snap>,
 }
 
 type SharedRef = Rc<RefCell<Shared>>;
@@ -201,6 +206,8 @@ struct Viewer {
     shared: SharedRef,
     /// This window's id with the server, once it has one.
     me: Option<u32>,
+    /// Its token, for window memory to put it back (keep.rs).
+    token: String,
     tabs: Vec<Tab>,
     front: u32,
     desktop: String,
@@ -323,6 +330,7 @@ impl Viewer {
         Viewer {
             shared,
             me: None,
+            token: String::new(),
             tabs: Vec::new(),
             front: 0,
             desktop,
@@ -426,6 +434,38 @@ impl Viewer {
             self.front = self.tabs.get(i.min(self.tabs.len().saturating_sub(1))).map_or(0, |t| t.id);
         }
         Some(t)
+    }
+
+    /// A window kept from the last run: its token and its documents.
+    fn from_snap(shared: SharedRef, snap: &keep::Snap) -> Viewer {
+        let mut v = Viewer::new(shared);
+        v.token = snap.token.clone();
+        for p in &snap.tabs {
+            v.queue(p.clone());
+        }
+        if let Some(t) = v.tabs.get(snap.front) {
+            v.front = t.id;
+        }
+        v
+    }
+
+    /// What this window keeps for the next start, written when it changed.
+    fn keep(&mut self) {
+        let Some(me) = self.me else { return };
+        if self.token.is_empty() {
+            return;
+        }
+        let tabs: Vec<PathBuf> = self.tabs.iter().map(|t| t.path.clone()).collect();
+        let front = self.tabs.iter().position(|t| t.id == self.front).unwrap_or(0);
+        let snap = keep::Snap { token: self.token.clone(), tabs, front };
+        let mut s = self.shared.borrow_mut();
+        match s.snaps.iter_mut().find(|(id, _)| *id == me) {
+            Some((_, old)) if *old == snap => return,
+            Some((_, old)) => *old = snap,
+            None => s.snaps.push((me, snap)),
+        }
+        let all: Vec<keep::Snap> = s.snaps.iter().map(|(_, w)| w.clone()).collect();
+        keep::save(&all);
     }
 
     /// Closes a tab; the window with it, if it was the last.
@@ -1191,8 +1231,13 @@ impl Program for Viewer {
     /// Light under App default, with a dark bar (Dave, 2026-11-20: "the
     /// light style with the dark toolbar as the app default... helps the app
     /// stand out a bit"); the ground around the pages stays dark.
+    /// Always solid: a see-through window helps no one reading (Dave,
+    /// 2026-11-21: "drop the opacity control totally"), whatever the
+    /// desktop's opacity.
     fn theme(&self) -> Theme {
-        Theme::from_desktop(&self.desktop, false, SECTION)
+        let mut t = Theme::from_desktop(&self.desktop, false, SECTION);
+        t.opacity = 1.0;
+        t
     }
 
     fn bar_style(&self) -> Option<BarStyle> {
@@ -1258,6 +1303,7 @@ impl Program for Viewer {
             }
             TabEvent::Menu { .. } => {}
         }
+        self.keep();
         window.redraw();
     }
 
@@ -1266,8 +1312,23 @@ impl Program for Viewer {
         self.register();
     }
 
+    /// Its token from the last run, so window memory puts it back; "new": ask for one.
+    fn token(&self) -> String {
+        if self.token.is_empty() { "new".into() } else { self.token.clone() }
+    }
+
+    fn token_given(&mut self, token: &str) {
+        self.token = token.to_string();
+        self.keep();
+    }
+
     fn closed(&mut self) {
-        self.shared.borrow_mut().windows.retain(|(id, _)| Some(*id) != self.me);
+        let mut s = self.shared.borrow_mut();
+        s.windows.retain(|(id, _)| Some(*id) != self.me);
+        // Closed by the user: it is not kept.
+        s.snaps.retain(|(id, _)| Some(*id) != self.me);
+        let all: Vec<keep::Snap> = s.snaps.iter().map(|(_, w)| w.clone()).collect();
+        keep::save(&all);
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
@@ -1613,6 +1674,12 @@ impl Program for Viewer {
     }
 
     fn woken(&mut self, window: &mut Window) -> bool {
+        // The other windows kept from the last run.
+        let pending = std::mem::take(&mut self.shared.borrow_mut().pending);
+        for snap in pending {
+            let w = Viewer::from_snap(self.shared.clone(), &snap);
+            window.open_window(vergence_widgets::window(w));
+        }
         // Woken by the drawing (its place changed) or a page drawn: look again.
         let mut changed = self.reread() || self.is_pdf();
         let asked: Vec<Vec<PathBuf>> = std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
@@ -1683,6 +1750,8 @@ impl Program for Viewer {
             d.go_to(page, r);
             changed = true;
         }
+        // Documents opened, moved or closed: kept for the next start.
+        self.keep();
         changed
     }
 
@@ -1760,7 +1829,6 @@ struct ReaderRows;
 
 impl Rows for ReaderRows {
     fn parts(&self, text: &str) -> Vec<Part> {
-        let opacity = vergence_ui::opacity_setting(text, "[appearance]");
         let locked = vergence_ui::desktop_pick(text).map(|light| format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" }));
         let styles = vec![Choice::text("Dark", "dark"), Choice::text("Light", "light")];
         vec![
@@ -1773,7 +1841,6 @@ impl Rows for ReaderRows {
                 rows: vec![
                     Row::new("style", "Style", "While the desktop's Style is App default.", Control::Choose { choices: styles.clone(), desktop: Some("Built-in (Light)".into()), app_default: 1 }).locked(locked.clone()),
                     Row::new("bar-style", "Title bar", "", Control::Choose { choices: styles, desktop: Some("Built-in (Dark)".into()), app_default: 0 }).locked(locked),
-                    Row::new("opacity", "Opacity", "30 to 100: how much of the window's ground shows.", Control::Percent { min: 30, desktop: format!("Desktop default ({:.0})", opacity * 100.0), now: (opacity * 100.0).round() as u32 }),
                     Row::new("", "Window places", "Where the desktop puts Reader's windows, for each set of screens.", Control::Button { label: "Forget…".into(), id: 1 }),
                 ],
             },
@@ -1798,8 +1865,17 @@ fn main() {
     if hand::hand_over(&files) {
         return;
     }
-    let shared = Rc::new(RefCell::new(Shared { inbox: Arc::default(), loaded: Arc::default(), next_tab: 0, windows: Vec::new(), transfers: Vec::new() }));
-    let mut viewer = Viewer::new(shared);
+    let shared = Rc::new(RefCell::new(Shared { inbox: Arc::default(), loaded: Arc::default(), next_tab: 0, windows: Vec::new(), transfers: Vec::new(), snaps: Vec::new(), pending: Vec::new() }));
+    // The windows kept from the last run come back, the first here and the
+    // rest once it is open; files named on the command line join the first.
+    let mut kept = keep::load();
+    let mut viewer = if kept.is_empty() {
+        Viewer::new(shared.clone())
+    } else {
+        let first = kept.remove(0);
+        shared.borrow_mut().pending = kept;
+        Viewer::from_snap(shared.clone(), &first)
+    };
     // The files, each in a tab, read once the window can be woken (waker()).
     for p in files {
         viewer.queue(p);

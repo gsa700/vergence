@@ -209,3 +209,13 @@ signing (question 2). Printing (no printing system yet). Video (Close-Up's).
   `App::cursor_now`, asked after each frame); and Reader remembers the
   tool chosen last (~/.local/state/vergence/reader-tool) for new windows
   and the next start.
+- **Windows kept across restarts** (2026-11-21, Dave: after a session
+  restart "Reader re-opened but had neither of the two pdf's i had
+  open"): vergence-reader keep.rs, as Edit's: each window's token and
+  documents in tab order with the one in front, in
+  ~/.local/state/vergence/reader-session (0600), written when they
+  change; a window the user closes leaves it. At start every kept window
+  comes back (the first at once, the rest once it is open), documents no
+  longer there left out; files named on the command line join the first.
+  Each document's page and view were kept already (pdf::places).
+
