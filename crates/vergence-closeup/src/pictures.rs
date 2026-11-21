@@ -88,6 +88,55 @@ pub fn turn(img: &Image, left: bool) -> Image {
     Image { width: h, height: w, rgba: out }
 }
 
+/// The part of a picture `w` x `h` from (x, y).
+pub fn crop(img: &Image, x: u32, y: u32, w: u32, h: u32) -> Image {
+    let (x, y) = (x.min(img.width.saturating_sub(1)), y.min(img.height.saturating_sub(1)));
+    let (w, h) = (w.min(img.width - x).max(1), h.min(img.height - y).max(1));
+    let mut out = Vec::with_capacity(w as usize * h as usize * 4);
+    for row in y..y + h {
+        let s = ((row * img.width + x) * 4) as usize;
+        out.extend_from_slice(&img.rgba[s..s + w as usize * 4]);
+    }
+    Image { width: w, height: h, rgba: out }
+}
+
+/// Where an edited picture that is not a PNG is saved: "<name> (edited).png"
+/// beside it, numbered if taken.
+pub fn copy_name(file: &Path) -> PathBuf {
+    let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "picture".into());
+    let dir = file.parent().map(Path::to_path_buf).unwrap_or_default();
+    for n in 1.. {
+        let name = if n == 1 { format!("{stem} (edited).png") } else { format!("{stem} (edited {n}).png") };
+        let p = dir.join(name);
+        if !p.exists() {
+            return p;
+        }
+    }
+    unreachable!()
+}
+
+/// Writes a picture (straight RGBA, as decoded) as PNG: beside the file
+/// and moved into place, so a failure leaves the old one; a file replaced
+/// keeps its permissions, a new one is the user's alone.
+pub fn save_png(img: &Image, to: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let mode = std::fs::metadata(to).map(|m| m.permissions().mode() & 0o777).unwrap_or(0o600);
+    let tmp = to.with_extension("png.part");
+    let res = (|| -> std::io::Result<()> {
+        let file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(mode).open(&tmp)?;
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(file), img.width, img.height);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().and_then(|mut w| w.write_image_data(&img.rgba)).map_err(std::io::Error::other)?;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
+        std::fs::rename(&tmp, to)
+    })();
+    if res.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    res
+}
+
 /// Names in the order people expect: without case, numbers by their value
 /// (as File Viewer and the Open dialog sort).
 pub fn natural(a: &str, b: &str) -> std::cmp::Ordering {
@@ -198,5 +247,30 @@ mod tests {
         let mut v = vec!["img10.png", "IMG2.png", "img1.png"];
         v.sort_by(|a, b| natural(a, b));
         assert_eq!(v, vec!["img1.png", "IMG2.png", "img10.png"]);
+    }
+
+    #[test]
+    fn crop_takes_the_part() {
+        let img = Image { width: 4, height: 3, rgba: (0..48u8).collect() };
+        let c = super::crop(&img, 1, 1, 2, 2);
+        assert_eq!((c.width, c.height), (2, 2));
+        assert_eq!(&c.rgba[..4], &img.rgba[(1 * 4 + 1) * 4..(1 * 4 + 1) * 4 + 4]);
+        assert_eq!(&c.rgba[8..12], &img.rgba[(2 * 4 + 1) * 4..(2 * 4 + 1) * 4 + 4]);
+    }
+
+    #[test]
+    fn saved_and_read_back() {
+        let dir = std::env::temp_dir().join(format!("closeup-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let img = Image { width: 3, height: 2, rgba: (0..24u8).map(|v| v * 10).collect() };
+        let to = dir.join("a.png");
+        super::save_png(&img, &to).unwrap();
+        let d = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&to).unwrap()));
+        let mut r = d.read_info().unwrap();
+        let mut buf = vec![0; r.output_buffer_size().unwrap()];
+        r.next_frame(&mut buf).unwrap();
+        assert_eq!(buf, img.rgba);
+        assert_eq!(super::copy_name(&dir.join("photo.jpg")).file_name().unwrap(), "photo (edited).png");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

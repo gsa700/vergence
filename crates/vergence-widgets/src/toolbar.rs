@@ -57,6 +57,8 @@ pub enum Icon {
     Hand,
     /// Selecting text: an I-beam.
     TextSelect,
+    /// Cropping: two corners crossing (a picture's edges cut).
+    Crop,
 }
 
 /// An icon at `size` points, in the theme's text color (dim when `dim`).
@@ -152,6 +154,12 @@ pub fn icon<M: 'static>(which: Icon, size: f32, dim: bool) -> Element<M> {
                 line!((x(3.5), 13.0), (x(9.5), 13.0));
                 line!((x(9.5), 13.0), (x(9.5), 9.0));
                 line!((x(9.5), 9.0), (x(3.5), 9.0));
+            }
+            Icon::Crop => {
+                line!((4.5, 1.5), (4.5, 11.5));
+                line!((4.5, 11.5), (14.5, 11.5));
+                line!((1.5, 4.5), (11.5, 4.5));
+                line!((11.5, 4.5), (11.5, 14.5));
             }
             Icon::Info => {
                 scene.stroke(rect(1.5, 1.5, 13.0, 13.0), 6.5 * k, w, ink);
