@@ -98,6 +98,10 @@ pub enum Part {
     /// Taking a screenshot of an area or a window (screenshots milestone 1,
     /// step 2): the whole screen is the picker's.
     Capture,
+    /// The floating thumbnail of the last screenshot (screenshots milestone
+    /// 1, step 4): a click opens it, a drag takes the file, a flick right
+    /// sends it away.
+    Shot,
     /// The dock's drawer of tiles (dock milestone 1).
     Drawer,
     /// The lock screen (VDM milestone 1): while locked, every pointer and

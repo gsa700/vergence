@@ -103,6 +103,8 @@ pub struct Server {
     pub capturing: bool,
     /// Super+Shift+4's picker, while open (capture.rs).
     pub capture_pick: Option<crate::capture::Pick>,
+    /// The last screenshot's floating thumbnail (capture.rs).
+    pub capture_shot: Option<crate::capture::Shot>,
     /// The last files named for screenshots (their names count as taken).
     pub capture_given: Vec<std::path::PathBuf>,
     /// Actions sent to native windows by their meaning, and their answers
@@ -336,6 +338,7 @@ impl Server {
             capture_only: None,
             capturing: false,
             capture_pick: None,
+            capture_shot: None,
             capture_given: Vec::new(),
             acts: Default::default(),
             meaning_log: Default::default(),

@@ -33,11 +33,14 @@ As on the Mac, Super standing in for Command:
   22.56.01.png` (a folder for each day; two in the same second numbered;
   several screens named by screen: `... (DP-1).png`). PNG, made 0600 like
   vctl's shots, the screen's real pixels at its scale.
-- **The card**: each capture shows as one of the server's notification
-  cards holding the picture (notify.rs cards gain a picture); a click opens
-  it in Close-Up; a drag from the card drops the file into any app (Edit,
-  FileView, Firefox); it goes after a few seconds, or swiped away. While a
-  card shows, the next capture takes its place.
+- **The floating thumbnail** (Dave, 2026-11-20, in place of the card of
+  15 November: "the floating thumbnail, maybe we should anchor it to
+  Main"): a small picture of each capture floats in the bottom-right corner
+  of the main screen's work area, in front of everything, about 5 s (kept
+  while the pointer is on it); a click opens it in Close-Up; a drag drops
+  the file into any app that takes files; a flick to the right sends it
+  away. Not a notification: Do Not Disturb doesn't hide it. The next
+  capture's thumbnail takes its place.
 - A camera's sound, as the Mac, off in Settings (and under Do Not Disturb).
 - Settings > Screenshots (or Keyboard > Shortcuts): what Super+Shift+3
   takes (the screen under the pointer, or every screen), the folder, a folder
@@ -58,8 +61,8 @@ unless asked).
    crosshair and its numbers, Space to pick a window, Escape.
 3. **The clipboard**: the server offers image/png itself (it already
    offers text it owns), to native apps and Wayland programs alike.
-4. **The card**: pictures in notification cards; click opens Close-Up; drag
-   the file out.
+4. **The floating thumbnail**: on the main screen; click opens Close-Up;
+   drag the file out; flick away.
 5. **Super+Shift+5's bar**: modes, the timer, the folder, the pointer.
 6. **Close-Up's minor edits**: crop and rotate, saved back or as a copy
    (markup in a later Close-Up milestone).
@@ -149,4 +152,20 @@ Recording, by question 1. OCR (text out of a capture) and the Mac's
   on Hubble: Ctrl+Super+Shift+3 (a 1920x1080 PNG on the clipboard),
   Ctrl+Super+Shift+4, Space and a click (Calculator, 410x646), no files
   written.
+- **Step 4, the floating thumbnail** (2026-11-21). capture.rs `Shot`:
+  after a capture is written (or put on the clipboard), its picture
+  averaged down to fit 200 x 130 points at the main screen's scale, in a
+  white frame with a soft shadow, floats at the bottom right of the main
+  screen's work area (`shelf_screen`, the dock's), in front of everything
+  (drm.rs screen_elements); 5 s, kept while hovered or held (a timer looks
+  again). vergence-seat `Part::Shot`; a click opens the file in Close-Up
+  (`vergence-closeup <file>`); a drag of 8 points (not rightward) starts
+  the server's own drag (drag.rs `server_drag_start`, a drag with no
+  source window) carrying text/uri-list and text/plain; a flick right of
+  30 points sends it away. A clipboard capture shows it with nothing to
+  open or drag; vctl's own files (`--to`) show none. Tried headless on
+  Hubble: it showed after Super+Shift+3, a flick sent it away, a click
+  opened Close-Up on the file, a drag dropped it on Edit (the ghost
+  accented, "dropped (copied)"), and it went after 5 s. Tests: the link
+  comes back as its path, the thumbnail's size, frame and picture.
 

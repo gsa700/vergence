@@ -297,6 +297,26 @@ mod tests {
     }
 
     #[test]
+    fn links_come_back_as_their_paths() {
+        let p = std::path::Path::new("/home/d/Pictures/Screenshots/2026-11-20/Screenshot 2026-11-20 at 23.07.44 (2).png");
+        let link = file_link(p);
+        assert!(!link.contains(' '));
+        assert_eq!(vergence_types::path_of_link(&link).as_deref(), Some(p));
+    }
+
+    #[test]
+    fn a_thumbnail_fits_and_has_its_frame_and_shadow() {
+        let rgba: Vec<u8> = std::iter::repeat_n([200u8, 200, 200, 255], 1920 * 1080).flatten().collect();
+        let (w, h, px) = thumb_pixels(1920, 1080, &rgba, 2.0);
+        // 400x225 picture (200 pt wide at 2x), a 6 px frame, a 20 px shadow each side.
+        assert_eq!((w, h), (400 + 12 + 40, 225 + 12 + 40));
+        assert_eq!(px.len(), w * h * 4);
+        // The frame is white, the picture its own gray.
+        assert_eq!(&px[((20 + 2) * w + 20 + 100) * 4..((20 + 2) * w + 20 + 100) * 4 + 3], &[255, 255, 255]);
+        assert_eq!(px[((20 + 100) * w + 20 + 100) * 4], 200);
+    }
+
+    #[test]
     fn the_folder_is_the_day() {
         let l = vergence_shell::tiles::Local { year: 2026, month: 10, mday: 20, wday: 5, hour: 23, min: 1, sec: 19 };
         assert!(folder(&l).ends_with("Pictures/Screenshots/2026-11-20"));
@@ -520,4 +540,215 @@ fn drag_rect(a: smithay::utils::Point<f64, Logical>, b: smithay::utils::Point<f6
     let (x0, y0) = (a.x.min(b.x).round() as i32, a.y.min(b.y).round() as i32);
     let (x1, y1) = (a.x.max(b.x).round() as i32, a.y.max(b.y).round() as i32);
     Rectangle::new((x0, y0).into(), (x1 - x0, y1 - y0).into())
+}
+
+// Step 4: the floating thumbnail (Dave, 2026-11-20: as the Mac's, "anchor
+// it to Main"). After each capture a small picture of it floats in the
+// bottom-right corner of the main screen's work area (the dock's screen),
+// whatever was captured, in front of everything: about 5 s, kept while the
+// pointer is over it; a click opens the file in Close-Up; a drag takes the
+// file to any app that takes files (the server's own drag, drag.rs); a
+// flick to the right sends it away. A capture to the clipboard shows it
+// too, with nothing to open or drag. It is not a notification: Do Not
+// Disturb and the cards' settings don't touch it. The next capture's
+// thumbnail takes its place.
+
+/// A path as a file:// link, every byte but the unreserved ones and '/'
+/// escaped (a screenshot's name has spaces).
+pub fn file_link(p: &std::path::Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    let mut s = String::from("file://");
+    for &b in p.as_os_str().as_bytes() {
+        if b.is_ascii_alphanumeric() || b"/-._~".contains(&b) {
+            s.push(b as char);
+        } else {
+            s.push_str(&format!("%{b:02X}"));
+        }
+    }
+    s
+}
+
+/// The longest side of the thumbnail's picture, in points.
+const SHOT_W: f64 = 200.0;
+const SHOT_H: f64 = 130.0;
+/// Its white frame and shadow, and its margin from the corner, in points.
+const SHOT_FRAME: f64 = 3.0;
+const SHOT_SHADOW: f64 = 10.0;
+const SHOT_MARGIN: i32 = 12;
+/// How long it floats.
+const SHOT_TIME: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The thumbnail while it floats.
+pub struct Shot {
+    /// The file (None: it went to the clipboard).
+    pub path: Option<PathBuf>,
+    buffer: smithay::backend::renderer::element::memory::MemoryRenderBuffer,
+    px: (i32, i32),
+    /// Where it is, in points (shadow included).
+    pub rect: Rectangle<i32, Logical>,
+    until: std::time::Instant,
+    hovered: bool,
+    /// Where a press on it started.
+    press: Option<smithay::utils::Point<f64, Logical>>,
+}
+
+/// A capture made small for its thumbnail, at `scale` (the main screen's):
+/// averaged down to fit SHOT_W x SHOT_H points, a white frame, a shadow.
+pub fn thumb_pixels(w: usize, h: usize, rgba: &[u8], scale: f64) -> (usize, usize, Vec<u8>) {
+    let k = ((SHOT_W * scale) / w as f64).min((SHOT_H * scale) / h as f64).min(1.0);
+    let (tw, th) = (((w as f64 * k).round() as usize).max(1), ((h as f64 * k).round() as usize).max(1));
+    let small = shrink(w, h, rgba, tw, th);
+    let f = (SHOT_FRAME * scale).round() as usize;
+    let (fw, fh) = (tw + 2 * f, th + 2 * f);
+    let mut framed = vec![255u8; fw * fh * 4];
+    for y in 0..th {
+        for x in 0..tw {
+            let s = &small[(y * tw + x) * 4..(y * tw + x) * 4 + 4];
+            let o = ((y + f) * fw + x + f) * 4;
+            // Over white (a window's clear corners show white, as framed).
+            let ia = 255 - s[3] as u32;
+            for c in 0..3 {
+                framed[o + c] = (s[c] as u32 + 255 * ia / 255).min(255) as u8;
+            }
+            framed[o + 3] = 255;
+        }
+    }
+    with_shadow(fw, fh, &framed, (SHOT_SHADOW * scale).round() as usize)
+}
+
+/// Area-averaged shrinking (premultiplied pixels average right).
+fn shrink(w: usize, h: usize, rgba: &[u8], tw: usize, th: usize) -> Vec<u8> {
+    if (tw, th) == (w, h) {
+        return rgba.to_vec();
+    }
+    let mut out = vec![0u8; tw * th * 4];
+    for ty in 0..th {
+        let (y0, y1) = (ty * h / th, ((ty + 1) * h / th).max(ty * h / th + 1).min(h));
+        for tx in 0..tw {
+            let (x0, x1) = (tx * w / tw, ((tx + 1) * w / tw).max(tx * w / tw + 1).min(w));
+            let mut sum = [0u64; 4];
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let o = (y * w + x) * 4;
+                    for c in 0..4 {
+                        sum[c] += rgba[o + c] as u64;
+                    }
+                }
+            }
+            let n = ((y1 - y0) * (x1 - x0)) as u64;
+            let o = (ty * tw + tx) * 4;
+            for c in 0..4 {
+                out[o + c] = (sum[c] / n) as u8;
+            }
+        }
+    }
+    out
+}
+
+impl Server {
+    /// The main screen and its scale, for the thumbnail.
+    pub fn shot_screen(&self) -> Option<(Rectangle<i32, Logical>, f64)> {
+        let geo = self.shelf_screen().or_else(|| self.space.outputs().next().and_then(|o| self.space.output_geometry(o)))?;
+        let scale = self.space.outputs().find(|o| self.space.output_geometry(o) == Some(geo)).map_or(1.0, |o| o.current_scale().fractional_scale());
+        Some((geo, scale))
+    }
+
+    /// A capture was saved (or put on the clipboard): its thumbnail floats.
+    pub fn shot_show(&mut self, path: Option<PathBuf>, w: usize, h: usize, rgba: Vec<u8>, scale: f64) {
+        use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
+        let Some((geo, _)) = self.shot_screen() else { return };
+        let area = self.work_area(geo);
+        let (pw, ph) = ((w as f64 / scale).round() as i32, (h as f64 / scale).round() as i32);
+        // The shadow's margin sits over the margin from the corner.
+        let shadow = (SHOT_SHADOW).round() as i32;
+        let x = area.loc.x + area.size.w - pw - SHOT_MARGIN + shadow;
+        let y = area.loc.y + area.size.h - ph - SHOT_MARGIN + shadow;
+        let buffer = MemoryRenderBuffer::from_slice(&rgba, smithay::backend::allocator::Fourcc::Abgr8888, (w as i32, h as i32), 1, smithay::utils::Transform::Normal, None);
+        self.capture_shot = Some(Shot { path, buffer, px: (w as i32, h as i32), rect: Rectangle::new((x, y).into(), (pw, ph).into()), until: std::time::Instant::now() + SHOT_TIME, hovered: false, press: None });
+        self.shot_timer();
+        self.redraw_all();
+    }
+
+    /// Looks again when it is due to go; kept while hovered or held.
+    fn shot_timer(&mut self) {
+        use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+        let _ = self.loop_handle.insert_source(Timer::from_duration(SHOT_TIME + std::time::Duration::from_millis(50)), |_, _, st| {
+            let now = std::time::Instant::now();
+            match st.capture_shot.as_mut() {
+                Some(s) if s.hovered || s.press.is_some() => {
+                    s.until = now + std::time::Duration::from_secs(2);
+                    return TimeoutAction::ToDuration(std::time::Duration::from_secs(2));
+                }
+                Some(s) if s.until > now => return TimeoutAction::ToDuration(s.until - now),
+                Some(_) => {
+                    st.capture_shot = None;
+                    st.redraw_all();
+                }
+                None => {}
+            }
+            TimeoutAction::Drop
+        });
+    }
+
+    pub fn shot_at(&self, pos: smithay::utils::Point<f64, Logical>) -> bool {
+        self.capture_shot.as_ref().is_some_and(|s| s.rect.to_f64().contains(pos))
+    }
+
+    /// The pointer moved: hovered or not; held and moved, a drag starts (or
+    /// a flick to the right sends it away).
+    pub fn shot_hover(&mut self, pos: smithay::utils::Point<f64, Logical>) {
+        let Some(s) = self.capture_shot.as_mut() else { return };
+        s.hovered = s.rect.to_f64().contains(pos);
+        let Some(from) = s.press else { return };
+        let (dx, dy) = (pos.x - from.x, pos.y - from.y);
+        if dx > 30.0 && dy.abs() < dx / 2.0 {
+            // Flicked away.
+            self.capture_shot = None;
+            self.redraw_all();
+        } else if dx.hypot(dy) > 8.0 && dx <= 0.0 {
+            let path = s.path.clone();
+            s.press = None;
+            if let Some(p) = path {
+                self.capture_shot = None;
+                let uri = format!("{}\r\n", file_link(&p));
+                let label = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let plain = p.to_string_lossy().into_owned().into_bytes();
+                self.server_drag_start(label, vec![("text/uri-list".into(), uri.into_bytes()), ("text/plain".into(), plain)]);
+                self.redraw_all();
+            }
+        }
+    }
+
+    pub fn shot_press(&mut self, pos: smithay::utils::Point<f64, Logical>) {
+        if let Some(s) = self.capture_shot.as_mut() {
+            s.press = Some(pos);
+        }
+    }
+
+    /// Let go without a drag: a click opens it in Close-Up.
+    pub fn shot_release(&mut self, pos: smithay::utils::Point<f64, Logical>) {
+        let Some(s) = self.capture_shot.as_mut() else { return };
+        let Some(from) = s.press.take() else { return };
+        if (pos.x - from.x).hypot(pos.y - from.y) > 8.0 {
+            return;
+        }
+        let Some(path) = s.path.clone() else { return };
+        self.capture_shot = None;
+        self.redraw_all();
+        if let Err(e) = crate::spawn(std::process::Command::new("vergence-closeup").arg(&path)) {
+            tracing::warn!("screenshot: Close-Up did not start: {e}");
+        }
+    }
+
+    /// The thumbnail on screen `out` (the main screen's).
+    pub fn shot_element(&mut self, renderer: &mut smithay::backend::renderer::gles::GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Option<crate::decor::SceneElement> {
+        use smithay::backend::renderer::element::{Kind, memory::MemoryRenderBufferRenderElement};
+        let s = self.capture_shot.as_ref()?;
+        if !s.rect.overlaps(out) {
+            return None;
+        }
+        let whole = Rectangle::<f64, Logical>::from_size((s.px.0 as f64, s.px.1 as f64).into());
+        let loc = (s.rect.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+        MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), &s.buffer, None, Some(whole), Some(s.rect.size), Kind::Unspecified).ok().map(crate::decor::SceneElement::Memory)
+    }
 }

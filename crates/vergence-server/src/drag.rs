@@ -32,7 +32,8 @@ enum Over {
 }
 
 pub struct NativeDrag {
-    source: Win,
+    /// None: the server's own (a screenshot's thumbnail, capture.rs).
+    source: Option<Win>,
     label: String,
     items: Vec<(String, Vec<u8>)>,
     over: Over,
@@ -62,7 +63,16 @@ impl Server {
             return tracing::debug!("drag: refused (no button held on the window)");
         }
         tracing::info!("drag: {label:?} ({} kinds)", items.len());
-        self.native_drag = Some(NativeDrag { source: w, label, items, over: Over::Nothing, action: DROP_NONE, ghost: None });
+        self.native_drag = Some(NativeDrag { source: Some(w), label, items, over: Over::Nothing, action: DROP_NONE, ghost: None });
+        let pos = self.pointer_location();
+        self.native_drag_motion(pos);
+    }
+
+    /// The server starts a drag of its own (a screenshot's thumbnail dragged
+    /// out, capture.rs): the left button is held on what it drew.
+    pub fn server_drag_start(&mut self, label: String, items: Vec<(String, Vec<u8>)>) {
+        tracing::info!("drag: the server's {label:?}");
+        self.native_drag = Some(NativeDrag { source: None, label, items, over: Over::Nothing, action: DROP_NONE, ghost: None });
         let pos = self.pointer_location();
         self.native_drag_motion(pos);
     }
@@ -138,7 +148,7 @@ impl Server {
             }
             _ => {}
         }
-        if let Win::Native(s) = &drag.source {
+        if let Some(Win::Native(s)) = &drag.source {
             self.bus_send(s.client, ServerMsg::Window(WinEvent::DragEnded { window: s.id, action: done }));
         }
         tracing::info!("drag: dropped ({})", ["nothing done", "copied", "moved"][done.min(2) as usize]);

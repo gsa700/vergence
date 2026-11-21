@@ -85,8 +85,10 @@ fn screen_elements(state: &mut Server, renderer: &mut GlesRenderer, output: &Out
             });
         }
     }
-    // Super+Shift+4's picker, over everything but the pointer (capture.rs).
+    // Super+Shift+4's picker, over everything but the pointer, and the last
+    // screenshot's thumbnail (capture.rs).
     elements.extend(state.capture_pick_element(renderer, geo, scale).map(crate::zoom::Inner::Scene));
+    elements.extend(state.shot_element(renderer, geo, scale).map(crate::zoom::Inner::Scene));
     elements.extend(state.scene(renderer, output, scale).into_iter().map(crate::zoom::Inner::Scene));
     elements
 }
@@ -1584,16 +1586,19 @@ fn run_captures(state: &mut Server, renderer: &mut GlesRenderer, pointer_at: Poi
             match taken.into_iter().next() {
                 // Made PNG on a thread, put on the clipboard on the main loop.
                 Some(Ok((w, h, rgba))) => {
-                    let (tx, rx) = smithay::reexports::calloop::channel::channel::<Vec<u8>>();
+                    let (tx, rx) = smithay::reexports::calloop::channel::channel::<(Vec<u8>, Pixels, f64)>();
                     let _ = state.loop_handle.insert_source(rx, |ev, _, st| {
-                        if let smithay::reexports::calloop::channel::Event::Msg(png) = ev {
+                        if let smithay::reexports::calloop::channel::Event::Msg((png, (tw, th, thumb), s)) = ev {
                             tracing::info!("screenshot: to the clipboard ({} KB)", png.len() >> 10);
                             st.server_copy_picture(png);
+                            st.shot_show(None, tw, th, thumb, s);
                         }
                     });
+                    let s = state.shot_screen().map_or(1.0, |(_, s)| s);
                     std::thread::spawn(move || match crate::capture::png_bytes(w as u32, h as u32, &rgba) {
                         Ok(png) => {
-                            let _ = tx.send(png);
+                            let thumb = crate::capture::thumb_pixels(w, h, &rgba, s);
+                            let _ = tx.send((png, thumb, s));
                         }
                         Err(e) => tracing::warn!("screenshot to the clipboard: {e}"),
                     });
@@ -1603,12 +1608,30 @@ fn run_captures(state: &mut Server, renderer: &mut GlesRenderer, pointer_at: Poi
             }
             continue;
         }
-        for (t, path) in taken.into_iter().zip(paths) {
+        // The first file's thumbnail floats once it is written (vctl's own
+        // files, --to, have none).
+        let s = state.shot_screen().map_or(1.0, |(_, s)| s);
+        let thumbs = matches!(req.dest, crate::capture::Dest::Folder);
+        for (i, (t, path)) in taken.into_iter().zip(paths).enumerate() {
             match t {
-                Ok((w, h, rgba)) => crate::capture::save(Taken { w: w as u32, h: h as u32, rgba, path }, |r| match r {
-                    Ok(p) => tracing::info!("screenshot: {}", p.display()),
-                    Err(e) => tracing::warn!("screenshot not saved: {e}"),
-                }),
+                Ok((w, h, rgba)) => {
+                    let thumb = (thumbs && i == 0).then(|| crate::capture::thumb_pixels(w, h, &rgba, s));
+                    let (tx, rx) = smithay::reexports::calloop::channel::channel::<(std::path::PathBuf, Pixels)>();
+                    let _ = state.loop_handle.insert_source(rx, move |ev, _, st| {
+                        if let smithay::reexports::calloop::channel::Event::Msg((p, (tw, th, px))) = ev {
+                            st.shot_show(Some(p), tw, th, px, s);
+                        }
+                    });
+                    crate::capture::save(Taken { w: w as u32, h: h as u32, rgba, path }, move |r| match r {
+                        Ok(p) => {
+                            tracing::info!("screenshot: {}", p.display());
+                            if let Some(t) = thumb {
+                                let _ = tx.send((p, t));
+                            }
+                        }
+                        Err(e) => tracing::warn!("screenshot not saved: {e}"),
+                    })
+                }
                 Err(e) => tracing::warn!("screenshot {}: {e}", path.display()),
             }
         }

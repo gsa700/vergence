@@ -233,6 +233,10 @@ impl Server {
         if self.capture_picking() {
             return Some(Target::Server(Part::Capture));
         }
+        // The last screenshot's thumbnail, in front of everything (capture.rs).
+        if self.shot_at(pos) {
+            return Some(Target::Server(Part::Shot));
+        }
         // The overview has the whole screen but the dock (overview.rs).
         if self.overview_is_open() && !self.shelf_at(pos) {
             return Some(Target::Server(Part::Overview));
@@ -331,6 +335,7 @@ impl Server {
         self.picker_hover(pos);
         self.overview_hover(pos);
         self.capture_pick_hover(pos);
+        self.shot_hover(pos);
     }
 
     /// The pointer's picture, and Smithay's pointer where the pointer is.
@@ -594,6 +599,8 @@ impl Server {
             Target::Server(Part::Overview) if pressed && button == vergence_seat::BTN_LEFT => self.overview_press(pos),
             Target::Server(Part::Capture) if pressed && button == vergence_seat::BTN_LEFT => self.capture_pick_press(pos),
             Target::Server(Part::Capture) if !pressed && button == vergence_seat::BTN_LEFT => self.capture_pick_release(pos),
+            Target::Server(Part::Shot) if pressed && button == vergence_seat::BTN_LEFT => self.shot_press(pos),
+            Target::Server(Part::Shot) if !pressed && button == vergence_seat::BTN_LEFT => self.shot_release(pos),
             // The bare wallpaper (no desktop icons): as the icons' ground (aside.rs).
             Target::Server(Part::Desktop) if pressed && button == vergence_seat::BTN_LEFT => self.ground_clicked(),
             Target::Server(Part::Card) if pressed && button == vergence_seat::BTN_LEFT => self.card_press(pos),
