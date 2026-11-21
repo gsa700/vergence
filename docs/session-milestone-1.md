@@ -1,7 +1,7 @@
 # Session milestone 1: back as it was, or fresh
 
-Status: **all steps in 2026-11-21**; Dave's hands-on pass and a real
-logout on kepler still open (see Progress). Agreed 2026-11-21 (Dave: "yes,
+Status: **all steps in 2026-11-21**, a real logout passed on techbench the
+same afternoon; Dave's longer hands-on pass still open (see Progress). Agreed 2026-11-21 (Dave: "yes,
 add it to the plan, build it where you think it makes sense"). Built before files milestone 3, because
 that milestone's first step keeps FileView's tabs across restarts and
 should keep them by these rules from the start. Small: four steps and the
@@ -156,6 +156,9 @@ kepler, techbench and apollo; display-suite scenario 15 (tools/display-suite/15-
   its end comes back on it, scrolled; the Session page's rows. By hand in a
   headless session on Hubble: Settings closed with the close button
   reopens on its page within the time, at the front page for another session or
-  after the time. **Still open:** a real logout (Exit Vergence) on kepler
-  with Reader and Settings open, which needs bus v33 installed and the
-  session restarted; Dave's hands-on pass.
+  after the time. **A real logout, 2026-11-21 ~14:49 on techbench** (bus v33
+  installed on Hubble and techbench): Dave left Reader partway into two
+  PDFs and Settings on a page, chose Exit Vergence (the server asked 5
+  windows to close; all closed in 0.3 s), logged in again, and "both came
+  back where they were" (reader-session kept pages 38 and 12; settings-page
+  had no "closed" line). **Still open:** Dave's longer hands-on pass.
