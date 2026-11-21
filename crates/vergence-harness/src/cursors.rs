@@ -21,7 +21,9 @@ const SIZES: [u32; 5] = [24, 32, 48, 64, 96];
 const BUSY_FRAMES: usize = 12;
 const BUSY_DELAY_MS: u32 = 80;
 
-const ARROW: &str = r##"<path d="M3 2 L3 25 L9 19 L13 29 L17 27.5 L13 18 L21 18 Z" fill="#000" stroke="#fff" stroke-width="1.5" stroke-linejoin="miter"/>"##;
+/// The arrow, with a soft shadow down and to the right (Dave, 2026-11-21:
+/// "something similar to the old Mac OSX era pointers").
+const ARROW: &str = r##"<path d="M3 2 L3 25 L9 19 L13 29 L17 27.5 L13 18 L21 18 Z" transform="translate(0.9 1.3)" fill="#000" fill-opacity="0.25" stroke="#000" stroke-opacity="0.25" stroke-width="1.5"/><path d="M3 2 L3 25 L9 19 L13 29 L17 27.5 L13 18 L21 18 Z" fill="#000" stroke="#fff" stroke-width="1.5" stroke-linejoin="miter"/>"##;
 
 /// The six-color disc, its center at (cx, cy), radius r, turned by `turn` degrees.
 fn disc(cx: f32, cy: f32, r: f32, turn: f32, rim: &str) -> String {
@@ -48,17 +50,25 @@ fn arrow(_: usize) -> String {
     ARROW.into()
 }
 
+/// The pointing hand: the closed hand with its index finger raised (Dave,
+/// 2026-11-21, choosing it after "the pointer finger is unnaturally long
+/// ... make it match the hand"); the curled fingers show by their bumps
+/// along the top, no lines between them ("try removing the three bold lines").
 fn hand(_: usize) -> String {
-    r##"<path d="M11 3 Q11 1 13 1 Q15 1 15 3 L15 13 L17 12 Q19 12 19 14 L21 13 Q23 13 23 15 L25 15 Q27 15 27 18 L27 24 Q27 30 21 30 L15 30 Q11 30 9 26 L4 18 Q3 16 5 15 Q7 14 8 16 L11 20 Z" fill="#000" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/>"##.into()
+    parts(&[(8.0, 11.5, 17.5, 16.5, 6.5, 0.0), (8.8, 2.5, 3.8, 13.5, 1.9, 0.0), (12.9, 8.3, 4.0, 6.8, 2.0, 0.0), (17.0, 8.6, 4.0, 6.6, 2.0, 0.0), (21.0, 10.0, 3.8, 6.0, 1.9, 0.0), (5.0, 15.5, 4.0, 8.0, 2.0, -30.0)])
 }
 
-/// Parts of a hand drawn as one: every part's white rim first, then every
-/// part filled black over them (no rim crosses a part).
+/// Parts of a hand drawn as one, as Mac OS X's hands (Dave, 2026-11-21:
+/// "change the hands from black to white ... most of the time the black
+/// is good but on a lot of the pdf's it gets lost"): a soft shadow, every
+/// part's black rim, then every part filled white over them (the rims
+/// show between the fingers, not across them).
 fn parts(rects: &[(f32, f32, f32, f32, f32, f32)]) -> String {
     let one = |(x, y, w, h, r, turn): (f32, f32, f32, f32, f32, f32), extra: &str| format!(r##"<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" transform="rotate({turn} {} {})" {extra}/>"##, x + w / 2.0, y + h / 2.0);
-    let rims: String = rects.iter().map(|r| one(*r, r##"fill="#fff" stroke="#fff" stroke-width="3""##)).collect();
-    let fills: String = rects.iter().map(|r| one(*r, r##"fill="#000""##)).collect();
-    rims + &fills
+    let shadow: String = rects.iter().map(|r| one(*r, r##"fill="#000" fill-opacity="0.25" stroke="#000" stroke-opacity="0.25" stroke-width="2.4""##)).collect();
+    let rims: String = rects.iter().map(|r| one(*r, r##"fill="#000" stroke="#000" stroke-width="2.4""##)).collect();
+    let fills: String = rects.iter().map(|r| one(*r, r##"fill="#fff""##)).collect();
+    format!(r##"<g transform="translate(0.9 1.3)">{shadow}</g>"##) + &rims + &fills
 }
 
 /// An open hand (Dave, 2026-11-20: "the pdf hand should have all fingers
@@ -83,7 +93,7 @@ fn closed_hand(_: usize) -> String {
         (17.0, 7.8, 4.0, 7.0, 2.0, 0.0),
         (21.0, 9.5, 3.8, 6.5, 1.9, 0.0),
         (5.0, 15.5, 4.0, 8.0, 2.0, -30.0),
-    ])
+    ]) + &[12.7f32, 16.9, 21.0].iter().map(|x| format!(r##"<path d="M{x} 12.2 L{x} 15.2" stroke="#000" stroke-width="0.9" stroke-linecap="round"/>"##)).collect::<String>()
 }
 
 fn ibeam(_: usize) -> String {
@@ -148,7 +158,7 @@ fn context(_: usize) -> String {
 fn shapes() -> Vec<Shape> {
     vec![
         Shape { names: &["default", "left_ptr", "arrow", "top_left_arrow"], hot: (3.0, 2.0), body: arrow, frames: 1 },
-        Shape { names: &["pointer", "hand2", "hand1", "pointing_hand"], hot: (13.0, 1.5), body: hand, frames: 1 },
+        Shape { names: &["pointer", "hand2", "hand1", "pointing_hand"], hot: (10.7, 2.6), body: hand, frames: 1 },
         Shape { names: &["grab", "openhand", "dnd-move", "dnd-none"], hot: (16.0, 14.0), body: open_hand, frames: 1 },
         Shape { names: &["grabbing", "closedhand"], hot: (16.0, 16.0), body: closed_hand, frames: 1 },
         Shape { names: &["text", "xterm", "ibeam", "vertical-text"], hot: (16.0, 16.0), body: ibeam, frames: 1 },
