@@ -151,6 +151,9 @@ pub struct Element<M> {
     pub(crate) max_width: Option<f32>,
     pub(crate) key: Option<u64>,
     pub(crate) name: Option<String>,
+    /// What it shows now, for the meaning tree, where it is a drawing
+    /// ([`Element::value`]): "Page 3 of 253".
+    pub(crate) value: Option<String>,
     pub(crate) reveal: bool,
     /// Drawn and taking the pointer only while the pointer is on the button
     /// it sits in ([`Element::shown_on_hover`]).
@@ -164,7 +167,7 @@ pub struct Element<M> {
 
 impl<M> Element<M> {
     pub(crate) fn new(kind: Kind<M>, width: Length, height: Length) -> Element<M> {
-        Element { kind, width, height, max_width: None, key: None, name: None, reveal: false, hover_only: false, pointer: None, on_menu: None }
+        Element { kind, width, height, max_width: None, key: None, name: None, value: None, reveal: false, hover_only: false, pointer: None, on_menu: None }
     }
 
     pub fn width(mut self, width: Length) -> Self {
@@ -221,6 +224,13 @@ impl<M> Element<M> {
     /// does not say it (a color swatch, a button that shows a symbol).
     pub fn name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
+        self
+    }
+
+    /// What a drawing shows now, to a screen reader, an agent and the
+    /// magnifier ("Page 3 of 253"); its name says what it is.
+    pub fn value(mut self, value: impl Into<String>) -> Self {
+        self.value = Some(value.into());
         self
     }
 

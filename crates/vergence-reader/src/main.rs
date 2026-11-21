@@ -859,8 +859,41 @@ impl Viewer {
             layout.draw(scene, r, scale.max(0.25), ground.unwrap_or(theme.page), theme.accent);
         })
         .on_touch(|t| Some(Msg::Touch(t)))
+        .name("Pages")
+        .value(self.where_now(d))
         .width(Length::FILL)
         .height(Length::FILL)
+    }
+
+    /// Where reading is, in words, for the page view's meaning (agents, the
+    /// magnifier, a screen reader): "Page 3 of 253, continuous, 129%
+    /// (width)", with the view, the turn and the night look when not the
+    /// usual.
+    fn where_now(&self, d: &pdf::Pdf) -> String {
+        let r = self.area.get();
+        let c = d.current(r);
+        let mut s = match d.view {
+            pdf::View::Two if c + 1 < d.pages.len() && c > 0 => format!("Pages {} and {} of {}", c + 1, c + 2, d.pages.len()),
+            _ => format!("Page {} of {}", c + 1, d.pages.len()),
+        };
+        s.push_str(match d.view {
+            pdf::View::Continuous => ", continuous",
+            pdf::View::Single => ", one page",
+            pdf::View::Two => ", two pages",
+        });
+        let mode = match d.mode {
+            pdf::Mode::Width => " (width)",
+            pdf::Mode::Page => " (page)",
+            pdf::Mode::Zoom(_) => "",
+        };
+        s.push_str(&format!(", {:.0}%{mode}", d.zoom(r) * 100.0));
+        if d.turn != 0 {
+            s.push_str(&format!(", turned {}°", d.turn));
+        }
+        if d.night {
+            s.push_str(", night look");
+        }
+        s
     }
 
     /// The sidebar: the pages' thumbnails, the outline, or find's results.
@@ -949,6 +982,8 @@ impl Viewer {
                 layout.draw_thumbs(scene, r, scale, current, theme.page, theme.accent);
             })
             .on_touch(|t| Some(Msg::ThumbTouch(t)))
+            .name("Page thumbnails")
+            .value(format!("Page {} of {} marked", d.current(self.area.get()) + 1, d.pages.len()))
             .width(Length::FILL)
             .height(Length::FILL)
         };

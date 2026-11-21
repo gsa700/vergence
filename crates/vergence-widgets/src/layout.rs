@@ -60,6 +60,8 @@ pub(crate) struct Node<M> {
     pub parent: Option<usize>,
     pub what: What<M>,
     pub name: Option<String>,
+    /// A drawing's value ([`crate::Element::value`]).
+    pub value: Option<String>,
     /// Sent on a right click ([`crate::Element::on_menu`]).
     pub on_menu: Option<M>,
     /// Scrolled into view when it first appears ([`crate::Element::keep_in_view`]).
@@ -355,11 +357,12 @@ impl Layout<'_> {
     fn arrange<M>(&mut self, e: Element<M>, rect: Rect, parent: Option<usize>, id: Id, out: &mut Vec<Node<M>>) {
         let me = out.len();
         let name = e.name;
+        let value = e.value;
         let reveal = e.reveal;
         let hover_only = e.hover_only;
         let pointer = e.pointer;
         let on_menu = e.on_menu;
-        let push = |out: &mut Vec<Node<M>>, what: What<M>| out.push(Node { id, rect, parent, what, name: name.clone(), on_menu: None, reveal, hover_only, pointer });
+        let push = |out: &mut Vec<Node<M>>, what: What<M>| out.push(Node { id, rect, parent, what, name: name.clone(), value: value.clone(), on_menu: None, reveal, hover_only, pointer });
         // Each element is one node, pushed before its children.
         self.arrange_kind(e.kind, rect, me, id, push, out);
         if let Some(n) = out.get_mut(me) {

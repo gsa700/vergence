@@ -778,6 +778,13 @@ impl<M: Clone> Ui<M> {
                     self.activate(id, &mut r);
                 }
                 What::Button { .. } | What::Switch { .. } | What::Choice { .. } => return Err("it is off".into()),
+                // A field pressed: Enter in it (what it does with its text: a
+                // search, a page to go to). Reader milestone 1, step 6.
+                What::Field { on_submit: Some(m), .. } if usable => {
+                    r.messages.push(m.clone());
+                    r.redraw = true;
+                }
+                What::Field { .. } => return Err("it does nothing with Enter".into()),
                 _ => return Err("it cannot be pressed".into()),
             },
             Action::Focus => {
@@ -2404,7 +2411,9 @@ impl<M: Clone> Ui<M> {
                 }
                 What::Scroll { .. } => mk("scroll area", named(String::new()), None, states),
                 What::Picture { .. } => mk("picture", named(String::new()), None, states),
-                What::Drawing { .. } => mk("drawing", named(String::new()), None, states),
+                // An icon in a button is the button's (its name says it).
+                What::Drawing { .. } if parent_in_button && n.name.is_none() => None,
+                What::Drawing { .. } => mk("drawing", named(String::new()), n.value.clone(), states),
                 What::Area { doc, .. } => {
                     let d = doc.borrow();
                     if !d.options().editable {

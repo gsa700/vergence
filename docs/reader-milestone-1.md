@@ -153,3 +153,16 @@ signing (question 2). Printing (no printing system yet). Video (Close-Up's).
   Tried headless on Hubble: two tabs, two views kept through switching,
   a file replaced on disk read again (20 pages to 4, its own title in the
   tab), a second start handed over.
+- **Step 6, its meaning** (2026-11-20). The toolbar's tools, the page
+  and find fields, the sidebar's tabs, the outline and the results were
+  already named. New: the page view is a drawing named "Pages" whose
+  value says where reading is ("Pages 100 and 101 of 253, two pages, 79%
+  (width)", with the turn and the night look when on), the thumbnails
+  "Page thumbnails" ("Page 3 of 253 marked"). In the toolkit, for every
+  app: a drawing may carry a value (`Element::value`); an icon in a
+  button is no node of its own any more (each toolbar button had an empty
+  drawing under it); an agent's Press on a field is Enter in it (its
+  submit: a page to go to, a search), Set then Press doing what typing and
+  Enter do. Tried headless on Hubble with vagent: the agent read the page
+  view, set the page field to 100, pressed it, chose Two pages and read
+  "Pages 100 and 101 of 253, two pages".

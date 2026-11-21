@@ -732,6 +732,11 @@ fn a_text_area_is_drawn() {
     assert!(m.iter().any(|m| m.role == "text area" && m.states.contains(&"focused")));
 }
 
+/// An icon as the toolbar's are: a drawing in a button.
+fn icon_like() -> Element<Msg> {
+    drawing(|_, _, _, _| {}).width(Length::Fixed(16.0)).height(Length::Fixed(16.0))
+}
+
 /// The meaning node id of the widget named `name`.
 fn id_of(ui: &Ui<Msg>, name: &str) -> u64 {
     ui.meaning().into_iter().find(|m| m.name == name).unwrap_or_else(|| panic!("no {name:?} in\n{}", ui.meaning_text())).id
@@ -752,6 +757,9 @@ fn actions_by_meaning_do_what_input_does() {
             switch(false, Msg::Toggle).name("Repeat"),
             slider(0.0, 100.0, 50.0, Msg::Value).on_release(Msg::Done).name("Delay"),
             field("Ann", Msg::Text).name("Name"),
+            field("12", Msg::Text).on_submit(Msg::Done).name("Page"),
+            button(icon_like()).on_press(Msg::A).name("Back"),
+            drawing(|_, _, _, _| {}).name("Pages").value("Page 3 of 10"),
             field("hunter2", Msg::Text).secret().name("Password"),
             choice(vec!["Inter".into(), "JetBrains Mono".into()], Some(0), Msg::Pick).name("Font"),
             label("Hello"),
@@ -772,6 +780,12 @@ fn actions_by_meaning_do_what_input_does() {
     assert_eq!(act(&mut ui, "Font", Action::Set("Inter".into())), Ok(vec![Msg::Pick(0)]), "set means choose");
     assert_eq!(act(&mut ui, "Font", Action::Choose("Comic Sans".into())), Err("no item named \"Comic Sans\" (its items: Inter, JetBrains Mono)".into()), "says what there is");
     assert_eq!(act(&mut ui, "Hello", Action::Press), Err("it cannot be pressed".into()));
+    // A field pressed: Enter in it; one with nothing to do with Enter says so.
+    assert_eq!(act(&mut ui, "Page", Action::Press), Ok(vec![Msg::Done]));
+    assert_eq!(act(&mut ui, "Name", Action::Press), Err("it does nothing with Enter".into()));
+    // A drawing tells what it shows; an icon in a button is the button's.
+    assert!(ui.meaning().iter().any(|m| m.role == "drawing" && m.name == "Pages" && m.value.as_deref() == Some("Page 3 of 10")));
+    assert!(!ui.meaning().iter().any(|m| m.role == "drawing" && m.name.is_empty()), "no nameless icons:\n{}", ui.meaning_text());
     assert_eq!(ui.act(9_999_999, &Action::Press).err(), Some("no such node".into()));
     // No action moves the focus but Focus.
     assert_eq!(ui.focused(), None);
