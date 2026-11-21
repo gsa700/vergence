@@ -992,6 +992,17 @@ impl<'a> Native<'a> {
         let w = &mut self.windows[i];
         w.frame_pending = true;
         w.frames += 1;
+        // The pointer's shape as the new frame has it (a shape that changed
+        // under a pointer at rest: Reader's hand let go, 2026-11-20).
+        if w.pointer_at.is_some()
+            && let Some(c) = w.app.get().cursor_now()
+            && c != w.cursor
+        {
+            w.cursor = c;
+            let window = w.id;
+            self.send(WinRequest::Cursor { window, shape: c.wire() as u16 })?;
+        }
+        let w = &mut self.windows[i];
         if !w.app.get().shown(&frame, t.elapsed().as_secs_f64() * 1e3) {
             w.closing = true;
         }

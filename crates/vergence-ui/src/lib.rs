@@ -678,6 +678,13 @@ pub trait App {
         false
     }
 
+    /// The pointer's shape now, if the window is under it: asked after each
+    /// frame, so a shape that changed under a pointer at rest (a hand let
+    /// go) is shown without waiting for it to move. None: no opinion.
+    fn cursor_now(&self) -> Option<Cursor> {
+        None
+    }
+
     /// Called after a frame has been handed to the server, with how long
     /// drawing it took. Return false to close the window.
     fn shown(&mut self, _frame: &Frame, _draw_ms: f64) -> bool {

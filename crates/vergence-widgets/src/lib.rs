@@ -446,6 +446,10 @@ impl<P: Program> vergence_ui::App for Host<P> {
         self.theme.ground()
     }
 
+    fn cursor_now(&self) -> Option<vergence_ui::Cursor> {
+        self.ui.cursor_now()
+    }
+
     fn scene(&mut self, frame: &Frame, fonts: &mut Fonts) -> Scene {
         let began = Instant::now();
         let scene = self.build(frame, fonts);

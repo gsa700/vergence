@@ -182,6 +182,8 @@ pub struct Ui<M> {
     nodes: Vec<Node<M>>,
     size: (f32, f32),
     hover: Option<Id>,
+    /// Where the pointer was last (window points), while it is over the window.
+    pointer_pos: Option<(f32, f32)>,
     pressed: Option<(Id, With)>,
     /// Where the pointer pressed it (a button pulled away starts a drag).
     pressed_at: (f32, f32),
@@ -238,6 +240,7 @@ impl<M> Default for Ui<M> {
             nodes: Vec::new(),
             size: (0.0, 0.0),
             hover: None,
+            pointer_pos: None,
             pressed: None,
             pressed_at: (0.0, 0.0),
             fingers: Vec::new(),
@@ -1398,6 +1401,7 @@ impl<M: Clone> Ui<M> {
         match *input {
             Input::PointerMoved { x, y } => self.pointer_moved(x, y, &mut r),
             Input::PointerLeft => {
+                self.pointer_pos = None;
                 if self.hover.take().is_some() {
                     r.redraw = true;
                 }
@@ -1557,7 +1561,45 @@ impl<M: Clone> Ui<M> {
         self.scroll_by(s, want - have);
     }
 
+    /// The pointer's shape at (x, y) as the widgets are now.
+    fn cursor_at(&self, x: f32, y: f32) -> Cursor {
+        if self.open.is_some() {
+            return Cursor::Default;
+        }
+        let t = self.target(x, y);
+        let what = t.and_then(|id| self.node(id)).map(|n| &n.what);
+        let on_bar = matches!(what, Some(What::Area { doc, .. }) if doc.borrow().bar_hit(x, y).is_some());
+        // A drawing pulled keeps its shape wherever the pointer goes.
+        let pulled = match self.drag {
+            Some(Drag::Drawing { id, .. }) => self.node(id).and_then(|n| match n.what {
+                What::Drawing { cursor, .. } => cursor,
+                _ => None,
+            }),
+            _ => None,
+        };
+        let asked = t.and_then(|id| self.node(id)).and_then(|n| n.pointer);
+        match (what, self.drag) {
+            _ if pulled.is_some() => pulled.unwrap_or(Cursor::Default),
+            (_, None) if asked.is_some() => asked.unwrap_or(Cursor::Default),
+            (_, Some(Drag::AreaBar { .. })) => Cursor::Default,
+            (Some(What::Area { .. }), None) if on_bar => Cursor::Default,
+            (_, Some(Drag::Select { .. } | Drag::AreaSelect { .. })) | (Some(What::Field { .. } | What::Area { .. }), _) => Cursor::Text,
+            (Some(What::Drawing { cursor, .. }), _) => cursor.unwrap_or(Cursor::Default),
+            // Buttons, switches, sliders: the arrow, as on the Mac and
+            // Windows; the hand only where asked (a link).
+            (None, _) | (Some(_), _) => Cursor::Default,
+        }
+    }
+
+    /// The pointer's shape now, if it is over the window: after a new
+    /// layout, a shape that changed under a pointer at rest (a drawing's
+    /// cursor changed by a press or a release) is shown without a move.
+    pub fn cursor_now(&self) -> Option<Cursor> {
+        self.pointer_pos.map(|(x, y)| self.cursor_at(x, y))
+    }
+
     fn pointer_moved(&mut self, x: f32, y: f32, r: &mut Response<M>) {
+        self.pointer_pos = Some((x, y));
         // A button held and pulled away: its drag message, and no press.
         if let Some((id, With::Pointer)) = self.pressed
             && ((x - self.pressed_at.0).powi(2) + (y - self.pressed_at.1).powi(2)) > 36.0
@@ -1629,28 +1671,7 @@ impl<M: Clone> Ui<M> {
             self.hover = t;
             r.redraw = true;
         }
-        let what = t.and_then(|id| self.node(id)).map(|n| &n.what);
-        let on_bar = matches!(what, Some(What::Area { doc, .. }) if doc.borrow().bar_hit(x, y).is_some());
-        // A drawing pulled keeps its shape wherever the pointer goes.
-        let pulled = match self.drag {
-            Some(Drag::Drawing { id, .. }) => self.node(id).and_then(|n| match n.what {
-                What::Drawing { cursor, .. } => cursor,
-                _ => None,
-            }),
-            _ => None,
-        };
-        let asked = t.and_then(|id| self.node(id)).and_then(|n| n.pointer);
-        r.cursor = Some(match (what, self.drag) {
-            _ if pulled.is_some() => pulled.unwrap_or(Cursor::Default),
-            (_, None) if asked.is_some() => asked.unwrap_or(Cursor::Default),
-            (_, Some(Drag::AreaBar { .. })) => Cursor::Default,
-            (Some(What::Area { .. }), None) if on_bar => Cursor::Default,
-            (_, Some(Drag::Select { .. } | Drag::AreaSelect { .. })) | (Some(What::Field { .. } | What::Area { .. }), _) => Cursor::Text,
-            (Some(What::Drawing { cursor, .. }), _) => cursor.unwrap_or(Cursor::Default),
-            // Buttons, switches, sliders: the arrow, as on the Mac and
-            // Windows; the hand only where asked (a link).
-            (None, _) | (Some(_), _) => Cursor::Default,
-        });
+        r.cursor = Some(self.cursor_at(x, y));
         // A drawing hears the pointer pass over it.
         let drawing = t.filter(|id| self.node(*id).is_some_and(|n| matches!(n.what, What::Drawing { .. })));
         if self.drag.is_none() {

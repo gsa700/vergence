@@ -683,7 +683,7 @@ impl Server {
             let pid = pid.map(|p| format!(" pid {p}")).unwrap_or_default();
             // A native window's scale and text factor, as told (the display suite).
             let told = w.native().map_or(String::new(), |n| format!(" scale={:.4} text={:.3}", n.scale(), n.text()));
-            let scene = w.native().and_then(|n| n.scene_report()).map_or(String::new(), |s| format!(" [{s}]"));
+            let scene = w.native().map(|n| format!(" cursor={:?}", n.cursor())).unwrap_or_default() + &w.native().and_then(|n| n.scene_report()).map_or(String::new(), |s| format!(" [{s}]"));
             out.push(format!("{i} {kind} {title:?} {class:?} {geo:?} on {on:?} title-bar={} bar-h={}{told}{pid} {}{scene}", self.has_title(w), if self.has_title(w) { self.bar_h(w) } else { 0 }, self.describe_style(w)));
         }
         out.join("\n")
