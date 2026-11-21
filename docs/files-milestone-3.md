@@ -1,6 +1,8 @@
 # Files milestone 3: FileView, with the best of Explorer and Finder
 
-Status: **draft 2026-11-21**, for Dave's approval. An app milestone (after
+Status: **questions answered 2026-11-21** (Dave: 1 yes; 2 "recents should
+probably exist, but I don't care for it and always turn it off. so lets
+have the option to do that"). An app milestone (after
 screenshots, which closed 2026-11-21). Dave compared FileView with Windows
 11's File Explorer and macOS's Finder (his screenshots on Control's
 Desktop, 2026-11-21) and answered the same night:
@@ -31,38 +33,44 @@ kind, an option there, is **on by default** here.
    windows; a folder handed over (from the desktop, Open with, the dock)
    opens in a tab of the front window. Folders kept across restarts per
    window and tab, as Reader keeps its documents.
-2. **One toolbar row under the tab bar**, as Explorer's: Back, Forward, Up;
+2. **The mouse's Back and Forward buttons** move through the tab's history,
+   as in a browser, and each folder in it comes back at the scroll place it
+   was left at (for the session).
+3. **One toolbar row under the tab bar**, as Explorer's: Back, Forward, Up;
    the path (the breadcrumb, which becomes a field to type a path when
    clicked, as Explorer's address bar); the views (list, icons) and the
    preview pane; New Folder, Trash; the filter field at the right. The
    status line stays at the bottom: the item count, the selection, and
    the free space of the folder's disk (one `statvfs` call per folder:
    cheap, so in).
-3. **The sidebar**, from both: full height under the toolbar, in sections
+4. **The sidebar**, from both: full height under the toolbar, in sections
    as Finder's and Explorer's (**Favorites**: Home, Desktop, Documents,
    Downloads, Pictures and the user's own; **Locations**: drives, network
-   mounts, Trash; **Recent**). Reordered by dragging; a folder or file
+   mounts, Trash; **Recent**: recent folders and files from FileView, Edit,
+   Reader and Close-Up, with a switch to turn it off in FileView's settings
+   and on the section's own right-click, Hide Recent; Dave turns it off). Reordered by dragging; a folder or file
    dragged from the main view drops in as a shortcut (a file's opens it, a
    folder's goes there); a shortcut's right-click: Open in New Tab, Remove
    from Sidebar, Show in its folder. Kept in ~/.config/vergence's FileView
    settings. A section folds by its heading.
-4. **The list**, Finder as the model: grouped by kind by default (Folders,
+5. **The list**, Finder as the model: grouped by kind by default (Folders,
    Documents, Pictures, Music, Videos, Archives, Developer, Other; Group by
    in the View menu: Kind, Date, Size, None); stripes under the files only;
    rows a little taller (Medium by default, about Finder's 24 points, the
    icons a little larger).
-5. **Rename in place with a single click** (Dave's list, 2026-11-21): a
+6. **Rename in place with a single click** (Dave's list, 2026-11-21): a
    click on the name of an item already selected, a pause, and the name is
    a field (Enter keeps it, Escape lets go, a click elsewhere keeps it); a
    double click still opens; F2 renames too (Explorer's key).
-6. **Opens in the home folder** (not Computer); New Window and New Tab too.
+7. **Opens in the home folder** (not Computer); New Window and New Tab too.
 
 ## Steps
 
 1. Tabs (and keeping each window's tabs across restarts).
-2. The toolbar row and the path field; free space in the status line.
+2. The toolbar row and the path field; free space in the status line; the
+   mouse's Back and Forward, scroll places kept.
 3. The sidebar: sections, dragging to reorder, shortcuts by drop, their
-   menu, folding.
+   menu, folding; Recent and its switch.
 4. The list: grouping by kind by default, stripes under files only, taller
    rows.
 5. Single-click rename, and F2.
@@ -75,16 +83,11 @@ kind, an option there, is **on by default** here.
 Column view and gallery (Finder), Explorer's command bar (its commands stay
 in the right-click and app menus), drive space bars (Dave: no), a separate
 preview window (on the wishlist since 2026-11-16: a later milestone with
-Close-Up), the mouse's Back button (also on the wishlist; small, could join
-step 2 if Dave likes).
+Close-Up).
 
-## Questions for Dave
+## Questions for Dave (answered 2026-11-21)
 
-1. **The mouse's Back and Forward buttons** (wishlist, 2026-11-16: "go back
-   in history with the mouse button 5 as web browsers do"), and history
-   remembering each folder's scroll position for the session: (a) in step 2
-   (recommended: small, and it is how people move back with the new tabs);
-   (b) later.
-2. **The sidebar's Recent**: (a) recent folders and files (Finder's Recents,
-   Explorer's Home), from what FileView, Edit, Reader and Close-Up open
-   (recommended); (b) leave it out.
+1. *Answered: yes, in step 2.* The mouse's Back and Forward buttons, and
+   history keeping each folder's scroll place for the session.
+2. *Answered: Recent exists, with a switch to turn it off* ("I don't care
+   for it and always turn it off").
