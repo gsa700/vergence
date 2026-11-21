@@ -74,6 +74,8 @@ smithay::backend::renderer::element::render_elements! {
     Backdrop = crate::backdrop::Backdrop,
     /// A window's picture (thumbs.rs): the dock's picker, Alt+Tab, the overview.
     Thumb = crate::thumbs::ThumbElement,
+    /// A window's own elements scaled into its place in the overview (overview.rs).
+    Placed = crate::overview::Placed,
 }
 
 /// What is under a point of the desktop.
@@ -778,7 +780,11 @@ impl Server {
         elements.extend(self.tab_mark_element(out, scale));
         // Where a dragged window will go if let go now (snap.rs).
         elements.extend(self.snap_preview_element(renderer, out, scale, light));
+        // Where each window's elements start (the overview lifts them out).
+        let loop_start = elements.len();
+        let mut spans: Vec<(Win, usize)> = Vec::new();
         for w in windows {
+            spans.push((w.clone(), elements.len()));
             // This window's own bar style (bar_light).
             let light = self.bar_light(&w, light);
             let style = vergence_look::bar_look(light);
@@ -1113,6 +1119,16 @@ impl Server {
             if let Some(n) = w.native() {
                 self.native_send_configure(n);
             }
+        }
+        // The overview: its windows themselves, scaled into their places, in
+        // front of the screen dimmed (overview.rs).
+        if self.overview.is_some() {
+            let windows_part = elements.split_off(loop_start);
+            let spans: Vec<(Win, usize, usize)> = spans.iter().enumerate().map(|(i, (w, a))| (w.clone(), a - loop_start, spans.get(i + 1).map_or(windows_part.len(), |n| n.1 - loop_start))).collect();
+            let (placed, rest) = self.overview_place(windows_part, &spans, out, scale);
+            elements.extend(placed);
+            elements.extend(self.overview_dim(out, scale));
+            elements.extend(rest);
         }
         // Behind everything: the wallpaper, at this output's own pixels (wallpaper.rs).
         if let Some(mode) = output.current_mode()

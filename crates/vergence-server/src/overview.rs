@@ -2,8 +2,10 @@
 // docs/overview-milestone-1.md). Dave, 2026-11-18: "Super+Tab Mission Control
 // style"; minimized windows in a faint row along the bottom (his 1a).
 //
-// Every window on each screen at once: the screen dimmed, each window's live
-// picture (thumbs.rs) where vergence-shell's overview.rs puts it (scaled
+// Every window on each screen at once: the screen dimmed, each window itself
+// (its bar, tabs, border and content: the scene's own elements, scaled;
+// Dave, 2026-11-20: "Could Super+Tab use the actual windows rather than
+// images of them?") where vergence-shell's overview.rs puts it (scaled
 // alike, none overlapping, roughly where it was), its title under it; the
 // minimized ones in a row of their own along the bottom, faint. The dock
 // stays where it is (the arrangement keeps to the work area).
@@ -33,6 +35,20 @@ use vergence_scene::{Color, Point as ScenePoint, Rect as SceneRect, Scene};
 use vergence_shell::{Rect, overview};
 
 use crate::{Server, decor::SceneElement, win::Win};
+
+smithay::backend::renderer::element::render_elements! {
+    /// What a window is drawn with (decor.rs's scene), to be scaled.
+    pub WinParts<=GlesRenderer>;
+    Surface = smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<GlesRenderer>,
+    Solid = SolidColorRenderElement,
+    Memory = MemoryRenderBufferRenderElement<GlesRenderer>,
+    Texture = smithay::backend::renderer::element::texture::TextureRenderElement<smithay::backend::renderer::gles::GlesTexture>,
+    Shaded = crate::backdrop::Shaded,
+    Backdrop = crate::backdrop::Backdrop,
+}
+
+/// A window's element scaled into its place in the overview.
+pub type Placed = smithay::backend::renderer::element::utils::RelocateRenderElement<smithay::backend::renderer::element::utils::RescaleRenderElement<WinParts>>;
 
 /// Between windows, and from them to the edges: room for a title under each.
 const GAP: i32 = 44;
@@ -434,14 +450,71 @@ impl Server {
             if rc.size.w <= 0 || !rc.overlaps(out) {
                 continue;
             }
+            // A window on this screen is drawn itself (overview_place); a
+            // minimized one, or one whose place is on another screen, by its picture.
+            let live = !minimized && self.space.element_bbox(&w).is_some_and(|b| b.overlaps(out));
+            if live {
+                continue;
+            }
             if let Some(e) = self.thumb_element(renderer, &w, px(rc), if minimized { 0.55 } else { 1.0 }) {
                 elements.push(SceneElement::Thumb(e));
             }
         }
-        // Behind them, the screen dimmed.
-        let dim = self.overview.as_ref().unwrap().dim.clone();
-        let shade = if light { [0.0, 0.0, 0.0, 0.45] } else { [0.0, 0.0, 0.0, 0.6] };
-        elements.push(SceneElement::Solid(SolidColorRenderElement::new(dim, px(out), CommitCounter::default(), shade, Kind::Unspecified)));
         elements
+    }
+
+    /// The screen dimmed behind the overview's windows (decor.rs puts it
+    /// behind them and in front of everything else).
+    pub fn overview_dim(&self, out: Rectangle<i32, Logical>, scale: f64) -> Option<SceneElement> {
+        let ov = self.overview.as_ref()?;
+        let shade = if self.light_style() { [0.0, 0.0, 0.0, 0.45] } else { [0.0, 0.0, 0.0, 0.6] };
+        let rect = Rectangle::<i32, Physical>::from_size(out.size.to_f64().to_physical(scale).to_i32_round());
+        Some(SceneElement::Solid(SolidColorRenderElement::new(ov.dim.clone(), rect, CommitCounter::default(), shade, Kind::Unspecified)))
+    }
+
+    /// The windows' elements (front first, `spans` saying each window's)
+    /// split: those of windows shown in the overview, each window's scaled
+    /// whole into its place (its shape kept, centered), and the rest as they
+    /// were (windows narrowed away by typing, the desktop's icons).
+    pub fn overview_place(&self, parts: Vec<SceneElement>, spans: &[(Win, usize, usize)], out: Rectangle<i32, Logical>, scale: f64) -> (Vec<SceneElement>, Vec<SceneElement>) {
+        use smithay::backend::renderer::element::{
+            Element,
+            utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
+        };
+        let Some(ov) = self.overview.as_ref() else { return (Vec::new(), parts) };
+        let target = |w: &Win| ov.entries.iter().find(|e| e.win == *w && !e.minimized && e.rect.size.w > 0).map(|e| e.rect);
+        let mut slots: Vec<Option<SceneElement>> = parts.into_iter().map(Some).collect();
+        let (mut placed, mut rest) = (Vec::new(), Vec::new());
+        let k_out = smithay::utils::Scale::from(scale);
+        for (w, a, b) in spans {
+            let Some(rc) = target(w) else { continue };
+            let mine: Vec<SceneElement> = slots[*a..*b].iter_mut().filter_map(Option::take).collect();
+            // The window's whole: the union of what it is drawn with.
+            let mut bx: Option<Rectangle<i32, Physical>> = None;
+            for e in &mine {
+                let g = e.geometry(k_out);
+                bx = Some(bx.map_or(g, |b| b.merge(g)));
+            }
+            let Some(bx) = bx.filter(|b| b.size.w > 0 && b.size.h > 0) else { continue };
+            let t0 = (rc.loc - out.loc).to_f64().to_physical(scale);
+            let ts = rc.size.to_f64().to_physical(scale);
+            let k = (ts.w / bx.size.w as f64).min(ts.h / bx.size.h as f64);
+            let (sw, sh) = (bx.size.w as f64 * k, bx.size.h as f64 * k);
+            let to = Point::<i32, Physical>::from(((t0.x + (ts.w - sw) / 2.0).round() as i32, (t0.y + (ts.h - sh) / 2.0).round() as i32));
+            for e in mine {
+                let part = match e {
+                    SceneElement::Surface(x) => WinParts::Surface(x),
+                    SceneElement::Solid(x) => WinParts::Solid(x),
+                    SceneElement::Memory(x) => WinParts::Memory(x),
+                    SceneElement::Texture(x) => WinParts::Texture(x),
+                    SceneElement::Shaded(x) => WinParts::Shaded(x),
+                    SceneElement::Backdrop(x) => WinParts::Backdrop(x),
+                    _ => continue,
+                };
+                placed.push(SceneElement::Placed(RelocateRenderElement::from_element(RescaleRenderElement::from_element(part, bx.loc, k), to - bx.loc, Relocate::Relative)));
+            }
+        }
+        rest.extend(slots.into_iter().flatten());
+        (placed, rest)
     }
 }

@@ -107,3 +107,20 @@ everything on Dave's machines.
 Spaces (several desktops), dragging a window between screens in the
 overview, a three- or four-finger swipe to open it (needs touchpad
 gestures first), previews of tabs inside one window.
+
+## 2026-11-20: the windows themselves in Super+Tab
+
+Dave (wishlist-2): "Could Super+Tab use the actual windows rather than
+images of them? Why are the images different?" The pictures (thumbs.rs)
+were live but only the program's content, without the bar, tabs, border
+and rounded corners the server draws, so each looked unlike its window.
+Now the scene (decor.rs) notes where each window's elements start; with
+the overview open, the elements of each window shown in it are lifted out
+and scaled whole into its place (overview.rs `overview_place`: their
+union's shape kept, centered; smithay's Rescale and Relocate elements,
+the parts in `WinParts`), in front of the screen dimmed (`overview_dim`,
+behind them now, in front of the rest); each element is still drawn once,
+so damage tracking is unchanged. A minimized window (off the screen) and
+one whose real place is on another screen keep their pictures; windows
+narrowed away by typing stay where they are, dimmed. Tried headless on
+Hubble with Calculator, Reader (two tabs) and Settings.
