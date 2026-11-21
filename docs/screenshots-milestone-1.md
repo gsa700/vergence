@@ -121,4 +121,21 @@ Recording, by question 1. OCR (text out of a capture) and the Mac's
   the window alone (820x1292 with its shadow, 724x1196 without), all
   0600. Tests: names counting up, the day's folder, pasting one to one
   and enlarged, the shadow around and below.
+- **Step 2, the keys and the picker** (2026-11-20). vergence-seat: Key
+  Three/Four/Five by their place (the server's keys.rs maps evdev's
+  KEY_3..KEY_5 by code, so Shift's # and other layouts don't matter),
+  `KeyOut::Capture { key, clip }` for Super+Shift+3/4/5 (+Ctrl),
+  `Menu::Capture`/`Part::Capture`: while the picker is open every key and
+  the whole screen are its. The server's capture.rs: Super+Shift+3 takes
+  the screen under the pointer; Super+Shift+4 opens the picker: a
+  crosshair, a drag takes the area (lightened, outlined, its size in
+  points in its corner while dragging; a click without a drag takes
+  nothing), Space turns it into choosing a window (the window under the
+  pointer lit in the accent, its bar included; a click takes it, Alt+click
+  without its shadow) and back, Escape lets go. Super+Shift+5 opens the
+  picker until step 5's bar. Ctrl's clipboard is step 3 (a file until
+  then). Tried headless on Hubble: Super+Shift+3 (1920x1080), a drag
+  (250x250), Space and a click on Calculator's bar (362x598 with Alt),
+  Escape (nothing taken). Seat test: the keys, release swallowed, Super+3
+  without Shift the program's, the picker's keys.
 

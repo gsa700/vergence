@@ -142,6 +142,7 @@ impl Seat {
                 Menu::AppMenu => Part::AppList,
                 // The whole screen is the overview's: it decides what a press is.
                 Menu::Overview => Part::Overview,
+                Menu::Capture => Part::Capture,
             });
             if under == Some(own) {
                 p.refocus(under, out);

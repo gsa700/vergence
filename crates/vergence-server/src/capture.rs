@@ -317,3 +317,196 @@ mod tests {
         assert_eq!(alpha(0, 0), 0);
     }
 }
+
+// Step 2: the keys and the picker. Super+Shift+3 takes the screen under the
+// pointer; Super+Shift+4 opens the picker over every screen: a crosshair,
+// a drag takes the area dragged out (its size in points beside it while
+// dragging), Space turns it into choosing a window (the window under the
+// pointer lit; a click takes it, Alt+click without its shadow) and back,
+// Escape lets go. Ctrl with either: to the clipboard (step 3; a file until
+// then). Super+Shift+5's bar is step 5.
+
+/// The picker while it is open.
+pub struct Pick {
+    pub clip: bool,
+    /// Choosing a window (Space) rather than dragging out an area.
+    pub window: bool,
+    /// Where the drag started, and where the pointer is.
+    pub start: Option<smithay::utils::Point<f64, Logical>>,
+    pub now: smithay::utils::Point<f64, Logical>,
+    /// Its overlay's picture, by what it shows.
+    picture: Option<(u64, smithay::backend::renderer::element::memory::MemoryRenderBuffer, (i32, i32))>,
+}
+
+impl Server {
+    /// Super+Shift+3, 4 or 5 (vergence-seat KeyOut::Capture).
+    pub fn capture_key(&mut self, key: vergence_seat::keyboard::CaptureKey, clip: bool) {
+        use vergence_seat::keyboard::CaptureKey;
+        match key {
+            CaptureKey::Screen => {
+                let what = if self.capture_every_screen() { What::Screens } else { What::Screen(None) };
+                self.capture_now(what, clip);
+            }
+            CaptureKey::Area => {
+                if self.lock.on || crate::greeter() {
+                    return;
+                }
+                let now = self.pointer_location();
+                self.capture_pick = Some(Pick { clip, window: false, start: None, now, picture: None });
+                self.redraw_all();
+            }
+            // The screenshot bar comes with step 5; until then, as Super+Shift+4.
+            CaptureKey::Bar => self.capture_key(CaptureKey::Area, clip),
+        }
+    }
+
+    /// Settings > Screenshots: Super+Shift+3 takes every screen (step 8;
+    /// desktop.toml `[screenshots] every-screen`).
+    fn capture_every_screen(&self) -> bool {
+        false
+    }
+
+    fn capture_now(&mut self, what: What, clip: bool) {
+        // To the clipboard with step 3; to a file until then.
+        let _ = clip;
+        let req = Request { what, dest: Dest::Folder, pointer: false, shadow: true };
+        if let Err(e) = self.capture_ask(req) {
+            tracing::info!("screenshot: {e}");
+        }
+    }
+
+    pub fn capture_picking(&self) -> bool {
+        self.capture_pick.is_some()
+    }
+
+    /// A key while the picker is open: Space switches area and window,
+    /// Escape lets go.
+    pub fn capture_pick_key(&mut self, sym: u32) {
+        use xkbcommon::xkb::keysyms as k;
+        let Some(p) = self.capture_pick.as_mut() else { return };
+        match sym {
+            k::KEY_Escape => self.capture_pick = None,
+            k::KEY_space if p.start.is_none() => p.window = !p.window,
+            _ => return,
+        }
+        self.redraw_all();
+    }
+
+    pub fn capture_pick_hover(&mut self, pos: smithay::utils::Point<f64, Logical>) {
+        if let Some(p) = self.capture_pick.as_mut() {
+            p.now = pos;
+        }
+    }
+
+    /// The window a click would take: the front one under the pointer
+    /// (not the desktop's icons).
+    pub fn capture_pick_window(&self) -> Option<Win> {
+        let p = self.capture_pick.as_ref()?;
+        // Front first; its bar counts as the window.
+        self.space.elements().rev().find(|w| !self.is_desktop(w) && !self.is_minimized(w) && self.space.element_geometry(w).is_some_and(|g| {
+            let bar = if w.native().is_some_and(|n| n.inset() > 0) { 0 } else { self.bar_h(w) };
+            Rectangle::new((g.loc.x, g.loc.y - bar).into(), (g.size.w, g.size.h + bar).into()).to_f64().contains(p.now)
+        })).cloned()
+    }
+
+    pub fn capture_pick_press(&mut self, pos: smithay::utils::Point<f64, Logical>) {
+        let Some(p) = self.capture_pick.as_mut() else { return };
+        p.now = pos;
+        if !p.window {
+            p.start = Some(pos);
+            return;
+        }
+        let clip = p.clip;
+        let alt = self.seat.get_keyboard().is_some_and(|k| k.modifier_state().alt);
+        let w = self.capture_pick_window();
+        self.capture_pick = None;
+        self.redraw_all();
+        if let Some(w) = w {
+            let req = Request { what: What::Window(w), dest: Dest::Folder, pointer: false, shadow: !alt };
+            let _ = clip;
+            if let Err(e) = self.capture_ask(req) {
+                tracing::info!("screenshot: {e}");
+            }
+        }
+    }
+
+    pub fn capture_pick_release(&mut self, pos: smithay::utils::Point<f64, Logical>) {
+        let Some(p) = self.capture_pick.as_ref() else { return };
+        let Some(start) = p.start else { return };
+        let clip = p.clip;
+        self.capture_pick = None;
+        self.redraw_all();
+        let r = drag_rect(start, pos);
+        // A click without a drag takes nothing (as the Mac).
+        if r.size.w >= 3 && r.size.h >= 3 {
+            self.capture_now(What::Area(r), clip);
+        }
+    }
+
+    /// The picker's overlay on screen `out`: the area being dragged out with
+    /// its size, or the window a click would take, lit.
+    pub fn capture_pick_element(&mut self, renderer: &mut smithay::backend::renderer::gles::GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Option<crate::decor::SceneElement> {
+        use smithay::backend::renderer::element::{
+            Kind,
+            memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+        };
+        let p = self.capture_pick.as_ref()?;
+        let (r, label) = if p.window {
+            let w = self.capture_pick_window()?;
+            // Its bar too (drawn above its geometry by the server).
+            let g = self.space.element_geometry(&w)?;
+            let bar = if w.native().is_some_and(|n| n.inset() > 0) { 0 } else { self.bar_h(&w) };
+            (Rectangle::new((g.loc.x, g.loc.y - bar).into(), (g.size.w, g.size.h + bar).into()), None)
+        } else {
+            let start = p.start?;
+            let r = drag_rect(start, p.now);
+            (r, Some(format!("{} \u{00d7} {}", r.size.w, r.size.h)))
+        };
+        let clipped = r.intersection(out)?;
+        let a = self.accent();
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (clipped.loc.x, clipped.loc.y, clipped.size.w, clipped.size.h, r.size.w, r.size.h, scale.to_bits(), p.window, (a.r, a.g, a.b)).hash(&mut h);
+            h.finish()
+        };
+        let (w, h) = (clipped.size.w as f32, clipped.size.h as f32);
+        if self.capture_pick.as_ref().and_then(|p| p.picture.as_ref()).is_none_or(|(k, ..)| *k != key) {
+            let mut scene = vergence_scene::Scene::new(w, h);
+            let rect = vergence_scene::Rect::new(0.0, 0.0, w, h);
+            if p.window {
+                scene.fill(rect, vergence_scene::Color::rgba(a.r, a.g, a.b, 70));
+            } else {
+                scene.fill(rect, vergence_scene::Color::rgba(255, 255, 255, 40));
+                scene.stroke(rect, 0.0, 1.0, vergence_scene::Color::rgba(255, 255, 255, 200));
+            }
+            let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
+            // The size, inside the area's lower right corner.
+            if let (Some(label), Some(face)) = (label, fonts.face("sans-serif", 500, false)) {
+                let size = 12.0;
+                let (_, tw) = fonts.layout(face, size, &label);
+                let m = fonts.metrics(face, size);
+                let (cw, ch) = (tw + 12.0, m.ascent + m.descent + 6.0);
+                if cw + 4.0 < w && ch + 4.0 < h {
+                    let card = vergence_scene::Rect::new((w - cw - 4.0).round(), (h - ch - 4.0).round(), cw, ch);
+                    scene.fill_rounded(card, 4.0, vergence_scene::Color::rgba(0, 0, 0, 160));
+                    vergence_render::text(&mut scene, fonts, face, size, vergence_scene::Color::rgb(255, 255, 255), vergence_scene::Point::new(card.x + 6.0, (card.y + 3.0 + m.ascent).round()), &label);
+                }
+            }
+            let pic = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)).ok()?;
+            let buffer = MemoryRenderBuffer::from_slice(&pic.data, smithay::backend::allocator::Fourcc::Abgr8888, (pic.width as i32, pic.height as i32), 1, smithay::utils::Transform::Normal, None);
+            self.capture_pick.as_mut()?.picture = Some((key, buffer, (pic.width as i32, pic.height as i32)));
+        }
+        let (_, buffer, px) = self.capture_pick.as_ref()?.picture.as_ref()?;
+        let whole = Rectangle::<f64, Logical>::from_size((px.0 as f64, px.1 as f64).into());
+        let loc = (clipped.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+        MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), buffer, None, Some(whole), Some(clipped.size), Kind::Unspecified).ok().map(crate::decor::SceneElement::Memory)
+    }
+}
+
+/// The rectangle between two corners, in whole points.
+fn drag_rect(a: smithay::utils::Point<f64, Logical>, b: smithay::utils::Point<f64, Logical>) -> Rectangle<i32, Logical> {
+    let (x0, y0) = (a.x.min(b.x).round() as i32, a.y.min(b.y).round() as i32);
+    let (x1, y1) = (a.x.max(b.x).round() as i32, a.y.max(b.y).round() as i32);
+    Rectangle::new((x0, y0).into(), (x1 - x0, y1 - y0).into())
+}

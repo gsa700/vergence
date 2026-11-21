@@ -140,6 +140,9 @@ impl Server {
             KeyOut::ShowDesktop => self.show_desktop(),
             // Super+Alt+= - 8 L: the magnifier (zoom.rs).
             KeyOut::Zoom(k) => self.zoom_key(k),
+            // Super+Shift+3/4/5 and the picker's keys (capture.rs).
+            KeyOut::Capture { key: k, clip } => self.capture_key(k, clip),
+            KeyOut::CaptureKey => self.capture_pick_key(key.sym),
             // Super+Tab, and the open overview's keys (overview.rs).
             KeyOut::Overview => self.overview_toggle(),
             KeyOut::OverviewKey => self.overview_key(key.sym, key.typed, mods),

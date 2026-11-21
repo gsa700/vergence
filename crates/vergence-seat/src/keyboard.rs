@@ -64,6 +64,11 @@ pub enum Key {
     Equal,
     Minus,
     Eight,
+    /// The keys 3, 4 and 5 by their place (Super+Shift: screenshots, as
+    /// the Mac reads them, whatever the layout or Shift prints).
+    Three,
+    Four,
+    Five,
     /// Delete (Ctrl+Alt+Delete: the session dialog).
     Delete,
     /// The power key (XF86PowerOff): the session dialog too.
@@ -78,6 +83,14 @@ pub enum WindowKey {
     Right,
     Up,
     Down,
+}
+
+/// A screenshot key: Super+Shift with 3, 4 or 5.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureKey {
+    Screen,
+    Area,
+    Bar,
 }
 
 /// A magnifier key: Super+Alt with =, -, 8 or L.
@@ -141,6 +154,11 @@ pub enum KeyOut {
     ShowDesktop,
     /// The magnifier.
     Zoom(ZoomKey),
+    /// Super+Shift+3 (the screen), 4 (an area or a window), 5 (the
+    /// screenshot bar); with Ctrl, to the clipboard.
+    Capture { key: CaptureKey, clip: bool },
+    /// The open screenshot picker's (Space, Escape).
+    CaptureKey,
     /// Super+Tab: the overview opens.
     Overview,
     /// The open overview's: the server gives it the key's symbol and character.
@@ -219,6 +237,22 @@ impl Seat {
                 Key::Eight => ZoomKey::Toggle,
                 _ => ZoomKey::Lens,
             });
+        }
+        // Screenshots, Super+Shift+3/4/5 (Ctrl: to the clipboard), as the Mac's.
+        if mods.logo && mods.shift && !mods.alt && matches!(key, Key::Three | Key::Four | Key::Five) && self.keyboard.switching.is_none() {
+            self.keyboard.super_alone = false;
+            if !pressed {
+                return KeyOut::Swallow;
+            }
+            let k = match key {
+                Key::Three => CaptureKey::Screen,
+                Key::Four => CaptureKey::Area,
+                _ => CaptureKey::Bar,
+            };
+            return KeyOut::Capture { key: k, clip: mods.ctrl };
+        }
+        if self.menu == Some(Menu::Capture) {
+            return if pressed && !is_super { KeyOut::CaptureKey } else { KeyOut::Swallow };
         }
         if pressed && mods.logo && !mods.alt && !mods.shift && ((key == Key::L && !mods.ctrl) || (key == Key::Q && mods.ctrl)) {
             self.keyboard.super_alone = false;
@@ -438,6 +472,23 @@ mod tests {
         // Their releases go on to the window, which never saw the press: harmless,
         // and Smithay's keyboard state stays right.
         assert_eq!(seat.key(Key::VolumeUp, false, none()), KeyOut::Forward(Some(W1)));
+    }
+
+    #[test]
+    fn super_shift_digits_take_screenshots_and_the_picker_has_every_key() {
+        use keyboard::CaptureKey;
+        let mut seat = Seat::default();
+        let ss = Mods { logo: true, shift: true, ..Mods::default() };
+        assert_eq!(seat.key(Key::Three, true, ss), KeyOut::Capture { key: CaptureKey::Screen, clip: false });
+        assert_eq!(seat.key(Key::Three, false, ss), KeyOut::Swallow);
+        assert_eq!(seat.key(Key::Four, true, Mods { ctrl: true, ..ss }), KeyOut::Capture { key: CaptureKey::Area, clip: true });
+        assert_eq!(seat.key(Key::Five, true, ss), KeyOut::Capture { key: CaptureKey::Bar, clip: false });
+        // Without Shift, 3 is the program's.
+        assert!(matches!(seat.key(Key::Three, true, Mods { logo: true, ..Mods::default() }), KeyOut::Forward(_)));
+        seat.menu_opened(Menu::Capture);
+        assert_eq!(seat.key(Key::Space, true, Mods::default()), KeyOut::CaptureKey);
+        assert_eq!(seat.key(Key::Escape, true, Mods::default()), KeyOut::CaptureKey);
+        assert_eq!(seat.key(Key::Escape, false, Mods::default()), KeyOut::Swallow);
     }
 
     #[test]

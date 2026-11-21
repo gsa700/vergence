@@ -95,6 +95,9 @@ pub enum Part {
     Picker,
     /// The overview over the whole screen (overview milestone 1, step 5).
     Overview,
+    /// Taking a screenshot of an area or a window (screenshots milestone 1,
+    /// step 2): the whole screen is the picker's.
+    Capture,
     /// The dock's drawer of tiles (dock milestone 1).
     Drawer,
     /// The lock screen (VDM milestone 1): while locked, every pointer and
@@ -151,6 +154,9 @@ pub enum Menu {
     /// The overview, Super+Tab (overview milestone 1): every key is its,
     /// to narrow by typing, to move with the arrows, to choose or close.
     Overview,
+    /// Super+Shift+4's picker: every key is its (Space, Escape), every
+    /// press and the whole screen.
+    Capture,
 }
 
 /// A grab: for as long as it lasts, the pointer is its.

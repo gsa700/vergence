@@ -175,7 +175,9 @@ impl Server {
     pub fn dispatch_sync(&mut self) {
         // A menu open over the launcher (an application's menu there) comes
         // first: a press on it is the menu's, not one outside the launcher.
-        let menu = if self.overview_is_open() {
+        let menu = if self.capture_picking() {
+            Some(vergence_seat::Menu::Capture)
+        } else if self.overview_is_open() {
             Some(vergence_seat::Menu::Overview)
         } else if self.app_menu_is_open() {
             Some(vergence_seat::Menu::AppMenu)
@@ -226,6 +228,10 @@ impl Server {
         // while one shows (session_dialog.rs, elevate.rs).
         if self.session_dialog.open || self.elevating() || self.agents_asking() {
             return Some(Target::Server(Part::Session));
+        }
+        // Super+Shift+4's picker has every screen (capture.rs).
+        if self.capture_picking() {
+            return Some(Target::Server(Part::Capture));
         }
         // The overview has the whole screen but the dock (overview.rs).
         if self.overview_is_open() && !self.shelf_at(pos) {
@@ -289,6 +295,8 @@ impl Server {
         let icon = match under {
             Some(Target::Surface(..)) => return,
             Some(Target::Server(Part::Edge(_, e))) => crate::decor::edge_icon(e.into()),
+            // Super+Shift+4: a crosshair for an area, the arrow for a window.
+            Some(Target::Server(Part::Capture)) if self.capture_pick.as_ref().is_some_and(|p| !p.window) => CursorIcon::Crosshair,
             Some(Target::Native(id)) => self.input.wins.get(&id).and_then(|w| w.native()).map(|n| n.cursor()).unwrap_or(CursorIcon::Default),
             _ => CursorIcon::Default,
         };
@@ -322,6 +330,7 @@ impl Server {
         self.shelf_hover(pos);
         self.picker_hover(pos);
         self.overview_hover(pos);
+        self.capture_pick_hover(pos);
     }
 
     /// The pointer's picture, and Smithay's pointer where the pointer is.
@@ -583,6 +592,8 @@ impl Server {
             Target::Server(Part::Note) if pressed => self.notify_press(pos),
             Target::Server(Part::Picker) if pressed && button == vergence_seat::BTN_LEFT => self.picker_press(pos),
             Target::Server(Part::Overview) if pressed && button == vergence_seat::BTN_LEFT => self.overview_press(pos),
+            Target::Server(Part::Capture) if pressed && button == vergence_seat::BTN_LEFT => self.capture_pick_press(pos),
+            Target::Server(Part::Capture) if !pressed && button == vergence_seat::BTN_LEFT => self.capture_pick_release(pos),
             // The bare wallpaper (no desktop icons): as the icons' ground (aside.rs).
             Target::Server(Part::Desktop) if pressed && button == vergence_seat::BTN_LEFT => self.ground_clicked(),
             Target::Server(Part::Card) if pressed && button == vergence_seat::BTN_LEFT => self.card_press(pos),

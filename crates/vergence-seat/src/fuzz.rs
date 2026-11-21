@@ -42,7 +42,7 @@ fn target(rng: &mut Rng) -> Option<Target> {
         9 => Target::Server(Part::Dock),
         10 => Target::Server(Part::Menu),
         11 => Target::Server(Part::Popup),
-        12 => Target::Server([Part::Note, Part::Card, Part::Drawer, Part::Lock, Part::Session, Part::Switcher, Part::Blocked(w), Part::Picker, Part::Overview][rng.below(9)]),
+        12 => Target::Server([Part::Note, Part::Card, Part::Drawer, Part::Lock, Part::Session, Part::Switcher, Part::Blocked(w), Part::Picker, Part::Overview, Part::Capture][rng.below(10)]),
         _ => Target::Server(Part::Desktop),
     })
 }

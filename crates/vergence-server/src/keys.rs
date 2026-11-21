@@ -86,6 +86,14 @@ pub fn seat_key(sym: u32, code: u32) -> vergence_seat::keyboard::Key {
     if code == GRAVE_CODE {
         return Key::Grave;
     }
+    // 3, 4 and 5 by their place (Super+Shift: screenshots): evdev's
+    // KEY_3..KEY_5 are 4..6.
+    match code {
+        12 => return Key::Three,
+        13 => return Key::Four,
+        14 => return Key::Five,
+        _ => {}
+    }
     match sym {
         k::KEY_BackSpace => Key::BackSpace,
         k::KEY_Escape => Key::Escape,

@@ -101,6 +101,8 @@ pub struct Server {
     pub capture_pending: Vec<(crate::capture::Request, Vec<std::path::PathBuf>)>,
     pub capture_only: Option<Win>,
     pub capturing: bool,
+    /// Super+Shift+4's picker, while open (capture.rs).
+    pub capture_pick: Option<crate::capture::Pick>,
     /// The last files named for screenshots (their names count as taken).
     pub capture_given: Vec<std::path::PathBuf>,
     /// Actions sent to native windows by their meaning, and their answers
@@ -333,6 +335,7 @@ impl Server {
             capture_pending: Vec::new(),
             capture_only: None,
             capturing: false,
+            capture_pick: None,
             capture_given: Vec::new(),
             acts: Default::default(),
             meaning_log: Default::default(),
