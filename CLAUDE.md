@@ -161,10 +161,10 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   rc.conf). It was Fedora 45 from 2026-11-08 (with GNOME and GDM until
   2026-11-16). Techbench is Dave's workstation, not a project machine:
   normally no root for Claude (every step that needs root is product
-  evidence). Since 2026-11-20 techbench has doas, not sudo (Dave's
-  choice; `permit :wheel` in /usr/local/etc/doas.conf, a password every
-  time: FreeBSD's doas has no persist, and reads it only from a terminal):
-  Claude builds there and Dave runs `doas tools/install.sh` himself. Rust by rustup (`.
+  evidence); for testing Dave gave a test password for sudo (installs),
+  not stored anywhere: ask him in a later session. (sudo was swapped for
+  doas on 2026-11-20 and put back the same evening; doas stays installed
+  with `permit :wheel`.) Rust by rustup (`.
   ~/.cargo/env` over ssh), build in ~/src/vergence (`tools/sync-hubble.sh
   techbench`), Vergence installed under /usr/local, the VDM login screen at
   boot, ~/.config/vergence/control-socket there so `vctl` works. Its disk

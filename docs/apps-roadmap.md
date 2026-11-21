@@ -383,8 +383,8 @@ it is today:
 - **Audio apps on FreeBSD** (AlbumWall, Deadwax, Marginal: Avalonia/.NET):
   Avalonia on FreeBSD is parked since 11 November; restart that port, or
   rewrite them on vergence-ui. To discuss.
-- *Decided 2026-11-20:* sudo or doas: each platform's standard; techbench
-  has doas (Dave's choice, sudo removed).
+- *Decided 2026-11-20:* sudo or doas: each platform's standard (techbench
+  tried doas for an evening and went back to sudo).
 
 ## Questions for Dave (when each app's turn comes)
 
