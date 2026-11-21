@@ -822,6 +822,7 @@ impl Server {
 
     /// The connection is gone: release its names, tell the others.
     fn dbus_forget(&mut self, id: u32) {
+        self.portal_shots_forget(id);
         let Some(c) = self.dbus.conns.get(&id) else { return };
         let unique = c.unique.clone();
         let program = c.program.clone();
@@ -900,6 +901,13 @@ impl Server {
                     Err(e) => err("org.freedesktop.portal.Error.Failed", &e),
                 }
             }
+            (crate::portal_shot::SCREENSHOT, "Screenshot" | "PickColor") => {
+                let unique = self.dbus.conns.get(&id).and_then(|c| c.unique.clone()).unwrap_or_default();
+                match self.portal_screenshot(id, &unique, member, &args) {
+                    Ok(handle) => ok(&[Value::Path(handle)]),
+                    Err(e) => err("org.freedesktop.portal.Error.Failed", &e),
+                }
+            }
             (crate::portal::OPEN_URI, "OpenURI") => {
                 let unique = self.dbus.conns.get(&id).and_then(|c| c.unique.clone()).unwrap_or_default();
                 match self.portal_open_uri(id, &unique, &args) {
@@ -949,11 +957,13 @@ impl Server {
                 (Some(PORTAL_SETTINGS), Some("version")) => ok(&[Value::Variant(Box::new(Value::U32(2)))]),
                 (Some(crate::portal::FILE_CHOOSER), Some("version")) => ok(&[Value::Variant(Box::new(Value::U32(3)))]),
                 (Some(crate::portal::OPEN_URI), Some("version")) => ok(&[Value::Variant(Box::new(Value::U32(3)))]),
+                (Some(crate::portal_shot::SCREENSHOT), Some("version")) => ok(&[Value::Variant(Box::new(Value::U32(2)))]),
                 _ => err(E_INVALID_ARGS, "no such interface or property"),
             },
             ("org.freedesktop.DBus.Properties", "GetAll") => match s(0).as_deref() {
                 Some(PORTAL_SETTINGS) => ok(&[Value::Array("{sv}".into(), vec![entry("version", Value::U32(2))])]),
                 Some(crate::portal::FILE_CHOOSER) | Some(crate::portal::OPEN_URI) => ok(&[Value::Array("{sv}".into(), vec![entry("version", Value::U32(3))])]),
+                Some(crate::portal_shot::SCREENSHOT) => ok(&[Value::Array("{sv}".into(), vec![entry("version", Value::U32(2))])]),
                 _ => err(E_INVALID_ARGS, "no such interface"),
             },
             _ => err(E_UNKNOWN_METHOD, &format!("{iface}.{member} is not provided (yet) by Vergence")),
@@ -1149,6 +1159,11 @@ const PORTAL_INTROSPECTION: &str = r#"<!DOCTYPE node PUBLIC "-//freedesktop//DTD
     <method name="OpenFile"><arg type="s" name="parent_window" direction="in"/><arg type="s" name="title" direction="in"/><arg type="a{sv}" name="options" direction="in"/><arg type="o" name="handle" direction="out"/></method>
     <method name="SaveFile"><arg type="s" name="parent_window" direction="in"/><arg type="s" name="title" direction="in"/><arg type="a{sv}" name="options" direction="in"/><arg type="o" name="handle" direction="out"/></method>
     <method name="SaveFiles"><arg type="s" name="parent_window" direction="in"/><arg type="s" name="title" direction="in"/><arg type="a{sv}" name="options" direction="in"/><arg type="o" name="handle" direction="out"/></method>
+    <property name="version" type="u" access="read"/>
+  </interface>
+  <interface name="org.freedesktop.portal.Screenshot">
+    <method name="Screenshot"><arg type="s" name="parent_window" direction="in"/><arg type="a{sv}" name="options" direction="in"/><arg type="o" name="handle" direction="out"/></method>
+    <method name="PickColor"><arg type="s" name="parent_window" direction="in"/><arg type="a{sv}" name="options" direction="in"/><arg type="o" name="handle" direction="out"/></method>
     <property name="version" type="u" access="read"/>
   </interface>
   <interface name="org.freedesktop.portal.OpenURI">

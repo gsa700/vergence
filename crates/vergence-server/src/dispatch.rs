@@ -226,7 +226,7 @@ impl Server {
         }
         // The log out dialog, or the elevation prompt: everything is theirs
         // while one shows (session_dialog.rs, elevate.rs).
-        if self.session_dialog.open || self.elevating() || self.agents_asking() {
+        if self.session_dialog.open || self.elevating() || self.agents_asking() || self.portal_asking() {
             return Some(Target::Server(Part::Session));
         }
         // Super+Shift+4's picker has every screen (capture.rs).
@@ -617,6 +617,7 @@ impl Server {
             Target::Server(Part::Drawer) if !pressed => self.drawer_release(pos),
             Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT && self.elevating() => self.elevate_press(pos),
             Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT && self.agents_asking() => self.agent_dialog_press(pos),
+            Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT && self.portal_asking() => self.portal_ask_press(pos),
             Target::Server(Part::Session) if pressed && button == vergence_seat::BTN_LEFT => self.session_dialog_press(pos),
             // The login screen's people and session line (greeter.rs).
             Target::Server(Part::Lock) if pressed && button == vergence_seat::BTN_LEFT && crate::greeter() => self.greeter_press(pos),

@@ -2,6 +2,7 @@
 #![allow(irrefutable_let_patterns)]
 
 mod capture;
+mod portal_shot;
 mod handlers;
 
 mod dispatch;

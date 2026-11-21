@@ -49,6 +49,8 @@ pub enum Dest {
     Path(PathBuf),
     /// The clipboard, as image/png (Ctrl with the keys, step 3).
     Clipboard,
+    /// A program that asked through the portal (portal_shot.rs, step 7).
+    Portal(crate::portal_shot::Asked),
 }
 
 #[derive(Clone)]
@@ -88,7 +90,7 @@ impl Server {
         };
         let paths: Vec<PathBuf> = match &req.dest {
             // One picture to the clipboard (every screen: the first).
-            Dest::Clipboard => vec![PathBuf::new()],
+            Dest::Clipboard | Dest::Portal(_) => vec![PathBuf::new()],
             Dest::Path(p) => screens.iter().map(|s| if s.is_empty() || screens.len() == 1 { p.clone() } else { with_suffix(p, s) }).collect(),
             Dest::Folder => {
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
@@ -374,6 +376,8 @@ pub struct Pick {
     pub clip: bool,
     /// Choosing a window (Space) rather than dragging out an area.
     pub window: bool,
+    /// Picking a color for a program (a click takes the pixel; portal_shot.rs).
+    pub color: bool,
     /// Where the drag started, and where the pointer is.
     pub start: Option<smithay::utils::Point<f64, Logical>>,
     pub now: smithay::utils::Point<f64, Logical>,
@@ -394,11 +398,25 @@ impl Server {
                 if self.lock.on || crate::greeter() {
                     return;
                 }
-                let now = self.pointer_location();
-                self.capture_pick = Some(Pick { clip, window: false, start: None, now, picture: None });
-                self.redraw_all();
+                self.capture_pick_open(clip, false, false);
             }
             CaptureKey::Bar => self.bar_open(clip),
+        }
+    }
+
+    /// The picker opens: an area (or a window), or a color for a program.
+    pub fn capture_pick_open(&mut self, clip: bool, window: bool, color: bool) {
+        let now = self.pointer_location();
+        self.capture_pick = Some(Pick { clip, window, color, start: None, now, picture: None });
+        self.redraw_all();
+    }
+
+    /// Where a picked capture goes: to the program that asked, if one did.
+    fn pick_dest(&mut self, clip: bool) -> Dest {
+        match self.portal_shots.picking.take() {
+            Some(a) => Dest::Portal(a),
+            None if clip => Dest::Clipboard,
+            None => Dest::Folder,
         }
     }
 
@@ -429,8 +447,11 @@ impl Server {
         }
         let Some(p) = self.capture_pick.as_mut() else { return };
         match sym {
-            k::KEY_Escape => self.capture_pick = None,
-            k::KEY_space if p.start.is_none() => p.window = !p.window,
+            k::KEY_Escape => {
+                self.capture_pick = None;
+                self.portal_pick_cancelled();
+            }
+            k::KEY_space if p.start.is_none() && !p.color => p.window = !p.window,
             _ => return,
         }
         self.redraw_all();
@@ -460,6 +481,17 @@ impl Server {
         }
         let Some(p) = self.capture_pick.as_mut() else { return };
         p.now = pos;
+        // A color for a program: the pixel under the click.
+        if p.color {
+            self.capture_pick = None;
+            self.redraw_all();
+            let at = Rectangle::new((pos.x.floor() as i32, pos.y.floor() as i32).into(), (1, 1).into());
+            let dest = self.pick_dest(false);
+            if let Err(e) = self.capture_ask(Request { what: What::Area(at), dest, pointer: false, shadow: false }) {
+                tracing::info!("screenshot: {e}");
+            }
+            return;
+        }
         if !p.window {
             p.start = Some(pos);
             return;
@@ -470,7 +502,8 @@ impl Server {
         self.capture_pick = None;
         self.redraw_all();
         if let Some(w) = w {
-            let req = Request { what: What::Window(w), dest: if clip { Dest::Clipboard } else { Dest::Folder }, pointer: false, shadow: !alt };
+            let dest = self.pick_dest(clip);
+            let req = Request { what: What::Window(w), dest, pointer: false, shadow: !alt };
             if let Err(e) = self.capture_ask(req) {
                 tracing::info!("screenshot: {e}");
             }
@@ -491,9 +524,15 @@ impl Server {
         self.capture_pick = None;
         self.redraw_all();
         let r = drag_rect(start, pos);
-        // A click without a drag takes nothing (as the Mac).
+        // A click without a drag takes nothing (as the Mac); a program that
+        // asked hears it was cancelled.
         if r.size.w >= 3 && r.size.h >= 3 {
-            self.capture_now(What::Area(r), clip);
+            let dest = self.pick_dest(clip);
+            if let Err(e) = self.capture_ask(Request { what: What::Area(r), dest, pointer: false, shadow: true }) {
+                tracing::info!("screenshot: {e}");
+            }
+        } else {
+            self.portal_pick_cancelled();
         }
     }
 
@@ -1105,7 +1144,7 @@ impl Server {
             Mode::Window | Mode::Area => {
                 self.capture_bar = None;
                 let now = self.pointer_location();
-                self.capture_pick = Some(Pick { clip: c.clip, window: c.mode == Mode::Window, start: None, now, picture: None });
+                self.capture_pick = Some(Pick { clip: c.clip, window: c.mode == Mode::Window, color: false, start: None, now, picture: None });
                 self.redraw_all();
             }
             Mode::Screen | Mode::Screens if c.timer > 0 => {

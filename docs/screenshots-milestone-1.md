@@ -227,4 +227,24 @@ Recording, by question 1. OCR (text out of a capture) and the Mac's
   'handle' on the left end?"): the pointer's open hand over it, closed
   while the bar is dragged (dispatch.rs passes the motion's point to the
   pointer's picture, and sets the closed hand while a button is held).
+- **Step 7, other programs** (2026-11-21). crates/vergence-server
+  portal_shot.rs: org.freedesktop.portal.Screenshot (version 2) on the
+  D-Bus edge, Screenshot and PickColor. Without `interactive` every screen
+  is taken as one picture; with it, Super+Shift+4's picker (an area, Space
+  for a window); PickColor opens the picker as a crosshair and a click
+  picks the pixel. Answered by the Request's Response: 0 with `uri` (a PNG
+  in $XDG_RUNTIME_DIR/vergence-portal, 0600) or `color` (three doubles),
+  1 cancelled or not allowed, 2 failed. Each program asked first by a
+  question the server draws (its name, and its executable from its
+  process, which the grant is tied to): Don't allow (the keyboard's: Enter
+  and Escape), Allow once, Always allow; nothing counts for a second;
+  after Don't allow the same program is refused without asking for a
+  minute; Always kept in ~/.local/state/vergence/screenshot-programs
+  (0600). A program that leaves takes its question or picker with it.
+  Never while locked. vergence-dbus example `portal-shot
+  [screenshot|interactive|color]` asks as a program does and prints the
+  answer. Tried headless on kepler: the question (Enter refused it; asked
+  again within the minute, refused without asking), Always allow (a PNG
+  answered; the next request answered without asking), interactive with
+  Escape (cancelled), PickColor (the ground's color, 0.102 each).
 

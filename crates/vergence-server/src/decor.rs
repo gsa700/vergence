@@ -1182,6 +1182,12 @@ impl Server {
             front.extend(elements);
             return front;
         }
+        // A program's screenshot question, over all of it (portal_shot.rs).
+        if self.portal_asking() {
+            let mut front = self.portal_ask_elements(renderer, out, scale);
+            front.extend(elements);
+            return front;
+        }
         // The log out dialog, over all of it (session_dialog.rs).
         if self.session_dialog.open {
             let mut front = self.session_dialog_elements(renderer, out, scale);

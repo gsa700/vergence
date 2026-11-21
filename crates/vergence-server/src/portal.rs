@@ -430,7 +430,7 @@ fn opts_seen(options: &Value) -> Vec<String> {
 }
 
 /// A process's name (its command), for the dialog's remembered folder.
-fn process_name(pid: u32) -> Option<String> {
+pub(crate) fn process_name(pid: u32) -> Option<String> {
     #[cfg(target_os = "linux")]
     {
         std::fs::read_to_string(format!("/proc/{pid}/comm")).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())

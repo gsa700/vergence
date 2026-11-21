@@ -1583,6 +1583,19 @@ fn run_captures(state: &mut Server, renderer: &mut GlesRenderer, pointer_at: Poi
             }
             What::Window(w) => taken.push(window_pixels(state, renderer, &outputs, w, req.shadow)),
         }
+        // For a program that asked through the portal (portal_shot.rs).
+        if let crate::capture::Dest::Portal(a) = &req.dest {
+            let first = match taken.into_iter().next() {
+                Some(Ok(p)) => Some(p),
+                Some(Err(e)) => {
+                    tracing::warn!("portal: the capture for {} failed: {e}", a.name);
+                    None
+                }
+                None => None,
+            };
+            state.portal_shot_done(a, first);
+            continue;
+        }
         if matches!(req.dest, crate::capture::Dest::Clipboard) {
             match taken.into_iter().next() {
                 // Made PNG on a thread, put on the clipboard on the main loop.
