@@ -7,8 +7,11 @@
 //!   List or Icons, the preview pane, hidden files, a field that narrows the
 //!   folder as you type), the places sidebar, the folder as a list or icons
 //!   (vergence-widgets files.rs, shared with the Open dialog), the preview
-//!   pane at the right. One folder a window, no tabs (Dave, 2026-11-16;
-//!   docs/files-milestone-2.md); one process for all of them (hand.rs).
+//!   pane at the right. A folder a tab in the bar (tabs back in files
+//!   milestone 3, Dave 2026-11-21, after milestone 2 had taken them out):
+//!   torn off into windows of their own and joined again; a folder handed
+//!   over opens in a tab of the window last used; each window's tabs kept
+//!   across restarts (keep.rs). One process for all of them (hand.rs).
 //! - **Preview**: Space shows the chosen file large over the list (pictures
 //!   decoded apart by vergence-decode, the start of text, else its mark and
 //!   facts); the arrows move on and it follows; Space or Escape closes it.
@@ -26,6 +29,7 @@
 
 mod desktop;
 mod hand;
+mod keep;
 mod ops;
 mod props;
 mod search;
@@ -37,7 +41,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime};
 
 use vergence_scene::{Color, Image, Rect};
-use vergence_ui::{AppCommand as C, Bar, BarStyle, MenuLine, Modifiers, Role};
+use vergence_ui::{AppCommand as C, Bar, BarStyle, BarTab, MenuLine, Modifiers, Role, TabEvent};
 use vergence_widgets::files::{self, Entry, Kind, ListLook, Place, RowSize, SortBy};
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
 use vergence_widgets::toolbar::{Icon, flexible, group, tool, toggle, toolbar};
@@ -59,7 +63,11 @@ const ROW_TOOL: f32 = 22.0;
 
 mod cmd {
     pub const NEW_WINDOW: u32 = 1;
+    pub const NEW_TAB: u32 = 2;
     pub const CLOSE: u32 = 3;
+    pub const CLOSE_TAB: u32 = 17;
+    pub const NEXT_TAB: u32 = 14;
+    pub const PREV_TAB: u32 = 15;
     pub const BACK: u32 = 4;
     pub const FORWARD: u32 = 5;
     pub const UP: u32 = 6;
@@ -283,6 +291,25 @@ struct Shared {
     clip: Option<(Vec<PathBuf>, bool)>,
     /// What can be undone, the newest last.
     undo: Vec<ops::Done>,
+    /// Each window by its toolkit number, to wake it (tabs moved to it,
+    /// folders handed to it).
+    windows: Vec<(u32, Waker)>,
+    /// Tabs dropped on another window: the window, the place in its row, the tab.
+    transfers: Vec<(u32, u32, Tab)>,
+    /// Folders handed over, for the window last used (by its number).
+    opens: Vec<(u32, Vec<PathBuf>)>,
+    /// The window the person last pressed or typed in.
+    last_used: Option<u32>,
+    /// What each window keeps for the next start (keep.rs), and the windows
+    /// kept from the last run still to open.
+    snaps: Vec<(u32, keep::Snap)>,
+    kept: Vec<keep::Snap>,
+}
+
+impl Shared {
+    fn new() -> Shared {
+        Shared { inbox: Arc::default(), next_tab: 0, clip: None, undo: Vec::new(), windows: Vec::new(), transfers: Vec::new(), opens: Vec::new(), last_used: None, snaps: Vec::new(), kept: Vec::new() }
+    }
 }
 
 type SharedRef = Rc<RefCell<Shared>>;
@@ -290,7 +317,12 @@ type SharedRef = Rc<RefCell<Shared>>;
 /// A Shared of its own, for a Properties window opened from the desktop's
 /// icons (its renames' undo is nobody's).
 fn lone_shared() -> SharedRef {
-    Rc::new(RefCell::new(Shared { inbox: Arc::default(), next_tab: 0, clip: None, undo: Vec::new() }))
+    Rc::new(RefCell::new(Shared::new()))
+}
+
+/// The home folder (or the root, where there is none).
+fn home() -> PathBuf {
+    files::home().unwrap_or_else(|| PathBuf::from("/"))
 }
 
 /// File Viewer's look (and its Properties windows'), from the desktop file's
@@ -303,6 +335,11 @@ struct Viewer {
     shared: SharedRef,
     tabs: Vec<Tab>,
     front: u32,
+    /// This window's toolkit number, once open; its persistence token for
+    /// window memory (keep.rs); when the session said it is ending.
+    me: Option<u32>,
+    token: String,
+    ending: Option<Instant>,
     desktop: String,
     stamp: Option<SystemTime>,
     waker: Option<Waker>,
@@ -522,6 +559,9 @@ impl Viewer {
             shared,
             tabs: Vec::new(),
             front: 0,
+            me: None,
+            token: String::new(),
+            ending: None,
             desktop,
             stamp,
             waker: None,
@@ -587,16 +627,21 @@ impl Viewer {
         Some(v)
     }
 
+    /// Paths handed over or given at the start, each in a tab of this window
+    /// (files milestone 3: a folder handed over opens in a tab, not a window
+    /// of its own): a folder, or a file's folder with the file chosen. None
+    /// given: the home folder here if the window shows nothing yet, else a
+    /// window of its own at home (a start with nothing to open).
     fn open_paths(&mut self, paths: &[PathBuf]) {
-        let home = || files::home().unwrap_or_else(|| PathBuf::from("/"));
-        let mut all: Vec<PathBuf> = if paths.is_empty() { vec![home()] } else { paths.to_vec() };
-        if !self.tabs.is_empty() {
-            self.pending.append(&mut all);
+        if paths.is_empty() {
+            if self.tabs.is_empty() {
+                self.new_tab(Showing::Folder(home()));
+            } else {
+                self.pending.push(home());
+            }
             return;
         }
-        let rest = all.split_off(1);
-        self.pending.extend(rest);
-        for p in &all {
+        for p in paths {
             let p = std::path::absolute(p).unwrap_or_else(|_| p.clone());
             if p.is_dir() {
                 self.new_tab(Showing::Folder(p));
@@ -609,6 +654,97 @@ impl Viewer {
                 }
             }
         }
+    }
+
+    /// Tells the others how to wake this window (once it has a number and a waker).
+    fn register(&mut self) {
+        let (Some(me), Some(w)) = (self.me, self.waker.clone()) else { return };
+        let mut s = self.shared.borrow_mut();
+        s.windows.retain(|(id, _)| *id != me);
+        s.windows.push((me, w));
+    }
+
+    /// A window kept from the last run: its token and its tabs.
+    fn from_snap(shared: SharedRef, snap: &keep::Snap) -> Viewer {
+        let mut v = Viewer::new(shared);
+        v.token = snap.token.clone();
+        for t in &snap.tabs {
+            v.new_tab(match t {
+                keep::Kept::Folder(p) => Showing::Folder(p.clone()),
+                keep::Kept::Recent => Showing::Recent,
+            });
+        }
+        if let Some(t) = v.tabs.get(snap.front) {
+            v.front = t.id;
+        }
+        v
+    }
+
+    /// What this window keeps for the next start, written when it changed.
+    fn keep(&mut self) {
+        let Some(me) = self.me else { return };
+        if self.token.is_empty() || self.trash_window {
+            return;
+        }
+        let tabs: Vec<keep::Kept> = self
+            .tabs
+            .iter()
+            .map(|t| match &t.showing {
+                Showing::Folder(p) => keep::Kept::Folder(p.clone()),
+                Showing::Recent => keep::Kept::Recent,
+            })
+            .collect();
+        let front = self.tabs.iter().position(|t| t.id == self.front).unwrap_or(0);
+        let snap = keep::Snap { token: self.token.clone(), tabs, front };
+        let mut s = self.shared.borrow_mut();
+        match s.snaps.iter_mut().find(|(id, _)| *id == me) {
+            Some((_, old)) if *old == snap => return,
+            Some((_, old)) => *old = snap,
+            None => s.snaps.push((me, snap)),
+        }
+        let all: Vec<keep::Snap> = s.snaps.iter().map(|(_, w)| w.clone()).collect();
+        keep::save(&all);
+    }
+
+    /// Takes a tab out of this window (moved to another, or closed).
+    fn remove_tab(&mut self, id: u32) -> Option<Tab> {
+        let i = self.tabs.iter().position(|t| t.id == id)?;
+        let t = self.tabs.remove(i);
+        if self.front == id {
+            self.front = self.tabs.get(i.min(self.tabs.len().saturating_sub(1))).map_or(0, |t| t.id);
+            self.tab_changed();
+        }
+        Some(t)
+    }
+
+    /// Closes a tab; the window with it, if it was the last.
+    fn close_tab(&mut self, id: u32, window: &mut Window) {
+        self.remove_tab(id);
+        if self.tabs.is_empty() {
+            window.close();
+        }
+    }
+
+    /// Another tab in front: the window's own state for a folder (the
+    /// narrowing, a search, the preview) starts again, and the folder is read
+    /// again if it changed while behind.
+    fn tab_changed(&mut self) {
+        self.clear_narrow();
+        self.preview = false;
+        if let Some(t) = self.front_mut() {
+            let now = t.dir().and_then(|d| std::fs::metadata(d).and_then(|m| m.modified()).ok());
+            if t.dir().is_none() || now != t.stamp {
+                t.read();
+            }
+        }
+    }
+
+    /// A tab from another window: this window's folder sizes from now on.
+    fn take_tab(&mut self, mut t: Tab, at: usize) {
+        t.sizes = self.sizes.clone();
+        self.front = t.id;
+        self.tabs.insert(at.min(self.tabs.len()), t);
+        self.tab_changed();
     }
 
     fn front_tab(&self) -> Option<&Tab> {
@@ -884,13 +1020,29 @@ impl Viewer {
 
     fn run(&mut self, id: u32, window: &mut Window) {
         match id {
+            // New windows and tabs open at home (files milestone 3, item 7).
             cmd::NEW_WINDOW => {
                 let mut w = Viewer::new(self.shared.clone());
-                let at = self.front_tab().map(|t| t.showing.clone()).unwrap_or(Showing::Recent);
-                w.new_tab(at);
+                w.new_tab(Showing::Folder(home()));
                 window.open_window(vergence_widgets::window(w));
             }
+            cmd::NEW_TAB if !self.trash_window => self.new_tab(Showing::Folder(home())),
             cmd::CLOSE => window.close(),
+            cmd::CLOSE_TAB => {
+                if self.trash_window {
+                    window.close();
+                } else if let Some(id) = self.front_tab().map(|t| t.id) {
+                    self.close_tab(id, window);
+                }
+            }
+            cmd::NEXT_TAB | cmd::PREV_TAB => {
+                let n = self.tabs.len() as isize;
+                if n > 1 {
+                    let i = self.tabs.iter().position(|t| t.id == self.front).unwrap_or(0) as isize;
+                    self.front = self.tabs[(i + if id == cmd::NEXT_TAB { 1 } else { -1 }).rem_euclid(n) as usize].id;
+                    self.tab_changed();
+                }
+            }
             cmd::BACK => self.back(),
             cmd::FORWARD => self.forward(),
             cmd::UP => self.up(),
@@ -1074,6 +1226,7 @@ impl Viewer {
             _ => {}
         }
         self.want_picture();
+        self.keep();
         window.redraw();
     }
 
@@ -1801,9 +1954,102 @@ impl Program for Viewer {
         true
     }
 
-    /// A plain title bar, the folder's name: one folder a window.
+    /// The server's tabs, a folder each (files milestone 3); the Trash
+    /// window's plain bar.
     fn bar(&self) -> Option<Bar> {
-        Some(Bar::Plain)
+        if self.trash_window {
+            return Some(Bar::Plain);
+        }
+        let tabs = self.tabs.iter().map(|t| BarTab { id: t.id, title: t.name(), closable: true, alert: false, edited: false }).collect();
+        Some(Bar::Tabs { tabs, front: self.front_tab().map_or(0, |t| t.id), plus: true, accent: None, menu: Vec::new() })
+    }
+
+    fn tab(&mut self, event: TabEvent, window: &mut Window) {
+        match event {
+            TabEvent::Chosen(id) => {
+                self.front = id;
+                self.tab_changed();
+            }
+            TabEvent::Close(id) => self.close_tab(id, window),
+            TabEvent::CloseOthers(id) => {
+                self.tabs.retain(|t| t.id == id);
+                self.front = id;
+                self.tab_changed();
+            }
+            TabEvent::New => self.run(cmd::NEW_TAB, window),
+            TabEvent::Moved { tab, to } => {
+                if let Some(i) = self.tabs.iter().position(|t| t.id == tab) {
+                    let t = self.tabs.remove(i);
+                    self.tabs.insert((to as usize).min(self.tabs.len()), t);
+                }
+            }
+            // Out of the row: a window of its own, its folder, history and choice with it.
+            TabEvent::Out { tab, .. } => {
+                if self.tabs.len() > 1
+                    && let Some(t) = self.remove_tab(tab)
+                {
+                    let mut w = Viewer::new(self.shared.clone());
+                    w.take_tab(t, 0);
+                    window.open_window(vergence_widgets::window(w));
+                }
+            }
+            TabEvent::Join { tab, into, to } => {
+                if let Some(t) = self.remove_tab(tab) {
+                    let waker = {
+                        let mut s = self.shared.borrow_mut();
+                        s.transfers.push((into, to, t));
+                        s.windows.iter().find(|(id, _)| *id == into).map(|(_, w)| w.clone())
+                    };
+                    if let Some(w) = waker {
+                        w.wake();
+                    }
+                    if self.tabs.is_empty() {
+                        window.close();
+                    }
+                }
+            }
+            TabEvent::Menu { .. } => {}
+        }
+        self.keep();
+        window.redraw();
+    }
+
+    /// Its token from the last run, so window memory puts it back; "new":
+    /// ask for one. The Trash window keeps none of its own here.
+    fn token(&self) -> String {
+        if self.trash_window {
+            String::new()
+        } else if self.token.is_empty() {
+            "new".into()
+        } else {
+            self.token.clone()
+        }
+    }
+
+    fn token_given(&mut self, token: &str) {
+        self.token = token.to_string();
+        self.keep();
+    }
+
+    fn session_ending(&mut self) {
+        self.ending = Some(Instant::now());
+        self.keep();
+    }
+
+    fn closed(&mut self) {
+        let mut s = self.shared.borrow_mut();
+        s.windows.retain(|(id, _)| Some(*id) != self.me);
+        if s.last_used == self.me {
+            s.last_used = None;
+        }
+        // Closed for an exit: kept for the next session (session milestone 1).
+        if vergence_widgets::session::ending(self.ending) || self.trash_window {
+            return;
+        }
+        // Closed by the user: it is not kept.
+        s.snaps.retain(|(id, _)| Some(*id) != self.me);
+        let all: Vec<keep::Snap> = s.snaps.iter().map(|(_, w)| w.clone()).collect();
+        keep::save(&all);
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
@@ -1956,10 +2202,16 @@ impl Program for Viewer {
             }
         }
         self.want_picture();
+        // A folder gone to: kept for the next start.
+        self.keep();
         window.redraw();
     }
 
     fn saw(&mut self, input: &Input) {
+        // The window last used takes the folders handed over.
+        if matches!(input, Input::Button { pressed: true, .. } | Input::Key { pressed: true, .. }) && self.me.is_some() {
+            self.shared.borrow_mut().last_used = self.me;
+        }
         if let Input::Button { pressed: true, modifiers, button, x, y } = input {
             self.mods = *modifiers;
             if *button == vergence_ui::Button::Right {
@@ -2035,7 +2287,10 @@ impl Program for Viewer {
             BACKSPACE if !typing => self.run(cmd::UP, window),
             s if m.ctrl && (s == 0x61 || s == 0x41) && !typing => self.run(cmd::SELECT_ALL, window),
             s if m.ctrl && !m.shift && (s == 0x6e || s == 0x4e) => self.run(cmd::NEW_WINDOW, window),
-            s if m.ctrl && (s == 0x77 || s == 0x57) => self.run(cmd::CLOSE, window),
+            s if m.ctrl && (s == 0x77 || s == 0x57) => self.run(cmd::CLOSE_TAB, window),
+            s if m.ctrl && (s == 0x74 || s == 0x54) => self.run(cmd::NEW_TAB, window),
+            0xff56 if m.ctrl => self.run(cmd::NEXT_TAB, window),
+            0xff55 if m.ctrl => self.run(cmd::PREV_TAB, window),
             s if m.ctrl && (s == 0x68 || s == 0x48) => self.run(cmd::HIDDEN, window),
             s if m.ctrl && (s == 0x69 || s == 0x49) && !typing => self.run(cmd::INFO, window),
             s if m.ctrl && s == 0x2c => self.run(cmd::SETTINGS, window),
@@ -2099,8 +2354,9 @@ impl Program for Viewer {
     }
 
     fn waker(&mut self, waker: Waker) {
-        let first = self.waker.is_none();
+        let first = self.waker.is_none() && self.shared.borrow().windows.is_empty();
         self.waker = Some(waker.clone());
+        self.register();
         *self.thumb_waker.lock().unwrap_or_else(|e| e.into_inner()) = Some(waker.clone());
         if first {
             let inbox = self.shared.borrow().inbox.clone();
@@ -2111,7 +2367,13 @@ impl Program for Viewer {
         waker.wake();
     }
 
-    fn opened(&mut self, _id: u32) {}
+    fn opened(&mut self, id: u32) {
+        self.me = Some(id);
+        self.register();
+        if self.shared.borrow().last_used.is_none() {
+            self.shared.borrow_mut().last_used = Some(id);
+        }
+    }
 
     fn woken(&mut self, window: &mut Window) -> bool {
         let mut changed = false;
@@ -2143,15 +2405,56 @@ impl Program for Viewer {
             (self.desktop, self.stamp) = (text, stamp);
             changed = true;
         }
+        // The other windows kept from the last run.
+        let kept = std::mem::take(&mut self.shared.borrow_mut().kept);
+        for snap in kept {
+            window.open_window(vergence_widgets::window(Viewer::from_snap(self.shared.clone(), &snap)));
+        }
         let asked: Vec<Vec<PathBuf>> = std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
         for paths in asked {
             // The Trash window started again: only forward.
-            if !self.trash_window {
-                self.open_paths(&paths);
+            if self.trash_window {
+                window.activate();
+                continue;
             }
-            // Handed over by a start the person just made: forward (the server judges).
+            // For the window last used, if it is another one: it is woken to take them.
+            let other = {
+                let s = self.shared.borrow();
+                s.last_used.filter(|u| Some(*u) != self.me).and_then(|u| s.windows.iter().find(|(id, _)| *id == u).map(|(id, w)| (*id, w.clone())))
+            };
+            match other {
+                Some((id, w)) => {
+                    self.shared.borrow_mut().opens.push((id, paths));
+                    w.wake();
+                }
+                None => {
+                    self.open_paths(&paths);
+                    // Handed over by a start the person just made: forward (the server judges).
+                    window.activate();
+                    changed = true;
+                }
+            }
+        }
+        // Folders handed over for this window, and tabs dropped on it.
+        let (opens, moved) = {
+            let mut s = self.shared.borrow_mut();
+            let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut s.opens).into_iter().partition(|(id, _)| Some(*id) == self.me);
+            s.opens = rest;
+            let (tabs, others): (Vec<_>, Vec<_>) = std::mem::take(&mut s.transfers).into_iter().partition(|(into, _, _)| Some(*into) == self.me);
+            s.transfers = others;
+            (mine, tabs)
+        };
+        for (_, paths) in opens {
+            self.open_paths(&paths);
             window.activate();
             changed = true;
+        }
+        for (_, to, t) in moved {
+            self.take_tab(t, to as usize);
+            changed = true;
+        }
+        if changed {
+            self.keep();
         }
         // Folders for windows of their own.
         for p in std::mem::take(&mut self.pending) {
@@ -2213,7 +2516,11 @@ impl Program for Viewer {
             false,
             vec![
                 C::role(cmd::NEW_WINDOW, Role::NewWindow).featured(),
+                C::role(cmd::NEW_TAB, Role::NewTab),
+                C::role(cmd::CLOSE_TAB, Role::CloseTab),
                 C::role(cmd::CLOSE, Role::CloseWindow),
+                C::role(cmd::NEXT_TAB, Role::NextTab),
+                C::role(cmd::PREV_TAB, Role::PreviousTab),
                 C::own(cmd::OPEN, "File", "Open", "Enter").featured(),
                 C::own(cmd::PREVIEW, "File", "Preview", "Space").checked(self.preview),
                 C::role(cmd::SELECT_ALL, Role::SelectAll),
@@ -2310,7 +2617,7 @@ fn main() {
         if hand::hand_over(TRASH_ID, &[]) {
             return;
         }
-        let shared = Rc::new(RefCell::new(Shared { inbox: Arc::default(), next_tab: 0, clip: None, undo: Vec::new() }));
+        let shared = Rc::new(RefCell::new(Shared::new()));
         let Some(v) = Viewer::trash_window(shared) else {
             eprintln!("vergence-files: no Trash (no home folder)");
             std::process::exit(1);
@@ -2325,9 +2632,26 @@ fn main() {
     if hand::hand_over(APP_ID, &paths) {
         return;
     }
-    let shared = Rc::new(RefCell::new(Shared { inbox: Arc::default(), next_tab: 0, clip: None, undo: Vec::new() }));
-    let mut v = Viewer::new(shared);
-    v.open_paths(&paths);
+    let shared = Rc::new(RefCell::new(Shared::new()));
+    // The windows kept from the last run come back (session milestone 1's
+    // rules), the first here and the rest once it is open; folders named on
+    // the command line join the first. `[session] restore = false`: forgotten.
+    let mut kept = if vergence_widgets::session::restore() {
+        keep::load()
+    } else {
+        keep::save(&[]);
+        Vec::new()
+    };
+    let mut v = if kept.is_empty() {
+        Viewer::new(shared.clone())
+    } else {
+        let first = kept.remove(0);
+        shared.borrow_mut().kept = kept;
+        Viewer::from_snap(shared.clone(), &first)
+    };
+    if !paths.is_empty() || v.tabs.is_empty() {
+        v.open_paths(&paths);
+    }
     if let Err(e) = vergence_widgets::run(v, (1040, 680)) {
         eprintln!("vergence-files: {e}");
         std::process::exit(1);
@@ -2387,16 +2711,46 @@ mod tests {
         v.forward();
         assert_eq!(v.front_tab().unwrap().showing, Showing::Folder(dir.clone()));
         // A file given opens its folder with it chosen.
-        // A file given opens its folder with it chosen (in a window of its own).
         let mut v = Viewer::new(shared());
         v.open_paths(&[dir.join("a.txt")]);
         assert_eq!(v.front_tab().unwrap().chosen, vec![dir.join("a.txt")]);
-        // One folder a window: more go to windows of their own.
-        v.open_paths(std::slice::from_ref(&dir));
-        assert_eq!(v.tabs.len(), 1);
-        assert_eq!(v.pending, vec![dir.clone()]);
+        // Files milestone 3: more folders handed over open in tabs of this
+        // window, the newest in front; nothing given, a window of its own.
+        v.open_paths(std::slice::from_ref(&sub));
+        assert_eq!(v.tabs.len(), 2);
+        assert_eq!(v.front_tab().unwrap().showing, Showing::Folder(sub.clone()));
+        assert!(v.pending.is_empty());
+        v.open_paths(&[]);
+        assert_eq!((v.tabs.len(), v.pending.len()), (2, 1));
         v.narrow = "zzz".into();
         assert!(v.visible().is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Tabs: each keeps its folder and choice; the next and previous go
+    /// round; a tab taken out leaves the next one in front, and a tab from
+    /// another window takes this window's folder sizes.
+    #[test]
+    fn tabs_keep_their_own_folders() {
+        let dir = std::env::temp_dir().join(format!("vergence-files-tabs-{}", std::process::id()));
+        let (a, b) = (dir.join("a"), dir.join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let mut v = Viewer::new(shared());
+        v.open_paths(&[a.clone(), b.clone()]);
+        let ids: Vec<u32> = v.tabs.iter().map(|t| t.id).collect();
+        assert_eq!(v.front, ids[1], "the last handed over in front");
+        v.narrow = "x".into();
+        v.front = ids[0];
+        v.tab_changed();
+        assert!(v.narrow.is_empty(), "the narrowing is the window's: it starts again");
+        assert_eq!(v.front_tab().unwrap().showing, Showing::Folder(a.clone()));
+        let t = v.remove_tab(ids[0]).unwrap();
+        assert_eq!(v.front, ids[1]);
+        let mut other = Viewer::new(shared());
+        other.take_tab(t, 0);
+        assert!(Arc::ptr_eq(&other.tabs[0].sizes, &other.sizes));
+        assert_eq!(other.front_tab().unwrap().showing, Showing::Folder(a.clone()));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

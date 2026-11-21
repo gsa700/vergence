@@ -94,3 +94,25 @@ Close-Up).
    history keeping each folder's scroll place for the session.
 2. *Answered: Recent exists, with a switch to turn it off* ("I don't care
    for it and always turn it off").
+
+## Progress
+
+- **Step 1, tabs: in 2026-11-21.** The server's tabs again (Reader's way):
+  New Tab (Ctrl+T and +, at home), Close Tab (Ctrl+W, the window with its
+  last), next and previous (Ctrl+Page Down/Up), torn off into a window of
+  its own and joined to another, each with its folder, history and choice
+  (a tab moved takes the new window's folder sizes). A folder handed over
+  (the desktop, Open with, a start with folders) opens in a tab of the
+  window last pressed or typed in; a start with nothing opens a window at
+  home. New Window opens at home too. Each window's tabs kept across
+  restarts by session milestone 1's rules (crates/vergence-files/src/keep.rs,
+  ~/.local/state/vergence/files-session: kept when ended from outside or by
+  an exit, forgotten when the user closes the window, `[session] restore =
+  false` forgets them). The Trash window keeps its plain bar and keeps
+  nothing. Checked in a headless session on Hubble: two folders on the
+  command line make two tabs; a folder handed over by a second start joins
+  that window as a third; killed and started again, the three come back
+  with the same one in front; Ctrl+W and Ctrl+T change what is kept.
+  Tests on Hubble and techbench; agent-check 0 failed. The folders' scroll
+  places come with step 2.
+
