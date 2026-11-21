@@ -168,4 +168,21 @@ Recording, by question 1. OCR (text out of a capture) and the Mac's
   opened Close-Up on the file, a drag dropped it on Edit (the ghost
   accented, "dropped (copied)"), and it went after 5 s. Tests: the link
   comes back as its path, the thumbnail's size, frame and picture.
+- **Step 5, Super+Shift+5's bar** (2026-11-21). capture.rs `Bar`: a small
+  bar at the bottom of the work area of the screen under the pointer
+  (over the dock's band): Close; the modes Screen, All screens, Window,
+  Area (the chosen one lit); No timer / 5 s / 10 s, To file / To
+  clipboard, No pointer / With pointer, each a button stepping through
+  its choices (sized for its widest, so nothing jumps); Capture in the
+  accent. Enter captures, Escape or a click outside closes, Left and Right
+  step the modes; Ctrl+Super+Shift+5 opens it set to the clipboard. A
+  window or an area hands over to Super+Shift+4's picker with the bar's
+  choices; a screen with a timer counts down in the Capture button ("3…"),
+  the desktop usable meanwhile (Escape stops it), and the bar is gone
+  before the picture is taken. The choices are kept in
+  ~/.local/state/vergence/screenshots (0600). Tried headless on Hubble:
+  the bar, the modes stepped by the arrows, the choices kept after
+  Escape, Enter taking the screen, a 5 s timer (nothing at 3 s, the file
+  at 7 s, no bar in it), Window through the bar taking Calculator. Test:
+  the choices read back, nonsense ignored.
 

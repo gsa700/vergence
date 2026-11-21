@@ -89,6 +89,7 @@ fn screen_elements(state: &mut Server, renderer: &mut GlesRenderer, output: &Out
     // screenshot's thumbnail (capture.rs).
     elements.extend(state.capture_pick_element(renderer, geo, scale).map(crate::zoom::Inner::Scene));
     elements.extend(state.shot_element(renderer, geo, scale).map(crate::zoom::Inner::Scene));
+    elements.extend(state.bar_element(renderer, geo, scale).map(crate::zoom::Inner::Scene));
     elements.extend(state.scene(renderer, output, scale).into_iter().map(crate::zoom::Inner::Scene));
     elements
 }

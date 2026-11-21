@@ -317,6 +317,13 @@ mod tests {
     }
 
     #[test]
+    fn the_bars_choices_are_read_back() {
+        let c = parse_choices("mode = area\ntimer = 10\nto = clipboard\npointer = true\n");
+        assert_eq!(c, Choices { mode: Mode::Area, timer: 10, clip: true, pointer: true });
+        assert_eq!(parse_choices("timer = 7\nmode = nonsense\n"), Choices::default());
+    }
+
+    #[test]
     fn the_folder_is_the_day() {
         let l = vergence_shell::tiles::Local { year: 2026, month: 10, mday: 20, wday: 5, hour: 23, min: 1, sec: 19 };
         assert!(folder(&l).ends_with("Pictures/Screenshots/2026-11-20"));
@@ -389,8 +396,7 @@ impl Server {
                 self.capture_pick = Some(Pick { clip, window: false, start: None, now, picture: None });
                 self.redraw_all();
             }
-            // The screenshot bar comes with step 5; until then, as Super+Shift+4.
-            CaptureKey::Bar => self.capture_key(CaptureKey::Area, clip),
+            CaptureKey::Bar => self.bar_open(clip),
         }
     }
 
@@ -407,14 +413,18 @@ impl Server {
         }
     }
 
+    /// The picker or the bar is open: every key and press is theirs.
     pub fn capture_picking(&self) -> bool {
-        self.capture_pick.is_some()
+        self.capture_pick.is_some() || self.bar_is_open()
     }
 
     /// A key while the picker is open: Space switches area and window,
     /// Escape lets go.
     pub fn capture_pick_key(&mut self, sym: u32) {
         use xkbcommon::xkb::keysyms as k;
+        if self.capture_bar.is_some() {
+            return self.bar_key(sym);
+        }
         let Some(p) = self.capture_pick.as_mut() else { return };
         match sym {
             k::KEY_Escape => self.capture_pick = None,
@@ -425,6 +435,7 @@ impl Server {
     }
 
     pub fn capture_pick_hover(&mut self, pos: smithay::utils::Point<f64, Logical>) {
+        self.bar_hover(pos);
         if let Some(p) = self.capture_pick.as_mut() {
             p.now = pos;
         }
@@ -442,6 +453,9 @@ impl Server {
     }
 
     pub fn capture_pick_press(&mut self, pos: smithay::utils::Point<f64, Logical>) {
+        if self.bar_is_open() {
+            return self.bar_press(pos);
+        }
         let Some(p) = self.capture_pick.as_mut() else { return };
         p.now = pos;
         if !p.window {
@@ -750,5 +764,369 @@ impl Server {
         let whole = Rectangle::<f64, Logical>::from_size((s.px.0 as f64, s.px.1 as f64).into());
         let loc = (s.rect.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
         MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), &s.buffer, None, Some(whole), Some(s.rect.size), Kind::Unspecified).ok().map(crate::decor::SceneElement::Memory)
+    }
+}
+
+// Step 5: Super+Shift+5's bar. A small bar at the bottom of the screen
+// under the pointer: the screen, every screen, a window, an area (the
+// chosen one lit); the timer (off, 5 s, 10 s), where it goes (a file or
+// the clipboard), the pointer in it or not, each a button that steps
+// through its choices; Capture. Enter captures, Escape or a click outside
+// closes. A window or an area hands over to Super+Shift+4's picker; a
+// screen with a timer counts down in the bar's place. Its choices are
+// kept in ~/.local/state/vergence/screenshots (owner only).
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
+    Screen,
+    Screens,
+    Window,
+    Area,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Btn {
+    Mode(Mode),
+    Timer,
+    Dest,
+    Pointer,
+    Capture,
+    Close,
+}
+
+/// The bar's choices, kept between uses.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Choices {
+    pub mode: Mode,
+    /// Seconds: 0, 5 or 10.
+    pub timer: u8,
+    pub clip: bool,
+    pub pointer: bool,
+}
+
+impl Default for Choices {
+    fn default() -> Self {
+        Choices { mode: Mode::Screen, timer: 0, clip: false, pointer: false }
+    }
+}
+
+fn choices_path() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    Some(base.join("vergence/screenshots"))
+}
+
+pub fn parse_choices(text: &str) -> Choices {
+    let mut c = Choices::default();
+    for line in text.lines() {
+        let Some((k, v)) = line.split_once('=') else { continue };
+        match (k.trim(), v.trim()) {
+            ("mode", "screen") => c.mode = Mode::Screen,
+            ("mode", "screens") => c.mode = Mode::Screens,
+            ("mode", "window") => c.mode = Mode::Window,
+            ("mode", "area") => c.mode = Mode::Area,
+            ("timer", t) => c.timer = match t.parse::<u8>() {
+                Ok(5) => 5,
+                Ok(10) => 10,
+                _ => 0,
+            },
+            ("to", t) => c.clip = t == "clipboard",
+            ("pointer", t) => c.pointer = t == "true",
+            _ => {}
+        }
+    }
+    c
+}
+
+fn write_choices(c: &Choices) {
+    use std::os::unix::fs::OpenOptionsExt;
+    let Some(p) = choices_path() else { return };
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let mode = match c.mode {
+        Mode::Screen => "screen",
+        Mode::Screens => "screens",
+        Mode::Window => "window",
+        Mode::Area => "area",
+    };
+    let text = format!("mode = {mode}\ntimer = {}\nto = {}\npointer = {}\n", c.timer, if c.clip { "clipboard" } else { "file" }, c.pointer);
+    if let Ok(mut f) = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&p) {
+        use std::io::Write;
+        let _ = f.write_all(text.as_bytes());
+    }
+}
+
+/// The bar while open (or counting down).
+pub struct Bar {
+    pub choices: Choices,
+    /// Its screen, and its buttons laid out there (points).
+    screen: Rectangle<i32, Logical>,
+    pub rect: Rectangle<i32, Logical>,
+    buttons: Vec<(Btn, Rectangle<i32, Logical>)>,
+    hover: Option<Btn>,
+    /// Counting down: when it captures.
+    pub countdown: Option<std::time::Instant>,
+    picture: Option<(u64, smithay::backend::renderer::element::memory::MemoryRenderBuffer, (i32, i32))>,
+}
+
+const BAR_H: i32 = 44;
+const BAR_PAD: i32 = 6;
+
+fn label(b: Btn, c: &Choices, secs_left: Option<u64>) -> String {
+    match b {
+        Btn::Mode(Mode::Screen) => "Screen".into(),
+        Btn::Mode(Mode::Screens) => "All screens".into(),
+        Btn::Mode(Mode::Window) => "Window".into(),
+        Btn::Mode(Mode::Area) => "Area".into(),
+        Btn::Timer => match c.timer {
+            0 => "No timer".into(),
+            t => format!("{t} s timer"),
+        },
+        Btn::Dest => if c.clip { "To clipboard".into() } else { "To file".into() },
+        Btn::Pointer => if c.pointer { "With pointer".into() } else { "No pointer".into() },
+        Btn::Capture => match secs_left {
+            Some(s) => format!("{s}\u{2026}"),
+            None => "Capture".into(),
+        },
+        Btn::Close => "\u{2715}".into(),
+    }
+}
+
+impl Server {
+    /// Super+Shift+5: the bar opens on the screen under the pointer.
+    pub fn bar_open(&mut self, clip: bool) {
+        if self.lock.on || crate::greeter() {
+            return;
+        }
+        let mut choices = choices_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| parse_choices(&t)).unwrap_or_default();
+        if clip {
+            choices.clip = true;
+        }
+        let Some(screen) = self.output_at_pointer() else { return };
+        self.capture_bar = Some(Bar { choices, screen, rect: Rectangle::default(), buttons: Vec::new(), hover: None, countdown: None, picture: None });
+        self.bar_layout();
+        self.redraw_all();
+    }
+
+    fn bar_layout(&mut self) {
+        let font = self.title_font.as_ref();
+        let width = |s: &str| font.map(|f| f.width(s)).unwrap_or(s.chars().count() as f32 * 7.0);
+        let Some(bar) = self.capture_bar.as_ref() else { return };
+        let c = bar.choices;
+        let order = [Btn::Close, Btn::Mode(Mode::Screen), Btn::Mode(Mode::Screens), Btn::Mode(Mode::Window), Btn::Mode(Mode::Area), Btn::Timer, Btn::Dest, Btn::Pointer, Btn::Capture];
+        // The widest each button's labels get, so it doesn't jump as they change.
+        let widest = |b: Btn| -> i32 {
+            let all: Vec<Choices> = match b {
+                Btn::Timer => [0u8, 5, 10].iter().map(|&t| Choices { timer: t, ..c }).collect(),
+                Btn::Dest => [false, true].iter().map(|&k| Choices { clip: k, ..c }).collect(),
+                Btn::Pointer => [false, true].iter().map(|&k| Choices { pointer: k, ..c }).collect(),
+                _ => vec![c],
+            };
+            all.iter().map(|x| width(&label(b, x, None)).ceil() as i32).max().unwrap_or(20) + 24
+        };
+        let ws: Vec<i32> = order.iter().map(|&b| widest(b)).collect();
+        let total: i32 = ws.iter().sum::<i32>() + BAR_PAD * (order.len() as i32 + 1) + 2 * 12;
+        let area = self.work_area(bar.screen);
+        let x = area.loc.x + (area.size.w - total) / 2;
+        let y = area.loc.y + area.size.h - BAR_H - 24;
+        let mut bx = x + BAR_PAD;
+        let mut buttons = Vec::new();
+        for (i, (&b, &w)) in order.iter().zip(&ws).enumerate() {
+            // A gap between the modes, the options and Capture.
+            if i == 1 || i == 5 || i == 8 {
+                bx += 12;
+            }
+            buttons.push((b, Rectangle::new((bx, y + BAR_PAD).into(), (w, BAR_H - 2 * BAR_PAD).into())));
+            bx += w + BAR_PAD;
+        }
+        let bar = self.capture_bar.as_mut().unwrap();
+        bar.rect = Rectangle::new((x, y).into(), (total, BAR_H).into());
+        bar.buttons = buttons;
+        bar.picture = None;
+    }
+
+    pub fn bar_is_open(&self) -> bool {
+        self.capture_bar.as_ref().is_some_and(|b| b.countdown.is_none())
+    }
+
+    fn bar_close(&mut self) {
+        if let Some(b) = self.capture_bar.take() {
+            write_choices(&b.choices);
+        }
+        self.redraw_all();
+    }
+
+    pub fn bar_hover(&mut self, pos: smithay::utils::Point<f64, Logical>) {
+        let Some(b) = self.capture_bar.as_mut() else { return };
+        let h = b.buttons.iter().find(|(_, r)| r.to_f64().contains(pos)).map(|(k, _)| *k);
+        if h != b.hover {
+            b.hover = h;
+            b.picture = None;
+        }
+    }
+
+    pub fn bar_press(&mut self, pos: smithay::utils::Point<f64, Logical>) {
+        let Some(b) = self.capture_bar.as_mut() else { return };
+        if b.countdown.is_some() {
+            return;
+        }
+        if !b.rect.to_f64().contains(pos) {
+            return self.bar_close();
+        }
+        let Some(btn) = b.buttons.iter().find(|(_, r)| r.to_f64().contains(pos)).map(|(k, _)| *k) else { return };
+        let c = &mut b.choices;
+        match btn {
+            Btn::Mode(m) => c.mode = m,
+            Btn::Timer => c.timer = match c.timer { 0 => 5, 5 => 10, _ => 0 },
+            Btn::Dest => c.clip = !c.clip,
+            Btn::Pointer => c.pointer = !c.pointer,
+            Btn::Capture => return self.bar_capture(),
+            Btn::Close => return self.bar_close(),
+        }
+        b.picture = None;
+        self.bar_layout();
+        self.redraw_all();
+    }
+
+    /// A key while the bar is open: Enter captures, Escape closes, the
+    /// arrows step through the modes.
+    pub fn bar_key(&mut self, sym: u32) {
+        use xkbcommon::xkb::keysyms as k;
+        let Some(b) = self.capture_bar.as_mut() else { return };
+        if b.countdown.is_some() {
+            // Escape stops a countdown too.
+            if sym == k::KEY_Escape {
+                self.capture_bar = None;
+                self.redraw_all();
+            }
+            return;
+        }
+        let modes = [Mode::Screen, Mode::Screens, Mode::Window, Mode::Area];
+        let i = modes.iter().position(|m| *m == b.choices.mode).unwrap_or(0);
+        match sym {
+            k::KEY_Escape => return self.bar_close(),
+            k::KEY_Return | k::KEY_KP_Enter => return self.bar_capture(),
+            k::KEY_Left => b.choices.mode = modes[(i + 3) % 4],
+            k::KEY_Right => b.choices.mode = modes[(i + 1) % 4],
+            _ => return,
+        }
+        b.picture = None;
+        self.redraw_all();
+    }
+
+    /// Capture with the bar's choices (after its timer).
+    fn bar_capture(&mut self) {
+        let Some(b) = self.capture_bar.as_ref() else { return };
+        let c = b.choices;
+        write_choices(&c);
+        match c.mode {
+            Mode::Window | Mode::Area => {
+                self.capture_bar = None;
+                let now = self.pointer_location();
+                self.capture_pick = Some(Pick { clip: c.clip, window: c.mode == Mode::Window, start: None, now, picture: None });
+                self.redraw_all();
+            }
+            Mode::Screen | Mode::Screens if c.timer > 0 => {
+                use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+                let at = std::time::Instant::now() + std::time::Duration::from_secs(c.timer as u64);
+                if let Some(b) = self.capture_bar.as_mut() {
+                    b.countdown = Some(at);
+                    b.picture = None;
+                }
+                self.redraw_all();
+                let _ = self.loop_handle.insert_source(Timer::from_duration(std::time::Duration::from_millis(250)), move |_, _, st| {
+                    let Some(b) = st.capture_bar.as_mut() else { return TimeoutAction::Drop };
+                    if b.countdown != Some(at) {
+                        return TimeoutAction::Drop;
+                    }
+                    if std::time::Instant::now() >= at {
+                        st.capture_bar = None;
+                        st.bar_shoot(c);
+                        return TimeoutAction::Drop;
+                    }
+                    b.picture = None;
+                    st.redraw_all();
+                    TimeoutAction::ToDuration(std::time::Duration::from_millis(250))
+                });
+            }
+            _ => {
+                self.capture_bar = None;
+                self.bar_shoot(c);
+            }
+        }
+    }
+
+    fn bar_shoot(&mut self, c: Choices) {
+        let what = if c.mode == Mode::Screens { What::Screens } else { What::Screen(None) };
+        let req = Request { what, dest: if c.clip { Dest::Clipboard } else { Dest::Folder }, pointer: c.pointer, shadow: true };
+        if let Err(e) = self.capture_ask(req) {
+            tracing::info!("screenshot: {e}");
+        }
+        self.redraw_all();
+    }
+
+    /// The bar on screen `out` (left out of what it takes: it closes first,
+    /// and a countdown's bar is not drawn into captures).
+    pub fn bar_element(&mut self, renderer: &mut smithay::backend::renderer::gles::GlesRenderer, out: Rectangle<i32, Logical>, scale: f64) -> Option<crate::decor::SceneElement> {
+        use smithay::backend::renderer::element::{
+            Kind,
+            memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+        };
+        if self.capturing {
+            return None;
+        }
+        let light = self.light_style();
+        let accent = self.accent();
+        let b = self.capture_bar.as_ref()?;
+        if !b.rect.overlaps(out) {
+            return None;
+        }
+        let left = b.countdown.map(|at| at.saturating_duration_since(std::time::Instant::now()).as_secs() + 1);
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (format!("{:?}{:?}{:?}", b.choices, b.hover, left), scale.to_bits(), light, (accent.r, accent.g, accent.b)).hash(&mut h);
+            h.finish()
+        };
+        if b.picture.as_ref().is_none_or(|(k, ..)| *k != key) {
+            let (rw, rh) = (b.rect.size.w as f32, b.rect.size.h as f32);
+            let mut scene = vergence_scene::Scene::new(rw, rh);
+            let s = vergence_look::shelf_look(light);
+            scene.fill_rounded(vergence_scene::Rect::new(0.0, 0.0, rw, rh), 10.0, vergence_scene::Color::rgba(s.menu.0, s.menu.1, s.menu.2, 240));
+            scene.stroke(vergence_scene::Rect::new(0.0, 0.0, rw, rh), 10.0, 1.0, vergence_scene::Color::rgba(128, 128, 128, 90));
+            let ink = vergence_scene::Color::rgb(s.menu_ink.0, s.menu_ink.1, s.menu_ink.2);
+            let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
+            let face = fonts.face("sans-serif", 500, false);
+            for (btn, r) in &b.buttons {
+                let rr = vergence_scene::Rect::new((r.loc.x - b.rect.loc.x) as f32, (r.loc.y - b.rect.loc.y) as f32, r.size.w as f32, r.size.h as f32);
+                let chosen = matches!(btn, Btn::Mode(m) if *m == b.choices.mode);
+                let (bg, fg) = if *btn == Btn::Capture || chosen {
+                    (Some(vergence_scene::Color::rgba(accent.r, accent.g, accent.b, if *btn == Btn::Capture { 255 } else { 90 })), if *btn == Btn::Capture { vergence_scene::Color::rgb(255, 255, 255) } else { ink })
+                } else if b.hover == Some(*btn) {
+                    (Some(vergence_scene::Color::rgba(128, 128, 128, 50)), ink)
+                } else {
+                    (None, ink)
+                };
+                if let Some(bg) = bg {
+                    scene.fill_rounded(rr, 6.0, bg);
+                }
+                if let Some(face) = face {
+                    let t = label(*btn, &b.choices, if *btn == Btn::Capture { left } else { None });
+                    let size = 13.0;
+                    let (_, tw) = fonts.layout(face, size, &t);
+                    let m = fonts.metrics(face, size);
+                    let at = vergence_scene::Point::new((rr.x + (rr.w - tw) / 2.0).round(), (rr.y + (rr.h - m.ascent - m.descent) / 2.0 + m.ascent).round());
+                    vergence_render::text(&mut scene, fonts, face, size, fg, at, &t);
+                }
+            }
+            let pic = vergence_render::Cpu::new().render(&scene, fonts, scale as f32, vergence_scene::Color::rgba(0, 0, 0, 0)).ok()?;
+            let buffer = MemoryRenderBuffer::from_slice(&pic.data, smithay::backend::allocator::Fourcc::Abgr8888, (pic.width as i32, pic.height as i32), 1, smithay::utils::Transform::Normal, None);
+            self.capture_bar.as_mut()?.picture = Some((key, buffer, (pic.width as i32, pic.height as i32)));
+        }
+        let b = self.capture_bar.as_ref()?;
+        let (_, buffer, px) = b.picture.as_ref()?;
+        let whole = Rectangle::<f64, Logical>::from_size((px.0 as f64, px.1 as f64).into());
+        let loc = (b.rect.loc - out.loc).to_f64().to_physical(scale).to_i32_round::<i32>();
+        MemoryRenderBufferRenderElement::from_buffer(renderer, loc.to_f64(), buffer, None, Some(whole), Some(b.rect.size), Kind::Unspecified).ok().map(crate::decor::SceneElement::Memory)
     }
 }
