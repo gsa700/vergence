@@ -3,7 +3,10 @@
 Status: **questions answered 2026-11-21** (Dave: 1 yes; 2 "recents should
 probably exist, but I don't care for it and always turn it off. so lets
 have the option to do that"). An app milestone (after
-screenshots, which closed 2026-11-21). Dave compared FileView with Windows
+screenshots, which closed 2026-11-21), now after session milestone 1
+(docs/session-milestone-1.md, 2026-11-21): its rules decide what FileView
+keeps. After a restart, its tabs come back with their folders and scroll
+places; a folder closed by the user opens at the top. Dave compared FileView with Windows
 11's File Explorer and macOS's Finder (his screenshots on Control's
 Desktop, 2026-11-21) and answered the same night:
 
