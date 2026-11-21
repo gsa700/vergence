@@ -114,6 +114,9 @@ const SCHEME_NAMES: [&str; 3] = ["App default", "Dark", "Light"];
 /// The Frost choice's names and their values in desktop.toml (Standard when unset).
 const FROST_NAMES: [&str; 3] = ["Clear", "Standard", "Heavy"];
 const FROST_VALUES: [&str; 3] = ["clear", "standard", "heavy"];
+/// Title bar shade (`[appearance] bar-shade`, vergence-look bar_look_shaded):
+/// the names shown and their steps.
+const SHADE_CHOICES: [(&str, i64); 5] = [("Lighter", -1), ("Standard", 0), ("A little darker", 1), ("Darker", 2), ("Darkest", 3)];
 /// The tab in front: the page's own color, or frosted (page when unset).
 const FRONT_TAB_NAMES: [&str; 2] = ["Page color", "Frosted"];
 const FRONT_TAB_VALUES: [&str; 2] = ["page", "frosted"];
@@ -501,6 +504,8 @@ enum Message {
     /// The desktop's own look (look milestone 1): how much shows through
     /// the frost, the tab in front, and Reduce transparency.
     Frost(usize),
+    /// Title bar shade: an index into SHADE_CHOICES.
+    BarShade(usize),
     FrontTab(usize),
     Transparency(bool),
     /// The sidebar's search field: typed, and Enter (the first page found).
@@ -1262,6 +1267,9 @@ impl App {
             Message::Motion(on) => self.save_appearance(|t| {
                 t.insert("reduced-motion".into(), on.into());
             }),
+            Message::BarShade(i) => self.save_appearance(|t| {
+                t.insert("bar-shade".into(), SHADE_CHOICES[i.min(SHADE_CHOICES.len() - 1)].1.into());
+            }),
             Message::Frost(i) => self.save_appearance(|t| {
                 t.insert("frost".into(), FROST_VALUES[i.min(2)].into());
             }),
@@ -1852,7 +1860,7 @@ impl App {
                 .chain([("Network".into(), Page::Network, Icon::Network, "network ethernet cable wired iphone phone usb tethering hotspot address ip")])
                 .collect()),
             ("Look", vec![
-                ("Appearance".into(), Page::Appearance, Icon::Appearance, "style light dark accent color frost tab tint controls size"),
+                ("Appearance".into(), Page::Appearance, Icon::Appearance, "style light dark accent color frost tab tint controls size title bar shade darker lighter"),
                 ("Theme and fonts".into(), Page::Theme, Icon::Fonts, "theme font fonts monospace interface icons cursor"),
                 ("Wallpaper".into(), Page::Wallpaper(self.primary_index()), Icon::Wallpaper, "wallpaper picture pictures background image photo fit color primary main screen"),
             ]),
@@ -2036,6 +2044,15 @@ impl App {
                     ),
                 ]),
                 self.group(Some("Desktop look"), vec![
+                    setting(
+                        "Title bar shade",
+                        "Darker sets the tabs off from the bar. Lighter is for light bars only. Titles stay readable at every step.",
+                        {
+                            let shade = self.desktop.get("appearance").and_then(|a| a.get("bar-shade")).and_then(|v| v.as_integer()).unwrap_or(0);
+                            let names: Vec<String> = SHADE_CHOICES.iter().map(|(n, _)| n.to_string()).collect();
+                            choice(names, SHADE_CHOICES.iter().position(|(_, s)| *s == shade), Message::BarShade).width(Length::Fixed(160.0)).name("Title bar shade")
+                        },
+                    ),
                     setting("Frost", "How much of a window shows through its bar. Titles stay readable whatever is under them.", choice(frost_names, Some(frost), Message::Frost).width(Length::Fixed(160.0)).name("Frost")),
                     setting(
                         "Under the bar",

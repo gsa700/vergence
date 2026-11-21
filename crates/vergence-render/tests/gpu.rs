@@ -401,9 +401,10 @@ fn the_frost_shader_on_the_gpu_matches_its_cpu_reference() {
         }
     }
     for f in [
-        Frost { tint: [51, 61, 82], strength: 0.5, ink: [235, 235, 235], need: 7.0, radius: 10.0, invert: false },
-        Frost { tint: [228, 230, 235], strength: 0.3, ink: [29, 29, 31], need: 5.85, radius: 6.0, invert: false },
-        Frost { tint: [228, 230, 235], strength: 0.3, ink: [29, 29, 31], need: 14.0, radius: 6.0, invert: true },
+        Frost { tint: [51, 61, 82], strength: 0.5, ink: [235, 235, 235], need: 7.0, radius: 10.0, invert: false, cap: false },
+        Frost { tint: [228, 230, 235], strength: 0.3, ink: [29, 29, 31], need: 5.85, radius: 6.0, invert: false, cap: false },
+        Frost { tint: [228, 230, 235], strength: 0.3, ink: [29, 29, 31], need: 14.0, radius: 6.0, invert: true, cap: false },
+        Frost { tint: [216, 219, 226], strength: 0.5, ink: [29, 29, 31], need: 5.85, radius: 6.0, invert: false, cap: true },
     ] {
         let cpu = frost(&rgba, w, h, h, &f);
         let unit = |c: [u8; 3]| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0];
@@ -416,6 +417,7 @@ fn the_frost_shader_on_the_gpu_matches_its_cpu_reference() {
             ("need", &[f.need]),
             ("corner", &[0.0]),
             ("invert", &[if f.invert { 1.0 } else { 0.0 }]),
+            ("cap", &[if f.cap { 1.0 } else { 0.0 }]),
         ]) {
             Ok(p) => p,
             Err(e) => panic!("the frost shader on this GPU: {e}"),

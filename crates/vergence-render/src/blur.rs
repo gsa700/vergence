@@ -36,7 +36,11 @@ const GOLDEN_ANGLE: f32 = 2.399_963_2;
 /// style than its window: light text under a light bar is shown dark, Dave,
 /// 2026-11-14) and `split` (float, a line across the picture in texture
 /// coordinates the blur does not reach over, so a sidebar's edge stays crisp
-/// in the bar above it: Dave, 2026-11-16; 0 for none).
+/// in the bar above it: Dave, 2026-11-16; 0 for none) and `cap` (float: 1
+/// keeps the frost from coming out lighter than the tint, channel by
+/// channel, so a white page under a light bar cannot wash it out: Dave,
+/// 2026-11-21, "the white bar washes out the tabs a bit"; what is darker
+/// still shows through).
 pub const FROST_SHADER: &str = r#"#version 100
 
 //_DEFINES_
@@ -63,6 +67,7 @@ uniform float corner;
 uniform float bottom;
 uniform float invert;
 uniform float split;
+uniform float cap;
 
 float lin(float c) {
     return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
@@ -135,7 +140,11 @@ void main() {
             cover = clamp(corner - distance(p, c) + 0.5, 0.0, 1.0);
         }
     }
-    gl_FragColor = vec4(mix(under, tint.rgb, strength), 1.0) * (alpha * cover);
+    vec3 frosted = mix(under, tint.rgb, strength);
+    if (cap > 0.5) {
+        frosted = min(frosted, tint.rgb);
+    }
+    gl_FragColor = vec4(frosted, 1.0) * (alpha * cover);
 }
 "#;
 
@@ -151,6 +160,8 @@ pub struct Frost {
     pub radius: f32,
     /// What is under shows inverted (a bar of the other style than its window).
     pub invert: bool,
+    /// No lighter than the tint (a light bar's: a white page cannot wash it out).
+    pub cap: bool,
 }
 
 fn lin(c: f32) -> f32 {
@@ -225,7 +236,10 @@ pub fn frost(rgba: &[u8], width: usize, height: usize, rows: usize, f: &Frost) -
                 }
             }
             let under = [b[0] + (1.0 - b[3]) * tint[0], b[1] + (1.0 - b[3]) * tint[1], b[2] + (1.0 - b[3]) * tint[2]];
-            let c = mix(under, tint, strength_over(under, f));
+            let mut c = mix(under, tint, strength_over(under, f));
+            if f.cap {
+                c = [c[0].min(tint[0]), c[1].min(tint[1]), c[2].min(tint[2])];
+            }
             let o = &mut out[(y * width + x) * 4..][..4];
             for i in 0..3 {
                 o[i] = (c[i] * 255.0).round().clamp(0.0, 255.0) as u8;
@@ -240,8 +254,8 @@ pub fn frost(rgba: &[u8], width: usize, height: usize, rows: usize, f: &Frost) -
 mod tests {
     use super::*;
 
-    const DARK: Frost = Frost { tint: [51, 61, 82], strength: 0.5, ink: [235, 235, 235], need: 7.0, radius: 14.0, invert: false };
-    const LIGHT: Frost = Frost { tint: [228, 230, 235], strength: 0.5, ink: [29, 29, 31], need: 5.85, radius: 14.0, invert: false };
+    const DARK: Frost = Frost { tint: [51, 61, 82], strength: 0.5, ink: [235, 235, 235], need: 7.0, radius: 14.0, invert: false, cap: false };
+    const LIGHT: Frost = Frost { tint: [228, 230, 235], strength: 0.5, ink: [29, 29, 31], need: 5.85, radius: 14.0, invert: false, cap: false };
 
     fn picture(width: usize, height: usize, at: impl Fn(usize, usize) -> [u8; 4]) -> Vec<u8> {
         let mut v = Vec::with_capacity(width * height * 4);
@@ -329,7 +343,7 @@ mod tests {
     fn a_sharp_edge_is_softened() {
         let (w, h) = (40, 30);
         let p = picture(w, h, |x, _| if x == 20 { [255, 255, 255, 255] } else { [0, 0, 0, 255] });
-        let f = Frost { tint: [0, 0, 0], strength: 0.0, ink: [255, 255, 255], need: 1.0, radius: 6.0, invert: false };
+        let f = Frost { tint: [0, 0, 0], strength: 0.0, ink: [255, 255, 255], need: 1.0, radius: 6.0, invert: false, cap: false };
         let out = frost(&p, w, h, 10, &f);
         let at = |x: usize| out[(5 * w + x) * 4];
         assert!(at(20) < 200, "the line itself is spread out: {}", at(20));
@@ -337,9 +351,25 @@ mod tests {
         assert_eq!(at(0), 0);
     }
 
+    /// A white page under a light bar, capped: the bar keeps its ground (no
+    /// lighter, Dave 2026-11-21: the white washed out the tabs), while dark
+    /// text under it still shows, darker than the ground.
+    #[test]
+    fn a_capped_light_frost_is_no_lighter_than_its_ground() {
+        let tint = [216, 219, 226];
+        let page = picture(32, 16, |x, _| if x % 8 == 0 { [20, 20, 20, 255] } else { [255, 255, 255, 255] });
+        let f = Frost { tint, cap: true, ..LIGHT };
+        let out = frost(&page, 32, 16, 16, &f);
+        assert!(out.chunks(4).all(|p| p[0] <= tint[0] && p[1] <= tint[1] && p[2] <= tint[2]), "nothing lighter than the ground");
+        assert!(out.chunks(4).any(|p| p[0] + 8 < tint[0]), "the text still shows, darker");
+        let open = frost(&page, 32, 16, 16, &Frost { tint, ..LIGHT });
+        assert!(open.chunks(4).any(|p| p[0] > tint[0]), "without the cap the white shows lighter (what washed the bar out)");
+        assert!(worst(&out, LIGHT.ink) >= LIGHT.need - 0.1, "the ink still reads");
+    }
+
     #[test]
     fn the_shader_names_what_the_server_sets() {
-        for name in ["texel", "radius", "tint", "ink", "need", "corner", "//_DEFINES_", "v_coords", "alpha"] {
+        for name in ["texel", "radius", "tint", "ink", "need", "corner", "cap", "//_DEFINES_", "v_coords", "alpha"] {
             assert!(FROST_SHADER.contains(name), "{name}");
         }
         assert!(FROST_SHADER.contains(&format!("i < {TAPS}")));

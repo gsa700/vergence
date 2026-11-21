@@ -538,6 +538,7 @@ impl Server {
                     UniformName::new("bottom", UniformType::_1f),
                     UniformName::new("invert", UniformType::_1f),
                     UniformName::new("split", UniformType::_1f),
+                    UniformName::new("cap", UniformType::_1f),
                 ];
                 match renderer.compile_custom_texture_shader(vergence_render::blur::FROST_SHADER, &uniforms) {
                     Ok(p) => {
@@ -565,6 +566,15 @@ impl Server {
             Some(vergence_protocol::bus::SettingValue::U32(v)) => *v,
             // Standard Frost and Standard size when unset.
             _ => if key == "frost" || key == "size" { 1 } else { 0 },
+        }
+    }
+
+    /// The title bars' shade step (Settings > Appearance > Title bar shade,
+    /// vergence-look bar_look_shaded); 0 when unset.
+    pub fn bar_shade(&self) -> i32 {
+        match self.look_setting("bar-shade") {
+            0 => 0,
+            v => v as i32 - 100,
         }
     }
 
@@ -787,7 +797,8 @@ impl Server {
             spans.push((w.clone(), elements.len()));
             // This window's own bar style (bar_light).
             let light = self.bar_light(&w, light);
-            let style = vergence_look::bar_look(light);
+            let shaded = vergence_look::bar_look_shaded(light, self.bar_shade());
+            let style = &shaded;
             // A parent a modal dialog blocks is dimmed, in front of its own bar
             // and content and behind the dialog (dialogs.rs).
             if self.modal_of(&w).is_some()
@@ -1016,6 +1027,8 @@ impl Server {
                             radius: frost_r * scale as f32,
                             corner: 0.0,
                             bottom: false,
+                            // As a native bar's: a light bar no lighter than its shade.
+                            cap: light,
                         };
                         let dst = bar_px;
                         if let Some(e) = crate::backdrop::element(renderer, &mut d.backdrop, dst, program, &look) {
@@ -1058,6 +1071,9 @@ impl Server {
                             // A sidebar window's sidebar ends where its bar's title would
                             // start: the frost does not blur across that edge.
                             Uniform::new("split", UniformValue::_1f(tools_of(&w).map_or(0.0, |(from, _)| ((from as f64 - 1.0) * per_point / px.w.max(1) as f64) as f32))),
+                            // A light bar is never washed out past its shade by a white
+                            // page under it (Dave, 2026-11-21).
+                            Uniform::new("cap", UniformValue::_1f(if light { 1.0 } else { 0.0 })),
                         ];
                         elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(&mut d.frost, dst, strip, texture.clone(), native_serial(&w), program.clone(), uniforms)));
                     }

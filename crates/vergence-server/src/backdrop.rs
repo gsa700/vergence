@@ -38,6 +38,8 @@ pub struct Look {
     pub radius: f32,
     pub corner: f32,
     pub bottom: bool,
+    /// No lighter than the tint (a light bar's frost; decor.rs).
+    pub cap: bool,
 }
 
 pub struct Backdrop {
@@ -65,6 +67,7 @@ impl Backdrop {
             // Said every time: a program's uniforms keep their last value, and a
             // native bar may have inverted (decor.rs).
             Uniform::new("invert", UniformValue::_1f(0.0)),
+            Uniform::new("cap", UniformValue::_1f(if look.cap { 1.0 } else { 0.0 })),
         ];
         Backdrop { id, commit, dst, texture, program, uniforms }
     }

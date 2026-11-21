@@ -787,6 +787,7 @@ impl Server {
             radius: vergence_look::frost_radius(self.look_setting("frost")) * scale as f32,
             corner: vergence_look::RADIUS * scale as f32,
             bottom: false,
+            cap: false,
         }
     }
 }

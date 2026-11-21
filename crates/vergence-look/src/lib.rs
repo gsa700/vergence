@@ -126,11 +126,16 @@ pub const BAR_DARK: BarLook = BarLook {
     edited: Rgb(232, 168, 56),
 };
 
+/// The light bar's grounds a shade darker since 2026-11-21 (Dave: "the white
+/// bar washes out the tabs a bit"; 228 and 240 before): the white tab in
+/// front stands out at about 1.35:1, the focused bar still darker than the
+/// others.
 pub const BAR_LIGHT: BarLook = BarLook {
-    ground: Rgb(228, 230, 235),
-    ground_off: Rgb(240, 240, 241),
+    ground: Rgb(216, 219, 226),
+    ground_off: Rgb(230, 230, 232),
     ink: Rgb(29, 29, 31),
-    ink_off: Rgb(112, 112, 116),
+    // 112 before the shade: a little darker, to read on the darker steps.
+    ink_off: Rgb(96, 96, 100),
     front: Rgb(250, 250, 251),
     front_off: Rgb(232, 232, 233),
     edge: Rgb(170, 174, 184),
@@ -148,6 +153,34 @@ pub const BAR_LIGHT: BarLook = BarLook {
 /// The bar look for light or dark.
 pub const fn bar_look(light: bool) -> &'static BarLook {
     if light { &BAR_LIGHT } else { &BAR_DARK }
+}
+
+/// Settings > Appearance > Title bar shade (Dave, 2026-11-21): steps lighter
+/// (below 0) or darker (above), desktop.toml `[appearance] bar-shade`. Each
+/// step lays black (or white) at SHADE_STEP of 255 on the bar's grounds; the
+/// tabs behind and the shapes follow, being laid on the ground, and the tab
+/// in front and the titles stay. The range is what keeps every title at the
+/// bar's contrast rule (the test below): one step lighter (the light bar
+/// only) to three darker.
+pub const BAR_SHADE_MIN: i32 = -1;
+pub const BAR_SHADE_MAX: i32 = 3;
+const SHADE_STEP: i32 = 7;
+
+/// The bar look for light or dark at a shade step.
+pub fn bar_look_shaded(light: bool, shade: i32) -> BarLook {
+    let mut l = *bar_look(light);
+    // The dark bar goes no lighter: a step lighter leaves an unfocused title
+    // under the pointer below 3:1.
+    let s = shade.clamp(if light { BAR_SHADE_MIN } else { 0 }, BAR_SHADE_MAX);
+    if s != 0 {
+        let (toward, a) = if s > 0 { (Rgb(0, 0, 0), s * SHADE_STEP) } else { (Rgb(255, 255, 255), -s * SHADE_STEP) };
+        let a = a as u8;
+        l.ground = over(l.ground, toward, a);
+        l.ground_off = over(l.ground_off, toward, a);
+        l.alert_ground = over(l.alert_ground, toward, a);
+        l.alert_ground_off = over(l.alert_ground_off, toward, a);
+    }
+    l
 }
 
 /// `top` laid over `base` at `alpha` of 255, as a renderer blends it.
@@ -409,7 +442,8 @@ mod tests {
     /// button's white mark on its red.
     #[test]
     fn bar_text_is_readable_in_both_styles() {
-        for (name, l) in [("dark", &BAR_DARK), ("light", &BAR_LIGHT)] {
+        let looks: Vec<(String, BarLook)> = (BAR_SHADE_MIN..=BAR_SHADE_MAX).flat_map(|s| [(format!("dark, shade {s}"), bar_look_shaded(false, s)), (format!("light, shade {s}"), bar_look_shaded(true, s))]).collect();
+        for (name, l) in &looks {
             for focused in [true, false] {
                 let (ground, ink, front) = if focused { (l.ground, l.ink, l.front) } else { (l.ground_off, l.ink_off, l.front_off) };
                 let need = if focused { 4.5 } else { 3.0 };
@@ -434,6 +468,19 @@ mod tests {
             }
         }
         assert!(contrast(Rgb(255, 255, 255), CLOSE) >= 4.5);
+    }
+
+    /// The light bar's tab in front stands out from the ground (Dave,
+    /// 2026-11-21: it washed out at 1.2:1), more with each darker step.
+    #[test]
+    fn the_light_front_tab_stands_out() {
+        let at = |s| contrast(bar_look_shaded(true, s).front, bar_look_shaded(true, s).ground);
+        assert!(at(0) >= 1.3, "default {:.2}", at(0));
+        for s in BAR_SHADE_MIN..BAR_SHADE_MAX {
+            assert!(at(s + 1) > at(s));
+        }
+        assert_eq!(bar_look_shaded(true, 0), BAR_LIGHT);
+        assert_eq!(bar_look_shaded(false, 99), bar_look_shaded(false, BAR_SHADE_MAX));
     }
 
     /// The dock's and menus' text and marks, both styles: text 4.5:1 on a

@@ -1788,6 +1788,7 @@ impl Server {
                 radius: vergence_look::frost_radius(self.look_setting("frost")) * scale as f32,
                 corner: vergence_look::RADIUS * scale as f32,
                 bottom: true,
+                cap: false,
             };
             let mut slot = self.shelf.backdrop.take();
             if let Some(e) = crate::backdrop::element(renderer, &mut slot, dst, program, &look) {

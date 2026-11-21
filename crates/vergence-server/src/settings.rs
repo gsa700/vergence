@@ -11,6 +11,7 @@
 //       front-tab      = "page" | "frosted"
 //       reduce-transparency = false
 //       controls       = "compact" | "standard" | "large"  (the size of controls)
+//       bar-shade      = 0   (title bar shade steps, -1 lighter to 3 darker; vergence-look)
 //   ~/.config/vergence/desktop.toml  [[displays.screen]] controls = "automatic"
 //       | "compact" | "standard" | "large"   (a screen's own; Automatic: Large
 //       where a touch panel is on it)
@@ -124,6 +125,10 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
     put(LOOK, "front-tab", SettingValue::U32((text("front-tab").as_deref() == Some("frosted")) as u32));
     // Under the bar: the titles' contrast first (0), or more of the window shown (1).
     put(LOOK, "under-bar", SettingValue::U32((text("under-bar").as_deref() == Some("more")) as u32));
+    // The title bars' shade (vergence-look bar_look_shaded), kept as 100 + the
+    // step, a u32 (0 is unset).
+    let shade = appearance.get("bar-shade").and_then(|v| v.as_integer()).unwrap_or(0).clamp(vergence_look::BAR_SHADE_MIN as i64, vergence_look::BAR_SHADE_MAX as i64);
+    put(LOOK, "bar-shade", SettingValue::U32((100 + shade) as u32));
     put(LOOK, "reduce-transparency", SettingValue::Bool(appearance.get("reduce-transparency").and_then(|v| v.as_bool()).unwrap_or(false)));
     // Size of controls (look milestone 1, step 8): the desktop's, and each
     // screen's own ("size:<monitor id>", 3 for Automatic: Large where a touch
