@@ -1,6 +1,9 @@
 # Screenshots milestone 1: the Mac's keys, built into the server
 
-Status: **draft 2026-11-20**, questions below for Dave. An app milestone,
+Status: **questions answered 2026-11-20** (all four as recommended:
+recording its own milestone next, with our own encoder; Close-Up's crop
+and rotate now, markup later; other programs through the portal, each
+asked first; a window with its shadow, Alt+click without). An app milestone,
 after display lists (core vision) by the rule of 15 November. Asked for
 2026-11-15 ("a built in for screen shots and video capture that mimics the
 macos keyboard shortcuts, I love that so much more than diving into a menu
@@ -21,7 +24,7 @@ As on the Mac, Super standing in for Command:
   and its shadow, on a clear ground; Alt+click without the shadow).
 - **Super+Shift+5**: a small bar on the screen: whole screen, a window,
   an area; a timer (none, 5 s, 10 s); where to save; show the pointer or
-  not; Capture. Recording's two buttons wait for question 1.
+  not; Capture. Recording's two buttons come with the recording milestone.
 - **Ctrl** with any of them: to the clipboard instead of a file (image/png,
   so any program can paste it).
 - Files: `~/Pictures/Screenshots/2026-11-20/Screenshot 2026-11-20 at
@@ -55,10 +58,11 @@ unless asked).
 4. **The card**: pictures in notification cards; click opens Close-Up; drag
    the file out.
 5. **Super+Shift+5's bar**: modes, the timer, the folder, the pointer.
-6. **Close-Up's minor edits** (question 2): crop, rotate, and markup
-   (arrows, boxes, text, a highlighter), saved back or as a copy.
-7. **Other programs** (question 3): the desktop portal's Screenshot
-   interface, answered by the server and asked first, as agents are.
+6. **Close-Up's minor edits**: crop and rotate, saved back or as a copy
+   (markup in a later Close-Up milestone).
+7. **Other programs**: the desktop portal's Screenshot interface,
+   answered by the server, each program asked first (the agents' kind of
+   dialog), its answer kept and shown in Settings > Privacy.
 8. **Settings and checks**: the settings page; a display-suite scenario
    (a capture is the screen's pixels exactly; an area across a 1x and a 2x
    screen; a window alone with its shadow); tests on all four.
@@ -70,7 +74,7 @@ Recording, by question 1. OCR (text out of a capture) and the Mac's
 
 ## Questions for Dave
 
-1. **Recording.** It needs a video encoder, which we would write ourselves
+1. *Answered: as recommended.* **Recording.** It needs a video encoder, which we would write ourselves
    (as the PDF engine and the JPEG 2000 decoder): (a) screenshots in this
    milestone, recording its own milestone next with the encoder
    (recommended: an encoder for a format every player opens is a real
@@ -78,13 +82,13 @@ Recording, by question 1. OCR (text out of a capture) and the Mac's
    a simple format first (Motion JPEG in a file mpv and VLC open; not
    Firefox); (c) recording only as an animated picture (APNG) for short
    clips, the video later.
-2. **Close-Up's edits.** (a) crop and rotate in this milestone, markup
+2. *Answered: as recommended.* **Close-Up's edits.** (a) crop and rotate in this milestone, markup
    (arrows, boxes, text, highlighter) in a Close-Up milestone later
    (recommended: a capture is useful at once; markup is a small drawing
    app of its own); (b) all of it now; (c) none now.
-3. **Other programs taking screenshots** (Firefox's own screenshot tool,
+3. *Answered: as recommended.* **Other programs taking screenshots** (Firefox's own screenshot tool,
    OBS, Flameshot) through the desktop portal: (a) yes, each program asked
    first with the agents' kind of dialog, its answer kept (recommended);
    (b) not in this milestone.
-4. **A window alone**: with its shadow on a clear ground, Alt+click
+4. *Answered: as recommended.* **A window alone**: with its shadow on a clear ground, Alt+click
    without, as the Mac (recommended), or without the shadow by default?
