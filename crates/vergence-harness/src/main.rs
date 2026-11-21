@@ -21,6 +21,7 @@
 //!   vergence-harness seams <shot.png> --scale S --window X Y W H [--bar H]
 //!   vergence-harness same <a.png> <b.png> [--at X Y] [--corners R] [--top N] [--tolerance T]
 //!   vergence-harness zoomed <plain.png> <zoomed.png> <px> <py> <level> [--tolerance T]
+//!   vergence-harness sharper <a.png> <b.png> <x> <y> <w> <h> [--by R]
 //!   vergence-harness cursors <theme directory>   (Vergence's pointers as an Xcursor theme)
 //!       Find each size box (tools/sizebox) and print its size on the panel
 //!       in millimeters (milestone 4, acceptance 3).
@@ -32,6 +33,7 @@ mod live;
 mod measure;
 mod parse;
 mod same;
+mod sharp;
 mod zoomed;
 mod seams;
 
@@ -48,7 +50,8 @@ fn usage() -> ExitCode {
          vergence-harness measure <window title>...\n       \
          vergence-harness seams <shot.png> --scale S --window X Y W H [--bar H]\n       \
          vergence-harness same <a.png> <b.png> [--at X Y] [--corners R] [--top N] [--tolerance T]
-         vergence-harness zoomed <plain.png> <zoomed.png> <px> <py> <level> [--tolerance T]"
+         vergence-harness zoomed <plain.png> <zoomed.png> <px> <py> <level> [--tolerance T]
+         vergence-harness sharper <a.png> <b.png> <x> <y> <w> <h> [--by R]"
     );
     ExitCode::from(2)
 }
@@ -66,6 +69,7 @@ fn main() -> ExitCode {
         Some("seams") if args.len() >= 2 => seams::run(&args[1..]),
         Some("same") if args.len() >= 3 => same::run(&args[1..]),
         Some("zoomed") if args.len() >= 6 => zoomed::run(&args[1..]),
+        Some("sharper") if args.len() >= 7 => sharp::run(&args[1..]),
         Some("cursors") if args.len() == 2 => cursors::run(&args[1..]),
         Some("icons") if args.len() == 3 => cursors::icons(&args[1..]),
         Some("icon-theme") if args.len() == 3 => cursors::icon_theme(&args[1..]),

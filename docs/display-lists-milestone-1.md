@@ -208,3 +208,20 @@ menus) as scenes (they are drawn in the server already, at each scale).
   levels, two copies kept (94 MB), none 11 s after the zoom went off. Not
   done: drawing at a lower density instead of switching to pixels (pixels
   are simpler and the app has the scene anyway).
+- **Step 7, checks** (2026-11-20). Display-suite scenario 13-scenes (the
+  rich test pattern, drawn by the server or, with VERGENCE_UI_PIXELS=1,
+  by itself): drawn from its scene, the same picture its app draws, at 1x
+  and 2x (0 of 240,000 and 0 of 960,000 pixels different); across a 1x
+  and a 2x screen, its 2x half drawn again and sharper than its pixels
+  stretched (1.90x); magnified at 3.12x, sharper than its pixels enlarged
+  (3.42x); no window switched to pixels. `vergence-harness sharper`
+  measures it (the typical brightness step across an edge: larger when
+  sharp). Passes on Hubble, kepler, techbench and apollo, the other 12
+  with it. Timing on kepler (2560x1440, headless; per frame): the
+  terminal maximized and scrolling, the app 0.29 ms building and sending
+  its scene plus the server 2.4 ms drawing it, against the app 1.70 ms
+  drawing its own pixels; Edit typing, 0.43 ms plus the server's ~2.3,
+  against 2.81 ms. About as much work in all (the server's draw waits for
+  the GPU to finish), moved from the app to the server; far inside a
+  frame. To follow: the server draws on its own thread, or only what
+  changed (step 2's hope), so a window's draw never holds up the others.
