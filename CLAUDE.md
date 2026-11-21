@@ -163,8 +163,7 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   normally no root for Claude (every step that needs root is product
   evidence); for testing Dave gave a test password for sudo (installs),
   not stored anywhere: ask him in a later session. (sudo was swapped for
-  doas on 2026-11-20 and put back the same evening; doas stays installed
-  with `permit :wheel`.) Rust by rustup (`.
+  doas on 2026-11-20 and put back the same evening; Dave then removed doas.) Rust by rustup (`.
   ~/.cargo/env` over ssh), build in ~/src/vergence (`tools/sync-hubble.sh
   techbench`), Vergence installed under /usr/local, the VDM login screen at
   boot, ~/.config/vergence/control-socket there so `vctl` works. Its disk
