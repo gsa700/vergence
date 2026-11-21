@@ -1,7 +1,9 @@
 # Display lists milestone 1: windows sent as scenes, drawn sharp everywhere
 
-Status: **draft 2026-11-20**, for Dave (Dave: "do the Super+Tab fix then
-draft display lists"). The core-vision milestone due after Reader (an app
+Status: **questions answered 2026-11-20** (all four as recommended: every
+app at once, drawn in the server, Reader's pages stay pictures, the
+magnifier sharp for our apps); drafted the same evening (Dave: "do the
+Super+Tab fix then draft display lists"). The core-vision milestone due after Reader (an app
 milestone) by the rule of 15 November; whitepaper §6.6, the NeXTSTEP idea
 in the name.
 
@@ -85,24 +87,24 @@ Remote display (scenes to another machine: phase 4); Avalonia's backend
 format (added when a tool needs them); the server's own panels (dock,
 menus) as scenes (they are drawn in the server already, at each scale).
 
-## Questions for Dave
+## Questions for Dave (answered 2026-11-20)
 
-1. **Which apps first?** (a) all of the toolkit's apps at once, with the
+1. *Answered: (a) all at once.* **Which apps first?** (a) all of the toolkit's apps at once, with the
    pixel road kept for any window and forced by a switch (recommended:
    they all build scenes already, so one change covers them, and the
    checks compare both roads); (b) one app first (Edit or the terminal),
    the rest in a second milestone.
-2. **Where scenes are drawn.** (a) in the server, on its GPU, with
+2. *Answered: (a) in the server.* **Where scenes are drawn.** (a) in the server, on its GPU, with
    vergence-render (recommended: our own renderer, no borrowing, the same
    code the apps use now, so the pictures match); (b) in a confined helper
    process, as PDFs are read (safer against a hostile scene, a copy of
    every frame between processes, slower).
-3. **Reader's pages.** A PDF page reaches Reader as a picture from its
+3. *Answered: leave them pictures.* **Reader's pages.** A PDF page reaches Reader as a picture from its
    helper, so even in a scene it stays a picture: sharp in Reader (it asks
    for the page at the zoom it shows), enlarged in the magnifier. Leave it
    so in milestone 1 (recommended), or have the PDF helper hand over pages
    as scenes later (a large piece of work of its own)?
-4. **The magnifier's level** of ambition in this milestone: (a) sharp for
+4. *Answered: (a) sharp for scene windows.* **The magnifier's level** of ambition in this milestone: (a) sharp for
    scene windows, enlarged pixels for the rest (recommended); (b) leave
    the magnifier as it is and do only the scales (straddling windows).
 
