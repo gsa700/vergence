@@ -382,7 +382,10 @@ pub enum Cursor {
     Pointer,
     Text,
     Move,
+    /// An open hand: something can be moved by dragging it.
     Grab,
+    /// A closed hand: it is being moved.
+    Grabbing,
     /// Resizing from these edges ([`Edges`]).
     Resize(Edges),
     /// ↔ between two columns, pulled to change a column's width.
@@ -412,6 +415,7 @@ impl Cursor {
             Cursor::Text => wl::SHAPE_TEXT,
             Cursor::Move => wl::SHAPE_MOVE,
             Cursor::Grab => wl::SHAPE_GRAB,
+            Cursor::Grabbing => wl::SHAPE_GRABBING,
             Cursor::ColResize => wl::SHAPE_COL_RESIZE,
             Cursor::Resize(e) => match (e.top, e.bottom, e.left, e.right) {
                 (true, _, true, _) => wl::SHAPE_NW_RESIZE,

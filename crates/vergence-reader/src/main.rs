@@ -899,7 +899,12 @@ impl Viewer {
             layout.draw(scene, r, scale.max(0.25), ground.unwrap_or(theme.page), theme.accent, held);
         })
         .on_touch(|t| Some(Msg::Touch(t)))
-        .cursor(if self.hand { vergence_ui::Cursor::Grab } else { vergence_ui::Cursor::Text })
+        .cursor(match (self.hand, self.drag.is_some() && !self.selecting) {
+            // The open hand; closed while it holds the pages (Dave, 2026-11-20).
+            (true, true) => vergence_ui::Cursor::Grabbing,
+            (true, false) => vergence_ui::Cursor::Grab,
+            _ => vergence_ui::Cursor::Text,
+        })
         .name("Pages")
         .value(self.where_now(d))
         .width(Length::FILL)

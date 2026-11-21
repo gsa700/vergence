@@ -125,6 +125,7 @@ pub const SHAPE_POINTER: u32 = 4;
 pub const SHAPE_TEXT: u32 = 9;
 pub const SHAPE_MOVE: u32 = 13;
 pub const SHAPE_GRAB: u32 = 16;
+pub const SHAPE_GRABBING: u32 = 17;
 pub const SHAPE_E_RESIZE: u32 = 18;
 pub const SHAPE_N_RESIZE: u32 = 19;
 pub const SHAPE_NE_RESIZE: u32 = 20;

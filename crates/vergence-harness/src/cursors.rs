@@ -52,6 +52,40 @@ fn hand(_: usize) -> String {
     r##"<path d="M11 3 Q11 1 13 1 Q15 1 15 3 L15 13 L17 12 Q19 12 19 14 L21 13 Q23 13 23 15 L25 15 Q27 15 27 18 L27 24 Q27 30 21 30 L15 30 Q11 30 9 26 L4 18 Q3 16 5 15 Q7 14 8 16 L11 20 Z" fill="#000" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/>"##.into()
 }
 
+/// Parts of a hand drawn as one: every part's white rim first, then every
+/// part filled black over them (no rim crosses a part).
+fn parts(rects: &[(f32, f32, f32, f32, f32, f32)]) -> String {
+    let one = |(x, y, w, h, r, turn): (f32, f32, f32, f32, f32, f32), extra: &str| format!(r##"<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" transform="rotate({turn} {} {})" {extra}/>"##, x + w / 2.0, y + h / 2.0);
+    let rims: String = rects.iter().map(|r| one(*r, r##"fill="#fff" stroke="#fff" stroke-width="3""##)).collect();
+    let fills: String = rects.iter().map(|r| one(*r, r##"fill="#000""##)).collect();
+    rims + &fills
+}
+
+/// An open hand (Dave, 2026-11-20: "the pdf hand should have all fingers
+/// showing since he is moving stuff"): four fingers up and apart, the thumb out.
+fn open_hand(_: usize) -> String {
+    parts(&[
+        (8.5, 14.0, 16.0, 14.5, 6.0, 0.0),
+        (9.0, 5.5, 3.6, 13.0, 1.8, -6.0),
+        (13.2, 3.0, 3.6, 14.0, 1.8, -2.0),
+        (17.4, 3.8, 3.6, 13.5, 1.8, 2.0),
+        (21.4, 7.0, 3.3, 11.5, 1.65, 7.0),
+        (3.6, 14.5, 3.6, 10.5, 1.8, -42.0),
+    ])
+}
+
+/// A closed hand, holding what it moves: the knuckles along the top.
+fn closed_hand(_: usize) -> String {
+    parts(&[
+        (8.0, 11.5, 17.5, 16.5, 6.5, 0.0),
+        (8.6, 8.5, 4.0, 7.0, 2.0, 0.0),
+        (12.8, 7.5, 4.0, 7.0, 2.0, 0.0),
+        (17.0, 7.8, 4.0, 7.0, 2.0, 0.0),
+        (21.0, 9.5, 3.8, 6.5, 1.9, 0.0),
+        (5.0, 15.5, 4.0, 8.0, 2.0, -30.0),
+    ])
+}
+
 fn ibeam(_: usize) -> String {
     let p = "M11 3 L15 3 L16 4 L17 3 L21 3 M16 4 L16 28 M11 29 L15 29 L16 28 L17 29 L21 29";
     format!(r##"<path d="{p}" fill="none" stroke="#fff" stroke-width="4"/><path d="{p}" fill="none" stroke="#000" stroke-width="2"/>"##)
@@ -115,7 +149,8 @@ fn shapes() -> Vec<Shape> {
     vec![
         Shape { names: &["default", "left_ptr", "arrow", "top_left_arrow"], hot: (3.0, 2.0), body: arrow, frames: 1 },
         Shape { names: &["pointer", "hand2", "hand1", "pointing_hand"], hot: (13.0, 1.5), body: hand, frames: 1 },
-        Shape { names: &["grab", "openhand", "grabbing", "closedhand", "dnd-move", "dnd-none"], hot: (13.0, 1.5), body: hand, frames: 1 },
+        Shape { names: &["grab", "openhand", "dnd-move", "dnd-none"], hot: (16.0, 14.0), body: open_hand, frames: 1 },
+        Shape { names: &["grabbing", "closedhand"], hot: (16.0, 16.0), body: closed_hand, frames: 1 },
         Shape { names: &["text", "xterm", "ibeam", "vertical-text"], hot: (16.0, 16.0), body: ibeam, frames: 1 },
         Shape { names: &["ew-resize", "e-resize", "w-resize", "col-resize", "sb_h_double_arrow", "h_double_arrow", "size_hor", "split_h"], hot: (16.0, 16.0), body: ew, frames: 1 },
         Shape { names: &["ns-resize", "n-resize", "s-resize", "row-resize", "sb_v_double_arrow", "v_double_arrow", "size_ver", "split_v"], hot: (16.0, 16.0), body: ns, frames: 1 },
