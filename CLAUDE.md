@@ -31,7 +31,9 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   main git copy, pushed to GitHub; Control has no Rust). Build and test on the
   dev boxes: `tools/sync-hubble.sh [host]` (rsync; keeps the host's build output;
   default hubble, also kepler and techbench), then `cargo test --workspace`
-  there: Hubble, kepler and Techbench for every change. After adding a
+  there: Hubble (Void) and techbench (FreeBSD) for every change (Dave, 2026-11-21:
+  "Too much testing is slowing us down"; apollo is dropped, kepler only when needed:
+  performance on slower hardware, touch). After adding a
   crate, a dependency or a version, copy Cargo.lock back from the build box
   (`scp hubble:src/vergence/Cargo.lock .`) and commit it: Cargo updates it
   there, never here (it was stale for three changes, 2026-11-11). Fake monitors for tests: docs/milestone-1.md, "Found on Hubble".
@@ -58,8 +60,8 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   `vergence-harness same` (pixel comparison). **The display suite**,
   `tools/display-suite.sh <host> [scenario...]`, runs the scenarios in
   tools/display-suite/NN-*.sh, each in a headless session of its own, the
-  monitors untouched; before every push of display code on Hubble, kepler
-  and techbench (Dave, 2026-11-18), about three minutes a machine; one host
+  monitors untouched; before every push of display code on Hubble and
+  techbench (Dave, 2026-11-18; kepler dropped from it 2026-11-21), about three minutes a machine; one host
   per command (parallel syncs collided). canary (the FreeBSD VM, back since
   2026-11-18, no GPU) runs it in software. Always the checkout's tools/vctl
   in scripts: canary's installed one predates VCTL_SOCKET.
@@ -183,8 +185,8 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   Linux-only interfaces (udev, systemd, logind, /sys) out of the core; where
   the platforms must differ, say so in the code and the docs. VMs are for
   build checks only. A milestone is done when it builds and passes
-  its tests on all three and has run on the FreeBSD machines; since
-  2026-11-20 apollo (Fedora) is the fourth test machine.
+  its tests on Hubble and techbench (2026-11-21; apollo, Fedora, was the
+  fourth test machine from 2026-11-20 and is dropped; kepler only when needed).
 - **Installing on a system**: `cargo build --release`, then `sudo tools/install.sh`
   (binaries, `vergence-session` and the `vergence` console command in
   /usr/local/bin, a Wayland session file, seatd enabled where there is no
