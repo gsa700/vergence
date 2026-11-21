@@ -1,6 +1,9 @@
 # Display lists milestone 1: windows sent as scenes, drawn sharp everywhere
 
-Status: **questions answered 2026-11-20** (all four as recommended: every
+Status: **closed 2026-11-20** (Dave: "close it"), all seven steps in;
+follow-ups: the server drawing scenes off its main thread or only what
+changed, the pointer sharp under the magnifier, other programs sharp
+under it (wishlist). Earlier: **questions answered 2026-11-20** (all four as recommended: every
 app at once, drawn in the server, Reader's pages stay pictures, the
 magnifier sharp for our apps); drafted the same evening (Dave: "do the
 Super+Tab fix then draft display lists"). The core-vision milestone due after Reader (an app
