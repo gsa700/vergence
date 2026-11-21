@@ -144,3 +144,18 @@ menus) as scenes (they are drawn in the server already, at each scale).
   Tried headless on Hubble: a window drawn from its scene beside one
   drawn by its program, alike; on the GPU (206 scenes) and forced to the
   CPU (158).
+- **Step 3, the toolkit sends scenes** (2026-11-20). vergence-ui's native
+  road sends each frame's scene (`send_scene`) instead of drawing it: the
+  app's ground added as the scene's first fill, each picture under a key
+  (by where it is in memory, a Weak telling a freed one from a new one),
+  sent whole only the first time, keys the frame no longer shows
+  forgotten; a new memfd each frame. The server and the apps always speak
+  one bus version, so a v30 app knows the server draws scenes: no new
+  handshake. `VERGENCE_UI_PIXELS=1` keeps a program on pixels (for
+  comparing, or a program that wants its pixels shown as drawn). Tried
+  headless on Hubble: Calculator and Settings drawn by the server from
+  their scenes against the same apps drawing their own pixels, **0 of
+  201,600 and 0 of 865,200 pixels different** (largest difference 0);
+  the terminal (6 commands a frame: its grid is one Cells command), Reader
+  (one page picture kept at a time, 4.9 MB, earlier pages let go), Edit.
+  Tests on all four.

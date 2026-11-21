@@ -75,6 +75,14 @@ impl Run<'_> {
 }
 
 /// One window: the program that runs it and what the road keeps for it.
+/// Windows go to the server as display lists unless VERGENCE_UI_PIXELS=1
+/// (display lists milestone 1: for comparing, and for a program that wants
+/// its pixels shown as drawn).
+fn scenes_wanted() -> bool {
+    static WANTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *WANTED.get_or_init(|| std::env::var_os("VERGENCE_UI_PIXELS").is_none_or(|v| v != "1"))
+}
+
 struct Win<'a> {
     id: u32,
     app: Run<'a>,
@@ -84,6 +92,11 @@ struct Win<'a> {
     /// The window that opened it (its parent to the server); 0 for none.
     opened_by: u32,
     slots: Vec<Slot>,
+    /// Its pictures as the server keeps them (display lists milestone 1):
+    /// each picture's key by where it is in memory (the Weak tells a freed
+    /// one from a new one at the same place), and the keys sent.
+    scene_keys: std::collections::HashMap<usize, (u64, std::sync::Weak<vergence_scene::Image>)>,
+    scene_sent: std::collections::HashSet<u64>,
     /// The slot attached last: the one the server shows until the next.
     showing: Option<usize>,
     drawn_by: &'static str,
@@ -283,6 +296,8 @@ impl<'a> Win<'a> {
             created: false,
             opened_by: 0,
             slots: Vec::new(),
+            scene_keys: std::collections::HashMap::new(),
+            scene_sent: std::collections::HashSet::new(),
             showing: None,
             drawn_by: "",
             shm: None,
@@ -899,6 +914,47 @@ impl<'a> Native<'a> {
         Ok(true)
     }
 
+    /// The window as a display list (display lists milestone 1, step 3):
+    /// its scene, with the app's ground as its first fill, sent for the
+    /// server to draw at each scale; each picture under a key, sent whole
+    /// only the first time, keys no longer used forgotten.
+    fn send_scene(&mut self, i: usize, mut scene: Scene, background: Color) -> io::Result<()> {
+        static NEXT_KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        if background.a > 0 {
+            let all = vergence_scene::Rect::new(0.0, 0.0, scene.width, scene.height);
+            scene.commands.insert(0, vergence_scene::Command::Fill { rect: all, radius: 0.0, color: background });
+        }
+        let w = &mut self.windows[i];
+        let mut keys = Vec::with_capacity(scene.images.len());
+        for im in &scene.images {
+            let at = Arc::as_ptr(im) as usize;
+            let known = w.scene_keys.get(&at).filter(|(_, weak)| weak.upgrade().is_some_and(|o| Arc::ptr_eq(&o, im))).map(|(k, _)| *k);
+            let key = known.unwrap_or_else(|| {
+                let k = NEXT_KEY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                w.scene_keys.insert(at, (k, Arc::downgrade(im)));
+                k
+            });
+            keys.push(key);
+        }
+        let sent = &w.scene_sent;
+        let bytes = scene.encode_keyed(&keys, &|k| sent.contains(&k)).map_err(other)?;
+        // Pictures this frame does not show: the server lets them go.
+        let used: std::collections::HashSet<u64> = keys.iter().copied().collect();
+        let forget: Vec<u64> = w.scene_sent.iter().copied().filter(|k| !used.contains(k)).take(vergence_protocol::window::MAX_FORGET).collect();
+        for k in &forget {
+            w.scene_sent.remove(k);
+        }
+        w.scene_keys.retain(|_, (k, weak)| used.contains(k) || (weak.strong_count() > 0 && w.scene_sent.contains(k)));
+        w.scene_sent.extend(keys.iter().copied());
+        // A new file each frame: the server reads it when it reads the message.
+        let mut file = ShmFile::new(bytes.len().max(1))?;
+        file.bytes()[..bytes.len()].copy_from_slice(&bytes);
+        // SAFETY: the ShmFile's descriptor is open for this call.
+        let fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(file.fd()) }.try_clone_to_owned()?;
+        let id = w.id;
+        self.send(WinRequest::Scene { window: id, fd: Fd(Arc::new(fd)), len: bytes.len() as u32, forget })
+    }
+
     fn draw(&mut self, i: usize) -> io::Result<()> {
         let t = Instant::now();
         let w = &mut self.windows[i];
@@ -907,7 +963,12 @@ impl<'a> Native<'a> {
         let scene = w.app.get().scene(&frame, &mut self.fonts);
         let background = self.windows[i].app.get().background();
         let (pw, ph) = pixel_size(&scene, frame.scale).map_err(other)?;
-        if self.draw_on_gpu(i, &scene, frame.scale, background, pw, ph)? {
+        // The server draws the scene (bus v30; the server and the apps always
+        // speak the same version), unless pixels are asked for.
+        if scenes_wanted() {
+            self.send_scene(i, scene, background)?;
+            self.windows[i].drawn_by = "server";
+        } else if self.draw_on_gpu(i, &scene, frame.scale, background, pw, ph)? {
             self.windows[i].drawn_by = "GPU";
         } else {
             let w = &mut self.windows[i];
