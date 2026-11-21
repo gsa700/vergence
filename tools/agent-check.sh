@@ -16,7 +16,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 T=$ROOT/target-check/release
 echo "building into target-check"
-CARGO_TARGET_DIR=$ROOT/target-check cargo build -q --release --manifest-path "$ROOT/Cargo.toml" -p vergence-server -p vergence-protocol -p vergence-edit -p vergence-settings -p vergence-files || exit 2
+CARGO_TARGET_DIR=$ROOT/target-check cargo build -q --release --manifest-path "$ROOT/Cargo.toml" -p vergence-server -p vergence-protocol -p vergence-edit -p vergence-settings -p vergence-files -p vergence-reader -p vergence-pdf || exit 2
 OUT=$HOME/vergence-agent-check/$(date +%Y%m%d-%H%M%S)
 mkdir -p "$OUT"
 H=$HOME/.cache/vergence-headless/home
@@ -45,6 +45,8 @@ wait_title() {
 vctl spawn "$T/vergence-edit" >/dev/null; wait_title Untitled || check 0 "Edit opens"
 vctl spawn "$T/vergence-settings --page accessibility" >/dev/null; wait_title Accessibility || check 0 "the settings app opens"
 vctl spawn "$T/vergence-files $HOME" >/dev/null; sleep 3
+rm -f "$H/.local/state/vergence/reader-places"
+vctl spawn "$T/vergence-reader $ROOT/docs/Vergence-Whitepaper.pdf" >/dev/null; sleep 3
 
 # The agent: vergence-agent-mcp on a pipe; its replies, a line each, in a file.
 mkfifo "$OUT/in"
@@ -105,6 +107,16 @@ check "$(yes_if "echo '$r' | grep -q 'allowed for 60 more min'")" "the window li
 # The widget changed: an id kept from before acts on nothing else.
 r=$(call act '{"action":"press","window":"1/1","node":"12345"}')
 check "$(yes_if "echo '$r' | grep -q '\"isError\":true'")" "an id that names nothing now is refused: $(echo "$r" | cut -c1-120)"
+
+# Reader: the page field set and pressed (Enter), where reading is read back.
+rtitle=$(vctl windows | grep '"vergence-reader"' | head -1 | sed -E 's/^[0-9]+ native "([^"]*)".*/\1/')
+answer hour & ANS=$!
+r=$(call act "{\"action\":\"set\",\"path\":\"$rtitle > text field:Page number\",\"value\":\"3\"}")
+wait $ANS
+r=$(call act "{\"action\":\"press\",\"path\":\"$rtitle > text field:Page number\"}")
+sleep 1
+r=$(call find "{\"path\":\"$rtitle > drawing:Pages\"}")
+check "$(yes_if "echo '$r' | grep -q 'Page 3 of'")" "Reader ($rtitle): page 3 by the page field, read back from the page view: $(echo "$r" | grep -o 'Page[s]* [0-9][^\\]*' | head -1 | cut -c1-60)"
 
 # Agents turned off: everything refused, whatever was allowed.
 printf '\n[agents]\nenabled = false\n' >>"$H/.config/vergence/desktop.toml"

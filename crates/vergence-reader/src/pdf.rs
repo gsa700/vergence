@@ -95,6 +95,32 @@ pub struct Search {
     pub done: bool,
 }
 
+/// The scroll bars, as the toolkit draws its own (vergence-widgets ui.rs):
+/// a thumb this wide, this far from the edge, at least this long.
+pub const BAR_W: f32 = 6.0;
+const BAR_INSET: f32 = 2.0;
+const BAR_MIN: f32 = 24.0;
+/// How near the edge a press counts as on the bar.
+pub const BAR_HIT: f32 = 12.0;
+
+/// Which scroll bar.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Bar {
+    Down,
+    Across,
+}
+
+/// A thumb in a track: its start and length along the track, for content
+/// `content` long shown `room` at a time, scrolled `offset` into it.
+fn thumb_on(track: f32, room: f32, content: f32, offset: f32) -> Option<(f32, f32)> {
+    if content <= room + 0.5 {
+        return None;
+    }
+    let len = (track * room / content).max(BAR_MIN).min(track);
+    let at = (track - len) * (offset / (content - room)).clamp(0.0, 1.0);
+    Some((at, len))
+}
+
 /// The sidebar's thumbnails: the widest box, in points, and the gap.
 pub const THUMB_W: f32 = 132.0;
 pub const THUMB_GAP: f32 = 16.0;
@@ -708,6 +734,84 @@ impl Layout {
         (first, last)
     }
 
+    /// The page view's scroll bars' thumbs, in window points: down the
+    /// right edge when the document is taller than the view, across the
+    /// bottom when wider.
+    pub fn bar(&self, r: Rect, which: Bar) -> Option<Rect> {
+        let z = self.zoom(r);
+        match which {
+            Bar::Down => {
+                let (content, room) = (self.total() * z + 2.0 * MARGIN, r.h);
+                let (at, len) = thumb_on(r.h - 2.0 * BAR_INSET, room, content, self.top * z)?;
+                Some(Rect::new(r.x + r.w - BAR_W - BAR_INSET, r.y + BAR_INSET + at, BAR_W, len))
+            }
+            Bar::Across => {
+                let content = self.widest() * z + 2.0 * MARGIN;
+                let room_x = (content - r.w).max(0.0) / 2.0;
+                let (at, len) = thumb_on(r.w - 2.0 * BAR_INSET - BAR_W - BAR_INSET, r.w, content, room_x - self.pan_x)?;
+                Some(Rect::new(r.x + BAR_INSET + at, r.y + r.h - BAR_W - BAR_INSET, len, BAR_W))
+            }
+        }
+    }
+
+    /// The bar a window point is on, if any.
+    pub fn bar_at(&self, r: Rect, x: f32, y: f32) -> Option<Bar> {
+        if self.bar(r, Bar::Down).is_some() && x >= r.x + r.w - BAR_HIT && y >= r.y && y <= r.y + r.h {
+            return Some(Bar::Down);
+        }
+        if self.bar(r, Bar::Across).is_some() && y >= r.y + r.h - BAR_HIT && x >= r.x && x <= r.x + r.w {
+            return Some(Bar::Across);
+        }
+        None
+    }
+
+    /// Scrolled so the bar's thumb starts at window point `at` (y down,
+    /// x across): a drag of the thumb, or a press on its track.
+    pub fn bar_to(&mut self, r: Rect, which: Bar, at: f32) {
+        let Some(t) = self.bar(r, which) else { return };
+        let z = self.zoom(r);
+        match which {
+            Bar::Down => {
+                let track = r.h - 2.0 * BAR_INSET;
+                let frac = ((at - r.y - BAR_INSET) / (track - t.h).max(1.0)).clamp(0.0, 1.0);
+                let view = (r.h - 2.0 * MARGIN) / z;
+                self.top = frac * (self.total() - view).max(0.0);
+            }
+            Bar::Across => {
+                let track = r.w - 3.0 * BAR_INSET - BAR_W;
+                let frac = ((at - r.x - BAR_INSET) / (track - t.w).max(1.0)).clamp(0.0, 1.0);
+                let room = (self.widest() * z + 2.0 * MARGIN - r.w).max(0.0) / 2.0;
+                self.pan_x = room - frac * 2.0 * room;
+            }
+        }
+        // One page at a time: the page the bar points at becomes the page.
+        if self.view == View::Single {
+            let held = self.top;
+            let p = self.current(r);
+            self.go_to(p, r);
+            if which == Bar::Down {
+                let (a, b) = self.bounds(r);
+                let view = (r.h - 2.0 * MARGIN) / z;
+                self.top = held.clamp(a, (b - view).max(a));
+            }
+        }
+        self.clamp(r);
+    }
+
+    /// The thumbnail strip's bar thumb, in window points.
+    pub fn thumbs_bar(&self, r: Rect) -> Option<Rect> {
+        let (at, len) = thumb_on(r.h - 2.0 * BAR_INSET, r.h, self.thumbs_total(), self.thumb_top)?;
+        Some(Rect::new(r.x + r.w - BAR_W - BAR_INSET, r.y + BAR_INSET + at, BAR_W, len))
+    }
+
+    /// The thumbnail strip scrolled so its thumb starts at window y `at`.
+    pub fn thumbs_bar_to(&mut self, r: Rect, at: f32) {
+        let Some(t) = self.thumbs_bar(r) else { return };
+        let frac = ((at - r.y - BAR_INSET) / (r.h - 2.0 * BAR_INSET - t.h).max(1.0)).clamp(0.0, 1.0);
+        self.thumb_top = frac * (self.thumbs_total() - r.h).max(0.0);
+        self.clamp_thumbs(r);
+    }
+
     /// Where page `p` is drawn in the window, at zoom `z`.
     pub fn dest(&self, r: Rect, z: f32, spots: &[(f32, f32)], p: usize) -> Rect {
         let (pw, ph) = self.pages[p];
@@ -716,7 +820,7 @@ impl Layout {
 
     /// Draws the pages in `r` and asks the worker for what is missing.
     #[allow(clippy::needless_range_loop)]
-    pub fn draw(&self, scene: &mut Scene, r: Rect, scale: f32, ground: Color, accent: Color) {
+    pub fn draw(&self, scene: &mut Scene, r: Rect, scale: f32, ground: Color, accent: Color, held: Option<Bar>) {
         scene.push_clip(r, 0.0);
         scene.fill(r, ground);
         let z = self.zoom(r);
@@ -838,6 +942,14 @@ impl Layout {
         // Tiles: only those of this zoom in sight.
         if tiles.len() > keep_tiles.len() {
             self.shared.tiles.lock().unwrap_or_else(|e| e.into_inner()).retain(|k, _| keep_tiles.contains(k));
+        }
+        // The scroll bars, over the pages.
+        for which in [Bar::Down, Bar::Across] {
+            // A mid gray, seen on white paper and on the dark ground alike.
+            if let Some(t) = self.bar(r, which) {
+                let a = if held == Some(which) { 240 } else { 170 };
+                scene.fill_rounded(t, BAR_W / 2.0, Color::rgba(0x8a, 0x8a, 0x8e, a));
+            }
         }
         scene.pop_clip();
     }
@@ -1013,7 +1125,8 @@ impl Layout {
     /// The sidebar's thumbnails, the current page marked; asks for the
     /// ones in sight.
     #[allow(clippy::needless_range_loop)]
-    pub fn draw_thumbs(&self, scene: &mut Scene, r: Rect, scale: f32, current: usize, ground: Color, accent: Color) {
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_thumbs(&self, scene: &mut Scene, r: Rect, scale: f32, current: usize, ground: Color, accent: Color, ink: Color, held: bool) {
         scene.push_clip(r, 0.0);
         scene.fill(r, ground);
         let tops = self.thumb_tops();
@@ -1047,6 +1160,9 @@ impl Layout {
                 *side = wanted;
                 self.shared.ready.notify_all();
             }
+        }
+        if let Some(t) = self.thumbs_bar(r) {
+            scene.fill_rounded(t, BAR_W / 2.0, Color::rgba(ink.r, ink.g, ink.b, if held { 150 } else { 80 }));
         }
         if first != usize::MAX {
             let keep = first.saturating_sub(30)..=last + 30;
@@ -1343,6 +1459,29 @@ mod tests {
         assert_eq!(&px[0..3], &[28, 28, 28], "white paper: soft black");
         assert_eq!(&px[4..7], &[233, 233, 233], "black text: soft white");
         assert!(px[8] > px[9] && px[9] == px[10], "red stays red: {:?}", &px[8..11]);
+    }
+
+    #[test]
+    fn scroll_bars_follow_and_lead() {
+        let mut d = Layout::sized(vec![LETTER; 10]);
+        let r = place();
+        let t = d.bar(r, Bar::Down).expect("ten pages are taller than the view");
+        assert!((t.y - (r.y + BAR_INSET)).abs() < 1e-3, "at the top first");
+        assert!(d.bar(r, Bar::Across).is_none(), "fitted to the width: nothing across");
+        assert_eq!(d.bar_at(r, r.w - 4.0, 100.0), Some(Bar::Down));
+        assert_eq!(d.bar_at(r, 300.0, 100.0), None);
+        // Dragged to the bottom: the document's end.
+        d.bar_to(r, Bar::Down, r.y + r.h);
+        let view = (r.h - 2.0 * MARGIN) / d.zoom(r);
+        assert!((d.top - (d.total() - view)).abs() < 1.0, "{} {}", d.top, d.total() - view);
+        let t = d.bar(r, Bar::Down).unwrap();
+        assert!((t.y + t.h - (r.y + r.h - BAR_INSET)).abs() < 1e-2, "the thumb at the end");
+        // Zoomed in: a bar across, dragged to its right end shows the right edge.
+        d.set_mode(Mode::Zoom(2.0), None, r);
+        assert!(d.bar(r, Bar::Across).is_some());
+        d.bar_to(r, Bar::Across, r.x + r.w);
+        let room = (d.widest() * 2.0 + 2.0 * MARGIN - r.w) / 2.0;
+        assert!((d.pan_x + room).abs() < 1e-2, "the right edge in view: pan {}", d.pan_x);
     }
 
     #[test]

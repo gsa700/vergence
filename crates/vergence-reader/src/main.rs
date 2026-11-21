@@ -72,6 +72,8 @@ mod cmd {
     pub const VIEW_TWO: u32 = 27;
     pub const NIGHT: u32 = 28;
     pub const INFO: u32 = 29;
+    pub const TOOL_TEXT: u32 = 30;
+    pub const TOOL_HAND: u32 = 31;
     pub const SETTINGS: u32 = 40;
     pub const ABOUT: u32 = 41;
 }
@@ -237,6 +239,13 @@ struct Viewer {
     page_focus: bool,
     /// The files are being watched for changes (the timer armed).
     watching: bool,
+    /// A scroll bar held: which, and where on its thumb it was taken
+    /// (window points from the thumb's start).
+    bar_drag: Option<(pdf::Bar, f32)>,
+    /// The thumbnail strip's bar held, and where on its thumb.
+    thumb_bar_drag: Option<f32>,
+    /// The Hand: a drag always moves the pages (else text is selected).
+    hand: bool,
 }
 
 /// Addresses a document's links may open (through vergence-open, after asking).
@@ -314,7 +323,27 @@ impl Viewer {
             page_key: 0,
             page_focus: false,
             watching: false,
+            bar_drag: None,
+            thumb_bar_drag: None,
+            hand: false,
         }
+    }
+
+    /// A press on the page view's scroll bars (window-relative `x`, `y`):
+    /// on a thumb it is held where taken; on a track the thumb's middle
+    /// goes there. True if it was on a bar.
+    fn bar_press(&mut self, x: f32, y: f32) -> bool {
+        let r = self.area.get();
+        let Some(d) = self.pdf_mut() else { return false };
+        let (ax, ay) = (r.x + x, r.y + y);
+        let Some(which) = d.bar_at(r, ax, ay) else { return false };
+        let Some(t) = d.bar(r, which) else { return false };
+        let (at, start, len) = if which == pdf::Bar::Down { (ay, t.y, t.h) } else { (ax, t.x, t.w) };
+        let grab = if at >= start && at <= start + len { at - start } else { len / 2.0 };
+        d.bar_to(r, which, at - grab);
+        self.bar_drag = Some((which, grab));
+        self.follow_thumb();
+        true
     }
 
     /// Before a jump (a link, the outline, find, the page field): the page
@@ -682,6 +711,14 @@ impl Viewer {
                     window.redraw();
                     return true;
                 }
+                if let Some(c) = match text.as_deref() {
+                    Some("t") => Some(cmd::TOOL_TEXT),
+                    Some("h") => Some(cmd::TOOL_HAND),
+                    _ => None,
+                } {
+                    self.run(c, window);
+                    return true;
+                }
                 if text.as_deref() == Some("n") {
                     self.pdf_run(cmd::NIGHT);
                     window.redraw();
@@ -820,6 +857,8 @@ impl Viewer {
                 }
             }
             cmd::OPEN_WITH => self.open_with(),
+            cmd::TOOL_TEXT => self.hand = false,
+            cmd::TOOL_HAND => self.hand = true,
             cmd::INFO => {
                 if let Some(t) = self.front_tab()
                     && let Content::Pdf(d) = &t.content
@@ -849,6 +888,7 @@ impl Viewer {
             Some("window") => None,
             _ => Some(Color::rgb(0x2a, 0x2a, 0x2c)),
         };
+        let held = self.bar_drag.map(|b| b.0);
         drawing(move |scene, _, r, theme| {
             if area.get() != r {
                 area.set(r);
@@ -856,9 +896,10 @@ impl Viewer {
                     w.wake();
                 }
             }
-            layout.draw(scene, r, scale.max(0.25), ground.unwrap_or(theme.page), theme.accent);
+            layout.draw(scene, r, scale.max(0.25), ground.unwrap_or(theme.page), theme.accent, held);
         })
         .on_touch(|t| Some(Msg::Touch(t)))
+        .cursor(if self.hand { vergence_ui::Cursor::Grab } else { vergence_ui::Cursor::Text })
         .name("Pages")
         .value(self.where_now(d))
         .width(Length::FILL)
@@ -971,6 +1012,7 @@ impl Viewer {
             let layout = d.0.clone();
             let (scale, area, tarea) = (self.scale, self.area.clone(), self.thumb_area.clone());
             let waker = self.waker.clone();
+            let held = self.thumb_bar_drag.is_some();
             drawing(move |scene, _, r, theme| {
                 if tarea.get() != r {
                     tarea.set(r);
@@ -979,7 +1021,7 @@ impl Viewer {
                     }
                 }
                 let current = layout.current(area.get());
-                layout.draw_thumbs(scene, r, scale, current, theme.page, theme.accent);
+                layout.draw_thumbs(scene, r, scale, current, theme.page, theme.accent, theme.text, held);
             })
             .on_touch(|t| Some(Msg::ThumbTouch(t)))
             .name("Page thumbnails")
@@ -1043,6 +1085,7 @@ impl Viewer {
         }
         let items = vec![
             toggle(Icon::Pane, "Sidebar", self.sidebar, Msg::Run(cmd::SIDEBAR)),
+            group(vec![toggle(Icon::TextSelect, "Text tool", !self.hand, Msg::Run(cmd::TOOL_TEXT)), toggle(Icon::Hand, "Hand tool", self.hand, Msg::Run(cmd::TOOL_HAND))]),
             group(vec![tool(Icon::Back, "Back", (!t.back.is_empty()).then_some(Msg::Run(cmd::BACK))), tool(Icon::Forward, "Forward", (!t.forward.is_empty()).then_some(Msg::Run(cmd::FORWARD)))]),
             group(vec![
                 tool(Icon::Previous, "Previous page", (c > 0).then_some(Msg::Run(cmd::PREVIOUS))),
@@ -1231,16 +1274,32 @@ impl Program for Viewer {
 
     fn update(&mut self, m: Msg, window: &mut Window) {
         match m {
+            Msg::Touch(Touch::Press { x, y }) if self.bar_press(x, y) => {}
+            Msg::Touch(Touch::Move { x, y, pressed: true }) if self.bar_drag.is_some() => {
+                let r = self.area.get();
+                if let (Some((which, grab)), Some(d)) = (self.bar_drag, self.pdf_mut()) {
+                    let at = if which == pdf::Bar::Down { r.y + y } else { r.x + x };
+                    d.bar_to(r, which, at - grab);
+                }
+                self.follow_thumb();
+                self.place_soon(window);
+            }
+            Msg::Touch(Touch::Release { .. } | Touch::Leave) if self.bar_drag.is_some() => self.bar_drag = None,
             Msg::Touch(Touch::Press { x, y }) => {
-                // A press on text starts a selection; anywhere else a drag scrolls.
+                // The Text tool selects; the Hand moves the pages.
                 self.drag = Some((x, y));
                 self.press_at = Some(((x, y), false));
                 let r = self.area.get();
+                // Each tool does one thing (Dave: "as is the pointer sort of
+                // floats between both functions"): the Text tool selects,
+                // from the nearest character on the page pressed, and never
+                // moves the pages; the Hand only moves them.
+                let hand = self.hand;
                 let spot = self.front_tab().and_then(|t| match &t.content {
-                    Content::Pdf(d) => d.text_at(r, r.x + x, r.y + y),
+                    Content::Pdf(d) if !hand => d.text_at(r, r.x + x, r.y + y).or_else(|| d.spot_near(r, r.x + x, r.y + y)),
                     _ => None,
                 });
-                self.selecting = spot.is_some();
+                self.selecting = !hand;
                 if let Some(d) = self.pdf_mut() {
                     d.selection = spot.map(|s| pdf::Selection { anchor: s, head: s });
                 }
@@ -1258,11 +1317,14 @@ impl Program for Viewer {
                     moved_far(&mut self.press_at);
                     if let Some(d) = self.pdf_mut()
                         && let Some(spot) = d.spot_near(r, r.x + x, r.y + y)
-                        && let Some(sel) = &mut d.selection
                     {
-                        sel.head = spot;
+                        // Begun beside the pages: it starts where the drag first reaches text.
+                        match &mut d.selection {
+                            Some(sel) => sel.head = spot,
+                            None => d.selection = Some(pdf::Selection { anchor: spot, head: spot }),
+                        }
                     }
-                } else if pressed && let Some((sx, sy)) = self.drag {
+                } else if pressed && self.hand && let Some((sx, sy)) = self.drag {
                     if let Some(d) = self.pdf_mut() {
                         d.scroll(sy - y, x - sx, r);
                     }
@@ -1309,6 +1371,29 @@ impl Program for Viewer {
                 }
             }
             Msg::Unlock => self.unlock(),
+            Msg::ThumbTouch(Touch::Press { x, y }) if x >= self.thumb_area.get().w - pdf::BAR_HIT && self.front_tab().is_some_and(|t| matches!(&t.content, Content::Pdf(d) if d.thumbs_bar(self.thumb_area.get()).is_some())) => {
+                let tr = self.thumb_area.get();
+                let thumb = match &self.front_tab().map(|t| &t.content) {
+                    Some(Content::Pdf(d)) => d.thumbs_bar(tr),
+                    _ => None,
+                };
+                if let Some(t) = thumb {
+                    let at = tr.y + y;
+                    // On the thumb: held where taken; on the track: the thumb's middle there.
+                    let grab = if at >= t.y && at <= t.y + t.h { at - t.y } else { t.h / 2.0 };
+                    self.thumb_bar_drag = Some(grab);
+                    if let Some(d) = self.pdf_mut() {
+                        d.thumbs_bar_to(tr, at - grab);
+                    }
+                }
+            }
+            Msg::ThumbTouch(Touch::Move { y, pressed: true, .. }) if self.thumb_bar_drag.is_some() => {
+                let tr = self.thumb_area.get();
+                if let (Some(grab), Some(d)) = (self.thumb_bar_drag, self.pdf_mut()) {
+                    d.thumbs_bar_to(tr, tr.y + y - grab);
+                }
+            }
+            Msg::ThumbTouch(Touch::Release { .. } | Touch::Leave) if self.thumb_bar_drag.is_some() => self.thumb_bar_drag = None,
             Msg::ThumbTouch(Touch::Press { y, .. }) => {
                 self.mark();
                 let (r, tr) = (self.area.get(), self.thumb_area.get());
@@ -1604,6 +1689,8 @@ impl Program for Viewer {
                 C::own(cmd::TURN_LEFT, "View", "Turn left", "Ctrl+L"),
                 C::own(cmd::TURN_RIGHT, "View", "Turn right", "Ctrl+R").featured(),
                 C::own(cmd::NIGHT, "View", "Night look", "N").checked(d.night),
+                C::own(cmd::TOOL_TEXT, "Tools", "Text", "T").checked(!self.hand),
+                C::own(cmd::TOOL_HAND, "Tools", "Hand", "H").checked(self.hand),
                 C::own(cmd::INFO, "File", "Info", "Ctrl+I"),
             ]);
         }

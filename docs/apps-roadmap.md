@@ -358,6 +358,34 @@ it is today:
 - *Done 2026-11-18: vergence-shell appmenu.rs State caret/anchor and the field's keys (Left/Right in the text, Shift to select, Home/End, Delete, Ctrl+Backspace, Ctrl+A, typing over a selection), a click places the caret and a drag selects; Ctrl+C/X/V through the server's own clipboard (native.rs ClipOwner::Server, server_copy, server_paste); Escape clears first.* **The app menu's (and launcher's) search field a real field** (Dave: "I'd like it to be real not just a picture with input").
 - **Edit and FileView** are the apps' names (Dave, 2026-11-18; Text Editor and File Viewer before).
 
+## From Dave, 2026-11-20 (Vergence-wishlist-2 on techbench)
+
+- *Done 2026-11-20 (Reader milestone 1, docs/reader-milestone-1.md).*
+  **PDFs in a window of their own**: Reader, split from Close-Up.
+- *Done 2026-11-20 (vergence-sound pulse.rs).* **Sound on Linux**: with
+  PipeWire or PulseAudio running (Fedora), Vergence's volume keys, Sound
+  tile and page did nothing; now through our own PulseAudio-protocol client.
+- **Hardware: CPU-Z / GPU-Z style details**, and per-core graphs beside one
+  combined CPU graph, as Windows' Task Manager.
+- **Super+Tab with the windows themselves**: the overview draws pictures
+  made smaller and kept a while (thumbs.rs); Alt+Tab and the dock already
+  show live windows. The windows' own pictures, scaled, always current.
+- **Dockworkers as a monitoring and control kit**: tiles anyone can make
+  from a small description (a command or an address, thresholds, actions),
+  growing from vtile and the UPS tile.
+- **Screenshots: where they go.** Claude's take: Pictures/Screenshots by
+  default, named by date and time, a setting to choose another folder (the
+  Desktop among them). Waits for Dave's call, with the screenshots
+  themselves (wishlist of 15 November: Super+Shift+3/4/5).
+- **A standard platform and release roadmap**: a short document for Dave's
+  decisions (the platforms, versions, packages, going public), into the
+  whitepaper's §9.
+- **Audio apps on FreeBSD** (AlbumWall, Deadwax, Marginal: Avalonia/.NET):
+  Avalonia on FreeBSD is parked since 11 November; restart that port, or
+  rewrite them on vergence-ui. To discuss.
+- *Decided 2026-11-20:* sudo or doas: each platform's standard; techbench
+  has doas (Dave's choice, sudo removed).
+
 ## Questions for Dave (when each app's turn comes)
 
 1. **Spellchecking**: dictionaries are data from other projects (Hunspell's

@@ -1,6 +1,9 @@
 # Reader milestone 1: documents get their own app
 
-Status: **accepted 2026-11-20** (Dave: the name "Reader it is"; reading
+Status: **closed 2026-11-20** (Dave: "close it when they pass": tests,
+the display suite's 12 scenarios and tools/agent-check.sh on Hubble,
+kepler, techbench and apollo, readercheck over the corpus on Hubble and
+kepler, and again for the scroll bars and tools). Was **accepted 2026-11-20** (Dave: the name "Reader it is"; reading
 only, editing in a second milestone; tabs: "tabs are nice, IF all the
 documents are of a similar layout... I suppose we could just open that
 tab in another window then? Ok, tab view"). Proposed the same day (Dave,
@@ -166,3 +169,36 @@ signing (question 2). Printing (no printing system yet). Video (Close-Up's).
   Enter do. Tried headless on Hubble with vagent: the agent read the page
   view, set the page field to 100, pressed it, chose Two pages and read
   "Pages 100 and 101 of 253, two pages".
+- **Step 7, the checks** (2026-11-20). vergence-pdf's example
+  `readercheck FOLDER...`: every PDF opened through the confined helper as
+  Reader opens it, then asked what Reader asks (what it says about
+  itself, its outline, the first page's text and links, a thumbnail):
+  Dave's corpus on Hubble, 1,544 files in 82 s, 1,543 opened and read, 1
+  locked, no problems, no helper crash or hang (1,116 with a title, 306
+  with an outline). Display-suite scenario 12-reader.sh, on the
+  repository's own PDF (the whitepaper): where reading is, two pages after
+  the cover, the night look (the screen differs by 620,000 pixels, and
+  comes back the same without it), the sidebar's thumbnails, a second
+  file (a one-page PDF the scenario writes) in a tab of the same window, a
+  file replaced on disk read again, Close-Up handing a PDF over; the run
+  builds Reader, Close-Up and the helper. tools/agent-check.sh: an MCP
+  agent sets Reader's page field to 3, presses it, reads "Page 3 of 44"
+  back from the page view.
+- **Before closing: scroll bars and tools** (Dave, 2026-11-20: "did you
+  notice that Reader has no scrollbars?"; "We should also have a hand
+  (with a button on the toolbar) for moving the pdf around, and a
+  seperate text tool (with button) for text selection", "because as is
+  the pointer sort of floats between both functions"). The page view and
+  the thumbnail strip draw scroll bars as the toolkit's are (a 6-point
+  thumb, 2 in from the edge, at least 24 long): down the page view's right
+  edge, across its bottom when zoomed wider than the window, in a gray
+  seen on white paper and on the dark ground; a thumb is dragged from
+  where it was taken, a press on the track puts its middle there (one
+  page at a time, the page the bar points at becomes the page). Two tools
+  in the toolbar (Tools menu, T and H): **Text** (the default; the I-beam)
+  only selects, from the nearest character on the page pressed (a drag
+  begun beside the pages starts where it reaches text), never moving the
+  pages; **Hand** (the grab hand) only moves them. Links are followed by a
+  click with either. New toolbar icons: Hand, TextSelect. Tested: bars
+  dragged to either end (pdf.rs test), headless a Text drag leaving the
+  view where it was and a Hand drag moving it.

@@ -53,6 +53,10 @@ pub enum Icon {
     Continuous,
     /// Two pages side by side (a book's spread).
     TwoPages,
+    /// The hand: moving what is shown by dragging it.
+    Hand,
+    /// Selecting text: an I-beam.
+    TextSelect,
 }
 
 /// An icon at `size` points, in the theme's text color (dim when `dim`).
@@ -218,6 +222,28 @@ pub fn icon<M: 'static>(which: Icon, size: f32, dim: bool) -> Element<M> {
             Icon::TwoPages => {
                 scene.stroke(rect(1.5, 3.0, 6.0, 10.0), 1.0 * k, w, ink);
                 scene.stroke(rect(8.5, 3.0, 6.0, 10.0), 1.0 * k, w, ink);
+            }
+            Icon::Hand => {
+                // Four fingers up, the thumb out to the left, the palm below.
+                for (x, top) in [(5.5, 4.0), (7.5, 2.5), (9.5, 3.0), (11.5, 4.5)] {
+                    line!((x, top), (x, 9.0));
+                }
+                line!((5.5, 9.0), (3.0, 7.5));
+                line!((3.0, 7.5), (5.0, 12.0));
+                line!((5.0, 12.0), (7.0, 14.0));
+                line!((7.0, 14.0), (11.0, 14.0));
+                line!((11.0, 14.0), (12.5, 11.5));
+                line!((12.5, 11.5), (11.5, 9.0));
+                line!((11.5, 4.5), (12.5, 11.5));
+            }
+            Icon::TextSelect => {
+                line!((8.0, 3.0), (8.0, 13.0));
+                line!((5.5, 2.5), (7.0, 3.0));
+                line!((7.0, 3.0), (9.0, 3.0));
+                line!((9.0, 3.0), (10.5, 2.5));
+                line!((5.5, 13.5), (7.0, 13.0));
+                line!((7.0, 13.0), (9.0, 13.0));
+                line!((9.0, 13.0), (10.5, 13.5));
             }
         }
     })
