@@ -198,6 +198,33 @@ struct State {
     /// Scenes taken, and refused (with the last reason), for vctl.
     scenes: u64,
     scene_refused: Option<(u64, String)>,
+    /// The server stopped drawing its scenes (step 6), and why: it sends
+    /// pixels from then on (told by `ScenesOff`).
+    scenes_off: Option<String>,
+}
+
+/// A keyed scene read against the pictures a window keeps (`images`, their
+/// bytes in `kept`): keys to forget dropped first, new pictures kept (at
+/// most SCENE_KEPT_BYTES in all), the scene decoded and checked. On a
+/// refusal the pictures kept stay as they were, but for those forgotten.
+pub(crate) fn take_keyed(images: &mut std::collections::HashMap<u64, Arc<vergence_scene::Image>>, kept: &mut usize, bytes: &[u8], forget: &[u64]) -> Result<vergence_scene::Scene, String> {
+    for k in forget {
+        if let Some(im) = images.remove(k) {
+            *kept -= im.rgba.len();
+        }
+    }
+    let d = vergence_scene::Scene::decode_keyed(bytes, &|k| images.get(&k).cloned()).map_err(|e| e.to_string())?;
+    let more: usize = d.new.iter().filter(|(k, _)| !images.contains_key(k)).map(|(_, im)| im.rgba.len()).sum();
+    if *kept + more > SCENE_KEPT_BYTES {
+        return Err(format!("more than {} MB of pictures kept", SCENE_KEPT_BYTES >> 20));
+    }
+    for (k, im) in d.new {
+        if let Some(old) = images.insert(k, im.clone()) {
+            *kept -= old.rgba.len();
+        }
+        *kept += im.rgba.len();
+    }
+    Ok(d.scene)
 }
 
 /// The most picture bytes one window may have kept for its scenes.
@@ -339,32 +366,34 @@ impl NativeWindow {
         }
         let last = st.scene.as_ref().map_or(String::new(), |s| format!(", {} commands, {:.0}x{:.0}", s.commands.len(), s.width, s.height));
         let refused = st.scene_refused.as_ref().map_or(String::new(), |(n, why)| format!(", {n} refused (last: {why})"));
-        Some(format!("scenes {}{last}, {} pictures kept ({} KB){refused}", st.scenes, st.scene_images.len(), st.scene_image_bytes >> 10))
+        let off = st.scenes_off.as_ref().map_or(String::new(), |why| format!(", drawn by the app now ({why})"));
+        Some(format!("scenes {}{last}, {} pictures kept ({} KB){refused}{off}", st.scenes, st.scene_images.len(), st.scene_image_bytes >> 10))
+    }
+
+    /// Its scenes no longer drawn (step 6): what it kept for them let go.
+    pub(crate) fn set_scenes_off(&self, why: &str) {
+        let mut st = self.state.lock().unwrap();
+        st.scenes_off = Some(why.to_string());
+        st.scene = None;
+        st.scene_images.clear();
+        st.scene_image_bytes = 0;
+    }
+
+    pub fn scenes_off(&self) -> bool {
+        self.state.lock().unwrap().scenes_off.is_some()
     }
 
     /// A display list sent (Scene): read, its pictures resolved from those
     /// kept, checked (vergence-scene never returns an invalid scene), kept.
     fn take_scene(&self, fd: &vergence_protocol::window::Fd, len: u32, forget: &[u64]) -> Result<(), String> {
+        if self.scenes_off() {
+            return Err("its scenes are no longer drawn; pixels expected".into());
+        }
         let bytes = read_memfd(fd, len)?;
         let mut st = self.state.lock().unwrap();
-        for k in forget {
-            if let Some(im) = st.scene_images.remove(k) {
-                st.scene_image_bytes -= im.rgba.len();
-            }
-        }
-        let kept = &st.scene_images;
-        let d = vergence_scene::Scene::decode_keyed(&bytes, &|k| kept.get(&k).cloned()).map_err(|e| e.to_string())?;
-        let more: usize = d.new.iter().filter(|(k, _)| !st.scene_images.contains_key(k)).map(|(_, im)| im.rgba.len()).sum();
-        if st.scene_image_bytes + more > SCENE_KEPT_BYTES {
-            return Err(format!("more than {} MB of pictures kept", SCENE_KEPT_BYTES >> 20));
-        }
-        for (k, im) in d.new {
-            if let Some(old) = st.scene_images.insert(k, im.clone()) {
-                st.scene_image_bytes -= old.rgba.len();
-            }
-            st.scene_image_bytes += im.rgba.len();
-        }
-        st.scene = Some(Arc::new(d.scene));
+        let st = &mut *st;
+        let scene = take_keyed(&mut st.scene_images, &mut st.scene_image_bytes, &bytes, forget)?;
+        st.scene = Some(Arc::new(scene));
         st.scenes += 1;
         Ok(())
     }
@@ -542,6 +571,7 @@ impl Server {
                         scene_image_bytes: 0,
                         scenes: 0,
                         scene_refused: None,
+                        scenes_off: None,
                     }),
                     user_data: UserDataMap::new(),
                 });
@@ -809,7 +839,10 @@ impl Server {
                 match taken {
                     Ok(()) => self.native_picture_came(&w, &n, window),
                     Err(why) => {
-                        tracing::warn!("native: client {client} window {window}: scene refused: {why}");
+                        // Switched off: said once already (scenes.rs scenes_off).
+                        if !n.scenes_off() {
+                            tracing::warn!("native: client {client} window {window}: scene refused: {why}");
+                        }
                         let mut st = n.state.lock().unwrap();
                         let count = st.scene_refused.as_ref().map_or(0, |r| r.0) + 1;
                         st.scene_refused = Some((count, why));
@@ -1606,4 +1639,67 @@ fn new_token() -> String {
         b = (t ^ (std::process::id() as u128) << 64).to_le_bytes();
     }
     b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+#[cfg(test)]
+mod scene_fuzz {
+    use super::*;
+    use vergence_scene::{Color, Command, Image, Rect, Scene};
+
+    /// Display lists step 6: damaged scenes through the server's own path
+    /// (take_keyed, then the cost a draw would be) never panic, and the
+    /// pictures a window keeps stay counted right, within their bound.
+    #[test]
+    fn damaged_scenes_through_the_server_path() {
+        let image = |n: u8| Arc::new(Image { width: 8, height: 4, rgba: vec![n; 8 * 4 * 4] });
+        let scene = Scene {
+            width: 320.0,
+            height: 200.0,
+            fonts: Vec::new(),
+            images: vec![image(1), image(2)],
+            commands: vec![
+                Command::Fill { rect: Rect { x: 0.0, y: 0.0, w: 320.0, h: 200.0 }, radius: 4.0, color: Color::rgb(200, 200, 200) },
+                Command::Image { image: 0, rect: Rect { x: 10.0, y: 10.0, w: 80.0, h: 40.0 }, opacity: 1.0 },
+                Command::Image { image: 1, rect: Rect { x: 100.0, y: 10.0, w: 80.0, h: 40.0 }, opacity: 0.5 },
+                Command::Stroke { rect: Rect { x: 5.0, y: 5.0, w: 300.0, h: 180.0 }, radius: 6.0, width: 1.0, color: Color::rgb(0, 0, 0) },
+            ],
+        };
+        let first = scene.encode_keyed(&[7, 9], &|_| false).unwrap();
+        let later = scene.encode_keyed(&[7, 9], &|_| true).unwrap();
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let (mut images, mut kept) = (std::collections::HashMap::new(), 0usize);
+        take_keyed(&mut images, &mut kept, &first, &[]).unwrap();
+        assert_eq!(kept, 2 * 128);
+        let mut accepted = 0;
+        for round in 0..20_000 {
+            let mut bytes = if round % 2 == 0 { first.clone() } else { later.clone() };
+            for _ in 0..1 + next() % 4 {
+                let at = (next() as usize) % bytes.len();
+                match next() % 3 {
+                    0 => bytes[at] = next() as u8,
+                    1 => bytes[at] ^= 1 << (next() % 8),
+                    _ => bytes.truncate(at.max(1)),
+                }
+            }
+            let forget: Vec<u64> = if next() % 8 == 0 { vec![7] } else { Vec::new() };
+            if let Ok(s) = take_keyed(&mut images, &mut kept, &bytes, &forget) {
+                accepted += 1;
+                let _ = vergence_render::cost(&s, 1.5);
+                let _ = vergence_render::pixel_size(&s, 1.5);
+            }
+            assert_eq!(kept, images.values().map(|i| i.rgba.len()).sum::<usize>(), "round {round}");
+            assert!(kept <= SCENE_KEPT_BYTES);
+            // Now and then everything sent again, as the toolkit would after forgetting.
+            if images.len() < 2 {
+                take_keyed(&mut images, &mut kept, &first, &[]).unwrap();
+            }
+        }
+        assert!(accepted > 0, "some damaged scenes still decode (colors, numbers)");
+    }
 }

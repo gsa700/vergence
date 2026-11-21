@@ -625,6 +625,10 @@ pub enum WinEvent {
     /// Do `action` to the widget whose meaning node is `node` (Contract 3,
     /// bus v24): answered by [`WinRequest::Acted`] with the same serial.
     Act { window: u32, serial: u32, node: u64, action: Action },
+    /// The server will not draw this window's scenes any more (bus v31,
+    /// display lists step 6: one too costly, or drawing it too slow): send
+    /// pixels for it from now on. `why` is for the log.
+    ScenesOff { window: u32, why: String },
 }
 
 pub(crate) mod op {
@@ -693,6 +697,7 @@ pub(crate) mod op {
     pub const DRAG_DROP: u16 = 132;
     pub const DRAG_ENDED: u16 = 133;
     pub const ACT: u16 = 134;
+    pub const SCENES_OFF: u16 = 135;
 
     /// Whether an opcode is a window message's (either way).
     pub fn is_window(opcode: u16) -> bool {
@@ -1467,6 +1472,11 @@ impl WinEvent {
                 put_action(&mut e, action);
                 e
             }
+            WinEvent::ScenesOff { window, why } => {
+                let mut e = Encoder::frame(op::SCENES_OFF);
+                e.u32(*window).str(why);
+                e
+            }
             WinEvent::Tint { window, rgb } => {
                 let mut e = Encoder::frame(op::TINT);
                 e.u32(*window);
@@ -1575,6 +1585,7 @@ impl WinEvent {
                 let action = get_action(&mut d)?;
                 WinEvent::Act { window, serial, node, action }
             }
+            op::SCENES_OFF => WinEvent::ScenesOff { window: d.u32()?, why: d.str()? },
             other => return Err(WireError::UnknownOpcode(other)),
         })
     }
@@ -1829,6 +1840,7 @@ mod tests {
             WinEvent::Act { window: 1, serial: 9, node: 3, action: Action::Set("Hello, wörld".into()) },
             WinEvent::Act { window: 1, serial: 10, node: 4, action: Action::Choose("JetBrains Mono".into()) },
             WinEvent::Act { window: 1, serial: 11, node: 5, action: Action::Reveal },
+            WinEvent::ScenesOff { window: 1, why: "too costly to draw".into() },
         ];
         for m in all {
             let (bytes, fds) = m.encode().unwrap();

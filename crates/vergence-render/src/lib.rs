@@ -79,6 +79,41 @@ impl From<SceneError> for RenderError {
 /// tests, 2026-11-18). The server's points_of rounds the same way.
 pub const PIXEL_SLACK: f64 = 1e-3;
 
+/// About how much work drawing a scene at `scale` is, in pixels touched:
+/// each command's area on the window (clipped to it), glyphs by their size,
+/// a terminal's cells by theirs, pictures by their own pixels too, and a
+/// little for each command. Not exact; for a server to refuse a scene too
+/// costly to draw before drawing it (display lists step 6). Never panics,
+/// whatever the scene; saturates.
+pub fn cost(scene: &Scene, scale: f32) -> u64 {
+    let s = if scale.is_finite() && scale > 0.0 { scale.min(MAX_SCALE) as f64 } else { 1.0 };
+    let (sw, sh) = (scene.width.max(0.0) as f64, scene.height.max(0.0) as f64);
+    let whole = sw * sh * s * s;
+    let clip = |r: &vergence_scene::Rect| -> f64 {
+        let (x0, y0) = ((r.x as f64).max(0.0), (r.y as f64).max(0.0));
+        let (x1, y1) = (((r.x + r.w) as f64).min(sw), ((r.y + r.h) as f64).min(sh));
+        let a = (x1 - x0).max(0.0) * (y1 - y0).max(0.0) * s * s;
+        if a.is_finite() { a } else { whole }
+    };
+    let mut total = 0.0f64;
+    for c in &scene.commands {
+        use vergence_scene::Command as C;
+        let work = match c {
+            C::Fill { rect, .. } => clip(rect),
+            C::Stroke { rect, width, .. } => clip(rect).min(2.0 * ((rect.w + rect.h).abs() as f64) * (*width as f64).abs().max(1.0) * s * s),
+            C::Line { from, to, width, .. } => (((to.x - from.x) as f64).hypot((to.y - from.y) as f64) * (*width as f64).abs().max(1.0) * s * s).min(whole),
+            C::Glyphs { size, glyphs, .. } => glyphs.len() as f64 * ((*size as f64).abs() * s).powi(2).min(whole),
+            C::Image { image, rect, .. } => clip(rect) + scene.images.get(*image as usize).map_or(0.0, |i| i.width as f64 * i.height as f64 / 4.0),
+            C::Cells { cell_w, cell_h, cells, .. } => cells.len() as f64 * ((*cell_w as f64).abs() * (*cell_h as f64).abs() * s * s).min(whole),
+            _ => 0.0,
+        };
+        // Each glyph and cell is capped at the window's area above; a whole
+        // run of them is not (60,000 glyphs are 60,000 draws).
+        total += 32.0 + if work.is_finite() { work } else { whole };
+    }
+    if total.is_finite() { total.min(u64::MAX as f64) as u64 } else { u64::MAX }
+}
+
 /// The size in pixels of a scene drawn at `scale`: every started pixel counts.
 pub fn pixel_size(scene: &Scene, scale: f32) -> Result<(u32, u32), RenderError> {
     if !(scale.is_finite() && scale > 0.0 && scale <= MAX_SCALE) {
@@ -150,4 +185,43 @@ pub fn text(scene: &mut Scene, fonts: &mut Fonts, face: FaceId, size: f32, color
         scene.glyphs(font, size, color, origin, glyphs);
     }
     width
+}
+
+#[cfg(test)]
+mod cost_tests {
+    use super::*;
+    use vergence_scene::{Color, Command, Glyph, Point, Rect, Scene};
+
+    fn scene(commands: Vec<Command>) -> Scene {
+        Scene { width: 400.0, height: 300.0, fonts: Vec::new(), images: Vec::new(), commands }
+    }
+
+    #[test]
+    fn a_window_costs_about_its_pixels() {
+        let fill = Command::Fill { rect: Rect { x: 0.0, y: 0.0, w: 400.0, h: 300.0 }, radius: 0.0, color: Color::rgb(1, 2, 3) };
+        assert_eq!(cost(&scene(vec![fill.clone()]), 1.0), 120_000 + 32);
+        assert_eq!(cost(&scene(vec![fill.clone()]), 2.0), 480_000 + 32);
+        // Off the window costs nothing but the command.
+        let off = Command::Fill { rect: Rect { x: 1000.0, y: 1000.0, w: 1e6, h: 1e6 }, radius: 0.0, color: Color::rgb(1, 2, 3) };
+        assert_eq!(cost(&scene(vec![off]), 1.0), 32);
+        // A huge rectangle costs the window, no more.
+        let huge = Command::Fill { rect: Rect { x: -1e6, y: -1e6, w: 2e6, h: 2e6 }, radius: 0.0, color: Color::rgb(1, 2, 3) };
+        assert_eq!(cost(&scene(vec![huge]), 1.0), 120_000 + 32);
+    }
+
+    #[test]
+    fn a_flood_of_large_glyphs_is_costly() {
+        let glyphs: Vec<Glyph> = (0..60_000).map(|i| Glyph { id: 36, x: (i % 400) as f32, y: 100.0 }).collect();
+        let run = Command::Glyphs { font: 0, size: 4000.0, color: Color::rgb(0, 0, 0), origin: Point { x: 0.0, y: 0.0 }, glyphs };
+        let s = scene(vec![run; 20]);
+        assert!(cost(&s, 2.0) > 400_000_000, "{}", cost(&s, 2.0));
+    }
+
+    #[test]
+    fn never_panics_on_odd_numbers() {
+        for scale in [0.0, -1.0, f32::NAN, f32::INFINITY, 1e30, 1e-30, 1.0] {
+            let s = Scene { width: f32::MAX, height: f32::MAX, fonts: Vec::new(), images: Vec::new(), commands: vec![Command::Line { from: Point { x: f32::MIN, y: 0.0 }, to: Point { x: f32::MAX, y: 0.0 }, width: f32::MAX, color: Color::rgb(0, 0, 0) }] };
+            let _ = cost(&s, scale);
+        }
+    }
 }

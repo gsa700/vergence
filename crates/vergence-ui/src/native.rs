@@ -83,6 +83,21 @@ fn scenes_wanted() -> bool {
     *WANTED.get_or_init(|| std::env::var_os("VERGENCE_UI_PIXELS").is_none_or(|v| v != "1"))
 }
 
+/// VERGENCE_UI_TIMING=<file>: each frame's time to draw (or build and
+/// send, when the server draws it) appended there, for comparing the two
+/// roads (display lists step 7): "window drawn-by ms".
+fn timing(window: u32, by: &str, ms: f64) {
+    static FILE: std::sync::OnceLock<Option<std::sync::Mutex<std::fs::File>>> = std::sync::OnceLock::new();
+    let f = FILE.get_or_init(|| {
+        let path = std::env::var_os("VERGENCE_UI_TIMING")?;
+        std::fs::OpenOptions::new().create(true).append(true).open(path).ok().map(std::sync::Mutex::new)
+    });
+    if let Some(f) = f {
+        use std::io::Write;
+        let _ = writeln!(f.lock().unwrap(), "{window} {by} {ms:.3}");
+    }
+}
+
 struct Win<'a> {
     id: u32,
     app: Run<'a>,
@@ -99,6 +114,9 @@ struct Win<'a> {
     scene_sent: std::collections::HashSet<u64>,
     /// The slot attached last: the one the server shows until the next.
     showing: Option<usize>,
+    /// The server stopped drawing this window's scenes (bus v31 ScenesOff):
+    /// it sends its own pixels from then on.
+    pixels: bool,
     drawn_by: &'static str,
     /// Shared memory for frames drawn in software: copied by the server at
     /// attach, so one serves every frame (its size, and whether it has alpha).
@@ -299,6 +317,7 @@ impl<'a> Win<'a> {
             scene_keys: std::collections::HashMap::new(),
             scene_sent: std::collections::HashSet::new(),
             showing: None,
+            pixels: false,
             drawn_by: "",
             shm: None,
             started: Instant::now(),
@@ -770,6 +789,18 @@ impl<'a> Native<'a> {
             WinEvent::DragLeave { window } => self.with_window(window, |app, _| app.drag_left())?,
             WinEvent::DragDrop { window, x, y, action, items } => self.with_window(window, |app, w| app.dropped(x as f32, y as f32, action, &items, w))?,
             WinEvent::DragEnded { window, action } => self.with_window(window, |app, w| app.drag_ended(action, w))?,
+            // The server will not draw this window's scenes (one too costly,
+            // or too slow): its own pixels from now on; the refused frame
+            // will have no Frame, so another is drawn at once.
+            WinEvent::ScenesOff { window, why } => {
+                if let Some(i) = self.index(window) {
+                    eprintln!("vergence-ui: window {window}: the server draws its scenes no more ({why}); drawing its pixels");
+                    let w = &mut self.windows[i];
+                    w.pixels = true;
+                    w.frame_pending = false;
+                    w.dirty = true;
+                }
+            }
             WinEvent::Tint { window, rgb } => {
                 if let Some(i) = self.index(window) {
                     let w = &mut self.windows[i];
@@ -965,7 +996,7 @@ impl<'a> Native<'a> {
         let (pw, ph) = pixel_size(&scene, frame.scale).map_err(other)?;
         // The server draws the scene (bus v30; the server and the apps always
         // speak the same version), unless pixels are asked for.
-        if scenes_wanted() {
+        if scenes_wanted() && !self.windows[i].pixels {
             self.send_scene(i, scene, background)?;
             self.windows[i].drawn_by = "server";
         } else if self.draw_on_gpu(i, &scene, frame.scale, background, pw, ph)? {
@@ -1003,7 +1034,9 @@ impl<'a> Native<'a> {
             self.send(WinRequest::Cursor { window, shape: c.wire() as u16 })?;
         }
         let w = &mut self.windows[i];
-        if !w.app.get().shown(&frame, t.elapsed().as_secs_f64() * 1e3) {
+        let ms = t.elapsed().as_secs_f64() * 1e3;
+        timing(w.id, w.drawn_by, ms);
+        if !w.app.get().shown(&frame, ms) {
             w.closing = true;
         }
         // The bar, when the server draws it and it has changed (bar milestone 1).

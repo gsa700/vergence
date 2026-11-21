@@ -182,3 +182,29 @@ menus) as scenes (they are drawn in the server already, at each scale).
   in all) a window is enlarged too (tiles later). Tried headless on
   Hubble: Calculator magnified 3.1×, drawn from its scene (crisp digits
   and borders) against the same app on pixels (soft).
+- **Step 6, safety and cost** (2026-11-20, bus v31). Before a scene is
+  drawn its cost is estimated (vergence-render `cost`: pixels touched, each
+  command's area clipped to the window, glyphs and cells each by their
+  size, pictures by their pixels too); over 400 M (about fifty 4K screens
+  filled; real windows are a few) it is not drawn. A draw over 100 ms is a
+  strike; three, or one over 500 ms, the same. Either way the window's
+  scenes are switched off: the app is told (`WinEvent::ScenesOff`) and the
+  toolkit draws that window's pixels from then on, so a hostile or broken
+  scene costs the server one bounded draw at most; what the server kept
+  for its scenes is let go. Copies for other scales: the same budget, and a
+  slow one stops them for the window (enlarged as before). Memory: GPU
+  buffers are now given back to the renderer when a window resizes or goes
+  (steps 2-5 dropped them without that, leaking GPU memory on every
+  resize); copies for other scales at most two per window, let go after
+  10 s unused, 1 GB in all (step 5 kept two buffers for every zoom level
+  settled at, for the window's life). Tests: cost (a window costs its
+  pixels, a flood of large glyphs is costly, odd numbers never panic);
+  20,000 damaged keyed scenes through the server's own intake
+  (`take_keyed`) and cost, the pictures kept counted right and bounded.
+  `VERGENCE_SCENES_BUDGET` lowers the budget for tests. Tried headless on
+  Hubble: a budget of 1,000 switches Calculator to its own pixels (shown,
+  answering keys); the real budget at 4K 2x with five apps (a maximized
+  terminal full of text among them), none switched; magnified at five
+  levels, two copies kept (94 MB), none 11 s after the zoom went off. Not
+  done: drawing at a lower density instead of switching to pixels (pixels
+  are simpler and the app has the scene anyway).

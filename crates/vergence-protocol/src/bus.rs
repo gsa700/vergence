@@ -61,11 +61,12 @@
 //! app and the minutes left (`agent::AgentWindow::allowed`, `AgentChange::Time`).
 //! Version 29 (the security review): `Grant::program`, `RevokeGrants::program`.
 //! Version 30 (display lists milestone 1): `window::WinRequest::Scene`, a window as a display list.
+//! Version 31 (display lists step 6): `window::WinEvent::ScenesOff`, the server stops drawing a window's scenes.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 30;
+pub const VERSION: u32 = 31;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
