@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Reader
+GenericName=PDF Reader
+Comment=PDF documents: pages, the outline, links, find and selection
+Exec=vergence-reader %F
+Icon=vergence-reader
+Terminal=false
+Categories=Office;Viewer;
+MimeType=application/pdf;
+Keywords=pdf;document;documents;reader;viewer;pages;
+StartupWMClass=vergence-reader

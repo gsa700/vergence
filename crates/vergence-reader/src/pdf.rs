@@ -1,4 +1,4 @@
-//! PDFs in Close-Up (PDF milestone 1, step 6): the document's pages in a
+//! PDFs in Reader (moved from Close-Up, Reader milestone 1; PDF milestone 1, step 6): the document's pages in a
 //! column, scrolled continuously, drawn by vergence-pdf's confined helper
 //! (never in this process) on a worker thread that owns it.
 //!
@@ -792,7 +792,8 @@ fn round3(s: f32) -> f32 {
     (s * k).round() / k
 }
 
-/// Each document's page and zoom: ~/.local/state/vergence/closeup-pdf-places,
+/// Each document's page and zoom: ~/.local/state/vergence/reader-places
+/// (Close-Up's closeup-pdf-places, taken over once when Reader first looks),
 /// owner-only, a line each (page, mode, path), newest first, at most 500.
 pub mod places {
     use super::Mode;
@@ -803,7 +804,12 @@ pub mod places {
 
     fn file() -> Option<PathBuf> {
         let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
-        Some(base.join("vergence/closeup-pdf-places"))
+        let new = base.join("vergence/reader-places");
+        let old = base.join("vergence/closeup-pdf-places");
+        if !new.exists() && old.exists() {
+            let _ = std::fs::rename(&old, &new);
+        }
+        Some(new)
     }
 
     fn mode_text(m: Mode) -> String {

@@ -30,7 +30,7 @@ pub fn tab_of(e: &Entry) -> Option<usize> {
 /// The order of Vergence's own applications in the launcher's top row
 /// (Dave, 2026-11-15: "a section at the top that holds the native apps");
 /// any other `vergence-*` application comes after these, by name.
-const OWN_ORDER: [&str; 8] = ["vergence-files", "vergence-edit", "vergence-term", "vergence-settings", "vergence-closeup", "vergence-calc", "vergence-hw", "vergence-quit"];
+const OWN_ORDER: [&str; 9] = ["vergence-files", "vergence-edit", "vergence-term", "vergence-settings", "vergence-closeup", "vergence-reader", "vergence-calc", "vergence-hw", "vergence-quit"];
 
 /// Vergence's own applications to show in the top row, as places in
 /// `entries`: those whose desktop entry is ours (`vergence-*`), not hidden.

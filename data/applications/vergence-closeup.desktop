@@ -1,12 +1,12 @@
 [Desktop Entry]
 Type=Application
 Name=Close-Up
-GenericName=Picture and PDF Viewer
-Comment=A file's contents in full: pictures, PDF documents and text
+GenericName=Picture Viewer
+Comment=A file's contents in full: pictures and text
 Exec=vergence-closeup %F
 Icon=vergence-closeup
 Terminal=false
 Categories=Graphics;Viewer;
-MimeType=image/png;image/jpeg;image/gif;image/webp;image/bmp;image/svg+xml;application/pdf;
-Keywords=closeup;close up;close-up;viewer;pictures;photos;images;preview;pdf;documents;
+MimeType=image/png;image/jpeg;image/gif;image/webp;image/bmp;image/svg+xml;
+Keywords=closeup;close up;close-up;viewer;pictures;photos;images;preview;
 StartupWMClass=vergence-closeup

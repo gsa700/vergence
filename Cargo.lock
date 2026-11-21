@@ -2177,7 +2177,6 @@ name = "vergence-closeup"
 version = "0.1.0"
 dependencies = [
  "vergence-decode",
- "vergence-pdf",
  "vergence-scene",
  "vergence-types",
  "vergence-ui",
@@ -2310,6 +2309,17 @@ dependencies = [
 [[package]]
 name = "vergence-raster"
 version = "0.1.0"
+
+[[package]]
+name = "vergence-reader"
+version = "0.1.0"
+dependencies = [
+ "vergence-pdf",
+ "vergence-scene",
+ "vergence-types",
+ "vergence-ui",
+ "vergence-widgets",
+]
 
 [[package]]
 name = "vergence-render"

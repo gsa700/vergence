@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Reader: an open book, two pages of lines, a red bookmark ribbon. Drawn by the project. -->
+  <path d="M4 14 Q4 11 7 11 L26 11 Q31 11 32 15 Q33 11 38 11 L57 11 Q60 11 60 14 L60 50 Q60 53 57 53 L38 53 Q34 53 32 56 Q30 53 26 53 L7 53 Q4 53 4 50 Z" fill="#2f6fd6"/>
+  <path d="M8 15 L26 15 Q30 15 30 19 L30 50 Q29 48 26 48 L8 48 Z" fill="#fbfbfc"/>
+  <path d="M56 15 L38 15 Q34 15 34 19 L34 50 Q35 48 38 48 L56 48 Z" fill="#fbfbfc"/>
+  <g fill="#4a5168">
+    <rect x="12" y="21" width="14" height="2.5" rx="1.25"/><rect x="12" y="27" width="14" height="2.5" rx="1.25"/><rect x="12" y="33" width="11" height="2.5" rx="1.25"/><rect x="12" y="39" width="14" height="2.5" rx="1.25"/>
+    <rect x="38" y="21" width="14" height="2.5" rx="1.25"/><rect x="38" y="27" width="10" height="2.5" rx="1.25"/><rect x="38" y="33" width="14" height="2.5" rx="1.25"/><rect x="38" y="39" width="12" height="2.5" rx="1.25"/>
+  </g>
+  <path d="M46 11 L52 11 L52 30 L49 27 L46 30 Z" fill="#e0453a"/>
+</svg>
