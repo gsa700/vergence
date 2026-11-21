@@ -138,3 +138,18 @@ signing (question 2). Printing (no printing system yet). Video (Close-Up's).
   the PDF version, encryption. vergence-pdf `Document::metadata` and
   `pdf_date`, the helper's `M` request. Select All on a page and copying
   were already in. Tried headless on Hubble.
+- **Step 5, opening** (2026-11-20). Each document in a tab of the
+  server's (as Edit's), each tab keeping its own view (fit, continuous /
+  one page / two pages, zoom, turn, night) and its own Back and Forward;
+  switching tabs lays its document out again in the same window, and the
+  search goes on in it. + opens a document; a tab dragged out of the row
+  (or "Move to a new window") is a window of its own, dropped on another
+  Reader window it joins it (its worker then wakes that window). Files
+  from the command line, a second start (handed over), Open… or a drop
+  all open in tabs; one already open comes to the front. Every 2 s the
+  open files are looked at (modified time and length, as Edit does): one
+  changed on disk is read again, its zoom, view, turn, night look and
+  page put back. A locked PDF still asks for its password in its tab.
+  Tried headless on Hubble: two tabs, two views kept through switching,
+  a file replaced on disk read again (20 pages to 4, its own title in the
+  tab), a second start handed over.

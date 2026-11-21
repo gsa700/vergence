@@ -251,6 +251,11 @@ impl Shared {
         }
     }
 
+    /// The window to wake when something is drawn (a tab moved to another).
+    pub fn set_waker(&self, waker: Waker) {
+        *self.waker.lock().unwrap_or_else(|e| e.into_inner()) = Some(waker);
+    }
+
     pub fn failure(&self, page: usize) -> Option<String> {
         self.failed.lock().unwrap_or_else(|e| e.into_inner()).get(&page).cloned()
     }

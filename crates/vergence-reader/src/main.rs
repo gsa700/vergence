@@ -13,9 +13,11 @@
 //!   document's page and zoom remembered; text selected by dragging on it,
 //!   copied (Ctrl+C), the page's text selected (Ctrl+A), and Find (Ctrl+F)
 //!   across the whole document, every match marked.
-//! - **Windows**: one process (hand.rs). A file dropped on a window takes
-//!   its place; files handed over or chosen in Open… open in the window if
-//!   it shows nothing, else each in a window of its own (tabs: step 5).
+//! - **Windows and tabs**: one process (hand.rs); each document in a tab
+//!   (the server's), each tab with its own view; dragged out of the row a
+//!   tab is a window of its own, dropped on another window it joins it.
+//!   Files handed over, chosen in Open… or dropped open in tabs. Files
+//!   changed on disk are read again, the view kept.
 //! - **Its settings** (Ctrl+,): the ground around the pages, the style and
 //!   the bar; desktop.toml `[reader]`.
 
@@ -30,7 +32,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use vergence_scene::{Color, Rect};
-use vergence_ui::{AppCommand as C, Bar, BarStyle, Role};
+use vergence_ui::{AppCommand as C, Bar, BarStyle, BarTab, Role, TabEvent};
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
 use vergence_widgets::{Align, ButtonLook, Element, Input, Length, Padding, Program, Theme, Touch, Waker, Window, button, column, drawing, field, label, panel, row, rule, scroll, vrule};
 
@@ -38,6 +40,9 @@ const APP_ID: &str = "vergence-reader";
 const SECTION: &str = "[reader]";
 /// A document's page and zoom saved a moment after they stop changing.
 const PLACE_TIMER: u64 = 2;
+/// Open files looked at for changes this often (as Edit does).
+const WATCH_TIMER: u64 = 3;
+const WATCH_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
 
 mod cmd {
     pub const NEW_WINDOW: u32 = 1;
@@ -87,6 +92,10 @@ struct Shared {
     /// Files read by the workers: (tab id, what it was).
     loaded: Arc<Mutex<Vec<(u32, Loaded)>>>,
     next_tab: u32,
+    /// The windows, by the server's id, and how to wake each.
+    windows: Vec<(u32, Waker)>,
+    /// Tabs dropped on another window: (into, at, the tab).
+    transfers: Vec<(u32, u32, Tab)>,
 }
 
 type SharedRef = Rc<RefCell<Shared>>;
@@ -99,6 +108,23 @@ struct Tab {
     content: Content,
     back: Vec<usize>,
     forward: Vec<usize>,
+    /// The file as last read (modified time, length): changed on disk, it
+    /// is read again.
+    stamp: Option<(SystemTime, u64)>,
+    /// A document read again: its view to put back (zoom, view, turn,
+    /// night, page) once it is open.
+    keep: Option<(pdf::Mode, pdf::View, u16, bool, usize)>,
+}
+
+/// A file's modified time and length, to see that it changed.
+fn stamp_of(path: &Path) -> Option<(SystemTime, u64)> {
+    let m = std::fs::metadata(path).ok()?;
+    Some((m.modified().ok()?, m.len()))
+}
+
+fn new_tab(id: u32, path: PathBuf) -> Tab {
+    let stamp = stamp_of(&path);
+    Tab { id, path, content: Content::Loading, back: Vec::new(), forward: Vec::new(), stamp, keep: None }
 }
 
 enum Content {
@@ -171,6 +197,8 @@ fn desktop_text() -> (String, Option<SystemTime>) {
 
 struct Viewer {
     shared: SharedRef,
+    /// This window's id with the server, once it has one.
+    me: Option<u32>,
     tabs: Vec<Tab>,
     front: u32,
     desktop: String,
@@ -207,6 +235,8 @@ struct Viewer {
     /// `page_focus`, takes the keyboard: Go to Page).
     page_key: u64,
     page_focus: bool,
+    /// The files are being watched for changes (the timer armed).
+    watching: bool,
 }
 
 /// Addresses a document's links may open (through vergence-open, after asking).
@@ -260,6 +290,7 @@ impl Viewer {
         let (desktop, stamp) = desktop_text();
         Viewer {
             shared,
+            me: None,
             tabs: Vec::new(),
             front: 0,
             desktop,
@@ -282,6 +313,7 @@ impl Viewer {
             selecting: false,
             page_key: 0,
             page_focus: false,
+            watching: false,
         }
     }
 
@@ -327,23 +359,73 @@ impl Viewer {
         true
     }
 
-    /// Files to show: the first here if this window shows nothing (or
-    /// `replace`, a drop), the rest each in a new window.
-    fn take(&mut self, paths: &[PathBuf], replace: bool, window: &mut Window) {
-        let mut rest = paths.iter();
-        if (self.tabs.is_empty() || replace)
-            && let Some(first) = rest.next()
-        {
-            self.tabs.clear();
-            self.open_paths(std::slice::from_ref(first));
+    /// Files to show, each in a tab of this window (one already open is
+    /// brought to the front).
+    fn take(&mut self, paths: &[PathBuf]) {
+        self.open_paths(paths);
+    }
+
+    /// Takes a tab out of this window (to another, or one of its own).
+    fn remove_tab(&mut self, id: u32) -> Option<Tab> {
+        let i = self.tabs.iter().position(|t| t.id == id)?;
+        let t = self.tabs.remove(i);
+        if self.front == id {
+            self.front = self.tabs.get(i.min(self.tabs.len().saturating_sub(1))).map_or(0, |t| t.id);
         }
-        for p in rest {
-            if self.tabs.iter().any(|t| t.path == *p) {
+        Some(t)
+    }
+
+    /// Closes a tab; the window with it, if it was the last.
+    fn close_tab(&mut self, id: u32, window: &mut Window) {
+        self.remove_tab(id);
+        if self.tabs.is_empty() {
+            window.close();
+        }
+        self.tab_changed();
+    }
+
+    /// Another document in front: the search goes on in it, the page field
+    /// starts again.
+    fn tab_changed(&mut self) {
+        self.page_field = None;
+        self.pending_uri = None;
+        if let Some(q) = self.finding.clone()
+            && let Some(d) = self.pdf_mut()
+            && d.shared.search.lock().unwrap_or_else(|e| e.into_inner()).query != q.trim()
+        {
+            d.start_search(&q);
+        }
+    }
+
+    /// Files changed on disk since they were read: read again, the view
+    /// kept (as Edit does).
+    fn watch(&mut self) {
+        let r = self.area.get();
+        let waker = self.waker.clone();
+        let shared = self.shared.clone();
+        for t in self.tabs.iter_mut() {
+            if matches!(t.content, Content::Loading) {
                 continue;
             }
-            let mut w = Viewer::new(self.shared.clone());
-            w.queue(p.clone());
-            window.open_window(vergence_widgets::window(w));
+            let now = stamp_of(&t.path);
+            if now.is_none() || now == t.stamp {
+                continue;
+            }
+            t.stamp = now;
+            if let Content::Pdf(d) = &t.content {
+                t.keep = Some((d.mode, d.view, d.turn, d.night, d.current(r)));
+            }
+            t.content = Content::Loading;
+            load(t.path.clone(), t.id, &shared.borrow(), waker.clone());
+        }
+    }
+
+    /// This window known to the others (tabs dropped on it).
+    fn register(&mut self) {
+        let (Some(id), Some(w)) = (self.me, self.waker.clone()) else { return };
+        let mut s = self.shared.borrow_mut();
+        if !s.windows.iter().any(|(i, _)| *i == id) {
+            s.windows.push((id, w));
         }
     }
 
@@ -356,7 +438,7 @@ impl Viewer {
     /// A file shown once the window can be woken (its `waker` reads it).
     fn queue(&mut self, p: PathBuf) {
         let id = self.next_id();
-        self.tabs.push(Tab { id, path: p, content: Content::Loading, back: Vec::new(), forward: Vec::new() });
+        self.tabs.push(new_tab(id, p));
         self.front = id;
     }
 
@@ -370,7 +452,7 @@ impl Viewer {
             }
             let id = self.next_id();
             load(p.clone(), id, &self.shared.borrow(), self.waker.clone());
-            self.tabs.push(Tab { id, path: p, content: Content::Loading, back: Vec::new(), forward: Vec::new() });
+            self.tabs.push(new_tab(id, p));
             self.front = id;
         }
     }
@@ -730,7 +812,13 @@ impl Viewer {
                 window.open_window(vergence_widgets::window(w));
             }
             cmd::OPEN => self.open_dialog(window),
-            cmd::CLOSE_TAB => window.close(),
+            cmd::CLOSE_TAB => {
+                let id = self.front_tab().map(|t| t.id);
+                match id {
+                    Some(id) => self.close_tab(id, window),
+                    None => window.close(),
+                }
+            }
             cmd::OPEN_WITH => self.open_with(),
             cmd::INFO => {
                 if let Some(t) = self.front_tab()
@@ -1003,9 +1091,70 @@ impl Program for Viewer {
         true
     }
 
-    /// A plain title bar: one document a window (tabs come with step 5).
+    /// The server's tabs, one document each (Dave: "Ok, tab view"); each
+    /// keeps its own view. + opens a document.
     fn bar(&self) -> Option<Bar> {
-        Some(Bar::Plain)
+        let tabs = self.tabs.iter().map(|t| BarTab { id: t.id, title: t.title(), closable: true, alert: false, edited: false }).collect();
+        Some(Bar::Tabs { tabs, front: self.front_tab().map_or(0, |t| t.id), plus: true, accent: None, menu: Vec::new() })
+    }
+
+    fn tab(&mut self, event: TabEvent, window: &mut Window) {
+        match event {
+            TabEvent::Chosen(id) => {
+                self.front = id;
+                self.tab_changed();
+            }
+            TabEvent::Close(id) => self.close_tab(id, window),
+            TabEvent::CloseOthers(id) => {
+                self.tabs.retain(|t| t.id == id);
+                self.front = id;
+            }
+            TabEvent::New => self.run(cmd::OPEN, window),
+            TabEvent::Moved { tab, to } => {
+                if let Some(i) = self.tabs.iter().position(|t| t.id == tab) {
+                    let t = self.tabs.remove(i);
+                    self.tabs.insert((to as usize).min(self.tabs.len()), t);
+                }
+            }
+            // Out of the row: a window of its own, its view with it.
+            TabEvent::Out { tab, .. } => {
+                if self.tabs.len() > 1
+                    && let Some(t) = self.remove_tab(tab)
+                {
+                    let mut w = Viewer::new(self.shared.clone());
+                    w.front = t.id;
+                    w.tabs.push(t);
+                    window.open_window(vergence_widgets::window(w));
+                    self.tab_changed();
+                }
+            }
+            TabEvent::Join { tab, into, to } => {
+                if let Some(t) = self.remove_tab(tab) {
+                    let waker = {
+                        let mut s = self.shared.borrow_mut();
+                        s.transfers.push((into, to, t));
+                        s.windows.iter().find(|(id, _)| *id == into).map(|(_, w)| w.clone())
+                    };
+                    if let Some(w) = waker {
+                        w.wake();
+                    }
+                    if self.tabs.is_empty() {
+                        window.close();
+                    }
+                }
+            }
+            TabEvent::Menu { .. } => {}
+        }
+        window.redraw();
+    }
+
+    fn opened(&mut self, id: u32) {
+        self.me = Some(id);
+        self.register();
+    }
+
+    fn closed(&mut self) {
+        self.shared.borrow_mut().windows.retain(|(id, _)| Some(*id) != self.me);
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
@@ -1269,8 +1418,15 @@ impl Program for Viewer {
 
     fn waker(&mut self, waker: Waker) {
         // The first window listens for other starts' files.
-        let first = self.waker.is_none();
+        let first = self.waker.is_none() && self.shared.borrow().windows.is_empty();
         self.waker = Some(waker.clone());
+        self.register();
+        // Documents brought in a moved tab wake this window from now on.
+        for t in &self.tabs {
+            if let Content::Pdf(d) = &t.content {
+                d.shared.set_waker(waker.clone());
+            }
+        }
         if first {
             let inbox = self.shared.borrow().inbox.clone();
             let w = waker.clone();
@@ -1292,10 +1448,30 @@ impl Program for Viewer {
         let mut changed = self.reread() || self.is_pdf();
         let asked: Vec<Vec<PathBuf>> = std::mem::take(&mut *self.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()));
         for paths in asked {
-            self.take(&paths, false, window);
+            self.take(&paths);
             // Handed over by a start (or the Open dialog): forward, if the server agrees.
             window.activate();
             changed = true;
+        }
+        // Tabs dropped on this window.
+        let moved: Vec<(u32, u32, Tab)> = {
+            let mut s = self.shared.borrow_mut();
+            let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut s.transfers).into_iter().partition(|(into, _, _)| Some(*into) == self.me);
+            s.transfers = rest;
+            mine
+        };
+        for (_, to, t) in moved {
+            if let (Content::Pdf(d), Some(w)) = (&t.content, &self.waker) {
+                d.shared.set_waker(w.clone());
+            }
+            self.front = t.id;
+            self.tabs.insert((to as usize).min(self.tabs.len()), t);
+            self.tab_changed();
+            changed = true;
+        }
+        if !self.watching {
+            self.watching = true;
+            window.wake_after(WATCH_TIMER, WATCH_EVERY);
         }
         let done: Vec<(u32, Loaded)> = {
             let shared = self.shared.borrow();
@@ -1314,8 +1490,23 @@ impl Program for Viewer {
                 changed = true;
             }
         }
-        // A remembered page, gone to once the view has its place.
+        // A document read again: its view put back.
         let r = self.area.get();
+        if r.w > 1.0 {
+            for t in self.tabs.iter_mut() {
+                if let (Content::Pdf(d), Some((mode, view, turn, night, page))) = (&mut t.content, t.keep) {
+                    d.restore = None;
+                    d.mode = mode;
+                    d.view = view;
+                    d.night = night;
+                    d.set_turn(turn, r);
+                    d.go_to(page, r);
+                    t.keep = None;
+                    changed = true;
+                }
+            }
+        }
+        // A remembered page, gone to once the view has its place.
         if r.w > 1.0
             && let Some(d) = self.pdf_mut()
             && let Some(page) = d.restore.take()
@@ -1326,21 +1517,25 @@ impl Program for Viewer {
         changed
     }
 
-    fn timer(&mut self, id: u64, _window: &mut Window) -> bool {
+    fn timer(&mut self, id: u64, window: &mut Window) -> bool {
         if id == PLACE_TIMER {
             self.save_place();
+        }
+        if id == WATCH_TIMER {
+            self.watch();
+            window.wake_after(WATCH_TIMER, WATCH_EVERY);
         }
         false
     }
 
-    /// A file dropped here takes this window's place (more, windows of their own).
+    /// Files dropped here open in tabs.
     fn drag_over(&mut self, _x: f32, _y: f32, kinds: &[String], _ctrl: bool) -> u8 {
         if kinds.iter().any(|k| k == "text/uri-list") { vergence_ui::DROP_COPY } else { vergence_ui::DROP_NONE }
     }
 
     fn dropped(&mut self, _x: f32, _y: f32, _action: u8, items: &[(String, Vec<u8>)], window: &mut Window) {
         let paths: Vec<PathBuf> = items.iter().find(|(k, _)| k == "text/uri-list").map(|(_, v)| String::from_utf8_lossy(v).lines().filter_map(|l| vergence_types::path_of_link(l.trim())).collect()).unwrap_or_default();
-        self.take(&paths, true, window);
+        self.take(&paths);
         window.redraw();
     }
 
@@ -1432,17 +1627,11 @@ fn main() {
     if hand::hand_over(&files) {
         return;
     }
-    let shared = Rc::new(RefCell::new(Shared { inbox: Arc::default(), loaded: Arc::default(), next_tab: 0 }));
+    let shared = Rc::new(RefCell::new(Shared { inbox: Arc::default(), loaded: Arc::default(), next_tab: 0, windows: Vec::new(), transfers: Vec::new() }));
     let mut viewer = Viewer::new(shared);
-    // The first file here, read once the window can be woken (waker()); the
-    // others go into windows of their own when it is (woken()).
-    let mut files = files.into_iter();
-    if let Some(p) = files.next() {
+    // The files, each in a tab, read once the window can be woken (waker()).
+    for p in files {
         viewer.queue(p);
-    }
-    let more: Vec<PathBuf> = files.collect();
-    if !more.is_empty() {
-        viewer.shared.borrow().inbox.lock().unwrap_or_else(|e| e.into_inner()).push(more);
     }
     if let Err(e) = vergence_widgets::run(viewer, (980, 760)) {
         eprintln!("vergence-reader: {e}");
