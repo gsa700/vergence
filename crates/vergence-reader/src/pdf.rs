@@ -41,12 +41,12 @@ const MAX_TILES: usize = 96;
 /// Something for the worker to draw.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Job {
-    /// A whole page at a scale, turned (degrees).
-    Page(usize, f32, u16),
+    /// A whole page at a scale, in a look.
+    Page(usize, f32, Look),
     /// One tile of a page at a scale: its column and row.
     Tile(usize, f32, u32, u32),
-    /// A page's thumbnail for the sidebar, at a scale, turned.
-    Thumb(usize, f32, u16),
+    /// A page's thumbnail for the sidebar, at a scale, in a look.
+    Thumb(usize, f32, Look),
     /// A page's links.
     Links(usize),
     /// A page's text layer (for selecting).
@@ -99,8 +99,8 @@ pub struct Search {
 pub const THUMB_W: f32 = 132.0;
 pub const THUMB_GAP: f32 = 16.0;
 
-/// A page's picture: the scale it was drawn at, its turn, the picture.
-type Drawn = (f32, u16, Arc<Image>);
+/// A page's picture: the scale it was drawn at, its look, the picture.
+type Drawn = (f32, Look, Arc<Image>);
 
 /// A tile's key: page, scale in thousandths, column, row.
 type TileKey = (usize, u32, u32, u32);
@@ -119,6 +119,37 @@ pub enum View {
     Single,
     /// Two pages a row, the first alone (a book's cover), then pairs.
     Two,
+}
+
+/// How a page's picture is drawn: turned (degrees clockwise), and in the
+/// night look (its lightness inverted, its hues kept).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Look {
+    pub turn: u16,
+    pub night: bool,
+}
+
+/// A picture as `look` asks.
+pub fn apply_look(img: Image, look: Look) -> Image {
+    let mut img = turn_image(img, look.turn);
+    if look.night {
+        night(&mut img.rgba);
+    }
+    img
+}
+
+/// The night look: each pixel's lightness inverted with its hue and
+/// saturation kept (white paper goes dark, black text light, a red line
+/// stays red), then kept between a soft black and a soft white.
+pub fn night(rgba: &mut [u8]) {
+    for px in rgba.as_chunks_mut::<4>().0 {
+        let (mx, mn) = (px[0].max(px[1]).max(px[2]) as i32, px[0].min(px[1]).min(px[2]) as i32);
+        let shift = 255 - mx - mn;
+        for c in &mut px[..3] {
+            let v = (*c as i32 + shift).clamp(0, 255);
+            *c = (28 + v * 205 / 255) as u8;
+        }
+    }
 }
 
 /// A picture turned a quarter, half or three quarters clockwise.
@@ -191,10 +222,12 @@ pub struct Shared {
     tiles: Mutex<HashMap<TileKey, Arc<Image>>>,
     /// The sidebar's wishes (thumbnails), after the view's.
     side: Mutex<Vec<Job>>,
-    thumbs: Mutex<HashMap<usize, (u16, Arc<Image>)>>,
+    thumbs: Mutex<HashMap<usize, (Look, Arc<Image>)>>,
     links: Mutex<HashMap<usize, Vec<Link>>>,
     /// The outline, once the worker has read it.
     pub outline: Mutex<Option<Arc<Vec<Entry>>>>,
+    /// What the document says about itself (names and values), once read.
+    pub meta: Mutex<Option<Arc<Vec<(String, String)>>>>,
     /// The text layers of the pages near sight.
     pub texts: Mutex<HashMap<usize, Arc<Vec<Char>>>>,
     pub search: Mutex<Search>,
@@ -206,7 +239,7 @@ pub struct Shared {
 
 impl Shared {
     fn new(waker: Option<Waker>) -> Shared {
-        Shared { wanted: Mutex::new(Vec::new()), ready: Condvar::new(), done: Mutex::new(HashMap::new()), tiles: Mutex::new(HashMap::new()), side: Mutex::new(Vec::new()), thumbs: Mutex::new(HashMap::new()), links: Mutex::new(HashMap::new()), outline: Mutex::new(None), texts: Mutex::new(HashMap::new()), search: Mutex::new(Search::default()), failed: Mutex::new(HashMap::new()), closed: AtomicBool::new(false), waker: Mutex::new(waker) }
+        Shared { wanted: Mutex::new(Vec::new()), ready: Condvar::new(), done: Mutex::new(HashMap::new()), tiles: Mutex::new(HashMap::new()), side: Mutex::new(Vec::new()), thumbs: Mutex::new(HashMap::new()), links: Mutex::new(HashMap::new()), outline: Mutex::new(None), meta: Mutex::new(None), texts: Mutex::new(HashMap::new()), search: Mutex::new(Search::default()), failed: Mutex::new(HashMap::new()), closed: AtomicBool::new(false), waker: Mutex::new(waker) }
     }
 
     fn wake(&self) {
@@ -226,6 +259,8 @@ fn work(mut viewer: vergence_pdf::helper::Viewer, shared: Arc<Shared>) {
     let pages_n = viewer.info.pages.len();
     let outline = viewer.outline().unwrap_or_default();
     *shared.outline.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(outline));
+    let meta = viewer.metadata().unwrap_or_default();
+    *shared.meta.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(meta));
     shared.wake();
     loop {
         let job = {
@@ -259,23 +294,23 @@ fn work(mut viewer: vergence_pdf::helper::Viewer, shared: Arc<Shared>) {
             }
         };
         let (page, result) = match job {
-            Job::Page(page, scale, turn) => {
+            Job::Page(page, scale, look) => {
                 let have = shared.done.lock().unwrap_or_else(|e| e.into_inner()).get(&page).map(|d| (d.0, d.1));
-                if have.is_some_and(|(s, t)| close_enough(s, scale) && t == turn) {
+                if have.is_some_and(|(s, l)| close_enough(s, scale) && l == look) {
                     continue;
                 }
                 (page, viewer.render(page, scale, None).map(|t| {
-                    let img = turn_image(Image { width: t.width, height: t.height, rgba: t.rgba }, turn);
-                    shared.done.lock().unwrap_or_else(|e| e.into_inner()).insert(page, (scale, turn, Arc::new(img)));
+                    let img = apply_look(Image { width: t.width, height: t.height, rgba: t.rgba }, look);
+                    shared.done.lock().unwrap_or_else(|e| e.into_inner()).insert(page, (scale, look, Arc::new(img)));
                 }))
             }
-            Job::Thumb(page, scale, turn) => {
-                if shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).get(&page).is_some_and(|t| t.0 == turn) {
+            Job::Thumb(page, scale, look) => {
+                if shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).get(&page).is_some_and(|t| t.0 == look) {
                     continue;
                 }
                 (page, viewer.render(page, scale, None).map(|t| {
-                    let img = turn_image(Image { width: t.width, height: t.height, rgba: t.rgba }, turn);
-                    shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).insert(page, (turn, Arc::new(img)));
+                    let img = apply_look(Image { width: t.width, height: t.height, rgba: t.rgba }, look);
+                    shared.thumbs.lock().unwrap_or_else(|e| e.into_inner()).insert(page, (look, Arc::new(img)));
                 }))
             }
             Job::Text(page) => {
@@ -345,6 +380,8 @@ pub struct Layout {
     /// How the pages are set out, and turned (0, 90, 180, 270 clockwise).
     pub view: View,
     pub turn: u16,
+    /// The night look: pages dark, their text light.
+    pub night: bool,
     pub shared: Arc<Shared>,
     pub mode: Mode,
     /// The document's y (points, from the first page's top) at the top of the view.
@@ -409,7 +446,7 @@ pub fn start(viewer: vergence_pdf::helper::Viewer, waker: Option<Waker>) -> Resu
     let shared = Arc::new(Shared::new(waker));
     let s = shared.clone();
     std::thread::spawn(move || work(viewer, s));
-    Ok(Pdf(Layout { sizes: pages.clone(), pages, view: View::Continuous, turn: 0, shared, mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0, selection: None, found: None }))
+    Ok(Pdf(Layout { sizes: pages.clone(), pages, view: View::Continuous, turn: 0, night: false, shared, mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0, selection: None, found: None }))
 }
 
 impl Layout {
@@ -417,7 +454,7 @@ impl Layout {
     #[cfg(test)]
     fn sized(pages: Vec<(f32, f32)>) -> Layout {
         let pages = Arc::new(pages);
-        Layout { sizes: pages.clone(), pages, view: View::Continuous, turn: 0, shared: Arc::new(Shared::new(None)), mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0, selection: None, found: None }
+        Layout { sizes: pages.clone(), pages, view: View::Continuous, turn: 0, night: false, shared: Arc::new(Shared::new(None)), mode: Mode::Width, top: 0.0, pan_x: 0.0, restore: None, thumb_top: 0.0, selection: None, found: None }
     }
 
     /// The pages in rows, as the view sets them out.
@@ -493,6 +530,11 @@ impl Layout {
 
     fn widest(&self) -> f32 {
         self.rows().iter().map(|row| self.row_size(row).0).fold(1.0, f32::max)
+    }
+
+    /// How the pages' pictures are drawn now.
+    pub fn look(&self) -> Look {
+        Look { turn: self.turn, night: self.night }
     }
 
     /// The pages turned to `turn` (0, 90, 180 or 270): their sizes as shown.
@@ -671,6 +713,8 @@ impl Layout {
         scene.fill(r, ground);
         let z = self.zoom(r);
         let turn = self.turn;
+        let look = self.look();
+        let paper = if self.night { Color::rgb(28, 28, 28) } else { Color::rgb(0xff, 0xff, 0xff) };
         let (first, last) = self.in_sight(r);
         let spots = self.spots();
         let done = self.shared.done.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -687,9 +731,9 @@ impl Layout {
             let (sw, sh) = self.sizes[p];
             let dest = self.dest(r, z, &spots, p);
             scene.fill(Rect::new(dest.x + 1.0, dest.y + 2.0, dest.w, dest.h), Color::rgba(0, 0, 0, 0x50));
-            scene.fill(dest, Color::rgb(0xff, 0xff, 0xff));
-            if let Some((_, t, img)) = done.get(&p)
-                && *t == turn
+            scene.fill(dest, paper);
+            if let Some((_, l, img)) = done.get(&p)
+                && *l == look
             {
                 let id = scene.image(img.clone());
                 scene.draw_image(id, dest, 1.0);
@@ -720,13 +764,13 @@ impl Layout {
                 }
             }
             let s = page_scale(pw, ph, z * scale);
-            if !done.get(&p).is_some_and(|d| close_enough(d.0, s) && d.1 == turn) && !failed.contains(&p) {
-                wanted.push(Job::Page(p, s, turn));
+            if !done.get(&p).is_some_and(|d| close_enough(d.0, s) && d.1 == look) && !failed.contains(&p) {
+                wanted.push(Job::Page(p, s, look));
             }
             // Deeper than a page picture goes: the part in sight in tiles
             // (not while turned: the page picture alone).
             let deep = round3(z * scale);
-            if turn == 0 && deep > s * 1.02 && !failed.contains(&p) {
+            if look == Look::default() && deep > s * 1.02 && !failed.contains(&p) {
                 let k = deep / z; // pixels per window point
                 let vis = (dest.x.max(r.x), dest.y.max(r.y), (dest.x + dest.w).min(r.x + r.w), (dest.y + dest.h).min(r.y + r.h));
                 if vis.2 > vis.0 && vis.3 > vis.1 {
@@ -753,9 +797,9 @@ impl Layout {
             }
         }
         // The page below, ahead of being scrolled to.
-        if last + 1 < self.pages.len() && !done.get(&(last + 1)).is_some_and(|d| d.1 == turn) {
+        if last + 1 < self.pages.len() && !done.get(&(last + 1)).is_some_and(|d| d.1 == look) {
             let (pw, ph) = self.pages[last + 1];
-            wanted.push(Job::Page(last + 1, page_scale(pw, ph, z * scale), turn));
+            wanted.push(Job::Page(last + 1, page_scale(pw, ph, z * scale), look));
         }
         let page_of = |j: &Job| match j {
             Job::Page(p, ..) | Job::Tile(p, ..) | Job::Thumb(p, ..) | Job::Links(p) | Job::Text(p) | Job::Search(p, _) => *p,
@@ -980,13 +1024,13 @@ impl Layout {
                 scene.stroke(Rect::new(dest.x - 3.0, dest.y - 3.0, dest.w + 6.0, dest.h + 6.0), 3.0, 2.0, accent);
             }
             scene.fill(Rect::new(dest.x + 1.0, dest.y + 1.5, w, h), Color::rgba(0, 0, 0, 0x50));
-            scene.fill(dest, Color::rgb(0xff, 0xff, 0xff));
-            match thumbs.get(&p).filter(|t| t.0 == self.turn) {
+            scene.fill(dest, if self.night { Color::rgb(28, 28, 28) } else { Color::rgb(0xff, 0xff, 0xff) });
+            match thumbs.get(&p).filter(|t| t.0 == self.look()) {
                 Some((_, img)) => {
                     let id = scene.image(img.clone());
                     scene.draw_image(id, dest, 1.0);
                 }
-                None => wanted.push(Job::Thumb(p, round3(w * scale.max(0.25) / self.pages[p].0), self.turn)),
+                None => wanted.push(Job::Thumb(p, round3(w * scale.max(0.25) / self.pages[p].0), self.look())),
             }
         }
         {
@@ -1282,6 +1326,15 @@ mod tests {
         assert!(s.starts_with('…') && s.ends_with('…'), "cut both sides: {s}");
         assert!(!s.contains("  "));
         assert_eq!(snippet(&chars[..9], 0, 4), "Early one", "the whole text: no dots");
+    }
+
+    #[test]
+    fn the_night_look_inverts_lightness_and_keeps_hue() {
+        let mut px = vec![255, 255, 255, 255, 0, 0, 0, 255, 200, 30, 30, 255];
+        night(&mut px);
+        assert_eq!(&px[0..3], &[28, 28, 28], "white paper: soft black");
+        assert_eq!(&px[4..7], &[233, 233, 233], "black text: soft white");
+        assert!(px[8] > px[9] && px[9] == px[10], "red stays red: {:?}", &px[8..11]);
     }
 
     #[test]

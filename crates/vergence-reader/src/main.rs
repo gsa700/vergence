@@ -20,6 +20,7 @@
 //!   the bar; desktop.toml `[reader]`.
 
 mod hand;
+mod info;
 mod pdf;
 
 use std::cell::{Cell, RefCell};
@@ -64,6 +65,8 @@ mod cmd {
     pub const VIEW_CONTINUOUS: u32 = 25;
     pub const VIEW_SINGLE: u32 = 26;
     pub const VIEW_TWO: u32 = 27;
+    pub const NIGHT: u32 = 28;
+    pub const INFO: u32 = 29;
     pub const SETTINGS: u32 = 40;
     pub const ABOUT: u32 = 41;
 }
@@ -111,6 +114,27 @@ impl Tab {
     fn name(&self) -> String {
         self.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| self.path.display().to_string())
     }
+
+    /// The document's own title (its Info /Title) when it has a real one,
+    /// else the file's name.
+    fn title(&self) -> String {
+        if let Content::Pdf(d) = &self.content
+            && let Some(meta) = d.shared.meta.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
+            && let Some((_, t)) = meta.iter().find(|(k, _)| k == "Title")
+            && title_is_real(t)
+        {
+            return t.clone();
+        }
+        self.name()
+    }
+}
+
+/// Whether a document's Title says something: not empty, not "untitled",
+/// not a file's name (as many programs write: "Microsoft Word - a.docx").
+fn title_is_real(t: &str) -> bool {
+    let low = t.trim().to_lowercase();
+    let file_like = [".pdf", ".doc", ".docx", ".odt", ".rtf", ".txt", ".tex", ".indd", ".ps", ".xls", ".xlsx", ".ppt", ".pptx"].iter().any(|e| low.ends_with(e));
+    low.chars().count() >= 3 && !["untitled", "title", "document", "(anonymous)"].contains(&low.as_str()) && !low.starts_with("microsoft word - ") && !file_like
 }
 
 /// Reads a document in a worker: opened in its helper, or why not.
@@ -445,6 +469,7 @@ impl Viewer {
             cmd::VIEW_CONTINUOUS => d.set_view(pdf::View::Continuous, r),
             cmd::VIEW_SINGLE => d.set_view(pdf::View::Single, r),
             cmd::VIEW_TWO => d.set_view(pdf::View::Two, r),
+            cmd::NIGHT => d.night = !d.night,
             cmd::BACK | cmd::FORWARD => {
                 self.go_back(id == cmd::FORWARD);
                 self.follow_thumb();
@@ -575,6 +600,11 @@ impl Viewer {
                     window.redraw();
                     return true;
                 }
+                if text.as_deref() == Some("n") {
+                    self.pdf_run(cmd::NIGHT);
+                    window.redraw();
+                    return true;
+                }
                 let Some(d) = self.pdf_mut() else { return false };
                 const LEFT: u32 = 0xff51;
                 const UP: u32 = 0xff52;
@@ -702,6 +732,15 @@ impl Viewer {
             cmd::OPEN => self.open_dialog(window),
             cmd::CLOSE_TAB => window.close(),
             cmd::OPEN_WITH => self.open_with(),
+            cmd::INFO => {
+                if let Some(t) = self.front_tab()
+                    && let Content::Pdf(d) = &t.content
+                {
+                    let meta = d.shared.meta.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default();
+                    let w = info::Info::new(&t.path, &d.sizes, &meta, self.theme());
+                    window.open_window(vergence_widgets::window(w));
+                }
+            }
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
                 let about = vergence_widgets::about::About::new(APP_ID, "Reader", env!("CARGO_PKG_VERSION"), "PDF documents: pages, the outline, links, find and selection, read and drawn apart from the app by Vergence's own PDF engine.", self.theme());
@@ -902,6 +941,7 @@ impl Viewer {
             ]),
             group(vec![tool(Icon::TurnLeft, "Turn left", Some(Msg::Run(cmd::TURN_LEFT))), tool(Icon::TurnRight, "Turn right", Some(Msg::Run(cmd::TURN_RIGHT)))]),
             flexible(),
+            tool(Icon::Info, "Info", Some(Msg::Run(cmd::INFO))),
             toggle(Icon::Search, "Find", self.finding.is_some(), if self.finding.is_some() { Msg::FindDone } else { Msg::Run(cmd::FIND) }),
             tool(Icon::Open, "Open…", Some(Msg::Run(cmd::OPEN))),
         ];
@@ -942,7 +982,7 @@ impl Program for Viewer {
     type Message = Msg;
 
     fn title(&self) -> String {
-        self.front_tab().map(Tab::name).unwrap_or_else(|| "Reader".into())
+        self.front_tab().map(Tab::title).unwrap_or_else(|| "Reader".into())
     }
 
     fn app_id(&self) -> String {
@@ -1190,6 +1230,7 @@ impl Program for Viewer {
                 0x30 if m.ctrl => Some(cmd::FIT),
                 0x67 | 0x47 if m.ctrl && m.alt => Some(cmd::GO_TO_PAGE),
                 0x72 | 0x52 if m.ctrl => Some(cmd::TURN_RIGHT),
+                0x69 | 0x49 if m.ctrl => Some(cmd::INFO),
                 0x6c | 0x4c if m.ctrl => Some(cmd::TURN_LEFT),
                 0x5b if m.ctrl => Some(cmd::BACK),
                 0x5d if m.ctrl => Some(cmd::FORWARD),
@@ -1332,6 +1373,8 @@ impl Program for Viewer {
                 C::own(cmd::VIEW_TWO, "View", "Two pages", "").checked(d.view == pdf::View::Two),
                 C::own(cmd::TURN_LEFT, "View", "Turn left", "Ctrl+L"),
                 C::own(cmd::TURN_RIGHT, "View", "Turn right", "Ctrl+R").featured(),
+                C::own(cmd::NIGHT, "View", "Night look", "N").checked(d.night),
+                C::own(cmd::INFO, "File", "Info", "Ctrl+I"),
             ]);
         }
         list.extend([C::role(cmd::SETTINGS, Role::Settings), C::role(cmd::ABOUT, Role::About)]);
@@ -1410,6 +1453,16 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::openable;
+
+    #[test]
+    fn real_titles_and_file_names() {
+        use super::title_is_real;
+        assert!(title_is_real("Log4OM 2 User Manual"));
+        assert!(!title_is_real("Microsoft Word - manual.docx"));
+        assert!(!title_is_real("report.pdf"));
+        assert!(!title_is_real("Untitled"));
+        assert!(!title_is_real(" "));
+    }
 
     #[test]
     fn links_open_only_known_addresses() {

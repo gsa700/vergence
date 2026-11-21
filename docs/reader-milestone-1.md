@@ -124,3 +124,17 @@ signing (question 2). Printing (no printing system yet). Video (Close-Up's).
   marked and kept in sight; typing a search with the sidebar open turns
   it to Results. Tried headless on Hubble: "lookup" in a 253-page manual,
   57 found, listed with their text.
+- **Step 4, reading comfort** (2026-11-20). The night look (View > Night
+  look, N): the worker draws each page with its lightness inverted and its
+  hue kept (white paper a soft black, black text a soft white, a red line
+  still red), the thumbnails with it; pictures go too (keeping them as
+  they are needs the helper to draw them apart: later). The bar shows the
+  document's own title (its Info /Title) when it is a real one, not a
+  file's name ("Microsoft Word - a.docx") or "Untitled"; else the file's
+  name. The Info window (Ctrl+I, the toolbar's Info): the file, folder and
+  size, the pages and their paper (A4, Letter... in mm and inches), and
+  what the document says about itself: title, author, subject, keywords,
+  "Made with", "PDF made by", created and modified (dates made readable),
+  the PDF version, encryption. vergence-pdf `Document::metadata` and
+  `pdf_date`, the helper's `M` request. Select All on a page and copying
+  were already in. Tried headless on Hubble.

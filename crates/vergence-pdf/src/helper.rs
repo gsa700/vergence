@@ -26,6 +26,9 @@
 //! - `L` page u32: its links. Answer: a u32 count, then each link's
 //!   rectangle (4 f32, points from the page's top left as shown), a kind
 //!   byte (0 a page: u32 page and f32 top; 1 an address: u16 length, UTF-8).
+//! - `M` what the document says about itself ([`crate::Document::metadata`]).
+//!   Answer: a u32 count, then each pair's name and value (u16 length,
+//!   UTF-8 each).
 //! - `T` page u32: its text layer. Answer: a u32 count, then each
 //!   character's box (4 f32, points from the page's top left as shown)
 //!   and text (u16 length, UTF-8).
@@ -118,6 +121,36 @@ impl Take<'_> {
         let (page, top) = (self.u32()?, self.f32()?);
         Some((page != u32::MAX).then(|| Target { page: page as usize, top: top.is_finite().then_some(top) }))
     }
+}
+
+fn encode_pairs(pairs: &[(String, String)]) -> Vec<u8> {
+    let mut out = (pairs.len() as u32).to_be_bytes().to_vec();
+    for (k, v) in pairs {
+        for s in [k, v] {
+            let b = &s.as_bytes()[..s.len().min(u16::MAX as usize)];
+            out.extend((b.len() as u16).to_be_bytes());
+            out.extend_from_slice(b);
+        }
+    }
+    out
+}
+
+fn decode_pairs(b: &[u8]) -> Option<Vec<(String, String)>> {
+    let n = u32::from_be_bytes(b.get(0..4)?.try_into().ok()?) as usize;
+    let mut at = 4;
+    let mut out = Vec::new();
+    let take = |at: &mut usize| -> Option<String> {
+        let l = u16::from_be_bytes(b.get(*at..*at + 2)?.try_into().ok()?) as usize;
+        let s = String::from_utf8_lossy(b.get(*at + 2..*at + 2 + l)?).into_owned();
+        *at += 2 + l;
+        Some(s)
+    };
+    for _ in 0..n.min(64) {
+        let k = take(&mut at)?;
+        let v = take(&mut at)?;
+        out.push((k, v));
+    }
+    Some(out)
 }
 
 fn encode_outline(entries: &[Entry]) -> Vec<u8> {
@@ -295,6 +328,10 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write) -> std::io::Result<
                 let d = doc.as_ref().ok_or("no document")?;
                 Ok(encode_outline(&crate::outline::outline(d, &pages)))
             }
+            b'M' => {
+                let d = doc.as_ref().ok_or("no document")?;
+                Ok(encode_pairs(&d.metadata()))
+            }
             b'T' => {
                 let d = doc.as_ref().ok_or("no document")?;
                 let page = body.get(0..4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize).ok_or("a bad request")?;
@@ -469,6 +506,12 @@ impl Viewer {
         }
     }
 
+    /// What the document says about itself (names and values).
+    pub fn metadata(&mut self) -> Result<Vec<(String, String)>, Error> {
+        let b = self.request(b'M', &[])?;
+        decode_pairs(&b).ok_or_else(|| Error::Crashed("a garbled answer".into()))
+    }
+
     /// The outline (bookmarks); empty if the document has none.
     pub fn outline(&mut self) -> Result<Vec<Entry>, Error> {
         let b = self.request(b'O', &[])?;
@@ -607,6 +650,13 @@ mod tests {
         assert_eq!(px(&a[2].1, 20, 15, 15), 0);
         assert_eq!(px(&a[2].1, 20, 2, 2), 255);
         assert_eq!(a[3].0, 1);
+    }
+
+    #[test]
+    fn metadata_crosses_the_pipe() {
+        let pairs = vec![("Title".to_string(), "Ein Handbuch ♠".to_string()), ("Version".to_string(), "1.7".to_string())];
+        assert_eq!(decode_pairs(&encode_pairs(&pairs)), Some(pairs));
+        assert_eq!(decode_pairs(&[0, 0, 0, 2, 0, 1]), None, "cut short: refused, no panic");
     }
 
     #[test]

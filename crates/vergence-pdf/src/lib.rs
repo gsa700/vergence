@@ -190,6 +190,37 @@ impl Document {
         self.trailer.has("Encrypt")
     }
 
+    /// What the document says about itself, for an Info window (Reader
+    /// milestone 1, step 4): its Info dictionary's Title, Author, Subject,
+    /// Keywords, Creator (the application) and Producer, its dates made
+    /// readable ("2020-12-31 23:59"), the PDF version and whether it is
+    /// encrypted. Only what is there, in that order; each value at most 500
+    /// characters.
+    pub fn metadata(&self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        let info = self.trailer.get("Info").map(|o| self.resolve(o)).and_then(|o| o.as_dict().cloned());
+        if let Some(info) = info {
+            for key in ["Title", "Author", "Subject", "Keywords", "Creator", "Producer", "CreationDate", "ModDate"] {
+                let Some(v) = info.get(key).map(|o| self.resolve(o)) else { continue };
+                let Some(bytes) = v.as_bytes() else { continue };
+                let mut text = outline::text_string(bytes).chars().filter(|c| !c.is_control()).take(500).collect::<String>().trim().to_string();
+                if key.ends_with("Date") {
+                    text = pdf_date(&text).unwrap_or(text);
+                }
+                if !text.is_empty() {
+                    out.push((key.to_string(), text));
+                }
+            }
+        }
+        if let Some(v) = self.version() {
+            out.push(("Version".into(), v));
+        }
+        if self.encrypted() {
+            out.push(("Encrypted".into(), self.encryption_revision().map_or("yes".into(), |r| format!("yes (revision {r})"))));
+        }
+        out
+    }
+
     /// The version in the header ("1.7"), if readable.
     pub fn version(&self) -> Option<String> {
         let at = lexer::find(&self.data[..self.data.len().min(1024)], b"%PDF-")?;
@@ -485,4 +516,42 @@ fn rect(o: &Object, doc: &Document) -> Option<[f64; 4]> {
     }
     let r = [v[0].min(v[2]), v[1].min(v[3]), v[0].max(v[2]), v[1].max(v[3])];
     (r[2] - r[0] > 0.0 && r[3] - r[1] > 0.0).then_some(r)
+}
+
+/// A PDF date ("D:20201231235959+01'00'") as "2020-12-31 23:59" (with its
+/// zone when it names one: "+01:00"); None if it is not one.
+pub fn pdf_date(s: &str) -> Option<String> {
+    let d = s.strip_prefix("D:").unwrap_or(s);
+    let digits: String = d.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.len() < 4 {
+        return None;
+    }
+    let part = |a: usize, b: usize, default: &str| digits.get(a..b).unwrap_or(default).to_string();
+    let mut out = format!("{}-{}-{}", part(0, 4, ""), part(4, 6, "01"), part(6, 8, "01"));
+    if digits.len() >= 12 {
+        out.push_str(&format!(" {}:{}", part(8, 10, "00"), part(10, 12, "00")));
+    }
+    let zone = &d[digits.len()..];
+    if let Some(sign) = zone.chars().next().filter(|c| *c == '+' || *c == '-') {
+        let z: String = zone[1..].chars().filter(|c| c.is_ascii_digit()).collect();
+        if z.len() >= 2 {
+            out.push_str(&format!(" {sign}{}:{}", &z[..2], z.get(2..4).unwrap_or("00")));
+        }
+    } else if zone.starts_with('Z') {
+        out.push_str(" UTC");
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod date_tests {
+    use super::pdf_date;
+
+    #[test]
+    fn dates_made_readable() {
+        assert_eq!(pdf_date("D:20201231235959+01'00'").as_deref(), Some("2020-12-31 23:59 +01:00"));
+        assert_eq!(pdf_date("D:2019").as_deref(), Some("2019-01-01"));
+        assert_eq!(pdf_date("D:20190402120000Z").as_deref(), Some("2019-04-02 12:00 UTC"));
+        assert_eq!(pdf_date("yesterday"), None);
+    }
 }
