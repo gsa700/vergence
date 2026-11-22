@@ -102,6 +102,17 @@ impl WallpaperConfig {
 struct DesktopFile {
     #[serde(default)]
     wallpaper: WallpaperConfig,
+    #[serde(default)]
+    lock: LockFile,
+}
+
+/// desktop.toml's `[lock] wallpaper`: "login" shows the login screen's picture
+/// behind the lock (defaults milestone 1, step 8); anything else, or nothing,
+/// the person's own wallpaper.
+#[derive(Debug, Default, Deserialize)]
+struct LockFile {
+    #[serde(default)]
+    wallpaper: Option<String>,
 }
 
 pub fn desktop_path() -> Option<PathBuf> {
@@ -165,7 +176,14 @@ pub struct Wallpaper {
     /// number that changes whenever a grid does.
     pub grids: HashMap<String, Vec<[u8; 3]>>,
     pub grid_gen: u64,
+    /// The picture behind the lock when it is the login screen's (`[lock]
+    /// wallpaper = "login"` and an administrator chose one); None: the
+    /// person's own wallpaper. Its pictures are kept under "lock:<output>".
+    lock_image: Option<PathBuf>,
 }
+
+/// The lock's own pictures are kept under this and the output's name.
+const LOCK_KEY: &str = "lock:";
 
 /// The color grid's size.
 pub const GRID_W: usize = 32;
@@ -213,6 +231,7 @@ impl Server {
             pictures: HashMap::new(),
             requested: HashSet::new(),
             jobs: job_tx,
+            lock_image: None,
             grids: HashMap::new(),
             grid_gen: 0,
         };
@@ -236,15 +255,24 @@ impl Server {
     }
 
     fn wallpaper_done(&mut self, d: Done) {
-        let id = self.monitor_id(&d.output);
+        // The lock's own pictures are kept as "lock:<output>" and give no tint.
+        let lock = d.output.strip_prefix(LOCK_KEY).map(str::to_string);
+        let id = self.monitor_id(lock.as_deref().unwrap_or(&d.output));
         let Some(w) = self.wallpaper.as_mut() else { return };
+        let wanted = match (&lock, &w.lock_image) {
+            (Some(_), Some(image)) => WallpaperConfig { image: Some(image.clone()), ..w.config.for_monitor(&id) },
+            (Some(_), None) => return,
+            (None, _) => w.config.for_monitor(&id),
+        };
         // Drawn for a look this monitor no longer has: drop it.
-        if d.look != Look::of(&w.config.for_monitor(&id)) {
+        if d.look != Look::of(&wanted) {
             return;
         }
         match d.rgba {
             Some(rgba) => {
-                w.grids.insert(d.output.clone(), grid_of(&rgba, d.w, d.h));
+                if lock.is_none() {
+                    w.grids.insert(d.output.clone(), grid_of(&rgba, d.w, d.h));
+                }
                 let buffer = MemoryRenderBuffer::from_slice(
                     &rgba,
                     Fourcc::Abgr8888,
@@ -298,8 +326,41 @@ impl Server {
         logical: Size<i32, Logical>,
     ) -> Option<MemoryRenderBufferRenderElement<GlesRenderer>> {
         let id = self.monitor_id(output);
+        let config = self.wallpaper.as_ref()?.config.for_monitor(&id);
+        self.picture_element(renderer, output, config, px, logical)
+    }
+
+    /// What the lock draws behind itself: the login screen's picture when the
+    /// person chose that (Lock Screen page) and there is one, else their own.
+    pub fn lock_wallpaper_element(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        output: &str,
+        px: Size<i32, smithay::utils::Physical>,
+        logical: Size<i32, Logical>,
+    ) -> Option<MemoryRenderBufferRenderElement<GlesRenderer>> {
+        let id = self.monitor_id(output);
+        let w = self.wallpaper.as_ref()?;
+        match w.lock_image.clone() {
+            Some(image) => {
+                let config = WallpaperConfig { image: Some(image), ..w.config.for_monitor(&id) };
+                self.picture_element(renderer, &format!("{LOCK_KEY}{output}"), config, px, logical)
+            }
+            None => self.wallpaper_element(renderer, output, px, logical),
+        }
+    }
+
+    /// A picture drawn from `config` at the output's pixels, kept under `output`
+    /// (an output's name, or "lock:" and one for the lock's own).
+    fn picture_element(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        output: &str,
+        config: WallpaperConfig,
+        px: Size<i32, smithay::utils::Physical>,
+        logical: Size<i32, Logical>,
+    ) -> Option<MemoryRenderBufferRenderElement<GlesRenderer>> {
         let w = self.wallpaper.as_mut()?;
-        let config = w.config.for_monitor(&id);
         config.image.as_ref()?;
         let (pw, ph) = (px.w.max(1) as u32, px.h.max(1) as u32);
         let look = Look::of(&config);
@@ -339,8 +400,9 @@ impl Wallpaper {
         // The newest of the person's file and the layers under it, so a
         // changed default (a package update) is seen too.
         let mut mtime = vergence_config::modified_with(desktop_path().as_deref());
-        // The login screen: the administrator's chosen picture counts too.
-        let login_pick = if crate::greeter() { vergence_dm::paths::login_wallpaper() } else { None };
+        // The administrator's chosen login picture counts too: the login
+        // screen shows it, and the lock may (`[lock] wallpaper = "login"`).
+        let login_pick = vergence_dm::paths::login_wallpaper();
         if let Some(t) = login_pick.as_ref().and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok()) {
             mtime = Some(mtime.map_or(t, |m| m.max(t)));
         }
@@ -348,23 +410,33 @@ impl Wallpaper {
             return false;
         }
         self.mtime = mtime;
-        let config = Some(desktop_text())
-            .map(|t| match toml::from_str::<DesktopFile>(&t) {
-                Ok(f) => f.wallpaper,
-                Err(e) => {
-                    tracing::warn!("desktop.toml: {e}");
-                    self.config.clone()
-                }
-            })
-            .unwrap_or_default();
+        let (config, lock_login) = match toml::from_str::<DesktopFile>(&desktop_text()) {
+            Ok(f) => (f.wallpaper, f.lock.wallpaper.as_deref() == Some("login")),
+            Err(e) => {
+                tracing::warn!("desktop.toml: {e}");
+                (self.config.clone(), self.lock_image.is_some())
+            }
+        };
+        let lock_image = if lock_login { login_pick.clone() } else { None };
+        // Drawn again when it changes, and whenever something changed while
+        // it is the login picture: a newly chosen one may have the same name.
+        let lock_changed = lock_image != self.lock_image || lock_image.is_some();
+        if lock_changed {
+            if lock_image != self.lock_image {
+                tracing::info!("wallpaper: behind the lock {:?}", lock_image);
+            }
+            self.lock_image = lock_image;
+            self.pictures.retain(|k, _| !k.starts_with(LOCK_KEY));
+            self.requested.retain(|(k, ..)| !k.starts_with(LOCK_KEY));
+        }
         // The login screen's own picture, when an administrator chose one in
         // Settings > Login (defaults milestone 1, step 8): on every screen.
-        let config = match login_pick {
+        let config = match login_pick.filter(|_| crate::greeter()) {
             Some(p) => WallpaperConfig { image: Some(p), monitor: Vec::new(), ..config },
             None => config,
         };
         if config == self.config && self.generation > 0 {
-            return false;
+            return lock_changed;
         }
         tracing::info!("wallpaper: {:?} {} {}", config.image, config.mode, config.color);
         self.config = config;

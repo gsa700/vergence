@@ -55,6 +55,8 @@ pub enum LockMsg {
     /// its place in that list (defaults milestone 1, step 8).
     LoginWallpaper(usize),
     LoginWallpaperDefault,
+    /// Behind the lock: the login screen's picture (true) or my wallpaper.
+    LockShowsLogin(bool),
     /// The prompt's outcome came back (from the asking thread).
     Elevated(Result<String, String>),
 }
@@ -159,6 +161,13 @@ impl App {
                 }
             }
             LockMsg::LoginWallpaperDefault => self.elevate(vec!["login-wallpaper.default".into()]),
+            LockMsg::LockShowsLogin(login) => self.save_table("lock", |t| {
+                if login {
+                    t.insert("wallpaper".into(), "login".into());
+                } else {
+                    t.remove("wallpaper");
+                }
+            }),
             LockMsg::Elevated(r) => {
                 self.status = match r {
                     Ok(t) => format!("Done: {t}."),
@@ -195,6 +204,17 @@ impl App {
                         switch(before_sleep, |on| Message::Lock(LockMsg::BeforeSleep(on))).name("Lock before the machine sleeps"),
                     ),
                 ]),
+                // Behind the lock (defaults milestone 1, step 8): your own
+                // wallpaper, or the login screen's picture an administrator chose.
+                self.group(Some("Look"), vec![setting(
+                    "Picture behind the lock",
+                    if vergence_dm::paths::login_wallpaper().is_some() { "Your wallpaper, or the login screen's picture (Login page)." } else { "Your wallpaper. The login screen's picture can be shown once an administrator chooses one (Login page)." },
+                    choice(
+                        vec!["My wallpaper".to_string(), "The login screen's".to_string()],
+                        Some(usize::from(self.desktop.get("lock").and_then(|l| l.get("wallpaper")).and_then(|v| v.as_str()) == Some("login"))),
+                        |i| Message::Lock(LockMsg::LockShowsLogin(i == 1)),
+                    ).width(Length::Fixed(180.0)).name("Picture behind the lock"),
+                )]),
                 self.status_line(),
             ],
         )

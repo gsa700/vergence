@@ -769,7 +769,7 @@ impl Server {
             Kind::Unspecified,
         )));
         if let Some(mode) = output.current_mode()
-            && let Some(e) = self.wallpaper_element(renderer, &output.name(), mode.size, out.size)
+            && let Some(e) = self.lock_wallpaper_element(renderer, &output.name(), mode.size, out.size)
         {
             elements.push(SceneElement::Memory(e));
         }
