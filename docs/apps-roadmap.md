@@ -409,6 +409,13 @@ it is today:
 
 ## Vergence Music (Dave, 2026-11-21 night)
 
+**Its name stays AlbumWall** (Dave: "yes, keep AlbumWall"): the same wall
+and the same way of working, rebuilt underneath. Its desktop entry's
+generic name is "Music" (so the launcher finds it by that word, as Edit's
+keeps "Text Editor"); the program is `vergence-albumwall`, with settings of
+its own apart from the Avalonia AlbumWall's; About says "AlbumWall for
+Vergence". "Vergence Music" below is the working title of the milestone.
+
 **Decided:** AlbumWall becomes **Vergence Music**, a Vergence app in Rust on
 the toolkit and Hymie (vergence-hymie, ported in preview milestone 1), for
 Vergence only for now (Dave: "let's just develop Vergence Music for
