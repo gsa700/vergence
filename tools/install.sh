@@ -16,6 +16,7 @@
 #   bin/vergence-server, vergence-term, vergence-settings, vergence-calc, vergence-quit, vergence-hw, vergence-edit, vergence-closeup, vergence-reader, vergence-files, vergence-screenshot, vergence-open, vbus, vtile, vagent, vergence-agent-mcp, vnative, vsound, vshell, vctl   the programs
 #   bin/vergence-session                     the session launcher (tools/vergence-session)
 #   bin/vergence -> vergence-session         start the session from a text console
+#   sbin/vergence-setup                      the system setup, run once as root (install.sh runs it with --yes)
 #   share/wayland-sessions/vergence.desktop  "Vergence" at a display manager's login screen
 #   share/applications/vergence-*.desktop    the terminal, the settings app, the calculator, Force Quit, Hardware, the text editor, FileView and its Trash window (NoDisplay: the dock's icon only), for the shelf and any launcher
 #   share/icons/hicolor/scalable/apps/       their icons (data/icons, drawn by the project)
@@ -90,7 +91,7 @@ cursortheme=$destdir$prefix/share/icons/Vergence
 
 if [ -n "$uninstall" ]; then
     for p in $programs vctl vergence-session vergence; do rm -f "$bin/$p"; done
-    rm -f "$sbin/vdm"
+    rm -f "$sbin/vdm" "$sbin/vergence-setup"
     # vdm's PAM files and the login screen at boot (the service itself is the
     # init system's to stop: vdm will not start without its binary).
     if [ -z "$destdir" ]; then
@@ -257,6 +258,11 @@ install -m 755 "$release/vergence-hymie-aac" "$libexec/vergence-hymie-aac"
 [ -x "$release/vergence-pdf" ] || { echo "install.sh: $release/vergence-pdf is missing; run cargo build --release first" >&2; exit 1; }
 install -m 755 "$release/vergence-pdf" "$libexec/vergence-pdf"
 install -m 755 "$here/vergence-session" "$bin/vergence-session"
+# The system setup, run once as root after installing (packaging milestone 1):
+# a package enables nothing, this does, asking first; install.sh runs it with
+# --yes below.
+install -d -m 755 "$sbin"
+install -m 755 "$here/vergence-setup" "$sbin/vergence-setup"
 ln -sf vergence-session "$bin/vergence"
 tmp=$(mktemp)
 cat > "$tmp" <<DESKTOP
@@ -272,30 +278,12 @@ rm -f "$tmp"
 echo "installed $("$bin/vergence-server" --version 2>/dev/null || echo vergence) under $destdir$prefix"
 [ -n "$destdir" ] && exit 0
 
-# ---- system setup: the seat ----
-if [ -d /run/systemd/system ]; then
-    echo "seat: logind (systemd) manages the seat; nothing to enable"
-elif [ "$(uname -s)" = FreeBSD ]; then
-    command -v seatd >/dev/null || echo "seat: seatd is not installed (pkg install seatd)" >&2
-    sysrc seatd_enable=YES >/dev/null && service seatd start >/dev/null 2>&1 || true
-    echo "seat: seatd enabled in rc.conf and started"
-    group=video
-elif [ -d /etc/sv/seatd ]; then
-    [ -e /var/service/seatd ] || ln -s /etc/sv/seatd /var/service/seatd
-    echo "seat: seatd enabled (runit, /var/service/seatd)"
-    group=_seatd
-else
-    echo "seat: no logind and no known seatd service; enable seatd for your init system" >&2
-fi
-if [ -n "${group:-}" ]; then
-    if [ -z "$user" ]; then
-        echo "seat: add each user who runs Vergence to the $group group (--user NAME does it)"
-    elif id -Gn "$user" | tr ' ' '\n' | grep -qx "$group"; then
-        echo "seat: $user is in $group"
-    else
-        if [ "$(uname -s)" = FreeBSD ]; then pw groupmod "$group" -m "$user"; else usermod -aG "$group" "$user"; fi
-        echo "seat: $user added to $group (takes effect at the next login)"
-    fi
+# ---- system setup: the files vergence-setup's steps need ----
+# The seat's group where there is no logind (polkit's rule names it).
+group=
+if [ -d /run/systemd/system ]; then group=
+elif [ "$(uname -s)" = FreeBSD ]; then group=video
+elif [ -d /etc/sv/seatd ]; then group=_seatd
 fi
 # ---- system setup: _vdm, the greeter's account (VDM milestone 1, review I10) ----
 # (Before vdm starts: vdm looks for it once, when it starts.)
@@ -312,10 +300,6 @@ if ! id _vdm >/dev/null 2>&1; then
         useradd -r -M -d /var/empty -s "$(command -v nologin || echo /sbin/nologin)" -c "Vergence display manager (greeter)" _vdm
     fi
     echo "vdm: the greeter's account _vdm made (uid $(id -u _vdm))"
-fi
-if [ -n "${group:-}" ] && ! id -Gn _vdm | tr ' ' '\n' | grep -qx "$group"; then
-    if [ "$(uname -s)" = FreeBSD ]; then pw groupmod "$group" -m _vdm; else usermod -aG "$group" _vdm; fi
-    echo "vdm: _vdm may use the seat ($group)"
 fi
 # ---- system setup: vdm (VDM milestone 1) ----
 # Our own PAM service for unlocking (review I2): the system's usual password
@@ -397,11 +381,7 @@ fi
 # when it starts. Neither: left as it was.
 if [ "$(uname -s)" = FreeBSD ]; then vdm_state=/var/db/vdm; else vdm_state=/var/lib/vdm; fi
 mkdir -p "$vdm_state" && chmod 700 "$vdm_state"
-case $login_screen in
-    on) : > "$vdm_state/login-screen"; echo "vdm: the login screen starts at boot (VT 7 on Linux, VT 9 on FreeBSD; the text consoles stay, Ctrl+Alt+F1)" ;;
-    off) rm -f "$vdm_state/login-screen"; echo "vdm: no login screen at boot (log in on a console and run 'vergence')" ;;
-    *) [ -f "$vdm_state/login-screen" ] && echo "vdm: the login screen starts at boot (--no-vdm turns it off)" ;;
-esac
+# (--vdm / --no-vdm are passed on to vergence-setup, which sets it.)
 # The service, by init system; started now and at every boot. What to do
 # with a running vdm: leave it (unchanged), restart it (changed, no Vergence
 # session running), or leave it and say how (changed, sessions running).
@@ -421,40 +401,29 @@ if [ -d /run/systemd/system ]; then
     printf '%s\n' "[Unit]" "Description=VDM, the Vergence display manager" "After=systemd-user-sessions.service systemd-logind.service" "" "[Service]" \
         "ExecStart=$prefix/sbin/vdm" "Restart=always" "" "[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/vdm.service
     systemctl daemon-reload
-    systemctl enable vdm >/dev/null 2>&1 || true
-    case $vdm_do in
-        restart) systemctl restart vdm ;;
-        *) systemctl start vdm ;;
-    esac
+    # Enabled by vergence-setup (below); a changed vdm restarted here.
+    if [ "$vdm_do" = restart ] && systemctl is-active vdm >/dev/null 2>&1; then systemctl restart vdm; fi
     if [ "$vdm_do" = defer ]; then vdm_deferred "systemctl restart vdm"; fi
     # Before any sleep, every session locks (VDM step 2): systemd runs
     # system-sleep hooks with "pre" before the machine sleeps.
     printf '%s\n' "#!/bin/sh" "# vdm: lock every Vergence session before sleeping (tools/install.sh)" \
         'case "$1" in pre) exec '"$prefix"'/sbin/vdm before-sleep ;; esac' > /usr/lib/systemd/system-sleep/vdm
     chmod 755 /usr/lib/systemd/system-sleep/vdm
-    echo "vdm: enabled and started (systemd); sessions lock before sleep (system-sleep hook)"
+    echo "vdm: service written (systemd); sessions lock before sleep (system-sleep hook)"
 elif [ "$(uname -s)" = FreeBSD ]; then
     install -m 555 "$here/freebsd/vdm.rc" /usr/local/etc/rc.d/vdm
     sed -i '' "s|@PREFIX@|$prefix|g" /usr/local/etc/rc.d/vdm
-    sysrc vdm_enable=YES >/dev/null
-    case $vdm_do in
-        restart) service vdm restart >/dev/null 2>&1 || service vdm start >/dev/null 2>&1 || true ;;
-        *) service vdm status >/dev/null 2>&1 || service vdm start >/dev/null 2>&1 || true ;;
-    esac
+    # Enabled by vergence-setup (below); a changed vdm restarted here.
+    if [ "$vdm_do" = restart ] && service vdm status >/dev/null 2>&1; then service vdm restart >/dev/null 2>&1 || true; fi
     if [ "$vdm_do" = defer ]; then vdm_deferred "service vdm restart"; fi
-    echo "vdm: enabled in rc.conf and started"
+    echo "vdm: rc.d script written"
 elif [ -d /etc/sv ] && [ -d /var/service ]; then
     mkdir -p /etc/sv/vdm/log
     printf '%s\n' "#!/bin/sh" "exec 2>&1" "exec $prefix/sbin/vdm" > /etc/sv/vdm/run
     printf '%s\n' "#!/bin/sh" "exec vlogger -t vdm -p auth" > /etc/sv/vdm/log/run
     chmod 755 /etc/sv/vdm/run /etc/sv/vdm/log/run
-    if [ ! -e /var/service/vdm ]; then
-        ln -s /etc/sv/vdm /var/service/vdm
-    elif [ "$vdm_do" = restart ]; then
-        sv restart vdm >/dev/null 2>&1 || true
-    else
-        sv up vdm >/dev/null 2>&1 || true
-    fi
+    # Enabled by vergence-setup (below); a changed vdm restarted here.
+    if [ -e /var/service/vdm ] && [ "$vdm_do" = restart ]; then sv restart vdm >/dev/null 2>&1 || true; fi
     if [ "$vdm_do" = defer ]; then vdm_deferred "sv restart vdm"; fi
     # Before any sleep, every session locks (VDM step 2): zzz runs these first.
     if [ -d /etc/zzz.d/suspend ]; then
@@ -462,26 +431,9 @@ elif [ -d /etc/sv ] && [ -d /var/service ]; then
         chmod 755 /etc/zzz.d/suspend/50-vdm
         echo "vdm: sessions lock before sleep (/etc/zzz.d/suspend/50-vdm)"
     fi
-    echo "vdm: enabled and started (runit, /var/service/vdm)"
+    echo "vdm: service written (runit, /etc/sv/vdm)"
 else
     echo "vdm: no known init system; start $prefix/sbin/vdm as root at boot" >&2
-fi
-# ---- system setup: the power key (menus milestone 1) ----
-# While a Vergence session runs, vdm holds the power key from the system so
-# it opens the session dialog: logind's inhibitor on systemd and elogind,
-# hw.acpi.power_button_state on FreeBSD (both vdm's at run time). acpid
-# (Void without elogind) shuts down from its handler whatever runs, so the
-# handler is taught to leave the button alone while vdm's flag is there
-# (the original kept beside it, once).
-handler=/etc/acpi/handler.sh
-if [ -f "$handler" ] && ! grep -q 'vdm/power-key' "$handler"; then
-    if grep -q 'PowerButton pressed' "$handler"; then
-        [ -f "$handler.vergence-orig" ] || cp -p "$handler" "$handler.vergence-orig"
-        sed -i '/logger "PowerButton pressed/i\                [ -e /run/vdm/power-key ] \&\& { logger "PowerButton: the Vergence session asks"; exit 0; }' "$handler"
-        echo "power key: acpid leaves it to a running session ($handler; the original is $handler.vergence-orig)"
-    else
-        echo "power key: $handler not as expected; acpid still shuts down on it" >&2
-    fi
 fi
 # ---- system setup: removable drives (files milestone 1) ----
 # Linux: udisks2 mounts a drive plugged in when the session asks (the
@@ -516,13 +468,7 @@ if [ "$(uname -s)" = FreeBSD ]; then
     fi
     echo "drives: the automounter is enabled (rc.conf autofs_enable) and running; its cache 5 s (sysctl.conf)"
 elif command -v udisksctl >/dev/null || [ -x /usr/libexec/udisks2/udisksd ] || [ -x /usr/lib/udisks2/udisksd ]; then
-    echo "drives: udisks2 is installed; the session mounts drives through it"
-    # udisks2 is reached on the system bus, which a base Void does not run
-    # (the clean-system test, 2026-11-22: "udisks2: no system bus").
-    if [ -d /etc/sv/dbus ] && [ ! -e /var/service/dbus ]; then
-        ln -s /etc/sv/dbus /var/service/dbus
-        echo "drives: the system bus enabled (runit, /var/service/dbus); udisks2 is reached on it"
-    fi
+    # (The system bus and polkitd are enabled by vergence-setup.)
     # Without logind polkit cannot see who sits at the machine and udisks2
     # refuses every mount: a rule lets the seat group mount, eject and power
     # off removable drives (docs/packaging.md). polkitd runs as a service,
@@ -533,13 +479,7 @@ elif command -v udisksctl >/dev/null || [ -x /usr/libexec/udisks2/udisksd ] || [
         chmod 644 /etc/polkit-1/rules.d/50-vergence-drives.rules
         echo "drives: polkit lets the $group group mount removable drives (/etc/polkit-1/rules.d/50-vergence-drives.rules)"
         dbus-send --system --type=method_call --dest=org.freedesktop.DBus / org.freedesktop.DBus.ReloadConfig 2>/dev/null || true
-        if [ -d /etc/sv/polkitd ] && [ ! -e /var/service/polkitd ]; then
-            ln -s /etc/sv/polkitd /var/service/polkitd
-            echo "drives: polkitd enabled (runit, /var/service/polkitd)"
-        fi
     fi
-else
-    echo "drives: udisks2 is not installed, so drives plugged in are not mounted (Void: xbps-install udisks2 dbus)" >&2
 fi
 # ---- system setup: Wi-Fi (settings milestone 1, step 4) ----
 # wpa_supplicant is enabled where there is a Wi-Fi card and nothing else
@@ -571,59 +511,6 @@ elif [ "$(uname -s)" = FreeBSD ]; then
             echo "wifi: $dev already set up in rc.conf"
         fi
     fi
-else
-    cards=
-    for d in /sys/class/net/*; do
-        [ -d "$d/wireless" ] || [ -e "$d/phy80211" ] || continue
-        cards="$cards ${d##*/}"
-    done
-    if [ -z "$cards" ]; then
-        echo "wifi: no Wi-Fi card; nothing to enable"
-    elif [ -d /etc/sv/wpa_supplicant ]; then
-        conf=/etc/wpa_supplicant/wpa_supplicant.conf
-        [ -e "$conf" ] || { mkdir -p /etc/wpa_supplicant; : > "$conf"; chmod 600 "$conf"; }
-        grep -q '^ctrl_interface=' "$conf" || echo 'ctrl_interface=/run/wpa_supplicant' >> "$conf"
-        grep -q '^ctrl_interface_group=' "$conf" || echo 'ctrl_interface_group=wheel' >> "$conf"
-        grep -q '^update_config=' "$conf" || echo 'update_config=1' >> "$conf"
-        [ -e /var/service/wpa_supplicant ] || ln -s /etc/sv/wpa_supplicant /var/service/wpa_supplicant
-        echo "wifi: wpa_supplicant enabled (runit) for$cards; control socket for the wheel group"
-    else
-        echo "wifi: Wi-Fi card$cards: enable wpa_supplicant for your init system (ctrl_interface_group=wheel, update_config=1)" >&2
-    fi
-fi
-if [ -n "$user" ] && ! id -Gn "$user" | tr ' ' '\n' | grep -qx wheel; then
-    echo "wifi: $user is not in wheel, so the settings app cannot use Wi-Fi (add them to wheel to allow it)"
-fi
-# ---- system setup: a driver for every GPU (GPUs milestone 1) ----
-# A second GPU shows its screens with a renderer of its own; without that
-# GPU's own OpenGL, Mesa falls back to software on the CPU and its screens
-# are slow (a GTX 1650 in software: 40 to 77 ms a 4K frame). Mesa
-# runs nouveau's OpenGL through Zink, which needs NVK and the Vulkan loader.
-# Said here, not installed: they are the system's packages.
-if [ "$(uname -s)" = Linux ]; then
-    distro=$(. /etc/os-release 2>/dev/null; echo "${ID:-}")
-    for dev in /sys/class/drm/card[0-9]*/device; do
-        [ -e "$dev/driver" ] || continue
-        drv=$(basename "$(readlink "$dev/driver")")
-        case "$drv" in
-            nouveau)
-                icd=; lib=
-                for f in /usr/share/vulkan/icd.d/nouveau_icd*.json; do [ -e "$f" ] && icd=1; done
-                for f in /usr/lib/libvulkan.so.1 /usr/lib64/libvulkan.so.1 /usr/lib/*/libvulkan.so.1; do [ -e "$f" ] && lib=1; done
-                if [ -n "$icd" ] && [ -n "$lib" ]; then
-                    echo "gpu: NVIDIA (nouveau): OpenGL through Zink on NVK, on the GPU"
-                else
-                    case "$distro" in
-                        void) pkgs="mesa-vulkan-nouveau vulkan-loader (xbps-install)" ;;
-                        fedora) pkgs="mesa-vulkan-drivers vulkan-loader (dnf install)" ;;
-                        debian|ubuntu) pkgs="mesa-vulkan-drivers libvulkan1 (apt install)" ;;
-                        *) pkgs="Mesa's NVK Vulkan driver and the Vulkan loader" ;;
-                    esac
-                    echo "gpu: NVIDIA (nouveau) has no OpenGL of its own: screens on it would be drawn by the CPU. Install $pkgs" >&2
-                fi
-                ;;
-        esac
-    done
 fi
 # The desktop's icons (vergence-files --desktop) run the program they
 # started with until they are started again: stopped here, a server that
@@ -642,12 +529,10 @@ if [ -z "$destdir" ] && [ -n "$user" ] && command -v pgrep >/dev/null 2>&1; then
         fi
     fi
 fi
-# vdm logs through syslog; a base Void runs none, and its log is then lost.
-if [ -d /etc/sv ] && [ -d /var/service ] && ! ls /var/service | grep -q -E '^(socklog|syslog|rsyslog|metalog)'; then
-    echo "log: no syslog runs, so vdm's log is lost (Void: xbps-install socklog-void; enable socklog-unix and nanoklogd)" >&2
-fi
-if [ -f "$vdm_state/login-screen" ]; then
-    echo "start: choose Vergence at the login screen, or 'vergence' from a text console"
-else
-    echo "start: 'vergence' from a text console (for the login screen at boot: sudo tools/install.sh --vdm)"
-fi
+# The steps that turn things on (the seat, vdm, the login screen with --vdm,
+# drives, Wi-Fi, the power key, a system log), one copy of them, in
+# vergence-setup; install.sh asks nothing, as before.
+setup_args="--yes"
+[ -n "$user" ] && setup_args="$setup_args --user $user"
+[ -n "$login_screen" ] && setup_args="$setup_args --login-screen $login_screen"
+"$sbin/vergence-setup" $setup_args
