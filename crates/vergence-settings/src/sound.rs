@@ -51,7 +51,11 @@ impl App {
         let label_for = |o: &vergence_sound::Output| {
             // The system's name lives in Advanced, unless two outputs share a
             // name here: then it is how they are told apart.
-            if self.sound_outputs.iter().filter(|x| x.name == o.name).count() > 1 { o.detail.clone() } else { String::new() }
+            if self.sound_outputs.iter().filter(|x| x.name == o.name).count() > 1 {
+                o.detail.clone()
+            } else {
+                String::new()
+            }
         };
         if let Some(o) = self.sound_outputs.iter().find(|o| o.default) {
             let (vol_id, mute_id, tone_id) = (o.id.clone(), o.id.clone(), o.id.clone());

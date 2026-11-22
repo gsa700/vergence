@@ -18,7 +18,6 @@
 //! Rule: decoded bytes are untrusted (another X client may have written them); a bad blob is an
 //! [`Error`], never a panic.
 
-
 /// The desktop's fonts when settings.toml names none, as "Family Size" in
 /// points (text milestone 1, step 5): Vergence's own, which install.sh ships
 /// and registers with fontconfig. One copy, which the server publishes and
