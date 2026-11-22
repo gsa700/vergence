@@ -257,7 +257,7 @@ impl Peek {
                 let page_w = 720.0;
                 (page_w + STRIP_W + 3.0 * PAD, page_w * first.1 / first.0.max(1.0) + 2.0 * PAD)
             }
-            Shows::Sound(_) => (720.0, 2.0 * PAD + 160.0 + 12.0 + WAVE_H + 12.0 + 34.0),
+            Shows::Sound(_) => (720.0, 2.0 * PAD + 160.0 + 12.0 + WAVE_H + 12.0 + 46.0),
             Shows::Text(doc) => {
                 let lines = doc.borrow().buffer().line_count() as f32;
                 let line_h = self.theme.mono_size * 1.45;
@@ -350,11 +350,24 @@ impl Peek {
         .name("Waveform");
         let seconds = s.info.as_ref().map_or(0.0, |i| i.seconds());
         let now = s.info.as_ref().map_or(0.0, |i| at as f64 / i.rate.max(1) as f64);
-        let play = button(label(if s.playing { "Pause" } else { "Play" }).size(13.0)).on_press(Msg::PlayPause).name(if s.playing { "Pause" } else { "Play" });
+        // Play at the bottom, centered and large (Dave, 2026-11-21), the time
+        // played on its left and the length on its right.
+        let play = button(label(if s.playing { "Pause" } else { "Play" }).size(16.0).weight(600))
+            .look(vergence_widgets::ButtonLook::Accent)
+            .padding(vergence_widgets::Padding::hv(10.0, 36.0))
+            .on_press(Msg::PlayPause)
+            .name(if s.playing { "Pause" } else { "Play" });
         column(vec![
             row(vec![cover, column(words).spacing(4.0).width(Length::FILL)]).spacing(PAD).width(Length::FILL),
             wave,
-            row(vec![play, label(format!("{} / {}", clock(now), clock(seconds))).size(12.0).dim()]).spacing(PAD).align(vergence_widgets::Align::Center),
+            row(vec![
+                label(clock(now)).size(13.0).dim().width(Length::FILL),
+                play,
+                label(clock(seconds)).size(13.0).dim().align(vergence_widgets::Align::End).width(Length::FILL),
+            ])
+            .spacing(PAD)
+            .align(vergence_widgets::Align::Center)
+            .width(Length::FILL),
         ])
         .spacing(12.0)
         .width(Length::FILL)
