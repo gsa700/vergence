@@ -13,9 +13,9 @@
 //
 // The strip is drawn with the project's own drawing code: a scene
 // (vergence-scene) rendered by vergence-render's CPU renderer at each
-// screen's exact pixels, kept until something in it changes. It is the first
-// thing the server draws that way; title bars, the menu and notifications
-// follow when the server's compositing moves onto the renderer.
+// screen's exact pixels, kept until something in it changes, as the server's
+// other panels are (title bars, menus, notifications); the final compositing
+// is still Smithay's GLES renderer (see docs/borrowed-review.md).
 //
 // ~/.config/vergence/desktop.toml:
 //

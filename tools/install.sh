@@ -31,7 +31,7 @@
 #   libexec/vergence/vergence-hymie-aac      AAC sound files decoded apart (GPL, FAAD2's), confined the same way
 #   libexec/vergence/vergence-pdf            PDF documents read and drawn apart, confined the same way
 #   libexec/vergence/media-eject             FreeBSD only: the root helper that unmounts a drive
-#                                            under /media (setuid root, video group)
+#                                            under /media (setuid root, group vergence, mode 4750)
 #   /etc/autofs/special_vergence_media       FreeBSD only: the automounter's /media map (FAT
 #                                            drives writable by video; a special map, so it lists)
 #   libexec/vergence/sound-default           FreeBSD only: the root helper that sets the default

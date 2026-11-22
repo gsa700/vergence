@@ -14,8 +14,8 @@
 // physical the same way as the window's own position, so bar and content meet
 // without a seam.
 //
-// Every window that draws no frame of its own, ours (the terminal and the settings
-// app draw their own title bars) or a server-decorated one, also gets an EDGE-point
+// Every window that draws no frame of its own (native windows, whose bars the
+// server draws, and server-decorated Wayland and X11 ones) also gets an EDGE-point
 // border line and the same resize band: a small border makes resizing easier,
 // and a window looks wrong without one. A window whose
 // bounding box is larger than its geometry is drawing its own frame and shadow
