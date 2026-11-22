@@ -47,6 +47,51 @@ A feature for anyone who installs Vergence, not lab setup.
    the wallpaper and the pins), a fresh user on techbench end to end, kepler
    builds and tests.
 
+## Settings, page by page (Dave's first-login walk, 2026-11-22)
+
+Good as they are: Windows, Dock, Notifications, Screenshots, Apps, Default
+Apps, Keyboard and Mouse, Accessibility, Date & Time, Lock Screen, Session.
+
+7. **Theme and fonts shows nothing chosen.** The fonts are installed and in
+   use: the server falls back to `Inter Variable 10` and `JetBrains Mono 12`
+   (vergence-server settings.rs DEFAULT_FONT/DEFAULT_MONO) when
+   settings.toml names none, but a fresh account has no settings.toml and
+   the page reads blanks, so every list shows no choice. Fix: the page shows
+   the defaults the server uses (one shared constant, not two copies); the
+   GTK theme list always offers Adwaita (built into GTK, so no folder names
+   it; a base Void's /usr/share/themes has none with a GTK 3 part); icons and
+   pointer default to Adwaita.
+8. **Wallpapers live in the system's backgrounds folder**
+   (`$prefix/share/backgrounds/vergence`, which the Wallpaper page already
+   offers first), always there and updated with Vergence, not copied into
+   each home. Dave asked: Pictures/Wallpaper or a dot folder? Lean: the
+   system folder for ours, and `~/Pictures/Wallpaper` offered automatically
+   when it exists, for the user's own.
+9. **Screens: say what the scale ticks are.** The marked steps are the
+   sharp ones (whole divisions of the screen's pixels); say so on the page,
+   and mark the recommended one ("200% (recommended)").
+10. **Sound: calmer.** Show the device in use (output and input) with its
+    volume; the other devices under "Other devices", closed by default.
+11. **Agents: off by default?** Today on (desktop.toml `[agents] enabled`,
+    default true); every app still asks in a server-drawn dialog before an
+    agent may act. For off: a user who never uses agents never sees a
+    prompt, and a program can't use the dialogs to nag. For on: the first
+    use just works. Lean: off, and when an agent connects while it is off,
+    one notification ("An agent asked to use your apps; Privacy > Agents
+    turns it on"), not silence. No screen reader depends on it today (there
+    is no AT-SPI bridge yet); when one comes it gets its own switch.
+12. **Energy: no defaults at all today** (screens off and sleep both
+    "Never"), and sleep on Void needs a sudoers line for zzz that nobody
+    writes, so a new user's machine never sleeps. Lean: screens off after
+    10 minutes (5 on battery); sleep never on power, 30 minutes on battery;
+    and sleep through vdm (already root, already locking before sleep), so
+    no sudoers line.
+13. **Login: the login screen's wallpaper, and on the lock screen too.**
+    The roadmap's machine-wide login look, first part: Settings > Login
+    chooses the login screen's wallpaper (default: Vergence's default);
+    Lock Screen gets "Show: my wallpaper / the login screen's".
+14. **About: bling and the Hardware app** (later, not this milestone).
+
 ## Questions for Dave
 
 1. **Wallpapers: our own SVG abstracts (lean), or photographs** (which need
@@ -60,3 +105,8 @@ A feature for anyone who installs Vergence, not lab setup.
    install.sh offer to install it?
 5. Anything else from the first login that looked unfinished? This is
    the place to gather it.
+6. **Agents off by default** with one notification when asked (lean), or on?
+7. **Energy defaults** (lean: screens off 10 min, 5 on battery; sleep never
+   on power, 30 min on battery; sleep through vdm)?
+8. **Wallpaper folders** (lean: ours in the system folder, the user's
+   `~/Pictures/Wallpaper` offered when it exists)?
