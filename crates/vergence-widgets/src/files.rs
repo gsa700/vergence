@@ -1240,6 +1240,12 @@ pub fn ejectable(path: &Path) -> bool {
     table.iter().any(|m| m.at == path && network_kind(&m.kind)) || disks_of(&table).iter().any(|d| d == path)
 }
 
+/// Whether what is mounted at `path` is a disk image (a FreeBSD md device or
+/// a Linux loop device), not a drive: nothing to pull out once let go of.
+pub fn is_image_mount(path: &Path) -> bool {
+    mounts().iter().any(|m| m.at == path && (m.what.starts_with("/dev/md") || m.what.starts_with("/dev/loop")))
+}
+
 /// Whether an entry is a disk image FileView mounts (an ISO; files milestone 3).
 pub fn is_disk_image(e: &Entry) -> bool {
     !e.dir && e.mime == Some("application/x-cd-image")

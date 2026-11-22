@@ -1528,9 +1528,12 @@ impl Viewer {
             cmd::EJECT => {
                 if let Some(here) = self.here().filter(|_| self.here_ejectable()) {
                     let name = here.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let image = files::is_image_mount(&here);
                     match files::eject(&here) {
                         Ok(()) => {
-                            notify(&format!("Safe to remove “{name}”"), "The drive can be pulled out now.");
+                            if !image {
+                                notify(&format!("Safe to remove “{name}”"), "The drive can be pulled out now.");
+                            }
                             *self.ejectable.borrow_mut() = None;
                             if let Some(h) = files::home() {
                                 self.go(Showing::Folder(h));
@@ -1651,9 +1654,13 @@ impl Viewer {
                     && let Some(p) = item.path
                 {
                     let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let image = files::is_image_mount(&p);
                     match files::eject(&p) {
                         Ok(()) => {
-                            notify(&format!("Safe to remove “{name}”"), "It can be pulled out (or the image put away) now.");
+                            // A drive: safe to pull out; a disk image: put away, nothing to say.
+                            if !image {
+                                notify(&format!("Safe to remove “{name}”"), "The drive can be pulled out now.");
+                            }
                             *self.ejectable.borrow_mut() = None;
                             // Tabs showing it go home.
                             for t in self.tabs.iter_mut().filter(|t| t.dir().is_some_and(|d| d.starts_with(&p))) {

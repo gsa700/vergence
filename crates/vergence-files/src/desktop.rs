@@ -925,9 +925,13 @@ impl Program for Desktop {
                 let disks: Vec<Entry> = chosen.iter().filter(|e| self.fixed_of(e) == Some(Fixed::Volume)).cloned().collect();
                 for e in disks {
                     let name = self.fixed.get(&e.name).map(|(_, n)| n.clone()).unwrap_or_default();
+                    let image = files::is_image_mount(&e.path);
                     match files::eject(&e.path) {
                         Ok(()) => {
-                            crate::notify(&format!("Safe to remove “{name}”"), "The drive can be pulled out now.");
+                            // A disk image put away: nothing to pull out, nothing to say.
+                            if !image {
+                                crate::notify(&format!("Safe to remove “{name}”"), "The drive can be pulled out now.");
+                            }
                             self.ejected.insert(e.path.clone());
                         }
                         Err(why) => self.notice = Some(format!("“{name}” could not be ejected: {why}")),
