@@ -225,4 +225,14 @@ Close-Up).
   root-owned ISO. On Hubble a test against udisks mounted the ISO at
   /run/media/<user>/VTEST and ejected it, and FileView in a headless
   session mounted it from Enter into a tab with VTEST under Locations.
+- **Dave's notes after step 7, 2026-11-21:** the sidebar and the folder on
+  one page as Explorer's (the sidebar's gray card gone), a line between
+  them pulled to change the sidebar's width (`[files] sidebar-width`, 140
+  to 400; taken in window points, since the line moves as it is pulled: a
+  pull of 80 moved it 80); Medium rows 34 and Large 42 with marks 1.5 and
+  1.8 and names 13 and 14, as Finder's beside his screenshot; an eject
+  button at the end of a drive's or a disk image's row under Locations
+  (toolbar `Icon::Eject`), besides its right click's Eject. Checked in a
+  headless session on Hubble: the divider pulled; an ISO mounted, the
+  button shown, pressed: unmounted and the tab gone home.
 

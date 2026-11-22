@@ -556,6 +556,8 @@ enum Msg {
     SideGo(usize),
     SideMenu(usize),
     SideDrag(usize),
+    /// A disk's eject button in the sidebar (a drive, a disk image).
+    SideEject(usize),
     SideFold(sidebar::Section),
     /// The line between the sidebar and the folder pulled (its touch).
     SideGrip(vergence_widgets::Touch),
@@ -970,6 +972,8 @@ impl Viewer {
         let here = self.front_tab().and_then(|t| t.dir().map(Path::to_path_buf));
         let recent_here = self.front_tab().is_some_and(|t| t.showing == Showing::Recent);
         let folded = self.side_setup().folded;
+        // The disks that can be let go of (read once for the whole sidebar).
+        let ejectable: Vec<PathBuf> = self.locations().into_iter().filter_map(|p| p.path).filter(|p| files::ejectable(p)).collect();
         let mut rows: Vec<Element<Msg>> = Vec::new();
         for (i, line) in self.side_lines().into_iter().enumerate() {
             match line {
@@ -1003,7 +1007,20 @@ impl Viewer {
                     })
                     .width(Length::Fixed(18.0))
                     .height(Length::Fixed(18.0));
-                    let line = row(vec![mark, label(item.name.clone()).size(13.0).elide().width(Length::FILL)]).spacing(8.0).align(Align::Center).width(Length::FILL);
+                    let mut cells = vec![mark, label(item.name.clone()).size(13.0).elide().width(Length::FILL)];
+                    // A drive or a disk image: its eject button at the row's end, as Finder's.
+                    if sec == Section::Locations && item.path.as_deref().is_some_and(|p| ejectable.contains(&p.to_path_buf())) {
+                        cells.push(
+                            button(vergence_widgets::toolbar::icon(Icon::Eject, 13.0, false))
+                                .look(ButtonLook::Plain)
+                                .padding(Padding::all(0.0))
+                                .width(Length::Fixed(20.0))
+                                .height(Length::Fixed(20.0))
+                                .on_press(Msg::SideEject(i))
+                                .name(format!("Eject {}", item.name)),
+                        );
+                    }
+                    let line = row(cells).spacing(8.0).align(Align::Center).width(Length::FILL);
                     let mut b = button(line)
                         .look(if chosen { ButtonLook::Chosen } else { ButtonLook::Plain })
                         .padding(Padding::hv(0.0, 8.0))
@@ -2586,6 +2603,10 @@ impl Program for Viewer {
             Msg::PathTyped(s) => self.path_edit = Some(s),
             Msg::PathGo => self.path_go(),
             Msg::SideGo(i) => self.side_go(i),
+            Msg::SideEject(i) => {
+                self.side_target = self.side_lines().get(i).cloned();
+                return self.run(cmd::SIDE_EJECT, window);
+            }
             Msg::SideGrip(touch) => {
                 use vergence_widgets::Touch;
                 // In window points (the line moves as it is pulled).

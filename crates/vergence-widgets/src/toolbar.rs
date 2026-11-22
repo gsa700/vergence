@@ -45,6 +45,8 @@ pub enum Icon {
     PutBack,
     /// Remove for good: a cross.
     Remove,
+    /// Eject: a triangle over a bar (a drive or a disk image let go of).
+    Eject,
     /// Fit to the width (arrows out to the sides).
     FitWidth,
     /// One page at a time.
@@ -210,6 +212,12 @@ pub fn icon<M: 'static>(which: Icon, size: f32, dim: bool) -> Element<M> {
             Icon::Remove => {
                 line!((4.0, 4.0), (12.0, 12.0));
                 line!((12.0, 4.0), (4.0, 12.0));
+            }
+            Icon::Eject => {
+                line!((3.0, 10.0), (8.0, 4.0));
+                line!((8.0, 4.0), (13.0, 10.0));
+                line!((13.0, 10.0), (3.0, 10.0));
+                line!((3.0, 13.0), (13.0, 13.0));
             }
             Icon::FitWidth => {
                 line!((1.5, 8.0), (14.5, 8.0));
