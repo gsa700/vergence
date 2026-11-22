@@ -626,14 +626,16 @@ impl App for Terminal {
             }
         }
         // Panes whose program has ended go; a tab goes with its last pane, the window with its last tab.
-        while ended {
-            let gone = self.tabs.iter().enumerate().find_map(|(index, tab)| {
-                tab.panes.iter().find(|(_, s)| lock(&s.screen).exited).map(|(id, _)| (index, *id))
-            });
-            let Some((index, id)) = gone else { break };
-            self.close_pane(index, id, window);
-            if self.tabs.is_empty() {
-                return;
+        if ended {
+            loop {
+                let gone = self.tabs.iter().enumerate().find_map(|(index, tab)| {
+                    tab.panes.iter().find(|(_, s)| lock(&s.screen).exited).map(|(id, _)| (index, *id))
+                });
+                let Some((index, id)) = gone else { break };
+                self.close_pane(index, id, window);
+                if self.tabs.is_empty() {
+                    return;
+                }
             }
         }
     }
