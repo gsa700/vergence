@@ -320,6 +320,14 @@ impl Server {
                 Err(e) => e,
             },
             "session" => self.session_report(),
+            // The drive list as the bus topic `Drives` has it (drives.rs).
+            "drives" => {
+                if self.drives.list.is_empty() {
+                    "no drives".into()
+                } else {
+                    self.drives.list.iter().map(|d| format!("{}\t{:?}\t{}\t{}\t{}\t{}", d.path, d.kind, if d.mounted { "mounted" } else { "not mounted" }, if d.ejectable { "ejectable" } else { "fixed" }, d.device, d.name)).collect::<Vec<_>>().join("\n")
+                }
+            }
             "apps" => self.launcher_report(),
             // A finger: `touch down|move <x> <y> [finger]`, `touch up [finger]`; alone, a report.
             "touch" => {
@@ -674,7 +682,7 @@ impl Server {
                 self.loop_signal.stop();
                 "quitting".into()
             }
-            _ => "commands: shot, windows, gpus, shelf, tiles, actions, action <id or name>, session, apps, key <name> (chords: ctrl+v), type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, scale [<screen> <scale>|reset], screen [add|remove], focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
+            _ => "commands: shot, windows, gpus, shelf, tiles, actions, action <id or name>, session, drives, apps, key <name> (chords: ctrl+v), type <text>, touch, dbus, notes, spawn <cmd>, move <i> <x> <y>, scale [<screen> <scale>|reset], screen [add|remove], focus <i>, pointer <x> <y>, press|release [left|right|middle], restart, quit".into(),
         }
     }
 

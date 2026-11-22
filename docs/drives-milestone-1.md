@@ -1,7 +1,8 @@
 # Drives milestone 1: one drive list, kept by the server
 
-Status: **planned 2026-11-21**, waiting for Dave's answers to the questions
-at the end. Decided (Dave, 2026-11-21): "2, and restart the desktop on
+Status: **answered 2026-11-21** (Dave: "yes to all three, go ahead":
+internal file systems shown, plugged-in drives not yet mounted shown, the
+server's one "Safe to remove"); building. Decided (Dave, 2026-11-21): "2, and restart the desktop on
 install". The second half was done the same evening: the server keeps the
 desktop's icons running, and tools/install.sh restarts them.
 

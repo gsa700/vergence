@@ -355,12 +355,18 @@ impl Server {
                         let m = self.bus_inputs();
                         self.bus_send(id, m);
                     }
+                    Topic::Drives => {
+                        let m = self.bus_drives();
+                        self.bus_send(id, m);
+                    }
                 }
             }
             ClientMsg::Unsubscribe { serial, topic } => {
                 c.topics.remove(&topic);
                 self.bus_send(id, ServerMsg::Done { serial });
             }
+            // A drive ejected or mounted, a disk image mounted (drives.rs, bus v34).
+            ClientMsg::Drive { serial, action, path } => self.drive_action(id, serial, action, path),
             // Windows on the native protocol (native milestone 1, native.rs).
             ClientMsg::Window(req) => self.native_request(id, req),
             // The agent interface (meaning milestone 1, step 3; meaning.rs).

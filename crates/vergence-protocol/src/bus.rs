@@ -64,11 +64,13 @@
 //! Version 31 (display lists step 6): `window::WinEvent::ScenesOff`, the server stops drawing a window's scenes.
 //! Version 32 (screenshots milestone 1): `ClientMsg::ScreenshotBar`, the Screenshot app opens the bar.
 //! Version 33 (session milestone 1): `window::WinEvent::SessionEnding`, the close that follows is the session's.
+//! Version 34 (drives milestone 1): [`Topic::Drives`], the drive list kept by the server;
+//! `ClientMsg::Drive` (eject, mount, mount a disk image), `ServerMsg::DriveDone`.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 33;
+pub const VERSION: u32 = 34;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -82,6 +84,9 @@ pub enum Topic {
     /// The input devices: on subscribe, then whenever one comes or goes or
     /// a kind is seen for the first time.
     Inputs,
+    /// The drives (drives milestone 1): every drive, disk image and network
+    /// mount the server knows, on subscribe and whenever the list changes.
+    Drives,
 }
 
 impl Topic {
@@ -90,6 +95,7 @@ impl Topic {
             Topic::Outputs => 1,
             Topic::Settings => 2,
             Topic::Inputs => 3,
+            Topic::Drives => 4,
         }
     }
 
@@ -98,6 +104,7 @@ impl Topic {
             1 => Some(Topic::Outputs),
             2 => Some(Topic::Settings),
             3 => Some(Topic::Inputs),
+            4 => Some(Topic::Drives),
             _ => None,
         }
     }
@@ -107,6 +114,7 @@ impl Topic {
             Topic::Outputs => "outputs",
             Topic::Settings => "settings",
             Topic::Inputs => "inputs",
+            Topic::Drives => "drives",
         }
     }
 
@@ -115,6 +123,88 @@ impl Topic {
             "outputs" => Some(Topic::Outputs),
             "settings" => Some(Topic::Settings),
             "inputs" => Some(Topic::Inputs),
+            "drives" => Some(Topic::Drives),
+            _ => None,
+        }
+    }
+}
+
+/// What a drive is (drives milestone 1). Values are fixed on the wire; a kind
+/// from a newer server is `Internal`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DriveKind {
+    /// A USB stick, a card, a disk plugged in.
+    Removable,
+    /// A disc (CD, DVD).
+    Optical,
+    /// A disk image mounted (an ISO).
+    Image,
+    /// A file system reached over the network.
+    Network,
+    /// A disk of the machine's own, mounted where drives are.
+    Internal,
+}
+
+impl DriveKind {
+    pub fn to_wire(self) -> u8 {
+        match self {
+            DriveKind::Removable => 1,
+            DriveKind::Optical => 2,
+            DriveKind::Image => 3,
+            DriveKind::Network => 4,
+            DriveKind::Internal => 5,
+        }
+    }
+
+    pub fn from_wire(v: u8) -> DriveKind {
+        match v {
+            1 => DriveKind::Removable,
+            2 => DriveKind::Optical,
+            3 => DriveKind::Image,
+            4 => DriveKind::Network,
+            _ => DriveKind::Internal,
+        }
+    }
+}
+
+/// One drive as the server lists it: its name, where it is (its mount
+/// point, or where the automounter lists it), what it is, whether it is
+/// mounted now, whether it can be ejected, and its device.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DriveInfo {
+    pub name: String,
+    pub path: String,
+    pub kind: DriveKind,
+    pub mounted: bool,
+    pub ejectable: bool,
+    pub device: String,
+}
+
+/// What a client asks the server to do with a drive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriveAction {
+    /// Let go of it (unmount; power off where the system can).
+    Eject,
+    /// Mount a drive the automounter lists but has not mounted.
+    Mount,
+    /// Mount the disk image at the path (read-only).
+    MountImage,
+}
+
+impl DriveAction {
+    fn to_wire(self) -> u8 {
+        match self {
+            DriveAction::Eject => 1,
+            DriveAction::Mount => 2,
+            DriveAction::MountImage => 3,
+        }
+    }
+
+    fn from_wire(v: u8) -> Option<DriveAction> {
+        match v {
+            1 => Some(DriveAction::Eject),
+            2 => Some(DriveAction::Mount),
+            3 => Some(DriveAction::MountImage),
             _ => None,
         }
     }
@@ -355,6 +445,10 @@ pub enum ClientMsg {
     /// pointer (bus v32; the Screenshot app). Reply: Done, or an error
     /// (locked, at the login screen).
     ScreenshotBar { serial: u32 },
+    /// Do something with a drive (bus v34): eject or mount the one at
+    /// `path`, or mount the disk image at `path`. Reply: DriveDone (where it
+    /// is mounted, for a mount), or an error saying why not.
+    Drive { serial: u32, action: DriveAction, path: String },
     /// Windows (window.rs).
     Window(crate::window::WinRequest),
     /// An agent's request (agent.rs; meaning milestone 1, step 3).
@@ -425,6 +519,11 @@ pub enum ServerMsg {
     /// The input devices present, and every kind this machine has had
     /// (remembered by the server across sessions): an event (serial 0).
     Inputs { serial: u32, devices: Vec<InputInfo>, seen: Vec<InputKind> },
+    /// The drives (bus v34): an event (serial 0) on subscribe and whenever
+    /// the list changes.
+    Drives { serial: u32, drives: Vec<DriveInfo> },
+    /// A drive action done: where the drive or image is mounted (empty for an eject).
+    DriveDone { serial: u32, path: String },
     /// The apps window memory keeps places for (their class) and how many places each.
     Places { serial: u32, apps: Vec<(String, u32)> },
     /// The agents' grants (bus v27).
@@ -470,6 +569,7 @@ mod op {
     pub const LIST_GRANTS: u16 = 17;
     pub const REVOKE_GRANTS: u16 = 18;
     pub const SCREENSHOT_BAR: u16 = 19;
+    pub const DRIVE: u16 = 20;
     // Server to client.
     pub const WELCOME: u16 = 1;
     pub const PONG: u16 = 2;
@@ -489,6 +589,8 @@ mod op {
     pub const TILE_CLICKED: u16 = 16;
     pub const TILE_ACTION: u16 = 17;
     pub const GRANTS: u16 = 18;
+    pub const DRIVES: u16 = 19;
+    pub const DRIVE_DONE: u16 = 20;
 }
 
 fn put_setting_value(e: &mut Encoder, v: &SettingValue) {
@@ -600,6 +702,11 @@ impl ClientMsg {
             ClientMsg::ScreenshotBar { serial } => {
                 let mut e = Encoder::frame(op::SCREENSHOT_BAR);
                 e.u32(*serial);
+                e
+            }
+            ClientMsg::Drive { serial, action, path } => {
+                let mut e = Encoder::frame(op::DRIVE);
+                e.u32(*serial).u8(action.to_wire()).str(path);
                 e
             }
             ClientMsg::ForceQuit { serial, app } => {
@@ -724,6 +831,12 @@ impl ClientMsg {
             }
             op::LIST_APPS => Ok(ClientMsg::ListApps { serial: d.u32().map_err(|e| bad(0, e))? }),
             op::SCREENSHOT_BAR => Ok(ClientMsg::ScreenshotBar { serial: d.u32().map_err(|e| bad(0, e))? }),
+            op::DRIVE => {
+                let serial = d.u32().map_err(|e| bad(0, e))?;
+                let action = DriveAction::from_wire(d.u8().map_err(|e| bad(serial, e))?).ok_or_else(|| bad(serial, WireError::BadValue("drive action")))?;
+                let path = d.str().map_err(|e| bad(serial, e))?;
+                Ok(ClientMsg::Drive { serial, action, path })
+            }
             op::FORCE_QUIT => {
                 let serial = d.u32().map_err(|e| bad(0, e))?;
                 let app = d.str().map_err(|e| bad(serial, e))?;
@@ -866,6 +979,19 @@ impl ServerMsg {
                 }
                 e
             }
+            ServerMsg::Drives { serial, drives } => {
+                let mut e = Encoder::frame(op::DRIVES);
+                e.u32(*serial).count(drives.len());
+                for d in drives {
+                    e.str(&d.name).str(&d.path).u8(d.kind.to_wire()).bool(d.mounted).bool(d.ejectable).str(&d.device);
+                }
+                e
+            }
+            ServerMsg::DriveDone { serial, path } => {
+                let mut e = Encoder::frame(op::DRIVE_DONE);
+                e.u32(*serial).str(path);
+                e
+            }
             ServerMsg::Inputs { serial, devices, seen } => {
                 let mut e = Encoder::frame(op::INPUTS);
                 e.u32(*serial).count(devices.len());
@@ -1001,6 +1127,17 @@ impl ServerMsg {
                 }
                 ServerMsg::Grants { serial, grants }
             }
+            op::DRIVES => {
+                let serial = d.u32()?;
+                // Each drive: three strings (4 bytes at least each), a kind, two flags.
+                let n = d.count(15)?;
+                let mut drives = Vec::with_capacity(n);
+                for _ in 0..n {
+                    drives.push(DriveInfo { name: d.str()?, path: d.str()?, kind: DriveKind::from_wire(d.u8()?), mounted: d.bool()?, ejectable: d.bool()?, device: d.str()? });
+                }
+                ServerMsg::Drives { serial, drives }
+            }
+            op::DRIVE_DONE => ServerMsg::DriveDone { serial: d.u32()?, path: d.str()? },
             op::INPUTS => {
                 let serial = d.u32()?;
                 // Each device: a string (4 bytes at least) and its kind.
@@ -1110,6 +1247,8 @@ mod tests {
             ClientMsg::ListApps { serial: 22 },
             ClientMsg::ForceQuit { serial: 23, app: "firefox".into() },
             ClientMsg::ScreenshotBar { serial: 24 },
+            ClientMsg::Drive { serial: 25, action: DriveAction::Eject, path: "/media/USB".into() },
+            ClientMsg::Drive { serial: 26, action: DriveAction::MountImage, path: "/home/d/Downloads/Fedora 45.iso".into() },
             ClientMsg::Alive { serial: 25 },
             ClientMsg::Open { serial: 26, items: vec!["/home/u/a b.png".into(), "https://example.org".into()], app: String::new() },
             ClientMsg::Open { serial: 27, items: vec![], app: "firefox.desktop".into() },
@@ -1144,6 +1283,8 @@ mod tests {
                 seen: vec![InputKind::Keyboard, InputKind::Touchpad, InputKind::Touchscreen],
             },
             ServerMsg::Inputs { serial: 0, devices: Vec::new(), seen: Vec::new() },
+            ServerMsg::Drives { serial: 0, drives: vec![DriveInfo { name: "USB".into(), path: "/media/USB".into(), kind: DriveKind::Removable, mounted: false, ejectable: true, device: "/dev/msdosfs/USB".into() }, DriveInfo { name: "Fedora".into(), path: "/mnt/Fedora".into(), kind: DriveKind::Image, mounted: true, ejectable: true, device: "/dev/md0".into() }] },
+            ServerMsg::DriveDone { serial: 9, path: "/mnt/Fedora".into() },
             ServerMsg::Places { serial: 20, apps: vec![("vergence-term".into(), 3), ("firefox".into(), 1)] },
             ServerMsg::Places { serial: 21, apps: Vec::new() },
             ServerMsg::Grants { serial: 40, grants: vec![Grant { agent: "Claude".into(), program: "/usr/local/bin/vergence-agent-mcp".into(), app: "vergence-calc".into(), shown: "Calculator".into(), span: "timed".into(), minutes_left: 42, working: true }] },

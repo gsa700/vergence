@@ -214,6 +214,8 @@ pub struct Server {
     pub touch_panels: Vec<String>,
     /// The input devices and the kinds this machine has had (inputs.rs).
     pub inputs: crate::inputs::Inputs,
+    /// The drive list (drives.rs; drives milestone 1).
+    pub drives: crate::drives::Drives,
     /// The "no network cable" notification while it is shown (network.rs).
     pub network_note: Option<u32>,
     /// Every GPU on the seat as probed at start (gpus.rs; `vctl gpus`).
@@ -393,6 +395,7 @@ impl Server {
             keyboard_devices: Vec::new(),
             touch_panels: Vec::new(),
             inputs: Default::default(),
+            drives: Default::default(),
             network_note: None,
             gpus: Vec::new(),
             touch: Default::default(),

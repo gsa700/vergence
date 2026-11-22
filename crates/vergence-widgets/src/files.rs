@@ -1081,163 +1081,17 @@ pub fn text_start(p: &Path) -> Option<String> {
     Some(s)
 }
 
-/// One line of the system's mount table: what is mounted, where, and its
-/// file system's type.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Mount {
-    pub what: String,
-    pub at: PathBuf,
-    pub kind: String,
-}
-
-/// A mount table's text read: Linux /proc/self/mounts, or FreeBSD's
-/// `mount -p` (fstab's form); the same columns. Octal escapes (\040 a
-/// space) undone.
-pub fn parse_mounts(text: &str) -> Vec<Mount> {
-    let unescape = |s: &str| -> String {
-        let b = s.as_bytes();
-        let mut out = Vec::with_capacity(b.len());
-        let mut i = 0;
-        while i < b.len() {
-            if b[i] == b'\\' && i + 3 < b.len() && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c)) {
-                out.push(((b[i + 1] - b'0') << 6) | ((b[i + 2] - b'0') << 3) | (b[i + 3] - b'0'));
-                i += 4;
-            } else {
-                out.push(b[i]);
-                i += 1;
-            }
-        }
-        String::from_utf8_lossy(&out).into_owned()
-    };
-    text.lines()
-        .filter_map(|l| {
-            let mut f = l.split_whitespace();
-            let mut what = f.next()?.to_string();
-            // FreeBSD's automounter: "map -media  /media  autofs ..." (a space in the first field).
-            if what == "map" {
-                what = format!("map {}", f.next()?);
-            }
-            let (at, kind) = (f.next()?, f.next()?);
-            (!what.starts_with('#')).then(|| Mount { what: unescape(&what), at: PathBuf::from(unescape(at)), kind: kind.to_string() })
-        })
-        .collect()
-}
-
-/// The system's mounts now.
-pub fn mounts() -> Vec<Mount> {
-    let text = fs::read_to_string("/proc/self/mounts").ok().or_else(|| {
-        // FreeBSD: mount -p prints the table in fstab's form. By its full
-        // path: a session's PATH has no /sbin (found on techbench 2026-11-19:
-        // no drive ever showed on the desktop or in FileView), and a PATH
-        // is not a thing to trust for a system tool anyway.
-        let mount = if Path::new("/sbin/mount").exists() { "/sbin/mount" } else { "mount" };
-        std::process::Command::new(mount).arg("-p").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-    });
-    parse_mounts(&text.unwrap_or_default())
-}
-
-/// Whether a file system type is one reached over the network (NFS, SMB,
-/// sshfs and other FUSE network file systems, WebDAV).
-pub fn network_kind(kind: &str) -> bool {
-    matches!(kind, "nfs" | "nfs4" | "cifs" | "smb3" | "smbfs" | "davfs" | "9p" | "afs") || ["fuse.sshfs", "fusefs.sshfs", "fuse.rclone", "fusefs.rclone", "fuse.gvfsd-fuse"].contains(&kind)
-}
-
-/// Disks mounted where removable and extra disks go (network mounts aside).
-pub fn mounted_disks() -> Vec<PathBuf> {
-    disks_of(&mounts())
-}
-
-fn disks_of(table: &[Mount]) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = table
-        .iter()
-        .filter(|m| !network_kind(&m.kind) && m.kind != "autofs")
-        .map(|m| m.at.clone())
-        .filter(|m| {
-            let s = m.to_string_lossy();
-            ["/media/", "/mnt/", "/run/media/"].iter().any(|p| s.starts_with(p)) || s == "/mnt"
-        })
-        .collect();
-    // FreeBSD's automounter (vergence-media; install.sh): /media lists the
-    // drives plugged in before they are mounted (looking into one mounts it).
-    if table.iter().any(|m| m.at == Path::new("/media") && m.kind == "autofs")
-        && let Ok(rd) = fs::read_dir("/media")
-    {
-        // A name stays listed after its drive is pulled out: kept only while
-        // it is mounted or its device is there (by name, or by its label),
-        // and not while it is a drive ejected and still plugged in (the
-        // same device node as when it was ejected: FreeBSD does not power
-        // a stick off; Dave, 2026-11-21, an ejected stick stayed listed).
-        let mounted: Vec<&Path> = table.iter().map(|m| m.at.as_path()).collect();
-        let ejected = ejected_now();
-        out.extend(rd.flatten().map(|e| e.path()).filter(|p| {
-            if mounted.contains(&p.as_path()) {
-                return true;
-            }
-            let Some(name) = p.file_name() else { return false };
-            match device_of(name) {
-                Some(node) => !ejected.iter().any(|(n, ino)| n.as_os_str() == name && Some(*ino) == node_ino(&node)),
-                None => false,
-            }
-        }));
-    }
-    out.sort();
-    out.dedup();
-    out
-}
-
-/// The device node of a drive the automounter lists under /media by
-/// `name` (by name, or by its label), if it is there.
-fn device_of(name: &std::ffi::OsStr) -> Option<PathBuf> {
-    std::iter::once(PathBuf::from("/dev").join(name)).chain(["msdosfs", "ufs", "ext2fs", "ntfs", "exfat", "iso9660", "label", "gpt"].iter().map(|d| PathBuf::from("/dev").join(d).join(name))).find(|p| p.exists())
-}
-
-fn node_ino(p: &Path) -> Option<u64> {
-    use std::os::unix::fs::MetadataExt;
-    fs::metadata(p).ok().map(|m| m.ino())
-}
-
-/// ~/.local/state/vergence/ejected: drives ejected (their /media name and
-/// device node's inode), hidden while that node is there; plugged in again,
-/// a drive has a new node and shows.
-fn ejected_file() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| home().map(|h| h.join(".local/state")))?;
-    Some(base.join("vergence/ejected"))
-}
-
-fn ejected_now() -> Vec<(PathBuf, u64)> {
-    let text = ejected_file().and_then(|p| fs::read_to_string(p).ok()).unwrap_or_default();
-    text.lines().filter_map(|l| l.split_once('\t')).filter_map(|(n, i)| Some((PathBuf::from(n), i.parse().ok()?))).collect()
-}
-
-/// Notes a drive under /media as ejected (its device node now), so the lists
-/// leave it out until it is plugged in again.
-fn note_ejected(path: &Path) {
-    let (Some(name), Some(file)) = (path.strip_prefix("/media").ok().and_then(|n| n.file_name()), ejected_file()) else { return };
-    let Some(ino) = device_of(name).and_then(|d| node_ino(&d)) else { return };
-    let mut all = ejected_now();
-    all.retain(|(n, _)| n.as_os_str() != name);
-    all.push((PathBuf::from(name), ino));
-    let keep = all.len().saturating_sub(32);
-    let text: String = all[keep..].iter().map(|(n, i)| format!("{}\t{i}\n", n.to_string_lossy().replace(['\t', '\n'], " "))).collect();
-    if let Some(d) = file.parent() {
-        let _ = fs::create_dir_all(d);
-    }
-    let _ = fs::write(file, text);
-}
-
-/// What the system has mounted over the network, anywhere (files
-/// milestone 1, step 10: shown under Network in the sidebar).
-pub fn network_mounts() -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = mounts().into_iter().filter(|m| network_kind(&m.kind)).map(|m| m.at).collect();
-    out.sort();
-    out.dedup();
-    out
-}
+// The mount table and the drives found in it live in vergence-media
+// (drives.rs), shared with the server, which keeps the drive list for every
+// app since drives milestone 1; these are its names here.
+pub use vergence_media::drives::{Mount, mounted_disks, mounts, network_kind, network_mounts, parse_mounts};
+#[cfg(test)]
+use vergence_media::drives::disks_of;
 
 /// Whether a folder is a disk or network mount that Eject can let go of.
 pub fn ejectable(path: &Path) -> bool {
     let table = mounts();
-    table.iter().any(|m| m.at == path && network_kind(&m.kind)) || disks_of(&table).iter().any(|d| d == path)
+    table.iter().any(|m| m.at == path && network_kind(&m.kind)) || vergence_media::drives::disks_of(&table).iter().any(|d| d == path)
 }
 
 /// Whether what is mounted at `path` is a disk image (a FreeBSD md device or
@@ -1267,7 +1121,7 @@ pub fn eject(path: &Path) -> Result<(), String> {
     if vergence_media::eject(path)? {
         // FreeBSD leaves the stick plugged in and listed: noted, so it is not.
         if path.starts_with("/media/") {
-            note_ejected(path);
+            vergence_media::drives::note_ejected(path);
         }
         return Ok(());
     }

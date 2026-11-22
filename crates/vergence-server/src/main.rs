@@ -2,6 +2,7 @@
 #![allow(irrefutable_let_patterns)]
 
 mod capture;
+mod drives;
 mod portal_shot;
 mod handlers;
 
@@ -145,6 +146,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !greeter() {
         // The session bus (bus.rs); sets VERGENCE_BUS for everything started after it.
         crate::bus::listen(&mut state);
+        // The drive list, for the bus topic `Drives` (drives.rs).
+        state.drives_start();
         // The D-Bus edge (dbus.rs); sets DBUS_SESSION_BUS_ADDRESS unless one is set.
         crate::dbus::listen(&mut state);
     }

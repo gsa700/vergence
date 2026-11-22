@@ -5,6 +5,8 @@
 //   vbus outputs              the monitors, once
 //   vbus settings             the desktop settings, once
 //   vbus watch <topic>        subscribe and print every event (Ctrl+C ends)
+//   vbus drive eject|mount|image <path>
+//                             eject or mount a drive, mount a disk image (bus v34)
 //   vbus notify <summary> [body] [--critical] [--action key=Label]...
 //                             show a notification and wait until it closes
 //
@@ -59,9 +61,23 @@ fn run(socket: Option<std::path::PathBuf>, args: &[String]) -> Result<(), Box<dy
             ServerMsg::Settings { settings, .. } => print_settings(&settings),
             other => return Err(format!("unexpected {other:?}").into()),
         },
+        Some("drive") => {
+            use vergence_protocol::bus::DriveAction;
+            let action = match args.get(1).map(String::as_str) {
+                Some("eject") => DriveAction::Eject,
+                Some("mount") => DriveAction::Mount,
+                Some("image") => DriveAction::MountImage,
+                _ => return Err("vbus drive eject|mount|image <path>".into()),
+            };
+            let path = args.get(2).cloned().ok_or("vbus drive eject|mount|image <path>")?;
+            match c.request(|serial| ClientMsg::Drive { serial, action, path })? {
+                ServerMsg::DriveDone { path, .. } => println!("done{}", if path.is_empty() { String::new() } else { format!(": {path}") }),
+                other => println!("{other:?}"),
+            }
+        }
         Some("watch") => {
             let name = args.get(1).map(String::as_str).unwrap_or("");
-            let topic = Topic::from_name(name).ok_or_else(|| format!("no topic {name:?} (topics: outputs, settings, inputs)"))?;
+            let topic = Topic::from_name(name).ok_or_else(|| format!("no topic {name:?} (topics: outputs, settings, inputs, drives)"))?;
             c.request(|serial| ClientMsg::Subscribe { serial, topic })?;
             loop {
                 match c.next_event()? {

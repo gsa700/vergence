@@ -14,6 +14,7 @@
 
 use std::time::Duration;
 
+pub mod drives;
 #[cfg(target_os = "linux")]
 mod udisks;
 #[cfg(target_os = "freebsd")]
