@@ -1,5 +1,7 @@
 # Packaging milestone 1: the xbps package for Void
 
+**CLOSED 2026-11-22.** The `vergence` package builds on Hubble (xbps-src, revision 4), installs, updates and removes cleanly on techbench, which now runs from it; `vergence-setup` does the system setup (and `--undo` before removal); two independent reviews, all findings fixed or answered (e5e0288). What remains is publishing, after going public: a release tarball and its checksum, a signed repository, the template offered to void-packages (with a maintainer address Dave chooses).
+
 *Drafted 2026-11-22.* Dave chose it next, after the platform decision (Void
 first, docs/release-pathway.md §1.1) and the first clean install on
 techbench. The package is the base the rest stands on: `xbps-install
@@ -119,3 +121,15 @@ the build machine's copy of the template.
   `/var/service/vdm` link (the person's), an empty
   `/usr/share/icons/Vergence` (the icon-cache trigger), acpid's added line.
   Reinstalled at once, clean; update 2 to 3 showed no message.
+- Independent review of the template and vergence-setup: H1 (uninstall
+  removing the package's PAM files), M1 (_vdm out of polkit's drive rule),
+  M2 (vergence-setup --undo), M3 (nocross), lows and nits fixed (e5e0288,
+  revision 4). Its claim that removing the package ends every session did
+  not hold on techbench: runsvdir keeps a service whose folder went while
+  its link stays. Open, low: a stale /run/vdm/power-key after vdm is killed
+  and not restarted makes acpid ignore the power key until a reboot (L3).
+- Revision 4 on techbench: update clean, lab tiles gone, polkit's rule
+  without _vdm; `vergence-setup --undo` with no terminal skipped disabling
+  vdm (asked), turned the login screen flag off and restored acpid's
+  handler; `vergence-setup --yes --login-screen on` put both back.
+

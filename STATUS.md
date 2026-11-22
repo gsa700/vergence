@@ -12,16 +12,14 @@ sync.
 
 ## In progress
 
-**Packaging milestone 1** (docs/packaging-milestone-1.md): the xbps package
-for Void, and `vergence-setup` for the system setup a package does not do.
-Going public follows it. Defaults milestone 1 closed 2026-11-22 (what a new
-user sees first: wallpapers, the dock's apps, the standard folders, the
-layered defaults file, the color-only tint, the login screen's picture).
+Nothing: packaging milestone 1 closed 2026-11-22 (docs/packaging-milestone-1.md):
+the `vergence` xbps package and `vergence-setup`; techbench runs from it.
+Defaults milestone 1 closed the same day.
 
 ## Next
 
-1. **Going public** (docs/release-pathway.md §3), once installing from the
-   package works.
+1. **Going public** (docs/release-pathway.md §3): the checks there, then a
+   first release (tag, tarball, checksum, a signed repository).
 2. **AlbumWall for Vergence** (generic name Music): AlbumWall's wall of
    covers and player rebuilt in Rust on the toolkit and Hymie
    (crates/vergence-hymie), for Vergence (docs/apps-roadmap.md).
