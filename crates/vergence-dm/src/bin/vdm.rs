@@ -1149,9 +1149,27 @@ fn is_admin(name: &str, gid: u32) -> bool {
 }
 
 /// An approved action, done by vdm's own code: what it did, or why not.
-fn carry_out(action: &vergence_dm::elevate::Action) -> Result<String, String> {
+/// `asker`: the account that asked (a picture is read as them).
+fn carry_out(action: &vergence_dm::elevate::Action, asker: Option<&Account>) -> Result<String, String> {
     use vergence_dm::elevate::Action;
     match action {
+        Action::LoginWallpaper(path) => {
+            let a = asker.ok_or("no such account")?;
+            let groups = sys::groups_of(&a.name, a.gid);
+            let bytes = read_as(a.uid, a.gid, &groups, path)?;
+            let ext = picture_kind(&bytes).ok_or("not a PNG, JPEG, WebP or SVG picture")?;
+            put_login_wallpaper(&bytes, ext).map(|_| "the login screen shows the new picture".into())
+        }
+        Action::LoginWallpaperDefault => {
+            for n in paths::LOGIN_WALLPAPER_NAMES {
+                match std::fs::remove_file(std::path::Path::new(paths::LOOK_DIR).join(n)) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.to_string()),
+                }
+            }
+            Ok("the login screen shows Vergence's own picture".into())
+        }
         Action::AutologinOn(user) => match autologin_allowed() {
             Ok(one) if &one == user => std::fs::write(paths::autologin_file(), format!("{user}\n"))
                 .map(|_| format!("automatic login is on for {user}"))
@@ -1173,6 +1191,108 @@ fn carry_out(action: &vergence_dm::elevate::Action) -> Result<String, String> {
             Err(e) => Err(e.to_string()),
         },
     }
+}
+
+/// The most a login screen picture may be (an 8K JPEG is about 20 MB).
+const LOGIN_WALLPAPER_MAX: usize = 40 * 1024 * 1024;
+
+/// A file's bytes, read by a child that has become `uid` (with its groups),
+/// so root reads nothing the person could not: the path is theirs to name.
+/// Only a plain file; opened without waiting (a FIFO named in its place does
+/// not hang vdm); at most LOGIN_WALLPAPER_MAX; five seconds at most.
+fn read_as(uid: u32, gid: u32, groups: &[u32], path: &str) -> Result<Vec<u8>, String> {
+    use std::io::{Read, Write};
+    use std::os::unix::fs::OpenOptionsExt;
+    #[cfg(target_os = "linux")]
+    const O_NONBLOCK: i32 = 0o4000;
+    #[cfg(not(target_os = "linux"))]
+    const O_NONBLOCK: i32 = 0x4;
+    let (mut ours, mut theirs) = UnixStream::pair().map_err(|e| e.to_string())?;
+    // SAFETY: vdm is single-threaded; the child changes ids, reads one file,
+    // writes it to its end of the pair and exits.
+    let pid = unsafe { fork() };
+    if pid < 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    if pid == 0 {
+        drop(ours);
+        reset_sigterm();
+        let code = (|| -> Result<(), ()> {
+            drop_to(uid, gid, groups).map_err(|_| ())?;
+            let mut f = std::fs::OpenOptions::new().read(true).custom_flags(O_NONBLOCK).open(path).map_err(|_| ())?;
+            if !f.metadata().map_err(|_| ())?.is_file() {
+                return Err(());
+            }
+            let mut buf = Vec::new();
+            Read::by_ref(&mut f).take(LOGIN_WALLPAPER_MAX as u64 + 1).read_to_end(&mut buf).map_err(|_| ())?;
+            theirs.write_all(&buf).map_err(|_| ())
+        })();
+        // SAFETY: the child's end.
+        unsafe { _exit(if code.is_ok() { 0 } else { 1 }) };
+    }
+    drop(theirs);
+    let _ = ours.set_read_timeout(Some(Duration::from_secs(5)));
+    let mut bytes = Vec::new();
+    let read = Read::by_ref(&mut ours).take(LOGIN_WALLPAPER_MAX as u64 + 1).read_to_end(&mut bytes);
+    let mut status: c_int = 0;
+    if read.is_err() {
+        // SAFETY: our own child, stuck: ended.
+        unsafe { kill(pid, 9) };
+    }
+    // SAFETY: our own child.
+    unsafe { waitpid(pid, &mut status, 0) };
+    if read.is_err() {
+        return Err("the picture took too long to read".into());
+    }
+    if status != 0 {
+        return Err("the picture could not be read as you (is it a file you may read?)".into());
+    }
+    if bytes.len() > LOGIN_WALLPAPER_MAX {
+        return Err("the picture is larger than 40 MB".into());
+    }
+    Ok(bytes)
+}
+
+/// What kind of picture bytes are, by their first bytes only (root never
+/// decodes them; the login screen does, as its own account, in the decode
+/// helper): the file name it is kept under.
+fn picture_kind(b: &[u8]) -> Option<&'static str> {
+    if b.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("login-wallpaper.png")
+    } else if b.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("login-wallpaper.jpg")
+    } else if b.len() > 12 && &b[..4] == b"RIFF" && &b[8..12] == b"WEBP" {
+        Some("login-wallpaper.webp")
+    } else {
+        let head = String::from_utf8_lossy(&b[..b.len().min(4096)]);
+        let t = head.trim_start_matches('\u{feff}').trim_start();
+        ((t.starts_with("<?xml") || t.starts_with("<svg") || t.starts_with("<!--")) && head.contains("<svg"))
+            .then_some("login-wallpaper.svg")
+    }
+}
+
+/// Keep the login screen's picture: LOOK_DIR made root's (0755, not followed
+/// if a link), the bytes written beside the final name and renamed over it
+/// (0644), any picture of another kind removed.
+fn put_login_wallpaper(bytes: &[u8], name: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::MetadataExt;
+    let dir = std::path::Path::new(paths::LOOK_DIR);
+    match std::fs::symlink_metadata(dir) {
+        Ok(m) if m.file_type().is_dir() && m.uid() == 0 => {}
+        Ok(_) => return Err(format!("{} is not root's directory", dir.display())),
+        Err(_) => std::fs::DirBuilder::new().mode(0o755).create(dir).map_err(|e| e.to_string())?,
+    }
+    let tmp = dir.join(format!(".{name}.new"));
+    let _ = std::fs::remove_file(&tmp);
+    let mut f =
+        std::fs::OpenOptions::new().write(true).create_new(true).mode(0o644).open(&tmp).map_err(|e| e.to_string())?;
+    f.write_all(bytes).and_then(|_| f.sync_all()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, dir.join(name)).map_err(|e| e.to_string())?;
+    for other in paths::LOGIN_WALLPAPER_NAMES.iter().filter(|n| **n != name) {
+        let _ = std::fs::remove_file(dir.join(other));
+    }
+    Ok(())
 }
 
 /// Tell the asking program how it ended.
@@ -1660,7 +1780,7 @@ fn main() {
                     declined.remove(&uid);
                     let e = elevations.remove(i);
                     let _ = proto::send_from_vdm(&mut server, &FromVdm::Done { ok: true, wait: 0 });
-                    let outcome = carry_out(&e.action);
+                    let outcome = carry_out(&e.action, account(&e.name).as_ref());
                     log(&format!(
                         "elevation: {} by {} through {}: {}",
                         e.action.name(),
@@ -2410,6 +2530,19 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The login screen's picture is told by its first bytes only.
+    #[test]
+    fn picture_kinds_by_their_first_bytes() {
+        assert_eq!(picture_kind(b"\x89PNG\r\n\x1a\n...."), Some("login-wallpaper.png"));
+        assert_eq!(picture_kind(&[0xff, 0xd8, 0xff, 0xe0, 0, 0]), Some("login-wallpaper.jpg"));
+        assert_eq!(picture_kind(b"RIFF\x00\x00\x00\x00WEBPVP8 "), Some("login-wallpaper.webp"));
+        assert_eq!(picture_kind(b"<svg xmlns='http://www.w3.org/2000/svg'/>"), Some("login-wallpaper.svg"));
+        assert_eq!(picture_kind(b"\xef\xbb\xbf<?xml version='1.0'?>\n<svg/>"), Some("login-wallpaper.svg"));
+        assert_eq!(picture_kind(b"#!/bin/sh\nrm -rf /"), None);
+        assert_eq!(picture_kind(b"<html><body>no</body></html>"), None);
+        assert_eq!(picture_kind(b""), None);
+    }
 
     /// A process orphaned while the worker waits is reaped on the way, not
     /// left a zombie until the session ends (two of Firefox's processes

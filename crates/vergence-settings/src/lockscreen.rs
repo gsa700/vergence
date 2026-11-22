@@ -51,6 +51,10 @@ pub enum LockMsg {
     AutologinOff,
     AutologinOn(String),
     LoginScreen(bool),
+    /// The login screen's picture: one of the Wallpaper page's pictures, by
+    /// its place in that list (defaults milestone 1, step 8).
+    LoginWallpaper(usize),
+    LoginWallpaperDefault,
     /// The prompt's outcome came back (from the asking thread).
     Elevated(Result<String, String>),
 }
@@ -147,6 +151,14 @@ impl App {
             LockMsg::LoginScreen(on) => {
                 self.elevate(vec![if on { "login-screen.on" } else { "login-screen.off" }.into()])
             }
+            // vdm copies the picture, reading it as you; the login screen draws
+            // the copy as its own account (root never decodes it).
+            LockMsg::LoginWallpaper(i) => {
+                if let Some(p) = self.files.get(i) {
+                    self.elevate(vec!["login-wallpaper.set".into(), p.display().to_string()]);
+                }
+            }
+            LockMsg::LoginWallpaperDefault => self.elevate(vec!["login-wallpaper.default".into()]),
             LockMsg::Elevated(r) => {
                 self.status = match r {
                     Ok(t) => format!("Done: {t}."),
@@ -197,6 +209,32 @@ impl App {
                     "The login screen",
                     if st.login_screen { "On: the machine starts at the Vergence login screen. The text consoles stay (Ctrl+Alt+F1)." } else { "Off: the machine starts at a text console; log in there and run vergence." },
                     switch(st.login_screen, |on| Message::Lock(LockMsg::LoginScreen(on))).name("The login screen at boot"),
+                )]));
+                // The login screen's picture (defaults milestone 1, step 8): one
+                // of the Wallpaper page's pictures, or Vergence's own.
+                let chosen = vergence_dm::paths::login_wallpaper().is_some();
+                let names: Vec<String> = self
+                    .files
+                    .iter()
+                    .map(|p| p.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+                    .collect();
+                let mut row_items: Vec<Element<Message>> = vec![
+                    choice(names, None, |i| Message::Lock(LockMsg::LoginWallpaper(i)))
+                        .width(Length::Fixed(200.0))
+                        .name("Choose the login screen's picture"),
+                ];
+                if chosen {
+                    row_items.push(
+                        button(label("Default").size(12.0))
+                            .padding(Padding::hv(4.0, 12.0))
+                            .on_press(Message::Lock(LockMsg::LoginWallpaperDefault))
+                            .name("The login screen's picture back to the default"),
+                    );
+                }
+                groups.push(self.group(Some("Look"), vec![setting(
+                    "The login screen's picture",
+                    if chosen { "A picture an administrator chose; everyone at this machine sees it. Choose another, or go back to the default." } else { "Vergence's own (the default). Choose one of your pictures; everyone at this machine will see it." },
+                    row(row_items).spacing(6.0).align(Align::Center).into(),
                 )]));
                 let (what, control): (String, Element<Message>) = match (&st.autologin, &st.allowed) {
                     (Some(user), Ok(_)) => (

@@ -55,6 +55,28 @@ pub fn login_screen_file() -> std::path::PathBuf {
     std::path::Path::new(STATE_DIR).join("login-screen")
 }
 
+/// The login screen's look the machine's administrator chose (defaults
+/// milestone 1, step 8): root's directory, readable by all, since what it
+/// holds is shown to anyone at the machine. vdm writes the picture there as a
+/// copy it read as the person who chose it; root never decodes it.
+#[cfg(target_os = "linux")]
+pub const LOOK_DIR: &str = "/var/lib/vdm-look";
+#[cfg(not(target_os = "linux"))]
+pub const LOOK_DIR: &str = "/var/db/vdm-look";
+
+/// The login screen's picture file names, one per kind vdm accepts.
+pub const LOGIN_WALLPAPER_NAMES: [&str; 4] =
+    ["login-wallpaper.png", "login-wallpaper.jpg", "login-wallpaper.webp", "login-wallpaper.svg"];
+
+/// The login screen's chosen picture, if one was chosen: a plain file (not a
+/// link) in LOOK_DIR.
+pub fn login_wallpaper() -> Option<std::path::PathBuf> {
+    LOGIN_WALLPAPER_NAMES
+        .iter()
+        .map(|n| std::path::Path::new(LOOK_DIR).join(n))
+        .find(|p| std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_file()))
+}
+
 /// What the login screen keeps between starts (its text size), _vdm's own:
 /// beside vdm's state directory, which is root's alone.
 #[cfg(target_os = "linux")]

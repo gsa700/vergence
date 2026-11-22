@@ -12,6 +12,11 @@ pub enum Action {
     /// The login screen at boot (STATE_DIR/login-screen).
     LoginScreenOn,
     LoginScreenOff,
+    /// The login screen's picture: a copy of this file (read as the person
+    /// who asks), shown to anyone at the machine.
+    LoginWallpaper(String),
+    /// The login screen's picture back to Vergence's default.
+    LoginWallpaperDefault,
 }
 
 impl Action {
@@ -23,6 +28,8 @@ impl Action {
             ["autologin.off"] => Ok(Action::AutologinOff),
             ["login-screen.on"] => Ok(Action::LoginScreenOn),
             ["login-screen.off"] => Ok(Action::LoginScreenOff),
+            ["login-wallpaper.set", path] if valid_path(path) => Ok(Action::LoginWallpaper(path.to_string())),
+            ["login-wallpaper.default"] => Ok(Action::LoginWallpaperDefault),
             [name, ..] => Err(format!("no such action: {name}")),
             [] => Err("no action".into()),
         }
@@ -39,6 +46,14 @@ impl Action {
             Action::LoginScreenOff => {
                 "Stop starting this machine at the Vergence login screen (log in on a text console instead)".into()
             }
+            Action::LoginWallpaper(p) => {
+                let name = std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned());
+                format!(
+                    "Show the picture {} behind the login screen, for anyone at this machine to see",
+                    crate::proto::clean(&name.unwrap_or_else(|| p.clone()))
+                )
+            }
+            Action::LoginWallpaperDefault => "Show Vergence's own picture behind the login screen".into(),
         }
     }
 
@@ -49,8 +64,16 @@ impl Action {
             Action::AutologinOff => "autologin.off",
             Action::LoginScreenOn => "login-screen.on",
             Action::LoginScreenOff => "login-screen.off",
+            Action::LoginWallpaper(_) => "login-wallpaper.set",
+            Action::LoginWallpaperDefault => "login-wallpaper.default",
         }
     }
+}
+
+/// A picture's path as a program may name it: absolute, at most 4096 bytes,
+/// no control characters (it is shown in the prompt and logged).
+fn valid_path(p: &str) -> bool {
+    p.starts_with('/') && p.len() <= 4096 && !p.chars().any(char::is_control)
 }
 
 /// An account's name as accounts are named: letters, digits, '.', '_', '-',
@@ -171,6 +194,22 @@ mod tests {
 
     fn w(s: &[&str]) -> Vec<String> {
         s.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn the_login_screen_s_picture() {
+        assert_eq!(
+            Action::parse(&w(&["login-wallpaper.set", "/home/me/Pictures/a b.jpg"])),
+            Ok(Action::LoginWallpaper("/home/me/Pictures/a b.jpg".into()))
+        );
+        assert_eq!(Action::parse(&w(&["login-wallpaper.default"])), Ok(Action::LoginWallpaperDefault));
+        assert!(Action::parse(&w(&["login-wallpaper.set", "Pictures/a.jpg"])).is_err(), "relative");
+        assert!(Action::parse(&w(&["login-wallpaper.set", "/tmp/a\nb.jpg"])).is_err(), "a control character");
+        assert!(Action::parse(&w(&["login-wallpaper.set"])).is_err(), "no path");
+        let long = format!("/{}", "a".repeat(5000));
+        assert!(Action::parse(&w(&["login-wallpaper.set", &long])).is_err(), "too long");
+        let d = Action::LoginWallpaper("/home/me/Pictures/dusk.svg".into()).describe();
+        assert!(d.contains("dusk.svg") && d.contains("anyone"), "{d}");
     }
 
     #[test]

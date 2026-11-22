@@ -338,7 +338,12 @@ impl Wallpaper {
     fn reload_if_changed(&mut self) -> bool {
         // The newest of the person's file and the layers under it, so a
         // changed default (a package update) is seen too.
-        let mtime = vergence_config::modified_with(desktop_path().as_deref());
+        let mut mtime = vergence_config::modified_with(desktop_path().as_deref());
+        // The login screen: the administrator's chosen picture counts too.
+        let login_pick = if crate::greeter() { vergence_dm::paths::login_wallpaper() } else { None };
+        if let Some(t) = login_pick.as_ref().and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok()) {
+            mtime = Some(mtime.map_or(t, |m| m.max(t)));
+        }
         if mtime == self.mtime && self.generation > 0 {
             return false;
         }
@@ -352,6 +357,12 @@ impl Wallpaper {
                 }
             })
             .unwrap_or_default();
+        // The login screen's own picture, when an administrator chose one in
+        // Settings > Login (defaults milestone 1, step 8): on every screen.
+        let config = match login_pick {
+            Some(p) => WallpaperConfig { image: Some(p), monitor: Vec::new(), ..config },
+            None => config,
+        };
         if config == self.config && self.generation > 0 {
             return false;
         }
