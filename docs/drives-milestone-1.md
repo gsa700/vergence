@@ -120,20 +120,41 @@ suite 17 of 17 on both (scenario 17 new), agent-check 0 failed.
 Fixed that evening: an ejected stick remounted by FileView looking into its
 folder, a stick pulled out while mounted kept listed (37e9baf); an ejected
 stick not showing when plugged in again, devfs having reused its node's
-number, and rescans on devd's disk events (810c570). Still open:
+number, and rescans on devd's disk events (810c570).
 
-1. **A mounted ISO brings phantom drives.** Attaching the Fedora ISO
-   (mdconfig) made label nodes for the image's own partitions,
-   /dev/iso9660/Fedora-E-dvd-x86_64-45 and /dev/msdosfs/ANACONDA; the
-   automounter lists them under /media, and drives.rs takes any label node
-   for a stick plugged in: the list showed /media/ANACONDA and
-   /media/Fedora-E-dvd-x86_64-45 (Removable, not mounted) beside
-   /mnt/Fedora-Everything-... (Image). To fix: a label whose provider is an
-   md device (glabel status, or the geom tree) is not a drive.
-2. **Ejecting the two together was "seriously broken"** (Dave ejected both,
-   then stopped: "we'll get into it later"). Not seen what went wrong; go
-   through it with him: stick and ISO mounted, eject each from FileView's
-   sidebar and from the desktop, watching `vctl drives` and the server log.
-3. **The delay when a stick is plugged in:** FreeBSD's USB probe, then the
-   automounter; devd now pokes a rescan (810c570), not yet tried by Dave.
+Fixed later that night (Dave and Claude together on techbench, a recorder
+logging the list, mounts, labels and /media each second; Dave: "Worked
+perfectly"):
 
+1. **A mounted ISO brought phantom drives** (a9aacb3, aaa5e2b): labels whose
+   provider is an md device or its partition (`glabel status -s`) are not
+   drives; the server ran glabel by name and the session's PATH has no
+   /sbin, so it is called by its full path (umount too, e563529).
+2. **Clicking the stick "dumped" Dave at Home** (0f3b73e): FileView's watch
+   sent a tab on a /media folder not listed as mounted home, which is also
+   a stick just clicked and mounting; it now only skips reading it again.
+3. **The stick opened empty** (e572446): autofs keeps an answer that mounted
+   nothing (its folder looked into while the stick was out) for
+   vfs.autofs.cache seconds, 600 by default, and `automount -c` clears only
+   /media itself. install.sh sets the cache to 5 s (sysctl.conf), and the
+   toolkit does not look into a /media folder whose drive is not listed.
+4. **One stick, two names** (a0ef549): looked up by its device name, the
+   automounter lists /media/da0s1 beside /media/USB; one entry per GEOM
+   provider, the mounted one, else the one by its label.
+5. **Three "Safe to remove" and the stick still there** (cd75869): the
+   helper only unmounted, so the next look mounted it again. Eject now
+   unmounts every partition of the disk and runs `camcontrol eject` (da,
+   cd, sdda): its partitions and labels leave /dev until plugged in again.
+6. **A disk image mounted opened a tab** (292d850): it shows under
+   Locations only (Dave: "A new tab should never appear unless the user
+   calls it").
+
+Still open:
+
+- **The delay when a stick is plugged in:** devd pokes a rescan (810c570);
+  Dave to say whether it is short enough.
+- The automounter keeps every name it has served in /media until a reboot;
+  techbench's /media/da0s1 (from the night's debugging) shows for a moment
+  while the stick mounts. Harmless; gone at the next reboot.
+- Hubble has not been given this night's build yet; the display suite on
+  both machines before the milestone closes.
