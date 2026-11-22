@@ -533,11 +533,14 @@ impl Program for Peek {
         Some(vergence_ui::Bar::Tools { buttons, from: 0.0 })
     }
 
-    fn bar_button(&mut self, id: u32, _window: &mut Window) {
+    fn bar_button(&mut self, id: u32, window: &mut Window) {
         if id == OPEN_WITH
             && let (Some(e), Some((app, _))) = (&self.entry, &self.app)
         {
             let _ = crate::open_files_with(std::slice::from_ref(&e.path), Some(app));
+            // Handed over: the preview gets out of the app's way, as Quick
+            // Look does (Dave, 2026-11-22: it stayed over Close-Up).
+            window.close();
         }
     }
 
