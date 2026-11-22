@@ -79,7 +79,36 @@ pub struct MonitorWallpaper {
     pub color: Option<String>,
 }
 
+/// One of Vergence's own wallpapers named by a path where it is not (saved
+/// under one prefix, Vergence now installed under another: a checkout's
+/// /usr/local, the package's /usr; techbench 2026-11-22), found by its name
+/// where Vergence's backgrounds are; any other path as it is.
+fn ours_wherever(p: &std::path::Path) -> PathBuf {
+    if p.exists() || !p.parent().is_some_and(|d| d.ends_with("backgrounds/vergence")) {
+        return p.to_path_buf();
+    }
+    let Some(name) = p.file_name() else { return p.to_path_buf() };
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(bin) = exe.parent()
+    {
+        dirs.push(bin.join("../share/backgrounds/vergence"));
+    }
+    dirs.push("/usr/share/backgrounds/vergence".into());
+    dirs.push("/usr/local/share/backgrounds/vergence".into());
+    dirs.into_iter().map(|d| d.join(name)).find(|c| c.is_file()).unwrap_or_else(|| p.to_path_buf())
+}
+
 impl WallpaperConfig {
+    /// Vergence's own pictures found wherever Vergence is installed now.
+    fn found(mut self) -> Self {
+        self.image = self.image.map(|i| ours_wherever(&i));
+        for m in &mut self.monitor {
+            m.image = m.image.take().map(|i| if i.as_os_str().is_empty() { i } else { ours_wherever(&i) });
+        }
+        self
+    }
+
     /// The wallpaper for the monitor `id`: its own fields over the common ones.
     pub fn for_monitor(&self, id: &str) -> WallpaperConfig {
         let mut c = WallpaperConfig { monitor: Vec::new(), ..self.clone() };
@@ -430,7 +459,7 @@ impl Wallpaper {
         self.mtime = mtime;
         self.login_stamp = login_stamp;
         let (config, lock_login) = match toml::from_str::<DesktopFile>(&desktop_text()) {
-            Ok(f) => (f.wallpaper, f.lock.wallpaper.as_deref() == Some("login")),
+            Ok(f) => (f.wallpaper.found(), f.lock.wallpaper.as_deref() == Some("login")),
             Err(e) => {
                 tracing::warn!("desktop.toml: {e}");
                 (self.config.clone(), self.lock_image.is_some())
@@ -701,6 +730,19 @@ fn placement(sw: f64, sh: f64, w: f64, h: f64, mode: &str) -> (f64, f64) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn our_wallpapers_are_found_by_name_elsewhere() {
+        let gone = std::path::Path::new("/nowhere/share/backgrounds/vergence/vergence-dusk.svg");
+        let ours = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/backgrounds/vergence-dusk.svg");
+        // Not installed in this test: a missing one stays as it was, as does
+        // a path that is not under backgrounds/vergence.
+        let other = std::path::Path::new("/nowhere/Pictures/mine.jpg");
+        assert_eq!(super::ours_wherever(other), other);
+        let found = super::ours_wherever(gone);
+        assert!(found == gone || found.is_file(), "{found:?}");
+        assert!(ours.is_file());
+    }
+
     use super::*;
 
     #[test]
