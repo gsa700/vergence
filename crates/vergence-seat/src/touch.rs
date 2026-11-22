@@ -1,5 +1,6 @@
 //! Touch: a finger on a window is the window's; the first finger anywhere
-//! else is the pointer with its left button held (Dave, 2026-11-10).
+//! else is the pointer with its left button held, so a tap is a click and a
+//! drag a drag (see docs/shelf-milestone-1.md).
 //!
 //! - A finger on a window's content raises it, gives it the keyboard, and
 //!   is that window's from its first contact to its last, wherever it

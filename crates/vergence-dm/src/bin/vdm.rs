@@ -88,7 +88,7 @@ const WNOHANG: c_int = 1;
 /// hands on (runit's vlogger, systemd's journal). FreeBSD: syslog(3) itself
 /// (auth.notice), with standard error /dev/null: daemon(8) reading vdm's
 /// output waited for every process holding it, a running session's worker
-/// among them, so `service vdm restart` hung (kepler, 2026-11-16).
+/// among them, so `service vdm restart` hung.
 fn log(msg: &str) {
     #[cfg(target_os = "freebsd")]
     {
@@ -215,7 +215,8 @@ fn people() -> Vec<String> {
     out
 }
 
-/// Whether automatic login may be on (Dave's "4 a", review M6): only where
+/// Whether automatic login may be on (answer 4 a in docs/vdm-milestone-1.md,
+/// review M6): only where
 /// exactly one person can log in, and nothing on the machine is encrypted.
 /// That person's name, or why not.
 fn autologin_allowed() -> Result<String, String> {
@@ -249,9 +250,9 @@ fn allowed_cached(cache: &mut Option<(std::time::Instant, Result<String, String>
 
 /// The pause after `failures` wrong answers in a row: none for the first
 /// FREE_TRIES (a typo, a lock key left on), then 5, 15, 30 seconds, then
-/// MAX_PAUSE. Gentler than it was (1, 2, 4 ... 300 s from the first): on
-/// apollo, 2026-11-20, a keyboard light gone wrong cost Dave six tries and
-/// a 256 s wait. A guesser at the console still gets about one try a minute.
+/// MAX_PAUSE. Gentler than it was (1, 2, 4 ... 300 s from the first): a
+/// keyboard light gone wrong could cost six tries and a 256 s wait. A guesser
+/// at the console still gets about one try a minute (see docs/vdm-milestone-1.md).
 fn pause_after(failures: u32) -> u64 {
     match failures.saturating_sub(FREE_TRIES) {
         0 => 0,
@@ -736,7 +737,7 @@ struct Greeter {
     quick: u32,
     next: Option<std::time::Instant>,
     /// The VT on the screen when `vdm greeter` was asked, to go back to
-    /// when it is stopped (kepler, 2026-11-16: a blank screen otherwise).
+    /// when it is stopped (a blank screen otherwise).
     came_from: Option<u32>,
     back_to: Option<(u32, std::time::Instant)>,
 }
@@ -1128,7 +1129,8 @@ struct Elevation {
 /// How long a prompt waits for its answer.
 const ELEVATION_LIMIT: Duration = Duration::from_secs(120);
 
-/// Whether an account is an administrator (Dave, 1 a): in the system's
+/// Whether an account is an administrator (decision 1 a in
+/// docs/elevation-milestone-1.md): in the system's
 /// administrators' group (wheel). struct group: gr_name, gr_passwd, gr_gid
 /// at byte 16, on both.
 fn is_admin(name: &str, gid: u32) -> bool {
@@ -1271,7 +1273,7 @@ fn lock_all(sessions: &mut Vec<(u32, UnixStream)>) -> String {
 /// once at the start: an install that replaces vdm's file while it runs (a
 /// session up, its restart left for later) leaves the running vdm unable to
 /// name its own file on FreeBSD, and every login screen after the next
-/// log out failed to start (kepler, 2026-11-16).
+/// log out failed to start.
 static SERVER: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
 
 fn main() {
@@ -1310,8 +1312,7 @@ fn main() {
             Some("off") => std::fs::remove_file(&file)
                 .or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }),
             // vdm's state directory is root's alone: an ordinary account
-            // can't see the file, so it is told so, not "off" (techbench,
-            // 2026-11-17).
+            // can't see the file, so it is told so, not "off".
             Some("status") | None => match std::fs::metadata(&file) {
                 Ok(_) => {
                     println!("login screen at boot: on");
@@ -1373,7 +1374,7 @@ fn main() {
     // FreeBSD: vdm writes to syslog itself (log()); its standard output and
     // error, daemon(8)'s pipe, go to /dev/null, so no session or login screen
     // started from it holds that pipe: daemon waited for them to close it
-    // before a restart could finish (kepler, 2026-11-16).
+    // before a restart could finish.
     #[cfg(target_os = "freebsd")]
     if let Ok(null) = std::fs::OpenOptions::new().write(true).open("/dev/null") {
         unsafe extern "C" {
@@ -1423,7 +1424,7 @@ fn main() {
         log(&format!("the login screen starts with vdm ({} is there)", paths::login_screen_file().display()));
     }
     // At boot (the machine up less than 3 minutes): at once, so the text
-    // console shows only for a moment (Techbench, 2026-11-16). Otherwise (vdm
+    // console shows only for a moment. Otherwise (vdm
     // restarted under running servers) after 6 s: they have registered by
     // then, and the login screen waits for them.
     let first = (at_boot && sys::uptime() >= 180).then(|| std::time::Instant::now() + Duration::from_secs(6));
@@ -1892,7 +1893,7 @@ fn main() {
                     "before-sleep" => lock_all(&mut sessions),
                     "greeter" if greeter_account.is_none() => format!("no {} account (tools/install.sh makes it)", paths::GREETER_USER),
                     // Not over someone's session: the login screen would take the screen
-                    // from it (kepler, 2026-11-16: started over Dave's session by mistake).
+                    // from it (it once started over a running session by mistake).
                     "greeter" if !greeter_run.on && (!sessions.is_empty() || logins.values().any(|l| l.yes)) => {
                         "not started: someone is logged in (log out first; it comes back by itself after a login screen's session)".to_string()
                     }
@@ -2411,8 +2412,8 @@ mod tests {
     use super::*;
 
     /// A process orphaned while the worker waits is reaped on the way, not
-    /// left a zombie until the session ends (Hubble, 2026-11-17: two of
-    /// Firefox's sat below a session's worker). This binary has no other
+    /// left a zombie until the session ends (two of Firefox's processes
+    /// were seen under a session's worker). This binary has no other
     /// tests, so the test process may become a reaper itself.
     #[test]
     fn pauses_are_gentle_then_firm_and_forgotten() {

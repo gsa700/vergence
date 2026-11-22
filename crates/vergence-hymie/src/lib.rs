@@ -1,6 +1,6 @@
 //! Hymie, AlbumWall's audio engine, ported to Rust (preview milestone 1,
-//! docs/preview-milestone-1.md; Dave, 2026-11-21: "we already built all
-//! those decoders for albumwall; let's use Hymie!"). The source is Spindle's
+//! docs/preview-milestone-1.md): its decoders already exist and are proven,
+//! so Vergence reuses them rather than writing new ones. The source is Spindle's
 //! `src/Spindle.Codecs` (C#, at 005f289), which played bit-identical to mpv
 //! (2026-10-26). Each decoder keeps Hymie's structure, so a fix in one can be
 //! carried to the other.

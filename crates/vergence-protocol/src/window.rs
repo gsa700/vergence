@@ -140,9 +140,8 @@ pub struct Tab {
     /// draws the tab in the desktop's alarm red; the color is never the
     /// program's to choose.
     pub alert: bool,
-    /// It has edits not saved (bus v14; Dave, 2026-11-15: "coloring a tab
-    /// for unsaved edits"): the server marks it in the desktop's color for
-    /// that, the same in every app.
+    /// It has edits not saved (bus v14): the server marks it in the desktop's
+    /// color for that, the same in every app (see docs/editor-milestone-1.md).
     pub edited: bool,
 }
 

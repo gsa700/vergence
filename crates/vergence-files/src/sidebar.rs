@@ -1,8 +1,7 @@
-//! FileView's sidebar (files milestone 3, step 3; Dave, 2026-11-21: "I like
-//! the explorer left panel and the mac one as well. what I would take away
-//! from them is drag and drop reordering, shortcuts from folders and files
-//! dropped there from the main window"). Three sections, each folded by its
-//! heading:
+//! FileView's sidebar (files milestone 3, step 3; see docs/files-milestone-3.md):
+//! the best of Explorer's and Finder's, reordered by drag and drop, with
+//! shortcuts made by dropping folders and files from the main window. Three
+//! sections, each folded by its heading:
 //!
 //! - **Favorites**: Home and the user's folders at first, then whatever the
 //!   user makes of it: reordered by dragging, folders and files dropped in
@@ -21,8 +20,8 @@ use std::path::{Path, PathBuf};
 use vergence_widgets::files::{self, Place};
 
 /// A row's height, a heading's, and the padding around them, in points.
-/// (Rows 28 and headings 26 since Dave's "bump up the font size in the left
-/// sidebar", 2026-11-21: names at 13 points, as Finder's, headings at 11.)
+/// (Rows 28 and headings 26, for a larger font: names at 13 points, as
+/// Finder's, headings at 11; see docs/files-milestone-3.md.)
 pub const ROW_H: f32 = 28.0;
 pub const HEAD_H: f32 = 26.0;
 pub const PAD: f32 = 6.0;

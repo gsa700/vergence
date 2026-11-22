@@ -122,8 +122,8 @@ pub struct AreaOptions {
     /// gives suggestions.
     pub spell: bool,
     /// The program's own lines at the end of the right-click menu (the
-    /// Text Editor's New Tab, New Window, Find…: Dave's list, "as full as
-    /// the terminal's"): the label, its id, its keys. A chosen one is read
+    /// Text Editor's New Tab, New Window, Find…, so its menu is as full as
+    /// the terminal's; see docs/apps-roadmap.md): the label, its id, its keys. A chosen one is read
     /// with [`Doc::take_command`] when the area's change message comes.
     pub commands: Vec<(String, u32, &'static str)>,
     /// Line height as a multiple of the text size (at least the font's own
@@ -392,7 +392,8 @@ pub struct Doc {
     /// window's meaning (the magnifier follows it); None when not shown.
     pub(crate) caret_drawn: Option<Rect>,
     /// Space may take the ghost: what was typed is no word of its own
-    /// (Dave, 2026-11-18: Space takes it, as macOS; "in" must stay "in").
+    /// (Space takes it, as on macOS, but a real word such as "in" stays as
+    /// typed; see docs/apps-roadmap.md).
     ghost_space: bool,
     list: Option<List>,
     /// Words from outside the document ([`Doc::set_words`]).
@@ -963,7 +964,7 @@ impl Doc {
             }
             self.list = None;
         }
-        // The suggestion shown (Dave, 2026-11-18): Tab takes it, Space takes
+        // The suggestion shown: Tab takes it, Space takes
         // it where the word typed is no word of its own, each with a space
         // after; Escape lets it go, so Space is a plain space.
         let plain_key = !(m.ctrl || m.logo || m.alt);
@@ -1309,9 +1310,9 @@ impl Doc {
             words.push("Ignore it here".into());
             actions.push(Action::Ignore(w));
         }
-        // The standard menu (Dave, 2026-11-15: "a standard style context menu
-        // as terminal does"): every line always there, faint when it cannot be
-        // used, the keys at the right; the spelling lines above it.
+        // The standard menu, as the terminal's (see docs/files-milestone-1.md):
+        // every line always there, faint when it cannot be used, the keys at
+        // the right; the spelling lines above it.
         let mut enabled = vec![true; words.len()];
         let mut keys = vec![""; words.len()];
         let selected = self.caret != self.anchor;
@@ -1347,8 +1348,8 @@ impl Doc {
     }
 
     /// The right-click menu just opened (context), for the server to draw as
-    /// every window's right-click menu is (bus v20; Dave, 2026-11-18: one
-    /// kind of menu everywhere): where, and its lines, each line's id its
+    /// every window's right-click menu is (bus v20: one kind of menu
+    /// everywhere; see docs/menus-milestone-1.md): where, and its lines, each line's id its
     /// index from `base`. The menu is kept here, not drawn, until
     /// menu_chosen or anything else done in the area.
     pub(crate) fn menu_for_server(&mut self, base: u32) -> Option<((f32, f32), Vec<vergence_ui::MenuLine>)> {
@@ -1465,9 +1466,8 @@ impl Doc {
 
     /// Scrolls by `dy` points (down is positive), held by the top line. It
     /// stops when the last line is at the view's bottom, so text that fits
-    /// doesn't scroll at all (Dave, 2026-11-17: the Text Editor scrolled a
-    /// few lines up under the bar when they didn't fill the window; the last
-    /// line could come up to the top).
+    /// doesn't scroll at all (otherwise a few lines that don't fill the window
+    /// scroll up under the bar, and the last line can come up to the top).
     fn scroll_by(&mut self, dy: f32) {
         let n = self.buffer.line_count();
         let mut off = self.top_off + dy;
@@ -1827,8 +1827,7 @@ impl Doc {
 
         // No ground of its own: the window's shows, as opaque as its settings
         // say (a second fill would make it nearly solid). The line numbers on a
-        // shade of their own over it (Dave, 2026-11-15: "to set it apart from
-        // the rest").
+        // shade of their own over it, to set them apart from the text.
         if gutter > 0.0 {
             scene.fill(Rect::new(r.x, r.y, gutter, r.h), alpha(theme.text, if theme.dark { 14 } else { 11 }));
         }

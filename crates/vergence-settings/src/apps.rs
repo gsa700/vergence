@@ -167,7 +167,7 @@ impl App {
                 vec![back, self.group(Some(&name), vec![forget])],
             );
         }
-        // The desktop's Style forces every app while it is Dark or Light (Dave, 2026-11-14).
+        // The desktop's Style forces every app while it is Dark or Light (see docs/app-settings-milestone-1.md).
         let scheme = appearance_text(&self.desktop, "color-scheme");
         let bar: Element<Message> = if scheme == "dark" || scheme == "light" {
             setting(

@@ -17,8 +17,9 @@
 //     setup = "<profile key>"    # (the set of connected EDIDs, as window memory)
 //     places = [ { id = "...", x = 0, y = 0 }, { id = "...", x = 1170, y = 0 } ]
 //
-// SCALE (Dave, 2026-11-08: "always try and default to the native scale if
-// possible for maximum sharpness ... most people have one screen"). A screen's
+// SCALE: the default is the screen's native pixels where possible, for the
+// most sharpness, since most people have one screen (see
+// docs/settings-milestone-2.md). A screen's
 // default is calculated as the whitepaper says (§3, Contract 1: its pixels and
 // millimeters from the EDID, and how far away it is, a built-in laptop panel
 // assumed at laptop distance, everything else at desk distance), then snapped
@@ -168,9 +169,8 @@ impl DisplaysConfig {
         let size = self.size();
         let how = if size != 1.0 { format!("{how}; size {}", pct(size)) } else { how };
         // Text is drawn at the size asked for on every screen. A text factor
-        // per screen ("Text on scaled screens", 2026-11-18) was taken out
-        // 2026-11-19 (Dave: "maybe we should dump that, it's confusing
-        // anyways combined with the other scaling"): each screen's scale and
+        // per screen ("Text on scaled screens") was taken out: combined with
+        // the other scaling it was confusing, and each screen's scale and
         // Accessibility's Size are the controls. The calculated scale over
         // the base is still told (OutputInfo::text_ratio), for the curious.
         let text_ratio = match d.note {
@@ -217,16 +217,16 @@ const SAME_SIZE_SLACK: f64 = 0.02;
 
 /// How far "the same size" gives way to a whole number: 8%. Whole scales
 /// put every line and edge on the panel's pixels, and at about 100 ppi that
-/// is sharper than being the same size to the last few percent (Dave,
-/// 2026-11-19, the ASUS on kepler: 1.0667 against 1.0, "1.0 looks
-/// sharper"). The text factor (Scales::text) gives some of the size back.
+/// is sharper than being the same size to the last few percent (a 22"
+/// 1080p ASUS looks sharper at 1.0 than at 1.0667). The text factor
+/// (Scales::text) gives some of the size back.
 const WHOLE_SLACK: f64 = 0.08;
 
 /// For "the same size on every screen": the scale on the pixel grid nearest
 /// `exact` (p/q with q of 8 or less, in 120ths) if within SAME_SIZE_SLACK,
 /// else `exact` (in 120ths); but a whole number within WHOLE_SLACK first.
 /// kepler: its 14" 4K at 3.2833 (no grid) becomes 3.25 (3 is 9% off); its
-/// ASUS at 1.0703 becomes 1 (it was 1.0667 until 2026-11-19).
+/// ASUS at 1.0703 becomes 1 (it was 1.0667 before WHOLE_SLACK).
 pub fn on_grid_near(exact: f64) -> f64 {
     let whole = exact.round().max(1.0);
     if (whole - exact).abs() <= WHOLE_SLACK * exact {
@@ -305,7 +305,7 @@ mod tests {
     fn same_size_lands_on_the_grid_when_near() {
         // kepler's 14" 4K: 3.2833 has no grid; 3.25 (13/4) is 1% off.
         assert_eq!(on_grid_near(3.2833), 3.25);
-        // Its ASUS: 1.0703; a whole number within 8% wins (Dave, 2026-11-19).
+        // Its ASUS: 1.0703; a whole number within 8% wins (it looks sharper).
         assert_eq!(on_grid_near(1.0703), 1.0);
         assert_eq!(on_grid_near(2.15), 2.0);
         // Beyond 8% the grid or the exact scale, as before.

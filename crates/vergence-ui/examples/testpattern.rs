@@ -1,5 +1,5 @@
 //! A window for the display checks (tools/display-check.sh, testing method
-//! layer 2, 2026-11-18): flat magenta, with a line one pixel wide on each
+//! layer 2): flat magenta, with a line one pixel wide on each
 //! edge in its own color, top red, bottom blue, left yellow, right cyan,
 //! drawn at the window's scale so each is exactly one row or column of the
 //! screen's pixels. A shot of the screen then says, pixel by pixel, whether

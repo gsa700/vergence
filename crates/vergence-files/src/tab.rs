@@ -159,8 +159,8 @@ impl Tab {
     }
 }
 
-/// The Trash's entries as its list shows them (Dave, 2026-11-18: "just a
-/// list of the files and a restore or remove forever button"): each by the
+/// The Trash's entries as its list shows them, kept simple (a list of the
+/// files, each to restore or remove forever): each by the
 /// name it had (two of a name have names of their own in the Trash), its
 /// time the moment it was trashed (its info file's, written then), and
 /// where it came from, returned by its path in the Trash.

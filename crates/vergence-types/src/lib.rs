@@ -13,7 +13,7 @@
 //! - **Which applications open it**: what each application's desktop entry
 //!   says it opens (its MimeType line), and the user's choices in the XDG
 //!   `mimeapps.list` files ([`MimeApps`], [`lists`]), Vergence's own first:
-//!   `~/.config/vergence-mimeapps.list` (Dave, 2026-11-15), so a choice made
+//!   `~/.config/vergence-mimeapps.list` (see docs/files-milestone-1.md), so a choice made
 //!   here holds in a Vergence session whatever else rewrites the shared one.
 //!
 //! Our own code and data; nothing here reads the system's shared-mime-info.
@@ -511,8 +511,8 @@ pub struct App<'a> {
 /// The applications that open `mime`, best first, by desktop file id:
 /// first the choices made in Vergence (vergence-mimeapps.list) for the type
 /// or a type it is a kind of, then Vergence's own apps (`vergence-*`) that
-/// open it (Dave, 2026-11-15: "Vergence apps first": GNOME's choice of its
-/// text editor for Markdown does not beat ours in a Vergence session); then,
+/// open it (Vergence apps first: GNOME's choice of its text editor for
+/// Markdown does not beat ours in a Vergence session; docs/files-milestone-1.md); then,
 /// for the type and each type it is a kind of, the defaults the other lists
 /// give (the first list that names one wins), those added, and those whose
 /// entries list it; minus those removed (for the type or any nearer one),

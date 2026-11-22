@@ -1,7 +1,7 @@
 //! Vergence's networks (settings milestone 1, step 3).
 //!
 //! - [`wpa`]: a client of wpa_supplicant's control socket, the text protocol
-//!   wpa_cli speaks (Dave, 2026-11-14: "wpa_supplicant is fine"): status,
+//!   wpa_cli speaks (see docs/settings-milestone-1.md): status,
 //!   scans and their results, the known networks, joining one with its
 //!   password, forgetting one, and the events (a scan done, connected,
 //!   disconnected, a wrong password). The same on Void and FreeBSD.

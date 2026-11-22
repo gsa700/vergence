@@ -42,8 +42,8 @@ mod search_tests {
 }
 
 impl App {
-    /// The pages in the sidebar's groups (settings milestone 1; Dave: "pages
-    /// are grouped by type"), each with its group's color for its icon and
+    /// The pages in the sidebar's groups, by type, as GNOME and macOS do
+    /// (see docs/settings-milestone-1.md), each with its group's color for its icon and
     /// the words its settings go by, for the search.
     /// A sidebar page by its name, case and punctuation aside ("wifi" is Wi-Fi).
     pub(crate) fn page_named(&self, name: &str) -> Option<Page> {
@@ -185,8 +185,7 @@ impl App {
             items.push(label("Nothing by that name.").size(12.0).dim());
         }
         // Its color runs up under the frosted bar; its items start below it
-        // and scroll under it when the window is shorter than the list (Dave,
-        // 2026-11-14).
+        // and scroll under it when the window is shorter than the list.
         let list = panel(column(items).spacing(2.0).width(Length::FILL))
             .padding(Padding { top: 12.0 + self.top.get(), bottom: 12.0, left: 10.0, right: 10.0 })
             .radius(0.0)

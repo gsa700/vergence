@@ -75,8 +75,8 @@ impl From<SceneError> for RenderError {
 
 /// How far over a whole pixel a side may be and still be that pixel: the
 /// scale comes as f32 (420 points at 1.2 were 504.00003 pixels, drawn as
-/// 505 where the server shows 504, cropping the last row: the geometry
-/// tests, 2026-11-18). The server's points_of rounds the same way.
+/// 505 where the server shows 504, cropping the last row, as the geometry
+/// tests found). The server's points_of rounds the same way.
 pub const PIXEL_SLACK: f64 = 1e-3;
 
 /// About how much work drawing a scene at `scale` is, in pixels touched:

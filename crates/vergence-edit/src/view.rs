@@ -118,7 +118,7 @@ impl EditWindow {
         let (l, c) = d.line_column();
         let (a, b) = d.selection();
         let mut status: Vec<Element<Msg>> = vec![space().width(Length::FILL)];
-        // Words (Dave, 2026-11-15: "a word counter in there somewhere").
+        // Words: a word count in the status line (see docs/editor-milestone-1.md).
         let words = grouped(d.word_count());
         status.push(
             label(if a != b {

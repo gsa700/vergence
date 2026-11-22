@@ -1,13 +1,12 @@
-// The server's own keyboard state (seat milestone 1, step 3; Dave, 2026-11-12:
-// xkbcommon used directly).
+// The server's own keyboard state (seat milestone 1, step 3: xkbcommon used
+// directly; see docs/seat-milestone-1.md).
 //
 // Smithay's keyboard keeps an xkb state for Wayland and X11 windows; this is a
 // second one from the same keymap and the same keys, for everything else: the
 // seat's key filter (which keys are the server's), the apps popup's typing, and
 // native windows' keys and modifiers (native.rs). It is read and changed only
 // in handle_key, never inside one of Smithay's keyboard callbacks, which run
-// holding the keyboard's lock (2026-11-11: reading the keymap there froze the
-// server).
+// holding the keyboard's lock (reading the keymap there froze the server).
 //
 // The keymap is Smithay's own, taken once as text before the first key, so the
 // two states cannot disagree about what a key is.
@@ -138,10 +137,9 @@ mod tests {
     use xkbcommon::xkb::keysyms as k;
 
     /// Every letter the seat decides on reaches it as that letter, in either
-    /// case (Super+L once came through as Other: VDM milestone 1, 2026-11-16).
-    /// The lights follow the locks (2026-11-20, apollo: a mini keyboard's
-    /// Num Lock light, left on from boot and never set by us, kept its
-    /// letters typing keypad digits).
+    /// case (Super+L once came through as Other). The lights follow the locks
+    /// (a mini keyboard's Num Lock light, left on from boot and never set by
+    /// us, kept its letters typing keypad digits; see docs/vdm-milestone-1.md).
     #[test]
     fn the_lights_follow_the_locks() {
         use super::Keys;

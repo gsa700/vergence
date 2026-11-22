@@ -39,8 +39,8 @@ impl App {
     }
 
     /// A line or two saying what a page is for, plain text over its groups:
-    /// no heading card (Dave, 2026-11-14: the sidebar already says which page
-    /// it is). A sub-page with no sidebar entry (adding pictures) keeps its
+    /// no heading card, since the sidebar already says which page it is
+    /// (see docs/settings-milestone-1.md). A sub-page with no sidebar entry (adding pictures) keeps its
     /// name in bold.
     pub(crate) fn intro(&self, title: Option<&str>, description: &str) -> Element<Message> {
         let text = label(description).size(12.0).dim().wrap().width(Length::FILL);

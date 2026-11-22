@@ -1,6 +1,6 @@
 //! Space's preview (preview milestone 1, docs/preview-milestone-1.md): a
 //! window of its own over FileView's, shaped for what it shows, as macOS's
-//! Quick Look (Dave, 2026-11-21, with screenshots of it). A picture fills a
+//! Quick Look. A picture fills a
 //! window of its proportions, a PDF's pages scroll beside their thumbnails,
 //! text is shown whole in the fixed-width font, and anything else as a large
 //! icon and its facts. Its title is the file's name; its bar's one button
@@ -52,16 +52,15 @@ const TEXT_MAX: u64 = 1 << 20;
 const PAGES_MAX: usize = 24;
 /// A PDF page's width when drawn, in pixels, and the thumbnail strip's width.
 /// Pages are drawn at twice their width in points (sharp at 133% and 200%;
-/// Dave, 2026-11-22: drawn once at 900 px, a larger window blurred them), and
-/// again when the window grows by a quarter.
+/// drawn once at a fixed 900 px, a larger window blurs them), and again when
+/// the window grows by a quarter (see docs/preview-milestone-1.md).
 const PAGE_SHARP: f32 = 2.0;
 const PAGE_REDRAW: f32 = 1.25;
 const STRIP_W: f32 = 112.0;
 const PAD: f32 = 12.0;
 /// The frost shown around the content card, below the bar too, and the
-/// card's corners (preview milestone 1, step 6b: Quick Look's look; Dave:
-/// "let's make the preview windows look similar to the mac. We have frost in
-/// our toolkit"). The window has no ground of its own: the server frosts
+/// card's corners: Quick Look's look, made with the toolkit's frost
+/// (see docs/preview-milestone-1.md, step 6b). The window has no ground of its own: the server frosts
 /// what is behind it, and the content stands on that as an inset card.
 const MARGIN: f32 = 8.0;
 const CARD_R: f32 = 8.0;
@@ -114,8 +113,8 @@ pub struct Peek {
     asked: Option<(u32, u32)>,
     /// The size the server gave for the last ask (None: an ask is under
     /// way); and whether the person has resized the window since, which
-    /// keeps their size for the files that follow (Dave, 2026-11-21: "macOS
-    /// allows these preview windows to be resized").
+    /// keeps their size for the files that follow, as macOS's Quick Look
+    /// can be resized.
     given: Option<(f32, f32)>,
     by_hand: bool,
     /// A thumbnail clicked: the page scroll's place to go to.
@@ -202,8 +201,8 @@ impl Peek {
         true
     }
 
-    /// A sound file's worker, playing at once (as Quick Look does; Dave,
-    /// 2026-11-21: "Ideally it would start playing when you open it") unless
+    /// A sound file's worker, playing at once, as Quick Look does
+    /// (see docs/preview-milestone-1.md), unless
     /// `[files] preview-autoplay = false`. Not before the waker has come:
     /// the worker started without it is replaced at once, and would click.
     fn listen(&self, path: PathBuf) -> Shows {
@@ -447,7 +446,7 @@ impl Peek {
         .name(if s.peaks.len() >= SLICES as usize { "Waveform" } else { "Waveform (drawing)" });
         let seconds = s.info.as_ref().map_or(0.0, |i| i.seconds());
         let now = s.info.as_ref().map_or(0.0, |i| at as f64 / i.rate.max(1) as f64);
-        // Play at the bottom, centered and large (Dave, 2026-11-21), the time
+        // Play at the bottom, centered and large, the time
         // played on its left and the length on its right.
         let play = button(label(if s.playing { "Pause" } else { "Play" }).size(16.0).weight(600))
             .look(vergence_widgets::ButtonLook::Accent)
@@ -646,7 +645,7 @@ impl Program for Peek {
         {
             let _ = crate::open_files_with(std::slice::from_ref(&e.path), Some(app));
             // Handed over: the preview gets out of the app's way, as Quick
-            // Look does (Dave, 2026-11-22: it stayed over Close-Up).
+            // Look does (otherwise it stays over Close-Up).
             window.close();
         }
     }

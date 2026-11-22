@@ -1,7 +1,7 @@
-//! ALSA, on Linux without a sound server (Void on Hubble): its kernel
+//! ALSA, on Linux without a sound server (Void Linux, say): its kernel
 //! interface, spoken here directly as the wire protocols are, with no
-//! alsa-lib between. Sizes and numbers measured from Hubble's
-//! <sound/asound.h> (2026-11-11, x86_64: `long` is 8 bytes).
+//! alsa-lib between. Sizes and numbers measured from Void's
+//! <sound/asound.h> (x86_64: `long` is 8 bytes).
 //!
 //! - **Outputs** are a card's playback PCM devices (`/proc/asound/cardN/
 //!   pcmDp/info`): the analog one (speakers and headphones, which the card
@@ -31,7 +31,7 @@ unsafe extern "C" {
     fn ioctl(fd: i32, request: std::ffi::c_ulong, arg: *mut u8) -> i32;
 }
 
-// Control interface (sound/asound.h, measured on Hubble).
+// Control interface (sound/asound.h, measured on x86_64).
 const ELEM_LIST: std::ffi::c_ulong = 0xc050_5510;
 const ELEM_INFO: std::ffi::c_ulong = 0xc110_5511;
 const ELEM_READ: std::ffi::c_ulong = 0xc4c8_5512;

@@ -1,5 +1,5 @@
 //! Properties (files milestone 2, step 3): a file's or folder's own window,
-//! Windows-style (Dave, 2026-11-16), opened by Get Info. Tabs inside it:
+//! Windows-style (see docs/files-milestone-2.md), opened by Get Info. Tabs inside it:
 //!
 //! - **General**: the mark, the name (changed here, undone with Ctrl+Z in
 //!   File Viewer), its kind, where it is, its size (a folder's counted on a
@@ -374,15 +374,15 @@ impl Program for Properties {
         Some((420, 470))
     }
 
-    /// Its own place in window memory, apart from FileView's windows (Dave,
-    /// 2026-11-18: it no longer kept its size or place).
+    /// Its own place in window memory, apart from FileView's windows, so it
+    /// keeps its own size and place.
     fn role(&self) -> String {
         "properties".into()
     }
 
     fn style(&self) -> vergence_ui::Style {
-        // A window of its own with only a close button (Dave, 2026-11-16: no
-        // app menu or settings on a Properties window).
+        // A window of its own with only a close button: no app menu or
+        // settings on a Properties window.
         vergence_ui::Style {
             kind: vergence_ui::WinKind::Dialog,
             alone: true,

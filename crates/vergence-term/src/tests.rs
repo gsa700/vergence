@@ -117,7 +117,7 @@ fn the_settings_file_is_followed() {
     assert!((s.ui_size - 13.333).abs() < 0.01 && (s.mono_size - 14.667).abs() < 0.01);
     // Nothing set: buttons on the right, the machine's own fonts at 10 points.
     let s = Settings::from_text("");
-    // No layout chosen: vergence-bar's default, on the left (2026-11-12).
+    // No layout chosen: vergence-bar's default, on the left.
     assert_eq!(
         (s.left.as_slice(), s.right.len()),
         (&[WinButton::Close, WinButton::Minimize, WinButton::Maximize][..], 0)
@@ -156,8 +156,8 @@ fn the_view_scrolls_within_the_scrollback() {
 }
 
 /// On the light palettes every one of the 16 colors, plain or bold, reads
-/// at the floor on the page (Hubble, 2026-11-13: Tango's whites and brights
-/// vanished on white); a color that already reads is left alone; the hue
+/// at the floor on the page (Tango's whites and brights vanish on white);
+/// a color that already reads is left alone; the hue
 /// stays (red stays reddest).
 #[test]
 fn the_remembered_answer_is_the_worked_out_one() {

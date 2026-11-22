@@ -16,8 +16,8 @@
 //
 // Every window that draws no frame of its own, ours (the terminal and the settings
 // app draw their own title bars) or a server-decorated one, also gets an EDGE-point
-// border line and the same resize band (Dave, 2026-11-09: "a small border to make
-// resizing the windows easier; it looks weird without one"). A window whose
+// border line and the same resize band: a small border makes resizing easier,
+// and a window looks wrong without one. A window whose
 // bounding box is larger than its geometry is drawing its own frame and shadow
 // (GTK's client-side decorations) and is left alone.
 //
@@ -752,7 +752,7 @@ impl Server {
     /// one its app asked for (`BarStyle`: its own setting, or under "App
     /// default" its built-in choice, which the toolkit works out), else the
     /// desktop's. An app's own choice wins over the desktop's Dark or Light
-    /// (Dave, 2026-11-14: "1 yes").
+    /// (see docs/app-settings-milestone-1.md).
     pub fn bar_light(&self, w: &Win, desktop_light: bool) -> bool {
         match w.native().map(|n| n.bar_style()) {
             Some(vergence_protocol::window::BarStyle::Light) => true,
@@ -920,8 +920,8 @@ impl Server {
         // The frost's contrast floor: the titles first, or more of the window
         // shown: then also half the base tint and the Clear step's shorter blur
         // (the floor alone changes nothing over dark text, which the blur and
-        // the base tint hide before the floor ever adds any; kepler,
-        // 2026-11-15). The floor still adds tint wherever the titles need it.
+        // the base tint hide before the floor ever adds any). The floor still
+        // adds tint wherever the titles need it.
         let show_more = self.look_setting("under-bar") == 1;
         let strength = vergence_look::frost_strength(self.look_setting("frost")) * if show_more { 0.5 } else { 1.0 };
         let frost_r = if show_more {
@@ -1034,7 +1034,8 @@ impl Server {
             }
             if frame.is_some() || border.is_some() {
                 // A sidebar window's bar carries no title: its page shows its own
-                // name (Dave, 2026-11-14: drop the heading over the page).
+                // name, so a heading over the page would say it twice (see
+                // docs/settings-milestone-1.md).
                 let title = if self.window_style(&w).kind == crate::style::Kind::Sidebar {
                     String::new()
                 } else {
@@ -1146,8 +1147,7 @@ impl Server {
                 }
                 let d = self.decor.get_mut(&w).unwrap();
                 // A native window with a frosted ground (bus v36; preview milestone
-                // 1, step 6b; Dave: "let's make the preview windows look similar to
-                // the mac. We have frost in our toolkit"): one frost of what is
+                // 1, step 6b, to look like the Mac's; see docs/preview-milestone-1.md): one frost of what is
                 // behind it under its bar and its whole body, as Quick Look's.
                 let ground_frosted = w.native().is_some_and(|n| n.frosted());
                 // A native window that draws under its bar, with its picture on the
@@ -1170,7 +1170,7 @@ impl Server {
                     let edited = f.tabs.as_ref().map(|t| t.edited.clone()).unwrap_or_default();
                     // A tab being dragged (dispatch.rs): left in its place, faint; its
                     // ghost follows the pointer and a line shows where it would land
-                    // (Dave, 2026-11-12). The row is not reordered under the drag: a
+                    // (see docs/bar-milestone-1.md). The row is not reordered under the drag: a
                     // row drawn with fewer titles than its layout had a blank tab.
                     let dragged = preview.map(|(from, _)| from).filter(|&i| i < titles.len());
                     // The program's own buttons (icons, pressable): part of what the picture shows.
@@ -1178,9 +1178,9 @@ impl Server {
                         tools_of(&w).map(|(_, t)| t.iter().map(|(i, e, _, _)| (*i, *e)).collect()).unwrap_or_default();
                     let tool_names: Vec<String> =
                         tools_of(&w).map(|(_, t)| t.into_iter().map(|(_, _, _, n)| n).collect()).unwrap_or_default();
-                    // The bar's height is part of it too (Dave, 2026-11-16: with
-                    // kepler's touch panel unplugged the bars got shorter but kept
-                    // the touch size's wide buttons, the old picture squeezed).
+                    // The bar's height is part of it too (with a touch panel
+                    // unplugged the bars got shorter but kept the touch size's wide
+                    // buttons, the old picture squeezed).
                     let key = (
                         title.clone(),
                         width,
@@ -1301,13 +1301,13 @@ impl Server {
                     }
                     // Where the bar is, not rounded: Smithay rounds both its edges
                     // (edges_px), so it meets the body below on the same pixel
-                    // wherever the window is (techbench at 133⅓%: a gap that came
-                    // and went while the window moved, 2026-11-18).
+                    // wherever the window is (at 133⅓% a gap came and went while
+                    // the window moved).
                     let at_f = (f.title.loc - out.loc).to_f64().to_physical(scale);
                     let bar_px = edges_px(f.title.loc - out.loc, f.title.size, scale);
                     // All of the picture's pixels (drawn for this scale) into the bar's points:
                     // drawn 1:1 (left out, it was taken as points and shown magnified at
-                    // scale 2: kepler, 2026-11-12).
+                    // scale 2).
                     let whole = shown_px((picture.px.0, picture.px.1), bar_px.size);
                     match MemoryRenderBufferRenderElement::from_buffer(
                         renderer,
@@ -1410,7 +1410,7 @@ impl Server {
                             // A bar of the other style than its window's ground (the
                             // terminal's page color): what shows through, inverted, so
                             // light text under a light bar is a dark shadow on it, not a
-                            // pale smudge (Dave, 2026-11-14).
+                            // pale smudge.
                             Uniform::new(
                                 "invert",
                                 UniformValue::_1f(if accent.is_some_and(|c| page_light(c) != light) {
@@ -1428,7 +1428,7 @@ impl Server {
                                 })),
                             ),
                             // A light bar is never washed out past its shade by a white
-                            // page under it (Dave, 2026-11-21).
+                            // page under it.
                             Uniform::new("cap", UniformValue::_1f(if light { 1.0 } else { 0.0 })),
                         ];
                         elements.push(SceneElement::Shaded(crate::backdrop::Shaded::new(
@@ -1648,8 +1648,8 @@ impl Server {
     }
 
     /// A window's title, as its app set it.
-    /// Whether a window's program runs as the superuser (Dave's wish,
-    /// 2026-11-10: "a server-drawn mark on windows of root clients"): its bar
+    /// Whether a window's program runs as the superuser (a server-drawn mark on
+    /// windows of root clients; see docs/look-milestone-1.md): its bar
     /// goes the alarm red. Asked once per window and kept with its decor.
     fn runs_as_root(&mut self, w: &Win) -> bool {
         if let Some(root) = self.decor.get(w).and_then(|d| d.root) {

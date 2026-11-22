@@ -1,5 +1,5 @@
 // The wallpaper settings in desktop.toml, as the settings app edits them
-// (2026-11-08: your own pictures, and a wallpaper per screen).
+// (your own pictures, and a wallpaper per screen).
 //
 //     [wallpaper]                 all screens (the server's wallpaper.rs)
 //     image = "..."  mode = "fill"  color = "#202020"

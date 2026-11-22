@@ -161,7 +161,7 @@ fn main() {
                     }
                     // The command failed: most likely its terminal is gone. (On FreeBSD
                     // this loop, which never writes to the terminal itself, was not
-                    // ended by the terminal's end, and ran on: 2026-11-10, canary.)
+                    // ended by the terminal's end, and ran on.)
                     Ok(_) => std::process::exit(0),
                     Err(e) => {
                         eprintln!("flood: {command}: {e}");

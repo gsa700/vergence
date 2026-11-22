@@ -2,8 +2,8 @@
 // monitor's modes from the bus (protocol v9), written as desktop.toml
 // `[[displays.screen]] mode = "3840x2160@60"`, which the server sets only if
 // the monitor offers it. A new mode asks "Keep this resolution?" and goes back
-// by itself after 15 s unless kept (Dave: "1 yes"), closing the dialog
-// included, so a mode the monitor cannot show never strands anyone.
+// by itself after 15 s unless kept, closing the dialog included, so a mode
+// the monitor cannot show never strands anyone (see docs/settings-milestone-2.md).
 
 use std::time::{Duration, Instant};
 
@@ -37,7 +37,7 @@ pub fn rates(modes: &[ModeInfo], size: (u32, u32)) -> Vec<ModeInfo> {
 
 /// "60 Hz", "59.94 Hz (video)": a rate a thousandth below a whole one
 /// (59.94, 29.97, 23.976, 119.88) is television's, kept for video that is
-/// made at it (Dave, 2026-11-14: "label it").
+/// made at it, and labeled so (see docs/settings-milestone-2.md).
 pub fn rate_words(mhz: u32) -> String {
     if mhz % 1000 == 0 {
         return format!("{} Hz", mhz / 1000);

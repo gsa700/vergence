@@ -92,8 +92,8 @@ impl Terminal {
         let Some(mt) = &self.metrics else { return scene };
         let (cw, ch) = (mt.cell_w, mt.cell_h);
         // The grid that fits a room: the whole of it for a new tab, a pane's for its terminal.
-        // Columns stop short of the scrollbar at the right edge (Dave's list,
-        // 2026-11-16: the text ran under it), always, so a terminal's width
+        // Columns stop short of the scrollbar at the right edge, so text never
+        // runs under it, always, so a terminal's width
         // does not change when its first line scrolls away.
         let fit = |w: f32, h: f32| {
             (

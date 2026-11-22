@@ -1,6 +1,6 @@
 //! Vergence's Hardware app (tools milestone 1, docs/tools-milestone-1.md;
-//! Dave's list: "monitor details on the hardware, CPU, GPU, Network, Memory,
-//! etc."): a page for each part of the machine with what it is and what it
+//! details on the CPU, GPU, network, memory and the rest, as listed in
+//! docs/apps-roadmap.md): a page for each part of the machine with what it is and what it
 //! is doing now, the last minute charted. Read-only; the readings are
 //! vergence-sysinfo's (processors, memory, file systems, disks,
 //! temperatures), vergence-net's (interfaces and their traffic) and

@@ -1,6 +1,6 @@
 // One monitor, one identity, whichever input it is plugged into (2026-11-17).
 //
-// A monitor gives each of its inputs its own EDID: Techbench's LG Ultra HD
+// A monitor gives each of its inputs its own EDID: an LG Ultra HD
 // on HDMI and on DisplayPort hashed to two ids, so it was two monitors, each
 // with its own scale, place and window memory. Maker, product code and serial
 // number are the same on every input (vergence_profile::model_key), so the

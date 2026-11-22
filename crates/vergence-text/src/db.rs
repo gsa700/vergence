@@ -22,8 +22,8 @@ use crate::sfnt::{self, Coverage, FaceInfo};
 const MAX_FILES: usize = 20_000;
 const MAX_DEPTH: usize = 8;
 
-/// The usual families, best first. Vergence's own two lead (Dave, 2026-11-16:
-/// a uniform look everywhere, "really important"): Inter for text and the
+/// The usual families, best first. Vergence's own two lead, for a uniform
+/// look everywhere (see docs/borrowed-review.md): Inter for text and the
 /// interface, JetBrains Mono for code, both shipped in share/vergence/fonts
 /// and found there when the system has none of its own.
 const MONOSPACE: [&str; 7] = [
@@ -199,9 +199,8 @@ fn weight_distance(info: &FaceInfo, weight: u16) -> u32 {
 /// Slant first, then weight.
 /// How far a face is from what is asked: the slant first, then the width
 /// (a family's normal width always before its condensed or expanded faces:
-/// kepler, 2026-11-16, set every text in Noto Sans Condensed, its file
-/// sorting before Regular and the width not looked at; Dave: "the display
-/// seems a little off ... slightly taller than wide"), then the weight.
+/// otherwise Noto Sans Condensed, its file sorting before Regular, set every
+/// text a little taller than wide), then the weight.
 fn distance(info: &FaceInfo, weight: u16, italic: bool) -> u32 {
     (info.italic != italic) as u32 * 100_000
         + (info.width as i32 - 5).unsigned_abs() * 10_000

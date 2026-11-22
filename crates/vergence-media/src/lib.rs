@@ -1,5 +1,5 @@
-//! Removable drives (files milestone 1, step 10; Dave, 2026-11-15: "yes,
-//! udisks2 on Linux and automounter on kepler"): a USB stick or card is
+//! Removable drives (files milestone 1, step 10, docs/files-milestone-1.md:
+//! udisks2 on Linux, the automounter on FreeBSD): a USB stick or card is
 //! mounted when it is plugged in, so the desktop and File Viewer show it,
 //! and Eject lets go of it.
 //!
@@ -103,8 +103,8 @@ pub fn mount_image(image: &std::path::Path) -> Result<std::path::PathBuf, String
 /// argument, checked; no environment read; only /sbin/mount -p and
 /// /sbin/umount run. Returns the exit status.
 ///
-/// Its second job (files milestone 3, step 7; Dave, 2026-11-21: "in
-/// downloads I have an iso, can i mount it"): `media-eject attach IMAGE`
+/// Its second job (files milestone 3, step 7, docs/files-milestone-3.md:
+/// mounting an ISO from the user's files): `media-eject attach IMAGE`
 /// attaches an ISO image the calling user owns (a regular file, an ISO 9660
 /// signature) read-only with mdconfig and mounts it at `/mnt/<name>`
 /// read-only, nosuid and noexec, printing where. An image's mount point is
@@ -172,9 +172,9 @@ pub fn helper_main(args: Vec<std::ffi::OsString>) -> i32 {
         let _ = std::fs::remove_dir(arg);
         return 0;
     }
-    // A drive: the whole disk let go of, as a Mac ejects (Dave, 2026-11-21:
-    // an ejected stick unmounted only was mounted again by the next look,
-    // and came back under its device's name).
+    // A drive: the whole disk let go of, as a Mac ejects (an ejected stick
+    // that was only unmounted was mounted again by the next look, and came
+    // back under its device's name).
     if let Some(disk) = disk_of(&device, &run) {
         eject_disk(&disk, &table, &run);
     }

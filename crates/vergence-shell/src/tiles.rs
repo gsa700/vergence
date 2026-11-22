@@ -6,7 +6,7 @@ use crate::{Rect, running};
 use vergence_protocol::tile::{Card, Control, ControlKind, Tile, TileState};
 
 /// The place of tile `index` on a dock with `items` applications: after
-/// them (applications and tiles keep their own parts; Dave, 2026-11-16).
+/// them (applications and tiles keep their own parts; see docs/dock-milestone-1.md).
 pub fn slot(dock: Rect, items: usize, index: usize, upright: bool) -> Option<Rect> {
     running::slot(dock, items + index, upright)
 }

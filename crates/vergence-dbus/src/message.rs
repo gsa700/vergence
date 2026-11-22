@@ -279,7 +279,7 @@ mod tests {
     }
 
     /// A byte array in a variant in an a{sv} (the portal's current_folder):
-    /// its bytes come back, not some of the header's (2026-11-15).
+    /// its bytes come back, not some of the header's.
     #[test]
     fn byte_arrays_in_options_round_trip() {
         let folder: Vec<Value> = b"/home/u/docs\0".iter().map(|b| Value::Byte(*b)).collect();

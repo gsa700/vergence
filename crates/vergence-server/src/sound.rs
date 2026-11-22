@@ -1,11 +1,11 @@
 // The volume keys (sound milestone 1, step 4, docs/sound-milestone-1.md).
 //
-// Volume up and down change the default output's volume by 5% a press (Dave,
-// 2026-11-11), to the nearest multiple of 5; up also unmutes. Mute turns it
+// Volume up and down change the default output's volume by 5% a press, to
+// the nearest multiple of 5; up also unmutes. Mute turns it
 // off or on. The new level shows for a moment as a notification of the
 // server's own, which each press replaces. Through vergence-sound, as the
 // settings app's Sound page does; where PipeWire has the sound the keys do
-// nothing yet (decided the same day).
+// nothing yet.
 
 use crate::{
     Server,

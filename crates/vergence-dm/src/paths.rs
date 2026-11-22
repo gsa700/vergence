@@ -32,7 +32,8 @@ pub const ELEVATE_SOCKET: &str = "/var/run/vdm/elevate";
 /// The PAM service the elevation prompt's check runs.
 pub const ELEVATE_SERVICE: &str = "vdm-elevate";
 
-/// The administrators' group: who may approve an elevation (Dave, 1 a).
+/// The administrators' group: who may approve an elevation (decision 1 a in
+/// docs/elevation-milestone-1.md).
 pub const ADMIN_GROUP: &str = "wheel";
 
 /// The greeter socket: the login screen's (_vdm's) only.

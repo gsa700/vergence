@@ -1,9 +1,9 @@
 // The launcher (menus milestone 1, 2026-11-16; before it, the applications
 // popup of shelf milestones 1 and 2, a grid in the middle of the screen).
-// Dave: the grid felt "disconnected"; the launcher is a start menu, a text
+// The grid felt disconnected from the dock; the launcher is a start menu, a text
 // menu pinned to the dock's button as menus are, in the menus' one look.
 // Opened by the button at the head of the dock or by the Super key tapped
-// alone. It is the app menu's panel (appmenu.rs) with these lines, and a
+// alone (see docs/menus-milestone-1.md). It is the app menu's panel (appmenu.rs) with these lines, and a
 // search field over them that finds an application in any submenu:
 //
 //   Vergence's own applications (File Viewer, Text Editor, Terminal...)

@@ -1,5 +1,5 @@
-//! The power key while a Vergence session runs (menus milestone 1, step 3;
-//! Dave, 2026-11-16): it opens the session dialog (Log Out, Sleep, Restart,
+//! The power key while a Vergence session runs (menus milestone 1, step 3,
+//! docs/menus-milestone-1.md): it opens the session dialog (Log Out, Sleep, Restart,
 //! Shut Down) instead of the system shutting down at once. vdm, the one
 //! part that runs as root and knows when a session is up, holds the key
 //! from the system's own handling while one is, and lets it go when none is

@@ -1,5 +1,5 @@
-//! The sessions the login screen offers (Dave, 2026-11-16: "5 b", Vergence
-//! and the installed Wayland sessions): the system's own wayland-sessions
+//! The sessions the login screen offers (Vergence and the installed Wayland
+//! sessions, answer 5 b in docs/vdm-milestone-1.md): the system's own wayland-sessions
 //! entries, never a user's (threat model T12). The login screen and vdm read
 //! the same list in the same order, so the greeter sends only an index and
 //! vdm starts what its own reading says (review M2).

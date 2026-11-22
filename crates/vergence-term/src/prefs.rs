@@ -31,8 +31,8 @@ impl TermRows {
 }
 
 /// Why the Style and Title bar rows are locked: the desktop's Style forces
-/// every app (Dave, 2026-11-14: App default lets each app choose; Dark or
-/// Light is for all).
+/// every app (App default lets each app choose; Dark or Light is for all;
+/// see docs/app-settings-milestone-1.md).
 pub fn forced_by_desktop(text: &str) -> Option<String> {
     vergence_ui::desktop_pick(text)
         .map(|light| format!("{} for every app: Settings > Appearance > Style", if light { "Light" } else { "Dark" }))

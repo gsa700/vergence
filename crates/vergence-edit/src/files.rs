@@ -1,8 +1,9 @@
 //! Reading and writing the files the editor edits (editor milestone 1).
 //!
 //! - **Reading**: UTF-8, with a byte-order mark taken off and remembered. A
-//!   file that is not UTF-8 opens read-only with a notice (Dave, "5 a now b
-//!   later maybe"): its text shown as well as it can be, never written back.
+//!   file that is not UTF-8 opens read-only with a notice, for now (other
+//!   encodings may come later; see docs/editor-milestone-1.md): its text
+//!   shown as well as it can be, never written back.
 //! - **Writing never leaves half a file**: the text goes to a new file
 //!   beside the old one, is flushed to the disk, and is then renamed over
 //!   it, so a crash or a full disk leaves the old file whole. The file's

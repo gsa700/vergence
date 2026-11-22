@@ -162,11 +162,11 @@ impl Theme {
 }
 
 /// How much of the wallpaper's color a tinted window's grounds take unless
-/// the desktop says (Dave, 2026-11-18: 3%; it was 8%, now "standard").
+/// the desktop says: 3% (8% was too strong, and is now "standard").
 pub const TINT_MIX: f32 = 0.03;
 
-/// The tint's amount (Dave, 2026-11-15: "needs settings to tone it down",
-/// then a slider): a percentage 0 to 10 in halves (Settings' slider), or a name
+/// The tint's amount, which the user can tone down (see docs/apps-roadmap.md):
+/// a percentage 0 to 10 in halves (Settings' slider), or a name
 /// (subtle 4%, standard 8%, strong 14%).
 pub fn tint_amount(value: Option<&str>) -> f32 {
     match value {

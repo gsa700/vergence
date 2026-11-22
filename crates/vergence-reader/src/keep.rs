@@ -1,6 +1,6 @@
-//! Reader's windows kept across restarts (Dave, 2026-11-21: after a
-//! restart "Reader re-opened but had neither of the two pdf's i had
-//! open"), as Edit keeps its own (vergence-edit keep.rs): each window's
+//! Reader's windows kept across restarts, so the documents open before a
+//! restart come back (see docs/reader-milestone-1.md), as Edit keeps its
+//! own (vergence-edit keep.rs): each window's
 //! token (window memory puts it back where it was), its documents in tab
 //! order and which was in front, and each document's place: the page, how
 //! far down it, and the zoom (session milestone 1: after a restart a

@@ -1,7 +1,6 @@
 //! The desktop's icons (files milestone 1, step 9; docs/files-milestone-1.md
-//! §6; Dave, 2026-11-15: "on many systems but especially windows i use it
-//! like a scratch folder: app launchers and random files ... include it as
-//! windows does"). `vergence-files --desktop`: a window of the Desktop kind
+//! §6): the desktop works as a scratch folder for launchers and stray files,
+//! as on Windows. `vergence-files --desktop`: a window of the Desktop kind
 //! (bus v17), which the server sizes to the main screen's work area and keeps
 //! under every window; its ground is clear, so the wallpaper shows.
 //!
@@ -10,8 +9,7 @@
 //!   which carries a shadow to read on any wallpaper.
 //! - **Where they stand**: a grid from the top left down, then across, as
 //!   Windows has it; dragged elsewhere, an icon keeps its cell, kept per size
-//!   of the desktop (a set of screens: Dave, "the desktop folder layout needs
-//!   to track the monitor memories as well") in
+//!   of the desktop (a set of screens, as window memory is kept) in
 //!   ~/.local/state/vergence/desktop-places; a new file takes the next free cell.
 //! - **What they do**: a click chooses (Ctrl+click adds), a double click
 //!   opens (a folder in File Viewer, a file with its app, a launcher starts
@@ -124,8 +122,8 @@ pub fn arrange(names: &[String], placed: &HashMap<String, (i32, i32)>, cols: i32
     out.into_iter().map(|s| s.unwrap_or((0, 0))).collect()
 }
 
-/// The icons every desktop has before its files (Dave, 2026-11-15: "a
-/// default set of icons there: Home, Trash, Mounted Volumes"): they open in
+/// The icons every desktop has before its files: Home, Trash and the mounted
+/// volumes (see docs/files-milestone-1.md). They open in
 /// File Viewer and take drops (into Home or a disk; the Trash trashes), but
 /// are not files of the Desktop folder: they cannot be renamed or trashed,
 /// and dragged they only move on the desktop (their drag carries no file
@@ -220,8 +218,8 @@ pub struct Desktop {
     /// The cell of the last right click (a new folder or a paste goes there).
     menu_cell: Option<(i32, i32)>,
     /// Drives ejected but not yet pulled out: their icons are hidden (the
-    /// system still offers a drive that is plugged in; Dave, 2026-11-15:
-    /// "cannot eject?" when the icon stayed).
+    /// system still offers a drive that is plugged in, and an icon left
+    /// standing reads as an eject that failed).
     ejected: HashSet<PathBuf>,
 }
 
@@ -488,7 +486,7 @@ impl Desktop {
     /// first if it is not trusted), a file with its app.
     fn open(&mut self, i: usize) {
         let Some(e) = self.entries.get(i).cloned() else { return };
-        // The Trash: its own window (Dave, 2026-11-18), made if not there yet.
+        // The Trash: its own window (see docs/backup-milestone-1.md), made if not there yet.
         if self.fixed_of(&e) == Some(Fixed::Trash) {
             let _ = crate::start(std::process::Command::new("vergence-files").arg("--trash"));
             return;
@@ -899,8 +897,8 @@ impl Program for Desktop {
                 }
             }
             // A click on the bare ground (pressed and let go there, not
-            // pulled): the windows move aside, or come back (overview
-            // milestone 1, step 6; Dave, 2026-11-18, after the Mac).
+            // pulled): the windows move aside, or come back, as on the Mac
+            // (see docs/overview-milestone-1.md).
             Msg::Touch(Touch::Release { x, y }) => {
                 if let Some((px, py, None)) = self.press.take()
                     && !self.dragged

@@ -1,7 +1,7 @@
-// The Notifications page (Dave, 2026-11-14: "Add a notifications item"):
-// do not disturb, how long a card stays, which corner the cards stack in,
-// and a test card. desktop.toml [notifications]; the server's notify.rs reads
-// the same keys within a second of a change.
+// The Notifications page (see docs/settings-milestone-2.md): do not disturb,
+// how long a card stays, which corner the cards stack in, and a test card.
+// desktop.toml [notifications]; the server's notify.rs reads the same keys
+// within a second of a change.
 
 use super::*;
 

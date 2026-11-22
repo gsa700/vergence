@@ -136,10 +136,9 @@ pub(crate) fn load(path: PathBuf, id: u32, shared: &Shared, waker: Option<Waker>
     });
 }
 
-/// A document as it opens (session milestone 1; Dave, 2026-11-21: after
-/// a restart "bring it back JUST like it was ... scrolled to where they
-/// were", but "if I close it by choice and reopen it sometime later, I
-/// think it should open at the first page"). Kept from the last run: its
+/// A document as it opens: after a restart it comes back just as it was,
+/// scrolled to where it was, but closed by choice and opened again later it
+/// starts at the first page (see docs/session-milestone-1.md). Kept from the last run: its
 /// zoom and place, gone to once placed (unless `[session] places` is
 /// false). Opened by the user: the first page, at the zoom it was last read at.
 fn with_place(mut d: pdf::Pdf, path: &Path, kept: Option<&keep::Place>) -> pdf::Pdf {

@@ -1,5 +1,5 @@
-//! What an app brings back when it starts (session milestone 1; Dave,
-//! 2026-11-21). Ended from outside (a logout, a restart, a power cut, a
+//! What an app brings back when it starts (see docs/session-milestone-1.md).
+//! Ended from outside (a logout, a restart, a power cut, a
 //! crash), everything comes back as it was, places inside documents too.
 //! Closed by the user, a document starts fresh. Settings keeps its page for
 //! a while.

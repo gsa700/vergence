@@ -1,7 +1,6 @@
-// Full screen (2026-11-14: Dave could not make a Firefox video, nor
-// AlbumWall, full screen: the server never answered Wayland's request, and
-// an X11 window was made full screen but never put back, with the dock
-// still drawn over it).
+// Full screen. Without this a Firefox video could not go full screen: the server never answered
+// Wayland's request, and an X11 window was made full screen but never put back,
+// with the dock still drawn over it.
 //
 // A window made full screen covers the whole of a screen (the one it names,
 // else the one it is mostly on), the dock's band included, with no bar; its

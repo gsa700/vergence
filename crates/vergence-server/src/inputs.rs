@@ -1,7 +1,7 @@
-// The input devices, for the settings app (settings milestone 1; Dave,
-// 2026-11-14: separate Keyboard, Mouse, Touchpad and Touchscreen pages,
-// "Mixed": Keyboard and Mouse always, Touchpad and Touchscreen once the
-// machine has had one). The devices present go to subscribers of the bus
+// The input devices, for the settings app (settings milestone 1; see
+// docs/settings-milestone-1.md): separate Keyboard, Mouse, Touchpad and
+// Touchscreen pages, Keyboard and Mouse always, Touchpad and Touchscreen once
+// the machine has had one. The devices present go to subscribers of the bus
 // topic `inputs` (protocol v7) with every kind this machine has had, which
 // is remembered in ~/.local/state/vergence/inputs.toml (owner only):
 //
@@ -9,8 +9,8 @@
 //
 // A touchscreen counts as seen when one is present. A touchpad only once it
 // has scrolled with fingers: a Logitech receiver says it has a touchpad
-// whether or not anything paired with it has one (pointer.rs, kepler
-// 2026-11-10), and a page for a touchpad that is not there would be a lie.
+// whether or not anything paired with it has one (pointer.rs), and a page
+// for a touchpad that is not there would be a lie.
 // The device names are the devices' own: untrusted text, shown as such.
 
 use std::path::PathBuf;

@@ -1,5 +1,5 @@
-// Closing a window asks first (settings milestone 2, step 7; Dave: "more than
-// one tab open or an active tab present"): with more than one tab, or with a
+// Closing a window asks first (settings milestone 2, step 7; see
+// docs/settings-milestone-2.md): with more than one tab, or with a
 // tab whose shell is running a program (its terminal's foreground process
 // group is not the shell's own: a build, an SSH session, an editor). One idle
 // tab closes without asking. The question is a modal dialog over the window

@@ -236,8 +236,8 @@ impl Server {
             open.picture = None;
         }
         // No redraw_all: it throws away every screen's damage history, so the
-        // network tile's reading every 2 s redrew whole screens (Techbench's
-        // 4K: 22 ms frames, every 2 s, 2026-11-17). The dock's and the
+        // network tile's reading every 2 s redrew whole screens (on a 4K
+        // screen, a 22 ms frame every 2 s). The dock's and the
         // drawer's pictures are keyed by the tiles they show, and the card's
         // was dropped above, so the next frame draws just what changed.
     }
@@ -436,8 +436,8 @@ impl Server {
         self.tiles.list.get(i).map(|p| p.key())
     }
 
-    /// The mouse wheel over the dock or an open card (Dave's list,
-    /// 2026-11-16: the wheel over the volume docket changes the volume): over
+    /// The mouse wheel over the dock or an open card (see docs/apps-roadmap.md,
+    /// polish batch 2): over
     /// the desktop's Sound tile, or its open card, each notch (a touchpad's
     /// travel, 15 points a step) is a volume key's 5%; up louder.
     pub fn tile_scroll(&mut self, at: Point<f64, Logical>, dy: f64, v120y: i32) {

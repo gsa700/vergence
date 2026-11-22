@@ -1,4 +1,4 @@
-//! The toolbar (files milestone 1, step 7; Dave, 2026-11-15: "b"): a strip
+//! The toolbar (files milestone 1, step 7; see docs/files-milestone-1.md): a strip
 //! right under the title bar the server draws, the same in every app. It
 //! reaches up under the bar (the window draws under its bar), so the bar's
 //! frost and the strip are one band of one color; the app's content starts

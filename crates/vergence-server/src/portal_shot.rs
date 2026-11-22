@@ -1,5 +1,5 @@
-// Other programs' screenshots (docs/screenshots-milestone-1.md, step 7;
-// Dave, 2026-11-20: through the desktop portal, each program asked first).
+// Other programs' screenshots (docs/screenshots-milestone-1.md, step 7):
+// through the desktop portal, each program asked first.
 //
 // org.freedesktop.portal.Screenshot on the D-Bus edge (dbus.rs), version 2:
 // Screenshot(parent_window, options) and PickColor(parent_window, options)

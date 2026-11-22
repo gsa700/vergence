@@ -1,5 +1,5 @@
 //! The app menu (app settings milestone 1): what opens from a window's app
-//! button, for every app. One rule for every app (Dave, 2026-11-14): the
+//! button, for every app. One rule for every app (see docs/app-settings-milestone-1.md): the
 //! app button is the app, a right click is the thing under the pointer (a
 //! pane, a tab, a selection), the title bar is the window. So the menu holds
 //! only what an app puts in it (its `featured` commands: New window, New
@@ -11,8 +11,8 @@
 //!    menu open (a while's size; the lasting one is in the app's settings);
 //! 3. the app's menus as submenus, File ›, View ›, Go › and the rest
 //!    (every command with its keys, chosen from there, a right click adding
-//!    one to the top level; Dave, 2026-11-22: Reader's View, Go and Tools
-//!    were buried in Keyboard shortcuts, "should be moved up one level");
+//!    one to the top level; an app's menus are one level up, not buried
+//!    in Keyboard shortcuts);
 //! 4. Settings…, About <App>, Quit <App>.
 //!
 //! An app that is not ours (no commands) gets the skeleton with a line saying
@@ -438,8 +438,8 @@ pub fn height(lines: &[Line]) -> i32 {
 pub struct State {
     pub typed: String,
     /// The search field's caret and the other end of its selection, as
-    /// byte offsets in `typed` (Dave, 2026-11-18: "I'd like it to be real
-    /// not just a picture with input"): the same where nothing is selected.
+    /// byte offsets in `typed`, so it edits as a real text field does (see
+    /// docs/apps-roadmap.md): the same where nothing is selected.
     pub caret: usize,
     pub anchor: usize,
     /// The chosen line of the top level (or of the results while searching).

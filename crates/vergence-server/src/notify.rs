@@ -17,8 +17,8 @@
 // card with buttons, and critical ones stay until clicked). While the pointer
 // is over any card, every countdown pauses, and resumes when it leaves.
 //
-// desktop.toml [notifications] (the settings app's Notifications page, Dave
-// 2026-11-14):
+// desktop.toml [notifications] (the settings app's Notifications page; see
+// docs/settings-milestone-2.md):
 //
 //   do-not-disturb = false   true: apps' cards are not shown (critical ones and
 //                            the server's own, the volume level, still are)

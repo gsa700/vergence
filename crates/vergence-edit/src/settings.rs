@@ -50,7 +50,7 @@ impl EditWindow {
             spaces: t.spaces.unwrap_or_else(|| self.flag("spaces", true)),
             current_line: self.flag("current-line", true),
             editable: t.read_only.is_none(),
-            // The right-click menu as full as the terminal's (Dave's list):
+            // The right-click menu as full as the terminal's (see docs/apps-roadmap.md):
             // the editor's own lines after the text's.
             commands: vec![
                 ("New Tab".into(), cmd::NEW_TAB, "Ctrl+T"),

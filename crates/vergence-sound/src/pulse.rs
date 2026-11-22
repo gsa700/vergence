@@ -1,8 +1,8 @@
 //! A sound server's outputs, through the PulseAudio native protocol, which
 //! PulseAudio and PipeWire (pipewire-pulse) both speak: Linux with a sound
-//! server running (Fedora on apollo, the platform's standard). Our own
-//! client of the wire protocol (Dave, 2026-11-20: "build the pulse
-//! client"), as with ALSA's kernel interface: no libpulse between.
+//! server running (Fedora's standard). Our own client of the wire protocol
+//! (see docs/sound-milestone-1.md), as with ALSA's kernel interface: no
+//! libpulse between.
 //!
 //! - **The socket** is `$PULSE_SERVER` when it names one (`unix:/path`),
 //!   else `$XDG_RUNTIME_DIR/pulse/native`; the server checks our uid by the

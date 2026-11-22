@@ -5,11 +5,11 @@
 //!
 //! They are loaded when a renderer is made (`dlopen`), not linked when the
 //! program is built: a machine without them, or without their development
-//! files (Techbench has only the run-time libraries), still builds and runs,
+//! files (many machines have only the run-time libraries), still builds and runs,
 //! and draws in software. Only the functions the renderer uses are declared.
 //!
-//! **On FreeBSD the loading has a rule** (found on kepler, 2026-11-10:
-//! FreeBSD 15.1, Mesa 26.2.2, Intel graphics): a thread that already existed
+//! **On FreeBSD the loading has a rule** (found on FreeBSD 15.1, Mesa
+//! 26.2.2, Intel graphics): a thread that already existed
 //! when these libraries were loaded cannot use them. Its thread-local state
 //! for them is not set up, and its first drawing call jumps to address zero.
 //! The thread that loads them is safe, and so is every thread started

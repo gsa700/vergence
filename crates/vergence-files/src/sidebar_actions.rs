@@ -59,8 +59,8 @@ impl Viewer {
         }
     }
 
-    /// A sidebar row's menu (Dave's list: Open in New Tab, Remove from
-    /// Sidebar, Show in its folder); the Recent heading's: Hide Recent.
+    /// A sidebar row's menu (Open in New Tab, Remove from Sidebar, Show in its
+    /// folder; see docs/files-milestone-3.md); the Recent heading's: Hide Recent.
     pub(crate) fn side_menu(&self, line: &sidebar::Line) -> Vec<MenuLine> {
         use sidebar::{Line, Section};
         match line {
@@ -185,8 +185,8 @@ impl Viewer {
         }
         let rect = self.side_rect.clone();
         let place = drawing(move |_, _, r: Rect, _| rect.set(r)).width(Length::FILL).height(Length::FILL);
-        // On the folder's own ground, as Explorer's (Dave, 2026-11-21: "the
-        // left pane the same color as the main window"), a line between them.
+        // On the folder's own ground, the same color as the main view, as
+        // Explorer's, a line between them.
         let _ = t;
         let list = panel(scroll(column(rows).width(Length::FILL)).name("Sidebar"))
             .radius(0.0)

@@ -1,8 +1,6 @@
 //! Reader (Reader milestone 1; docs/reader-milestone-1.md): PDF documents
-//! in an app of their own, split from Close-Up (Dave, 2026-11-20: "We need
-//! to have a unique window spec for when Close-Up is displaying PDF vs
-//! images... Maybe we should make it its own application?"; named Reader
-//! the same day). Close-Up keeps pictures and hands PDFs here.
+//! in an app of their own, split from Close-Up, since a PDF wants a
+//! different window from a picture. Close-Up keeps pictures and hands PDFs here.
 //!
 //! - **Documents** are read and drawn by vergence-pdf's confined helper,
 //!   never in this process (pdf.rs): pages in a column, scrolled
@@ -140,10 +138,10 @@ struct Viewer {
     thumb_bar_drag: Option<f32>,
     /// The Hand: a drag always moves the pages (else text is selected).
     hand: bool,
-    /// The pointer is over a scroll bar (the arrow there, Dave 2026-11-20).
+    /// The pointer is over a scroll bar (the arrow there).
     over_bar: bool,
     /// The pointer is over a link: the pointing hand, as Preview and
-    /// browsers show (Dave, 2026-11-21).
+    /// browsers show.
     over_link: bool,
 }
 
@@ -323,12 +321,10 @@ impl Program for Viewer {
         APP_ID.into()
     }
 
-    /// Light under App default, with a dark bar (Dave, 2026-11-20: "the
-    /// light style with the dark toolbar as the app default... helps the app
-    /// stand out a bit"); the ground around the pages stays dark.
-    /// Always solid: a see-through window helps no one reading (Dave,
-    /// 2026-11-21: "drop the opacity control totally"), whatever the
-    /// desktop's opacity.
+    /// Light under App default, with a dark bar, which helps the app stand
+    /// out a bit; the ground around the pages stays dark.
+    /// Always solid, with no opacity control: a see-through window helps no
+    /// one reading, whatever the desktop's opacity.
     fn theme(&self) -> Theme {
         let mut t = Theme::from_desktop(&self.desktop, false, SECTION);
         t.opacity = 1.0;
@@ -344,7 +340,7 @@ impl Program for Viewer {
         true
     }
 
-    /// The server's tabs, one document each (Dave: "Ok, tab view"); each
+    /// The server's tabs, one document each (see docs/reader-milestone-1.md); each
     /// keeps its own view. + opens a document.
     fn bar(&self) -> Option<Bar> {
         let tabs = self

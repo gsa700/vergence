@@ -70,7 +70,7 @@ pub(crate) fn watch_settings(changed: Arc<AtomicBool>, waker: Waker) {
 
 impl Settings {
     /// Vergence's settings file; the button layout GNOME's when running under
-    /// GNOME (Dave, 2026-11-12).
+    /// GNOME, so the terminal fits in there (see docs/bar-milestone-1.md).
     pub(crate) fn load() -> Settings {
         let mut s = Settings::from_text(&config("settings.toml"));
         if let Some(layout) = bar::host_layout() {
@@ -127,7 +127,7 @@ impl CursorShape {
 }
 
 /// A switch of the terminal's settings (absent: `default`).
-/// The settings' "Scroll on output" (Dave's list, 2026-11-15): while
+/// The settings' "Scroll on output" (see docs/apps-roadmap.md): while
 /// scrolled back, new output brings the view down to it. Off by default:
 /// the view stays on the text being read. Read by every tab's parse thread.
 pub(crate) static SCROLL_ON_OUTPUT: AtomicBool = AtomicBool::new(false);

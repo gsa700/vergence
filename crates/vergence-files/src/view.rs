@@ -77,7 +77,7 @@ impl Viewer {
         }
     }
 
-    /// The view as shown: the Trash is always a list (Dave, 2026-11-18),
+    /// The view as shown: the Trash is always a list,
     /// whatever the window's view is for folders.
     pub(crate) fn shown_view(&self) -> ViewKind {
         if self.in_trash() { ViewKind::List } else { self.view }
@@ -203,9 +203,9 @@ impl Viewer {
         if self.trash_window {
             items.clear();
         }
-        // The path (Dave, 2026-11-21): the folder's real path in a box drawn
-        // as the field is ("the folder name is right above it in the tab so
-        // here the real path makes more sense"); a click on it, or Ctrl+L,
+        // The path (see docs/files-milestone-3.md): the folder's real path in a
+        // box drawn as the field is, since the folder's name is right above it
+        // in the tab; a click on it, or Ctrl+L,
         // makes it the field to type a path in (Enter goes there, Escape lets
         // go). Not a field all the time: the folder's keys (Backspace goes
         // up, Delete trashes) must not act while a path is being typed.
@@ -267,7 +267,7 @@ impl Viewer {
         }
         if trash {
             // The chosen ones put back or deleted; the whole Trash emptied
-            // (Dave, 2026-11-18: right click and each row have them too).
+            // (right click and each row have them too).
             let full = tab.is_some_and(|t| !t.entries.is_empty());
             items.push(
                 button(label("Put Back").size(12.0))
@@ -429,7 +429,7 @@ impl Viewer {
             vec![self.folder_view(t)]
         } else {
             // The sidebar and the folder on one page, a line between them that
-            // is pulled to change the sidebar's width (Dave, 2026-11-21).
+            // is pulled to change the sidebar's width (see docs/files-milestone-3.md).
             let rect = self.divider_rect.clone();
             let divider = drawing(move |scene, _, r: Rect, t: &Theme| {
                 rect.set(r);

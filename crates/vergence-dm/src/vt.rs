@@ -38,7 +38,7 @@ pub fn tty_path(n: u32) -> String {
 /// Open VT `n` for reading and writing, never as the opener's controlling
 /// terminal (O_NOCTTY): vdm runs as a session leader under systemd, and a
 /// plain open made the login screen's VT vdm's own terminal, so the login
-/// screen could not take it (Techbench, 2026-11-16: EPERM from TIOCSCTTY).
+/// screen could not take it (EPERM from TIOCSCTTY).
 pub fn open(n: u32) -> std::io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
     #[cfg(target_os = "linux")]

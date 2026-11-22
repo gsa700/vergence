@@ -26,7 +26,7 @@ const O_RDWR: i32 = 2;
 // Close-on-exec: the terminal's end of a pty must not be handed down to the
 // programs it starts. Without it every shell held its own terminal's master
 // (and those of the tabs opened before it), so a killed terminal's programs
-// never saw the hangup and ran on (found in the stress test, 2026-11-09).
+// never saw the hangup and ran on (found in the stress test).
 #[cfg(target_os = "freebsd")]
 const O_CLOEXEC: i32 = 0x0010_0000;
 #[cfg(not(target_os = "freebsd"))]
@@ -72,7 +72,7 @@ impl Pty {
         // ptsname answers in one buffer shared by the whole process, so two
         // threads asking at once could read each other's name, or half of
         // one: a shell then started on the wrong terminal, or the open below
-        // failed on "/dev/pts/" (seen on FreeBSD, 2026-11-09). One at a time,
+        // failed on "/dev/pts/" (seen on FreeBSD). One at a time,
         // and the name is copied before the next may ask.
         static NAMING: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let name = {
@@ -106,8 +106,8 @@ impl Pty {
                 // theirs to take: if this terminal was started ignoring any of them
                 // (under `nohup`, by a launcher), its programs are not to be born
                 // ignoring them too. One that ignored the hangup would run on after
-                // the terminal was gone (seen 2026-11-10 with a terminal whose server
-                // had been started with nohup). Hangup, interrupt, quit, terminate;
+                // the terminal was gone (as under a server started with nohup).
+                // Hangup, interrupt, quit, terminate;
                 // 0 is the default action.
                 for number in [1, 2, 3, 15] {
                     signal(number, 0);
@@ -225,7 +225,7 @@ mod tests {
         // thrown away, even if another descriptor of the slave is open (Linux
         // keeps it). A program quicker than the reading thread (here, under a
         // loaded test run) lost all its output: the test failed now and then
-        // on kepler (2026-11-12). Shells and real programs live longer than
+        // on FreeBSD. Shells and real programs live longer than
         // their first output; a one-line `-e` command's window closes as it
         // exits anyway.
         let p = super::Pty::spawn(

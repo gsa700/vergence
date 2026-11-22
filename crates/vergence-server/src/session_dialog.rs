@@ -1,5 +1,5 @@
-//! The session dialog (Dave, 2026-11-16: "dim the screen and have a proper
-//! dialog prompt" for logging out, in place of a second small menu): every
+//! The session dialog (a proper dialog for logging out, in place of a second
+//! small menu; see docs/vdm-milestone-1.md): every
 //! screen dimmed, a panel in the middle of the pointer's screen asking
 //! whether to log out, with Lock, Cancel and Log Out (the default: Enter).
 //! Escape, Cancel or a press outside the panel closes it. Opened by the
@@ -54,8 +54,8 @@ const BUTTONS: [(Button, &str); 6] = [
 const DEFAULT: usize = 5;
 /// The power buttons come first, a gap after them.
 const POWER_BUTTONS: usize = 3;
-// As the mock-up Dave chose (2026-11-16: "make ours match your mockup
-// exactly"): a 600-point panel, 24 inside, the heading and a line under it,
+// As the chosen mock-up, exactly (see docs/menus-milestone-1.md): a
+// 600-point panel, 24 inside, the heading and a line under it,
 // then the buttons, each as wide as its word, 8 apart, the power group well
 // apart from Lock, Cancel and Log Out.
 const W: i32 = 600;

@@ -38,7 +38,7 @@ const GAP: f32 = 2.0;
 const CLOSE_NEEDS: f32 = 72.0;
 
 /// A bar's proportions at one size of controls (look milestone 1, step 8;
-/// the presets of the mock-up Dave chose from, 2026-11-13): the bar's
+/// the presets of the chosen mock-up, see docs/look-milestone-1.md): the bar's
 /// height, its tabs' and buttons' height, a button's width, the + tab's,
 /// the room at the sides and between items. Text stays FONT_SIZE: text size
 /// is a setting of its own.
@@ -121,15 +121,15 @@ pub fn without_app_menu((mut left, mut right): (Vec<WinButton>, Vec<WinButton>))
 }
 
 /// The button layout when none has been chosen: close, minimize, maximize
-/// on the left (Dave, 2026-11-12; it was on the right until then).
+/// on the left (see docs/bar-milestone-1.md).
 pub const DEFAULT_LAYOUT: &str = "close,minimize,maximize:";
 
 /// The desktop's button layout: under GNOME, GNOME's own ([`host_layout`]:
-/// a program of ours there looks like its neighbors, Dave 2026-11-12); else
+/// a program of ours there looks like its neighbors); else
 /// Vergence's settings file (`~/.config/vergence/settings.toml`,
 /// `"Gtk/DecorationLayout" = "..."`, the settings app's Windows page); else
 /// [`DEFAULT_LAYOUT`]. What the terminal's bar follows, and the toolkit's own
-/// bar where the server draws none.
+/// bar where the server draws none (see docs/bar-milestone-1.md).
 pub fn desktop_layout() -> (Vec<WinButton>, Vec<WinButton>) {
     let text = settings_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
     // No app button where the toolkit draws its own bar: its menu is the server's.
@@ -315,11 +315,10 @@ impl Layout {
 
     /// [`Layout::new`] at a size of controls (look milestone 1, step 8).
     pub fn sized(width: f32, count: usize, shown: usize, left: &[WinButton], right: &[WinButton], z: Sizes) -> Layout {
-        // The tabs stand at the bar's bottom edge, joined to the page (Dave,
-        // 2026-11-10); the window's buttons in the bar's middle, as in a plain
-        // bar (Dave, 2026-11-21: "it feels like the close minimize are closer
-        // to the bottom of the titlebar": at the tabs' height they had 9
-        // points above and 3 below).
+        // The tabs stand at the bar's bottom edge, joined to the page; the
+        // window's buttons in the bar's middle, as in a plain bar: at the tabs'
+        // height they had 9 points above and 3 below and looked low in the bar
+        // (see docs/look-milestone-1.md).
         let (buttons, start, end) = Layout::buttons(width, left, right, &z, ((z.bar_h - z.item_h) / 2.0).round());
         // The tabs share what is left after +, down to a least width.
         let room = (end - start - z.plus_w - z.gap).max(0.0);
@@ -327,9 +326,8 @@ impl Layout {
         let tab_w = ((room - z.gap * n) / n).clamp(TAB_MIN, TAB_W);
         let controls_left = !left.is_empty();
         // The tabs a touch taller than the buttons, reaching up from the
-        // bottom edge, so they stand apart from the centered controls (Dave,
-        // 2026-11-21: "it is nice that the tab is a bit taller, I think it
-        // sets them off the controls"): 3 points at Standard and Large, 2 at Compact.
+        // bottom edge, so they stand apart from the centered controls: 3 points
+        // at Standard and Large, 2 at Compact.
         let tab_h = z.item_h + ((z.bar_h - z.item_h) * 0.4).round();
         let top = z.bar_h - tab_h;
         let (mut tabs, mut closes) = (Vec::new(), Vec::new());
@@ -364,8 +362,8 @@ impl Layout {
 
     /// [`Layout::plain`] at a size of controls.
     pub fn plain_sized(width: f32, left: &[WinButton], right: &[WinButton], z: Sizes) -> Layout {
-        // No tabs to stand with: everything in the bar's middle (Dave,
-        // 2026-11-14: "the buttons never got centered").
+        // No tabs to stand with: everything in the bar's middle (see
+        // docs/settings-milestone-2.md).
         let top = ((z.bar_h - z.item_h) / 2.0).round();
         let (buttons, start, end) = Layout::buttons(width, left, right, &z, top);
         let title = Rect::new(start + 6.0, top, (end - start - 12.0).max(0.0), z.item_h);
@@ -563,7 +561,7 @@ pub struct Look<'a> {
     pub hover: Option<Part>,
     /// The tab being dragged (the server's, dispatch.rs): left in its place,
     /// faint, while its ghost follows the pointer and a line shows where it
-    /// would land (Dave, 2026-11-12).
+    /// would land (see docs/bar-milestone-1.md).
     pub dragged: Option<usize>,
     /// The program's own buttons' icons and whether each can be pressed
     /// ([`Layout::tools`] gives where).
@@ -575,10 +573,11 @@ pub struct Look<'a> {
     pub app_icon: Option<std::sync::Arc<vergence_scene::Image>>,
     /// The app menu is open from this bar: its button stays lit.
     pub menu_open: bool,
-    /// The window's program runs as the superuser (Dave's wish, 2026-11-10:
-    /// "a server-drawn mark on windows of root clients"): the bar's ground
-    /// goes the alarm red, as a terminal's does while a root tab is in front,
-    /// and a bar without tabs shows its title as a red tab, white on red.
+    /// The window's program runs as the superuser, marked by the server so no
+    /// program chooses how alarming its own bar looks: the bar's ground goes
+    /// the alarm red, as a terminal's does while a root tab is in front, and a
+    /// bar without tabs shows its title as a red tab, white on red (see
+    /// docs/look-milestone-1.md).
     pub root: bool,
 }
 

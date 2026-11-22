@@ -1,6 +1,6 @@
 // `vergence-harness seams`: is a test-pattern window (vergence-ui's
 // testpattern example) shown whole, on the pixels it should be? Testing
-// method, layer 2 (2026-11-18), for tools/display-check.sh.
+// method, layer 2, for tools/display-check.sh.
 //
 //     vergence-harness seams <shot.png> --scale S --window X Y W H [--bar H]
 //
@@ -13,7 +13,7 @@
 //     was shown whole, not cropped or squeezed;
 //   - the body's magenta is just inside them;
 //   - with --bar, the bar's first and last columns match each other (its
-//     outline on both sides, or on neither), the seam of 2026-11-18.
+//     outline on both sides, or on neither): a seam once showed there.
 // Prints one line per check and exits 1 if any fails.
 
 use std::path::Path;

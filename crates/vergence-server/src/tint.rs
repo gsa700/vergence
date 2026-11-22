@@ -1,13 +1,12 @@
 // Windows tinted with the wallpaper behind them (docs/window-styles-milestone-1.md,
-// step 6; as macOS's "Tint window background with wallpaper color", which Dave
-// asked about on 2026-11-14).
+// step 6; as macOS's "Tint window background with wallpaper color").
 //
 // The server knows each screen's wallpaper (wallpaper.rs keeps its colors
 // averaged over a 32 x 18 grid) and where every window is. A native window is
 // told the average color of the wallpaper under it (`WinEvent::Tint`) when it
 // changes enough to see, looked at each frame but at most five times a second
 // for one window; the toolkit mixes a few percent of it into the window's
-// grounds. On in dark style only, where it shows (Dave: (a)); off with Reduce
+// grounds. On in dark style only, where it shows; off with Reduce
 // transparency and High contrast, and by the Appearance switch (desktop.toml
 // `[appearance] wallpaper-tint = false`).
 

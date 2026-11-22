@@ -8,7 +8,7 @@
 //! path only. Code from FAAD2 is copyright (c) Nero AG, www.nero.com. So this
 //! crate is used ONLY by its own helper program,
 //! libexec/vergence/vergence-hymie-aac, never linked into vergence-hymie or
-//! any app (Dave, 2026-11-21). It depends on vergence-hymie (dual-licensed,
+//! any app (see docs/preview-milestone-1.md). It depends on vergence-hymie (dual-licensed,
 //! so it may be combined into this GPL program) for the MP4 reader, the
 //! track, and the helper's protocol and confinement; vergence-hymie holds no
 //! AAC code, only the [`FrameDecoder`] trait this decoder plugs into.

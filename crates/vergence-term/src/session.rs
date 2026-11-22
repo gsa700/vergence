@@ -235,7 +235,7 @@ impl Session {
     /// A terminal started as root is red throughout.
     fn as_root(&self) -> bool {
         // Every process of the group counts, the shell's own group included: a
-        // script leads the group the sudo it runs is in (found on Hubble).
+        // script leads the group the sudo it runs is in.
         let Some(group) = self.pty.foreground() else { return false };
         if let Some((seen, root, at)) = self.root_seen.get()
             && seen == group

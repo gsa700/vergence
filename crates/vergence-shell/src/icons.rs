@@ -158,7 +158,7 @@ pub fn find_in(data_dirs: &[PathBuf], home: Option<&Path>, theme: &str, name: &s
     None
 }
 
-/// One of Vergence's own icons (tools/make-icons.py, 2026-11-18): `group`
+/// One of Vergence's own icons (tools/make-icons.py): `group`
 /// "places" (home, trash, trash-full, folder, disk, usb ...) or "kinds"
 /// (text, picture, pdf ...). Installed in share/vergence/icons/<group>
 /// (install.sh); a checkout's own data/icons/<group> beside its build
@@ -177,8 +177,7 @@ pub fn vergence_icon(group: &str, name: &str) -> Option<PathBuf> {
 
 /// The icon theme Vergence installs (share/icons/Vergence: the apps, places
 /// and kinds of files drawn by the project, and the pointers), and the one
-/// used when none is chosen (Dave, 2026-11-18: "yes Vergence, and yes our
-/// apps follow it").
+/// used when none is chosen; Vergence's own apps follow the chosen theme.
 pub const THEME: &str = "Vergence";
 
 /// Vergence's own icons by their freedesktop names (the Icon Naming

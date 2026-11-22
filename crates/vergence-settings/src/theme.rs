@@ -1,4 +1,4 @@
-// The Theme and fonts page's data (2026-11-08): what is installed, and the
+// The Theme and fonts page's data: what is installed, and the
 // desktop's choices in ~/.config/vergence/settings.toml (the XSETTINGS file
 // vergd and the server share; the server republishes it to apps live and
 // passes the same values on through the settings portal).

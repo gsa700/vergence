@@ -16,7 +16,7 @@ const KEEP_CHOICES: [(&str, i64); 5] = [
 ];
 
 impl App {
-    /// The Session page (session milestone 1; Dave, 2026-11-21): desktop.toml
+    /// The Session page (see docs/session-milestone-1.md): desktop.toml
     /// `[session]` restore (moved here from the Dock page), places and
     /// settings-keep. Window places themselves are on the Windows page.
     pub(crate) fn session_page(&self) -> Element<Message> {

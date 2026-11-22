@@ -5,12 +5,13 @@
 // with no input, 0: not on its own), before-sleep (default on).
 //
 // Login: what vdm says on its power socket ("login-state"): whether the
-// login screen comes up at boot, and automatic login, with Dave's rules
-// ("4 a", review M6): off unless turned on, only where exactly one person
-// can log in, never with any encrypted storage, checked at every boot.
-// Every change goes through an elevation prompt (elevation milestone 1;
-// Dave: administrators only, their own password, every time, off too): the
-// page asks vdm, the server shows the prompt, vdm does it.
+// login screen comes up at boot, and automatic login, with these rules
+// (review M6): off unless turned on, only where exactly one person
+// can log in, never with any encrypted storage, checked at every boot
+// (see docs/vdm-milestone-1.md). Every change goes through an elevation
+// prompt: administrators only, with their own password, every time, turning
+// it off too (see docs/elevation-milestone-1.md). The page asks vdm, the
+// server shows the prompt, vdm does it.
 
 use super::*;
 
@@ -33,7 +34,7 @@ pub fn lock_settings(d: &toml::Table) -> (bool, i64, bool) {
     (on("screens-off"), after, on("before-sleep"))
 }
 
-/// The grace after the screens' timeout (Dave's list, 2026-11-16).
+/// The grace after the screens' timeout before the lock needs the password (see docs/apps-roadmap.md).
 const GRACE_CHOICES: [(&str, i64); 4] =
     [("At once", 0), ("After 10 seconds", 10), ("After 30 seconds", 30), ("After 1 minute", 60)];
 

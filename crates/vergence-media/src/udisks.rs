@@ -47,8 +47,8 @@ fn opt(key: &str, v: Value) -> Value {
     Value::Entry(Box::new(Value::Str(key.into())), Box::new(Value::Variant(Box::new(v))))
 }
 
-/// Mount options: as quiet, and noexec (Dave, 2026-11-15: "noexec on
-/// sticks"): nothing on a drive runs as a program. udisks adds its own
+/// Mount options: as quiet, and noexec on removable drives: nothing on a
+/// drive runs as a program. udisks adds its own
 /// nosuid and nodev, and allows noexec for any file system by default.
 fn mount_options() -> Value {
     Value::Array(
@@ -91,7 +91,7 @@ fn label(ifaces: &Value) -> String {
 /// Mounts the file systems that are new since `seen` (and, the first time,
 /// those already there), and returns what is there now, less those whose
 /// mount failed: they are tried again next time (a mount refused because
-/// polkit was not up yet, Hubble 2026-11-15, must not be given up on).
+/// polkit was not up yet must not be given up on).
 fn mount_new(c: &mut Client, seen: Option<&HashSet<String>>, told: &dyn Fn(&str)) -> Result<HashSet<String>, String> {
     let all = objects(c)?;
     let mut failed = HashSet::new();

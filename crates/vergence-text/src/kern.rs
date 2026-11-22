@@ -1,8 +1,8 @@
 //! Kerning from a font's `GPOS` table, read by us (text milestone 1, step 1).
 //!
 //! Modern fonts keep their kerning in `GPOS` only (Inter has no legacy
-//! `kern` table), and ab_glyph reads only `kern`, so until 2026-11-19 Inter
-//! was set at its bare advances. This reads the `kern` feature's pair
+//! `kern` table), and ab_glyph reads only `kern`, so without this Inter
+//! would be set at its bare advances. This reads the `kern` feature's pair
 //! adjustment lookups (formats 1 and 2, through extension lookups too) for
 //! the default script and Latin, and a variable font's adjustments at the
 //! face's own axis settings (GDEF's item variation store), so bold is kerned
@@ -516,7 +516,7 @@ mod tests {
     }
 
     /// HarfBuzz 11's kerning of "AVATo.Ty" in Inter 4.1, at three weights
-    /// (hb-shape with and without `kern` on kepler, 2026-11-19).
+    /// (hb-shape with and without `kern`).
     #[test]
     fn the_same_as_harfbuzz() {
         let file = shipped("InterVariable.ttf");

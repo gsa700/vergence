@@ -1,5 +1,5 @@
-//! The table of file types: our own, written for Vergence (Dave,
-//! 2026-11-15: not the system's shared-mime-info, whose data is GPL). Type
+//! The table of file types: our own, written for Vergence (not the system's
+//! shared-mime-info, whose data is GPL; see docs/files-milestone-1.md). Type
 //! names are the freedesktop ones (what desktop entries' MimeType lines and
 //! mimeapps.list use), so other programs' entries match ours.
 //!

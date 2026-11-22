@@ -48,8 +48,8 @@ pub fn monitor_id(edid: &[u8]) -> String {
 /// The monitor itself, whichever of its inputs it is on: maker, product code
 /// and serial number from the EDID's base block, plus the serial string
 /// (descriptor 0xFF) if it has one. A monitor gives each input its own EDID
-/// (Techbench, 2026-11-17: the LG Ultra HD's HDMI and DisplayPort EDIDs
-/// differ, so it became two monitors with two scales), but these fields stay
+/// (an LG Ultra HD's HDMI and DisplayPort EDIDs differ, so it became two
+/// monitors with two scales), but these fields stay
 /// the same. None when it can't be told apart from another of its model: no
 /// serial number and no serial string.
 pub fn model_key(edid: &[u8]) -> Option<String> {

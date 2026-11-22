@@ -36,7 +36,7 @@ impl Viewer {
             _ if self.over_bar || self.bar_drag.is_some() => vergence_ui::Cursor::Default,
             // Over a link, not dragging: the pointing hand, with either tool.
             (_, false) if self.over_link && !self.selecting => vergence_ui::Cursor::Pointer,
-            // The open hand; closed while it holds the pages (Dave, 2026-11-20).
+            // The open hand; closed while it holds the pages (see docs/reader-milestone-1.md).
             (true, true) => vergence_ui::Cursor::Grabbing,
             (true, false) => vergence_ui::Cursor::Grab,
             _ => vergence_ui::Cursor::Text,

@@ -1,5 +1,5 @@
-//! The look of the desktop's own drawing, in one place (Dave, 2026-11-10:
-//! "I want consistency throughout").
+//! The look of the desktop's own drawing, in one place, so it is consistent
+//! throughout (see docs/look-milestone-1.md).
 //!
 //! The server draws title bars and borders; the toolkit draws window bars,
 //! tabs, buttons, menus and scrollbars. They are to look like one thing, so
@@ -42,8 +42,8 @@ pub fn text_size(size: f32, factor: f32) -> f32 {
     ((size * factor * 2.0).round() / 2.0).max(1.0)
 }
 
-/// **Menus** (Dave, 2026-11-16: "the black rounded design", a standard for
-/// every right-click menu, light where the look is light): the server's
+/// **Menus** (the mock-up's black rounded design, a standard for every
+/// right-click menu, light where the look is light; docs/menus-milestone-1.md): the server's
 /// (the desktop's, the dock's, a title bar's, an app's own) and the
 /// toolkit's in a window (a field's, a choice's list) alike. Their colors
 /// are [`ShelfLook`]'s `menu`, `edge`, `separator`, `hover` and inks. The
@@ -126,10 +126,9 @@ pub const BAR_DARK: BarLook = BarLook {
     edited: Rgb(232, 168, 56),
 };
 
-/// The light bar's grounds a shade darker since 2026-11-21 (Dave: "the white
-/// bar washes out the tabs a bit"; 228 and 240 before): the white tab in
-/// front stands out at about 1.35:1, the focused bar still darker than the
-/// others.
+/// The light bar's grounds a shade darker (228 and 240 before) so a white bar
+/// does not wash out the tabs: the white tab in front stands out at about
+/// 1.35:1, the focused bar still darker than the others.
 pub const BAR_LIGHT: BarLook = BarLook {
     ground: Rgb(216, 219, 226),
     ground_off: Rgb(230, 230, 232),
@@ -155,7 +154,7 @@ pub const fn bar_look(light: bool) -> &'static BarLook {
     if light { &BAR_LIGHT } else { &BAR_DARK }
 }
 
-/// Settings > Appearance > Title bar shade (Dave, 2026-11-21): steps lighter
+/// Settings > Appearance > Title bar shade: steps lighter
 /// (below 0) or darker (above), desktop.toml `[appearance] bar-shade`. Each
 /// step lays black (or white) at SHADE_STEP of 255 on the bar's grounds; the
 /// tabs behind and the shapes follow, being laid on the ground, and the tab
@@ -256,8 +255,8 @@ pub const fn front_veil(light: bool) -> u8 {
 }
 /// The blur's reach in points at Standard. The blur's weights fall off as
 /// exp(-2r²) over the reach, so its spread (a CSS blur's px) is half of it:
-/// 12 is the mock-up's 6 px that Dave chose (2026-11-13: "better, I see it
-/// now"); 14 was there before the steps took the blur too.
+/// 12 is the mock-up's 6 px, the blur at which the frost first shows clearly
+/// (see docs/look-milestone-1.md); 14 was there before the steps took the blur too.
 pub const FROST_RADIUS: f32 = 12.0;
 /// The Frost setting's steps (Clear, Standard, Heavy): the blur's reach in
 /// points (spread 4, 6 and 10 px), stepped with the strength.
@@ -274,12 +273,11 @@ pub const fn frost_radius(step: u32) -> f32 {
 /// too (a tab behind, a button, anything under the pointer). Worked out over
 /// a grid of colors; the test below checks it. (A light bar over a dark
 /// window frosts what is under it inverted, so its ground is never the dark
-/// that made the focused bar look dimmer than the unfocused one: Dave,
-/// 2026-11-14; 14:1 for the focused bar fixed that but washed out
-/// everything under the bar.)
+/// that made the focused bar look dimmer than the unfocused one; 14:1 for
+/// the focused bar fixed that but washed out everything under the bar.)
 /// The gentler floor the desktop may choose instead (Settings > Appearance,
-/// "Under the bar: show more of the window"; Dave, 2026-11-15, after the
-/// frost all but hid a terminal's text under a dark bar): the bare frost
+/// "Under the bar: show more of the window"; the frost all but hid a
+/// terminal's text under a dark bar): the bare frost
 /// keeps the bar's ink at the usual minimum, 4.5:1 focused and 3:1 not, so
 /// more of what is under the bar shows; a shape laid on the frost may then
 /// read a little below it.
@@ -308,7 +306,8 @@ pub const BUTTON_INSET_Y: f32 = 3.0;
 pub const SHELF_W: f32 = 48.0;
 /// The room between the shelf and the screen's edge, and between it and
 /// the windows' work area, unless the settings say another: the shelf
-/// floats, like a dock, a hair off its edge (Dave, 2026-11-10: 1 point).
+/// floats, like a dock, a hair off its edge: 1 point (see
+/// docs/shelf-milestone-1.md).
 pub const SHELF_GAP: f32 = 1.0;
 /// How far the apps popup and an icon's menu stand off the dock.
 pub const SHELF_POPUP_GAP: f32 = 6.0;
@@ -346,7 +345,7 @@ pub const SHELF_DARK: ShelfLook = ShelfLook {
     tile: Rgb(70, 78, 98),
     tile_ink: Rgb(235, 235, 235),
     mark: BAR_DARK.ink_off,
-    // Near black, hardly blue (the menus' standard, 2026-11-16).
+    // Near black, hardly blue (the menus' standard, docs/menus-milestone-1.md).
     menu: Rgb(42, 44, 51),
     menu_ink: Rgb(235, 235, 235),
     menu_ink_off: Rgb(128, 128, 134),
@@ -364,7 +363,7 @@ pub const SHELF_LIGHT: ShelfLook = ShelfLook {
     // The light style's ink, not its mid grey: a mid grey keeps 3:1 over
     // neither a dark nor a bright backdrop well, so the frost's floor kept a
     // light dock over a red and black wallpaper about 80% tinted whatever its
-    // opacity (Hubble, 2026-11-13); this ink needs 30-45% there.
+    // opacity; this ink needs 30-45% there.
     mark: BAR_LIGHT.ink,
     menu: Rgb(250, 250, 251),
     menu_ink: Rgb(29, 29, 31),
@@ -427,7 +426,7 @@ mod tests {
     use super::*;
 
     /// The Frost steps go from clear to heavy in the blur and the strength
-    /// both; Standard is the mock-up's 6 px blur that Dave chose.
+    /// both; Standard is the mock-up's 6 px blur (see docs/look-milestone-1.md).
     #[test]
     fn frost_steps_blur_and_tint_together() {
         assert!(frost_radius(0) < frost_radius(1) && frost_radius(1) < frost_radius(2));
@@ -487,8 +486,8 @@ mod tests {
         assert!(contrast(Rgb(255, 255, 255), CLOSE) >= 4.5);
     }
 
-    /// The light bar's tab in front stands out from the ground (Dave,
-    /// 2026-11-21: it washed out at 1.2:1), more with each darker step.
+    /// The light bar's tab in front stands out from the ground (it washed
+    /// out at 1.2:1), more with each darker step.
     #[test]
     fn the_light_front_tab_stands_out() {
         let at = |s| contrast(bar_look_shaded(true, s).front, bar_look_shaded(true, s).ground);

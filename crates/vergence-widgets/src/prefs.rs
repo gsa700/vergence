@@ -90,8 +90,8 @@ pub enum Control {
     Switch { default: bool },
     /// A button the app answers ([`Rows::button`]): "Forget…".
     Button { label: String, id: u32 },
-    /// A percentage typed in (an opacity: Dave, 2026-11-14, rather than a
-    /// list in steps of 5), from `min` to 100, written as a fraction; empty
+    /// A percentage typed in (an opacity, any value rather than a list in
+    /// steps of 5), from `min` to 100, written as a fraction; empty
     /// is the default, which `desktop` names ("Desktop default (100)") and
     /// `now` is (where the slider beside it rests while the field is empty).
     Percent { min: u32, desktop: String, now: u32 },
@@ -156,8 +156,8 @@ pub struct Prefs {
     alive: Arc<AtomicBool>,
     /// What is typed in a percentage's field, by key, until it is a value.
     drafts: std::collections::HashMap<String, String>,
-    /// Its size now, kept when it closes (Dave, 2026-11-14: "at least
-    /// remember the size"), per app, in ~/.local/state/vergence/settings-windows.toml.
+    /// Its size now, kept when it closes so it reopens as the user left it,
+    /// per app, in ~/.local/state/vergence/settings-windows.toml.
     size: Option<(f32, f32)>,
 }
 
@@ -344,7 +344,7 @@ impl Prefs {
                 }
                 let help = format!("{min} to 100");
                 let (key, min) = (r.key.clone(), *min);
-                // A slider for a quick change (Dave: "could be a slider too"), the
+                // A slider for a quick change, the
                 // field beside it for an exact one; the slider writes when let go.
                 let at = shown.parse::<u32>().ok().filter(|n| (min..=100).contains(n)).unwrap_or(*now) as f32;
                 let (k1, k2) = (key.clone(), key.clone());
@@ -401,8 +401,8 @@ impl Program for Prefs {
     }
 
     /// Light, whatever the app's own look, unless the desktop's Style forces
-    /// Dark (Dave, 2026-11-14: settings are hard to read dark with small
-    /// text); not the app's opacity either: no section of its own.
+    /// Dark, since settings are hard to read dark with small text (see
+    /// docs/app-settings-milestone-1.md); not the app's opacity either: no section of its own.
     fn theme(&self) -> Theme {
         Theme::from_desktop(&self.text, false, "[settings window]")
     }
@@ -503,9 +503,9 @@ impl Program for Prefs {
     }
 
     /// It opens at a guess from its rows (the width kept from before), then
-    /// fits its height to what it holds (Dave, 2026-11-16: "size to content,
-    /// then window space"; the guess came out too tall once the font
-    /// changed). The server keeps it on the screen, where a long one scrolls.
+    /// fits its height to what it holds: sized to its content first, then to
+    /// the room on the screen (a guess alone comes out too tall once the font
+    /// changes). The server keeps it on the screen, where a long one scrolls.
     fn opening_size(&self) -> Option<(u32, u32)> {
         let parts = self.rows.parts(&self.text);
         let rows: usize = parts.iter().map(|p| p.rows.len()).sum();

@@ -219,8 +219,8 @@ impl Viewer {
             cmd::UNDO => {
                 let last = self.shared.borrow_mut().undo.pop();
                 if let Some(d) = last {
-                    // Only what went wrong is said: what was done shows itself
-                    // (Dave, 2026-11-18: "I know I deleted a file").
+                    // Only what went wrong is said: what was done shows itself,
+                    // and the user already knows what they did.
                     if let Err(why) = ops::undo(&d) {
                         self.notice = Some(format!("It could not be undone: {why}"));
                     }
@@ -234,7 +234,7 @@ impl Viewer {
                     .iter()
                     .filter_map(|p| p.file_name().map(|n| (n.to_string_lossy().into_owned(), self.shown_name(p))))
                     .collect();
-                // Only what went wrong is said (Dave, 2026-11-18).
+                // Only what went wrong is said.
                 for (n, shown) in &names {
                     if let Err(e) = ops::restore(n) {
                         self.notice = Some(format!("“{shown}” could not be put back: {e}"));
@@ -421,8 +421,8 @@ impl Viewer {
         window.redraw();
     }
 
-    /// A chosen item's menu (Dave: "a blend of macOS and Windows with Linux
-    /// flavoring"): every line always there, faint when it cannot be done.
+    /// A chosen item's menu, a blend of macOS's and Windows' with a Linux flavor
+    /// (see docs/apps-roadmap.md): every line always there, faint when it cannot be done.
     pub(crate) fn item_menu(&mut self) -> Vec<MenuLine> {
         let chosen = self.chosen_paths();
         let one = chosen.len() == 1;

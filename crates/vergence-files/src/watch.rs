@@ -137,8 +137,8 @@ impl Viewer {
         if let Some((name, r)) = answered {
             self.mounting = None;
             match r {
-                // Mounted, and shown under Locations: no tab of its own (Dave,
-                // 2026-11-21: "A new tab should never appear unless the user calls it").
+                // Mounted, and shown under Locations: no tab of its own, since a new tab
+                // never appears unless the user asks for it (see docs/files-milestone-3.md).
                 Ok(_) => self.notice = None,
                 Err(why) => self.notice = Some(format!("“{name}” could not be mounted: {why}")),
             }
@@ -195,7 +195,7 @@ impl Viewer {
         // yet is not looked into again here: a look has FreeBSD's automounter
         // mount it (an ejected stick came back that way). Not sent home: a
         // stick just clicked is mounting, and the server sees it at its next
-        // look (Dave, 2026-11-21: clicking the stick "dumped" him at Home).
+        // look (otherwise clicking a stick sends the user home; see docs/drives-milestone-1.md).
         let mounted: Vec<PathBuf> =
             files::drive_list().into_iter().filter(|d| d.mounted).map(|d| PathBuf::from(d.path)).collect();
         let off = |d: &Path| d.starts_with("/media/") && !mounted.iter().any(|m| d.starts_with(m));

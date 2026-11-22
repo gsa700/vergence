@@ -18,9 +18,9 @@ pub const EDGE: i32 = 2;
 /// How near a corner, along the edge, makes a quarter instead of a half.
 pub const CORNER: i32 = 24;
 /// The room between snapped windows, and between them and the screen's
-/// edges, where the settings keep it (Dave, 2026-11-14: "should the windows
-/// have a little buffer between them? Like the terminal when we split it?";
-/// 6 was "a little too much ... about half that much").
+/// edges, where the settings keep it: a little buffer, as between the
+/// terminal's split panes; 6 points is too much, about half that is right
+/// (see docs/windows-milestone-1.md).
 pub const GAP: i32 = 3;
 
 /// A part of a screen.
@@ -76,8 +76,8 @@ pub fn zone_at(x: f64, y: f64, screen: Rect, screens: &[Rect]) -> Option<(Zone, 
     // Another screen touching this edge where the pointer is. "Touching"
     // allows a point of overlap or gap: at a fractional scale the server's
     // layout can round a screen's width up and the next one's start down
-    // (Hubble, 2026-11-14: 1280 pixels at 1.125 gave a screen 854 wide and the
-    // next at 853, and the shared edge snapped from both sides).
+    // (1280 pixels at 1.125 gives a screen 854 wide and the next at 853, and
+    // the shared edge would snap from both sides).
     let near = |a: i32, b: i32| (a - b).abs() <= 1;
     let others = || screens.iter().filter(move |o| **o != screen);
     let beyond_left = others().any(|o| near(o.right(), screen.x) && y >= o.y && y < o.bottom());

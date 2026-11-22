@@ -66,8 +66,9 @@ const IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 /// Whether the commands that stand in for the person before agents (act,
 /// agent-answer, the agent tile's controls) are on: only where the server
 /// was started with VERGENCE_CONTROL=1 and the person has not turned the
-/// socket on for a daily session with the control-socket file (Dave, after
-/// Fable's review). Headless tests have no such file.
+/// socket on for a daily session with the control-socket file, so nothing in a
+/// daily session can answer for the person (see docs/meaning-milestone-1.md).
+/// Headless tests have no such file.
 fn agent_commands() -> bool {
     let file = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
@@ -151,7 +152,7 @@ pub fn our_uid() -> u32 {
 }
 
 /// The connecting process's user id: getpeereid on FreeBSD; SO_PEERCRED on Linux,
-/// where glibc has no getpeereid (found on Fedora, 2026-11-08).
+/// where glibc has no getpeereid.
 pub fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
     use std::os::fd::AsRawFd;
     #[cfg(not(target_os = "linux"))]
@@ -169,8 +170,8 @@ pub fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
     }
 }
 
-/// The connecting process's id, for `vctl windows` (2026-11-11: the stress
-/// test's click tool finds its own terminal by it). Linux: SO_PEERCRED's
+/// The connecting process's id, for `vctl windows` (the stress test's click
+/// tool finds its own terminal by it). Linux: SO_PEERCRED's
 /// struct ucred { pid, uid, gid }. FreeBSD: LOCAL_PEERCRED's struct xucred
 /// { u_int version; uid_t uid; short ngroups; gid_t groups[16]; union {
 /// void *; pid_t pid; } }, the pid at byte 80 (after 76 bytes, aligned to 8).

@@ -1,11 +1,10 @@
 // The overview, Super+Tab (overview milestone 1, step 5;
-// docs/overview-milestone-1.md). Dave, 2026-11-18: "Super+Tab Mission Control
-// style"; minimized windows in a faint row along the bottom (his 1a).
+// docs/overview-milestone-1.md): Super+Tab in the style of macOS's Mission
+// Control; minimized windows in a faint row along the bottom.
 //
 // Every window on each screen at once: the screen dimmed, each window itself
-// (its bar, tabs, border and content: the scene's own elements, scaled;
-// Dave, 2026-11-20: "Could Super+Tab use the actual windows rather than
-// images of them?") where vergence-shell's overview.rs puts it (scaled
+// (its bar, tabs, border and content: the scene's own elements, scaled,
+// rather than pictures of them) where vergence-shell's overview.rs puts it (scaled
 // alike, none overlapping, roughly where it was), its title under it; the
 // minimized ones in a row of their own along the bottom, faint. The dock
 // stays where it is (the arrangement keeps to the work area).

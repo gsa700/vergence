@@ -135,7 +135,7 @@ impl Measure for Counting {
 fn a_long_wrapped_text_is_measured_about_once() {
     // 2,000 words in a label, three containers deep, as on a settings page. Line
     // breaking used to re-measure the line so far for every word, again for every
-    // time a container measured it: 2026-11-11, the License page took 6 s.
+    // time a container measured it: the License page took 6 s.
     let text = vec!["word"; 2000].join(" ");
     let page: Element<Msg> = column(vec![
         panel(
@@ -148,8 +148,8 @@ fn a_long_wrapped_text_is_measured_about_once() {
     let mut ui = Ui::new();
     ui.layout(page, 300.0, 300.0, &mut counting, 10.0);
     // Linear: the natural width once whole, then, for each width the containers
-    // try (two here), each word once and each finished line once (2026-11-11:
-    // about 3.6x the text). Quadratic line breaking would be millions here.
+    // try (two here), each word once and each finished line once (about 3.6x
+    // the text). Quadratic line breaking would be millions here.
     assert!(counting.0 < 5 * text.len(), "measured {} characters for a text of {}", counting.0, text.len());
     // And the lines are what they were: 300 / 5 per char = 60 chars, so 12 words ("word " x 12 = 59).
     let m = &ui.meaning()[0];

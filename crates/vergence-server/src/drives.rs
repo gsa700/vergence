@@ -1,6 +1,6 @@
-// The drive list (drives milestone 1; Dave, 2026-11-21: the desktop's icons
-// and FileView disagreed about a USB stick, two processes each reading the
-// mounts on its own; "2": the server keeps one list). A thread looks at the
+// The drive list (drives milestone 1; see docs/drives-milestone-1.md): the
+// server keeps the one list, since the desktop's icons and FileView, each
+// reading the mounts on its own, disagreed about a USB stick. A thread looks at the
 // mount table and the automounter's /media (vergence-media drives.rs) every
 // two seconds, and at once when poked (after an action); the list goes to
 // the subscribers of the bus topic `Drives` whenever it changes. Eject,
@@ -94,7 +94,7 @@ impl Server {
             return tracing::warn!("drives: can't start watching: {e}");
         }
         // FreeBSD: devd tells when a disk's node comes or goes; looked at at
-        // once (Dave, 2026-11-21: "a pretty long delay when inserting a drive").
+        // once, so a drive shows up without waiting for the next scan.
         #[cfg(target_os = "freebsd")]
         {
             let p = poke.clone();
@@ -124,8 +124,8 @@ impl Server {
                 match &result {
                     Ok(path) => {
                         self.bus_send(client, ServerMsg::DriveDone { serial, path: path.clone() });
-                        // One notice, from here (Dave: "yes" to the server's one "Safe to
-                        // remove"); a disk image or a network mount let go of says nothing.
+                        // One notice, from here (the server's one "Safe to remove"; see
+                        // docs/drives-milestone-1.md); a disk image or a network mount let go of says nothing.
                         if action == DriveAction::Eject
                             && matches!(kind, Some(DriveKind::Removable | DriveKind::Optical))
                         {

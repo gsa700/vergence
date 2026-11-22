@@ -12,7 +12,7 @@
 // The list (step 5): once Alt has been held 0.15 s after the first Tab (so a
 // quick Alt+Tab switches without a flash), a frosted panel in the middle of
 // the screen with the focused window. Since overview milestone 1, step 4
-// (Dave, 2026-11-18: "Alt+Tab live tiles"), a tile for each window: its live
+// (see docs/overview-milestone-1.md), a tile for each window: its live
 // picture (thumbs.rs) over its application's icon and title, the minimized
 // ones faint with their last picture, the one stepped to outlined in the
 // accent; more than fit across wrap to more rows, and when those would not

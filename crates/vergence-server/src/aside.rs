@@ -1,7 +1,7 @@
 // The desktop moving aside (overview milestone 1, step 6;
-// docs/overview-milestone-1.md). Dave, 2026-11-18: "Click on the desktop makes
-// the windows move aside as on the macOS. This is a cool feature."; on unless
-// switched off (his 2a: desktop.toml `[windows] desktop-aside = false`).
+// docs/overview-milestone-1.md). A click on the desktop moves the windows
+// aside, as on macOS; on unless switched off (desktop.toml `[windows]
+// desktop-aside = false`).
 //
 // A click on the desktop's bare ground (the desktop window says so, bus v23
 // `GroundClicked`; with no icons, a press on the bare wallpaper) slides every

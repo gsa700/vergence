@@ -254,7 +254,8 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
             put(INTERFACE, key, SettingValue::Str(v));
         }
     }
-    // Unset, Vergence's own fonts (Dave, 2026-11-16: a uniform look), which
+    // Unset, Vergence's own fonts (a uniform look on every system; see
+    // docs/borrowed-review.md), which
     // install.sh ships and registers with fontconfig for every app.
     if xstr("Gtk/FontName").is_none() {
         put(INTERFACE, "font-name", SettingValue::Str(DEFAULT_FONT.into()));
@@ -283,11 +284,10 @@ pub fn build(desktop: Option<&str>, xsettings: Option<&str>, cursor_points: u32)
 }
 
 /// The desktop's fonts when settings.toml names none: sizes as on a screen
-/// at its calculated scale, which each screen's text factor keeps them
-/// (Dave, 2026-11-18: 11 and 12, Hubble's).
+/// at its calculated scale, which each screen's text factor keeps them.
 /// In points, as every app reads them (text milestone 1, step 5): 10 is
-/// 13.3, a hair over the 13 our apps drew the interface at before (Dave,
-/// 2026-11-19: "should we just use 10?"); 12 is Terminal's 16.
+/// 13.3, a hair over the 13 our apps drew the interface at before; 12 is
+/// Terminal's 16 (see docs/text-milestone-1.md).
 pub const DEFAULT_FONT: &str = "Inter Variable 10";
 pub const DEFAULT_MONO: &str = "JetBrains Mono 12";
 
@@ -331,7 +331,7 @@ impl Server {
         }
         // The look (frost, under the bar, front tab, sizes): every bar and its
         // frost built again, or damage tracking would keep the old ones on
-        // screen until something else moved (found 2026-11-15).
+        // screen until something else moved.
         if diff.iter().any(|s| s.namespace == LOOK) {
             self.decor.clear();
         }

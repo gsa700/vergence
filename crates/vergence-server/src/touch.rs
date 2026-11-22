@@ -1,5 +1,6 @@
-// Touch, the plain version (Dave, 2026-11-10: basic touch beside a keyboard
-// and, later, a spoken interface; an on-screen keyboard later if ever).
+// Touch, the plain version: basic touch beside a keyboard and, later, a
+// spoken interface; an on-screen keyboard later if ever (see
+// docs/shelf-milestone-1.md).
 //
 // A finger on a window is the window's: it is brought forward and given the
 // keyboard, and the touch goes to it as Wayland touch (wl_touch), every

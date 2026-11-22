@@ -1,14 +1,14 @@
 //! File Viewer (files milestone 1, step 7; docs/files-milestone-1.md §5):
-//! Vergence's file manager, named after NeXTSTEP's Workspace Manager window
-//! (Dave, 2026-11-15). Dave's words: "with space bar preview ala macOS
-//! finder ... remote file system support as well (using native OS tools?)".
+//! Vergence's file manager, named after NeXTSTEP's Workspace Manager window,
+//! with Space to preview as in macOS's Finder, and remote file systems
+//! through the system's own tools (see docs/apps-roadmap.md).
 //!
 //! - **The window**: the toolbar (Back, Forward, Up, the folder's path,
 //!   List or Icons, the preview pane, hidden files, a field that narrows the
 //!   folder as you type), the places sidebar, the folder as a list or icons
 //!   (vergence-widgets files.rs, shared with the Open dialog), the preview
 //!   pane at the right. A folder a tab in the bar (tabs back in files
-//!   milestone 3, Dave 2026-11-21, after milestone 2 had taken them out):
+//!   milestone 3, after milestone 2 had taken them out; see docs/files-milestone-3.md):
 //!   torn off into windows of their own and joined again; a folder handed
 //!   over opens in a tab of the window last used; each window's tabs kept
 //!   across restarts (keep.rs). One process for all of them (hand.rs).
@@ -64,7 +64,7 @@ use tab::{COUNT_MOST, Showing, Sizes, Tab, size_worker};
 use view::ViewKind;
 
 const APP_ID: &str = "vergence-files";
-/// The Trash window's (Dave, 2026-11-18): a process of its own, so the dock
+/// The Trash window's: a process of its own, so the dock
 /// shows it with the Trash's icon and window memory keeps its place apart.
 const TRASH_ID: &str = "vergence-trash";
 const SECTION: &str = "[files]";
@@ -349,8 +349,8 @@ pub(crate) fn notify(summary: &str, body: &str) {
 /// Vergence session (the dock shows them starting), else started here.
 /// Starts a program and lets it run on its own: a thread waits for it, so
 /// it is not left behind as a zombie when it ends (the desktop's process
-/// lives all session and started a FileView for each folder opened, each
-/// left over once it handed its folder on, 2026-11-18).
+/// lives all session and starts a FileView for each folder opened, each
+/// left over once it hands its folder on).
 pub(crate) fn start(cmd: &mut std::process::Command) -> std::io::Result<()> {
     let mut child = cmd.spawn()?;
     std::thread::spawn(move || child.wait());
@@ -676,9 +676,9 @@ impl Program for Viewer {
     }
 
     fn update(&mut self, m: Msg, window: &mut Window) {
-        // A name being changed in its row is kept when anything else is done
-        // (Dave's list: "a click elsewhere keeps it"); a click on its own row
-        // leaves it be.
+        // A name being changed in its row is kept when anything else is done,
+        // a click elsewhere included (see docs/files-milestone-3.md); a click on
+        // its own row leaves it be.
         if self.renaming_row().is_some() {
             let own_row = matches!(m, Msg::Click(k) | Msg::DragRow(k) if Some(k) == self.renaming_row());
             if own_row {
@@ -1011,7 +1011,7 @@ fn main() {
     if args.iter().any(|a| a == "--desktop") {
         return desktop::run();
     }
-    // The Trash window (Dave, 2026-11-18): the desktop's Trash and the
+    // The Trash window (see docs/backup-milestone-1.md): the desktop's Trash and the
     // dock's; one, brought forward if it is open already.
     if args.iter().any(|a| a == "--trash") {
         if hand::hand_over(TRASH_ID, &[]) {

@@ -33,14 +33,12 @@ const GOLDEN_ANGLE: f32 = 2.399_963_2;
 /// (float, the corners' radius in pixels; 0 for square) and `bottom`
 /// (float: 1 rounds the bottom corners too, a dock's or a menu's) and
 /// `invert` (float: 1 shows what is under inverted, for a bar of the other
-/// style than its window: light text under a light bar is shown dark, Dave,
-/// 2026-11-14) and `split` (float, a line across the picture in texture
-/// coordinates the blur does not reach over, so a sidebar's edge stays crisp
-/// in the bar above it: Dave, 2026-11-16; 0 for none) and `cap` (float: 1
-/// keeps the frost from coming out lighter than the tint, channel by
-/// channel, so a white page under a light bar cannot wash it out: Dave,
-/// 2026-11-21, "the white bar washes out the tabs a bit"; what is darker
-/// still shows through).
+/// style than its window: light text under a light bar is shown dark) and
+/// `split` (float, a line across the picture in texture coordinates the blur
+/// does not reach over, so a sidebar's edge stays crisp in the bar above it,
+/// see docs/apps-roadmap.md; 0 for none) and `cap` (float: 1 keeps the frost
+/// from coming out lighter than the tint, channel by channel, so a white page
+/// under a light bar cannot wash out its tabs; what is darker still shows through).
 pub const FROST_SHADER: &str = r#"#version 100
 
 //_DEFINES_
@@ -310,7 +308,7 @@ mod tests {
     /// A light bar over a dark terminal, inverted: the focused bar is a shade
     /// darker than the unfocused one, as everywhere in the light style (228
     /// and 240), not the mid grey against white it was before (focus looked
-    /// reversed: Dave, 2026-11-14); and the text under it still shows.
+    /// reversed); and the text under it still shows.
     #[test]
     fn over_a_dark_window_inverted_the_focused_light_bar_is_not_the_dimmer() {
         let text = picture(32, 16, |x, y| if (x + y) % 5 == 0 { [235, 235, 235, 255] } else { [46, 52, 54, 255] });
@@ -397,7 +395,7 @@ mod tests {
     }
 
     /// A white page under a light bar, capped: the bar keeps its ground (no
-    /// lighter, Dave 2026-11-21: the white washed out the tabs), while dark
+    /// lighter: the white washed out the tabs), while dark
     /// text under it still shows, darker than the ground.
     #[test]
     fn a_capped_light_frost_is_no_lighter_than_its_ground() {

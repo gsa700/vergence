@@ -333,7 +333,7 @@ pub struct GpuPicture {
     /// frame from the last (backdrop.rs Shaded). The GL texture's number
     /// can't: a freed one is handed straight back to the next import, so a
     /// new frame looked unchanged and stayed off the screen until the next
-    /// (the terminal's echo on Techbench, 2026-11-17).
+    /// (the terminal's echo, for one).
     pub serial: u64,
 }
 
@@ -354,7 +354,7 @@ fn opaque_region(
 /// toolkit's pixel_size, which rounds up (580 points at 4/3 are 773.33
 /// pixels, drawn as 774). Rounding to the nearest instead gave 581, a body
 /// two pixels wider than the bar drawn for the 580 the window was given
-/// (techbench at 133⅓%, 2026-11-18): the largest number of points whose
+/// (at 133⅓%): the largest number of points whose
 /// pixels, rounded up, are still `px`.
 pub fn points_of(px: i32, scale: f64) -> i32 {
     if !(scale.is_finite() && scale > 0.0) || px <= 0 {
@@ -1342,8 +1342,8 @@ impl Server {
         }
         n.kill();
         self.scenes_forget(n.client, n.id);
-        // The keyboard goes back where the person was (found 2026-11-15: after
-        // the editor's Open dialog closed, keys went nowhere): to a dialog's
+        // The keyboard goes back where the person was (without this, keys went
+        // nowhere after the editor's Open dialog closed): to a dialog's
         // parent, else the window in front.
         if had_keys {
             let next = parent

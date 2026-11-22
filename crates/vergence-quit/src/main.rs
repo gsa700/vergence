@@ -1,5 +1,5 @@
-//! Vergence's Force Quit (tools milestone 1; Dave: "they call it force quit
-//! on the mac ... very simple as we said, term for the hard stuff"): the
+//! Vergence's Force Quit (tools milestone 1, docs/tools-milestone-1.md: named
+//! as on the Mac, and kept very simple; the terminal is for anything harder): the
 //! user's running applications, with their icons, and one of them ended at
 //! once after a question. The list and the ending are the server's
 //! (forcequit.rs) over the session bus; this is only the window. Opened from

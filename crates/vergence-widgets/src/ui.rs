@@ -237,15 +237,15 @@ pub struct Ui<M> {
     /// from the last run, or from a close a while ago).
     scroll_wanted: HashMap<String, f32>,
     /// The strip at the window's top under the server's bar (look milestone
-    /// 1): scroll bars start below it (Dave, 2026-11-14: they went under the
-    /// title bar).
+    /// 1): scroll bars start below it, not under the title bar
+    /// (see docs/app-settings-milestone-1.md).
     under_bar: f32,
     /// The screen's text factor (Frame::text): sizes that labels name are
     /// drawn this much larger (the size of text that names none is the
     /// theme's, already larger).
     text_factor: f32,
     /// Right-click menus are drawn by the server (the native road: every
-    /// window's menu one kind, 2026-11-18); set by the host each frame.
+    /// window's menu one kind); set by the host each frame.
     server_menus: bool,
     /// A right-click menu for the server to open (where, its lines), taken
     /// by the host (take_menu_request), and what its lines do.

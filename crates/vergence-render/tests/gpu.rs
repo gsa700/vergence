@@ -26,8 +26,8 @@ static LOAD_FIRST: extern "C" fn() = {
 /// gen9) two threads of one process mapping GPU buffers at once can deadlock
 /// in the kernel, the thread faulting on a mapping waiting forever for a busy
 /// page while the others wait on the process's mapping lock, unkillable until
-/// a reboot (kepler 2026-11-14: in parallel it hung by the 19th run, one at a
-/// time 200 runs never did; tools/gpu-report.sh caught both stacks). Not ours
+/// a reboot (in parallel it hung by the 19th run, one at a time 200 runs
+/// never did; tools/gpu-report.sh caught both stacks). Not ours
 /// to fix there; the tests stop doing it.
 static TURNS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -269,9 +269,9 @@ fn text_agrees_with_the_reference() {
         // Never more than two steps apart. How many pixels are two apart depends on the
         // font: every partly covered pixel of a glyph is rounded twice by the CPU renderer
         // (the coverage times the color's alpha, then the blend) and once by the GPU. At
-        // scale 1 most of a glyph's pixels are partly covered: 0.4% of the picture on
-        // canary's Noto Sans Mono and 1.4% with Techbench's variable one, against one
-        // pixel on Hubble (2026-11-09).
+        // scale 1 most of a glyph's pixels are partly covered: 0.4% of the picture with
+        // Noto Sans Mono and 1.4% with a variable monospace font, against one pixel with
+        // another font.
         agree(&mut gpu, &s, &mut fonts, scale, BLACK, 2, 30, "a screen of text");
     }
     // The same glyphs again are already in the atlas; and the picture is the same.
@@ -433,8 +433,8 @@ fn a_grid_of_cells_is_drawn_as_its_fills_and_glyphs() {
             );
             // Three steps, where a screen of opaque text is held to two: some of these
             // inks are translucent, which is one more multiplication the CPU renderer
-            // rounds and the GPU does not (three apart seen with Techbench's variable
-            // font at scale 2.25, 2026-11-10; two on Hubble and canary).
+            // rounds and the GPU does not (three apart seen with a variable font at
+            // scale 2.25; two with static fonts).
             agree(&mut gpu, &grid, &mut fonts, scale, BLACK, 3, 30, "a grid of cells");
         }
     }

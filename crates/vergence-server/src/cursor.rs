@@ -6,7 +6,7 @@
 // average) to exactly the pixels an output needs, then drawn 1:1. Themes draw
 // different designs at different sizes (Adwaita: a thin hinted arrow at 24/32 px,
 // a fat outlined one at 48-96 px; picking the nearest image per monitor showed a
-// different arrow on each, 2026-11-07), and GPU resampling at a fractional factor
+// different arrow on each), and GPU resampling at a fractional factor
 // is soft. Shapes come from the theme by name, as clients ask with
 // wp-cursor-shape-v1; a client that sets its own cursor surface gets that drawn.
 

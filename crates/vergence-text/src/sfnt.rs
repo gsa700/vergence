@@ -128,7 +128,7 @@ fn face(src: &mut dyn Source, at: u64, index: u32) -> Option<FaceInfo> {
     let italic = selection.map(|s| s & 0x0201 != 0).unwrap_or(mac_style & 2 != 0);
     // Fixed pitch: `post` says so, or the PANOSE classification does (a Latin
     // text face, byte 0 = 2, whose proportion, byte 3, is 9). Noto Sans Mono
-    // says no in `post` and yes in PANOSE (found on Hubble, 2026-11-09).
+    // says no in `post` and yes in PANOSE.
     let post = tables.load(src, b"post", 1 << 20).and_then(|t| u32_at(&t, 12)).is_some_and(|v| v != 0);
     let panose = os2.as_deref().and_then(|t| t.get(32..36)).is_some_and(|p| p[0] == 2 && p[3] == 9);
     let monospace = post || panose;

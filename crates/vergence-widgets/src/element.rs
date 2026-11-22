@@ -745,8 +745,8 @@ impl<M> Element<M> {
     /// The pointer's shape over a drawing, and while it is pulled (a
     /// column's grip: [`vergence_ui::Cursor::ColResize`]). None: the arrow.
     /// The pointer over it. Buttons, switches and the like show the arrow,
-    /// as on the Mac and Windows (Dave, 2026-11-18: "everything in FileView
-    /// gets the hand"); a button that is a link asks for `Cursor::Pointer`.
+    /// as on the Mac and Windows, rather than the hand everywhere; a button
+    /// that is a link asks for `Cursor::Pointer`.
     pub fn cursor(mut self, c: vergence_ui::Cursor) -> Self {
         if let Kind::Drawing { cursor, .. } = &mut self.kind {
             *cursor = Some(c);

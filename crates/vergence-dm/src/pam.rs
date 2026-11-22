@@ -1,5 +1,5 @@
 //! PAM, the operating system's interface for logging in, through our own
-//! declarations (Dave, 2026-11-16: an OS interface, not borrowing): Linux-PAM
+//! declarations (an OS interface, not borrowing; docs/vdm-milestone-1.md): Linux-PAM
 //! on Linux, OpenPAM on FreeBSD. They agree on the calls and the structures
 //! and **differ in the numbers** of several results, kept apart below (the
 //! design review; OpenPAM's from FreeBSD's <security/pam_constants.h>,
@@ -224,8 +224,8 @@ fn free_responses(out: *mut Response, n: usize) {
 /// Linux-PAM's delay after a failure (pam_unix's 2 s, pam_faildelay's), taken
 /// over by the application through the PAM_FAIL_DELAY item (10): vdm keeps a
 /// pause of its own per account (1, 2, 4 ... s, across restarts), so PAM's
-/// wait only made the "no" slow (Dave, 2026-11-16: FreeBSD, whose OpenPAM has
-/// no such delay, was "smoother and more consistent"). Called by PAM; waits for nothing.
+/// wait only made the "no" slow (FreeBSD's OpenPAM has no such delay and felt
+/// smoother; see docs/vdm-milestone-1.md). Called by PAM; waits for nothing.
 #[cfg(target_os = "linux")]
 extern "C" fn no_fail_delay(_retval: c_int, _usec: std::ffi::c_uint, _appdata: *mut c_void) {}
 

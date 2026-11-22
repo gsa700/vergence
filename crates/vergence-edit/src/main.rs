@@ -1,7 +1,7 @@
-//! Vergence's text editor (editor milestone 1, docs/editor-milestone-1.md;
-//! Dave: "a native text editor for Vergence. Like TextEdit on Mac or GNOME
-//! Edit. Autocomplete and line numbers required."). Plain text for now
-//! ("other formats later md rtf etc"), on the toolkit's text area.
+//! Vergence's text editor (editor milestone 1, docs/editor-milestone-1.md):
+//! a native editor like TextEdit on the Mac or GNOME's Text Editor, with
+//! autocomplete and line numbers. Plain text for now (other formats, such as
+//! Markdown and RTF, later), on the toolkit's text area.
 //!
 //! - **Windows and tabs**: one process for all its windows (hand.rs); a
 //!   document a tab, in the bar the server draws; tabs dragged between

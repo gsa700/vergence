@@ -6,7 +6,8 @@
 use super::*;
 
 /// The dock's edges: as shown, and as desktop.toml writes them.
-/// The dock's edges, the default (bottom, 2026-11-16) first.
+/// The dock's edges, the default (bottom, where the launcher opens as a start menu) first
+/// (see docs/menus-milestone-1.md).
 const DOCK_EDGES: [(&str, &str); 4] =
     [("Bottom edge", "bottom"), ("Left edge", "left"), ("Top edge", "top"), ("Right edge", "right")];
 /// When the dock hides: as shown, and as desktop.toml writes it.

@@ -170,12 +170,12 @@ pub fn same_arrangement(a: &[OutputSetting], b: &[OutputSetting]) -> bool {
 /// their sizes differ.
 ///
 /// Row or column is decided from the monitors' **unscaled** sizes: tools
-/// that place monitors (`xrandr --right-of`, found 2026-11-06) use the mode
+/// that place monitors (`xrandr --right-of`) use the mode
 /// size even when the picture is scaled, so scaled sizes can overlap a
 /// neighbor that the user put side by side.
 ///
 /// Monitors that overlap only partly (Xfce's display settings left one at
-/// x=0 and the other at x=250 on 2026-11-06) are laid out in the order of
+/// x=0 and the other at x=250) are laid out in the order of
 /// their left edges, or failing that their top edges; only monitors at the
 /// same position (mirrored) are refused.
 pub fn repack(current: &[OutputSetting], factors: &[u32]) -> Result<Vec<OutputSetting>, String> {

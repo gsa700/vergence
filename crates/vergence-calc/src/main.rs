@@ -1,6 +1,6 @@
 //! Vergence's calculator (tools milestone 1, docs/tools-milestone-1.md): a
-//! keypad window (Dave: "a basic calculator with advanced scientific as an
-//! option"), exact decimal arithmetic of its own (dec.rs), the expression
+//! keypad window, basic with scientific keys as an option (see
+//! docs/apps-roadmap.md), exact decimal arithmetic of its own (dec.rs), the expression
 //! typed shown above its result, a live answer while typing, and this
 //! session's calculations above it, each one taken back by a click. The
 //! scientific keys open on the left (View › Scientific in its menu). Keys
@@ -390,8 +390,8 @@ impl Program for Calc {
             .weight(500)
             .align(Align::End)
             .width(Length::FILL);
-        // The answer in green once = is pressed (Dave, 2026-11-14: "a little
-        // color"), plain again as soon as more is typed; a green that keeps
+        // The answer in green once = is pressed, a little color to mark it
+        // final, plain again as soon as more is typed; a green that keeps
         // 4.5:1 on the light card and on the dark one.
         let green = if !t.dark {
             vergence_scene::Color::rgb(0x1a, 0x7f, 0x37)

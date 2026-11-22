@@ -285,9 +285,9 @@ struct Host<P: Program> {
     tint: Option<Color>,
     /// The title last given to the window (at first, the one it opens with).
     title_sent: String,
-    /// A finger down and still (touch and hold, 2026-11-15, Dave: "there is
-    /// no way to get to the desktop context menu" by touch): its id and
-    /// where; held HOLD it is a right click there.
+    /// A finger down and still (touch and hold, so a right-click menu such
+    /// as the desktop's can be reached by touch; see docs/files-milestone-1.md):
+    /// its id and where; held HOLD it is a right click there.
     hold: Option<(i32, f32, f32)>,
     /// The finger whose hold became a right click: the rest of its touch
     /// is dropped (lifting it does not also tap).
@@ -476,9 +476,9 @@ impl<P: Program> vergence_ui::App for Host<P> {
     fn background(&self) -> Color {
         // A frosted window on the native road: no ground of its own, so the
         // server's frost of what is behind it shows wherever the view leaves
-        // its pixels clear (preview milestone 1, step 6b; Dave: "let's make
-        // the preview windows look similar to the mac. We have frost in our
-        // toolkit"). On the Wayland road no one frosts it: it keeps its ground.
+        // its pixels clear, as the Mac's Quick Look looks (see
+        // docs/preview-milestone-1.md, step 6b). On the Wayland road no one
+        // frosts it: it keeps its ground.
         if self.native && self.program.style().frosted {
             return Color::rgba(0, 0, 0, 0);
         }
@@ -705,9 +705,9 @@ impl<P: Program> Host<P> {
                 self.program.resized(frame.width, frame.height);
             }
             self.laid_at = (frame.width, frame.height);
-            // As tall as its content, once, after the first layout (Dave,
-            // 2026-11-16: "size to content, then window space"; the server
-            // keeps it on the screen, where a long one scrolls).
+            // As tall as its content, once, after the first layout: sized to its
+            // content first, then to the room on the screen (the server keeps
+            // it on the screen, where a long one scrolls).
             if self.fit == FitToContent::Wanted {
                 self.fit = FitToContent::Done;
                 if self.program.fit_content()

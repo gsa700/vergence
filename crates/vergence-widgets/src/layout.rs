@@ -159,7 +159,7 @@ pub(crate) struct Layout<'a> {
     /// A label's lines, remembered for this layout pass: containers measure
     /// their children more than once, and nested ones multiply that, so
     /// without it a long wrapped text was broken into lines dozens of times
-    /// (the settings app's License page took 6 s to lay out, 2026-11-11).
+    /// (the settings app's License page took 6 s to lay out).
     pub lines_seen: HashMap<LinesKey, (Vec<Line>, f32)>,
 }
 
@@ -654,7 +654,7 @@ impl Layout<'_> {
                 };
                 // Taller than its place: the scroll bar shows, and a child as
                 // wide as the place leaves it a gutter on the right, so nothing
-                // sits under the bar (Dave, 2026-11-14).
+                // sits under the bar (see docs/settings-milestone-2.md).
                 let mut w = w;
                 if natural > rect.h && matches!(child.width, Length::Fill(_)) {
                     w = (w - SCROLL_GUTTER).max(0.0);

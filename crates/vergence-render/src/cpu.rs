@@ -429,7 +429,7 @@ impl Prepared<'_> {
             for x in xa.max(x0)..xb.min(x1) {
                 // Clamped before a clip is applied: a line's coverage runs past 1 inside it, and
                 // times a clip's 0.3 that would be more than 0.3 (found by the GPU renderer
-                // disagreeing, 2026-11-09).
+                // disagreeing).
                 let mut c = cover(x).clamp(0.0, 1.0);
                 if c > 0.0 && !chain.is_empty() {
                     c *= chain_cover(chain, x, y);

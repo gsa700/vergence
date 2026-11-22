@@ -4,9 +4,9 @@
 
 use crate::{Rect, desktop::Entry};
 
-/// The launcher's category tabs after "All" (shelf milestone 2, Dave's
-/// choice 2026-11-13: a short fixed list, each shown only when it has an
-/// application), from the freedesktop main categories entries declare.
+/// The launcher's category tabs after "All": a short fixed list, each shown
+/// only when it has an application (see docs/shelf-milestone-2.md), from the
+/// freedesktop main categories entries declare.
 pub const TABS: [&str; 9] =
     ["Internet", "Office", "Graphics", "Sound & Video", "Development", "Games", "Education", "Utilities", "System"];
 
@@ -28,8 +28,8 @@ pub fn tab_of(e: &Entry) -> Option<usize> {
     })
 }
 
-/// The order of Vergence's own applications in the launcher's top row
-/// (Dave, 2026-11-15: "a section at the top that holds the native apps");
+/// The order of Vergence's own applications in the launcher's top row (the
+/// native apps get a section of their own at the top);
 /// any other `vergence-*` application comes after these, by name.
 const OWN_ORDER: [&str; 9] = [
     "vergence-files",

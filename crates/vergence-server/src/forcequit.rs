@@ -1,11 +1,11 @@
-// Force Quit (tools milestone 1; Dave: "they call it force quit on the mac
-// ... very simple as we said, term for the hard stuff"): the server lists
+// Force Quit (tools milestone 1; see docs/tools-milestone-1.md: named as on
+// the Mac, and kept simple, the terminal being for the hard cases): the server lists
 // the user's running applications as the dock knows them, with their icons,
 // and ends one on request: SIGTERM to every process behind its windows (a
 // native window's bus connection, a Wayland client's credentials, an X11
 // window's _NET_WM_PID), so a program that still can flushes its files and
 // lets its children go, then two seconds later SIGKILL to any of them still
-// there (Dave, 2026-11-14: try gently "just before killing"). Only the user's own clients
+// there: gently first, just before killing. Only the user's own clients
 // reach the server, so only the user's own processes are ever named; the
 // server itself and process 1 are never sent anything. The Force Quit app
 // (vergence-quit) is only the window; Ctrl+Alt+Escape opens it.

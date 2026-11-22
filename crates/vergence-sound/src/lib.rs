@@ -5,8 +5,8 @@
 //! One interface, [`Sound`], and a back end per system, chosen at run time:
 //! OSS on FreeBSD ([`oss`], step 1); ALSA on Linux without a sound server
 //! (step 2); with one (PipeWire or PulseAudio, the platform's standard on
-//! Fedora), the PulseAudio protocol both speak ([`pulse`], our own client,
-//! 2026-11-20).
+//! Fedora), the PulseAudio protocol both speak ([`pulse`], our own client;
+//! docs/sound-milestone-1.md).
 //! Volume and mute need no privilege on either; FreeBSD's default output
 //! needs root: the helper `sound-default` (step 5, [`oss::helper_main`]).
 

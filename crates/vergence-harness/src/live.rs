@@ -1,7 +1,7 @@
 //! Live sweep: EDIDs from the database as debugfs fake monitors.
 //!
-//! Needs root (debugfs) and an X display. Found on Hubble (2026-11-06):
-//! forcing a connector sends no hot-plug event, so the harness makes X
+//! Needs root (debugfs) and an X display. Forcing a connector sends no
+//! hot-plug event, so the harness makes X
 //! re-probe itself after each change, and EDID files must be written in one
 //! write (`cat`'s copy path fails on debugfs).
 

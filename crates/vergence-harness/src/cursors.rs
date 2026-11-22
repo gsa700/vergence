@@ -1,6 +1,6 @@
 // `vergence-harness cursors <dir>`: Vergence's pointers as an Xcursor theme
-// (direction D, Dave 2026-11-18: "I like the D mouse pointers"; the design
-// canvas https://claude.ai/artifact/KE2ECDjA9NM5YR2yCEYyQ3). The classic
+// (direction D of the design canvas https://claude.ai/artifact/KE2ECDjA9NM5YR2yCEYyQ3;
+// our own set instead of Adwaita's, see docs/apps-roadmap.md). The classic
 // black arrow with a white rim, with color only where it means something:
 // accent heads on the resize arrows, a six-color disc of our own that turns
 // for busy, badges for copy, not allowed and help.
@@ -21,8 +21,8 @@ const SIZES: [u32; 5] = [24, 32, 48, 64, 96];
 const BUSY_FRAMES: usize = 12;
 const BUSY_DELAY_MS: u32 = 80;
 
-/// The arrow, with a soft shadow down and to the right (Dave, 2026-11-21:
-/// "something similar to the old Mac OSX era pointers").
+/// The arrow, with a soft shadow down and to the right, in the manner of the
+/// classic Mac OS X pointers.
 const ARROW: &str = r##"<path d="M3 2 L3 25 L9 19 L13 29 L17 27.5 L13 18 L21 18 Z" transform="translate(0.9 1.3)" fill="#000" fill-opacity="0.25" stroke="#000" stroke-opacity="0.25" stroke-width="1.5"/><path d="M3 2 L3 25 L9 19 L13 29 L17 27.5 L13 18 L21 18 Z" fill="#000" stroke="#fff" stroke-width="1.5" stroke-linejoin="miter"/>"##;
 
 /// The six-color disc, its center at (cx, cy), radius r, turned by `turn` degrees.
@@ -56,13 +56,11 @@ fn arrow(_: usize) -> String {
     ARROW.into()
 }
 
-/// The pointing hand: the closed hand with its index finger raised (Dave,
-/// 2026-11-21, choosing it after "the pointer finger is unnaturally long
-/// ... make it match the hand"); the curled fingers show by their bumps
-/// along the top, no lines between them ("try removing the three bold lines").
-/// The index got back half of what that took off (Dave, 2026-11-21: "a
-/// little too short now. maybe add back half of what we removed"), the
-/// hand moved down 0.3 to make room for it.
+/// The pointing hand: the closed hand with its index finger raised, the
+/// finger in proportion to the hand; the curled fingers show by their bumps
+/// along the top, no lines between them. The index is half way between its
+/// first, too long, length and a shortened one; the hand sits 0.3 lower to
+/// make room for it.
 fn hand(_: usize) -> String {
     parts(&[
         (8.0, 11.8, 17.5, 16.5, 6.5, 0.0),
@@ -74,9 +72,8 @@ fn hand(_: usize) -> String {
     ])
 }
 
-/// Parts of a hand drawn as one, as Mac OS X's hands (Dave, 2026-11-21:
-/// "change the hands from black to white ... most of the time the black
-/// is good but on a lot of the pdf's it gets lost"): a soft shadow, every
+/// Parts of a hand drawn as one, white as Mac OS X's hands (a black hand
+/// gets lost over many PDF pages): a soft shadow, every
 /// part's black rim, then every part filled white over them (the rims
 /// show between the fingers, not across them).
 fn parts(rects: &[(f32, f32, f32, f32, f32, f32)]) -> String {
@@ -96,8 +93,8 @@ fn parts(rects: &[(f32, f32, f32, f32, f32, f32)]) -> String {
     format!(r##"<g transform="translate(0.9 1.3)">{shadow}</g>"##) + &rims + &fills
 }
 
-/// An open hand (Dave, 2026-11-20: "the pdf hand should have all fingers
-/// showing since he is moving stuff"): four fingers up and apart, the thumb out.
+/// An open hand, all fingers showing since it moves things (Reader's hand
+/// over a PDF): four fingers up and apart, the thumb out.
 fn open_hand(_: usize) -> String {
     parts(&[
         (8.5, 14.0, 16.0, 14.5, 6.0, 0.0),
@@ -346,8 +343,7 @@ const INDEX: &str = "[Icon Theme]\nName=Vergence\nComment=Vergence's own icons a
 /// Vergence icon theme laid out by the freedesktop names
 /// (vergence_shell::icons::NAMES): the apps' icons in scalable/apps, the
 /// places and devices, the kinds of files in scalable/mimetypes; with the
-/// index (Dave, 2026-11-18: a named set chosen in Settings, our apps
-/// following it).
+/// index (a named set chosen in Settings, our apps following it).
 pub fn icon_theme(args: &[String]) -> Result<bool, Box<dyn Error>> {
     let (Some(src), Some(dest)) = (args.first(), args.get(1)) else {
         return Err("icon-theme <data/icons> <share/icons/Vergence>".into());

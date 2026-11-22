@@ -12,7 +12,7 @@
 //! - the password is checked by vdm, the one part that runs as root, over
 //!   its unlock socket (vergence-dm's protocol), in a thread so the screen
 //!   never waits; PAM's prompts and messages are shown as they come; the
-//!   field takes typed keys only (no paste: Dave, 2026-11-16).
+//!   field takes typed keys only (no paste; see docs/vdm-milestone-1.md).
 //!
 //! It never shows a lock that is not one (threat model T18, review C2): it
 //! locks only when vdm's socket is there and the session cannot fall back to
@@ -293,7 +293,7 @@ pub(crate) fn converse(
                     }
                     // Nobody answered (a key woke the screen, then nothing):
                     // end it ourselves, or vdm drops it unseen and the next
-                    // Enter meets a dead connection (Hubble 2026-11-17).
+                    // Enter meets a dead connection.
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                         let _ = proto::send_to_vdm(&mut s, &ToVdm::Cancel);
                         let _ = heard.send(Heard::Idle);

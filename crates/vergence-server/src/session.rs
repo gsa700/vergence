@@ -1,4 +1,4 @@
-// Session restore (whitepaper §6.9; Dave, 2026-11-10): the applications
+// Session restore (see docs/Vergence-Whitepaper.md §6.9): the applications
 // running when a session ends are started again when the next one begins,
 // and window memory puts their windows back where they were. What an
 // application had open is its own to restore (Firefox does).

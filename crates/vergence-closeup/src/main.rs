@@ -1,7 +1,7 @@
 //! Close-Up (files milestone 1, step 5; docs/files-milestone-1.md §4):
-//! the step after File Viewer's Preview, a file's contents in full. Dave's
-//! words: "picture, video, and pdf viewer. Connected to file manager by file
-//! type association, but a standalone app"; named Close-Up 2026-11-15.
+//! the step after File Viewer's Preview, a file's contents in full: a
+//! picture, video and PDF viewer, connected to the file manager by file type
+//! association but a standalone app (see docs/apps-roadmap.md).
 //!
 //! - **Pictures** (decoded apart by vergence-decode's helper, never in this
 //!   process): fitted to the window, or at any zoom (scroll or the keys,
@@ -14,8 +14,8 @@
 //! - **Text**: shown read-only in the toolkit's text area, with "Open in Text
 //!   Editor".
 //! - **Anything else**: says what it is and offers the app chosen for it.
-//! - **Windows**: one process (hand.rs), one file a window, no tabs (Dave,
-//!   2026-11-16; docs/files-milestone-2.md). A file dropped on a window
+//! - **Windows**: one process (hand.rs), one file a window, no tabs (see
+//!   docs/files-milestone-2.md). A file dropped on a window
 //!   takes its place; files handed over or chosen in Open… open in the
 //!   window if it shows nothing, else each in a window of its own.
 //! - **Preview** (`--preview FILE`): one file in a small window, for File

@@ -15,9 +15,9 @@ pub(crate) struct Palette {
     pub(crate) ansi: [u32; 16],
     /// The least contrast text keeps against what is behind it (WCAG ratio;
     /// 0: colors as they are). The light palettes' 16 colors were tuned on
-    /// black, and Tango's whites and brights all but vanish on white (Dave on
-    /// Hubble, 2026-11-13: "the text is light and somewhat hard to see"):
-    /// a color under the floor is darkened, its hue kept, until it reads.
+    /// black, and Tango's whites and brights all but vanish on white, leaving
+    /// light text hard to see: a color under the floor is darkened, its hue
+    /// kept, until it reads.
     pub(crate) floor: f32,
 }
 
@@ -46,10 +46,10 @@ pub(crate) fn readable(ink: Color, ground: Color, floor: f32) -> Color {
 }
 
 /// `readable`, remembered: every pair of colors a screen has worked out once
-/// (2026-11-14: with only the last pair kept, a busy light screen such as
-/// btop's alternated between pairs and redid the up to 20 contrast steps cell
-/// after cell; tab clicks on Hubble went from 1.85 ms to 3.5 ms on average,
-/// 18 ms at worst). Kept per thread, a few thousand pairs at most.
+/// (with only the last pair kept, a busy light screen such as btop's
+/// alternates between pairs and redoes the up to 20 contrast steps cell
+/// after cell; a tab click went from 1.85 ms to 3.5 ms on average, 18 ms at
+/// worst). Kept per thread, a few thousand pairs at most.
 pub(crate) fn readable_cached(ink: Color, ground: Color, floor: f32, floor_bits: u32) -> Color {
     use std::{cell::RefCell, collections::HashMap};
     thread_local! {

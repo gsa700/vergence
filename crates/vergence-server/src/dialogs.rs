@@ -3,7 +3,8 @@
 // going where it goes, in front of it whenever it comes forward, minimized and
 // back with it, and not listed apart from it (the dock's list, Alt+Tab). A
 // modal dialog dims its parent and takes every press on it: the press brings
-// the dialog forward and flashes its border (Dave, 2026-11-14: (a) to dimming).
+// the dialog forward and flashes its border (see
+// docs/window-styles-milestone-1.md).
 
 use std::time::{Duration, Instant};
 
@@ -115,7 +116,7 @@ impl Server {
 
     /// The keyboard went to `focused` (None: to no window). Palettes float
     /// above their own application's windows and only while it is in front
-    /// (Dave, 2026-11-14: (a), as macOS's): another application's are taken
+    /// (as macOS's; see docs/window-styles-milestone-1.md): another application's are taken
     /// off the screen, kept with their place; this one's come back on top.
     pub fn palettes_follow_focus(&mut self, focused: Option<&Win>) {
         self.dialogs.hidden.retain(|(w, _)| w.alive());

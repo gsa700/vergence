@@ -1,6 +1,6 @@
 //! The overview's arrangement (overview milestone 1, step 5;
 //! docs/overview-milestone-1.md): every window of a screen shown at once,
-//! scaled down so none overlap, Mission Control's idea (Dave, 2026-11-18).
+//! scaled down so none overlap, Mission Control's idea.
 //!
 //! Pure: windows in (their places on the screen), places out. Every window
 //! is scaled by the same amount, so their sizes still say which is which;

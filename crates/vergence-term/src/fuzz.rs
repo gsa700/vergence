@@ -1,5 +1,5 @@
 //! Random escape sequences into the parser and the screen: nothing may panic,
-//! whatever a program in the terminal prints (security pass 2026-11-08).
+//! whatever a program in the terminal prints (see docs/security-pass-2026-11-08.md).
 //! Deterministic (a fixed seed); FUZZ_ITERS raises the count for a long run:
 //! `FUZZ_ITERS=200000 cargo test --release -p vergence-term fuzz`.
 

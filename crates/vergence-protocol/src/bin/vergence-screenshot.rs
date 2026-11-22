@@ -1,6 +1,6 @@
-// Screenshot (screenshots milestone 1; Dave, 2026-11-21: "How will users
-// know about all this? Maybe we should make a little utility that calls
-// the bar directly"): the app in Apps (and on the dock, if pinned) that
+// Screenshot (screenshots milestone 1, docs/screenshots-milestone-1.md: a
+// little utility so users can find the screenshot bar at all): the app in
+// Apps (and on the dock, if pinned) that
 // opens Super+Shift+5's bar on the screen under the pointer, as the Mac's
 // Screenshot app does. The bar shows the keys under it, so it teaches
 // them too. Asks the session's server over the bus (v32 ScreenshotBar)

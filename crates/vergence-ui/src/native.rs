@@ -215,7 +215,7 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
     app.opened(1);
     // Software when asked, or when the GPU can't be used: said once, on the
     // error output (the server's log for apps it starts), so a session that
-    // draws in software says why (techbench, 2026-11-18).
+    // draws in software says why.
     let gpu = if std::env::var("VERGENCE_RENDER").as_deref() == Ok("cpu") {
         None
     } else {
@@ -239,8 +239,8 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
     app.waker(waker.clone());
     // On the native road the server draws every window's bar, whether or not
     // the app would draw one elsewhere (`bar_by_server` says only that): an app
-    // that asks to draw under it, or describes it, is heard (2026-11-14: the
-    // settings app, which draws no frame, was neither).
+    // that asks to draw under it, or describes it, is heard (the settings
+    // app, which draws no frame, was once neither).
     let under_bar = app.under_bar();
     let app_style = app.style();
     let mut first = Win::new(1, Run::Borrowed(app), size, bar_by_server);
@@ -1131,7 +1131,7 @@ impl<'a> Native<'a> {
         w.frame_pending = true;
         w.frames += 1;
         // The pointer's shape as the new frame has it (a shape that changed
-        // under a pointer at rest: Reader's hand let go, 2026-11-20).
+        // under a pointer at rest, as Reader's hand does when let go).
         if w.pointer_at.is_some()
             && let Some(c) = w.app.get().cursor_now()
             && c != w.cursor

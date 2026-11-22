@@ -68,8 +68,8 @@ pub const GAP: i32 = vergence_look::SHELF_GAP as i32;
 pub const MAX_GAP: i32 = 24;
 pub const SNAP: i32 = 40;
 /// The sizes the person may give the dock (its thickness, and each place
-/// along it), in points: 48 unless the settings say another (Dave,
-/// 2026-11-17: "the dock's size, chosen by the person").
+/// along it), in points: 48 unless the settings say another (see
+/// docs/apps-roadmap.md).
 pub const MIN_SIZE: i32 = 32;
 pub const MAX_SIZE: i32 = 96;
 
@@ -82,8 +82,8 @@ pub enum Edge {
     Bottom,
 }
 
-/// Where the dock is on its screen (Dave, 2026-11-10: it can be dragged; "let's
-/// have it all, adjustable in settings").
+/// Where the dock is on its screen: at any edge or dragged anywhere, all of it
+/// adjustable in settings (see docs/shelf-milestone-1.md).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Place {
     /// Along an edge, in the middle of it: upright at the sides, level at
@@ -109,7 +109,7 @@ pub struct Placement {
 
 impl Default for Placement {
     fn default() -> Placement {
-        // The bottom edge by default (Dave, 2026-11-16, with the launcher as a start menu).
+        // The bottom edge by default, with the launcher as a start menu (see docs/menus-milestone-1.md).
         Placement { place: Place::Edge(Edge::Bottom), gap: GAP, keep_clear: true, size: STRIP_W }
     }
 }
@@ -154,7 +154,7 @@ pub fn column(screen: Rect, at: &Placement) -> Option<Rect> {
     })
 }
 
-/// The dock itself (Dave, 2026-11-10: "like a dock"): a panel as long as
+/// The dock itself (see docs/shelf-milestone-1.md): a panel as long as
 /// the apps button's place and `items` places after it. At an edge it is in
 /// the middle of the edge, a gap in from it; floating, it is where it was
 /// put, moved only as far as keeps it whole on its screen. On a screen too

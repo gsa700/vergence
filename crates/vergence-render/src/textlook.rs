@@ -25,8 +25,8 @@
 
 use std::sync::OnceLock;
 
-/// The defaults, set by eye on techbench's LG (4K, 27") and ASUS (1080p,
-/// 21.5"), light and dark (2026-11-19).
+/// The defaults, set by eye on an LG (4K, 27") and an ASUS (1080p, 21.5")
+/// monitor, light and dark.
 pub const GAMMA: f32 = 1.45;
 pub const CONTRAST: f32 = 0.5;
 

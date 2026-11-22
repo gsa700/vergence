@@ -5,7 +5,7 @@
 //! masks (/SMask). JPEG (DCTDecode) through vergence-decode's decoder
 //! (the image crate, borrowed), its samples then going the same way as
 //! any; CCITT fax (ccitt.rs, ours) the same way as 1-bit samples; JPEG
-//! 2000 is a placeholder for now (Dave, 2026-11-19); JBIG2 through
+//! 2000 is a placeholder for now (see docs/pdf-milestone-1.md); JBIG2 through
 //! jbig2.rs (ours), arithmetic-coded streams so far. What cannot be
 //! decoded comes back as [`Decoded::Undecoded`].
 

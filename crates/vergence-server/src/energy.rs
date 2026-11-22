@@ -57,7 +57,7 @@ pub struct Config {
     /// this long with no input (zero: not on its own), before sleep (default on).
     pub lock_on_screens_off: bool,
     /// After the screens went off by their timeout, how long before the
-    /// lock comes on (Dave's list, 2026-11-16: 10 s, 30 s, 1 minute): a
+    /// lock comes on (10 s, 30 s, 1 minute; see docs/apps-roadmap.md): a
     /// touch within it brings them back with no password. A lock asked for,
     /// and the lock before sleep, are immediate whatever this says.
     pub lock_grace: Duration,

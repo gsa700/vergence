@@ -1,6 +1,6 @@
 // The battery's history (vergence-power's history.rs): one line a minute
 // while the machine has a battery, kept a week, for the settings app's
-// Battery page (Dave, 2026-11-14: "battery users will want it"). On its own
+// Battery page (people on battery want it; see docs/settings-milestone-1.md). On its own
 // thread: reading the battery touches /sys or sysctls, never the server's
 // frame. Only in the session on the real screens (a nested test server
 // would record the same battery twice).

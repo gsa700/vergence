@@ -3,8 +3,8 @@
 //! A window is recognized by its class (`WM_CLASS` instance and class), its
 //! role (`WM_WINDOW_ROLE`, often empty) and its place among open windows of
 //! the same class (0 = the first opened). **Titles are never stored**
-//! (Dave, 2026-11-06): they carry document names, email subjects and web
-//! page titles.
+//! (decision 2a in docs/milestone-3.md): they carry document names, email
+//! subjects and web page titles.
 //!
 //! Positions are relative to the top-left corner of the monitor the window
 //! is on, so a window follows its monitor when the arrangement changes.
@@ -139,7 +139,7 @@ pub struct WindowProfile {
 /// A setup's key for one size of its monitors: the monitors' key (their
 /// EDIDs, [`crate::profile_key`]) and each monitor's size in points, so the
 /// same monitors at another resolution or scale keep places of their own
-/// (Dave, 2026-11-12). `sizes`: (monitor id, width, height), in any order.
+/// (see docs/bar-milestone-1.md). `sizes`: (monitor id, width, height), in any order.
 pub fn sized_key(base: &str, sizes: &[(String, u32, u32)]) -> String {
     let mut v: Vec<String> = sizes.iter().map(|(id, w, h)| format!("{id}={w}x{h}")).collect();
     v.sort();
@@ -190,8 +190,8 @@ pub fn key_monitors(key: &str) -> (&str, Vec<KeyMonitor>) {
 }
 
 /// A sized key with each monitor's scale too (in 120ths): a place recorded
-/// at another scale of the same mode keeps its size in points (Dave,
-/// 2026-11-18), one at another resolution scales in proportion.
+/// at another scale of the same mode keeps its size in points, one at
+/// another resolution scales in proportion.
 pub fn sized_key_scaled(base: &str, monitors: &[(String, u32, u32, u32)]) -> String {
     let mut v: Vec<String> = monitors.iter().map(|(id, w, h, s)| format!("{id}={w}x{h}@{s}")).collect();
     v.sort();
@@ -201,8 +201,7 @@ pub fn sized_key_scaled(base: &str, monitors: &[(String, u32, u32, u32)]) -> Str
 impl WindowSetting {
     /// This place on its monitor after a scale change (same pixels, `to`
     /// points now): the same size and place in points, pulled inside the
-    /// monitor where it no longer fits (Dave, 2026-11-18: "keep point size on
-    /// scale changes").
+    /// monitor where it no longer fits: a scale change keeps the point size.
     pub fn kept(&self, to: (u32, u32)) -> WindowSetting {
         let width = self.width.min(to.0.max(1));
         let height = self.height.min(to.1.max(1));

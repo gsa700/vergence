@@ -2,8 +2,8 @@
 //
 // A dock on the right edge of the primary screen, drawn by the server: a
 // rounded panel as tall as what it holds, floating a gap in from the edge
-// (Dave, 2026-11-10: "like a dock, rounded with the same radius as all the
-// other elements"). It stands in a column that runs the height of the screen
+// (rounded with the same radius as all the other elements; see
+// docs/shelf-milestone-1.md). It stands in a column that runs the height of the screen
 // (called the strip below, as vergence-shell calls it), and a screen with the
 // shelf has a WORK AREA, the screen less that column: maximize,
 // default placement and fitting, the desktop menu and notification cards keep
@@ -83,9 +83,9 @@ enum Asked {
     Pending,
     Done(Option<Arc<Icon>>),
     /// The file was there but would not decode, at this time: asked again
-    /// after [`RETRY`] (Dave, 2026-11-22: Reader kept its letter for a whole
-    /// session; its icon was asked for while install.sh replaced the picture
-    /// helper, and the failure was kept for good).
+    /// after [`RETRY`] (an icon asked for while install.sh replaced the
+    /// picture helper failed, and a failure kept for good left the app with
+    /// its letter for the whole session).
     Failed(std::time::Instant),
 }
 
@@ -203,8 +203,8 @@ impl Default for HideSetting {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hide {
     Never,
-    /// While a window covers where it stands (Dave, 2026-11-10: "visible
-    /// unless a window came over it ... several desktops do this").
+    /// While a window covers where it stands, as several desktops do (see
+    /// docs/shelf-milestone-1.md).
     Windows,
     /// Always, until the pointer comes to its sliver.
     Always,
@@ -256,7 +256,7 @@ impl ShelfConfig {
                 Some("left") => Edge::Left,
                 Some("top") => Edge::Top,
                 Some("right") => Edge::Right,
-                // The bottom edge by default (Dave, 2026-11-16).
+                // The bottom edge by default (see docs/menus-milestone-1.md).
                 _ => Edge::Bottom,
             }),
         };
@@ -668,8 +668,8 @@ impl Server {
             self.shelf.primary = primary;
             self.shelf_moved();
             // A change that moves nothing (its opacity) still shows at once: it
-            // waited for the next frame something else asked for (Hubble,
-            // 2026-11-13: "the slider does nothing").
+            // waited for the next frame something else asked for (the opacity
+            // slider seemed to do nothing).
             self.redraw_all();
         }
     }
@@ -1193,7 +1193,7 @@ impl Server {
             self.shelf.held = Some((button, Held { start: at, dock, dragging: true, grip: Grip::Dock }));
             return;
         }
-        // Alt+drag moves the dock, as it moves any window (Dave, 2026-11-16);
+        // Alt+drag moves the dock, as it moves any window (see docs/dock-milestone-1.md);
         // a plain drag moves what was pressed.
         let alt = self.input.keys.as_ref().is_some_and(|k| k.mods().alt);
         let upright = self.shelf.config.placement().upright();
@@ -1320,7 +1320,8 @@ impl Server {
     /// where it was dropped, and its place is written to the settings. After
     /// a click on an application with one window: that window comes forward
     /// and has the keyboard, or comes back if it was minimized, or, if it is
-    /// the one that has the keyboard already, is minimized (Dave, 2026-11-09).
+    /// the one that has the keyboard already, is minimized (see
+    /// docs/shelf-milestone-1.md).
     /// With several: a list of them opens beside the icon.
     pub fn shelf_release(&mut self, at: Point<f64, Logical>) {
         let Some((_, held)) = self.shelf.held.take() else { return };
@@ -1719,9 +1720,9 @@ impl Server {
         let accent = self.accent();
         // Each application's windows, and how many of them are minimized: a
         // dot for each window under its icon, hollow for a minimized one
-        // (overview milestone 1, step 2; Dave, 2026-11-18: "Mac and Windows
-        // both keep dots under running apps when minimized ... that is how
-        // you know there is something there"). The icon is never faint.
+        // (overview milestone 1, step 2; see docs/overview-milestone-1.md): as
+        // on the Mac and Windows, the dots say there is something there. The
+        // icon is never faint.
         let counts: Vec<(usize, usize)> = items
             .iter()
             .map(|(_, windows)| (windows.len(), windows.iter().filter(|w| self.is_minimized(w)).count()))
@@ -1817,12 +1818,12 @@ impl Server {
             );
             let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
             let face = fonts.face("sans-serif", 700, false).or_else(|| fonts.face("sans-serif", 400, false));
-            // The apps button at its head, saying the apps live there (Dave,
-            // 2026-11-16, after macOS's Apps icon): a search field across the
+            // The apps button at its head, saying the apps live there (after
+            // macOS's Apps icon; see docs/apps-roadmap.md): a search field across the
             // top and six apps under it, two rows of three, inside a window's
             // outline, in the dock's own colors (the nine dots are the drawer's).
-            // All of it in the outline of a window (Dave: "might still need
-            // something like an outline of a window").
+            // All of it in the outline of a window, so it reads as the apps'
+            // place rather than one app.
             let r = |x: f32, y: f32, w: f32, h: f32| SceneRect::new(x * k, y * k, w * k, h * k);
             scene.stroke(r(7.5, 7.5, 33.0, 33.0), 6.0 * k, 1.3 * k.sqrt(), color(s.mark));
             scene.stroke(r(13.0, 13.0, 22.0, 4.5), 2.25 * k, 1.1 * k.sqrt(), color(s.mark));
@@ -1837,8 +1838,8 @@ impl Server {
                 let ((item, _), icon) = (&items[index], &icons[index]);
                 let at = running::icon_in(slot);
                 let square = SceneRect::new(at.x as f32, at.y as f32, at.w as f32, at.h as f32);
-                // The marks, on the dock's outside edge, away from the windows
-                // (Dave, 2026-11-10): starting, a bar that grows and shrinks;
+                // The marks, on the dock's outside edge, away from the windows:
+                // starting, a bar that grows and shrinks;
                 // asking, a long bar in the accent; otherwise a dot for each
                 // window, up to three, hollow for a minimized one, in the
                 // accent for the application that has the keyboard.
@@ -2147,7 +2148,7 @@ impl Server {
             let s = vergence_look::shelf_look(self.light_style());
             // The dock's own opacity (Settings > Dock) is the frost's strength, at
             // Standard as it is, scaled by the Frost step: it had been left out
-            // since the frost came (Dave, 2026-11-13: "the slider does nothing").
+            // since the frost came, and the slider seemed to do nothing.
             let step = vergence_look::frost_strength(self.look_setting("frost")) / vergence_look::FROST_STRENGTH;
             let look = crate::backdrop::Look {
                 tint: crate::backdrop::unit(s.dock),

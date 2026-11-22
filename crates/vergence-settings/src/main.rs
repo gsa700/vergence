@@ -2,8 +2,8 @@
 // from iced 2026-11-10, toolkit milestone 2, which had replaced Slint on
 // 2026-11-08).
 //
-// THE FORMAT (Dave, 2026-11-08: "similar to the macOS ... designed for desktop
-// and not mobiles"; colors from his System Settings screenshot): a warm gray
+// THE FORMAT: like macOS's System Settings, made for a desktop and not for
+// phones, with its colors (see docs/settings-milestone-1.md): a warm gray
 // sidebar of pages, the selected one filled with the desktop's accent; the page
 // on a lighter ground, its heading centered in a card, settings in soft gray
 // cards with the name on the left and the control on the right. Every change
@@ -682,8 +682,8 @@ impl App {
     /// Make `new` the main screen (desktop.toml `[displays] primary`): the
     /// default wallpaper moves without anything on screen changing, and the
     /// dock, if it was put on a screen by name, goes back to following the
-    /// main screen (Techbench, 2026-11-17: the dock named the ASUS from long
-    /// before, and nothing on the Screens page could move it).
+    /// main screen (otherwise a dock pinned by name to an old screen stays
+    /// there, and nothing on the Screens page can move it).
     fn make_main(&mut self, new: &str) {
         let old = self
             .primary()
@@ -719,7 +719,7 @@ impl App {
             match self.page_named(name) {
                 Some(page) => self.open(page),
                 // The Screens pages are listed once the server has told the
-                // screens (`--page screens` opened Appearance, 2026-11-18).
+                // screens (until then, `--page screens` would open Appearance).
                 None if self.outputs.is_empty() => self.page_wanted = Some(name.clone()),
                 None => {}
             }
@@ -1047,9 +1047,9 @@ impl Program for App {
 
     fn theme(&self) -> Theme {
         let text = toml::to_string(&self.desktop).unwrap_or_default();
-        // Light (Dave, 2026-11-14: "so hard to read when dark with the small
-        // text"), unless the desktop's Style forces Dark ("unless the master
-        // override is engaged"). Its own Style choice does not apply.
+        // Light, since its small text is hard to read dark, unless the
+        // desktop's Style forces Dark (see docs/app-settings-milestone-1.md).
+        // Its own Style choice does not apply.
         let dark = vergence_ui::desktop_pick(&text) == Some(false);
         let mut t = Theme::new(dark, self.accent(), appearance_text(&self.desktop, "contrast") == "high");
         t.reduced_motion = self
@@ -1065,8 +1065,8 @@ impl Program for App {
             .and_then(|v| v.as_integer())
             .map_or(400, |v| v.clamp(100, 2000) as u32);
         // The wallpaper tint's amount and the spelling switch, as every other
-        // app reads them (Theme::from_desktop); it tinted at 8% whatever the
-        // slider said (Dave, 2026-11-15: "even 1% is pretty aggressive").
+        // app reads them (Theme::from_desktop), so the slider is obeyed here
+        // too: even a 1% tint shows, and a fixed 8% was far too strong.
         t.tint_mix =
             vergence_widgets::tint_amount(vergence_ui::table_value(&text, "[appearance]", "tint-amount").as_deref());
         t.spell = vergence_ui::table_value(&text, "[settings]", "spellcheck")
@@ -1129,8 +1129,8 @@ impl Program for App {
             .height(Length::FILL)
     }
 
-    /// A sidebar window (window styles milestone 1; Dave's screenshot of
-    /// macOS's System Settings): its content runs up under the server's
+    /// A sidebar window, as macOS's System Settings (see docs/window-styles-milestone-1.md):
+    /// its content runs up under the server's
     /// frosted bar, 760 x 480 to 1100 wide, no maximize.
     fn style(&self) -> vergence_ui::Style {
         vergence_ui::Style {
@@ -1145,9 +1145,9 @@ impl Program for App {
         true
     }
 
-    /// No buttons and no title in the bar over the page (Dave, 2026-11-14:
-    /// the page shows its own name); the bar still starts where the sidebar
-    /// ends.
+    /// No buttons and no title in the bar over the page, since the page shows
+    /// its own name; the bar still starts where the sidebar ends
+    /// (see docs/settings-milestone-1.md).
     fn bar(&self) -> Option<vergence_ui::Bar> {
         Some(vergence_ui::Bar::Tools { buttons: Vec::new(), from: (SIDEBAR_W + 1.0) as f64 })
     }
@@ -1308,14 +1308,14 @@ fn main() -> std::io::Result<()> {
         println!("vergence-settings {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
-    // Vergence's settings are for a Vergence session only (Dave, 2026-11-12):
-    // other desktops have settings of their own. The server gives every
+    // Vergence's settings are for a Vergence session only: other desktops have
+    // settings of their own (see docs/bar-milestone-1.md). The server gives every
     // program it starts its bus, nested or not.
     if std::env::var_os(vergence_protocol::BUS_ENV).is_none() {
         eprintln!("vergence-settings: runs in a Vergence session only ({} is not set)", vergence_protocol::BUS_ENV);
         std::process::exit(1);
     }
-    // Portrait (Dave's screenshot of macOS's System Settings): the server fits
+    // Portrait, as macOS's System Settings (see docs/window-styles-milestone-1.md): the server fits
     // the height to the screen; window memory decides after the first time.
     // `--page wifi`: the page to open with, by its sidebar name in lower case
     // ("wifi", "energy", "windows", "theme and fonts"); the server's "no network
@@ -1353,7 +1353,7 @@ struct OwnRows;
 impl vergence_widgets::prefs::Rows for OwnRows {
     fn parts(&self, text: &str) -> Vec<vergence_widgets::prefs::Part> {
         use vergence_widgets::prefs::{Control, Part, Row};
-        // Always light (Dave, 2026-11-14): no Style or Title bar of its own to choose.
+        // Always light (see docs/app-settings-milestone-1.md): no Style or Title bar of its own to choose.
         let opacity = vergence_ui::opacity_setting(text, "[appearance]");
         vec![Part {
             title: "On this desktop".into(),

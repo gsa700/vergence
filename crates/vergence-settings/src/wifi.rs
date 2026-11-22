@@ -291,7 +291,7 @@ fn state_words(s: &str) -> &'static str {
 impl App {
     /// Whether the machine has a Wi-Fi device now (the sidebar shows the Wi-Fi
     /// page then, as Touchpad and Touchscreen once the machine has had one;
-    /// Dave, 2026-11-14). A USB Wi-Fi adapter plugged in makes it appear.
+    /// see docs/settings-milestone-1.md). A USB Wi-Fi adapter plugged in makes it appear.
     pub fn has_wifi(&self) -> bool {
         self.wifi.all.iter().any(|f| f.kind == ifaces::Kind::WiFi)
     }
@@ -615,9 +615,8 @@ impl App {
         };
         let mut top = vec![setting_row];
         if wanted && w.status.connected() {
-            // The network in use with its numbers up front (Dave, 2026-11-14:
-            // "some of the connection statistics right up front"); the rest
-            // stays in Advanced.
+            // The network in use with its numbers up front, where they are
+            // wanted most; the rest stays in Advanced (see docs/settings-milestone-1.md).
             let n = w.signal.as_ref().map_or(0, |s| wpa::bars(s.rssi));
             let band = w
                 .status
@@ -921,7 +920,7 @@ impl App {
         } else {
             "Not connected.".to_string()
         };
-        // Only where there is Wi-Fi (Dave, 2026-11-14: hidden like the touchscreen's).
+        // Only where there is Wi-Fi, hidden otherwise as the touchscreen's page is.
         if self.has_wifi() {
             items.push(self.group(
                 Some("Wi-Fi"),

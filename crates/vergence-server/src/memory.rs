@@ -9,14 +9,14 @@
 //   Places are kept per size of the setup: its key and each monitor's size in
 //   points and scale (windows::sized_key_scaled), so the same monitors at
 //   another resolution or scale keep places of their own, and going back
-//   finds the old ones (Dave, 2026-11-12). A size seen for the first time
+//   finds the old ones (see docs/bar-milestone-1.md). A size seen for the first time
 //   starts from the most recent other size of the same monitors: at another
 //   resolution each place scaled in proportion to its monitor; at another
 //   scale of the same mode each keeps its size and place in points, pulled
-//   inside the monitor (Dave, 2026-11-18). A move there is kept for that
-//   size only.
+//   inside the monitor. A move there is kept for that size only.
 // - A window is its app's class (X11 WM_CLASS instance/class, Wayland app_id)
-//   and its place among open windows of that class. No titles (Dave, 2026-11-06).
+//   and its place among open windows of that class. No titles (they change;
+//   see docs/server-milestone-1.md).
 //   A native window is its persistence token instead (bar milestone 1, step 5;
 //   docs/bar-milestone-1.md, "Windows that stay where they were"): issued by the
 //   server, presented again by the program, so each window keeps its own place
@@ -28,7 +28,8 @@
 // - Recorded when a move or resize ends, on maximize/restore, and when the
 //   window closes. A remembered place decides before the defaults and before the
 //   app's own restore, when its monitor is there and the window's title bar is
-//   wholly on it (Dave, 2026-11-12; the whole window had to fit until then).
+//   wholly on it: a window goes back exactly where it was put, as long as it
+//   can be grabbed (place.rs `bar_on_a_monitor`).
 // - ~/.config/vergence/server-windows.toml, 0600 (whitepaper §7.3), the shared
 //   WindowStore format; `skip = ["app"]` leaves an app alone. vergd's
 //   windows.toml is separate: its units are X pixels.
@@ -46,7 +47,7 @@ use crate::Server;
 
 /// The smallest window memory records or restores, in points. A foot window
 /// was put back at 1x1 at every restart (it had been anchored before its first
-/// commit, squeezed to one cell, 7x15, and remembered so, 2026-11-08).
+/// commit, squeezed to one cell, 7x15, and remembered so).
 const MIN_W: i32 = 64;
 const MIN_H: i32 = 48;
 
@@ -137,14 +138,13 @@ impl Server {
     pub fn window_identity(&mut self, w: &Win) -> Option<WindowId> {
         // Dialogs, palettes and splash screens are placed by their parent
         // (dialogs.rs), never from memory: a settings dialog took the size of
-        // the settings window last closed, its buttons off the screen (kepler,
-        // 2026-11-14).
+        // the settings window last closed, its buttons off the screen.
         // A window with a parent counts too: its parent is known when it is
         // created, its kind only once its style arrives, which can be after
         // the server first places it.
-        // A lone dialog of our own toolkit (no parent: a Properties window,
-        // 2026-11-16) is a window of its own and is remembered by its role
-        // (Dave, 2026-11-18: it no longer kept its size or place).
+        // A lone dialog of our own toolkit (no parent: a Properties window)
+        // is a window of its own and is remembered by its role (otherwise it
+        // keeps neither its size nor its place).
         use crate::style::Kind;
         let style = self.window_style(w);
         let lone_dialog = style.kind == Kind::Dialog
@@ -196,7 +196,7 @@ impl Server {
                     .unwrap_or_default()
             });
             // No app_id (iced and Slint set none on FreeBSD): the program's name,
-            // from the client's process (2026-11-08: the terminal and the settings
+            // from the client's process (without it the terminal and the settings
             // app had no memory).
             let app =
                 if app.is_empty() { program_of(&self.display_handle, t.wl_surface()).unwrap_or_default() } else { app };
@@ -271,7 +271,7 @@ impl Server {
         let id = self.window_identity(w)?;
         // A native window (a role) with no memory yet takes its program's
         // role-less one: where the same program's Wayland window was (our tools
-        // before the native road, 2026-11-11), so moving roads forgets nothing.
+        // before the native road), so moving roads forgets nothing.
         // A window with a token and no memory yet starts where the last window
         // of its program the user closed was (a new terminal window, a torn-off
         // tab's own window asks for its drop point and has no memory: that wins).
@@ -299,8 +299,8 @@ impl Server {
                     let (s, fallback) = find(p)?;
                     let then = key_monitors(&p.key).1;
                     let s = match (monitor(&then, &s.monitor), monitor(&now, &s.monitor)) {
-                        // The same pixels at another scale: points kept (Dave,
-                        // 2026-11-18); another resolution: in proportion.
+                        // The same pixels at another scale: points kept;
+                        // another resolution: in proportion.
                         // (Pixels from points and scale may be a few off at a scale off the grid.)
                         (Some(from), Some(to))
                             if from
@@ -325,7 +325,7 @@ impl Server {
         let mut r = Rectangle::new((og.loc.x + s.x, og.loc.y + s.y).into(), (s.width as i32, s.height as i32).into());
         // A new window starting from its program's last-closed place does not
         // land exactly on another of its windows (three new terminals stacked
-        // exactly on one another, 2026-11-12).
+        // exactly on one another).
         if fallback {
             r = self.clear_of_siblings(w, r, og);
         }

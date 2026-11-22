@@ -112,7 +112,8 @@ impl Role {
 /// keys (ignored for a role: [`ROLES`] says). `enabled`: it can be chosen
 /// now; `checked`: a switch, on or off (None: not a switch); `featured`: one
 /// of the app's everyday few, shown on the menu's first panel (the rest are
-/// under All commands; Dave, 2026-11-14, after GNOME Terminal's menu).
+/// under All commands, as in GNOME Terminal's menu; see
+/// docs/app-settings-milestone-1.md).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Command {
     pub id: u32,

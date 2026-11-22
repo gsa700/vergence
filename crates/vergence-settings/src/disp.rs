@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn clean_scales_land_on_whole_points() {
         let k = |v: &[f64]| v.iter().map(|s| (s * 120.0).round() as u32).collect::<Vec<_>>();
-        // 3840x2160 (Techbench's LG, 2026-11-17).
+        // 3840x2160, a 4K monitor.
         let lg = clean_scales(3840, 2160, 0.75, 2.0);
         assert_eq!(k(&lg), [90, 96, 100, 120, 128, 144, 150, 160, 180, 192, 200, 225, 240]);
         for s in &lg {

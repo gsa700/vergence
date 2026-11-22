@@ -172,8 +172,8 @@ fn work(path: PathBuf, slices: u32, state: Arc<Mutex<State>>, nudge: Arc<Condvar
             }
             state.lock().unwrap_or_else(|e| e.into_inner()).at += frames;
             // The waveform goes on filling in while it plays, a small piece
-            // between pieces of sound (Dave, 2026-11-22: it stayed invisible
-            // until Pause): about three seconds' worth, decoded well inside
+            // between pieces of sound (otherwise it stays invisible until
+            // Pause): about three seconds' worth, decoded well inside
             // the output's buffer.
             if !whole {
                 match sound.peaks_step(slices, 131_072) {

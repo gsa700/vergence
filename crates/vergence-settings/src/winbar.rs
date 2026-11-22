@@ -1,6 +1,6 @@
 // The title bar's layout: which side the window controls are on and which
-// buttons there are (2026-11-08, Dave: controls on either side, buttons chosen
-// in the settings app). Kept as GTK's Gtk/DecorationLayout in settings.toml, so
+// buttons there are: controls on either side, buttons chosen in the settings
+// app (see docs/bar-milestone-1.md). Kept as GTK's Gtk/DecorationLayout in settings.toml, so
 // GTK apps' own bars follow it too, and the server's bars and the terminal's
 // read it: "close,minimize,maximize:" (left), ":minimize,maximize,close" (right).
 
@@ -14,7 +14,7 @@ pub struct Layout {
 }
 
 impl Default for Layout {
-    /// On the left, with every button (Dave, 2026-11-12; vergence-bar's DEFAULT_LAYOUT).
+    /// On the left, with every button (vergence-bar's DEFAULT_LAYOUT; see docs/bar-milestone-1.md).
     fn default() -> Self {
         Layout { left: true, minimize: true, maximize: true }
     }

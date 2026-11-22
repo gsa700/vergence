@@ -6,7 +6,7 @@
 // screen's corner, starts and ends on a pixel: its body, its bar and the
 // frost under the bar all round the same way, wherever it is dragged. Off
 // that grid each edge rounds on its own, and the bar's outline showed or was
-// cut off a pixel at a time as the window moved (techbench, 133⅓%).
+// cut off a pixel at a time as the window moved.
 //
 // Only scales with a short step get the grid: the slider's clean stops
 // (4/3, 5/4, 6/5, 3/2, 15/8 ...). A scale such as 1.4417 (173/120) would

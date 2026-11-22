@@ -2,18 +2,17 @@
 // opens each everyday kind of file and link. A choice is written to
 // Vergence's own list, ~/.config/vergence-mimeapps.list (vergence-types),
 // read before the shared mimeapps.list in a Vergence session; the shared one
-// is never written (Dave, 2026-11-15), so other desktops keep theirs. A kind
+// is never written, so other desktops keep theirs (see docs/files-milestone-1.md). A kind
 // covers every type of it (Pictures: PNG, JPEG, GIF, ...); its menu offers
 // the apps that open its first type, and "Not chosen here" forgets
 // Vergence's choice so the shared list's counts again.
 //
-// Text can also be opened by a terminal editor (Dave's list, 2026-11-15:
-// "nano in the terminal to edit text files in Vergence"): the ones on the
-// PATH are offered as "nano (in Terminal)" and so on. Choosing one writes a
-// small desktop entry of our own, ~/.local/share/applications/
+// Text can also be opened by a terminal editor, for people who edit in nano
+// and the like: the ones on the PATH are offered as "nano (in Terminal)" and
+// so on. Choosing one writes a small desktop entry of our own, ~/.local/share/applications/
 // vergence-term-<program>.desktop (Terminal=true, so opening runs it in
 // our terminal; NoDisplay, so the launcher does not list it), and makes it
-// the default like any other app.
+// the default like any other app (see docs/apps-roadmap.md).
 
 use super::*;
 

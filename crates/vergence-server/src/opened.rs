@@ -1,6 +1,6 @@
-// A new window and the keyboard (2026-11-14; found running windows milestone
-// 1, step 1 on kepler, and by Dave the day before: a window opened from the
-// launcher waited for a click before it could be typed in).
+// A new window and the keyboard (see docs/windows-milestone-1.md). Without
+// these rules a window opened from the launcher waited for a click before it
+// could be typed in.
 //
 // A new window takes the keyboard when it is one the person just asked for:
 //
@@ -34,7 +34,7 @@ impl Server {
         // A dialog has no identity of its own (memory.rs leaves dialogs
         // out), so it is judged by its parent: a dialog of the focused window,
         // or of another window of the focused program, is that program's
-        // (found 2026-11-15: the editor's Open dialog opened behind it).
+        // (otherwise the editor's Open dialog opened behind it).
         let parent = self.window_style(w).parent;
         let same = match &focused {
             Some(f) => {

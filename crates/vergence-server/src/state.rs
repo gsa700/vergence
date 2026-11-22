@@ -281,7 +281,7 @@ impl Server {
         // You may want to track keyboard hot-plug in real compositor.
         // Key repeat: GNOME's 500 ms / 30 a second until the settings load
         // (settings.rs apply_key_repeat; the settings app's Keyboard page).
-        // It was 200 ms, smallvil's: held keys doubled letters (Dave, 2026-11-08).
+        // It was 200 ms, smallvil's: held keys doubled letters.
         seat.add_keyboard(
             Default::default(),
             crate::settings::REPEAT_DELAY as i32,
@@ -540,7 +540,7 @@ impl Server {
                 unsafe {
                     std::env::set_var("DISPLAY", format!(":{display_number}"));
                     // Avalonia takes its scale from Xft.dpi; its env factors MULTIPLY
-                    // that (AVALONIA_GLOBAL_SCALE_FACTOR=3.28 gave 10.77, 2026-11-07).
+                    // that (AVALONIA_GLOBAL_SCALE_FACTOR=3.28 gave 10.77).
                     std::env::remove_var("AVALONIA_GLOBAL_SCALE_FACTOR");
                     std::env::remove_var("AVALONIA_SCREEN_SCALE_FACTORS");
                 }

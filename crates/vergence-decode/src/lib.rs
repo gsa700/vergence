@@ -212,8 +212,8 @@ fn resized(w: u32, h: u32, rgba: Vec<u8>, to: (u32, u32)) -> Vec<u8> {
 /// `image` crate's RGB assumed Adobe's inverted CMYK and turned plain CMYK
 /// photos black or negative). YCCK (Adobe transform 2) is turned into CMYK
 /// here: its Y, Cb, Cr to RGB, then C, M, Y = 255 - R, G, B, K kept. So
-/// zune-jpeg is called directly, the decoder `image` itself uses (Dave,
-/// 2026-11-20; docs/borrowed-review.md).
+/// zune-jpeg is called directly, the decoder `image` itself uses (see
+/// docs/borrowed-review.md).
 pub fn jpeg_samples(data: &[u8]) -> Result<(u32, u32, u8, Vec<u8>), String> {
     use zune_core::colorspace::ColorSpace as Cs;
     let options = || {

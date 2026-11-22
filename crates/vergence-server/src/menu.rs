@@ -1,7 +1,7 @@
 // The desktop menu (server milestone 1, 2026-11-07; reshaped 2026-11-15,
 // files milestone 1): right-click on the bare desktop, or on the desktop's
 // icons, for Open Terminal and the desktop's settings (wallpaper, screens;
-// Log Out moved to the launcher's power button, Dave 2026-11-16); a window's right
+// Log Out moved to the launcher's power button, see docs/menus-milestone-1.md); a window's right
 // click it asks the server to answer (WinRequest::ContextMenu) shows the
 // window's commands first (the desktop's icons: New folder, Open, Rename...). Drawn by the server like the
 // title bars (solid colors, text rasterized per monitor at its own pixels), sized

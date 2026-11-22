@@ -100,8 +100,8 @@ fn linear_xrgb(formats: &smithay::backend::allocator::format::FormatSet) -> bool
 
 /// Probe one GPU: open it, ask, close it. The one drm.rs draws with comes
 /// open (`drawing`: its descriptor and its renderer's formats): a second open
-/// through logind fails, "Invalid argument" (Techbench, Fedora, 2026-11-17:
-/// its only GPU showed no driver and no screens), and a second EGL display
+/// through logind fails, "Invalid argument" (on Fedora a machine's only GPU
+/// showed no driver and no screens), and a second EGL display
 /// on it would share, and on drop could end, the session's own.
 fn probe_one(
     session: &mut smithay::backend::session::libseat::LibSeatSession,

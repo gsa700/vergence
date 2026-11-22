@@ -4,8 +4,8 @@
 
 use super::*;
 
-/// A page's icon in the sidebar (settings milestone 1; Dave: (a), colored
-/// rounded squares with a white mark, as macOS's).
+/// A page's icon in the sidebar: colored rounded squares with a white mark, as macOS's, so a
+/// page is found by color and shape at a glance (see docs/settings-milestone-1.md).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Icon {
     WiFi,

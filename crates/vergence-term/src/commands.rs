@@ -84,14 +84,14 @@ impl Terminal {
         use vergence_ui::{AppCommand as C, Role};
         let selected = self.front().is_some_and(|s| lock(&s.screen).selection.is_some());
         let several = self.tabs.len() > 1;
-        // The app menu holds the terminal's own few (Dave, 2026-11-14: the app
-        // button is the app; a pane's and a tab's commands are on their right
-        // click); the rest are listed under Keyboard shortcuts.
+        // The app menu holds the terminal's own few (the app button is the app;
+        // a pane's and a tab's commands are on their right click; see
+        // docs/app-settings-milestone-1.md); the rest are listed under Keyboard shortcuts.
         let percent = format!("{}%", (self.zoom * 100.0).round());
         let list = vec![
             C::role(cmd::SETTINGS, Role::Settings),
-            // Its own About window, as Edit's (Dave, 2026-11-18: the server's
-            // card for apps with none was a notification).
+            // Its own About window, as Edit's (the server's card for apps with
+            // none is only a notification).
             C::role(cmd::ABOUT, Role::About),
             C::role(cmd::NEW_WINDOW, Role::NewWindow).featured(),
             C::role(cmd::NEW_TAB, Role::NewTab).featured(),

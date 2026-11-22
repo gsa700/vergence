@@ -1,5 +1,5 @@
 //! JPEG 2000 (ITU-T T.800 / ISO/IEC 15444-1), our own decoder (PDF
-//! milestone 1, step 5's last part; Dave, 2026-11-20): what PDF's
+//! milestone 1, step 5's last part; docs/pdf-milestone-1.md): what PDF's
 //! JPXDecode carries. A JP2 file's boxes (the codestream, its color space,
 //! a palette, which channel is opacity) or a bare codestream; tiles,
 //! components with their own sampling, any number of quality layers, all

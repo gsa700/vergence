@@ -5,7 +5,8 @@
 // chosen is carried out: an app's command goes to the app, the skeleton's
 // own lines (About, Settings…, Quit for an app that sent none) and the
 // Window menu are the desktop's. A right click on one of the app's commands
-// adds it to the first panel or takes it off (Dave, 2026-11-14): kept per
+// adds it to the first panel or takes it off (see
+// docs/app-settings-milestone-1.md): kept per
 // app in ~/.local/state/vergence/app-menu.toml (owner only), by the
 // command's key (its role, or its menu and label), not its id.
 
@@ -283,8 +284,8 @@ impl Server {
         self.redraw_all();
     }
 
-    /// The launcher (menus milestone 1, Dave 2026-11-16: a text menu pinned
-    /// to the dock's button, as a start menu): these lines with a search
+    /// The launcher (menus milestone 1: a text menu pinned to the dock's
+    /// button, as a start menu; see docs/menus-milestone-1.md): these lines with a search
     /// field, at `at` (its top left, kept on `screen`), every line carried
     /// out here (`own`).
     pub(crate) fn app_menu_launcher(
@@ -365,7 +366,7 @@ impl Server {
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| self.window_title(w));
         let (commands, terminal) = w.native().map(|n| n.commands()).unwrap_or_default();
-        // No Window menu (Dave, 2026-11-14): the window's layouts are on its
+        // No Window menu (see docs/app-settings-milestone-1.md): the window's layouts are on its
         // title bar (right click, long press) and its maximize button, and
         // Super with the arrows; the app menu is the app's.
         let window: Vec<(WindowAct, String)> = Vec::new();
@@ -817,7 +818,7 @@ impl Server {
                     let f = SceneRect::new(r.x, r.y + 2.0, r.w, r.h - 6.0);
                     scene.fill_rounded(f, vergence_look::MENU_ROW_RADIUS, color(s.field));
                     // The menu has the keyboard, so the field always shows it
-                    // has: an outline in the accent, and a caret (Dave: it
+                    // has: an outline in the accent, and a caret (without them it
                     // looked as if it could not be typed in until typed in).
                     scene.stroke(
                         f,

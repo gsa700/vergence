@@ -8,18 +8,18 @@
 // alone, its bar, border and corners, drawn at the densest scale of the
 // screens it is on (a window drawn from its scene is drawn again at that
 // density, sharp), on a clear ground, with a soft shadow around it unless
-// asked not to (Dave, 2026-11-20: as the Mac; Vergence's windows have no
-// shadow of their own, so the picture gets one).
+// asked not to (as the Mac does; Vergence's windows have no shadow of their
+// own, so the picture gets one).
 //
 // Never while the screen is locked or at the login screen, and the
 // password prompt (elevate.rs) is left out of what is taken.
 //
 // Files: ~/Pictures/Screenshots/<date>/Screenshot <date> at <h.m.s>.png
-// (Dave, 2026-11-20: "~/Pictures/Screenshots/$DATE"), a second in the same
+// (see docs/screenshots-milestone-1.md), a second in the same
 // second numbered " (2)", every screen at once named by screen; the folder
 // 0700 and the file 0600, written beside it and moved into place, off the
-// main thread. Super+Shift+3 takes the screen under the pointer (Dave,
-// 2026-11-20); every screen is a setting (step 8).
+// main thread. Super+Shift+3 takes the screen under the pointer; every
+// screen is a setting (step 8).
 
 use std::path::PathBuf;
 
@@ -738,8 +738,8 @@ fn drag_rect(
     Rectangle::new((x0, y0).into(), (x1 - x0, y1 - y0).into())
 }
 
-// Step 4: the floating thumbnail (Dave, 2026-11-20: as the Mac's, "anchor
-// it to Main"). After each capture a small picture of it floats in the
+// Step 4: the floating thumbnail (as the Mac's, on the main screen; see
+// docs/screenshots-milestone-1.md). After each capture a small picture of it floats in the
 // bottom-right corner of the main screen's work area (the dock's screen),
 // whatever was captured, in front of everything: about 5 s, kept while the
 // pointer is over it; a click opens the file in Close-Up; a drag takes the
@@ -1030,8 +1030,8 @@ pub struct Choices {
     pub clip: bool,
     pub pointer: bool,
     /// Where the bar was dragged to, from its screen's corner (points);
-    /// None: centered above the dock (Dave, 2026-11-21: "can the screenshot
-    /// bar be made movable by dragging it like a window?").
+    /// None: centered above the dock. The bar moves by dragging, like a
+    /// window (see docs/screenshots-milestone-1.md).
     pub place: Option<(i32, i32)>,
 }
 
@@ -1124,8 +1124,8 @@ pub struct Bar {
 }
 
 const BAR_H: i32 = 44;
-/// The grip at its left end, to drag it by (Dave: "maybe a little 'handle'
-/// on the left end?").
+/// The grip at its left end, to drag it by (see
+/// docs/screenshots-milestone-1.md).
 const GRIP_W: i32 = 18;
 /// The line of keys under the bar.
 const HINT_H: i32 = 26;

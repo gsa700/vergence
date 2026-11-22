@@ -1,5 +1,4 @@
-// Only one System Settings at a time (Dave, 2026-11-16: "there should only
-// ever be one copy of System Settings at any one time"). The first
+// Only one System Settings at a time (see docs/apps-roadmap.md). The first
 // vergence-settings listens on a socket of its own (owner-only, in the
 // runtime directory, as the editor's hand.rs); a second start hands its
 // arguments (--page, --app, --forget) to it and exits; the running one turns

@@ -144,7 +144,7 @@ impl EditWindow {
                 C::role(cmd::REPLACE, Role::Replace).enabled(editable),
                 C::own(cmd::GO_TO_LINE, "Edit", "Go to line…", "Ctrl+L"),
                 // The app menu's "− 100% +" Text size row, as the terminal's
-                // (Dave's list, 2026-11-16): for now, this window; the lasting
+                // (see docs/app-settings-milestone-1.md): for now, this window; the lasting
                 // size is the editor's own settings window's.
                 C::role(cmd::ZOOM_OUT, Role::ZoomOut).enabled(self.zoom > ZOOM_MIN + 0.001).featured(),
                 C {

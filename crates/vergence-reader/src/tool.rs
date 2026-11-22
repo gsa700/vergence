@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 /// The tool chosen last, kept for the next window and the next start
-/// (Dave, 2026-11-20: "Reader should remember the last selected tool"):
+/// (see docs/reader-milestone-1.md):
 /// ~/.local/state/vergence/reader-tool, "hand" or "text".
 fn tool_file() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_STATE_HOME")

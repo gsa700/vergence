@@ -1,7 +1,7 @@
 //! The keyboard: the server's own keys first, then the focused window.
 //!
 //! The server reads each key's symbol from its own xkb state (xkbcommon,
-//! used directly; Dave, 2026-11-12) and names the few the seat cares about
+//! used directly; see docs/borrowed-review.md) and names the few the seat cares about
 //! ([`Key`]); everything else is [`Key::Other`]. The seat never reads a
 //! keymap, so nothing here can run inside Smithay's keyboard lock.
 //!
@@ -168,7 +168,7 @@ pub enum KeyOut {
     /// Lock the screen: Super+L, or Ctrl+Super+Q (VDM milestone 1).
     Lock,
     /// The session dialog (Log Out, Sleep, Restart, Shut Down): the power
-    /// key, or Ctrl+Alt+Delete (Dave, 2026-11-16).
+    /// key, or Ctrl+Alt+Delete (see docs/menus-milestone-1.md).
     SessionDialog,
     /// The screen is locked: the key is the lock dialog's, and nobody else's.
     Locked,

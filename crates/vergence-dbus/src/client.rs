@@ -1,5 +1,5 @@
 //! A D-Bus client: a connection to a bus (the system bus, for udisks2:
-//! files milestone 1, Dave 2026-11-15), blocking, one thread. Authenticates
+//! files milestone 1, docs/files-milestone-1.md), blocking, one thread. Authenticates
 //! with EXTERNAL (our uid), says Hello, makes method calls and waits for
 //! their replies, and keeps the signals that arrive meanwhile for
 //! [`Client::next_signal`]. No file descriptors are passed.

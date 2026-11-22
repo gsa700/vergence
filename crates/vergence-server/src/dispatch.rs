@@ -639,8 +639,8 @@ impl Server {
         }
         // A press on the desktop (its icons' window or the bare wallpaper)
         // puts away whatever of the dock's or the desktop's is open: a
-        // docket's card, the drawer, the menus, the launcher (Dave's list,
-        // 2026-11-16).
+        // docket's card, the drawer, the menus, the launcher (see
+        // docs/apps-roadmap.md, polish batch 2).
         let on_desktop = match &t {
             Target::Native(id) => self.input.wins.get(id).is_some_and(|w| self.is_desktop(w)),
             _ => false,
@@ -785,7 +785,7 @@ impl Server {
         let Some((bar, layout)) = self.bar_of(&hold.window) else { return };
         let (lx, ly) = ((pos.x - bar.loc.x as f64) as f32, (pos.y - bar.loc.y as f64) as f32);
         let moved = (pos.x - hold.from.x).hypot(pos.y - hold.from.y) as f32;
-        // A window's only tab moves the window (Dave, 2026-11-12).
+        // A window's only tab moves the window, as a browser's does (see docs/bar-milestone-1.md).
         if hold.drag.is_none() && moved >= vergence_bar::DRAG_START && layout.tabs.len() == 1 {
             let Some(hold) = self.input.tab_hold.take() else { return };
             if self.grab_request(&hold.window, None) {
@@ -814,7 +814,7 @@ impl Server {
     /// A tab held with no button held any more: the seat let go of the press
     /// without a release reaching the tab (a window gone, a drag and drop,
     /// the screens off). The hold ends, said in the log, and the bar is drawn
-    /// as it is (Techbench, 2026-11-12: a bar stuck mid-drag).
+    /// as it is (otherwise a bar stays stuck mid-drag).
     fn tab_hold_check(&mut self) {
         if self.input.tab_hold.is_some() && !self.input.seat.buttons_held() {
             let hold = self.input.tab_hold.take().unwrap();

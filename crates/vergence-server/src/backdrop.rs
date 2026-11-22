@@ -10,8 +10,8 @@
 // what stands on it needs). Which way up the copy comes depends on the
 // frame: drawing to the screen, the framebuffer's rows run from the bottom
 // (the copy is drawn flipped); drawing into a texture (a screenshot), the
-// frame is flipped already and its rows run from the top (found on Hubble:
-// the first try frosted the top of the screen into a dock at the bottom).
+// frame is flipped already and its rows run from the top (copied the other
+// way, the top of the screen was frosted into a dock at the bottom).
 //
 // The texture is made by the scene builder (which has the renderer) and kept
 // while the size stays the same; the element only copies into it.
@@ -179,7 +179,7 @@ impl RenderElement<GlesRenderer> for Backdrop {
 /// texture, as a screenshot is drawn) rather than from its bottom (the
 /// screen): read from the frame's projection, whose vertical scale is
 /// negative when the output's top is the framebuffer's last row. (The
-/// frame's transformation says Normal either way: found on Hubble.)
+/// frame's transformation says Normal either way.)
 fn rows_from_top(frame: &GlesFrame<'_, '_>) -> bool {
     frame.projection()[4] > 0.0
 }
@@ -189,12 +189,12 @@ fn rows_from_top(frame: &GlesFrame<'_, '_>) -> bool {
 /// texture is new. (Smithay captures what is behind a framebuffer effect when
 /// that changed, or when the element reports damage of its own; a menu that
 /// opens over a still desktop changes nothing behind it, so without the new
-/// commit its texture stayed empty: found on Hubble, a menu and a Wayland
+/// commit its texture stayed empty: a menu and a Wayland
 /// bar frosted only their tint.)
 /// The element's id, its texture, its commit, and the look it was last
 /// drawn with: a new look (the dock's opacity, the Frost step, light or
 /// dark) is a new commit, or the screen kept the old frost until something
-/// behind it changed (Hubble, 2026-11-13: "the slider does nothing").
+/// behind it changed (the dock's opacity slider seemed to do nothing).
 pub type Slot = Option<(Id, GlesTexture, CommitCounter, Look)>;
 
 /// The backdrop frost over `dst` for a surface whose texture is kept in
@@ -251,8 +251,7 @@ pub fn unit(c: vergence_look::Rgb) -> [f32; 3] {
 /// stays the window's and a commit that moves only when the picture, its
 /// place or the shader's numbers change. Smithay's own TextureShaderElement
 /// takes a new id each time it is made: every frame looked new, so the
-/// screen was drawn again at every refresh (25% of a core on Hubble, idle;
-/// found 2026-11-13).
+/// screen was drawn again at every refresh (25% of a core while idle).
 pub struct Shaded {
     id: Id,
     commit: CommitCounter,

@@ -1,5 +1,5 @@
-// The desktop (files milestone 1, step 9; docs/files-milestone-1.md §6;
-// Dave, 2026-11-15: "include it as windows does"). The icons of ~/Desktop
+// The desktop (files milestone 1, step 9; docs/files-milestone-1.md §6:
+// included as Windows does it). The icons of ~/Desktop
 // are drawn by File Viewer in a window of the Desktop kind (bus v17,
 // `vergence-files --desktop`, app id vergence-desktop), which the server
 // sizes to the main screen's work area and keeps under every other window:
@@ -11,9 +11,9 @@
 //
 // The session starts it (session.rs, at the session's start) unless
 // desktop.toml `[desktop] icons = false` (Settings > Desktop), and starts it
-// again whenever it exits (Dave, 2026-11-21: "restart the desktop on
-// install": tools/install.sh stops the old program and the new one comes
-// up; a crash comes back too), up to five times a minute, never while the
+// again whenever it exits (so tools/install.sh can stop the old program and
+// the new one comes up, and a crash comes back too; see
+// docs/drives-milestone-1.md), up to five times a minute, never while the
 // session exits.
 //
 // Super+D (the seat's ShowDesktop): every window minimized out of the way;
@@ -142,7 +142,7 @@ impl Server {
     /// not the desktop, a splash, a palette, a dialog of another window or
     /// an X11 popup, nor one full screen; whoever draws its title bar
     /// (Firefox and GTK 4 apps draw their own: they were left out while this
-    /// asked for the server's bar, Dave 2026-11-18).
+    /// asked for the server's bar).
     pub fn ordinary_window(&self, w: &Win) -> bool {
         use crate::style::Kind;
         if self.is_desktop(w) || self.belongs_to_parent(w) || self.fullscreen.contains_key(w) {

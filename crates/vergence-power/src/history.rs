@@ -1,5 +1,5 @@
-//! The battery's history (Dave, 2026-11-14: "chart and track the battery
-//! longer than two minutes ... battery users will want it"): the server
+//! The battery's history, charted and tracked longer than the live two
+//! minutes because battery users want it (see docs/settings-milestone-1.md): the server
 //! writes one line a minute while there is a battery, and keeps a week;
 //! the Battery page charts the charge over a day or a week and sums up the
 //! time on battery and the power drawn.

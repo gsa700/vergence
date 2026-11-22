@@ -1,5 +1,5 @@
-// Exit Vergence (2026-11-15, Dave: "We might want to confirm on logout
-// though?"): the desktop menu asks first (menu.rs); then every window is
+// Exit Vergence (see docs/files-milestone-1.md): logging out is confirmed, so
+// the desktop menu asks first (menu.rs); then every window is
 // asked to close as its close button would (close_window: a program with
 // work not saved asks about it), and the session ends once they are gone.
 // If any is still open after GRACE (a question waiting for its answer), the

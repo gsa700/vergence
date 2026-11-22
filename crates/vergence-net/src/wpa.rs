@@ -220,7 +220,7 @@ impl Client {
     }
 
     /// Whether a known network is joined by itself when in range, or only
-    /// when chosen (Dave, 2026-11-14: a phone's hotspot, as Windows does it).
+    /// when chosen (a phone's hotspot, say, as Windows does it).
     /// The mark is the network's `id_str` in wpa_supplicant's own file, so
     /// it outlives everything here; a network marked so is kept disabled
     /// while it is not the one in use ([`Client::keep_manual`]), so turning
@@ -643,7 +643,7 @@ pub struct Bss {
 
 /// The password handshakes a network takes: WPA2's (PSK), WPA3's (SAE), or
 /// both. 6 GHz takes WPA3 only, so a network joined as WPA2 alone never
-/// uses its 6 GHz access points (found on Hubble, 2026-11-14).
+/// uses its 6 GHz access points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Keys {
     pub psk: bool,

@@ -1,6 +1,7 @@
 //! Spelling (editor milestone 1, step 7): our own checker, reading the list
 //! Vergence ships (data/words/en_US.txt, made from SCOWL by
-//! tools/make-words.py; Dave, 2026-11-15: "ship our own").
+//! tools/make-words.py), shipped with Vergence rather than taken from the
+//! system (see docs/editor-milestone-1.md).
 //!
 //! - **Checking** a word: as listed, or capitalized at a sentence's start
 //!   ("The" for "the"), or all in capitals ("THE", "NASA"); a name stays a
@@ -199,7 +200,7 @@ impl Speller {
         let mut u = self.user.lock().unwrap_or_else(|e| e.into_inner());
         u.fresh();
         // `allows` judges case only: the word itself must be the same first
-        // (2026-11-15: any capitalized word passed once "vergence" was the user's).
+        // (otherwise any capitalized word passed once "vergence" was the user's).
         u.words.iter().any(|form| {
             let f = form.to_lowercase();
             (f == key && Speller::allows(form, &w))

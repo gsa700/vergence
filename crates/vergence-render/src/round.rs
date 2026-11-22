@@ -3,8 +3,8 @@
 //! cut softened over a pixel. The top corners belong to the bar, which the
 //! server draws rounded itself (and the frost under it, [`crate::blur`]);
 //! but a window that draws under its bar has its own top corners there too,
-//! and they are cut as well (`top`; found 2026-11-15 by Dave: a light
-//! window's corners showed as white specks round a dark bar).
+//! and they are cut as well (`top`; otherwise a light window's corners show
+//! as white specks round a dark bar).
 //!
 //! Written for the GLES renderer the server composites with today (Smithay's
 //! texture-shader conventions, as the frost); it moves to vergence-render's

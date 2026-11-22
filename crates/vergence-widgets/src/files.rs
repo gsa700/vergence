@@ -60,8 +60,8 @@ impl RowSize {
     /// A row's height in points (one line of name).
     pub fn height(self) -> f32 {
         match self {
-            // Medium and Large as Finder's (Dave, 2026-11-21, beside a Finder
-            // screenshot: rows about 36 points, marks about 26 tall).
+            // Medium and Large as Finder's (rows about 36 points, marks about
+            // 26 tall).
             RowSize::Small => 24.0,
             RowSize::Medium => 34.0,
             RowSize::Large => 42.0,
@@ -72,7 +72,7 @@ impl RowSize {
     fn mark(self) -> f32 {
         match self {
             RowSize::Small => 1.0,
-            // A little larger since files milestone 3 (Dave: "slightly taller rows, yes").
+            // A little larger since files milestone 3 (see docs/files-milestone-3.md).
             RowSize::Medium => 1.5,
             RowSize::Large => 1.8,
         }
@@ -97,8 +97,8 @@ pub const COLUMN_MIN: f32 = 50.0;
 pub const COLUMN_MAX: f32 = 420.0;
 
 /// What the list's entries are grouped by, under headings (files milestone
-/// 3, step 4: by kind by default, as Finder separates by kind; Dave,
-/// 2026-11-21).
+/// 3, step 4: by kind by default, as Finder separates by kind; see
+/// docs/files-milestone-3.md).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum GroupBy {
     None,
@@ -260,8 +260,7 @@ impl Entry {
 
     /// An entry for a path. `look`: when the name says nothing of its type,
     /// its first bytes are read (vergence-types: signatures, then text), so
-    /// a file with no extension gets its mark (Dave, 2026-11-18: the
-    /// desktop's icon for "Vergence-wishlist-2" had no picture). Not on a
+    /// a file with no extension gets its mark instead of a blank one. Not on a
     /// network mount, where opening every file to list a folder is slow.
     pub fn of_looking(path: PathBuf, look: bool) -> Option<Entry> {
         let name = path.file_name()?.to_string_lossy().into_owned();
@@ -300,8 +299,7 @@ pub fn read_folder(dir: &Path) -> Result<Vec<Entry>, String> {
 
 /// FreeBSD: a folder of the automounter's /media whose drive is not in the
 /// list (pulled out). Not looked into: autofs keeps an answer that mounted
-/// nothing for a while, and the drive plugged in meanwhile opened empty
-/// (Dave, 2026-11-21, techbench).
+/// nothing for a while, and the drive plugged in meanwhile opens empty.
 fn absent_drive(dir: &Path) -> bool {
     if !cfg!(target_os = "freebsd") {
         return false;
@@ -695,8 +693,8 @@ pub fn list<M: Clone + 'static>(
         }
         rows.push(b);
     }
-    // The stripes stop at the last row (Dave, 2026-11-21: "stripes under
-    // files only"; files milestone 2 carried them on below).
+    // The stripes stop at the last row, under the files only (files milestone 2
+    // carried them on below; see docs/files-milestone-3.md).
     (head, rows)
 }
 
@@ -869,8 +867,8 @@ thread_local! {
 /// share/vergence/icons/<group>), read once. None where it is not installed.
 pub fn own_icon(group: &str, name: &str, px: u32) -> Option<std::sync::Arc<vergence_scene::Image>> {
     let size = [16u32, 32, 64, 128, 256].into_iter().find(|s| *s >= px).unwrap_or(256);
-    // Another icon theme chosen in Settings: its icon, once decoded (Dave,
-    // 2026-11-18: "our apps follow it"); ours until then, or if it has none.
+    // Another icon theme chosen in Settings: its icon, once decoded, since our
+    // apps follow the chosen theme; ours until then, or if it has none.
     let theme = icon_theme();
     if theme != vergence_shell::icons::THEME
         && let Some(found) = themed_icon(&theme, group, name, size)

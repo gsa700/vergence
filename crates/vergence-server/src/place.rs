@@ -49,8 +49,8 @@ impl Server {
     /// Is a window with content `rect` grabbable where it is: its title bar
     /// (for a window without one, its top strip of the same height) wholly on
     /// one monitor? A remembered place is restored then, even with the rest of
-    /// the window hanging off the edge (Dave, 2026-11-12: windows go back
-    /// exactly where they were put, as long as they can always be grabbed).
+    /// the window hanging off the edge: windows go back exactly where they
+    /// were put, as long as they can always be grabbed.
     pub fn bar_on_a_monitor(&self, rect: Rectangle<i32, Logical>, titled: bool) -> bool {
         let h = crate::decor::TITLE_H;
         let bar = if titled {
@@ -123,7 +123,7 @@ impl Server {
             t.send_pending_configure();
         }
         // Not exactly on another window of its program (three of the toolkit's
-        // Wayland windows opened at once stacked in the middle, 2026-11-12).
+        // Wayland windows opened at once stacked in the middle).
         let r = self.clear_of_siblings(w, Rectangle::new(center(area, fitted), fitted), out);
         self.put(w.clone(), r.loc, false);
         self.window_opened(w);

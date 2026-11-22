@@ -21,7 +21,7 @@
 // second and changes apply at once.
 //
 // Only a monitor whose own picture, fit, color or size changed is drawn again
-// (2026-11-08: choosing a picture for one screen used to redraw both). The worker
+// (choosing a picture for one screen used to redraw both). The worker
 // keeps the last few decoded pictures, each shrunk to what the largest monitor
 // needs (an 8K JPEG is 130 MB decoded and took 1.4 s to draw again each time).
 //
@@ -271,7 +271,7 @@ impl Server {
     /// the output when it is set up), so its wallpaper follows it to any port;
     /// nested outputs are named by their name. (Not from the backend: during a
     /// frame the backend is out of the state, and every monitor fell back to its
-    /// name, so per-monitor wallpapers never matched, 2026-11-08.)
+    /// name, so per-monitor wallpapers never matched.)
     pub fn monitor_id(&self, output: &str) -> String {
         self.space
             .outputs()

@@ -2,15 +2,14 @@
 //
 // While a window is moved by the pointer, the pointer at a screen's edge aims
 // it at a part of that screen (vergence-shell snap.rs decides which); letting
-// go there puts it there. On by default since the evening of 2026-11-14
-// (Dave, who had started with "I am really not a snap window person" and
-// Ctrl-only snapping: "You did such a nice job it changed my mind");
+// go there puts it there. On by default (windows milestone 1 started with it
+// off; see docs/app-settings-milestone-1.md, which turned it on);
 // desktop.toml `[windows] snap = "always" | "ctrl" | "off"` (true and false
 // read as always and off), and the other choices sit beside it there (the
 // settings app's Windows page, step 6). With "ctrl" the preview still shows
 // where the window would go, faint and saying to hold Ctrl, and only a drag
-// that has had Ctrl held snaps (Dave: "there was no feedback what was going
-// to happen"). The maximize button and the title bar carry the same
+// that has had Ctrl held snaps (without the preview nothing showed what was
+// going to happen). The maximize button and the title bar carry the same
 // layouts in a menu (menu.rs, `open_window_menu`), opened by a right click, a
 // long press on the bar, or the pointer resting 0.7 s on the button
 // (`layouts-hover`). The screen's part is taken from its work area, the one maximize
@@ -331,8 +330,7 @@ impl Server {
             if !self.restore.contains_key(w) {
                 self.toggle_maximize(w);
                 // Dragged to the top edge: back later to where the drag took
-                // it from, not where it was let go (its bar above the screen;
-                // Hubble, 2026-11-16).
+                // it from, not where it was let go (its bar above the screen).
                 if let Some(from) = from
                     && self.restore.contains_key(w)
                 {

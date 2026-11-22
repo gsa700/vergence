@@ -137,9 +137,9 @@ impl App {
     }
 
     pub(crate) fn overview(&self) -> Element<Message> {
-        // Every screen's scale here, each on its own (Dave, 2026-11-17: "we
-        // need to be able to scale each monitor separately"), and the main
-        // screen; the size of everything is Accessibility's.
+        // Every screen's scale here, each on its own, since monitors differ
+        // and each needs its own scale, and the main screen; the size of
+        // everything is Accessibility's (see docs/settings-milestone-2.md).
         let primary = self.primary();
         let mut scales: Vec<Element<Message>> = Vec::new();
         for (i, o) in self.outputs.iter().enumerate() {
@@ -189,9 +189,9 @@ impl App {
             "Screens",
             "Drag the screens to where they sit on your desk. Each one's scale is worked out from its size and how far away it is, or chosen here.",
             {
-                // Out of the way (Dave, 2026-11-19: "move it to advanced and
-                // show each screen"): the scales above are the setting most
-                // people need; these two fine-tune them.
+                // Out of the way in Advanced, showing each screen: the scales
+                // above are the setting most people need; these two fine-tune
+                // them (see docs/settings-milestone-2.md).
                 items.push(self.advanced("screens", vec![self.same_size_row()]));
                 items.push(self.status_line());
                 items
@@ -200,7 +200,7 @@ impl App {
     }
 
     /// "Windows the same size on every screen", with what each screen has
-    /// now and why, so a soft screen says so (Dave, 2026-11-19).
+    /// now and why, so a soft screen says so (see docs/settings-milestone-2.md).
     fn same_size_row(&self) -> Element<Message> {
         let on = disp::same_size(&self.desktop);
         let screens: Vec<String> = self
@@ -436,8 +436,8 @@ impl App {
     }
 }
 
-/// The slider's top: 300% (Dave, 2026-11-17: "No one will run a monitor
-/// past 300%"), or a screen's own default where that is higher.
+/// The slider's top: 300%, since no one runs a monitor past that, or a
+/// screen's own default where that is higher.
 fn scale_max(o: &OutputInfo) -> f64 {
     o.default_scale.ceil().max(3.0)
 }

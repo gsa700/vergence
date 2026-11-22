@@ -1,7 +1,7 @@
 //! Is any of this machine's storage encrypted? (VDM review M6: automatic
-//! login is never allowed with any encrypted file system, Dave's "4 a but
-//! also not allowed with any encrypted FS": it would unlock at power on
-//! what the encryption was there to keep.) Checked at every boot, not only
+//! login is never allowed with any encrypted file system, answer 4 a in
+//! docs/vdm-milestone-1.md: it would unlock at power on what the encryption
+//! was there to keep.) Checked at every boot, not only
 //! when automatic login is turned on. Counts: dm-crypt (LUKS or plain) on
 //! Linux, GELI on FreeBSD, ZFS native encryption on either, even when a
 //! TPM unlocks it; Linux eCryptfs mounts and volumes listed in /etc/crypttab

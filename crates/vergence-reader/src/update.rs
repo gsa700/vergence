@@ -85,8 +85,8 @@ impl Viewer {
                 self.drag = Some((x, y));
                 self.press_at = Some(((x, y), false));
                 let r = self.area.get();
-                // Each tool does one thing (Dave: "as is the pointer sort of
-                // floats between both functions"): the Text tool selects,
+                // Each tool does one thing, so the pointer never floats between
+                // two (see docs/reader-milestone-1.md): the Text tool selects,
                 // from the nearest character on the page pressed, and never
                 // moves the pages; the Hand only moves them.
                 let hand = self.hand;

@@ -1,6 +1,6 @@
-// Wi-Fi follows the cable (settings milestone 1, step 4; Dave, 2026-11-14:
-// "what if we enable wpa on all, but only turn it on when there is no
-// hardline detected?"). ~/.config/vergence/desktop.toml:
+// Wi-Fi follows the cable (settings milestone 1, step 4; see
+// docs/settings-milestone-1.md): wpa_supplicant is enabled everywhere, but
+// Wi-Fi is on only while no wired link is up. ~/.config/vergence/desktop.toml:
 //
 //     [network]
 //     wifi = "auto"   # or "on", "off"; auto: on only while no cable is connected
@@ -143,8 +143,8 @@ const UNJOINED: Duration = Duration::from_secs(20);
 enum Said {
     /// Wi-Fi came on for want of a cable and knows no network: say so, once.
     NoCable,
-    /// Wi-Fi is on, has joined nothing, and these are in range (Dave,
-    /// 2026-11-14: "it could notify: Networks Available"): the words to say.
+    /// Wi-Fi is on, has joined nothing, and these are in range ("Networks
+    /// Available"; see docs/settings-milestone-1.md): the words to say.
     Available(String),
 }
 

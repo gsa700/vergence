@@ -1,7 +1,6 @@
 // The dock's window picker (overview milestone 1, step 3;
-// docs/overview-milestone-1.md). Dave, 2026-11-18: "let's use the live tiles
-// as the window picker on the Dock as well! Hover on icon shows the live
-// preview (as Windows does)".
+// docs/overview-milestone-1.md): the live tiles as the dock's window picker,
+// shown when the pointer rests on an icon, as Windows does.
 //
 // The pointer resting on a running application's icon opens a frosted strip
 // beside the icon, on the side the windows are: a tile for each of the

@@ -16,7 +16,7 @@
 //! memory on the GPU that the display server can show as it is, handed over
 //! as a file descriptor (a dmabuf), with no copy through main memory.
 //!
-//! The interface is OpenGL ES 3 through EGL (decided 2026-11-09), on the
+//! The interface is OpenGL ES 3 through EGL, on the
 //! GPU's render node through GBM. Where there is no GPU device, EGL's
 //! "surfaceless" platform is tried, which on Mesa is a software GL: slow,
 //! but it lets the same tests run on a machine without a GPU. A machine
@@ -1033,7 +1033,7 @@ impl Gpu {
                 [one] => (rect(one), [one.radius, 1.0, 0.0, 0.0]),
                 // Several: as one, where that is exact (one_clip). Before, such
                 // a frame was drawn in software and lost the frost under its
-                // window's bar (techbench's Settings at 133⅓%, 2026-11-18).
+                // window's bar (the settings app at 133⅓%).
                 many => match one_clip(many, p.bounds) {
                     Some(one) => (rect(&one), [one.radius, 1.0, 0.0, 0.0]),
                     None => return Err(GpuError::Unsupported("a shape inside more than one rounded clip")),

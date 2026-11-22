@@ -209,7 +209,7 @@ impl Server {
 
         // Kept on the monitor where the popup is anchored (the menu's button), else
         // the one the window is mostly on. (It used the first monitor: Firefox's
-        // menus on the ASUS opened on the 14", 2026-11-07.)
+        // menus on one monitor opened on another.)
         let anchor = popup.with_pending_state(|s| s.positioner.anchor_rect);
         let center: smithay::utils::Point<i32, smithay::utils::Logical> = (anchor.size.w / 2, anchor.size.h / 2).into();
         let at = window_geo.loc + parent_offset + anchor.loc + center;

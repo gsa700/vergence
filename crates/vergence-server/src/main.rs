@@ -152,8 +152,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         crate::dbus::listen(&mut state);
     }
 
-    // X11 apps through Xwayland, if the settings ask for it (off by default since
-    // 2026-11-10: Dave runs no X11-only programs); the first app then starts once
+    // X11 apps through Xwayland, if the settings ask for it (off by default: a
+    // session needs it only for X11-only programs); the first app then starts once
     // it is ready (or failed), so it inherits DISPLAY. Never at the login screen.
     if greeter() {
         tracing::info!("Xwayland: off (the login screen)");
@@ -245,8 +245,8 @@ fn session_id() -> String {
 }
 
 /// Start an app in the session: stdin from /dev/null (the server's is the console:
-/// a .NET app blocked reading it and froze, 2026-11-07), in a session of its own
-/// with no controlling terminal (VDM milestone 1, review C6: found on kepler, every
+/// a .NET app blocked reading it and froze), in a session of its own
+/// with no controlling terminal (VDM milestone 1, review C6: otherwise every
 /// app had the console as its controlling terminal and could open /dev/tty, which
 /// a lock screen must not allow), reaped when it exits.
 pub fn spawn(cmd: &mut std::process::Command) -> std::io::Result<u32> {
@@ -273,7 +273,7 @@ pub fn spawn_child(cmd: &mut std::process::Command) -> std::io::Result<std::proc
 
 /// The first app, once Xwayland is ready: `-c <command>` only, and never on the
 /// real monitors (--drm): the session starts with an empty desktop; apps come
-/// from the desktop menu (2026-11-08: a foot window opened at every restart, a
+/// from the desktop menu (a foot window opened at every restart was a
 /// leftover from the first nested tests). Nested runs still take `-c`.
 fn spawn_client() {
     let all: Vec<String> = std::env::args().skip(1).collect();

@@ -1,9 +1,8 @@
-// Where the settings app was (session milestone 1; Dave, 2026-11-21:
-// "Settings is one where I would go the other way: during a session
-// remember everything, so if I am trying to get a setting just right but
-// have to close settings to do so, it should re-open on the same page and
-// location as I closed it. Maybe have it reset if the computer restarts or
-// a period of time has gone by?").
+// Where the settings app was (session milestone 1). During a session it
+// remembers everything: someone getting a setting just right, who has to
+// close the app to see the result, finds it again on the same page and at
+// the same place. It resets after a restart or a while away
+// (see docs/session-milestone-1.md).
 //
 // ~/.local/state/vergence/settings-page (owner only): the page (its
 // sidebar name) or the app whose page is open, how far it is scrolled,

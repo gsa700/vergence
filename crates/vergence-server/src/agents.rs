@@ -12,10 +12,10 @@
 // every request it makes of an app is logged in agents.log (0600).
 //
 // The dialog looks as the log out dialog does (session_dialog.rs): every
-// screen dimmed, a panel on the pointer's screen, one row of buttons (Dave,
-// 2026-11-20: "one row of buttons"). Enter and Escape mean Don't allow
-// (Dave, after the review: no keystroke meant for something else may
-// grant); nothing counts for a moment after a question appears; Space
+// screen dimmed, a panel on the pointer's screen, one row of buttons. Enter
+// and Escape mean Don't allow (no keystroke meant for something else may
+// grant; see docs/meaning-milestone-1.md); nothing counts for a moment after
+// a question appears; Space
 // answers nothing. The question names the app by its entry's name and id
 // and the agent by its name (cleaned, quoted) and program, in rows its
 // words cannot push out. Requests wait while it asks, and run when it answers.
@@ -181,8 +181,9 @@ fn timed_label(minutes: u64) -> String {
         m => format!("For {m} minutes"),
     }
 }
-/// The keyboard's default: Don't allow (Dave, after the review). The look
-/// is as he chose it: the timed answer still drawn as the suggested one.
+/// The keyboard's default: Don't allow, so no keystroke meant for something
+/// else can grant. The timed answer is still drawn as the suggested one
+/// (see docs/meaning-milestone-1.md).
 const DEFAULT: usize = 0;
 const W: i32 = 660;
 const H: i32 = 214;

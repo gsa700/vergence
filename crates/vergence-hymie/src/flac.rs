@@ -1,5 +1,5 @@
 //! FLAC, read for playing: Hymie's Flac.cs and FlacTrack.cs, which are
-//! Deadwax's decoder (written from RFC 9639; it decoded Dave's whole FLAC
+//! Deadwax's decoder (written from RFC 9639; it decoded a whole FLAC
 //! library the same as FFmpeg, 2026-10-20). decode_frame, subframe, residual,
 //! the bit reader and the CRCs are as they are there, so a fix can be carried
 //! over line for line; what playing adds is the tags and finding the frame
@@ -668,7 +668,7 @@ impl Track for FlacTrack {
             skip -= self.frame_len as u64;
             // A frame skipped whole is used up: it is not handed out again.
             // (Hymie's FlacTrack.SeekNow leaves it unread, so a seek to the
-            // end of a frame plays it again: found here 2026-11-21.)
+            // end of a frame plays it again; found while porting.)
             self.frame_off = self.frame_len;
         }
         Ok(())

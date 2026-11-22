@@ -279,7 +279,8 @@ pub fn table_value(text: &str, section: &str, key: &str) -> Option<String> {
 /// The desktop's fonts (text milestone 1, step 5): the interface's and the
 /// monospace one's family and size, from settings.toml's "Gtk/FontName" and
 /// "Gtk/MonospaceFontName" ("Inter Variable 9.75"). The number is **points
-/// at 96 to the inch**, as GTK reads it (Dave, 2026-11-19), so a size here
+/// at 96 to the inch**, as GTK reads it, so our apps and GTK apps agree
+/// (see docs/text-milestone-1.md); a size here
 /// is points * 96 / 72 in reference units: 9.75 is 13, 12 is 16.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopFonts {
@@ -364,7 +365,7 @@ pub fn desktop_pick(text: &str) -> Option<bool> {
 }
 
 /// Whether an app's content is light (app settings milestone 1). The
-/// desktop's Style is the master switch (Dave, 2026-11-14): Dark or Light
+/// desktop's Style is the master switch (see docs/app-settings-milestone-1.md): Dark or Light
 /// forces every app; under "App default" each app is as it wants, its own
 /// `style` if it chose one, else its built-in look.
 pub fn content_light(text: &str, section: &str, builtin_light: bool) -> bool {

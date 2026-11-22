@@ -113,8 +113,7 @@ struct Device {
     scanner: DrmScanner,
     /// A GPU other than the primary: its own renderer, which copies the frame
     /// the primary drew into its own scan-out buffer (nouveau scans out of its
-    /// video memory only, and the Intel GPU cannot draw there: EGL BAD_ALLOC on
-    /// Hubble, 2026-11-14).
+    /// video memory only, and the Intel GPU cannot draw there: EGL BAD_ALLOC).
     renderer: Option<GlesRenderer>,
     /// Its device node's path, for the log.
     path: String,
@@ -211,7 +210,7 @@ static CONNECTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::n
 /// scan-out buffers (its compositor's damage tracking, fed the primary's
 /// damage). A full 4K copy takes nouveau 60 to 77 ms (reading system memory
 /// over PCIe), so copying whole frames could not keep up and the screen
-/// flipped to half-copied ones (Hubble's 14", 2026-11-14). The two steps take
+/// flipped to half-copied ones. The two steps take
 /// turns on the one buffer: the primary draws, the showing GPU copies once the
 /// primary's fence has signaled (checked, never waited on), and finishes its
 /// copy before the flip and before the primary draws again.
@@ -263,12 +262,12 @@ pub struct Backend {
     devices: Vec<Device>,
     surfaces: HashMap<Key, Surface>,
     /// The seat is another console's (a VT switch away, the login screen):
-    /// nothing is drawn until it comes back (kepler, 2026-11-16: ten failed
-    /// frames a second, 10,000 log lines, while the login screen had the seat).
+    /// nothing is drawn until it comes back (drawing anyway failed ten frames
+    /// a second, 10,000 log lines, while the login screen had the seat).
     paused: bool,
     /// Monitors that came back while the screens were off (energy.rs), set up by
     /// screens_on. Setting one up turns it on, and a monitor that drops off in
-    /// standby (Techbench's ASUS, 2026-11-12) then woke and dropped again.
+    /// standby (some do) then woke and dropped again.
     waiting: Vec<(usize, connector::Handle, crtc::Handle)>,
     /// Tells the main loop that a thread has woken another GPU and probed its
     /// connectors (screens_on), so its scan is quick.
@@ -303,7 +302,7 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
 
     // GPU buffers from apps (linux-dmabuf v4): Xwayland's glamor and GL apps draw on
     // the GPU and hand their buffers over without a copy. Without it Xwayland fell
-    // back to software and AlbumWall managed ~4 frames a second at 3.28 (2026-11-07).
+    // back to software and AlbumWall managed ~4 frames a second at 3.28.
     // The feedback names the render node: Mesa opens the device by its number.
     let render_node = node.node_with_type(NodeType::Render).and_then(|r| r.ok()).unwrap_or(node);
     match smithay::wayland::dmabuf::DmabufFeedbackBuilder::new(render_node.dev_id(), renderer.dmabuf_formats()).build()
@@ -347,10 +346,10 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
             let context = EGLContext::new(&display)?;
             let mut copier = unsafe { GlesRenderer::new(context)? };
             // Which driver really draws there: Mesa falls back to software
-            // (llvmpipe) when the GPU's own GL driver is missing. On Hubble,
-            // Mesa 26 runs nouveau's GL through Zink, which needs NVK, and
-            // without it the "GPU copy" of the 14"'s frames was the CPU's
-            // (40 to 77 ms a 4K frame), 2026-11-14.
+            // (llvmpipe) when the GPU's own GL driver is missing. On an NVIDIA
+            // card Mesa 26 runs nouveau's GL through Zink, which needs NVK, and
+            // without it the "GPU copy" of a screen's frames was the CPU's
+            // (40 to 77 ms a 4K frame).
             let name = gl_renderer(&mut copier);
             if is_software(&name) {
                 tracing::warn!(
@@ -488,7 +487,7 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
     })?;
     // FreeBSD: libudev-devd passes input devices, not DRM hotplug, and every way of
     // asking DRM for connector state probes the monitors (EDID over DDC: 327 ms with
-    // the server blocked; polling every 2 s froze dragged windows, 2026-11-07). The
+    // the server blocked; polling every 2 s froze dragged windows). The
     // kernel tells devd, so a thread reads devd's pipe (as vergd does) and the
     // scan, with its probe, runs only when a monitor really came or went.
     #[cfg(target_os = "freebsd")]
@@ -514,7 +513,7 @@ pub fn run(event_loop: &mut EventLoop<Server>, state: &mut Server) -> Result<(),
 /// The connected monitors: an output each, at its EDID's scale, laid out left to right.
 /// At start-up every monitor at once; afterwards (hotplug) a new monitor is set up a
 /// second later from a fresh forced probe: FreeBSD's first look after a hotplug can
-/// see only the kernel's fallback modes (800x600; vergd, 2026-11-07).
+/// see only the kernel's fallback modes (800x600).
 fn scan(state: &mut Server, startup: bool) {
     let count = state.backend.as_ref().map_or(0, |b| b.devices.len());
     let anchors = state.window_anchors();
@@ -548,7 +547,7 @@ fn scan_gpu(state: &mut Server, gpu: usize, startup: bool) -> bool {
             DrmScanEvent::Connected { connector, crtc: Some(crtc) } => {
                 let handle = connector.handle();
                 // While the screens are off, a monitor in standby may come and go every
-                // few seconds (Techbench's ASUS: every 10 s, all night): debug only.
+                // few seconds (one did every 10 s, all night): debug only.
                 if state.energy.screens_off {
                     tracing::debug!(
                         "hotplug: {}-{} connected",
@@ -602,7 +601,7 @@ fn scan_gpu(state: &mut Server, gpu: usize, startup: bool) -> bool {
                 // New modes on a monitor that stayed connected (a late probe): set it up
                 // again, but only if the mode we would pick differs from the one running.
                 // (The scanner reports the ASUS as changed on every scan, mode list
-                // unchanged in substance; reconnecting each time blanked it, 2026-11-07.)
+                // unchanged in substance; reconnecting each time blanked it.)
                 let want = connector
                     .modes()
                     .iter()
@@ -861,7 +860,7 @@ fn connect(state: &mut Server, gpu: usize, conn: connector::Info, crtc: crtc::Ha
     // preference, or set by hand (displays.rs). In 120ths, as wp-fractional-scale-v1
     // tells it to apps: the output at exactly the scale the apps draw at, so their
     // buffers are shown 1:1, not resampled (the ASUS's 1.0703 drawn at 128/120 and
-    // shown at 1.0703 was soft, 2026-11-07).
+    // shown at 1.0703 was soft).
     let scales = crate::displays::load().scale_for(&id, &name, (w as u32, h as u32), mm);
     let (scale, how) = (scales.shown, scales.how.clone());
     let label = parsed.as_ref().and_then(|e| e.name.clone()).unwrap_or_else(|| name.clone());
@@ -1033,8 +1032,8 @@ fn lay_out(state: &mut Server) {
     let Some(b) = state.backend.as_ref() else { return };
     // Screens the arrangement has no place for go on the right in the order
     // they were connected: a screen plugged in joins at the right and moves
-    // nothing (Techbench, 2026-11-17: a fixed "HDMI-A-2 first" order from
-    // Hubble's first days put a new ASUS on the left and pushed the LG over).
+    // nothing (a fixed connector order put a newly plugged screen on the left
+    // and pushed the others over).
     // VERGENCE_LEFT_TO_RIGHT="DP-1,HDMI-A-1" still puts connectors first by hand.
     let order = std::env::var("VERGENCE_LEFT_TO_RIGHT").unwrap_or_default();
     let rank = |c: &str| order.split(',').position(|o| !o.trim().is_empty() && o.trim() == c).unwrap_or(usize::MAX);
@@ -1080,7 +1079,7 @@ fn render(state: &mut Server, crtc: Key) {
     // A frame that blocks for seconds was waiting on a GPU hang (the kernel resets
     // the engine after ~7 s). The reset leaves this GL context drawing nothing but
     // black (on screen) or white (offscreen) for good, while every call succeeds
-    // (Hubble, UHD 630, 2026-11-08), and Smithay's context is not robust, so it
+    // (seen on an Intel UHD 630), and Smithay's context is not robust, so it
     // cannot ask. Start over with a new context; textures are cached per context
     // and upload again.
     if ms > 2000 {
@@ -1548,7 +1547,7 @@ mod tests {
 }
 
 fn watchdog(event_loop: &mut EventLoop<Server>) -> Result<(), Box<dyn std::error::Error>> {
-    // THE WATCHDOG (2026-11-08: the whole desktop froze, pointer and all, with
+    // THE WATCHDOG (without it the whole desktop froze, pointer and all, with
     // the server idle and nothing logged): drawing is driven by VBlank events,
     // so a lost one, or a frame that ended without arranging the next, stops a
     // monitor for good. Any monitor not drawn for 2 s while the session is
@@ -1990,8 +1989,8 @@ pub fn screens_off(state: &mut Server) {
 pub fn screens_on(state: &mut Server) {
     // The other GPUs' connectors, probed again: with the screens off such a GPU
     // has nothing to do and sleeps, and a sleeping GPU sees no cable come or go
-    // (Hubble's NVIDIA card kept the 14" "connected" after Dave unplugged it
-    // with the screens off, 2026-11-14). A forced probe wakes it, which takes
+    // (an NVIDIA card kept a monitor "connected" after it was unplugged with
+    // the screens off). A forced probe wakes it, which takes
     // about half a second (the server stalled 0.45 s doing it here), so a thread
     // probes and the main loop scans once the card is awake.
     if let Some(b) = state.backend.as_ref() {

@@ -213,7 +213,7 @@ impl Viewer {
             }
         }
         if !done.is_empty() {
-            // No notice of it (Dave, 2026-11-18): it shows in the Trash, and Ctrl+Z puts it back.
+            // No notice of it: the user knows what they did, it shows in the Trash, and Ctrl+Z puts it back.
             self.shared.borrow_mut().undo.push(ops::Done::Trashed(done));
         }
         self.read_all();

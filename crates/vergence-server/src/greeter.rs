@@ -1,10 +1,10 @@
 //! The login screen (VDM milestone 1, step 4), drawn by the server itself in
 //! greeter mode, as the lock is (the password never leaves a `Secret`; the
 //! server starts no program: main.rs, review C3). It shows the machine's
-//! people (Dave: "1 a", a list with Other… to type a name; initials, no
-//! pictures: "3 yes"), the chosen person's PAM conversation with vdm over the
+//! people (a list with Other… to type a name; initials, no pictures; see
+//! docs/vdm-milestone-1.md), the chosen person's PAM conversation with vdm over the
 //! greeter socket (whatever the system's login stack asks), and the session
-//! to start (Dave: "5 b"; vergence-dm's sessions list, by index). Every key
+//! to start (vergence-dm's sessions list, by index). Every key
 //! and press is the login screen's: the seat is in its lock state for the
 //! whole time (Ctrl+Alt+Backspace and the rest do nothing). No paste.
 //!

@@ -1,9 +1,8 @@
-// The Battery page (Dave, 2026-11-14: "yes, add a battery page", after
-// "this thing eats the battery"): the charge, time left, the power drawn now
+// The Battery page, so a laptop's owner can see what drains it: the charge, time left, the power drawn now
 // with a chart of the last two minutes, which GPUs are awake, and in
 // Advanced the battery's health and make. From vergence-power (Linux's
 // /sys, FreeBSD's ACPI sysctls). Shown in the sidebar only where there is a
-// battery.
+// battery (see docs/settings-milestone-1.md).
 
 use std::collections::VecDeque;
 use std::time::Duration;

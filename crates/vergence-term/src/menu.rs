@@ -66,7 +66,7 @@ const LINES: [Option<Item>; 11] = [
 ];
 
 /// The same menu for the server to draw, as every window's right-click
-/// menu is (bus v20; 2026-11-18: one kind of menu everywhere): its lines,
+/// menu is (bus v20: one kind of menu everywhere): its lines,
 /// each with the id of the terminal's command that does the same (`id`).
 pub fn server_lines(can_copy: bool, id: impl Fn(Item) -> u32) -> Vec<vergence_ui::MenuLine> {
     LINES

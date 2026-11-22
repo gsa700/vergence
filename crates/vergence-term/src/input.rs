@@ -394,7 +394,7 @@ impl Terminal {
                     return self
                         .show_tab(if forward { (self.shown + 1) % n } else { (self.shown + n - 1) % n }, window);
                 }
-                // Ctrl+V pastes, with Shift or without (Dave, 2026-11-09). The control
+                // Ctrl+V pastes, with Shift or without (see docs/toolkit-milestone-1.md). The control
                 // character it used to send (the shell's "take the next key as it is") is
                 // given up for it.
                 if m.ctrl && !m.alt && letter('v') {

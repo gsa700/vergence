@@ -88,7 +88,7 @@ impl Auth {
                     out.extend_from_slice(b"REJECTED EXTERNAL\r\n");
                     self.state = State::WaitingAuth;
                 }
-                // File descriptors may be passed (2026-11-17: GLib sends one
+                // File descriptors may be passed (GLib sends one
                 // even when refused, then ends the connection, and with it
                 // Firefox, on its portal OpenDirectory).
                 (State::Authenticated, "NEGOTIATE_UNIX_FD") => {

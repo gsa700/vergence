@@ -22,7 +22,7 @@
 // OpenDirectory opens the folder it is in (a folder itself, if one was
 // passed). Before, the edge refused descriptors, GLib sent one anyway and
 // then ended its connection, which ended Firefox ("show in folder" from
-// its downloads panel, Hubble, 2026-11-17).
+// its downloads panel).
 //
 // Our apps are not sandboxed: the answer is the file's own file:// link; the
 // Documents portal (copies for sandboxed apps) is not provided.
@@ -31,8 +31,8 @@
 // own-file-dialog = true`, the server sets GTK_USE_PORTAL=1,
 // GDK_DEBUG=portals and QT_QPA_PLATFORMTHEME=xdgdesktopportal for every app
 // it starts (where not set already), so GTK and Qt apps ask the portal
-// (answer 6, Dave 2026-11-15: behind a switch, on once Firefox, a GTK and a
-// Qt app pass).
+// (behind a switch, on by default once Firefox, a GTK and a Qt app pass; see
+// docs/files-milestone-1.md).
 
 use std::collections::HashMap;
 use std::path::PathBuf;

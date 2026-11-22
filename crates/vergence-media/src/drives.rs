@@ -59,8 +59,8 @@ pub fn parse_mounts(text: &str) -> Vec<Mount> {
 pub fn mounts() -> Vec<Mount> {
     let text = fs::read_to_string("/proc/self/mounts").ok().or_else(|| {
         // FreeBSD: mount -p prints the table in fstab's form. By its full
-        // path: a session's PATH has no /sbin (found on techbench 2026-11-19:
-        // no drive ever showed on the desktop or in FileView), and a PATH
+        // path: a session's PATH may have no /sbin (and then no drive ever
+        // shows on the desktop or in FileView), and a PATH
         // is not a thing to trust for a system tool anyway.
         let mount = if Path::new("/sbin/mount").exists() { "/sbin/mount" } else { "mount" };
         std::process::Command::new(mount)
@@ -103,7 +103,8 @@ pub fn disks_of(table: &[Mount]) -> Vec<PathBuf> {
         // it is mounted or its device is there (by name, or by its label),
         // and not while it is a drive ejected and still plugged in (the
         // same device node as when it was ejected: FreeBSD does not power
-        // a stick off; Dave, 2026-11-21, an ejected stick stayed listed).
+        // a stick off, so an ejected stick would stay listed; see
+        // docs/files-milestone-3.md).
         let mounted: Vec<&Path> = table.iter().map(|m| m.at.as_path()).collect();
         let ejected = ejected_now();
         let on_images = labels_on_images(&label_providers());
@@ -113,8 +114,8 @@ pub fn disks_of(table: &[Mount]) -> Vec<PathBuf> {
             }
             let Some(name) = p.file_name() else { return false };
             match device_of(name) {
-                // A label on a disk image's own partitions (Dave, 2026-11-21: the
-                // Fedora ISO brought /media/ANACONDA and its volume as drives): the
+                // A label on a disk image's own partitions (a Fedora ISO brought
+                // /media/ANACONDA and its volume as drives): the
                 // image is listed by where it is mounted, not as a stick.
                 Some(node) if node.strip_prefix("/dev").is_ok_and(|l| on_images.iter().any(|i| Path::new(i) == l)) => {
                     false
@@ -147,7 +148,7 @@ fn label_providers() -> Vec<(String, String)> {
     if !cfg!(target_os = "freebsd") {
         return Vec::new();
     }
-    // By its full path: the session's PATH may not have /sbin (it did not on techbench).
+    // By its full path: the session's PATH may not have /sbin.
     let glabel = if Path::new("/sbin/glabel").exists() { "/sbin/glabel" } else { "glabel" };
     std::process::Command::new(glabel)
         .args(["status", "-s"])
@@ -255,8 +256,8 @@ pub fn note_ejected(path: &Path) {
 }
 
 /// Forgets the drives ejected whose device is gone (pulled out): plugged
-/// in again, a drive shows (Dave, 2026-11-21: the same stick plugged in
-/// again did not show; devfs gave its new node the old one's number).
+/// in again, a drive shows (devfs may give the new node the old one's
+/// number, which hid the same stick plugged in again).
 pub fn prune_ejected() {
     let all = ejected_now();
     let kept: Vec<(PathBuf, u64)> = all.iter().filter(|(n, _)| device_of(n.as_os_str()).is_some()).cloned().collect();
@@ -280,7 +281,7 @@ pub fn network_mounts() -> Vec<PathBuf> {
 /// Every drive now, as the server lists it (drives milestone 1): the disks
 /// where drives are mounted (and, on FreeBSD, the drives the automounter
 /// lists before they are mounted), then the network's mounts. A disk of the
-/// machine's own (Dave, 2026-11-21: shown, as Explorer does) cannot be
+/// machine's own (shown, as Explorer does; docs/drives-milestone-1.md) cannot be
 /// ejected; everything else can.
 pub fn scan() -> Vec<DriveInfo> {
     let table = mounts();
@@ -290,8 +291,8 @@ pub fn scan() -> Vec<DriveInfo> {
     for at in disks_of(&table) {
         let m = table.iter().find(|m| m.at == at);
         // A drive pulled out while mounted: FreeBSD keeps the mount of a
-        // device that is gone (Dave, 2026-11-21: the stick "came back after
-        // I pulled the drive"); not a drive (stale_mounts lets go of it).
+        // device that is gone, which made a pulled stick come back; not a
+        // drive (stale_mounts lets go of it).
         if m.is_some_and(gone) {
             continue;
         }

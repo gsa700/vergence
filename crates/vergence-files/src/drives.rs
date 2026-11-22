@@ -26,9 +26,8 @@ pub(crate) fn parse_df_free(text: &str) -> Option<u64> {
 }
 
 impl Viewer {
-    /// Mounts a disk image on a worker (files milestone 3, step 7; Dave,
-    /// 2026-11-21: "in downloads I have an iso, can i mount it in Fileview as
-    /// we do the USB drive?"); woken() opens it in a tab when it is mounted.
+    /// Mounts a disk image on a worker, as a USB drive is (see docs/files-milestone-3.md);
+    /// once mounted it shows under Locations, with no tab of its own (watch.rs).
     pub(crate) fn mount_image(&mut self, p: PathBuf) {
         if self.mounting.is_some() {
             return;

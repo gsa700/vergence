@@ -67,7 +67,7 @@ impl Terminal {
         let mut t = self.window_for(String::new(), Vec::new(), None, None);
         t.moved = vec![tab];
         t.ask = place;
-        // As large as the window it came from (Dave, 2026-11-12).
+        // As large as the window it came from (see docs/bar-milestone-1.md).
         t.ask_size =
             (self.width > 0.0 && self.height > 0.0).then(|| (self.width.round() as u32, self.height.round() as u32));
         window.open_window(Box::new(t));

@@ -105,8 +105,8 @@ pub struct Grid {
     saved: (usize, usize, Style),
     /// Character sets (VT100): G0 and G1, each ASCII or DEC Special Graphics
     /// (true), and whether G1 is the one in use (Shift Out). ncurses draws
-    /// boxes this way (mc, htop, dialog): ESC ( 0, then letters (2026-11-11:
-    /// mc on kepler drew "lqqqk" for a frame). Saved with the cursor.
+    /// boxes this way (mc, htop, dialog): ESC ( 0, then letters (without it,
+    /// mc draws "lqqqk" for a frame). Saved with the cursor.
     charsets: [bool; 2],
     shift_out: bool,
     saved_charsets: ([bool; 2], bool),
@@ -716,7 +716,7 @@ impl Grid {
     /// DECRC / CSI u: the saved cursor, kept on the screen. The screen may have
     /// shrunk since the save (an editor saves, the window is resized, it
     /// restores): an unclamped restore put the cursor past the last line and
-    /// the next character crashed the terminal (fuzz test, 2026-11-08).
+    /// the next character crashed the terminal (found by the fuzz test).
     fn restore_cursor(&mut self) {
         let (x, y, pen) = self.saved;
         self.cx = x.min(self.cols - 1);

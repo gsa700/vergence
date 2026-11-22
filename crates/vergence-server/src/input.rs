@@ -210,8 +210,8 @@ impl Server {
         // The idle clock (energy.rs). A key or button that only woke the screens
         // goes no further; pointer motion does, so the pointer is where the hand put it.
         // Only what a person does counts: a device coming or going is not input
-        // (2026-11-11, Hubble: the 14" monitor's USB touchscreen dropped off when the
-        // screens went off and came back ~14 s later, waking them every 10 min all night).
+        // (a monitor's USB touchscreen dropped off when the screens went off and came
+        // back ~14 s later, waking them every 10 min all night).
         let by_hand = !matches!(
             event,
             InputEvent::DeviceAdded { .. }
@@ -263,8 +263,8 @@ impl Server {
                 // On the real monitors, an absolute device (a drawing tablet, a touch
                 // panel left in mouse mode, a VM's mouse) covers one screen: the one
                 // desktop.toml ties it to, else the primary, as a touch panel does
-                // (touch.rs). It went through the nested mapping below until
-                // 2026-11-12 and landed nowhere useful (kepler's panel in mouse mode).
+                // (touch.rs). Through the nested mapping below it landed nowhere
+                // useful (a touch panel in mouse mode).
                 if self.backend.is_some() {
                     use smithay::backend::input::Device;
                     if let Some(screen) = self.touch_screen(&event.device().name()) {

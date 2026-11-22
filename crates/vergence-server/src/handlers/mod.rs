@@ -86,7 +86,7 @@ impl SelectionHandler for Server {
     }
 
     /// A Wayland client pastes what the server holds for someone: X11's or a
-    /// native client's clipboard (before 2026-11-11, X11's never reached it).
+    /// native client's clipboard.
     fn send_selection(
         &mut self,
         ty: smithay::wayland::selection::SelectionTarget,
