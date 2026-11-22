@@ -38,6 +38,33 @@ own machines have them:
   /etc/sv/nanoklogd /var/service/`). Checked on a fresh Void install
   (techbench, 2026-11-22): a cold `cargo build --release` takes about a
   minute on an i9-13900K.
+- **Void, the clock:** a fresh install's chrony uses the public pool and
+  never hears of the network's own time servers: Void's dhcpcd does not
+  ask for them (option 42) and ships no hook that tells chrony. Best: take
+  them from the router, with the stock pool as the fallback.
+  1. In `/etc/dhcpcd.conf`, uncomment `option ntp_servers`.
+  2. `/etc/dhcpcd.exit-hook` (root's, 0644) hands them to chrony:
+
+         case "$reason" in
+         BOUND|RENEW|REBIND|REBOOT|INFORM)
+             if [ -n "$new_ntp_servers" ]; then
+                 mkdir -p /run/chrony-dhcp
+                 for s in $new_ntp_servers; do echo "server $s iburst"; done > "/run/chrony-dhcp/$interface.sources"
+                 chronyc reload sources >/dev/null 2>&1
+             fi ;;
+         EXPIRE|FAIL|RELEASE|STOP|NOCARRIER)
+             rm -f "/run/chrony-dhcp/$interface.sources"
+             chronyc reload sources >/dev/null 2>&1 ;;
+         esac
+
+  3. In `/etc/chrony.conf`, above the stock `pool pool.ntp.org iburst`
+     line (kept: the fallback when the network names no server), add
+     `sourcedir /run/chrony-dhcp`.
+  4. `sv restart dhcpcd; sv restart chronyd`; `chronyc sources` then lists
+     the router's servers, one of them chosen (`^*`), the pool beside them.
+
+  Where the router hands out no time servers, the stock config (the pool)
+  is what runs, unchanged. Checked on techbench, 2026-11-22.
 
     cargo build --release
     cargo test --workspace
