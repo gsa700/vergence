@@ -234,10 +234,12 @@ impl App {
         let multi = self.outputs.len() > 1;
         let o = self.current_output();
         let title = o.map(screen_label).unwrap_or_else(|| "Screens".into());
+        // What the slider's marks are (Dave, 2026-11-22: no mention that the
+        // ticks are the evenly dividing scales, or which is recommended).
         let description = if multi {
-            "Its scale and where it sits, drawn at the screen's own pixels."
+            "Its scale and where it sits, drawn at the screen's own pixels. The marks on the slider are the sharp scales: tall at whole numbers and the recommended one, short where the screen's pixels divide evenly."
         } else {
-            "Its scale, drawn at the screen's own pixels."
+            "Its scale, drawn at the screen's own pixels. The marks on the slider are the sharp scales: tall at whole numbers and the recommended one, short where the screen's pixels divide evenly."
         };
         let mut items: Vec<Element<Message>> = Vec::new();
         if multi && let Page::Screen(i) = self.page {
@@ -248,13 +250,16 @@ impl App {
         if let Some(o) = o {
             let marks = scale_marks(o);
             let note = if (self.scale as f64 - o.default_scale).abs() < 1e-6 {
-                "The default: the sharpest for this screen."
+                format!("{:.0}%, recommended: the sharpest for this screen.", o.default_scale * 100.0)
             } else if self.scale.fract() == 0.0 {
-                "Whole number: sharp in every app."
+                format!("Whole number: sharp in every app. Recommended: {:.0}%.", o.default_scale * 100.0)
             } else if scale_detents(o).1.iter().any(|c| (c - self.scale as f64).abs() < 1e-4) {
-                "Whole pixels: sharp in apps that draw at any scale."
+                format!(
+                    "Divides the screen's pixels evenly: sharp in apps that draw at any scale. Recommended: {:.0}%.",
+                    o.default_scale * 100.0
+                )
             } else {
-                "In between: soft in some older apps."
+                format!("In between: soft in some older apps. Recommended: {:.0}%.", o.default_scale * 100.0)
             };
             let chosen = disp::screen(&self.desktop, &o.id).1.is_some();
             let mut shown_row = vec![label(format!("{:.0}%", o.scale * 100.0)).dim()];
@@ -266,7 +271,7 @@ impl App {
             let screen_controls: Vec<String> = SCREEN_CONTROLS_NAMES.iter().map(|s| s.to_string()).collect();
             let mode_rows = self.mode_rows(o);
             let mut rows = vec![
-                setting("Scale", note, scale_slider(self.scale, o, &marks)),
+                setting("Scale", &note, scale_slider(self.scale, o, &marks)),
                 setting(
                     "Shown at",
                     &format!(
