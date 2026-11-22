@@ -15,17 +15,23 @@
 //! - WAV and FLAC (Deadwax's decoder, written from RFC 9639): our own.
 //! - MP3, MPEG-1, 2 and 2.5 Layer III: minimp3 (CC0), gapless by the LAME
 //!   tag as FFmpeg does it.
-//! - ALAC (Apple's, Apache-2.0) and the MP4 container follow, one at a time.
+//! - ALAC in an MP4 (.m4a): Apple's own decoder (Copyright (c) 2011 Apple
+//!   Inc., Apache-2.0, licenses/alac-LICENSE.txt) by way of Hymie's Alac.cs;
+//!   the MP4 container, gapless by its edit list and iTunSMPB as FFmpeg does
+//!   it, and its iTunes tags (ilst atoms): our own.
 //! - AAC (FAAD2, GPL-2.0-or-later) lives in its own crate and helper program
-//!   (vergence-hymie-aac), so this one stays under Vergence's license.
+//!   (vergence-hymie-aac), so this one stays under Vergence's license. Until
+//!   then an AAC .m4a is refused by name, but its tags and cover are read.
 //!
 //! Files are parsed in a confined helper, never in an app's own process
 //! (whitepaper §6.10): this crate is that helper's library.
 
+mod alac;
 mod flac;
 pub mod helper;
 mod md5;
 mod mp3;
+mod mp4;
 mod mp3_tables;
 mod replaygain;
 mod tags;
@@ -110,6 +116,9 @@ pub enum Format {
     Flac,
     /// MPEG audio: Layer III is played, Layers I and II are refused by name.
     Mp3,
+    /// An MP4 (ftyp at byte 4, not a HEIF or AVIF picture): ALAC is played,
+    /// AAC refused by name for now, its tags read either way.
+    Mp4,
 }
 
 pub fn format_of(data: &[u8]) -> Option<Format> {
@@ -119,6 +128,9 @@ pub fn format_of(data: &[u8]) -> Option<Format> {
     let at = tags::id3_size(data);
     if data.len() >= at + 4 && &data[at..at + 4] == b"fLaC" {
         return Some(Format::Flac);
+    }
+    if mp4::sniff(data) {
+        return Some(Format::Mp4);
     }
     if mp3::sniff(data) {
         return Some(Format::Mp3);
@@ -132,6 +144,7 @@ pub fn open(data: Vec<u8>) -> Result<Box<dyn Track>, Error> {
         Some(Format::Wav) => Box::new(wav::WavTrack::new(data)?),
         Some(Format::Flac) => Box::new(flac::FlacTrack::new(data)?),
         Some(Format::Mp3) => Box::new(mp3::Mp3Track::new(data)?),
+        Some(Format::Mp4) => Box::new(mp4::Mp4Track::new(data)?),
         None => return Err(Error::Unsupported("Not a sound file Hymie plays.".into())),
     };
     if !(1..=MAX_RATE).contains(&track.rate()) || !(1..=MAX_CHANNELS).contains(&track.channels()) {
@@ -146,6 +159,7 @@ pub fn tags(data: &[u8]) -> Tags {
         Some(Format::Flac) => flac::tags(data),
         Some(Format::Wav) => wav::tags(data),
         Some(Format::Mp3) => mp3::tags(data),
+        Some(Format::Mp4) => mp4::tags(data),
         None => Tags::default(),
     }
 }

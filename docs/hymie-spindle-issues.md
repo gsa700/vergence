@@ -49,8 +49,27 @@ Each is fixed (or guarded) in the Rust port already; none is fixed in Spindle.
    checked. Harmless in practice (a file with a frame is longer); Rust
    guards it.
 
-## Already known (Marginal's security review, 2026-10-31)
+## MP4 and ALAC (found by reading while porting; fixed in the Rust port)
 
-- A1: deeply nested .m4a boxes overflow the stack in `Mp4Track.Walk` (and
-  TagLib# 2.3.0). To be fixed in the Rust port's MP4 reader with a nesting
-  limit.
+1. **Marginal's A1 is only half fixed.** Mp4Track.cs `Walk` has `MaxDepth
+   = 16`, but `AlacCookie()` and `Esds()` follow `wave` boxes nested in
+   `wave` with no limit: a crafted stsd entry still overflows the stack.
+   (TagLib# 2.3.0, which Marginal and AlbumWall use for tags, had it too.)
+2. **`SampleTable()`, an stsc first chunk of 0**: `c = -1`, `chunks[c]`
+   throws IndexOutOfRange.
+3. **`SampleTable()`, runs of zero samples per chunk** still walk every
+   chunk: quadratic time on a crafted file.
+4. **stsz sizes read as `(int)Be32`**: a size of 2^31 or more is negative,
+   passes `DecodeNext`'s `at + size > _data.Length` check, then `AsSpan`
+   throws ArgumentOutOfRangeException, which the `catch (IOException)`
+   there does not catch.
+5. **Fixed-offset reads** in mvhd, mdhd, hdlr and the freeform/esds readers
+   are not checked against the array: a short box at the end of a file
+   throws IndexOutOfRange.
+6. **Alac.cs `DecodeFrame` reuses `_frame`**, which only grows: a damaged
+   frame that reads past its own length and padding reads an earlier,
+   larger frame's leftover bytes instead of failing, so whether damage is
+   caught depends on what played before.
+
+The Rust reader (mp4.rs) limits nesting to 16 everywhere and boxes to
+100,000 in all, and refuses past either (the C# ignored deep boxes).

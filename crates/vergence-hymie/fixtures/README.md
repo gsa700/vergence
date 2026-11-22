@@ -32,3 +32,30 @@ and padding), from which the tests check gapless length and placement:
 FFmpeg 9.0.2 (techbench) decodes all three to the same length, and
 `HYMIE_MP3_REFERENCE=<folder of ffmpeg -f f32le decodes> cargo test` compares
 them sample by sample (about 2e-7 RMS apart, 2026-11-21).
+
+MP4s (.m4a), encoded by FFmpeg 9.0.2 on techbench, 2026-11-21 (muxer
+Lavf63.1.102: an edit list starting at 0 for ALAC, at 1024 for AAC; the
+moov after the frames):
+
+- alac16.m4a: ALAC from tone16.flac (16-bit stereo, 44.1 kHz, 66,150
+  samples), its title changed to "ALAC Tone", artist and album and the PNG
+  cover carried over (covr, data type 14). Four freeform (----) atoms were
+  then added to its ilst by a Python script, named in lower case as
+  foobar2000 writes them: replaygain_track_gain "-7.50 dB",
+  replaygain_track_peak "0.800000", replaygain_album_gain "-8.25 dB",
+  replaygain_album_peak "0.900000".
+- alac24.m4a: ALAC from tone24.flac (24-bit mono, 48 kHz, 48,000 samples;
+  `-sample_fmt s32p`), title "ALAC 24". Its frames shift off one byte.
+- noise16.m4a: ALAC from a WAV of 11,025 stereo 16-bit frames at 44.1 kHz,
+  each sample the top 16 bits of the generator x = x * 1103515245 + 12345
+  (from x = 1; left, then right), which the tests make again. Full-scale
+  noise, so ALAC stores its frames uncompressed (escaped); the last frame is
+  short. Title "Noise".
+- aac.m4a: AAC-LC, 64 kbps, 0.5 s of FFmpeg's 440 Hz sine, mono, 44.1 kHz;
+  title "AAC Tone", artist "Vergence", album "Hymie Fixtures", a 32x32 red
+  JPEG cover (covr, data type 13). Not played here (AAC comes with its own
+  helper): its tags and cover are read.
+
+FFmpeg decodes the three ALAC files to exactly the samples they were made
+from, and so do the tests (against tone16.flac and tone24.flac, whose own
+decode matches their MD5).

@@ -390,3 +390,234 @@ fn mp3_matches_ffmpeg_when_given_its_decode() {
         assert!(rms < 1e-4, "{name}: RMS difference {rms}");
     }
 }
+
+// ------------------------------------------------------------ ALAC in MP4
+
+const ALAC16: &[u8] = include_bytes!("../fixtures/alac16.m4a");
+const ALAC24: &[u8] = include_bytes!("../fixtures/alac24.m4a");
+const NOISE16: &[u8] = include_bytes!("../fixtures/noise16.m4a");
+const AAC: &[u8] = include_bytes!("../fixtures/aac.m4a");
+
+/// noise16.m4a's source (fixtures/README.md): 11,025 stereo frames, each
+/// sample the top 16 bits of a linear congruential generator.
+fn noise16_source() -> Vec<f32> {
+    let mut x: u32 = 1;
+    (0..11_025 * 2)
+        .map(|_| {
+            x = x.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            (x >> 16) as u16 as i16 as f32 / 32768.0
+        })
+        .collect()
+}
+
+#[test]
+fn alac_is_lossless_and_as_long_as_what_was_encoded() {
+    // Encoded by FFmpeg from tone16.flac and tone24.flac, whose own decode
+    // matches the MD5 they keep: the same samples, to the bit, at both depths.
+    for (name, m4a, flac, rate, ch, bits, frames) in [("alac16", ALAC16, TONE16, 44_100, 2, 16, 66_150u64), ("alac24", ALAC24, TONE24, 48_000, 1, 24, 48_000)] {
+        assert_eq!(format_of(m4a), Some(Format::Mp4), "{name}");
+        let mut t = open(m4a.to_vec()).unwrap();
+        assert_eq!((t.rate(), t.channels(), t.bits(), t.frames()), (rate, ch, bits, frames), "{name}");
+        let ours = all(t.as_mut(), 1000);
+        let theirs = all(open(flac.to_vec()).unwrap().as_mut(), 4096);
+        assert_eq!(ours.len() as u64, frames * ch as u64, "{name}");
+        assert!(ours == theirs, "{name}: not the FLAC's samples");
+    }
+    // Full-scale noise, which ALAC stores uncompressed (escaped), and a
+    // last frame shorter than the rest (11,025 is not a multiple of 4096).
+    let mut t = open(NOISE16.to_vec()).unwrap();
+    assert_eq!((t.rate(), t.channels(), t.bits(), t.frames()), (44_100, 2, 16, 11_025));
+    assert!(all(t.as_mut(), 777) == noise16_source(), "noise16: not its source");
+}
+
+#[test]
+fn alac_seeks_to_the_exact_sample() {
+    for (name, data) in [("alac16", ALAC16), ("alac24", ALAC24), ("noise16", NOISE16)] {
+        let mut t = open(data.to_vec()).unwrap();
+        let (ch, frames) = (t.channels() as usize, t.frames());
+        let whole = all(t.as_mut(), 999);
+        for to in [0u64, 1, 4095, 4096, 4097, 8191, 10_000, frames / 2 + 3, frames - 1] {
+            t.seek(to).unwrap();
+            let mut buf = vec![0f32; ch * 5000];
+            let n = t.read(&mut buf).unwrap();
+            assert_eq!(n as u64, 5000.min(frames - to), "{name}: seek to {to}");
+            assert!(buf[..n * ch] == whole[to as usize * ch..(to as usize + n) * ch], "{name}: seek to {to}");
+        }
+        t.seek(frames).unwrap();
+        assert_eq!(t.read(&mut [0f32; 64]).unwrap(), 0, "{name}: the end");
+        t.seek(u64::MAX).unwrap();
+        assert_eq!(t.read(&mut [0f32; 64]).unwrap(), 0, "{name}: past the end");
+    }
+}
+
+#[test]
+fn mp4_tags_cover_and_replaygain() {
+    let tags = tags(ALAC16);
+    assert_eq!(tags.title.as_deref(), Some("ALAC Tone"));
+    assert_eq!(tags.artist.as_deref(), Some("Vergence"));
+    assert_eq!(tags.album.as_deref(), Some("Hymie Fixtures"));
+    let pic = tags.picture.expect("the cover");
+    assert_eq!(pic.mime, "image/png");
+    assert_eq!(Some(pic), super::tags(TONE16).picture, "the FLAC's cover, carried over");
+    // Freeform atoms named in lower case, as foobar2000 writes them.
+    assert_eq!(tags.values.get("REPLAYGAIN_TRACK_GAIN").map(String::as_str), Some("-7.50 dB"));
+    let g = open(ALAC16.to_vec()).unwrap().gain();
+    assert!(g.present, "{g:?}");
+    assert!((g.track_gain + 7.5).abs() < 1e-6 && (g.track_peak - 0.8).abs() < 1e-6, "{g:?}");
+    assert!((g.album_gain + 8.25).abs() < 1e-6 && (g.album_peak - 0.9).abs() < 1e-6, "{g:?}");
+    assert!(!open(ALAC24.to_vec()).unwrap().gain().present);
+    assert_eq!(super::tags(ALAC24).title.as_deref(), Some("ALAC 24"));
+}
+
+#[test]
+fn aac_is_refused_for_now_but_its_tags_are_read() {
+    assert_eq!(format_of(AAC), Some(Format::Mp4));
+    match open(AAC.to_vec()) {
+        Err(Error::Unsupported(m)) => assert!(m.contains("AAC") && m.contains("not played yet"), "{m}"),
+        Err(e) => panic!("{e:?}"),
+        Ok(_) => panic!("AAC opened"),
+    }
+    let tags = tags(AAC);
+    assert_eq!(tags.title.as_deref(), Some("AAC Tone"));
+    assert_eq!(tags.artist.as_deref(), Some("Vergence"));
+    assert_eq!(tags.album.as_deref(), Some("Hymie Fixtures"));
+    let pic = tags.picture.expect("the cover");
+    assert_eq!(pic.mime, "image/jpeg");
+    assert!(pic.data.starts_with(&[0xFF, 0xD8, 0xFF]));
+    // A HEIF picture is not taken for sound.
+    assert_eq!(format_of(b"\0\0\0\x18ftypheic\0\0\0\0"), None);
+}
+
+/// An MP4 box: its size, type and body.
+fn mp4_box(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+    let mut b = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+    b.extend_from_slice(kind);
+    b.extend_from_slice(body);
+    b
+}
+
+/// `kind` boxes nested `depth` deep, the innermost empty.
+fn nested(kind: &[u8; 4], depth: usize) -> Vec<u8> {
+    // Built from the inside out with the sizes worked out first: 8 bytes a level.
+    let mut b = Vec::with_capacity(depth * 8);
+    for level in 0..depth {
+        b.extend_from_slice(&(((depth - level) * 8) as u32).to_be_bytes());
+        b.extend_from_slice(kind);
+    }
+    b
+}
+
+#[test]
+fn deep_and_endless_boxes_are_an_error_not_a_crash() {
+    let ftyp = mp4_box(b"ftyp", b"M4A \0\0\0\0M4A isom");
+    // 100,000 udta boxes one inside the next (Marginal's review, A1: 3,000
+    // overflowed the C#'s stack).
+    let file = [ftyp.clone(), mp4_box(b"moov", &nested(b"udta", 100_000))].concat();
+    assert!(matches!(open(file.clone()), Err(Error::Damaged(_))));
+    assert_eq!(tags(&file), Tags::default());
+    // 'wave' boxes nested inside an ALAC sample description, which the C#
+    // followed without any limit.
+    let mut entry = vec![0u8; 28];
+    entry.extend_from_slice(&nested(b"wave", 100_000));
+    let mut stsd = vec![0, 0, 0, 0, 0, 0, 0, 1];
+    stsd.extend_from_slice(&mp4_box(b"alac", &entry));
+    let trak = mp4_box(b"trak", &mp4_box(b"mdia", &mp4_box(b"minf", &mp4_box(b"stbl", &mp4_box(b"stsd", &stsd)))));
+    let file = [ftyp.clone(), mp4_box(b"moov", &trak)].concat();
+    assert!(matches!(open(file), Err(Error::Damaged(_))));
+    // A flat moov of 200,000 empty boxes: too many to look at.
+    let file = [ftyp.clone(), mp4_box(b"moov", &b"\0\0\0\x08free".repeat(200_000))].concat();
+    assert!(matches!(open(file), Err(Error::Damaged(_))));
+    // No moov at all, and a moov with no track.
+    assert!(matches!(open(ftyp.clone()), Err(Error::Damaged(_))));
+    assert!(matches!(open([ftyp, mp4_box(b"moov", &[])].concat()), Err(Error::Unsupported(_))));
+}
+
+#[test]
+fn damaged_mp4s_are_not_a_panic() {
+    for data in [ALAC16, ALAC24, NOISE16, AAC] {
+        for cut in (0..data.len()).step_by(331) {
+            let _ = tags(&data[..cut]);
+            if let Ok(mut t) = open(data[..cut].to_vec()) {
+                let _ = all_lossy(t.as_mut());
+            }
+        }
+    }
+    // Every byte of the moov boxes flipped in turn (the sample tables, the
+    // cookie, the tags), and the frames' bytes every so often.
+    for data in [ALAC24, AAC] {
+        let moov = data.windows(4).position(|w| w == b"moov").unwrap() - 4;
+        for at in (moov..data.len()).chain((0..moov).step_by(89)) {
+            let mut d = data.to_vec();
+            d[at] ^= 0xa5;
+            let _ = tags(&d);
+            if let Ok(mut t) = open(d) {
+                let _ = all_lossy(t.as_mut());
+                let _ = t.seek(20_000);
+                let _ = all_lossy(t.as_mut());
+            }
+        }
+    }
+    // Handfuls of random bytes in the frames.
+    let mut x: u32 = 7;
+    let mut rand = || {
+        x = x.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+        x >> 8
+    };
+    for data in [ALAC16, NOISE16] {
+        let mdat = data.windows(4).position(|w| w == b"mdat").unwrap() + 4;
+        let moov = data.windows(4).position(|w| w == b"moov").unwrap() - 4;
+        for _ in 0..100 {
+            let mut d = data.to_vec();
+            for _ in 0..16 {
+                let at = mdat + rand() as usize % (moov - mdat);
+                d[at] = rand() as u8;
+            }
+            let mut t = open(d).unwrap();
+            let _ = all_lossy(t.as_mut());
+            let _ = t.seek(rand() as u64 % 70_000);
+            let _ = all_lossy(t.as_mut());
+        }
+    }
+}
+
+/// alac16.m4a with a freeform atom (mean, name, data) added at the end of its
+/// ilst, every box around it grown to hold it (its moov is after the frames,
+/// so no chunk offset moves).
+fn with_freeform(name: &str, value: &str) -> Vec<u8> {
+    let full = |kind: &[u8; 4], body: &[u8]| mp4_box(kind, &[&[0u8, 0, 0, if kind == b"data" { 1 } else { 0 }][..], body].concat());
+    let atom = mp4_box(b"----", &[full(b"mean", b"com.apple.iTunes"), full(b"name", name.as_bytes()), full(b"data", &[&[0u8; 4][..], value.as_bytes()].concat())].concat());
+    let mut d = ALAC16.to_vec();
+    let size = |d: &[u8], at: usize| u32::from_be_bytes(d[at..at + 4].try_into().unwrap()) as usize;
+    let find = |d: &[u8], kind: &[u8], from: usize| from + d[from..].windows(4).position(|w| w == kind).unwrap() - 4;
+    let moov = find(&d, b"moov", 0);
+    let chain = [moov, find(&d, b"udta", moov), find(&d, b"meta", moov), find(&d, b"ilst", moov)];
+    let end = chain[3] + size(&d, chain[3]);
+    d.splice(end..end, atom.iter().copied());
+    for at in chain {
+        let grown = (size(&d, at) + atom.len()) as u32;
+        d[at..at + 4].copy_from_slice(&grown.to_be_bytes());
+    }
+    d
+}
+
+#[test]
+fn mp4_is_gapless_by_itunsmpb_as_ffmpeg_does_it() {
+    // Priming 256 dropped, padding 512 cut off the end, the length (65,382)
+    // less than the track's: the music is the FLAC's samples 256 to 65,638.
+    let d = with_freeform("iTunSMPB", " 00000000 00000100 00000200 000000000000FF66 00000000 00000000");
+    let t = mp4::Mp4Track::new(d.clone()).unwrap();
+    assert_eq!((t.skip, t.end), (256, 65_638));
+    let mut t = open(d).unwrap();
+    assert_eq!(t.frames(), 65_382);
+    let ours = all(t.as_mut(), 1000);
+    let flac = all(open(TONE16.to_vec()).unwrap().as_mut(), 4096);
+    assert!(ours == flac[256 * 2..65_638 * 2], "the music in place");
+    t.seek(1000).unwrap();
+    let mut buf = [0f32; 2];
+    t.read(&mut buf).unwrap();
+    assert_eq!(buf, [flac[1256 * 2], flac[1256 * 2 + 1]], "a seek counts from the music's start");
+    // Padding that would not leave the length it claims is not believed
+    // (FFmpeg: the duration must exceed the samples it says); the priming is.
+    let d = with_freeform("iTunSMPB", " 00000000 00000100 00000200 0000000000010266");
+    assert_eq!(open(d).unwrap().frames(), 66_150 - 256);
+}

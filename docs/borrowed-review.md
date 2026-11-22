@@ -35,6 +35,20 @@ our own words, so the attribution can go and the files read as one design.
 Natural moment: native milestone 1 steps 3 to 5, which touch `state.rs`,
 `input.rs`, the grabs and `xdg_shell.rs` anyway.
 
+### Hymie's decoders: minimp3 (CC0) and Apple's ALAC (Apache-2.0), by way of C#
+
+Where: `crates/vergence-hymie/src/mp3.rs` and `mp3_tables.rs` (minimp3,
+lieff, at ea99364, dedicated to the public domain), `src/alac.rs` (Apple's
+ALAC decoder at c38887c, Copyright (c) 2011 Apple Inc., Apache-2.0; its
+license in `crates/vergence-hymie/licenses/alac-LICENSE.txt`). Both came
+through Hymie, AlbumWall's engine (Spindle, C#), which ported them line
+for line in 2026-10; preview milestone 1 (2026-11-21, Dave: "let's use
+Hymie!") carried them to safe Rust, names kept for cross-reference. FLAC,
+WAV, the MP4 reader, the tags and ReplayGain are our own (Deadwax's and
+Hymie's). Review: none needed for license (CC0, Apache-2.0); a later
+rewrite only if the decoders become hard to keep. AAC (FAAD2, GPL-2.0+)
+will live apart, in its own crate and helper program.
+
 ### SCOWL word lists (permissive, MIT-like), as data
 
 Where: `data/words/en_US.txt` (123,679 words, about 1.2 MB), made by

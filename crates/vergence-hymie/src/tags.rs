@@ -4,7 +4,8 @@
 //! libavformat/id3v2.c: versions 2.2 to 2.4, one tag after another,
 //! unsynchronisation undone, compressed and encrypted frames left alone),
 //! with the text and picture frames added; Vorbis comments as RFC 9639 §8.6;
-//! FLAC's PICTURE block as §8.8.
+//! FLAC's PICTURE block as §8.8. MP4's ilst atoms are read in mp4.rs, into
+//! the same Tags.
 
 use std::collections::HashMap;
 
@@ -34,7 +35,7 @@ pub struct Tags {
 const PICTURE_MAX: usize = 16 << 20;
 
 impl Tags {
-    fn put_text(&mut self, which: &str, value: String) {
+    pub(crate) fn put_text(&mut self, which: &str, value: String) {
         let value = value.trim().to_string();
         if value.is_empty() {
             return;
@@ -50,7 +51,7 @@ impl Tags {
         }
     }
 
-    fn put_value(&mut self, key: &str, value: String) {
+    pub(crate) fn put_value(&mut self, key: &str, value: String) {
         let key = key.to_ascii_uppercase();
         if key.is_empty() {
             return;
