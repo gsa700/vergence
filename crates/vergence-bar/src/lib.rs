@@ -269,6 +269,15 @@ pub enum Part {
 pub enum ToolIcon {
     Back,
     Forward,
+    /// Its name as text ([`Look::tool_names`]), at the bar's far end
+    /// (preview milestone 1: "Open with Reader").
+    Label,
+}
+
+/// The width of a text button showing `name` (a measure from its letters,
+/// so the layout needs no fonts; the text is drawn centered in it).
+pub fn label_width(name: &str) -> f32 {
+    (name.chars().count() as f32 * FONT_SIZE * 0.56 + 24.0).clamp(48.0, 320.0)
 }
 
 fn inside(r: &Rect, x: f32, y: f32) -> bool {
@@ -353,21 +362,31 @@ impl Layout {
     /// say) and the title after them, both starting `from` points in (the
     /// width of a sidebar the content has on the left), or after the window's
     /// buttons if they reach further.
-    pub fn tools_sized(width: f32, left: &[WinButton], right: &[WinButton], z: Sizes, from: f32, count: usize) -> Layout {
-        // Centered, as in a plain bar.
+    pub fn tools_sized(width: f32, left: &[WinButton], right: &[WinButton], z: Sizes, from: f32, tools: &[Option<f32>]) -> Layout {
+        // Centered, as in a plain bar. Icon buttons from `from` on, after
+        // the window's buttons on the left; text buttons (their widths given)
+        // at the far end, before the window's buttons on the right.
         let top = ((z.bar_h - z.item_h) / 2.0).round();
-        let (buttons, start, end) = Layout::buttons(width, left, right, &z, top);
-        let mut x = start.max(from + z.side);
-        let mut tools = Vec::new();
-        for _ in 0..count {
-            if x + z.button_w > end {
-                break;
+        let (buttons, start, mut end) = Layout::buttons(width, left, right, &z, top);
+        let mut rects = vec![Rect::new(0.0, top, 0.0, z.item_h); tools.len()];
+        for (i, t) in tools.iter().enumerate().rev() {
+            if let Some(w) = *t
+                && end - w > start
+            {
+                end -= w;
+                rects[i] = Rect::new(end, top, w, z.item_h);
+                end -= z.gap;
             }
-            tools.push(Rect::new(x, top, z.button_w, z.item_h));
-            x += z.button_w + z.gap;
+        }
+        let mut x = start.max(from + z.side);
+        for (i, t) in tools.iter().enumerate() {
+            if t.is_none() && x + z.button_w <= end {
+                rects[i] = Rect::new(x, top, z.button_w, z.item_h);
+                x += z.button_w + z.gap;
+            }
         }
         let title = Rect::new(x + 6.0, top, (end - x - 12.0).max(0.0), z.item_h);
-        Layout { buttons, tabs: Vec::new(), closes: Vec::new(), plus: Rect::new(end, top, 0.0, z.item_h), title: Some(title), tools, controls_left: !left.is_empty(), sizes: z }
+        Layout { buttons, tabs: Vec::new(), closes: Vec::new(), plus: Rect::new(end, top, 0.0, z.item_h), title: Some(title), tools: rects, controls_left: !left.is_empty(), sizes: z }
     }
 
     /// The window's buttons on their sides, and where the room between them
@@ -421,6 +440,7 @@ fn tool_icon(scene: &mut Scene, r: &Rect, what: ToolIcon, size: f32, ink: Color)
     let s = match what {
         ToolIcon::Back => 1.0,
         ToolIcon::Forward => -1.0,
+        ToolIcon::Label => return,
     };
     let w = h * 0.6;
     scene.line(Point::new(cx + s * w, cy - h), Point::new(cx - s * w, cy), 1.5, ink);
@@ -503,6 +523,8 @@ pub struct Look<'a> {
     /// The program's own buttons' icons and whether each can be pressed
     /// ([`Layout::tools`] gives where).
     pub tools: &'a [(ToolIcon, bool)],
+    /// The program's own buttons' names: a [`ToolIcon::Label`] shows its own.
+    pub tool_names: &'a [String],
     /// The app's icon for the app button (the one the dock shows), drawn
     /// for this scale; None: a plain square in its place.
     pub app_icon: Option<std::sync::Arc<vergence_scene::Image>>,
@@ -628,6 +650,25 @@ pub fn draw(scene: &mut Scene, fonts: &mut Fonts, layout: &Layout, look: &Look) 
             scene.fill_rounded(drawn, RADIUS, shape_hover);
         }
         let mark = if enabled { ink } else { Color::rgba(ink.r, ink.g, ink.b, FAINT) };
+        if what == ToolIcon::Label {
+            // A text button: shaded at rest while the window has the keyboard, its name centered.
+            if r.w <= 0.0 {
+                continue;
+            }
+            let drawn = Rect::new(r.x + vergence_look::BUTTON_INSET_X, r.y + vergence_look::BUTTON_INSET_Y, r.w - 2.0 * vergence_look::BUTTON_INSET_X, r.h - 2.0 * vergence_look::BUTTON_INSET_Y);
+            if look.focused && !(enabled && look.hover == Some(Part::Tool(i))) {
+                scene.fill_rounded(drawn, RADIUS, shape_rest);
+            }
+            if let (Some(face), Some(name)) = (look.font, look.tool_names.get(i)) {
+                let w = fonts.layout(face, look.font_size, name).1;
+                let m = fonts.metrics(face, look.font_size);
+                let baseline = r.y + ((r.h - (m.ascent + m.descent)) / 2.0 + m.ascent).round() - 1.0;
+                scene.push_clip(drawn, 0.0);
+                text(scene, fonts, face, look.font_size, mark, Point::new((r.x + (r.w - w) / 2.0).max(drawn.x + 4.0), baseline), name);
+                scene.pop_clip();
+            }
+            continue;
+        }
         tool_icon(scene, r, what, 12.0, mark);
     }
     if let (Some(room), Some(face)) = (&layout.title, look.font)
@@ -811,6 +852,25 @@ mod tests {
 
     const LEFT: [WinButton; 2] = [WinButton::Close, WinButton::Minimize];
 
+    /// Icon buttons start after the window's buttons on the left; a text
+    /// button stands at the far end, before those on the right, and the
+    /// title has the room between; a bar too narrow leaves the text button out.
+    #[test]
+    fn a_text_button_stands_at_the_far_end() {
+        let w = label_width("Open with Reader");
+        let l = Layout::tools_sized(800.0, &[WinButton::Close], &[], STANDARD, 0.0, &[None, Some(w)]);
+        assert!(l.tools[0].x >= l.buttons[0].1.x + l.buttons[0].1.w, "the icon after Close");
+        assert_eq!(l.tools[1].x + l.tools[1].w, 800.0 - STANDARD.side, "the text button at the right edge");
+        let title = l.title.unwrap();
+        assert!(title.x + title.w <= l.tools[1].x, "the title before it");
+        assert_eq!(l.at(l.tools[1].x + 5.0, l.tools[1].y + 5.0), Some(Part::Tool(1)));
+        let right = Layout::tools_sized(800.0, &[], &[WinButton::Close], STANDARD, 0.0, &[Some(w)]);
+        let close = right.buttons[0].1;
+        assert!(right.tools[0].x + right.tools[0].w <= close.x, "before Close on the right");
+        let narrow = Layout::tools_sized(120.0, &[WinButton::Close], &[], STANDARD, 0.0, &[Some(w)]);
+        assert_eq!(narrow.tools[0].w, 0.0, "no room: left out");
+    }
+
     /// The insertion line: between two tabs' edges, before the first, after
     /// the last; a landing at its own place shows none.
     #[test]
@@ -934,7 +994,7 @@ mod tests {
         for focused in [true, false] {
             for root in [true, false] {
                 let layout = Layout::plain(640.0, &[], &[WinButton::Close]);
-                let look = Look { bar: l, frosted: false, focused, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font: None, font_size: FONT_SIZE, titles: &[], alerts: &[], edited: &[], title: "sudo", shown: 0, hover: None, dragged: None, tools: &[], app_icon: None, menu_open: false, root };
+                let look = Look { bar: l, frosted: false, focused, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font: None, font_size: FONT_SIZE, titles: &[], alerts: &[], edited: &[], title: "sudo", shown: 0, hover: None, dragged: None, tools: &[], tool_names: &[], app_icon: None, menu_open: false, root };
                 let mut scene = Scene::new(640.0, 60.0);
                 draw(&mut scene, &mut fonts, &layout, &look);
                 let want = match (root, focused) {

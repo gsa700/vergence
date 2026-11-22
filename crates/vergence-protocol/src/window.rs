@@ -121,6 +121,9 @@ pub struct BarButton {
 pub enum BarIcon {
     Back,
     Forward,
+    /// The button shows its name as text, at the bar's far end, before the
+    /// window's buttons (preview milestone 1: a preview's "Open with Reader").
+    Label,
 }
 
 /// The most buttons a bar may carry of its program's own.
@@ -853,6 +856,7 @@ fn put_bar(e: &mut Encoder, bar: &Bar) {
                 e.u32(b.id).u8(match b.icon {
                     BarIcon::Back => 0,
                     BarIcon::Forward => 1,
+                    BarIcon::Label => 2,
                 })
                 .str(&b.name)
                 .bool(b.enabled);
@@ -914,6 +918,7 @@ fn get_bar(d: &mut Decoder) -> Result<Bar, WireError> {
                 let icon = match d.u8()? {
                     0 => BarIcon::Back,
                     1 => BarIcon::Forward,
+                    2 => BarIcon::Label,
                     _ => return Err(WireError::BadValue("bar button icon")),
                 };
                 let (name, enabled) = (title(d)?, d.bool()?);
@@ -1735,6 +1740,7 @@ mod tests {
                     buttons: vec![
                         BarButton { id: 1, icon: BarIcon::Back, name: "Back".into(), enabled: false },
                         BarButton { id: 2, icon: BarIcon::Forward, name: "Forward".into(), enabled: true },
+                        BarButton { id: 3, icon: BarIcon::Label, name: "Open with Reader".into(), enabled: true },
                     ],
                     from: 220.0,
                 },

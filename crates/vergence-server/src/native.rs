@@ -777,6 +777,14 @@ impl Server {
                 let screen = self.space.outputs().filter_map(|o| self.space.output_geometry(o)).find(|g| g.contains(loc)).or_else(|| self.output_at_pointer());
                 let mut size = self.within_limits(&w, Size::from((width.round() as i32, height.round() as i32)));
                 let mut at = loc;
+                // A dialog keeps its center (preview milestone 1: a preview shaped
+                // for each file it shows stays where it was over its window).
+                if self.window_style(&w).kind == crate::style::Kind::Dialog
+                    && let Some(g) = self.space.element_geometry(&w)
+                {
+                    at.x += (g.size.w - size.w) / 2;
+                    at.y += (g.size.h - size.h) / 2;
+                }
                 if let Some(area) = screen.map(|s| self.work_area(s)) {
                     let bar = self.bar_h(&w);
                     size.w = size.w.min(area.size.w);

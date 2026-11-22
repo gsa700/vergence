@@ -187,12 +187,12 @@ struct Frame {
 }
 
 impl Frame {
-    fn of(content: Rectangle<i32, Logical>, buttons: &(Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>), tabs: Option<Tabs>, tools: Option<(f32, usize)>, z: vergence_bar::Sizes) -> Frame {
+    fn of(content: Rectangle<i32, Logical>, buttons: &(Vec<vergence_bar::WinButton>, Vec<vergence_bar::WinButton>), tabs: Option<Tabs>, tools: Option<(f32, Vec<Option<f32>>)>, z: vergence_bar::Sizes) -> Frame {
         let h = z.bar_h as i32;
         let title = Rectangle::new((content.loc.x, content.loc.y - h).into(), (content.size.w, h).into());
         let layout = match (&tabs, tools) {
             (Some(t), _) => vergence_bar::Layout::sized(content.size.w as f32, t.titles.len(), t.shown, &buttons.0, &buttons.1, z),
-            (None, Some((from, n))) => vergence_bar::Layout::tools_sized(content.size.w as f32, &buttons.0, &buttons.1, z, from, n),
+            (None, Some((from, widths))) => vergence_bar::Layout::tools_sized(content.size.w as f32, &buttons.0, &buttons.1, z, from, &widths),
             (None, None) => vergence_bar::Layout::plain_sized(content.size.w as f32, &buttons.0, &buttons.1, z),
         };
         Frame { content, title, layout, tabs }
@@ -337,7 +337,8 @@ impl Server {
             let left = buttons.0.contains(&vergence_bar::WinButton::Close) || buttons.1.is_empty();
             buttons = if left { (vec![vergence_bar::WinButton::Close], vec![]) } else { (vec![], vec![vergence_bar::WinButton::Close]) };
             let z = self.bar_sizes(w);
-            return self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, None, None, z))).flatten();
+            // A dialog's own buttons too (preview milestone 1: a preview's "Open with").
+            return self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, None, tool_widths(w), z))).flatten();
         }
         // Every other window has the app button (app settings milestone 1).
         buttons = vergence_bar::with_app_menu(buttons);
@@ -347,8 +348,7 @@ impl Server {
             buttons.1.retain(|b| *b != vergence_bar::WinButton::Maximize);
         }
         let z = self.bar_sizes(w);
-        let tools = tools_of(w).map(|(from, t)| (from, t.len()));
-        self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, tabs_of(w), tools, z))).flatten()
+        self.has_title(w).then(|| self.space.element_geometry(w).map(|g| Frame::of(g, &buttons, tabs_of(w), tool_widths(w), z))).flatten()
     }
 
     /// The size of controls for a screen (look milestone 1, step 8): its own
@@ -926,11 +926,12 @@ impl Server {
                     // row drawn with fewer titles than its layout had a blank tab.
                     let dragged = preview.map(|(from, _)| from).filter(|&i| i < titles.len());
                     // The program's own buttons (icons, pressable): part of what the picture shows.
-                    let tools: Vec<(vergence_bar::ToolIcon, bool)> = tools_of(&w).map(|(_, t)| t.into_iter().map(|(i, e, _)| (i, e)).collect()).unwrap_or_default();
+                    let tools: Vec<(vergence_bar::ToolIcon, bool)> = tools_of(&w).map(|(_, t)| t.iter().map(|(i, e, _, _)| (*i, *e)).collect()).unwrap_or_default();
+                    let tool_names: Vec<String> = tools_of(&w).map(|(_, t)| t.into_iter().map(|(_, _, _, n)| n).collect()).unwrap_or_default();
                     // The bar's height is part of it too (Dave, 2026-11-16: with
                     // kepler's touch panel unplugged the bars got shorter but kept
                     // the touch size's wide buttons, the old picture squeezed).
-                    let key = (title.clone(), width, active, hover, format!("{layout_text}{tools:?}{menu_open}{} h{}", app_icon.is_some(), f.title.size.h), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded, dragged, edited.clone(), root));
+                    let key = (title.clone(), width, active, hover, format!("{layout_text}{tools:?}{tool_names:?}{menu_open}{} h{}", app_icon.is_some(), f.title.size.h), titles.clone(), shown, accent, (light, frosted, alerts.clone(), front_frosted, rounded, dragged, edited.clone(), root));
                     let fonts = self.shelf.fonts.get_or_insert_with(vergence_text::Fonts::system);
                     let picture = d.bars.entry(scale.to_bits()).or_insert_with(|| BarPicture {
                         key: (String::new(), -1, false, None, String::new(), Vec::new(), 0, None, (false, false, Vec::new(), false, false, None, Vec::new(), false)),
@@ -973,6 +974,7 @@ impl Server {
                             hover,
                             dragged,
                             tools: &tools,
+                            tool_names: &tool_names,
                             app_icon: app_icon.as_ref().map(|i| std::sync::Arc::new(vergence_scene::Image { width: i.width, height: i.height, rgba: i.rgba.clone() })),
                             menu_open,
                             root,
@@ -1367,8 +1369,8 @@ fn tabs_of(w: &Win) -> Option<Tabs> {
 }
 
 /// A native window's own bar buttons (window styles milestone 1): where the
-/// title starts, and each button's icon, whether it can be pressed, and id.
-fn tools_of(w: &Win) -> Option<(f32, Vec<(vergence_bar::ToolIcon, bool, u32)>)> {
+/// title starts, and each button's icon, whether it can be pressed, id and name.
+fn tools_of(w: &Win) -> Option<(f32, Vec<(vergence_bar::ToolIcon, bool, u32, String)>)> {
     match w.native()?.bar()? {
         vergence_protocol::window::Bar::Tools { buttons, from } => Some((
             from as f32,
@@ -1378,8 +1380,9 @@ fn tools_of(w: &Win) -> Option<(f32, Vec<(vergence_bar::ToolIcon, bool, u32)>)> 
                     let icon = match b.icon {
                         vergence_protocol::window::BarIcon::Back => vergence_bar::ToolIcon::Back,
                         vergence_protocol::window::BarIcon::Forward => vergence_bar::ToolIcon::Forward,
+                        vergence_protocol::window::BarIcon::Label => vergence_bar::ToolIcon::Label,
                     };
-                    (icon, b.enabled, b.id)
+                    (icon, b.enabled, b.id, b.name.clone())
                 })
                 .collect(),
         )),
@@ -1387,10 +1390,16 @@ fn tools_of(w: &Win) -> Option<(f32, Vec<(vergence_bar::ToolIcon, bool, u32)>)> 
     }
 }
 
+/// Where the title starts and each own button's width for the layout: None
+/// an icon button's, a text button's from its name.
+fn tool_widths(w: &Win) -> Option<(f32, Vec<Option<f32>>)> {
+    tools_of(w).map(|(from, t)| (from, t.iter().map(|(icon, _, _, name)| (*icon == vergence_bar::ToolIcon::Label).then(|| vergence_bar::label_width(name))).collect()))
+}
+
 impl Server {
     /// The id of a native window's own bar button at `index`, if it can be pressed.
     pub fn bar_tool_id(&self, w: &Win, index: usize) -> Option<u32> {
-        tools_of(w).and_then(|(_, t)| t.get(index).filter(|(_, enabled, _)| *enabled).map(|(_, _, id)| *id))
+        tools_of(w).and_then(|(_, t)| t.get(index).filter(|(_, enabled, _, _)| *enabled).map(|(_, _, id, _)| *id))
     }
 }
 

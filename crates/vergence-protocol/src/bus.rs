@@ -66,11 +66,13 @@
 //! Version 33 (session milestone 1): `window::WinEvent::SessionEnding`, the close that follows is the session's.
 //! Version 34 (drives milestone 1): [`Topic::Drives`], the drive list kept by the server;
 //! `ClientMsg::Drive` (eject, mount, mount a disk image), `ServerMsg::DriveDone`.
+//! Version 35 (preview milestone 1): `window::BarIcon::Label`, a bar button
+//! showing its name; a dialog that asks for a size keeps its center.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 34;
+pub const VERSION: u32 = 35;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
