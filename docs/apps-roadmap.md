@@ -498,7 +498,9 @@ USB stick goes over ssh where Dave cannot watch it. Needed: the screen's text
 documents generally, and typing into a terminal as an action. A terminal is a
 shell, so the permission must say so plainly ("Claude wants to type commands
 in Terminal"), and what the agent types shows on screen as it goes, so Dave can
-watch and stop it.
+watch and stop it. *Planned 2026-11-22: docs/terminal-agent-milestone-1.md
+(scoped to a tab, read and type apart, no Always, refusals at password
+prompts and in root tabs).*
 
 **JIT app building is close** (Dave: "I think our JIT app building is almost
 writing itself with the way things are going. Modular components and a roadmap
