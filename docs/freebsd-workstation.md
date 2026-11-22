@@ -68,7 +68,7 @@ comes from `tools/install.sh`.
 
 ## Vergence
 
-`tools/sync-hubble.sh <host>` (add the host), `cargo test --workspace`,
+`tools/lab/sync.sh <host>` (add the host), `cargo test --workspace`,
 `cargo build --release`, `sudo tools/install.sh --vdm` (the login screen at
 boot). `~/.config/vergence/control-socket` for `vctl`, if Dave wants it driven
 remotely.

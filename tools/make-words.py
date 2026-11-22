@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Builds data/words/en_US.txt, the spelling list Vergence ships (editor
-milestone 1, step 7; Dave, 2026-11-15: "ship our own"), from a SCOWL
+milestone 1, step 7: our own list, shipped with Vergence), from a SCOWL
 release (Spell Checker Oriented Word Lists, Kevin Atkinson's;
 http://wordlist.aspell.net/).
 

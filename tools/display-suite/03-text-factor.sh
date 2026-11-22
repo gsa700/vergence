@@ -1,7 +1,7 @@
 # Text on a scaled screen: a 27" 4K (calculated 1.69) at 133% and at its
 # default 200% tells its windows text 1.0x. Until 2026-11-19 a text factor
-# made it 1.06x and 0.96x ("Text on scaled screens", removed at Dave's word:
-# each screen's scale and Accessibility's Size are the controls).
+# made it 1.06x and 0.96x ("Text on scaled screens", removed: each screen's
+# scale and Accessibility's Size are the controls).
 scenario() {
     headless "3840x2160 600x340@60" || { check 0 "headless session"; return; }
     vctl scale MEM-1 1.3333333333 >/dev/null

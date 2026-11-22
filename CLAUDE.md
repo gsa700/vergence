@@ -32,7 +32,7 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
 
 - **Started 2026-11-06** (Dave's go). The source lives here on Control (the
   main git copy, pushed to GitHub; Control has no Rust). Build and test on the
-  dev boxes: `tools/sync-hubble.sh [host]` (rsync; keeps the host's build output;
+  dev boxes: `tools/lab/sync.sh [host]` (rsync; keeps the host's build output;
   default hubble, also kepler and techbench), then `cargo test --workspace`
   there: Hubble (Void) and techbench (FreeBSD) for every change (Dave, 2026-11-21:
   "Too much testing is slowing us down"; apollo is dropped, kepler only when needed:
@@ -43,7 +43,7 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
 - **Display checks** (testing method, 2026-11-18): layer 1 is
   crates/vergence-server/src/geometry_tests.rs in `cargo test` (pixel
   geometry at every clean scale, no GPU). Layer 2 is
-  `tools/display-check.sh <host> <screen> [scale...]` on a running session:
+  `tools/lab/display-check.sh <host> <screen> [scale...]` on a running session (on your own machine, `tools/display-check.sh <screen> [scale...]`):
   it opens vergence-ui's `testpattern` example (one-pixel colored lines on
   each edge), sets each scale with `vctl scale <screen> <s>` (runtime only,
   never saved; `vctl scale <screen> reset`), steps the window a point at a
@@ -61,7 +61,7 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   ~/.cache/vergence-headless; `eval "$(tools/vergence-headless env)"` points
   vctl at it alone), `vctl picture <i>` (a window's own picture),
   `vergence-harness same` (pixel comparison). **The display suite**,
-  `tools/display-suite.sh <host> [scenario...]`, runs the scenarios in
+  `tools/lab/display-suite.sh <host> [scenario...]` (on your own machine, `tools/display-suite/run.sh [scenario...]`), runs the scenarios in
   tools/display-suite/NN-*.sh, each in a headless session of its own, the
   monitors untouched; before every push of display code on Hubble and
   techbench (Dave, 2026-11-18; kepler dropped from it 2026-11-21), about three minutes a machine; one host
@@ -73,7 +73,7 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   it saves `tools/gpu-report.sh`'s report (each stuck process's threads and
   kernel stacks, the i915 error state, the kernel's log) before stopping
   them. Run `tools/gpu-report.sh [pid...]` by hand on any hang or freeze
-  before killing or rebooting, then `tools/fetch-gpu-reports.sh` to copy the
+  before killing or rebooting, then `tools/lab/fetch-gpu-reports.sh` to copy the
   reports to Control (~/vergence-gpu-reports/; a reinstall lost the
   2026-11-10 dump). Found 2026-11-14: the vergence-render GPU test hung on
   kepler in the kernel (a page fault on a mapped GPU buffer in drm-kmod's
@@ -91,7 +91,7 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   144 Hz, GTX 1650 on the external outputs, dual boot with Windows): no
   display manager and no Xfce. Log in on the text console (agetty), then
   `vergence` (installed in /usr/local/bin; Ctrl+Alt+Backspace ends it). After
-  a change: `tools/sync-hubble.sh`, `cargo build --release` there, `sudo
+  a change: `tools/lab/sync.sh`, `cargo build --release` there, `sudo
   tools/install.sh`, `vctl restart`. Log ~/.local/state/vergence/server.log;
   settings in ~/.config/vergence (desktop.toml, settings.toml; the
   control-socket file is there, so the installed session has `vctl`). Over
@@ -134,7 +134,7 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   (Dave, 2026-11-20, netinst, a minimal install; he chose Debian on
   2026-11-19 and went back to Fedora the same night). Up since 2026-11-20:
   ssh by key as `apollo` (apollo.home.arpa), Rust by rustup (`.
-  ~/.cargo/env`), build in ~/src/vergence (`tools/sync-hubble.sh apollo`),
+  ~/.cargo/env`), build in ~/src/vergence (`tools/lab/sync.sh apollo`),
   Vergence installed under /usr/local, passwordless sudo (Dave,
   2026-11-20: /etc/sudoers.d/90-derickson-test), the VDM login screen at
   boot (VT 7, the ASUS VS229 by HDMI). Its first night the login screen
@@ -162,7 +162,7 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   /usr/local/etc/devd/touchscreen-sw4101c.conf with
   /usr/local/libexec/touchscreen-mode, sets `dev.hconf.N.input_mode=2` each
   time it attaches. drm-kmod with `kld_list="i915kms"`, seatd, Rust by rustup so
-  `. ~/.cargo/env` over ssh; `tools/sync-hubble.sh kepler`; passwordless
+  `. ~/.cargo/env` over ssh; `tools/lab/sync.sh kepler`; passwordless
   sudo; Vergence installed under /usr/local, `vergence` from its text
   console starts the session, and ~/.config/vergence/control-socket is
   there so `vctl` works). **canary**, the FreeBSD VM that was the build gate
@@ -178,7 +178,7 @@ Vergence (named 2026-11-05, formerly "App Consistency"): the design is docs/Verg
   evidence); for testing Dave gave a test password for sudo (installs),
   not stored anywhere: ask him in a later session. (sudo was swapped for
   doas on 2026-11-20 and put back the same evening; Dave then removed doas.) Rust by rustup (`.
-  ~/.cargo/env` over ssh), build in ~/src/vergence (`tools/sync-hubble.sh
+  ~/.cargo/env` over ssh), build in ~/src/vergence (`tools/lab/sync.sh
   techbench`), Vergence installed under /usr/local, the VDM login screen at
   boot, ~/.config/vergence/control-socket there so `vctl` works. Its disk
   is encrypted: no autologin there, ever (Dave's rule). Log

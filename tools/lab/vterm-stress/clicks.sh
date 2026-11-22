@@ -3,8 +3,8 @@
 # within two frames, 50 of 50"), against the stress test's terminal while its
 # six tabs run:
 #
-#   VTERM_FRAMES=1 tools/vterm-stress/run.sh 5 &     (wait for "vterm pid")
-#   tools/vterm-stress/clicks.sh [CLICKS]
+#   VTERM_FRAMES=1 tools/lab/vterm-stress/run.sh 5 &     (wait for "vterm pid")
+#   tools/lab/vterm-stress/clicks.sh [CLICKS]
 #
 # It presses each tab in turn through tools/vctl (so it MOVES THE POINTER of
 # the session it runs in), then reads from the terminal's log how many frames

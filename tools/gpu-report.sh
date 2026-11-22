@@ -1,7 +1,7 @@
 #!/bin/sh
-# What a dev box knows about a GPU hang, saved before anything is killed
-# (2026-11-14: a test hung on kepler and was killed with nothing kept, and the
-# 2026-11-10 hang dump was lost with kepler's reinstall).
+# What a machine knows about a GPU hang, saved before anything is killed: a
+# hung test killed with nothing kept leaves nothing to debug (CLAUDE.md, "GPU
+# hangs: keep the evidence").
 #
 # Usage: tools/gpu-report.sh [pid ...]
 #
@@ -12,7 +12,7 @@
 # FreeBSD and Linux. Root (sudo -n, never a password prompt) reads the kernel
 # stacks of others' processes and the error state; without it, what can be
 # read is, and the report says what could not. Prints the report's folder.
-# Copy the reports to Control with tools/fetch-gpu-reports.sh.
+# The lab copies the reports off its boxes with tools/lab/fetch-gpu-reports.sh.
 set -u
 os=$(uname -s)
 host=$(hostname -s 2>/dev/null || hostname)

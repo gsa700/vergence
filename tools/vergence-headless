@@ -14,7 +14,7 @@
 # clients (vtile, vagent) talk to it and to nothing else (a test must never
 # fall through to the session on the monitors).
 # The server: $VERGENCE_SERVER, else the checkout's target-check build
-# (tools/display-check-remote.sh builds it there), else target/release.
+# (tools/display-check.sh builds it there), else target/release.
 # With no --screen: one 1920x1080 screen of 531x299 mm (a 24").
 set -u
 here=$(cd "$(dirname "$0")" && pwd)

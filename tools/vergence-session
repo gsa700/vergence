@@ -29,8 +29,8 @@ elif [ -x "$here/../target/release/vergence-server" ]; then
     PATH=$(cd "$here/../target/release" && pwd):$PATH
     export PATH
     # Its desktop entries and icons too, ahead of any installed ones (an
-    # older install lacks the newer apps: Techbench, 2026-11-15, had no File
-    # Viewer in the launcher): links to the checkout's data/ in a share
+    # older install lacks the newer apps, which then miss from the launcher):
+    # links to the checkout's data/ in a share
     # directory under target/.
     root=$(cd "$here/.." && pwd)
     share=$root/target/dev-share
@@ -68,7 +68,7 @@ unset QT_SCREEN_SCALE_FACTORS QT_SCALE_FACTOR QT_AUTO_SCREEN_SCALE_FACTOR \
     AVALONIA_SCREEN_SCALE_FACTORS AVALONIA_GLOBAL_SCALE_FACTOR \
     GDK_SCALE GDK_DPI_SCALE _JAVA_OPTIONS VERGENCE_SCALE DISPLAY
 # Seat and device access: libseat finds logind by itself where systemd runs
-# (Fedora on Techbench, 2026-11-08); everywhere else it is seatd.
+# (Fedora, say); everywhere else it is seatd.
 if [ -z "$LIBSEAT_BACKEND" ] && [ ! -d /run/systemd/system ]; then
     export LIBSEAT_BACKEND=seatd
 fi
@@ -86,7 +86,7 @@ fi
 # settings portal only when told to; the server's D-Bus edge is that portal,
 # and so they get our window buttons' layout, theme and fonts. What else
 # they ask a portal for (a file dialog) we answer "unknown", and they use
-# their own (seen with Firefox on kepler, 2026-11-10).
+# their own (Firefox does).
 export GTK_USE_PORTAL=${GTK_USE_PORTAL:-1}
 # The development control socket (vctl; src/control.rs): any program running as
 # the user can drive the session through it, so this is what makes a session a
@@ -111,8 +111,8 @@ mkdir -p "$STATE" && chmod 700 "$STATE"
 LOG=$STATE/server.log
 # A quick failure at start is retried: when the user logs out of an X session and
 # into this one, the display manager starts us while the old X server is still
-# letting go of the display ("Failed to disable connectors: Permission denied",
-# Hubble 2026-11-07). Each try's log is kept beside the main one.
+# letting go of the display ("Failed to disable connectors: Permission denied").
+# Each try's log is kept beside the main one.
 tries=0
 while :; do
     started=$(date +%s)

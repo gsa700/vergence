@@ -1,8 +1,8 @@
 target/
 *.swp
 .DS_Store
-tools/sizebox/bin/
-tools/sizebox/avalonia/bin/
-tools/sizebox/avalonia/obj/
+tools/lab/sizebox/bin/
+tools/lab/sizebox/avalonia/bin/
+tools/lab/sizebox/avalonia/obj/
 /dist/
 /target-check

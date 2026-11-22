@@ -3,7 +3,7 @@
 # acceptance 5), on the machine it is run on, in the running Vergence session
 # (through tools/vctl, so the session needs its control socket).
 #
-#   tools/vterm-stress/run.sh [MINUTES] [vterm options]
+#   tools/lab/vterm-stress/run.sh [MINUTES] [vterm options]
 #
 # Opens one vterm with six tabs: btop, htop, `seq 1 1000000` again and again,
 # the color flood, the cursor test, the Unicode flood (examples/flood.rs).

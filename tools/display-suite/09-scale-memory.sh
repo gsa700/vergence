@@ -1,5 +1,4 @@
-# Window memory across a scale change (Dave, 2026-11-18: "keep point size
-# on scale changes"): a window closed at 100% opens at 200% of the same
+# Window memory across a scale change, keeping its size in points: a window closed at 100% opens at 200% of the same
 # screen at the same size in points, not the same pixels; at another
 # resolution (a 4K screen's 1440p mode stands in) places still scale in
 # proportion.

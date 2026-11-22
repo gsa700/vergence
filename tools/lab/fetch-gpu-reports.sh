@@ -1,10 +1,10 @@
 #!/bin/bash
-# Copy the dev boxes' GPU reports (tools/gpu-report.sh, ~/gpu-reports) to
-# Control, to ~/vergence-gpu-reports/<host>/, so a reinstall cannot lose them
-# (kepler's of 2026-11-10 was lost so). Not in the repository: error states
-# hold the GPU's memory contents.
+# The lab's: copy the dev boxes' GPU reports (tools/gpu-report.sh,
+# ~/gpu-reports) to the machine that holds the git copy, to
+# ~/vergence-gpu-reports/<host>/, so reinstalling a box cannot lose them. Not
+# in the repository: error states hold the GPU's memory contents.
 #
-# Usage: tools/fetch-gpu-reports.sh [host ...]   (default: kepler hubble techbench)
+# Usage: tools/lab/fetch-gpu-reports.sh [host ...]   (default: kepler hubble techbench)
 set -uo pipefail
 hosts=("$@")
 [ ${#hosts[@]} -eq 0 ] && hosts=(kepler hubble techbench)

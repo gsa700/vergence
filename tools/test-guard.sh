@@ -1,8 +1,8 @@
 #!/bin/sh
 # Run a command (cargo test) with a time limit; if it runs over, keep what
 # the box knows about why (tools/gpu-report.sh, with every process under it)
-# before stopping it. 2026-11-14: kepler's vergence-render GPU test hung once
-# at 0% CPU and was killed with nothing kept.
+# before stopping it: a GPU test can hang in the kernel at 0% CPU, and once
+# killed it leaves nothing to debug.
 #
 # Usage: tools/test-guard.sh SECONDS -- cargo test -q --workspace
 # Exit: the command's own, or 124 when it ran over.

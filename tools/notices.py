@@ -12,7 +12,7 @@ x86_64), and reads each crate's LICENSE*, COPYING*, NOTICE* and UNLICENSE
 files from where Cargo keeps its source. Apache-2.0 asks that a NOTICE file
 travel with redistributions (section 4d), so those are reproduced whole.
 
-Run from the checkout on a machine with Rust (Control has none):
+Run from the checkout on a machine with Rust:
     python3 tools/notices.py            # writes THIRD-PARTY-NOTICES.md
     python3 tools/notices.py --check    # exit 1 if the file is out of date
 """

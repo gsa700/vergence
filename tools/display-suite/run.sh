@@ -1,6 +1,7 @@
 #!/bin/sh
 # The display suite, on the machine it tests (headless milestone 1, step 5).
-# From Control: tools/display-suite.sh <host> [scenario...]. By hand:
+# On your own machine (the lab runs it on a dev box with
+# tools/lab/display-suite.sh <host>):
 #
 #   sh tools/display-suite/run.sh [scenario...]     # e.g. 04-hotplug-add
 #

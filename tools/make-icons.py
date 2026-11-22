@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vergence's icons (direction D, "Vergence", chosen by Dave 2026-11-18):
+"""Vergence's icons (direction D, the "Vergence" icon theme; see docs/apps-roadmap.md):
 C's even tiles colored by kind, lit from the top left with a fine rim as in
 A, carrying B's friendly objects drawn with A's crisp edges and bright
 touches. Files and places share the folder blue and the same light.
@@ -55,8 +55,8 @@ def tile(kind):
 
 
 # ---- the apps ----
-# The apps' own icons are not drawn here: Dave preferred the hand-drawn ones
-# from before direction D (2026-11-18, side by side), so data/icons/
+# The apps' own icons are not drawn here: the hand-drawn ones from before
+# direction D were preferred side by side, so data/icons/
 # vergence-<app>.svg are kept as they are. Direction D's app tiles are in
 # git (ee1af80) if they are wanted again.
 
@@ -76,7 +76,7 @@ CAN = ('<path d="M15 18 L49 18 L46 56 Q45.7 59 42.7 59 L21.3 59 Q18.3 59 18 56 Z
        '<rect x="26" y="6" width="12" height="5" rx="2" fill="#dfe3ea" stroke="#2a303c" stroke-width="1.2"/>'
        '<g stroke="#8a919e" stroke-width="2" stroke-linecap="round"><line x1="25" y1="25" x2="26" y2="52"/><line x1="32" y1="25" x2="32" y2="52"/><line x1="39" y1="25" x2="38" y2="52"/></g>')
 
-# Full: heaped, the lid askew, and a few on the floor (Dave: "We aren't that neat").
+# Full: heaped, the lid askew, and a few on the floor (a real one is not that neat).
 CAN_FULL = ('<path d="M17 14 L27 7 L33 14 Z" fill="#ffffff" stroke="#2a303c" stroke-width="1"/>'
             '<path d="M30 13 L43 7 L42 15 Z" fill="#fff4c9" stroke="#2a303c" stroke-width="1"/>'
             '<circle cx="25" cy="12" r="4" fill="#f4f6f9" stroke="#2a303c" stroke-width="1"/>'
@@ -142,7 +142,7 @@ def write(path, text):
 def main():
     for name, (comment, body) in PLACES.items():
         write(os.path.join(OUT, "places", f"{name}.svg"), svg(body, comment))
-    # The Trash window's own icon, for the dock (Dave, 2026-11-18): the can
+    # The Trash window's own icon, for the dock: the can
     # itself, no tile, as the desktop's Trash.
     write(os.path.join(OUT, "vergence-trash.svg"), svg(CAN, "The Trash: its window's icon, the can itself."))
     for name, (comment, body) in KINDS.items():

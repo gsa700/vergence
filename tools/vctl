@@ -7,7 +7,7 @@
 # (pam_xdg), or the console launcher's.
 # VCTL_SOCKET names one socket and nothing else is tried: a script driving a
 # nested server must never fall through to the session it runs in (a test
-# quit Hubble's session that way, 2026-11-12).
+# that did quit the real session).
 sock=
 if [ -n "$VCTL_SOCKET" ]; then
     [ -S "$VCTL_SOCKET" ] || { echo "no vergence-server control socket at $VCTL_SOCKET" >&2; exit 1; }

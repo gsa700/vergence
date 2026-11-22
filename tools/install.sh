@@ -134,7 +134,7 @@ for p in $programs; do install -m 755 "$release/$p" "$bin/$p"; done
 install -d -m 755 "$sbin"
 # Restarting vdm ends every session it started (they are its children), so
 # it is restarted only when its binary changed and no one is logged in
-# (kepler 2026-11-16: an install for an app change logged Dave out).
+# (otherwise an install for an app change would log the user out).
 vdm_changed=no
 cmp -s "$release/vdm" "$sbin/vdm" 2>/dev/null || vdm_changed=yes
 install -m 755 "$release/vdm" "$sbin/vdm"
@@ -142,10 +142,10 @@ install -m 755 "$release/vdm" "$sbin/vdm"
 install -d -m 755 "$words"
 install -m 644 "$root/data/words/en_US.txt" "$words/en_US.txt"
 install -m 644 "$root/data/words/SCOWL-COPYRIGHT.txt" "$words/SCOWL-COPYRIGHT.txt"
-# Vergence's own fonts (Dave, 2026-11-16: a uniform look): Inter and JetBrains
+# Vergence's own fonts, for the same look everywhere: Inter and JetBrains
 # Mono with their licenses (SIL OFL 1.1); a family the system has itself is
 # the system's copy, these the fallback (vergence-text db.rs). Liberation
-# Sans, Serif and Mono (Dave, 2026-11-19): the PDF reader's metric-compatible
+# Sans, Serif and Mono: the PDF reader's metric-compatible
 # stand-ins for Helvetica, Times and Courier when a PDF does not embed them.
 install -d -m 755 "$fonts"
 # The pointers: drawn by vergence-harness from their own SVG (the theme the
@@ -456,7 +456,7 @@ elif [ -d /etc/sv ] && [ -d /var/service ]; then
 else
     echo "vdm: no known init system; start $prefix/sbin/vdm as root at boot" >&2
 fi
-# ---- system setup: the power key (menus milestone 1; Dave, 2026-11-16) ----
+# ---- system setup: the power key (menus milestone 1) ----
 # While a Vergence session runs, vdm holds the power key from the system so
 # it opens the session dialog: logind's inhibitor on systemd and elogind,
 # hw.acpi.power_button_state on FreeBSD (both vdm's at run time). acpid
@@ -473,7 +473,7 @@ if [ -f "$handler" ] && ! grep -q 'vdm/power-key' "$handler"; then
         echo "power key: $handler not as expected; acpid still shuts down on it" >&2
     fi
 fi
-# ---- system setup: removable drives (files milestone 1; Dave, 2026-11-15) ----
+# ---- system setup: removable drives (files milestone 1) ----
 # Linux: udisks2 mounts a drive plugged in when the session asks (the
 # server does); nothing to set up but the daemon itself. FreeBSD: the base
 # system's automounter, /media pointed at our map (FAT drives writable by
@@ -499,7 +499,7 @@ if [ "$(uname -s)" = FreeBSD ]; then
     # autofs keeps an answer that mounted nothing (a stick's folder looked
     # into while it was out) for vfs.autofs.cache seconds, 600 by default,
     # and `automount -c` clears only /media itself: the stick plugged in
-    # meanwhile opened empty (Dave, 2026-11-21, techbench). Five seconds.
+    # meanwhile opened empty. Five seconds (see docs/drives-milestone-1.md).
     sysctl vfs.autofs.cache=5 >/dev/null 2>&1 || true
     if ! grep -q '^vfs\.autofs\.cache=' /etc/sysctl.conf 2>/dev/null; then
         printf '# Vergence (tools/install.sh): a drive plugged in is mounted at once\nvfs.autofs.cache=5\n' >> /etc/sysctl.conf
@@ -581,7 +581,7 @@ fi
 # ---- system setup: a driver for every GPU (GPUs milestone 1) ----
 # A second GPU shows its screens with a renderer of its own; without that
 # GPU's own OpenGL, Mesa falls back to software on the CPU and its screens
-# are slow (Hubble's NVIDIA card: 40 to 77 ms a 4K frame, 2026-11-14). Mesa
+# are slow (a GTX 1650 in software: 40 to 77 ms a 4K frame). Mesa
 # runs nouveau's OpenGL through Zink, which needs NVK and the Vulkan loader.
 # Said here, not installed: they are the system's packages.
 if [ "$(uname -s)" = Linux ]; then
@@ -611,8 +611,8 @@ if [ "$(uname -s)" = Linux ]; then
 fi
 # The desktop's icons (vergence-files --desktop) run the program they
 # started with until they are started again: stopped here, a server that
-# keeps them running starts the new one at once (Dave, 2026-11-21: "restart
-# the desktop on install"), so the desktop and FileView never differ. Only
+# keeps them running starts the new one at once, so the desktop and FileView
+# never differ (see docs/drives-milestone-1.md). Only
 # with such a server (its log says so); an older one would leave no desktop.
 if [ -z "$destdir" ] && [ -n "$user" ] && command -v pgrep >/dev/null 2>&1; then
     home_of=$(getent passwd "$user" 2>/dev/null | cut -d: -f6)

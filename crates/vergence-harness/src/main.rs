@@ -23,7 +23,7 @@
 //!   vergence-harness zoomed <plain.png> <zoomed.png> <px> <py> <level> [--tolerance T]
 //!   vergence-harness sharper <a.png> <b.png> <x> <y> <w> <h> [--by R]
 //!   vergence-harness cursors <theme directory>   (Vergence's pointers as an Xcursor theme)
-//!       Find each size box (tools/sizebox) and print its size on the panel
+//!       Find each size box (tools/lab/sizebox) and print its size on the panel
 //!       in millimeters (milestone 4, acceptance 3).
 
 mod cursors;
