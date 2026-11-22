@@ -57,6 +57,13 @@ impl Server {
             let mut last: Vec<DriveInfo> = Vec::new();
             let mut first = true;
             loop {
+                // A drive pulled out while mounted is let go of (FreeBSD keeps its mount).
+                for stale in vergence_media::drives::stale_mounts() {
+                    match vergence_media::eject(&stale) {
+                        Ok(_) => tracing::info!("drives: {} was pulled out while mounted; unmounted", stale.display()),
+                        Err(e) => tracing::warn!("drives: {} was pulled out while mounted and could not be unmounted: {e}", stale.display()),
+                    }
+                }
                 let now = vergence_media::drives::scan();
                 if now != last || first {
                     first = false;

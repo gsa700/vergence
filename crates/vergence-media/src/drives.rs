@@ -173,6 +173,12 @@ pub fn scan() -> Vec<DriveInfo> {
     let mut out: Vec<DriveInfo> = Vec::new();
     for at in disks_of(&table) {
         let m = table.iter().find(|m| m.at == at);
+        // A drive pulled out while mounted: FreeBSD keeps the mount of a
+        // device that is gone (Dave, 2026-11-21: the stick "came back after
+        // I pulled the drive"); not a drive (stale_mounts lets go of it).
+        if m.is_some_and(gone) {
+            continue;
+        }
         let device = m.map(|m| m.what.clone()).or_else(|| at.file_name().and_then(device_of).map(|p| p.to_string_lossy().into_owned())).unwrap_or_default();
         let kind = match m {
             Some(_) if device.starts_with("/dev/md") || device.starts_with("/dev/loop") => DriveKind::Image,
@@ -190,6 +196,17 @@ pub fn scan() -> Vec<DriveInfo> {
     out.sort_by(|a, b| a.path.cmp(&b.path));
     out.dedup_by(|a, b| a.path == b.path);
     out
+}
+
+/// A mount whose device is a node that is not there any more.
+fn gone(m: &Mount) -> bool {
+    m.what.starts_with("/dev/") && !Path::new(&m.what).exists()
+}
+
+/// Drives under /media still mounted though their device is gone (pulled
+/// out while mounted): to be unmounted (the server does, through eject).
+pub fn stale_mounts() -> Vec<PathBuf> {
+    mounts().into_iter().filter(|m| m.at.starts_with("/media/") && gone(m)).map(|m| m.at).collect()
 }
 
 fn name_of(p: &Path) -> String {

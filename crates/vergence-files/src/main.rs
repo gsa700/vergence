@@ -1535,6 +1535,9 @@ impl Viewer {
                 if let Some(here) = self.here().filter(|_| self.here_ejectable()) {
                     let name = here.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     let image = files::is_image_mount(&here);
+                    for t in self.tabs.iter_mut().filter(|t| t.dir().is_some_and(|d| d.starts_with(&here))) {
+                        t.go(Showing::Folder(home()));
+                    }
                     match files::eject(&here) {
                         Ok(told) => {
                             if !image && !told {
@@ -1661,6 +1664,11 @@ impl Viewer {
                 {
                     let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     let image = files::is_image_mount(&p);
+                    // Tabs on it go home first: on FreeBSD a look into the folder
+                    // after the eject would have the automounter mount it again.
+                    for t in self.tabs.iter_mut().filter(|t| t.dir().is_some_and(|d| d.starts_with(&p))) {
+                        t.go(Showing::Folder(home()));
+                    }
                     match files::eject(&p) {
                         Ok(told) => {
                             // A drive: safe to pull out (the server says so itself when it
@@ -3152,6 +3160,19 @@ impl Program for Viewer {
                 t.go(Showing::Folder(home()));
             }
             self.drives_last = drives;
+            return true;
+        }
+        // A tab on a drive under /media the server does not list as mounted
+        // (ejected elsewhere, pulled out) goes home without being looked into:
+        // a look would have FreeBSD's automounter mount it again.
+        let mounted: Vec<PathBuf> = files::drive_list().into_iter().filter(|d| d.mounted).map(|d| PathBuf::from(d.path)).collect();
+        let off = |d: &Path| d.starts_with("/media/") && !mounted.iter().any(|m| d.starts_with(m));
+        let mut moved = false;
+        for t in self.tabs.iter_mut().filter(|t| t.dir().is_some_and(off)) {
+            t.go(Showing::Folder(home()));
+            moved = true;
+        }
+        if moved {
             return true;
         }
         // The folder changed on disk: read again.
