@@ -58,10 +58,6 @@ each milestone doc lists what is left.
 
 ## Known issues
 
-- **Terminal in a headless session closes at once** (2026-11-22, making
-  screenshots): its window opens and closes within 0.3 s, with or without
-  `-e`; the display suite has no terminal scenario, so it went unseen. Real
-  sessions are not affected.
 - **A stale `/run/vdm/power-key`** (vdm killed and not restarted) makes
   acpid ignore the power key until a reboot (packaging review, L3).
 
