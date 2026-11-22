@@ -92,6 +92,45 @@ Apps, Keyboard and Mouse, Accessibility, Date & Time, Lock Screen, Session.
     Lock Screen gets "Show: my wallpaper / the login screen's".
 14. **About: bling and the Hardware app** (later, not this milestone).
 
+## Dave's answers (2026-11-22)
+
+"1 yes, 2 yes minus Reader, 3 yes, 4 yes, 5 likely, 6 yes I think so, 7 yes,
+8 yes." So: our own SVG wallpapers; the dock's pins Files, Firefox, Edit,
+Terminal, Settings; the shipped defaults file with /etc between it and the
+user's; Firefox recommended, not installed by us; agents off by default with
+one notification; the energy defaults as leaned, sleep through vdm; ours in
+the system backgrounds folder, `~/Pictures/Wallpaper` offered when it exists.
+
+Added: "I think we should create a set of folders if they don't exist as is
+standard for most desktops: Documents Downloads Pictures Music Video
+Desktop". The freedesktop names (xdg-user-dirs): Desktop, Documents,
+Downloads, Music, Pictures, Videos; made at login when missing, and
+`~/.config/user-dirs.dirs` written when absent so other programs (Firefox's
+downloads, GTK's file chooser) find them. An existing user-dirs.dirs (other
+names, another language) is respected, never rewritten.
+
+## Steps
+
+1. The defaults file: one loader that layers
+   `$prefix/share/vergence/defaults/desktop.toml`, then
+   `/etc/vergence/desktop.toml` (FreeBSD `/usr/local/etc/vergence/`), under
+   the user's, key by key; the server and Settings read through it, Settings
+   writes only the user's file and shows what is in effect.
+2. The standard folders and user-dirs.dirs at login.
+3. Wallpapers: our SVGs in `$prefix/share/backgrounds/vergence`, the default
+   in the defaults file; `~/Pictures/Wallpaper` offered when it exists.
+4. The dock's pins in the defaults file (missing apps skipped quietly).
+5. Settings: Theme and fonts shows what is in effect (Adwaita offered);
+   Screens names its sharp steps and the recommended one; Sound shows the
+   device in use, the rest under Other devices.
+6. Agents off by default, one notification when an agent asks while off.
+7. Energy defaults (10/5 min screens off; sleep never on power, 30 min on
+   battery) and sleep through vdm.
+8. The login screen's wallpaper (Settings > Login, through elevation), and
+   the lock screen's choice of it.
+9. Checks: display suite on Hubble and techbench, a fresh account on
+   techbench end to end, kepler builds and tests; an independent review.
+
 ## Questions for Dave
 
 1. **Wallpapers: our own SVG abstracts (lean), or photographs** (which need
