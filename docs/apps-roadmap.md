@@ -472,3 +472,22 @@ into the processor (an APU), what most people with AMD have (laptops, mini
 PCs, handhelds); it can be the slower-hardware machine too and run FreeBSD
 or Void as needed. To check before buying: FreeBSD drm-kmod's (amdgpu)
 support for its graphics generation (Radeon 680M/780M are recent).
+
+## The agent interface, put to work (Dave, 2026-11-22)
+
+"We should really put the Agent socket to work more and more. To test it and
+make sure it works like we want it to." From now on, where a task can be done
+through the agent interface (reading an app's state, acting on it by name), the
+AI collaborator uses it rather than vctl or the disk, and notes what was
+awkward. Known rough edges to fix as they bite: a text area's value is cut at
+512 characters in the tree (long documents can't be read through it); paths
+like "Edit > text area" don't find a window named by its document.
+
+**JIT app building is close** (Dave: "I think our JIT app building is almost
+writing itself with the way things are going. Modular components and a roadmap
+is all a dev or Ai would need to quickly build great apps"). The wish list's
+"Agentic JIT app building" (an agent builds an app to a spec on the toolkit and
+the system's references) now has its parts: the toolkit and its widgets, the
+components (Hymie, the PDF engine, decoders, drives, the preview), the
+documents (ARCHITECTURE.md, the crate docs, CONTRIBUTING.md), the display suite
+to check what was built, and the agent interface to try it.
