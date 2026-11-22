@@ -91,3 +91,32 @@ and changing behavior are out too.
    and decide when going public?
 4. **STATUS.md replacing the whitepaper's §9 status:** §9 keeps the order
    of work and the reasons, and STATUS.md holds the state (Claude's lean)?
+
+## Progress (2026-11-22, all six steps in)
+
+1. **One format** (6b0141b, 9fc4387): rustfmt.toml, width 120 with "Max"
+   heuristics (half the churn of the defaults), the whole tree once;
+   .git-blame-ignore-revs skips it.
+2. **Big files split** (429da12, 6b62c00, 2c4ebe0): FileView 4,156 lines to
+   1,067, Settings 4,567 to 1,390, the terminal 3,116 to 718, Reader 2,248
+   to 569, Edit 2,236 to 588; pure moves checked line by line.
+3. **Comments keep the why** (64f49c8): about 450 comments in about 190
+   files; the 61 quotes no doc held went to docs/decisions.md.
+4. **Lab tools apart** (ff4075c): tools/lab/ (sync.sh, the Control-side
+   suite and check wrappers, the GPU-report fetcher, the earlier phases'
+   tools), with a README; contributors run tools/display-suite/run.sh and
+   tools/display-check.sh.
+5. **The newcomer's documents** (3ddeb0a, c25f823, 4888c95): README for
+   people, CONTRIBUTING.md, STATUS.md, ARCHITECTURE.md, a doc at the top of
+   all 40 crates; CLAUDE.md split (its milestone notes to
+   docs/milestone-notes.md).
+6. **Checks** (cc88b59, c72ec3a): tests, fmt and the display suite after
+   every step on Hubble and techbench; `cargo doc` clean with `-D warnings`
+   on both; the cold read (a fresh agent with only the newcomer docs built,
+   ran a headless session and the suite, and found three named things in
+   3 to 5 minutes each) and its fixes.
+
+Left for Dave: four whitepaper passages the code has outgrown (§7.3 display
+lists drawn in the server, under budgets, not in a sandboxed process; §6.5
+agents are built; §6.9 the desktop has icons; §6.10 the toolkit's native
+road is the default), and the vendored drm-rs's one warning.
