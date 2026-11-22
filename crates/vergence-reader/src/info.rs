@@ -93,7 +93,7 @@ impl Program for Info {
     fn update(&mut self, _: (), _window: &mut Window) {}
 
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (440.0, 380.0), max: (0.0, 0.0), alone: false }
+        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (440.0, 380.0), max: (0.0, 0.0), alone: false, frosted: false }
     }
 }
 

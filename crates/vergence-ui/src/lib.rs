@@ -636,6 +636,11 @@ pub struct Style {
     /// goes nowhere with its opener. A dialog so opened is a lone one to the
     /// server: a window of its own with the slim close-only bar, no app button.
     pub alone: bool,
+    /// No ground of its own (bus v36; preview milestone 1, step 6b): on the
+    /// native road the server frosts what is behind the window under its
+    /// whole body, joined with its bar, as macOS's Quick Look window; the
+    /// window paints only what stands on the frost (an inset card).
+    pub frosted: bool,
 }
 
 pub trait App {

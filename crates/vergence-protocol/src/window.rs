@@ -279,8 +279,11 @@ pub enum WinRequest {
     /// be), and its smallest and largest size in points (0 on an axis: no
     /// limit). After Create, and again whenever it changes (window styles
     /// milestone 1). The server keeps every size within the limits and draws
-    /// the bar the kind has.
-    Style { window: u32, kind: WinKind, modal: bool, min: (f64, f64), max: (f64, f64) },
+    /// the bar the kind has. `frosted` (bus v36, preview milestone 1, step
+    /// 6b): the window has no ground of its own; the server frosts what is
+    /// behind it under its whole body, joined with its bar into one surface,
+    /// as macOS's Quick Look window (the content an inset card on it).
+    Style { window: u32, kind: WinKind, modal: bool, min: (f64, f64), max: (f64, f64), frosted: bool },
     /// The window's commands now (app settings milestone 1): what its app
     /// menu holds (crate::commands). `terminal`: its Ctrl+letter keys belong
     /// to the programs it runs, so roles' keys take Shift. After Create, and
@@ -1042,9 +1045,9 @@ impl WinRequest {
                 e.u32(*window);
                 e
             }
-            WinRequest::Style { window, kind, modal, min, max } => {
+            WinRequest::Style { window, kind, modal, min, max, frosted } => {
                 let mut e = Encoder::frame(op::STYLE);
-                e.u32(*window).u8(kind.byte()).u8(*modal as u8).f64(min.0).f64(min.1).f64(max.0).f64(max.1);
+                e.u32(*window).u8(kind.byte()).u8(*modal as u8).f64(min.0).f64(min.1).f64(max.0).f64(max.1).bool(*frosted);
                 e
             }
             WinRequest::Commands { window, terminal, commands } => {
@@ -1202,7 +1205,8 @@ impl WinRequest {
                 if (max.0 > 0.0 && max.0 < min.0) || (max.1 > 0.0 && max.1 < min.1) {
                     return Err(WireError::BadValue("largest size below the smallest"));
                 }
-                WinRequest::Style { window, kind, modal: modal && kind == WinKind::Dialog, min, max }
+                let frosted = d.bool()?;
+                WinRequest::Style { window, kind, modal: modal && kind == WinKind::Dialog, min, max, frosted }
             }
             op::COMMANDS => {
                 use crate::commands::{Command, MAX_COMMANDS, MAX_LABEL, Role};
@@ -1649,7 +1653,7 @@ mod tests {
             let (bytes, _) = m.encode().unwrap();
             WinRequest::decode(op::STYLE, &bytes[6..], &mut NoFds)
         };
-        let style = |kind, modal, min: (f64, f64), max: (f64, f64)| WinRequest::Style { window: 1, kind, modal, min, max };
+        let style = |kind, modal, min: (f64, f64), max: (f64, f64)| WinRequest::Style { window: 1, kind, modal, min, max, frosted: false };
         assert!(decode(style(WinKind::Normal, false, (0.0, 0.0), (0.0, 0.0))).is_ok());
         assert!(decode(style(WinKind::Normal, false, (-1.0, 0.0), (0.0, 0.0))).is_err(), "a negative size");
         assert!(decode(style(WinKind::Normal, false, (0.0, f64::NAN), (0.0, 0.0))).is_err(), "not a number");
@@ -1746,8 +1750,9 @@ mod tests {
                 },
             },
             WinRequest::UnderBar { window: 1 },
-            WinRequest::Style { window: 1, kind: WinKind::Dialog, modal: true, min: (320.0, 200.0), max: (0.0, 0.0) },
-            WinRequest::Style { window: 2, kind: WinKind::Sidebar, modal: false, min: (760.0, 480.0), max: (1100.0, 0.0) },
+            WinRequest::Style { window: 1, kind: WinKind::Dialog, modal: true, min: (320.0, 200.0), max: (0.0, 0.0), frosted: false },
+            WinRequest::Style { window: 2, kind: WinKind::Sidebar, modal: false, min: (760.0, 480.0), max: (1100.0, 0.0), frosted: false },
+            WinRequest::Style { window: 3, kind: WinKind::Dialog, modal: false, min: (240.0, 160.0), max: (0.0, 0.0), frosted: true },
             WinRequest::Commands {
                 window: 1,
                 terminal: true,

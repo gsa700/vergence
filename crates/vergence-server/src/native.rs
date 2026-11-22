@@ -81,6 +81,9 @@ pub struct NativeStyle {
     pub modal: bool,
     pub min: (f64, f64),
     pub max: (f64, f64),
+    /// No ground of its own: the server frosts what is behind its whole body
+    /// (bus v36; preview milestone 1, step 6b; decor.rs).
+    pub frosted: bool,
 }
 
 /// Actions sent to native windows by their meaning (Contract 3, bus v24,
@@ -302,6 +305,9 @@ pub struct Picture {
     pub px: Size<i32, BufferCoords>,
     pub logical: Size<i32, Logical>,
     format: u32,
+    /// Declared opaque to the renderer (an Xrgb picture of a window that is
+    /// not frosted): a picture made otherwise is made again, not reused.
+    opaque: bool,
 }
 
 #[derive(Clone)]
@@ -325,6 +331,15 @@ pub struct GpuPicture {
     /// new frame looked unchanged and stayed off the screen until the next
     /// (the terminal's echo on Techbench, 2026-11-17).
     pub serial: u64,
+}
+
+/// The region of a shared-memory picture the renderer may take as opaque:
+/// all of an Xrgb one (it has no alpha), none of an Argb one, and none of a
+/// frosted window's (bus v36; preview milestone 1, step 6b): the frost the
+/// server draws behind it must show through wherever it leaves its pixels
+/// clear, and an opaque region would let the renderer skip what is behind.
+fn opaque_region(fourcc: Fourcc, frosted: bool, px: Size<i32, BufferCoords>) -> Option<Vec<Rectangle<i32, BufferCoords>>> {
+    (fourcc == Fourcc::Xrgb8888 && !frosted).then(|| vec![Rectangle::from_size(px)])
 }
 
 /// A picture's side in points from its side in pixels: the inverse of the
@@ -464,6 +479,12 @@ impl NativeWindow {
     /// The style it asked its bar to be drawn in.
     pub fn bar_style(&self) -> vergence_protocol::window::BarStyle {
         self.state.lock().unwrap().bar_style
+    }
+
+    /// Whether it asked for a frosted ground (bus v36; preview milestone 1,
+    /// step 6b): the server frosts what is behind its whole body (decor.rs).
+    pub fn frosted(&self) -> bool {
+        self.state.lock().unwrap().style.is_some_and(|s| s.frosted)
     }
 
     /// Its parent's id on its connection (0: none) and what it said of itself.
@@ -687,7 +708,7 @@ impl Server {
             // lone one (a Properties window, files milestone 2): a window of
             // its own, listed and stacked as one, with the slim close-only bar
             // (no app button); a palette of none is a normal window.
-            WinRequest::Style { window, kind, modal, min, max } => {
+            WinRequest::Style { window, kind, modal, min, max, frosted } => {
                 if let Some(Win::Native(n)) = self.natives.get(&(client, window)).cloned() {
                     let parent = n.state.lock().unwrap().parent;
                     // A portal's dialog belongs to another program's window (portal.rs).
@@ -698,7 +719,7 @@ impl Server {
                         vergence_protocol::window::WinKind::Dialog | vergence_protocol::window::WinKind::Palette if !owned => vergence_protocol::window::WinKind::Normal,
                         k => k,
                     };
-                    let style = NativeStyle { kind, modal: modal && kind == vergence_protocol::window::WinKind::Dialog, min, max };
+                    let style = NativeStyle { kind, modal: modal && kind == vergence_protocol::window::WinKind::Dialog, min, max, frosted };
                     tracing::info!("native: window {window} of {:?} is {style:?}", n.app_id);
                     n.state.lock().unwrap().style = Some(style);
                     // The desktop's icons: in their place, under every window (desktop.rs).
@@ -1057,11 +1078,12 @@ impl Server {
         let (w, h) = (width as i32, height as i32);
         let px: Size<i32, BufferCoords> = (w, h).into();
         let mut s = n.state.lock().unwrap();
-        let reuse = s.picture.as_ref().is_some_and(|p| p.px == px && p.format == format && matches!(p.content, Content::Memory(_)));
+        let opaque = opaque_region(fourcc, s.style.is_some_and(|st| st.frosted), px);
+        let reuse = s.picture.as_ref().is_some_and(|p| p.px == px && p.format == format && p.opaque == opaque.is_some() && matches!(p.content, Content::Memory(_)));
         if !reuse {
-            let opaque = (fourcc == Fourcc::Xrgb8888).then(|| vec![Rectangle::from_size(px)]);
+            let declared = opaque.is_some();
             let buffer = MemoryRenderBuffer::new(fourcc, px, 1, Transform::Normal, opaque);
-            s.picture = Some(Picture { content: Content::Memory(buffer), px, logical: Size::default(), format });
+            s.picture = Some(Picture { content: Content::Memory(buffer), px, logical: Size::default(), format, opaque: declared });
         }
         let scale = s.scale;
         let p = s.picture.as_mut().unwrap();
@@ -1109,7 +1131,7 @@ impl Server {
         let buffer = MemoryRenderBuffer::from_slice(rgba, Fourcc::Abgr8888, px, 1, Transform::Normal, None);
         let mut s = n.state.lock().unwrap();
         let logical = (points_of(px.w, s.scale), points_of(px.h, s.scale)).into();
-        s.picture = Some(Picture { content: Content::Memory(buffer), px, logical, format: 0 });
+        s.picture = Some(Picture { content: Content::Memory(buffer), px, logical, format: 0, opaque: false });
         Ok(())
     }
 
@@ -1129,7 +1151,7 @@ impl Server {
         let logical = (points_of(width as i32, s.scale), points_of(height as i32, s.scale)).into();
         let serial = PICTURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let gpu = GpuPicture { dmabuf, texture: None, gles: None, failed: false, serial };
-        s.picture = Some(Picture { content: Content::Gpu(Arc::new(Mutex::new(gpu))), px, logical, format });
+        s.picture = Some(Picture { content: Content::Gpu(Arc::new(Mutex::new(gpu))), px, logical, format, opaque: false });
         Ok(())
     }
 
@@ -1608,6 +1630,18 @@ mod tests {
         }
         assert_eq!(points_of(0, 1.5), 0);
         assert_eq!(points_of(100, 0.0), 100);
+    }
+
+    /// A frosted window's picture is never declared opaque, whatever its
+    /// format (preview milestone 1, step 6b): the frost behind it shows
+    /// through. Other windows' Xrgb pictures stay opaque, as before.
+    #[test]
+    fn a_frosted_window_has_no_opaque_region() {
+        let px: Size<i32, BufferCoords> = (64, 32).into();
+        assert_eq!(opaque_region(Fourcc::Xrgb8888, false, px), Some(vec![Rectangle::from_size(px)]));
+        assert_eq!(opaque_region(Fourcc::Argb8888, false, px), None);
+        assert_eq!(opaque_region(Fourcc::Xrgb8888, true, px), None);
+        assert_eq!(opaque_region(Fourcc::Argb8888, true, px), None);
     }
 
     fn file_with(bytes: &[u8]) -> std::fs::File {

@@ -283,7 +283,7 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
 /// The Style request for an app's window, if it says anything a normal window
 /// without limits would not.
 fn style_request(s: crate::Style, window: u32) -> Option<WinRequest> {
-    (s != crate::Style::default()).then_some(WinRequest::Style { window, kind: s.kind, modal: s.modal, min: s.min, max: s.max })
+    (s != crate::Style::default()).then_some(WinRequest::Style { window, kind: s.kind, modal: s.modal, min: s.min, max: s.max, frosted: s.frosted })
 }
 
 /// The Create request for a window run by `app` (its serial filled in by the
@@ -584,7 +584,7 @@ impl<'a> Native<'a> {
                         // does, the server takes it for a dialog (no window memory).
                         let style = self.windows[i].app.get().style();
                         let opened = self.windows[i].opened_by != 0;
-                        if let Some(r) = style_request(style, window).or_else(|| opened.then_some(WinRequest::Style { window, kind: style.kind, modal: style.modal, min: style.min, max: style.max })) {
+                        if let Some(r) = style_request(style, window).or_else(|| opened.then_some(WinRequest::Style { window, kind: style.kind, modal: style.modal, min: style.min, max: style.max, frosted: style.frosted })) {
                             self.send(r)?;
                         }
                     }

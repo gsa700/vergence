@@ -795,6 +795,9 @@ impl Server {
         let mut spans: Vec<(Win, usize)> = Vec::new();
         for w in windows {
             spans.push((w.clone(), elements.len()));
+            // A frosted window's frost (its look, its bar's place in pixels, its
+            // ground for when there is no frost), drawn behind its picture.
+            let mut body_frost: Option<(crate::backdrop::Look, Rectangle<i32, Physical>, vergence_look::Rgb)> = None;
             // This window's own bar style (bar_light).
             let light = self.bar_light(&w, light);
             let shaded = vergence_look::bar_look_shaded(light, self.bar_shade());
@@ -907,13 +910,19 @@ impl Server {
                     reinset.push(w.clone());
                 }
                 let d = self.decor.get_mut(&w).unwrap();
+                // A native window with a frosted ground (bus v36; preview milestone
+                // 1, step 6b; Dave: "let's make the preview windows look similar to
+                // the mac. We have frost in our toolkit"): one frost of what is
+                // behind it under its bar and its whole body, as Quick Look's.
+                let ground_frosted = w.native().is_some_and(|n| n.frosted());
                 // A native window that draws under its bar, with its picture on the
-                // GPU: the strip at the picture's top is frosted into the bar.
-                let under = frost.as_ref().filter(|_| w.native().is_some_and(|n| n.inset() > 0)).and_then(|_| native_texture(renderer, &w));
+                // GPU: the strip at the picture's top is frosted into the bar (not a
+                // frosted window's: its strip is clear, the frost behind shows).
+                let under = frost.as_ref().filter(|_| !ground_frosted && w.native().is_some_and(|n| n.inset() > 0)).and_then(|_| native_texture(renderer, &w));
                 // A Wayland or X11 window's bar: frosted over what is behind it.
                 let behind = frost.is_some() && w.native().is_none();
                 if let Some(f) = frame {
-                    let frosted = under.is_some() || behind;
+                    let frosted = under.is_some() || behind || (ground_frosted && frost.is_some());
                     // The bar, vergence-bar's, drawn once per scale and again when what it shows changes.
                     let hover = hovered.as_ref().filter(|(hw, _)| *hw == w).map(|(_, p)| *p);
                     let width = f.title.size.w;
@@ -1013,6 +1022,31 @@ impl Server {
                     // Behind it, the frost: the top of the window's own picture, blurred
                     // and tinted (vergence_render::blur), the tint raised where the
                     // bar's ink needs it.
+                    // A frosted window: the bar's frost and the body's are one, drawn
+                    // behind its picture (below), rounded at all four corners; here
+                    // only its look and the bar's place are kept. Without the frost
+                    // (Reduce transparency, high contrast, software drawing) its
+                    // ground is the bar's, solid, so its content still has one.
+                    if ground_frosted {
+                        let front_alert = root || alerts.get(shown).copied().unwrap_or(false);
+                        let (ground, ink) = match (front_alert, active) {
+                            (true, true) => (style.alert_ground, style.ink),
+                            (true, false) => (style.alert_ground_off, style.ink_off),
+                            (false, true) => (style.ground, style.ink),
+                            (false, false) => (style.ground_off, style.ink_off),
+                        };
+                        let look = crate::backdrop::Look {
+                            tint: crate::backdrop::unit(ground),
+                            strength,
+                            ink: crate::backdrop::unit(ink),
+                            need: need_of(light, active),
+                            radius: frost_r * scale as f32,
+                            corner: if rounded { vergence_look::RADIUS * scale as f32 } else { 0.0 },
+                            bottom: true,
+                            cap: light,
+                        };
+                        body_frost = Some((look, bar_px, ground));
+                    }
                     if behind && let Some(program) = frost.clone() {
                         let front_alert = root || alerts.get(shown).copied().unwrap_or(false);
                         let (ground, ink) = match (front_alert, active) {
@@ -1136,6 +1170,26 @@ impl Server {
                                         elements.push(SceneElement::Texture(e));
                                     }
                                 }
+                            }
+                        }
+                    }
+                    // Behind the picture (elements run front to back) and in front of
+                    // whatever is behind the window: a frosted window's frost, over its
+                    // bar and its body as one surface (preview milestone 1, step 6b).
+                    // A framebuffer effect, as the dock's: Smithay draws it again
+                    // whenever what is behind it changes (backdrop.rs).
+                    if let Some((look, bar_px, ground)) = body_frost.take() {
+                        let dst = bar_px.merge(body_px);
+                        let d = self.decor.entry(w.clone()).or_insert_with(Decor::new);
+                        match frost.clone() {
+                            Some(program) => {
+                                if let Some(e) = crate::backdrop::element(renderer, &mut d.backdrop, dst, program, &look) {
+                                    elements.push(SceneElement::Backdrop(e));
+                                }
+                            }
+                            None => {
+                                let c = [ground.0 as f32 / 255.0, ground.1 as f32 / 255.0, ground.2 as f32 / 255.0, 1.0];
+                                elements.push(SceneElement::Solid(SolidColorRenderElement::new(d.ids[10].clone(), dst, d.commit, c, Kind::Unspecified)));
                             }
                         }
                     }

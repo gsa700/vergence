@@ -296,6 +296,10 @@ struct Host<P: Program> {
     waker: Option<Waker>,
     /// Each named scroll's place as last told to the program (Program::scrolled).
     scrolls_told: std::collections::HashMap<String, f32>,
+    /// The last frame was for the native road (a Vergence session), where
+    /// the server frosts a frosted window's ground (preview milestone 1,
+    /// step 6b): such a window then leaves its ground clear.
+    native: bool,
 }
 
 /// The toolkit's timer for touch and hold, and how long a finger is held.
@@ -467,6 +471,14 @@ impl<P: Program> vergence_ui::App for Host<P> {
     }
 
     fn background(&self) -> Color {
+        // A frosted window on the native road: no ground of its own, so the
+        // server's frost of what is behind it shows wherever the view leaves
+        // its pixels clear (preview milestone 1, step 6b; Dave: "let's make
+        // the preview windows look similar to the mac. We have frost in our
+        // toolkit"). On the Wayland road no one frosts it: it keeps its ground.
+        if self.native && self.program.style().frosted {
+            return Color::rgba(0, 0, 0, 0);
+        }
         self.theme.ground()
     }
 
@@ -643,6 +655,7 @@ impl<P: Program> Host<P> {
 
     /// The frame's scene: the tree built again if anything changed, then drawn.
     fn build(&mut self, frame: &Frame, fonts: &mut Fonts) -> Scene {
+        self.native = frame.native;
         if frame.scale != self.scale {
             self.scale = frame.scale;
             self.stale |= self.program.scale(frame.scale);
@@ -713,7 +726,7 @@ impl<P: Program> Host<P> {
 pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
     let theme = program.theme();
     let title_sent = program.title();
-    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None, fit: FitToContent::Wanted, waker: None, scrolls_told: Default::default() })
+    Box::new(Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: false, print_frames: false, scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None, fit: FitToContent::Wanted, waker: None, scrolls_told: Default::default(), native: false })
 }
 
 /// Opens the program's window and runs until it is closed. `size` is the
@@ -721,7 +734,7 @@ pub fn window<P: Program + 'static>(program: P) -> Box<dyn vergence_ui::App> {
 pub fn run<P: Program>(program: P, size: (u32, u32)) -> io::Result<()> {
     let theme = program.theme();
     let title_sent = program.title();
-    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None, fit: FitToContent::Wanted, waker: None, scrolls_told: Default::default() };
+    let mut host = Host { program, ui: Ui::new(), theme, stale: true, laid_at: (0.0, 0.0), scale: 0.0, print_tree: std::env::var_os("VERGENCE_UI_TREE").is_some_and(|v| v == "1"), print_frames: std::env::var_os("VERGENCE_UI_FRAMES").is_some_and(|v| v == "1"), scene_ms: 0.0, meaning_sent: None, bar_sent: None, commands_sent: None, bar_style_sent: None, tint: None, title_sent, hold: None, held: None, fit: FitToContent::Wanted, waker: None, scrolls_told: Default::default(), native: false };
     vergence_ui::run(&mut host, size)
 }
 

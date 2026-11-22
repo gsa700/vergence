@@ -24,7 +24,7 @@ use vergence_scene::{Image, Rect};
 use vergence_ui::keyboard::sym;
 use vergence_widgets::files::{self, Entry, Kind};
 use vergence_widgets::textarea::{AreaOptions, TextDoc, text_area};
-use vergence_widgets::{Element, Input, Length, Program, Theme, Waker, Window, button, column, drawing, label, panel, row, scroll, space};
+use vergence_widgets::{Element, Input, Length, Padding, Program, Theme, Waker, Window, button, column, drawing, label, panel, row, scroll, space};
 
 /// What the preview and the window it came from share.
 pub struct Link {
@@ -51,6 +51,13 @@ const PAGES_MAX: usize = 24;
 const PAGE_PX: f32 = 900.0;
 const STRIP_W: f32 = 112.0;
 const PAD: f32 = 12.0;
+/// The frost shown around the content card, below the bar too, and the
+/// card's corners (preview milestone 1, step 6b: Quick Look's look; Dave:
+/// "let's make the preview windows look similar to the mac. We have frost in
+/// our toolkit"). The window has no ground of its own: the server frosts
+/// what is behind it, and the content stands on that as an inset card.
+const MARGIN: f32 = 8.0;
+const CARD_R: f32 = 8.0;
 
 /// What the preview shows of the file.
 enum Shows {
@@ -277,7 +284,13 @@ impl Peek {
                 (self.theme.mono_size * 0.6 * 100.0 + 2.0 * PAD + 16.0, (lines * line_h + 2.0 * PAD).clamp(200.0, 1100.0))
             }
         };
-        (w.round() as u32, h.round() as u32)
+        // The frost's margin around the card.
+        ((w + 2.0 * MARGIN).round() as u32, (h + 2.0 * MARGIN).round() as u32)
+    }
+
+    /// The card's width: the window's less the frost's margins.
+    fn card_w(&self) -> f32 {
+        self.size.0 - 2.0 * MARGIN
     }
 
     fn pages_view(&self) -> Element<Msg> {
@@ -285,7 +298,7 @@ impl Peek {
         if p.drawn.is_empty() {
             return panel(label("…").size(14.0).dim()).width(Length::FILL).height(Length::FILL);
         }
-        let page_w = (self.size.0 - STRIP_W - 3.0 * PAD).max(100.0);
+        let page_w = (self.card_w() - STRIP_W - 3.0 * PAD).max(100.0);
         let mut pages: Vec<Element<Msg>> = Vec::new();
         let mut thumbs: Vec<Element<Msg>> = Vec::new();
         for (i, img) in p.drawn.iter().enumerate() {
@@ -432,6 +445,22 @@ fn fitted<M: 'static>(img: Arc<Image>) -> Element<M> {
     .height(Length::FILL)
 }
 
+/// A picture fitted in its place, at its proportions, its corners rounded
+/// to `radius` (the card's: preview milestone 1, step 6b).
+fn rounded<M: 'static>(img: Arc<Image>, radius: f32) -> Element<M> {
+    drawing(move |scene, _, r: Rect, _t: &Theme| {
+        let s = (r.w / img.width as f32).min(r.h / img.height as f32);
+        let (w, h) = (img.width as f32 * s, img.height as f32 * s);
+        let at = Rect::new(r.x + (r.w - w) / 2.0, r.y + (r.h - h) / 2.0, w, h);
+        let id = scene.image(img.clone());
+        scene.push_clip(at, radius);
+        scene.draw_image(id, at, 1.0);
+        scene.pop_clip();
+    })
+    .width(Length::FILL)
+    .height(Length::FILL)
+}
+
 /// A text file's text, the first [`TEXT_MAX`] bytes, if it is text: no NUL,
 /// UTF-8 (cut at a character's edge where the read ended).
 fn read_text(path: &Path) -> Option<String> {
@@ -476,7 +505,7 @@ impl Program for Peek {
     }
 
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (240.0, 160.0), max: (0.0, 0.0), alone: false }
+        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: false, min: (240.0, 160.0), max: (0.0, 0.0), alone: false, frosted: true }
     }
 
     /// Its own place in window memory, apart from FileView's windows.
@@ -598,7 +627,7 @@ impl Program for Peek {
             Msg::Seek(x) => {
                 if let Shows::Sound(l) = &self.shows {
                     let frames = l.state.lock().unwrap_or_else(|e| e.into_inner()).info.as_ref().map_or(0, |i| i.frames);
-                    let w = (self.size.0 - 2.0 * PAD).max(1.0);
+                    let w = (self.card_w() - 2.0 * PAD).max(1.0);
                     l.ask(crate::listen::Ask::Seek(((x / w).clamp(0.0, 1.0) as f64 * frames as f64) as u64));
                     l.ask(crate::listen::Ask::Play);
                 }
@@ -606,24 +635,30 @@ impl Program for Peek {
             }
         };
         let p = self.pages.lock().unwrap_or_else(|e| e.into_inner());
-        let page_w = (self.size.0 - STRIP_W - 3.0 * PAD).max(100.0);
+        let page_w = (self.card_w() - STRIP_W - 3.0 * PAD).max(100.0);
         let y: f32 = p.sizes.iter().take(i).map(|(w, h)| page_w * h / w.max(1.0) + PAD).sum();
         drop(p);
         self.jump = Some(y);
     }
 
     fn view(&self, theme: &Theme) -> Element<Msg> {
-        let inner = match &self.shows {
-            Shows::Facts => self.facts_view(),
+        // The card: the content on a ground of its own with rounded corners,
+        // inset in the frost (no ground around it: the window's is clear).
+        let card = match &self.shows {
+            Shows::Facts => panel(self.facts_view()).color(theme.card).padding(PAD),
+            // A picture is the card itself, its own corners rounded; the frost
+            // shows where the window is not of its proportions.
             Shows::Picture => match self.picture() {
-                Some(img) => return panel(fitted(img)).color(theme.card).radius(0.0).width(Length::FILL).height(Length::FILL),
-                None => panel(label("…").size(14.0).dim()).width(Length::FILL).height(Length::FILL),
+                Some(img) => panel(rounded(img, CARD_R)),
+                None => panel(label("…").size(14.0).dim()).color(theme.page).padding(PAD),
             },
-            Shows::Pages => self.pages_view(),
-            Shows::Text(doc) => text_area(doc),
-            Shows::Sound(l) => self.sound_view(l, theme),
+            Shows::Pages => panel(self.pages_view()).color(theme.card).padding(PAD),
+            // The text area has no ground of its own: the page color under it.
+            Shows::Text(doc) => panel(text_area(doc)).color(theme.page).padding(Padding::all(CARD_R / 2.0)),
+            Shows::Sound(l) => panel(self.sound_view(l, theme)).color(theme.card).padding(PAD),
         };
-        panel(inner).color(theme.card).radius(0.0).padding(PAD).width(Length::FILL).height(Length::FILL)
+        let card = card.radius(CARD_R).width(Length::FILL).height(Length::FILL);
+        panel(card).radius(0.0).padding(MARGIN).width(Length::FILL).height(Length::FILL)
     }
 }
 

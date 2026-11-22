@@ -68,11 +68,13 @@
 //! `ClientMsg::Drive` (eject, mount, mount a disk image), `ServerMsg::DriveDone`.
 //! Version 35 (preview milestone 1): `window::BarIcon::Label`, a bar button
 //! showing its name; a dialog that asks for a size keeps its center.
+//! Version 36 (preview milestone 1, step 6b): `window::WinRequest::Style::frosted`,
+//! a window with no ground of its own, frosted by the server behind its whole body.
 
 use crate::wire::{Decoder, Encoder, Frame, WireError};
 
 /// The protocol version this crate speaks.
-pub const VERSION: u32 = 35;
+pub const VERSION: u32 = 36;
 
 /// Something a client can subscribe to. Values are fixed on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

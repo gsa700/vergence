@@ -73,7 +73,7 @@ impl Program for Dialog {
     }
     fn update(&mut self, _: Msg, _: &mut Window) {}
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: self.modal, min: (320.0, 140.0), max: (0.0, 0.0), alone: false }
+        vergence_ui::Style { kind: vergence_ui::WinKind::Dialog, modal: self.modal, min: (320.0, 140.0), max: (0.0, 0.0), alone: false, frosted: false }
     }
 }
 
@@ -94,7 +94,7 @@ impl Program for Palette {
     }
     fn update(&mut self, _: Msg, _: &mut Window) {}
     fn style(&self) -> vergence_ui::Style {
-        vergence_ui::Style { kind: vergence_ui::WinKind::Palette, modal: false, min: (200.0, 100.0), max: (0.0, 0.0), alone: false }
+        vergence_ui::Style { kind: vergence_ui::WinKind::Palette, modal: false, min: (200.0, 100.0), max: (0.0, 0.0), alone: false, frosted: false }
     }
 }
 
