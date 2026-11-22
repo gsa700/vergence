@@ -79,6 +79,22 @@ pub struct Icon {
 enum Asked {
     Pending,
     Done(Option<Arc<Icon>>),
+    /// The file was there but would not decode, at this time: asked again
+    /// after [`RETRY`] (Dave, 2026-11-22: Reader kept its letter for a whole
+    /// session; its icon was asked for while install.sh replaced the picture
+    /// helper, and the failure was kept for good).
+    Failed(std::time::Instant),
+}
+
+/// How long a failed decode is left before the icon is asked for again.
+const RETRY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// What the icon thread found: the picture, none (no file has the name, for
+/// good), or a file that would not decode (asked again later).
+enum Found {
+    Icon(Icon),
+    NoFile,
+    Failed,
 }
 
 /// Files larger than this, and pictures wider or taller, are not icons.
@@ -95,7 +111,7 @@ fn decode(path: &Path, pixels: u32) -> Option<Icon> {
         return None;
     }
     let pixels = pixels.clamp(8, 512);
-    let p = vergence_decode::decode_file(path, Some((pixels, pixels))).map_err(|e| tracing::debug!("icon {}: {e}", path.display())).ok()?;
+    let p = vergence_decode::decode_file(path, Some((pixels, pixels))).map_err(|e| tracing::info!("icon {}: {e}", path.display())).ok()?;
     let (w, h) = (p.width, p.height);
     if w == 0 || h == 0 || w > MAX_ICON_SIDE || h > MAX_ICON_SIDE {
         return None;
@@ -557,25 +573,34 @@ impl Server {
         match self.shelf.icons.get(&key) {
             Some(Asked::Done(icon)) => return icon.clone(),
             Some(Asked::Pending) => return None,
-            None => {}
+            Some(Asked::Failed(at)) if at.elapsed() < RETRY => return None,
+            Some(Asked::Failed(_)) | None => {}
         }
         if self.shelf.decoder.is_none() {
             // One thread finds and decodes icons, one at a time; what it makes comes
             // back through the event loop. A file that never finishes decoding costs
             // that thread, not the session: its item keeps its letter.
             let (jobs, work) = std::sync::mpsc::channel::<(String, String, u32)>();
-            let (done, results) = channel::<(String, u32, Option<Icon>)>();
+            let (done, results) = channel::<(String, u32, Found)>();
             let spawned = std::thread::Builder::new().name("shelf-icons".into()).spawn(move || {
                 for (theme, name, pixels) in work {
-                    let icon = vergence_shell::icons::find(&theme, &name, pixels).and_then(|file| decode(&file, pixels));
+                    let icon = match vergence_shell::icons::find(&theme, &name, pixels) {
+                        None => Found::NoFile,
+                        Some(file) => decode(&file, pixels).map_or(Found::Failed, Found::Icon),
+                    };
                     if done.send((name, pixels, icon)).is_err() {
                         break;
                     }
                 }
             });
             let listening = self.loop_handle.insert_source(results, |event, _, state| {
-                if let Event::Msg((name, pixels, icon)) = event {
-                    state.shelf.icons.insert((name, pixels), Asked::Done(icon.map(Arc::new)));
+                if let Event::Msg((name, pixels, found)) = event {
+                    let asked = match found {
+                        Found::Icon(icon) => Asked::Done(Some(Arc::new(icon))),
+                        Found::NoFile => Asked::Done(None),
+                        Found::Failed => Asked::Failed(std::time::Instant::now()),
+                    };
+                    state.shelf.icons.insert((name, pixels), asked);
                     state.redraw_all();
                 }
             });
