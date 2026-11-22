@@ -2,14 +2,14 @@
 title: "Vergence"
 subtitle: "A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD"
 author: "David Erickson (AB0R), with Claude"
-date: "22 November 2026 — Draft 0.25"
+date: "22 November 2026 — Draft 0.26"
 ---
 
 # Vergence
 
 **A display architecture for right-sized, right-placed, accessible applications on Linux and FreeBSD**
 
-David Erickson (AB0R), with Claude · Draft 0.25 · 22 November 2026
+David Erickson (AB0R), with Claude · Draft 0.26 · 22 November 2026
 
 ---
 
@@ -21,7 +21,7 @@ On today's Unix-like desktops, an application's size on screen depends on which 
 
 This paper proposes a path to **app consistency**: every application the right size, in the right place and readable, on any monitor setup, for every user, including users who depend on accessibility tools. It starts with something buildable in days on an ordinary X11 desktop: a daemon that recognizes monitor setups by their EDIDs, applies consistent scaling across toolkits, and remembers window layouts per setup. It ends with a long-term design for a new display server. That server rests on one authority and three contracts: geometry in visual size, placement owned by the server but negotiated with apps, and accessibility built into the protocol. Optional vector "display-list" surfaces revive the best idea of NeXTSTEP's Display PostScript.
 
-The design targets **FreeBSD and Linux** together: FreeBSD first, Void Linux second, both tested at every milestone (§9).
+The design targets **FreeBSD and Linux** together: Void Linux first, FreeBSD second, both tested at every milestone (§9).
 
 As of November 2026 the phase 1 daemon is built and frozen, and the phase 2 server runs as the author's daily session on real monitors, on FreeBSD and on Linux (§9).
 
@@ -501,7 +501,7 @@ Why one language:
 - **D-Bus clients** reach a D-Bus front end written by the project, which translates notifications, settings and accessibility into the server's own session bus (§6.8).
 - The server speaks Wayland, X11 and D-Bus at the edges, but placement, memory, units, accessibility and security follow this design.
 
-**Platforms.** Development happens on a Linux without systemd: Void Linux, since 12 November 2026 on a laptop with Intel UHD graphics and an NVIDIA GTX 1650, after first replacing FreeBSD 15 as the primary platform on a small desktop with Intel UHD 630 graphics. FreeBSD taught the project most of what §9 lists and stays a real-hardware platform on that desktop; the order was changed because the work ahead, GPUs and drivers, several cards, explicit sync, a suspend-and-wake soak, is where FreeBSD's ported DRM drivers lag and its tools are thin (no nouveau, no rtcwake, and a GPU hang whose cause is still open, §9). The second Linux is Fedora on a workstation with Intel UHD 770 graphics; there the server meets logind, udev and the in-kernel DRM drivers instead of seatd and devd. Since 16 November all three start at the project's own login screen (§7.5). The FreeBSD virtual machine that built every change while FreeBSD had no hardware was dropped on 10 November. Where the platforms must differ, as with hot-plug events (§4.7) or seat management, the code and the documents say so.
+**Platforms.** Development happens on a Linux without systemd: Void Linux, since 12 November 2026 on a laptop with Intel UHD graphics and an NVIDIA GTX 1650, after first replacing FreeBSD 15 as the primary platform on a small desktop with Intel UHD 630 graphics. FreeBSD taught the project most of what §9 lists and stays a real-hardware platform on that desktop; the order was changed because the work ahead, GPUs and drivers, several cards, explicit sync, a suspend-and-wake soak, is where FreeBSD's ported DRM drivers lag and its tools are thin (no nouveau, no rtcwake, and a GPU hang whose cause is still open, §9). The second Linux is Fedora on a workstation with Intel UHD 770 graphics; there the server meets logind, udev and the in-kernel DRM drivers instead of seatd and devd. Since 16 November all three start at the project's own login screen (§7.5). The FreeBSD virtual machine that built every change while FreeBSD had no hardware was dropped on 10 November. Where the platforms must differ, as with hot-plug events (§4.7) or seat management, the code and the documents say so. On 22 November the order was settled for release: **Void Linux (glibc) first, FreeBSD second**, for hardware and application support (graphics, Wi-Fi, laptop power saving, and applications built only for Linux). Vergence installs on a stock system and leaves its disk layout, encryption and backups to that system.
 
 ### 8.1 Running our .NET/Avalonia applications
 
@@ -646,7 +646,7 @@ The display-list renderer was phase 3 work. Step 1 brought its first version for
 13. Session bus (§6.8): which D-Bus interfaces everyday applications (Firefox, Thunderbird, GTK and Qt applications, Avalonia) actually call, measured with a logging edge before anything is translated; which of them only warn when a service is missing and which fail; the scope of the AT-SPI bridge on the bus side. *First measurement (8 November 2026, Firefox, Slint, Avalonia): the settings portal (now provided), GNOME's idle monitor (Firefox polls it), gvfs, screensaver inhibit, Ubuntu's menu registrar and the accessibility bus. None of the applications failed without them.*
 14. The agent interface (§6.5): the observations and actions it offers, and how they follow from the accessibility tree; how a grant is scoped (an application, a window, a kind of action); a seat for each agent in the server (how its input is routed, what holds its focus, what the user sees of it); which actions wait for the user's confirmation, and how an agent misled by text on the screen is kept from harm; the protocol at the edge.
 15. Session restore (§6.9): how the project's tools are told they are being restored and what they keep (the stable window identity of Contract 2 is the natural key); how much of the Wayland session-management protocol and X11's are worth speaking at the edge for other toolkits; how an application the user closed on purpose just before the end is told from one the end took with it. *Partly answered (15 November 2026): Exit Vergence… closes the applications itself while the session's list is held, so they are reopened; one the user closed before choosing Exit is not.*
-16. A reference platform. Every system service Vergence leans on (principle 8) is set up differently on each Linux distribution, and supporting all of them would cost without end; at some point one platform will be the reference that every feature is complete on first, the others following as they can. FreeBSD is the natural candidate, there being only one, but its hardware support is why development moved to Linux in November 2026 (§8, Platforms). No choice is needed yet; it is noted so that platform-specific work keeps to the three platforms of principle 6 meanwhile.
+16. A reference platform. Every system service Vergence leans on (principle 8) is set up differently on each Linux distribution, and supporting all of them would cost without end; at some point one platform will be the reference that every feature is complete on first, the others following as they can. FreeBSD is the natural candidate, there being only one, but its hardware support is why development moved to Linux in November 2026 (§8, Platforms). *Settled 2026-11-22:* Void Linux (glibc) is the reference, FreeBSD second, for hardware and application support; Vergence installs on a stock Void system and leaves its disk layout, encryption and backups to it.
 
 ---
 

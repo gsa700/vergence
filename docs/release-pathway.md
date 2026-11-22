@@ -16,13 +16,20 @@ Decided already:
   for packages, `--uninstall`).
 
 To settle:
-1. *Settled 2026-11-21:* **FreeBSD first, Void second** (Dave: "The goal
-   is not to exclude other platforms but to minimize our testing and
-   distribution support requirements. If someone wants to port it to their
-   systemd distro they can, but they support that not me and you."). So the
-   packages are a FreeBSD port (and pkg) first, then an xbps template for
-   Void, and nothing else from us. FreeBSD defines what a feature is; Void
-   gets Linux equivalents where they exist.
+1. *Settled 2026-11-22:* **Void first, FreeBSD second**, replacing
+   2026-11-21's FreeBSD first. Dave: "it's app and driver compatibility
+   that keeps dragging me back ... the graphics, wifi drivers, laptop power
+   save, and so on." The rule from 2026-11-21 stands: "The goal is not to
+   exclude other platforms but to minimize our testing and distribution
+   support requirements. If someone wants to port it to their systemd
+   distro they can, but they support that not me and you." So the packages
+   are an xbps template for Void (glibc) first, then a FreeBSD port (and
+   pkg), and nothing else from us. Void defines what a feature is; FreeBSD
+   gets equivalents where they exist. **No installer of our own**: Vergence
+   is added to a stock system set up by that system's installer, which owns
+   the disk layout and encryption (a Vergence installer was weighed and
+   dropped the same morning: it would make Vergence a distribution to
+   maintain). Backup is left to the user (Rewind shelved, 2026-11-22).
 2. **One package or several**: server + apps + vdm as one, or split (the
    login manager is root and optional; the apps could be wanted under other
    desktops).
@@ -77,7 +84,7 @@ reads well; getting started depends on knowing the lab):
   (sharp text everywhere, the magnifier sharp); placement owned by the server
   and kept per monitor setup; meaning built in, so screen readers and agents
   act by name with permission; untrusted files parsed in confined helpers;
-  FreeBSD first; our own parts throughout. With pictures.
+  Void first, FreeBSD second; our own parts throughout. With pictures.
 
 - The repository is private (`gsa700/vergence`). Going public is Dave's
   call (CLAUDE.md).

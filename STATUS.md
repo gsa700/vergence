@@ -59,6 +59,5 @@ each milestone doc lists what is left.
 The drawer's filter field; a calendar in the clock's card; weather and
 system-log tiles; docks on several screens; explicit sync and NVIDIA's own
 driver (whitepaper §8.3); AMD testing (a Ryzen mini PC is on the wish list);
-the rest of Smithay's replacement (docs/borrowed-review.md); Rewind, the
-backup and versions app (docs/backup-milestone-1.md); connecting to servers
+the rest of Smithay's replacement (docs/borrowed-review.md); connecting to servers
 from FileView; packages.

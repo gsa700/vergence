@@ -2,8 +2,8 @@
 
 Vergence is a desktop written in Rust. It has its own display server, its own
 native protocol between that server and applications, its own toolkit, and a
-set of applications built on that toolkit. FreeBSD is the main platform;
-Void Linux is the supported Linux (see
+set of applications built on that toolkit. Void Linux is the main platform;
+FreeBSD is supported second (see
 [docs/release-pathway.md](docs/release-pathway.md)). Other Wayland
 applications, and X11 applications through Xwayland, run beside the native
 ones.

@@ -7,11 +7,14 @@ is how to build it, run it, test it, and the rules the code keeps.
 
 ## Platforms
 
-FreeBSD first, Void Linux (glibc) second (docs/release-pathway.md). FreeBSD
-defines what a feature is; on Void it builds, is tested, and uses the
-equivalents where they exist. Other systems may be ported by those who use
-them. Keep Linux-only interfaces (udev, systemd, logind, /sys) out of the
-core: where the platforms must differ, say so in the code and the docs.
+Void Linux (glibc) first, FreeBSD second (docs/release-pathway.md, settled
+2026-11-22). Void defines what a feature is; on FreeBSD it builds, is
+tested, and uses the equivalents where they exist. Vergence installs on top
+of a stock system set up by its own installer: disk layout, encryption and
+backups are the system's business, not ours. Other systems may be ported by
+those who use them. Keep one platform's interfaces (udev, /sys, systemd,
+logind; devd, sysctl) out of the core: where the platforms must differ, say
+so in the code and the docs.
 
 ## Build
 

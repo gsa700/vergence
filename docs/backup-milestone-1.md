@@ -1,5 +1,16 @@
 # Backup milestone 1: Vergence's own Backup, and File Viewer's right-click menu
 
+> **SHELVED 2026-11-22 (Dave).** "forget Rewind as conceived and leave
+> backup to the user totally. We could revisit later if we want to or even
+> build the hook into FileView at some point but otherwise leave it and
+> focus on a kick ass desktop environment." Backup is the user's own tool's
+> job; the file system is whatever their system installed. Kept as a record
+> of the design. If it comes back, the cheap first step is a read-only
+> Earlier Versions in FileView over snapshots other tools already make
+> (snapper on Btrfs, sanoid or zfs-auto-snapshot on ZFS); see
+> docs/apps-roadmap.md. File Viewer's right-click menu, the other half of
+> this plan, was built (9460c05).
+
 **Name: Rewind** (Dave, 2026-11-22: "Rewind is good"): the ZFS versions
 and backup part of Vergence. FileVault was the first idea (it fits FileView's
 name) but is Apple's, macOS's disk encryption and a trademark.

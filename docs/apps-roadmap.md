@@ -83,9 +83,12 @@ build once than in every app:
    desktop portal's FileChooser on the session D-Bus (our own D-Bus code,
    vergence-dbus), so Firefox, GTK and Qt apps open the same dialog, and
    whatever it gains later reaches them too.
-6. **Backup**, then into the file manager: ZFS snapshots on FreeBSD (and
-   Linux with ZFS), `zfs send` to remote hosts over SSH, rsync where there
-   is no ZFS; a file's versions from its snapshots in the file manager.
+6. ~~**Backup**~~ *shelved 2026-11-22 (Dave: "leave backup to the user
+   totally ... focus on a kick ass desktop environment"; see
+   docs/backup-milestone-1.md).* Later, maybe: a read-only Earlier
+   Versions in FileView, over snapshots other tools already make (snapper
+   on Btrfs, sanoid or zfs-auto-snapshot on ZFS), with no backup engine of
+   our own.
 7. **Disk utility**: disks, partitions, file systems, ZFS pools, SMART;
    changing anything needs root, so a small root helper of our own (as the
    sound helper on FreeBSD), designed with §7.3.
@@ -184,7 +187,7 @@ it is today:
   started before then does not have it. The terminal's also has New tab,
   the splits and moving a pane: the editor's equivalents (New tab, New
   window, Find) can join it.
-- **Snapshots for the backup app on Linux, as ZFS gives on FreeBSD**: Btrfs
+- *(Shelved with Rewind, 2026-11-22.)* **Snapshots for the backup app on Linux, as ZFS gives on FreeBSD**: Btrfs
   has them (read-only subvolume snapshots, `btrfs send` to another
   machine), and Fedora installs on Btrfs (Techbench's / and /home are
   Btrfs); Hubble's ext4 has none, so rsync stays the fallback there. The

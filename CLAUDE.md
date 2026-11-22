@@ -1,7 +1,7 @@
 # Working in this repository (the lab's notes)
 
 Vergence is a Rust desktop: its own display server, native protocol, toolkit
-and apps, FreeBSD first and Void Linux second. Start here:
+and apps, Void Linux first and FreeBSD second. Start here:
 
 - **CONTRIBUTING.md**: building, running, testing, and the rules the code
   keeps (Rust throughout, our own parts unless borrowing is necessary and
@@ -29,8 +29,8 @@ an AI collaborator must know to work here safely.
   external outputs through Mesa NVK; dual boot with Windows). No display
   manager: log in on the text console, then `vergence`. Passwordless sudo.
   Ask before restarting its session.
-- **techbench** (FreeBSD 15.1 on ZFS over GELI, i9-13900K, UHD 770, the LG
-  27" 4K at 133⅓%): **Dave's workstation, not a project machine.** Normally no
+- **techbench** (i9-13900K, UHD 770, the LG 27" 4K at 133⅓%; FreeBSD 15.1
+  on ZFS over GELI until Dave reinstalls it with Void, 2026-11-22): **Dave's workstation, not a project machine.** Normally no
   root for Claude; for testing Dave gives a test password for sudo, **never
   stored anywhere** (ask him again in a later session). Its disk is
   encrypted: **no autologin there, ever.** Restarts of its session only when
