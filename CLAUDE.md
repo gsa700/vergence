@@ -72,7 +72,14 @@ an AI collaborator must know to work here safely.
 - **The display check** on a live screen (`tools/lab/display-check.sh`)
   changes that screen's scale for minutes: never on a screen Dave is working
   at without asking; `--headless "<spec>"` instead.
-- **Installing:** `cargo build --release` on the box, `sudo tools/install.sh`
+- **techbench runs from the package** (since 2026-11-22: `vergence`, /usr):
+  tests build there as always (target-check), but a change reaches its
+  session through a package: bump `revision` in the template, a `git
+  archive` tarball into Hubble's ~/void-packages/hostdir/sources, `./xbps-src
+  pkg vergence` on Hubble, copy the .xbps into techbench's ~/vergence-repo,
+  `xbps-rindex -a`, `sudo xbps-install -u --repository=$HOME/vergence-repo
+  vergence` (docs/packaging-milestone-1.md). install.sh refuses there.
+- **Installing (Hubble, kepler):** `cargo build --release` on the box, `sudo tools/install.sh`
   (it restarts the desktop's icons and installs the helpers in
   libexec/vergence), then `vctl restart` only when the server changed or the
   bus version moved (and only with Dave's go on techbench; ask on Hubble).
