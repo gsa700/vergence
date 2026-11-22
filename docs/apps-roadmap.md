@@ -343,7 +343,10 @@ it is today:
 - **PDF in Close-Up** (or a viewer of its own): a PDF library is a
   borrowing question (pdfium BSD, MuPDF AGPL, poppler GPL).
 - **File Viewer's Space preview as a window of its own**, attached to File
-  Viewer, with Open in… for full viewing and editing.
+  Viewer, with Open in… for full viewing and editing. Its text runs past the
+  window (Dave, 2026-11-21: "the spacebar preview on FileView is broken.
+  Text flows past the window. We'll get it when we work that over"): to fix
+  with this rework.
 - **File Viewer's history**: the mouse's back button (BTN_SIDE) goes back
   as in a browser; going back gives each folder its state (scroll,
   selection) again; forgotten when the session ends.
