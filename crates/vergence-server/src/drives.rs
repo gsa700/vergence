@@ -226,7 +226,8 @@ fn eject(path: &std::path::Path) -> Result<(), String> {
         tries.push(("fusermount3", vec!["-u"]));
         tries.push(("fusermount", vec!["-u"]));
     }
-    tries.push(("umount", vec![]));
+    // By its full path where there is one: the session's PATH may not have /sbin.
+    tries.push((if std::path::Path::new("/sbin/umount").exists() { "/sbin/umount" } else { "umount" }, vec![]));
     let mut why = String::new();
     for (program, args) in tries {
         match std::process::Command::new(program).args(&args).arg(path).stdin(std::process::Stdio::null()).output() {
