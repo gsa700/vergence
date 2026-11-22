@@ -25,11 +25,11 @@ To settle:
    distro they can, but they support that not me and you." So the packages
    are an xbps template for Void (glibc) first, then a FreeBSD port (and
    pkg), and nothing else from us. Void defines what a feature is; FreeBSD
-   gets equivalents where they exist. **No installer of our own**: Vergence
-   is added to a stock system set up by that system's installer, which owns
-   the disk layout and encryption (a Vergence installer was weighed and
-   dropped the same morning: it would make Vergence a distribution to
-   maintain). Backup is left to the user (Rewind shelved, 2026-11-22).
+   gets equivalents where they exist. **Near term, no installer of our
+   own**: Vergence is added to a stock system set up by that system's
+   installer, which owns the disk layout and encryption. Backup is left to
+   the user (Rewind shelved, 2026-11-22). Long term, the Vergence system
+   (§4).
 2. **One package or several**: server + apps + vdm as one, or split (the
    login manager is root and optional; the apps could be wanted under other
    desktops).
@@ -95,8 +95,38 @@ reads well; getting started depends on knowing the lab):
 - Where the project lives, how issues are taken, and the license text
   (`Apache-2.0 OR GPL-2.0-or-later`, decided 2026-11-11).
 
+## 4. The Vergence system (long term)
+
+*Settled 2026-11-22* (Dave: "I think that is a good balance. We benefit
+from an OS configuration that we like and get the FS and layout we want for
+Rewind as a bonus. In the worst case, we rebase to something else, heck that
+could be a feature sometime: Linux or FreeBSD from our installer?"). After
+the packages (1), not before:
+
+1. **Void's repository is the software source.** We package Vergence and
+   choose a base set; the kernel, Mesa, firmware and security fixes stay
+   Void's. Not a distribution of our own.
+2. **Our own installer and ISO** (the ISO made with Void's void-mklive).
+   We own the layout: encryption is a checkbox (LUKS2), Btrfs is the
+   default.
+3. **A normal, changeable system** (Dave is no fan of immutable ones), with
+   a Btrfs snapshot before every system update and a boot entry for the
+   state before it.
+4. **Apps Void lacks**: Flatpak while it works without systemd (Flatpak's
+   next major version is heading toward systemd: watched, not built on);
+   AppImage for proprietary apps.
+5. **The installer's engine takes the OS as a back end** from the start:
+   Void first, FreeBSD later (pkgbase into ZFS on GELI). A choice for
+   users, and the way out if Void ever has to be replaced.
+6. **Rewind comes back** here, on the layout the installer made (Btrfs on
+   Void, ZFS on FreeBSD).
+
+Weighed and set aside the same morning: ZFS root on Linux (ZFSBootMenu),
+a distribution of our own, an immutable image with Flathub at its center.
+
 ## Order (proposed)
 
 The platforms (1.1) are settled. Do the
 tree work (2) before the first package, so the source a package points at
-is the one people will read. Going public (3) comes last.
+is the one people will read. Going public (3) comes last. The Vergence
+system (4) follows the packages.

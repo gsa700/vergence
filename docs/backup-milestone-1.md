@@ -9,7 +9,9 @@
 > Earlier Versions in FileView over snapshots other tools already make
 > (snapper on Btrfs, sanoid or zfs-auto-snapshot on ZFS); see
 > docs/apps-roadmap.md. File Viewer's right-click menu, the other half of
-> this plan, was built (9460c05).
+> this plan, was built (9460c05). Later the same morning Dave chose the
+> long-term Vergence system with our own installer (docs/release-pathway.md
+> §4): Rewind is expected back there, on the layout the installer makes.
 
 **Name: Rewind** (Dave, 2026-11-22: "Rewind is good"): the ZFS versions
 and backup part of Vergence. FileVault was the first idea (it fits FileView's

@@ -88,7 +88,8 @@ build once than in every app:
    docs/backup-milestone-1.md).* Later, maybe: a read-only Earlier
    Versions in FileView, over snapshots other tools already make (snapper
    on Btrfs, sanoid or zfs-auto-snapshot on ZFS), with no backup engine of
-   our own.
+   our own. Rewind itself returns with the Vergence system's installer
+   (docs/release-pathway.md §4).
 7. **Disk utility**: disks, partitions, file systems, ZFS pools, SMART;
    changing anything needs root, so a small root helper of our own (as the
    sound helper on FreeBSD), designed with §7.3.
