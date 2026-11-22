@@ -1,6 +1,6 @@
 # Files milestone 3: FileView, with the best of Explorer and Finder
 
-Status: **all steps in 2026-11-21**; Dave's hands-on pass open. Earlier: **questions answered 2026-11-21** (Dave: 1 yes; 2 "recents should
+Status: **closed 2026-11-21** (Dave: "close it"), seven steps in (disk images the seventh). Earlier: **questions answered 2026-11-21** (Dave: 1 yes; 2 "recents should
 probably exist, but I don't care for it and always turn it off. so lets
 have the option to do that"). An app milestone (after
 screenshots, which closed 2026-11-21), now after session milestone 1
