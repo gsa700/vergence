@@ -79,3 +79,38 @@ only standing in for one.
 6. **The source while the repository is private**: a `git archive` tarball
    of a tagged commit, placed where xbps-src looks for sources, until
    release tarballs can come from GitHub. Lean: yes.
+
+## How a release is cut
+
+1. Raise `version` in the workspace's Cargo.toml (and `Cargo.lock`, from a
+   box) and in the template; `revision=1` again. A change to the package
+   alone, with the same source, raises only `revision`.
+2. Commit, tag `vX.Y.Z`, push the tag: GitHub makes
+   `archive/refs/tags/vX.Y.Z.tar.gz`, the template's distfile.
+3. The template's `checksum`: `sha256sum` of that tarball (GitHub's, not a
+   local `git archive`: the two differ in their bytes).
+4. `./xbps-src pkg vergence` on a Void box; `xlint`; install it on a test
+   machine, update from the last release on another.
+5. Publish: our signed repository (`xbps-rindex --sign --signedby ...`),
+   or the template offered to void-packages.
+
+While the repository is private, steps 2 and 3 use a local `git archive
+--prefix=vergence-X.Y.Z/` tarball placed in xbps-src's
+`hostdir/sources/vergence-X.Y.Z/vX.Y.Z.tar.gz`, its checksum written into
+the build machine's copy of the template.
+
+## Progress
+
+- Step 1 (2026-11-22): void-packages on Hubble, binary-bootstrap; Void's
+  cargo build style builds with the network in the chroot (crates cached in
+  `/host/cargo`).
+- Step 2: the template (09d3fdf); Void allows no `/usr/sbin` (91a38e4).
+  Built: 21 MB, 350 files, 88 MB installed.
+- Step 3: vergence-setup (4a32586), install.sh runs it.
+- Step 5 on techbench: the checkout copy removed, the package installed
+  (runit's supervise folder from the old service had to go: f91d753),
+  vergence-setup, reboot, a session wholly from `/usr`; a wallpaper saved
+  under `/usr/local` found again by name (88e7701, revision 2); update from
+  revision 1 to 2 clean, `xbps-pkgdb` clean. The next-steps message on the
+  first install only (82c7cf7, revision 3).
+

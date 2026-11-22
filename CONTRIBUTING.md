@@ -73,9 +73,30 @@ If you run a Vergence session from your checkout's `target/`, build tests
 into another directory (`CARGO_TARGET_DIR=target-check`), so a rebuild never
 replaces the binaries a running session uses.
 
+## Install (Void: the package)
+
+On Void, Vergence installs as one xbps package, `vergence`, under `/usr`
+(packaging/void/srcpkgs/vergence; docs/packaging-milestone-1.md). The
+package enables nothing, Void's way; afterwards run `sudo vergence-setup`
+once: it enables seatd, vdm, the system bus and polkitd, Wi-Fi and a system
+log, adds you to the seat's group, and asks before each change. Then log out
+and back in, or reboot.
+
+Until the project has a repository of its own, build the package yourself:
+
+    git clone --depth 1 https://github.com/void-linux/void-packages
+    cd void-packages && ./xbps-src binary-bootstrap
+    cp -r /path/to/vergence/packaging/void/srcpkgs/vergence srcpkgs/
+    ./xbps-src pkg vergence
+    sudo xbps-install --repository=hostdir/binpkgs vergence
+    sudo vergence-setup
+
+A machine has the package or a checkout's install (below, under
+`/usr/local`), not both: `tools/install.sh --uninstall` first.
+
 ## Run
 
-- **Installed:** `sudo tools/install.sh` puts the server, the apps, the
+- **Installed from a checkout** (development): `sudo tools/install.sh` puts the server, the apps, the
   helpers (in libexec/vergence), the session files and the login screen's
   daemon under /usr/local (`--prefix`, `--destdir` for packages,
   `--uninstall`). Log in on a text console and run `vergence`. The login
