@@ -9,7 +9,7 @@ makedepends="libinput-devel libxkbcommon-devel libseat-devel libgbm-devel
  fontconfig-devel pam-devel"
 depends="seatd mesa-dri fontconfig dbus udisks2 polkit openbsd-netcat"
 short_desc="Desktop with its own display server, toolkit and applications"
-maintainer="gsa700 <298062495+gsa700@users.noreply.github.com>"
+maintainer="David Erickson <gsa700@gmail.com>"
 # The code is Apache-2.0 OR GPL-2.0-or-later; the AAC helper GPL-2.0-or-later
 # alone (FAAD2's code); the fonts OFL-1.1; the spelling list SCOWL's own.
 license="Apache-2.0 OR GPL-2.0-or-later, GPL-2.0-or-later, OFL-1.1, custom:SCOWL"
