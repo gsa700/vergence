@@ -1084,20 +1084,88 @@ pub fn text_start(p: &Path) -> Option<String> {
 // The mount table and the drives found in it live in vergence-media
 // (drives.rs), shared with the server, which keeps the drive list for every
 // app since drives milestone 1; these are its names here.
-pub use vergence_media::drives::{Mount, mounted_disks, mounts, network_kind, network_mounts, parse_mounts};
+pub use vergence_media::drives::{Mount, mounts, network_kind, parse_mounts};
+pub use vergence_protocol::bus::{DriveInfo, DriveKind};
+
+/// The drive list the server keeps (bus topic Drives), followed by a
+/// thread of this process's own from the first ask; None until it has come,
+/// and outside a Vergence session.
+static DRIVES: std::sync::OnceLock<std::sync::Arc<std::sync::Mutex<Option<Vec<DriveInfo>>>>> = std::sync::OnceLock::new();
+/// Bumped each time the server's list comes: windows that show drives look again.
+static DRIVES_SEEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn server_drives() -> Option<Vec<DriveInfo>> {
+    std::env::var_os(vergence_protocol::BUS_ENV)?;
+    let cell = DRIVES.get_or_init(|| {
+        let cell: std::sync::Arc<std::sync::Mutex<Option<Vec<DriveInfo>>>> = std::sync::Arc::default();
+        let c = cell.clone();
+        let _ = std::thread::Builder::new().name("drives".into()).spawn(move || {
+            use vergence_protocol::bus::{ClientMsg, ServerMsg, Topic};
+            let Ok(mut bus) = vergence_protocol::Client::connect("vergence-drives") else { return };
+            if bus.request(|serial| ClientMsg::Subscribe { serial, topic: Topic::Drives }).is_err() {
+                return;
+            }
+            while let Ok(m) = bus.next_event() {
+                if let ServerMsg::Drives { drives, .. } = m {
+                    *c.lock().unwrap_or_else(|e| e.into_inner()) = Some(drives);
+                    DRIVES_SEEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            // The bus gone: back to reading the mounts here.
+            *c.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        });
+        cell
+    });
+    cell.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// How many times the server's drive list has come (a window showing
+/// drives looks again when it changes).
+pub fn drives_seen() -> u64 {
+    DRIVES_SEEN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Every drive: the server's list in a Vergence session, else as read here.
+pub fn drive_list() -> Vec<DriveInfo> {
+    server_drives().unwrap_or_else(vergence_media::drives::scan)
+}
+
+/// Disks mounted where removable and extra disks go (network mounts aside),
+/// and the drives the automounter lists before they are mounted.
+pub fn mounted_disks() -> Vec<PathBuf> {
+    drive_list().into_iter().filter(|d| d.kind != DriveKind::Network).map(|d| PathBuf::from(d.path)).collect()
+}
+
+/// What the system has mounted over the network.
+pub fn network_mounts() -> Vec<PathBuf> {
+    drive_list().into_iter().filter(|d| d.kind == DriveKind::Network).map(|d| PathBuf::from(d.path)).collect()
+}
+
+/// A drive action through the server (bus v34): where it is mounted, or why not.
+fn by_server(action: vergence_protocol::bus::DriveAction, path: &Path) -> Option<Result<String, String>> {
+    use vergence_protocol::bus::{ClientMsg, ServerMsg};
+    std::env::var_os(vergence_protocol::BUS_ENV)?;
+    let mut bus = vergence_protocol::Client::connect("vergence-drives").ok()?;
+    let path = path.to_string_lossy().into_owned();
+    Some(match bus.request(|serial| ClientMsg::Drive { serial, action, path }) {
+        Ok(ServerMsg::DriveDone { path, .. }) => Ok(path),
+        Ok(other) => Err(format!("{other:?}")),
+        Err(vergence_protocol::ClientError::Refused(_, why)) => Err(why),
+        Err(e) => Err(e.to_string()),
+    })
+}
 #[cfg(test)]
 use vergence_media::drives::disks_of;
 
 /// Whether a folder is a disk or network mount that Eject can let go of.
 pub fn ejectable(path: &Path) -> bool {
-    let table = mounts();
-    table.iter().any(|m| m.at == path && network_kind(&m.kind)) || vergence_media::drives::disks_of(&table).iter().any(|d| d == path)
+    drive_list().iter().any(|d| Path::new(&d.path) == path && d.ejectable)
 }
 
 /// Whether what is mounted at `path` is a disk image (a FreeBSD md device or
 /// a Linux loop device), not a drive: nothing to pull out once let go of.
 pub fn is_image_mount(path: &Path) -> bool {
-    mounts().iter().any(|m| m.at == path && (m.what.starts_with("/dev/md") || m.what.starts_with("/dev/loop")))
+    drive_list().iter().any(|d| Path::new(&d.path) == path && d.kind == DriveKind::Image)
 }
 
 /// Whether an entry is a disk image FileView mounts (an ISO; files milestone 3).
@@ -1105,9 +1173,13 @@ pub fn is_disk_image(e: &Entry) -> bool {
     !e.dir && e.mime == Some("application/x-cd-image")
 }
 
-/// Mounts a disk image read-only through vergence-media: where it is mounted.
+/// Mounts a disk image read-only: through the server in a Vergence session
+/// (bus v34), else vergence-media here. Where it is mounted.
 pub fn mount_image(path: &Path) -> Result<PathBuf, String> {
-    vergence_media::mount_image(path)
+    match by_server(vergence_protocol::bus::DriveAction::MountImage, path) {
+        Some(r) => r.map(PathBuf::from),
+        None => vergence_media::mount_image(path),
+    }
 }
 
 /// Unmounts a disk or a network mount: a removable drive through
@@ -1115,7 +1187,17 @@ pub fn mount_image(path: &Path) -> Result<PathBuf, String> {
 /// `fusermount3 -u` / `fusermount -u` on Linux, everything else (and
 /// everything on FreeBSD) by `umount`. The system decides whether the user
 /// may: the error says why not.
-pub fn eject(path: &Path) -> Result<(), String> {
+///
+/// Ok(true): the server did it and told the user itself (its one "Safe to
+/// remove"); Ok(false): done here, the caller tells.
+pub fn eject(path: &Path) -> Result<bool, String> {
+    if let Some(r) = by_server(vergence_protocol::bus::DriveAction::Eject, path) {
+        return r.map(|_| true);
+    }
+    eject_here(path).map(|()| false)
+}
+
+fn eject_here(path: &Path) -> Result<(), String> {
     // A drive the system's media service mounted (udisks2 on Linux, the
     // automounter on FreeBSD) is let go of through it, and powered off.
     if vergence_media::eject(path)? {

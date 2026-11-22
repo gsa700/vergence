@@ -927,9 +927,10 @@ impl Program for Desktop {
                     let name = self.fixed.get(&e.name).map(|(_, n)| n.clone()).unwrap_or_default();
                     let image = files::is_image_mount(&e.path);
                     match files::eject(&e.path) {
-                        Ok(()) => {
-                            // A disk image put away: nothing to pull out, nothing to say.
-                            if !image {
+                        Ok(told) => {
+                            // A disk image put away: nothing to pull out, nothing to say;
+                            // the server tells of a drive it ejected itself.
+                            if !image && !told {
                                 crate::notify(&format!("Safe to remove “{name}”"), "The drive can be pulled out now.");
                             }
                             self.ejected.insert(e.path.clone());

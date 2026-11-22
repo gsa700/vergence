@@ -27,6 +27,7 @@
 //!       in millimeters (milestone 4, acceptance 3).
 
 mod cursors;
+mod iso;
 mod db;
 mod fake;
 mod live;
@@ -71,6 +72,7 @@ fn main() -> ExitCode {
         Some("zoomed") if args.len() >= 6 => zoomed::run(&args[1..]),
         Some("sharper") if args.len() >= 7 => sharp::run(&args[1..]),
         Some("cursors") if args.len() == 2 => cursors::run(&args[1..]),
+        Some("iso") if args.len() == 3 => iso::run(&args[1..]),
         Some("icons") if args.len() == 3 => cursors::icons(&args[1..]),
         Some("icon-theme") if args.len() == 3 => cursors::icon_theme(&args[1..]),
         // `grid <scale>`: exit 0 if the scale has the server's pixel grid (step and all).

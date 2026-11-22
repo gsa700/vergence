@@ -9,6 +9,8 @@ publish.workspace = true
 [dependencies]
 vergence-scene.workspace = true
 vergence-media.workspace = true
+# The drive list kept by the server (bus topic Drives; drives milestone 1).
+vergence-protocol.workspace = true
 vergence-text.workspace = true
 vergence-render.workspace = true
 vergence-ui.workspace = true

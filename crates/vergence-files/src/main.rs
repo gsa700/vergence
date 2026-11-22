@@ -421,6 +421,10 @@ struct Viewer {
     /// The sidebar's width (`[files] sidebar-width`), the divider's place as
     /// drawn, and a pull on it: where it began (window points) and the width then.
     side_w: f32,
+    /// The server's drive lists seen (files::drives_seen): a new one redraws the sidebar.
+    drives_seen: u64,
+    /// The drives as last seen, to know which went away.
+    drives_last: Vec<PathBuf>,
     divider_rect: Rc<Cell<Rect>>,
     side_pull: Option<(f32, f32)>,
     side_target: Option<sidebar::Line>,
@@ -671,6 +675,8 @@ impl Viewer {
             side_rect: Rc::new(Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0))),
             side_scroll: 0.0,
             side_w: vergence_ui::table_value(&desktop_now, SECTION, "sidebar-width").and_then(|v| v.trim().parse::<f32>().ok()).filter(|w| w.is_finite()).map_or(SIDE_W, |w| w.clamp(SIDE_MIN, SIDE_MAX)),
+            drives_seen: 0,
+            drives_last: Vec::new(),
             divider_rect: Rc::new(Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0))),
             side_pull: None,
             side_target: None,
@@ -1530,8 +1536,8 @@ impl Viewer {
                     let name = here.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     let image = files::is_image_mount(&here);
                     match files::eject(&here) {
-                        Ok(()) => {
-                            if !image {
+                        Ok(told) => {
+                            if !image && !told {
                                 notify(&format!("Safe to remove “{name}”"), "The drive can be pulled out now.");
                             }
                             *self.ejectable.borrow_mut() = None;
@@ -1656,9 +1662,10 @@ impl Viewer {
                     let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     let image = files::is_image_mount(&p);
                     match files::eject(&p) {
-                        Ok(()) => {
-                            // A drive: safe to pull out; a disk image: put away, nothing to say.
-                            if !image {
+                        Ok(told) => {
+                            // A drive: safe to pull out (the server says so itself when it
+                            // ejected); a disk image: put away, nothing to say.
+                            if !image && !told {
                                 notify(&format!("Safe to remove “{name}”"), "The drive can be pulled out now.");
                             }
                             *self.ejectable.borrow_mut() = None;
@@ -3132,6 +3139,21 @@ impl Program for Viewer {
         window.wake_after(WATCH_TIMER, WATCH_EVERY);
         // Where the tabs are scrolled, kept (at most every WATCH_EVERY).
         self.keep();
+        // A new drive list from the server: the sidebar's Locations again
+        // (and a tab on a drive gone goes home).
+        let seen = files::drives_seen();
+        if seen != self.drives_seen {
+            self.drives_seen = seen;
+            *self.ejectable.borrow_mut() = None;
+            let drives: Vec<PathBuf> = files::mounted_disks().into_iter().chain(files::network_mounts()).collect();
+            // A drive listed before and not now: tabs on it go home.
+            let went: Vec<PathBuf> = self.drives_last.iter().filter(|d| !drives.contains(d)).cloned().collect();
+            for t in self.tabs.iter_mut().filter(|t| t.dir().is_some_and(|d| went.iter().any(|w| d.starts_with(w)))) {
+                t.go(Showing::Folder(home()));
+            }
+            self.drives_last = drives;
+            return true;
+        }
         // The folder changed on disk: read again.
         let Some(t) = self.front_mut() else { return false };
         let now = t.dir().and_then(|d| std::fs::metadata(d).and_then(|m| m.modified()).ok());

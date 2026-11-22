@@ -2,7 +2,8 @@
 
 Status: **answered 2026-11-21** (Dave: "yes to all three, go ahead":
 internal file systems shown, plugged-in drives not yet mounted shown, the
-server's one "Safe to remove"); building. Decided (Dave, 2026-11-21): "2, and restart the desktop on
+server's one "Safe to remove"); all steps in the same evening (see
+Progress), waiting for the install and Dave's pass. Decided (Dave, 2026-11-21): "2, and restart the desktop on
 install". The second half was done the same evening: the server keeps the
 desktop's icons running, and tools/install.sh restarts them.
 
@@ -79,3 +80,37 @@ utility on the wish list).
 3. **The notice.** "Safe to remove" from the server alone, once, whichever
    app ejected (Claude's lean), or none at all, as macOS (the drive just
    leaves the sidebar)?
+
+## Progress
+
+All five steps in 2026-11-21. Tests on Hubble and techbench, the display
+suite 17 of 17 on both (scenario 17 new), agent-check 0 failed.
+
+- **Steps 1-3** (044d2f5): vergence-media drives.rs holds the mount table,
+  the disks and network mounts, the automounter's /media, the ejected
+  sticks (moved from vergence-widgets files.rs) and `scan()`, which gives
+  each drive its kind: removable (FreeBSD by driver, da, cd, mmcsd and sdda,
+  and label nodes; Linux by sysfs, on USB or marked removable), optical,
+  image (md, loop), network, internal (not ejectable). The server's
+  drives.rs: a thread scanning every 2 s and when poked (the plan's devd and
+  udisks notices became the poll and the pokes after actions: two seconds
+  at most, and nothing a mount by hand can slip past), the list to the
+  `Drives` topic's subscribers; Eject, Mount and Mount Disk Image on a
+  worker, refused for a path the list does not have (an image's file
+  excepted: vergence-media and the FreeBSD helper check it); the one "Safe
+  to remove" for a drive or a disc. `vctl drives`, `vbus drive`.
+- **Step 4:** vergence-widgets follows the topic on a thread of its own
+  from the first ask (`files::drive_list`, `drives_seen`); `mounted_disks`,
+  `network_mounts`, `ejectable`, `is_image_mount` read it; `eject` and
+  `mount_image` go through the server in a Vergence session (Ok(true): the
+  server told the user, the app says nothing). FileView redraws its
+  sidebar when a new list comes, and a tab on a drive that went away goes
+  home; the desktop's timer compares as before. Outside a session, all as
+  read here.
+- **Step 5:** display-suite scenario 17 (tools/display-suite/17-drives.sh):
+  an ISO written by `vergence-harness iso` (our own ISO 9660 writer, so no
+  xorriso or makefs is needed) mounted through the server, in its list and
+  in FileView's Locations with an eject button; that button lets it go,
+  gone from the system, the list and the sidebar. Passes on Hubble (udisks)
+  and techbench (the helper).
+
