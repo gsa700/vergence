@@ -3108,10 +3108,9 @@ impl Program for Viewer {
         if let Some((name, r)) = answered {
             self.mounting = None;
             match r {
-                Ok(at) => {
-                    self.notice = None;
-                    self.new_tab(Showing::Folder(at));
-                }
+                // Mounted, and shown under Locations: no tab of its own (Dave,
+                // 2026-11-21: "A new tab should never appear unless the user calls it").
+                Ok(_) => self.notice = None,
                 Err(why) => self.notice = Some(format!("“{name}” could not be mounted: {why}")),
             }
             changed = true;

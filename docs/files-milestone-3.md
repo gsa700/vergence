@@ -202,8 +202,9 @@ Close-Up).
 - **Step 7, disk images: in 2026-11-21** (Dave: "in downloads I have an iso,
   can i mount it in Fileview as we do the USB drive?"; added before the
   milestone closes). An ISO opened (double click, Enter) or Mount Disk Image
-  on its right click is mounted read-only on a worker and opens in a tab; it
-  shows under Locations, with Eject (the File menu's, and now the right
+  on its right click is mounted read-only on a worker; it
+  shows under Locations (no tab of its own since 2026-11-21, Dave: "A new tab
+  should never appear unless the user calls it"), with Eject (the File menu's, and now the right
   click of a disk under Locations). vergence-media `mount_image`:
   - FreeBSD: the root helper's `attach` (media-eject, setuid root, its
     group only): an ISO 9660 image the caller owns, checked as opened
