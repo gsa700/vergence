@@ -29,15 +29,17 @@ an AI collaborator must know to work here safely.
   external outputs through Mesa NVK; dual boot with Windows). No display
   manager: log in on the text console, then `vergence`. Passwordless sudo.
   Ask before restarting its session.
-- **techbench** (i9-13900K, UHD 770, the LG 27" 4K at 133⅓%; FreeBSD 15.1
-  on ZFS over GELI until Dave reinstalls it with Void, 2026-11-22): **Dave's workstation, not a project machine.** Normally no
-  root for Claude; for testing Dave gives a test password for sudo, **never
-  stored anywhere** (ask him again in a later session). Its disk is
-  encrypted: **no autologin there, ever.** Restarts of its session only when
-  he agrees.
+- **techbench** (Void Linux, glibc, since 2026-11-22: i9-13900K, UHD 770,
+  the LG 27" 4K at 133⅓%; Btrfs root, not encrypted for now: encryption
+  waits for the Vergence installer, docs/release-pathway.md §4):
+  **Dave's workstation, not a project machine.** Normally no root for
+  Claude; for testing Dave gives a test password for sudo, **never stored
+  anywhere** (ask him again in a later session). No autologin there unless
+  Dave says so. Restarts of its session only when he agrees. vdm's log:
+  socklog (installed 2026-11-22; a base Void has no syslog).
 - **kepler** (FreeBSD, Lenovo Tiny, i5-8500T, UHD 630, the 14" 4K touch
-  monitor): the FreeBSD box for every change (Dave, 2026-11-22), once
-  techbench is on Void; also slower hardware and touch. Its touch panel needs
+  monitor): the FreeBSD box for every change (Dave, 2026-11-22); also
+  slower hardware and touch. Its touch panel needs
   the devd rule that sets `dev.hconf.N.input_mode=2`. Passwordless sudo.
   Clippy is not installed there: run it on Hubble.
 - **canary** (a FreeBSD VM, no GPU): runs the display suite in software when
@@ -51,7 +53,7 @@ an AI collaborator must know to work here safely.
   skip edits that look older than its last build: touch the changed files on
   the box if a change seems not to take.
 - **Build and test on Hubble, techbench and kepler for every change**
-  (kepler is the FreeBSD one once techbench is on Void): `. ~/.cargo/env 2>/dev/null; cd ~/src/vergence;
+  (kepler is the FreeBSD one): `. ~/.cargo/env 2>/dev/null; cd ~/src/vergence;
   CARGO_TARGET_DIR=target-check cargo test -q --workspace` (Rust is rustup's
   on techbench and kepler, hence `~/.cargo/env`; Hubble's is Void's package). Test builds always go to target-check: a
   rebuilt target/release under a running session broke techbench once.
