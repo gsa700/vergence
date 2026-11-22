@@ -89,6 +89,12 @@ pub struct Peek {
     /// The window's size, and the last size asked for.
     size: (f32, f32),
     asked: Option<(u32, u32)>,
+    /// The size the server gave for the last ask (None: an ask is under
+    /// way); and whether the person has resized the window since, which
+    /// keeps their size for the files that follow (Dave, 2026-11-21: "macOS
+    /// allows these preview windows to be resized").
+    given: Option<(f32, f32)>,
+    by_hand: bool,
     /// A thumbnail clicked: the page scroll's place to go to.
     jump: Option<f32>,
     /// What had come from the workers when last drawn: whether the picture
@@ -115,6 +121,8 @@ impl Peek {
             theme,
             size: (0.0, 0.0),
             asked: None,
+            given: None,
+            by_hand: false,
             jump: None,
             had: (false, 0),
         };
@@ -377,6 +385,13 @@ impl Program for Peek {
 
     fn resized(&mut self, width: f32, height: f32) {
         self.size = (width, height);
+        match self.given {
+            // The answer to the window's own ask (or its opening size).
+            None => self.given = Some((width, height)),
+            // Another size with no ask under way: pulled by its edges.
+            Some(g) if (g.0 - width).abs() > 1.0 || (g.1 - height).abs() > 1.0 => self.by_hand = true,
+            Some(_) => {}
+        }
     }
 
     fn bar(&self) -> Option<vergence_ui::Bar> {
@@ -437,8 +452,9 @@ impl Program for Peek {
         let changed = self.follow() | (now != self.had);
         self.had = now;
         let want = self.wanted();
-        if self.asked != Some(want) {
+        if !self.by_hand && self.asked != Some(want) {
             self.asked = Some(want);
+            self.given = None;
             window.request_size(want.0, want.1);
         }
         changed
