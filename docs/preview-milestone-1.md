@@ -1,6 +1,15 @@
 # Preview milestone 1: a window shaped for what it shows, and Hymie
 
-Status: **planned 2026-11-21**, decided the same evening.
+Status: **closed 2026-11-22** (Dave: "pdf is sharp now, close the
+milestone"). Planned and decided 2026-11-21; built that night: the preview
+window shaped for what it shows (text, pictures, PDF pages with
+thumbnails, sound with cover, waveform and Play, facts), frosted whole as
+Quick Look's (bus v35, v36), Hymie in Rust (WAV, FLAC, MP3, ALAC, MP4; AAC
+in its own GPL helper), playback through vergence-sound (OSS, ALSA,
+PulseAudio). Display suite 18 of 18 on Hubble and techbench (scenario 18
+new), workspace tests and tools/agent-check.sh clean; Dave's pass on
+techbench (text, pictures, PDF, sound, the desktop's Space, resizing).
+Notes for Spindle: docs/hymie-spindle-issues.md.
 - Dave showed macOS Quick Look on Control: a text file, a picture, a
   cheat-sheet picture and a PDF, each in a window shaped for it, with "Open
   with ..." in the title bar.
