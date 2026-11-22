@@ -130,7 +130,9 @@ fn label_providers() -> Vec<(String, String)> {
     if !cfg!(target_os = "freebsd") {
         return Vec::new();
     }
-    std::process::Command::new("glabel")
+    // By its full path: the session's PATH may not have /sbin (it did not on techbench).
+    let glabel = if Path::new("/sbin/glabel").exists() { "/sbin/glabel" } else { "glabel" };
+    std::process::Command::new(glabel)
         .args(["status", "-s"])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
