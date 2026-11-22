@@ -94,6 +94,12 @@ Until the project has a repository of its own, build the package yourself:
 A machine has the package or a checkout's install (below, under
 `/usr/local`), not both: `tools/install.sh --uninstall` first.
 
+To remove it: `sudo rm /var/service/vdm` (the service you enabled; runit
+leaves a link to nothing otherwise), then `sudo xbps-remove vergence`. Your
+settings under `~/.config/vergence` stay, as does the `_vdm` account (Void
+keeps system accounts); acpid's handler keeps its one added line, harmless
+without Vergence (the original is `/etc/acpi/handler.sh.vergence-orig`).
+
 ## Run
 
 - **Installed from a checkout** (development): `sudo tools/install.sh` puts the server, the apps, the

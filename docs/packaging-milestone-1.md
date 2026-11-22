@@ -113,4 +113,9 @@ the build machine's copy of the template.
   under `/usr/local` found again by name (88e7701, revision 2); update from
   revision 1 to 2 clean, `xbps-pkgdb` clean. The next-steps message on the
   first install only (82c7cf7, revision 3).
-
+- Removal on techbench (revision 3): the session and vdm kept running
+  through it; binaries, data, unedited PAM files, the service folder, the
+  hooks and rules gone; settings and `_vdm` kept; left: the
+  `/var/service/vdm` link (the person's), an empty
+  `/usr/share/icons/Vergence` (the icon-cache trigger), acpid's added line.
+  Reinstalled at once, clean; update 2 to 3 showed no message.
