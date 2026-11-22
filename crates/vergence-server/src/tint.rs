@@ -49,9 +49,7 @@ fn near(a: Option<u32>, b: Option<u32>) -> bool {
 }
 
 fn tint_wanted_from_file() -> bool {
-    let Some(home) = std::env::var_os("HOME") else { return true };
-    let text =
-        std::fs::read_to_string(std::path::Path::new(&home).join(".config/vergence/desktop.toml")).unwrap_or_default();
+    let text = vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref());
     text.parse::<toml::Table>()
         .ok()
         .and_then(|t| t.get("appearance").and_then(|a| a.get("wallpaper-tint")).and_then(|v| v.as_bool()))

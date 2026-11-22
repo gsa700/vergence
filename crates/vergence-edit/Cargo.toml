@@ -10,6 +10,7 @@ description = "Vergence's text editor: plain text, tabs, line numbers, on the to
 # text area (vergence-widgets textarea.rs), its reading and writing of files
 # (files.rs), editor milestone 1.
 [dependencies]
+vergence-config.workspace = true
 vergence-ui.workspace = true
 vergence-widgets.workspace = true
 vergence-scene.workspace = true

@@ -225,8 +225,7 @@ pub struct Desktop {
 
 impl Desktop {
     pub fn new() -> Desktop {
-        let desktop_text =
-            vergence_widgets::prefs::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        let desktop_text = vergence_config::effective_text_with(vergence_widgets::prefs::desktop_path().as_deref());
         let mut d = Desktop {
             dir: desktop_dir(),
             entries: Vec::new(),

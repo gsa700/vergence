@@ -57,8 +57,7 @@ impl ForceQuit {
     fn new() -> ForceQuit {
         let (mail, inbox) = channel();
         let (outbox, _) = channel();
-        let desktop =
-            vergence_widgets::prefs::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        let desktop = vergence_config::effective_text_with(vergence_widgets::prefs::desktop_path().as_deref());
         ForceQuit { apps: Vec::new(), picked: None, asking: false, status: String::new(), inbox, outbox, mail, desktop }
     }
 

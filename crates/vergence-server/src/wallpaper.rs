@@ -108,6 +108,14 @@ pub fn desktop_path() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/vergence/desktop.toml"))
 }
 
+/// desktop.toml as in effect: Vergence's shipped defaults and the machine's
+/// under the person's own (vergence-config). For reading only: whatever
+/// writes desktop.toml reads `desktop_path()` alone, so no default is copied
+/// into the person's file.
+pub fn desktop_text() -> String {
+    vergence_config::effective_text_with(desktop_path().as_deref())
+}
+
 /// "#rrggbb" -> straight RGB 0-1 (else the default dark gray).
 pub fn parse_color(s: &str) -> [f32; 3] {
     let h = s.trim().trim_start_matches('#');
@@ -328,14 +336,14 @@ impl Server {
 impl Wallpaper {
     /// Re-read desktop.toml if it changed; true if the wallpaper changed.
     fn reload_if_changed(&mut self) -> bool {
-        let path = desktop_path();
-        let mtime = path.as_ref().and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+        // The newest of the person's file and the layers under it, so a
+        // changed default (a package update) is seen too.
+        let mtime = vergence_config::modified_with(desktop_path().as_deref());
         if mtime == self.mtime && self.generation > 0 {
             return false;
         }
         self.mtime = mtime;
-        let config = path
-            .and_then(|p| std::fs::read_to_string(p).ok())
+        let config = Some(desktop_text())
             .map(|t| match toml::from_str::<DesktopFile>(&t) {
                 Ok(f) => f.wallpaper,
                 Err(e) => {

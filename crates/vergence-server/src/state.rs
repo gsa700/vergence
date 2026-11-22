@@ -453,9 +453,7 @@ impl Server {
 /// desktop.toml's `[x11] enabled`: whether X11 applications are to run (through
 /// Xwayland). Off unless it says true.
 pub fn x11_wanted() -> bool {
-    let Some(home) = std::env::var_os("HOME") else { return false };
-    let text =
-        std::fs::read_to_string(std::path::Path::new(&home).join(".config/vergence/desktop.toml")).unwrap_or_default();
+    let text = vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref());
     text.parse::<toml::Table>()
         .ok()
         .and_then(|t| t.get("x11").and_then(|x| x.get("enabled")).and_then(|v| v.as_bool()))

@@ -28,7 +28,7 @@ use crate::{Server, decor::SceneElement};
 /// desktop.toml `[clock]`: a 24-hour clock and the date under it, both on
 /// unless set off (the settings app's Date & Time page).
 fn clock_look() -> tiles::ClockLook {
-    let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let text = vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref());
     let table = text.parse::<toml::Table>().ok();
     let get = |k: &str| {
         table.as_ref().and_then(|t| t.get("clock")).and_then(|c| c.get(k)).and_then(|v| v.as_bool()).unwrap_or(true)

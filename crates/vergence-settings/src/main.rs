@@ -461,8 +461,11 @@ fn desktop_path() -> PathBuf {
     home().join(".config/vergence/desktop.toml")
 }
 
+/// desktop.toml as in effect, for showing: Vergence's shipped defaults and
+/// the machine's under the person's own (vergence-config). `update_desktop`
+/// reads and writes the person's file alone, so no default is copied into it.
 fn read_desktop() -> toml::Table {
-    std::fs::read_to_string(desktop_path()).ok().and_then(|t| t.parse().ok()).unwrap_or_default()
+    vergence_config::effective_with(Some(&desktop_path()))
 }
 
 /// Change desktop.toml in place: read it fresh, let `f` edit it, write it back
@@ -601,8 +604,9 @@ impl App {
 
     fn save(&mut self, f: impl FnOnce(&mut toml::Table)) {
         match update_desktop(f) {
-            Ok(t) => {
-                self.desktop = t;
+            Ok(_) => {
+                // Shown as in effect, not as the person's file alone.
+                self.desktop = read_desktop();
                 self.status.clear();
                 self.dock_from_file();
             }

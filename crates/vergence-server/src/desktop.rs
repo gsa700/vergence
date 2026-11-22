@@ -31,7 +31,7 @@ pub static STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 
 /// Whether desktop.toml asks for the desktop's icons (on unless `icons = false`).
 pub fn icons_wanted() -> bool {
-    let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let text = vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref());
     let table = text.parse::<toml::Table>().unwrap_or_default();
     table.get("desktop").and_then(|d| d.get("icons")).and_then(|v| v.as_bool()).unwrap_or(true)
 }

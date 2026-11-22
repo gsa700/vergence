@@ -89,8 +89,7 @@ struct Hardware {
 impl Hardware {
     fn new() -> Hardware {
         let (host, system) = vergence_sysinfo::system();
-        let desktop =
-            vergence_widgets::prefs::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        let desktop = vergence_config::effective_text_with(vergence_widgets::prefs::desktop_path().as_deref());
         let mut h = Hardware {
             page: Page::Computer,
             host,

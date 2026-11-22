@@ -10,6 +10,7 @@ description = "Vergence's calculator: exact decimal arithmetic of its own, a key
 # decimals to 34 digits), its reading of what is typed (expr.rs), and its
 # window, on the toolkit (tools milestone 1).
 [dependencies]
+vergence-config.workspace = true
 vergence-ui.workspace = true
 vergence-widgets.workspace = true
 vergence-scene.workspace = true

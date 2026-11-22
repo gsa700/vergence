@@ -19,11 +19,11 @@ use std::rc::Rc;
 use vergence_widgets::Theme;
 use vergence_widgets::filedialog::{FileDialog, Filter};
 
-/// desktop.toml's text, for the theme.
+/// desktop.toml's text as in effect, for the theme.
 fn desktop_text() -> String {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".config"));
-    std::fs::read_to_string(config.join("vergence/desktop.toml")).unwrap_or_default()
+    vergence_config::effective_text_with(Some(&config.join("vergence/desktop.toml")))
 }
 
 /// A filter from its argument: "Text files|glob:*.txt|mime:text/plain".

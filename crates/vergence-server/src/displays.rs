@@ -91,8 +91,7 @@ struct DesktopFile {
 }
 
 pub fn load() -> DisplaysConfig {
-    crate::wallpaper::desktop_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
+    Some(crate::wallpaper::desktop_text())
         .map(|t| match toml::from_str::<DesktopFile>(&t) {
             Ok(f) => f.displays,
             Err(e) => {

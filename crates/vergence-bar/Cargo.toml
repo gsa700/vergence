@@ -10,6 +10,7 @@ publish.workspace = true
 # native windows' tabs); vergence-ui draws the same bar itself where the
 # server draws none (other desktops).
 [dependencies]
+vergence-config.workspace = true
 vergence-scene.workspace = true
 vergence-text.workspace = true
 vergence-render.workspace = true

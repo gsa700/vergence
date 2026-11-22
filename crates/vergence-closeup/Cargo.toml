@@ -9,6 +9,7 @@ description = "Close-Up: Vergence's viewer for pictures and text (PDFs: Reader),
 # Pictures are decoded apart (vergence-decode's helper); what Close-Up does
 # with the pixels (a pyramid of halvings, turning) is its own.
 [dependencies]
+vergence-config.workspace = true
 vergence-ui.workspace = true
 vergence-widgets.workspace = true
 vergence-scene.workspace = true

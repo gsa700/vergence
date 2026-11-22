@@ -152,7 +152,7 @@ pub fn desktop_layout() -> (Vec<WinButton>, Vec<WinButton>) {
 /// server's bars follow the server's settings.
 pub fn desktop_light() -> bool {
     host_light().unwrap_or_else(|| {
-        let text = desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        let text = vergence_config::effective_text_with(desktop_path().as_deref());
         color_scheme_light(&text)
     })
 }

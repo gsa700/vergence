@@ -225,10 +225,7 @@ fn write_apps(apps: &HashMap<String, u64>) -> std::io::Result<()> {
 }
 
 pub fn load() -> Config {
-    crate::wallpaper::desktop_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .map(|t| parse(&t))
-        .unwrap_or_default()
+    Some(crate::wallpaper::desktop_text()).map(|t| parse(&t)).unwrap_or_default()
 }
 
 struct Palette {

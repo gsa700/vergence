@@ -10,6 +10,7 @@ description = "Vergence's Wayland server (phase 2): one authority over the scree
 # Smithay is pinned to the commit that built and ran on Hubble (FreeBSD 15.1) in step 0.
 
 [dependencies]
+vergence-config.workspace = true
 vergence-media.workspace = true
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }

@@ -177,7 +177,7 @@ pub fn config_from(text: &str) -> Config {
 
 /// Read when a capture is asked for (desktop.toml is small).
 pub fn config() -> Config {
-    config_from(&crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default())
+    config_from(&vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref()))
 }
 
 /// The folder a capture goes to: the setting's (~/Pictures/Screenshots by

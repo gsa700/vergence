@@ -192,12 +192,14 @@ impl Prefs {
     /// desktop.toml again, if it changed. True if it did.
     fn reread(&mut self) -> bool {
         let Some(path) = desktop_path() else { return false };
-        let stamp = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        let stamp = vergence_config::modified_with(Some(&path));
         if stamp == self.stamp && self.stamp.is_some() {
             return false;
         }
         self.stamp = stamp;
-        self.text = std::fs::read_to_string(&path).unwrap_or_default();
+        // What is shown is what is in effect; `write` below reads the
+        // person's file alone, so no default is copied into it.
+        self.text = vergence_config::effective_text_with(Some(&path));
         true
     }
 
@@ -473,10 +475,10 @@ impl Program for Prefs {
     fn waker(&mut self, waker: Waker) {
         let alive = self.alive.clone();
         let _ = std::thread::Builder::new().name("prefs-watch".into()).spawn(move || {
-            let mut last = desktop_path().and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+            let mut last = vergence_config::modified_with(desktop_path().as_deref());
             while alive.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_secs(1));
-                let now = desktop_path().and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+                let now = vergence_config::modified_with(desktop_path().as_deref());
                 if now != last {
                     last = now;
                     waker.wake();

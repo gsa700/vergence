@@ -148,10 +148,7 @@ pub fn config_from(text: &str) -> SnapConfig {
 }
 
 fn load_config() -> SnapConfig {
-    let Some(home) = std::env::var_os("HOME") else { return SnapConfig::default() };
-    config_from(
-        &std::fs::read_to_string(std::path::Path::new(&home).join(".config/vergence/desktop.toml")).unwrap_or_default(),
-    )
+    config_from(&vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref()))
 }
 
 /// A snapped window: its part of the screen, and where it was before.

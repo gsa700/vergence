@@ -9,6 +9,7 @@ description = "Vergence's Hardware app: what the computer is and what it is doin
 # Our own throughout: the window on the toolkit, the readings from our own
 # crates (vergence-sysinfo, vergence-net, vergence-power).
 [dependencies]
+vergence-config.workspace = true
 vergence-sysinfo.workspace = true
 vergence-net.workspace = true
 vergence-power.workspace = true

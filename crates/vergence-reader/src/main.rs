@@ -81,12 +81,10 @@ type SharedRef = Rc<RefCell<Shared>>;
 
 /// ~/.config/vergence/desktop.toml.
 fn desktop_text() -> (String, Option<SystemTime>) {
-    match vergence_widgets::prefs::desktop_path() {
-        Some(p) => {
-            (std::fs::read_to_string(&p).unwrap_or_default(), std::fs::metadata(&p).and_then(|m| m.modified()).ok())
-        }
-        None => (String::new(), None),
-    }
+    // As in effect (the shipped defaults and the machine's under the
+    // person's own); the writers here read the person's file alone.
+    let p = vergence_widgets::prefs::desktop_path();
+    (vergence_config::effective_text_with(p.as_deref()), vergence_config::modified_with(p.as_deref()))
 }
 
 struct Viewer {

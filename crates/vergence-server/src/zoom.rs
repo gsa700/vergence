@@ -113,7 +113,7 @@ pub fn config_from(text: &str) -> Config {
 }
 
 fn focus_ring_wanted() -> bool {
-    let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let text = vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref());
     text.parse::<toml::Table>()
         .ok()
         .and_then(|t| t.get("appearance").and_then(|a| a.get("focus-ring")).and_then(|v| v.as_bool()))
@@ -121,7 +121,7 @@ fn focus_ring_wanted() -> bool {
 }
 
 fn load_config() -> Config {
-    config_from(&crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default())
+    config_from(&vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref()))
 }
 
 pub struct Zoom {

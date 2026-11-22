@@ -89,8 +89,10 @@ pub fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
     std::fs::rename(&beside, path)
 }
 
+/// desktop.toml as in effect (the shipped defaults and the machine's under
+/// the person's own): only read here.
 fn desktop_text() -> Option<String> {
-    crate::prefs::desktop_path().and_then(|p| std::fs::read_to_string(p).ok())
+    Some(vergence_config::effective_text_with(crate::prefs::desktop_path().as_deref()))
 }
 
 fn read_bool(key: &str) -> Option<bool> {

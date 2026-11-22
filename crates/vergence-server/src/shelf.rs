@@ -408,8 +408,7 @@ struct Primary {
 
 /// What desktop.toml says about the shelf: its own table, and which screen is primary.
 pub fn load() -> (ShelfConfig, Option<String>) {
-    crate::wallpaper::desktop_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
+    Some(crate::wallpaper::desktop_text())
         .map(|t| match toml::from_str::<DesktopFile>(&t) {
             Ok(f) => (f.shelf, f.displays.primary),
             Err(e) => {

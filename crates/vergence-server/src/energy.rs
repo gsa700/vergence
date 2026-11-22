@@ -120,10 +120,7 @@ impl Energy {
 
 /// `[energy]` from desktop.toml (missing file or table: everything off).
 pub fn load() -> Config {
-    crate::wallpaper::desktop_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .map(|t| parse(&t))
-        .unwrap_or_default()
+    Some(crate::wallpaper::desktop_text()).map(|t| parse(&t)).unwrap_or_default()
 }
 
 pub fn parse(text: &str) -> Config {

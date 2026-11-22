@@ -9,6 +9,7 @@ description = "Vergence's Force Quit: the user's running applications, and one o
 # Force Quit is the project's own: a window on the toolkit; the listing and
 # the ending are the server's (forcequit.rs), over the session bus.
 [dependencies]
+vergence-config.workspace = true
 vergence-protocol.workspace = true
 vergence-ui.workspace = true
 vergence-widgets.workspace = true

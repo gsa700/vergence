@@ -203,8 +203,7 @@ pub(crate) fn menu_separator(scene: &mut Scene, r: SceneRect, light: bool) {
 
 /// Applications desktop.toml's [[menu.item]] puts on the desktop menu (none by default).
 fn configured_apps() -> Vec<Item> {
-    crate::wallpaper::desktop_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
+    Some(crate::wallpaper::desktop_text())
         .and_then(|t| toml::from_str::<MenuFile>(&t).ok())
         .map(|f| f.menu.item)
         .unwrap_or_default()

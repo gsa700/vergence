@@ -1,0 +1,10 @@
+[package]
+name = "vergence-config"
+description = "desktop.toml as it is in effect: Vergence's shipped defaults, then the machine's, then the person's own, key by key"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+toml = "0.8"

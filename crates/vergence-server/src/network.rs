@@ -62,7 +62,7 @@ impl WifiSetting {
 /// desktop.toml `[network] country`: the radio rules wpa_supplicant follows
 /// (6 GHz needs one); none: the system's.
 fn country() -> Option<String> {
-    let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let text = vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref());
     let table = text.parse::<toml::Table>().unwrap_or_default();
     table
         .get("network")
@@ -74,7 +74,7 @@ fn country() -> Option<String> {
 
 /// desktop.toml `[network] wifi-power-save` (default on, the driver's own).
 fn power_save() -> bool {
-    let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let text = vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref());
     let table = text.parse::<toml::Table>().unwrap_or_default();
     table.get("network").and_then(|n| n.get("wifi-power-save")).and_then(|v| v.as_bool()).unwrap_or(true)
 }
@@ -88,7 +88,7 @@ fn apply_power_save(c: &wpa::Client, name: &str, on: bool) {
 }
 
 fn setting() -> WifiSetting {
-    let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let text = vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref());
     let table = text.parse::<toml::Table>().unwrap_or_default();
     table
         .get("network")

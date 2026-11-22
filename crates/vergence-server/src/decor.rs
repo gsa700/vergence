@@ -1847,7 +1847,7 @@ impl Server {
 /// desktop.toml's `[app."<id>"] bar-style` for each app not ours that has
 /// one (app settings milestone 1): id (lower case) to light.
 pub fn app_bars() -> std::collections::HashMap<String, bool> {
-    let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let text = vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref());
     let table = text.parse::<toml::Table>().unwrap_or_default();
     let mut out = std::collections::HashMap::new();
     if let Some(apps) = table.get("app").and_then(|a| a.as_table()) {

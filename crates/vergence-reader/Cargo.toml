@@ -7,6 +7,7 @@ publish.workspace = true
 description = "Reader: Vergence's PDF documents app (split from Close-Up), drawn by vergence-pdf's confined helper"
 
 [dependencies]
+vergence-config.workspace = true
 vergence-ui.workspace = true
 vergence-widgets.workspace = true
 vergence-scene.workspace = true

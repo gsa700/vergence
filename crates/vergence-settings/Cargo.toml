@@ -11,6 +11,7 @@ description = "Vergence's settings app: appearance, theme and fonts, windows, sc
 # On the project's own toolkit since 2026-11-10 (toolkit milestone 2); iced
 # before that, Slint before iced.
 [dependencies]
+vergence-config.workspace = true
 vergence-widgets.workspace = true
 vergence-ui.workspace = true
 vergence-scene.workspace = true

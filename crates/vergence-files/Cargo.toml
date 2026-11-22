@@ -7,6 +7,7 @@ publish.workspace = true
 description = "File Viewer: Vergence's file manager, with Preview on the space bar"
 
 [dependencies]
+vergence-config.workspace = true
 vergence-ui.workspace = true
 vergence-widgets.workspace = true
 vergence-scene.workspace = true

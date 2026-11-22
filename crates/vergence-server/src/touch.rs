@@ -85,9 +85,7 @@ pub struct Touch {
 
 /// The ties desktop.toml records.
 pub fn load() -> Vec<(String, String)> {
-    let table = crate::wallpaper::desktop_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|t| t.parse::<toml::Table>().ok());
+    let table = Some(crate::wallpaper::desktop_text()).and_then(|t| t.parse::<toml::Table>().ok());
     let panels = table.as_ref().and_then(|t| t.get("touch")?.get("panel")?.as_array());
     panels
         .into_iter()

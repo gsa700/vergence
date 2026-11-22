@@ -94,8 +94,7 @@ fn write(record: &Record) -> std::io::Result<()> {
 
 /// `[session] restore` in desktop.toml: true unless it says false.
 fn wanted() -> bool {
-    crate::wallpaper::desktop_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
+    Some(crate::wallpaper::desktop_text())
         .and_then(|t| t.parse::<toml::Table>().ok())
         .and_then(|t| t.get("session")?.get("restore")?.as_bool())
         .unwrap_or(true)
@@ -179,7 +178,7 @@ impl Server {
         self.desktop_start();
         // Drives plugged in are mounted (vergence-media: udisks2 on Linux),
         // unless desktop.toml `[media] automount = false`.
-        let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        let text = vergence_config::effective_text_with(crate::wallpaper::desktop_path().as_deref());
         let automount =
             text.parse::<toml::Table>().ok().and_then(|t| t.get("media")?.get("automount")?.as_bool()).unwrap_or(true);
         if automount {

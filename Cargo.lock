@@ -2155,6 +2155,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 name = "vergence-bar"
 version = "0.1.0"
 dependencies = [
+ "vergence-config",
  "vergence-look",
  "vergence-render",
  "vergence-scene",
@@ -2165,6 +2166,7 @@ dependencies = [
 name = "vergence-calc"
 version = "0.1.0"
 dependencies = [
+ "vergence-config",
  "vergence-look",
  "vergence-scene",
  "vergence-text",
@@ -2177,11 +2179,19 @@ name = "vergence-closeup"
 version = "0.1.0"
 dependencies = [
  "png 0.18.1",
+ "vergence-config",
  "vergence-decode",
  "vergence-scene",
  "vergence-types",
  "vergence-ui",
  "vergence-widgets",
+]
+
+[[package]]
+name = "vergence-config"
+version = "0.1.0"
+dependencies = [
+ "toml",
 ]
 
 [[package]]
@@ -2211,6 +2221,7 @@ version = "0.1.0"
 name = "vergence-edit"
 version = "0.1.0"
 dependencies = [
+ "vergence-config",
  "vergence-scene",
  "vergence-types",
  "vergence-ui",
@@ -2221,6 +2232,7 @@ dependencies = [
 name = "vergence-files"
 version = "0.1.0"
 dependencies = [
+ "vergence-config",
  "vergence-decode",
  "vergence-hymie",
  "vergence-pdf",
@@ -2250,6 +2262,7 @@ dependencies = [
 name = "vergence-hw"
 version = "0.1.0"
 dependencies = [
+ "vergence-config",
  "vergence-net",
  "vergence-power",
  "vergence-scene",
@@ -2319,6 +2332,7 @@ version = "0.1.0"
 name = "vergence-quit"
 version = "0.1.0"
 dependencies = [
+ "vergence-config",
  "vergence-protocol",
  "vergence-scene",
  "vergence-ui",
@@ -2333,6 +2347,7 @@ version = "0.1.0"
 name = "vergence-reader"
 version = "0.1.0"
 dependencies = [
+ "vergence-config",
  "vergence-pdf",
  "vergence-scene",
  "vergence-types",
@@ -2373,6 +2388,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "vergence-bar",
+ "vergence-config",
  "vergence-dbus",
  "vergence-decode",
  "vergence-dm",
@@ -2403,6 +2419,7 @@ version = "0.3.0"
 dependencies = [
  "image",
  "toml",
+ "vergence-config",
  "vergence-decode",
  "vergence-dm",
  "vergence-look",
@@ -2497,6 +2514,7 @@ dependencies = [
 name = "vergence-widgets"
 version = "0.1.0"
 dependencies = [
+ "vergence-config",
  "vergence-decode",
  "vergence-look",
  "vergence-media",
