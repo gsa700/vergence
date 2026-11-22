@@ -111,6 +111,23 @@ preview as a window of its own, with Open in...".
 - Previews from other programs' helpers.
 - AlbumWall itself moving to the Rust Hymie.
 
+## Step 6b: the Quick Look look (Dave, 2026-11-21: "let's make the preview
+windows look similar to the mac. We have frost in our toolkit")
+
+The whole window a frosted frame, as Quick Look's: the frost of what is
+behind it (the dock's backdrop frost, look milestone 1) under the bar and
+down around the content, rounded corners, the content an inset card with
+rounded corners of its own.
+- Bus v36: a window style's "frosted ground" (`Style`).
+- The server draws the backdrop frost behind such a window's body, joined
+  with its bar's into one surface, and composites the window as translucent
+  (not opaque).
+- The toolkit leaves such a window's ground clear; the preview paints its
+  content as an inset rounded card (text, pages, picture, sound, facts).
+- Sound plays as soon as the preview opens and on each file arrowed to
+  (Dave: "Ideally it would start playing when you open it"), unless
+  `[files] preview-autoplay = false` (FileView's settings).
+
 ## Polish, later (Dave, 2026-11-21)
 
 - **The preview window's decorations** (Dave: "We might want to change the
