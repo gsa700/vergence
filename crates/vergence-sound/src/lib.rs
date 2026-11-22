@@ -97,6 +97,40 @@ pub fn open() -> Option<Box<dyn Sound>> {
     }
 }
 
+/// Sound played as it is written, to the default output (preview milestone
+/// 1: a preview's Play). The output may play at another rate than asked
+/// (an ALSA device that takes only its own) or with fewer channels: the
+/// writer converts to [`Stream::rate`] and [`Stream::channels`].
+pub trait Stream: Send {
+    fn rate(&self) -> u32;
+    fn channels(&self) -> u32;
+    /// Interleaved 16-bit samples, a whole number of frames; blocks while
+    /// the output is full, so writing paces the playing.
+    fn write(&mut self, samples: &[i16]) -> io::Result<()>;
+}
+
+/// A stream to the default output, at `rate` and `channels` if it takes them.
+/// `VERGENCE_SOUND_OFF=1` refuses it (the display suite presses Play
+/// without making a sound on the machine it runs on).
+pub fn stream(rate: u32, channels: u32) -> io::Result<Box<dyn Stream>> {
+    if std::env::var_os("VERGENCE_SOUND_OFF").is_some() {
+        return Err(io::Error::other("sound is off (VERGENCE_SOUND_OFF)"));
+    }
+    #[cfg(target_os = "freebsd")]
+    {
+        oss::stream(rate, channels)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if pipewire_running() { pulse::stream(rate, channels) } else { alsa::stream(rate, channels) }
+    }
+    #[cfg(not(any(target_os = "freebsd", target_os = "linux")))]
+    {
+        let _ = (rate, channels);
+        Err(io::Error::other("no sound system here"))
+    }
+}
+
 /// Whether PipeWire (or PulseAudio) has the user's sound: its socket is in
 /// the runtime directory.
 #[cfg(target_os = "linux")]

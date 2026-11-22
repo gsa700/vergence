@@ -663,3 +663,79 @@ mod tests {
         assert_eq!(percent(&[]), 0);
     }
 }
+
+/// Sound to the default sink, on a connection of its own: written as the
+/// server asks for more (its REQUEST packets), so writing paces the playing.
+pub struct PulseStream {
+    p: Pulse,
+    channel: u32,
+    missing: usize,
+    rate: u32,
+    channels: u32,
+}
+
+pub fn stream(rate: u32, channels: u32) -> io::Result<Box<dyn crate::Stream>> {
+    let mut p = Pulse::connect()?;
+    let sink = p.sink("@DEFAULT_SINK@")?;
+    let ch = channels.clamp(1, 8) as u8;
+    let r = p.ask(CREATE_PLAYBACK_STREAM, |t| {
+        t.spec(ch, rate).map(ch).u32(sink.index).str(None);
+        t.u32(INVALID).bool(false).u32(INVALID).u32(INVALID).u32(INVALID).u32(0);
+        t.cvolume(ch, NORM);
+        for _ in 0..7 {
+            t.bool(false);
+        }
+        t.bool(false).bool(false).props(&[("media.name", "Preview"), ("media.role", "music")]);
+        for _ in 0..7 {
+            t.bool(false);
+        }
+        t.u8(0);
+    })?;
+    let mut g = Get::new(&r);
+    let channel = g.u32()?;
+    g.u32()?; // its sink input
+    let missing = g.u32()? as usize;
+    Ok(Box::new(PulseStream { p, channel, missing, rate, channels: ch as u32 }))
+}
+
+impl crate::Stream for PulseStream {
+    fn rate(&self) -> u32 {
+        self.rate
+    }
+    fn channels(&self) -> u32 {
+        self.channels
+    }
+    fn write(&mut self, samples: &[i16]) -> io::Result<()> {
+        let bytes: Vec<u8> = samples.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let frame = self.channels as usize * 2;
+        let mut sent = 0;
+        while sent < bytes.len() {
+            if self.missing == 0 {
+                // Wait for the server to ask for more.
+                let body = self.p.read_control()?;
+                let mut g = Get::new(&body);
+                if g.u32()? == REQUEST {
+                    g.u32()?;
+                    if g.u32()? == self.channel {
+                        self.missing += g.u32()? as usize;
+                    }
+                }
+                continue;
+            }
+            let n = (self.missing.min(bytes.len() - sent).min(64 * 1024) / frame * frame).max(frame.min(bytes.len() - sent));
+            self.p.send(self.channel, &bytes[sent..sent + n])?;
+            sent += n;
+            self.missing = self.missing.saturating_sub(n);
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PulseStream {
+    fn drop(&mut self) {
+        let channel = self.channel;
+        let _ = self.p.ask(DELETE_PLAYBACK_STREAM, |t| {
+            t.u32(channel);
+        });
+    }
+}

@@ -25,7 +25,7 @@ use std::{
     path::PathBuf,
 };
 
-use crate::{Output, Sound};
+use crate::{Output, Sound, Stream};
 
 unsafe extern "C" {
     fn ioctl(fd: i32, request: std::ffi::c_ulong, arg: *mut u8) -> i32;
@@ -281,39 +281,7 @@ impl Sound for Alsa {
 
     fn tone(&mut self, id: &str, channels: u32, on: &[u32]) -> io::Result<String> {
         let (card, dev) = Self::parse(id)?;
-        let f = OpenOptions::new().write(true).open(format!("/dev/snd/pcmC{card}D{dev}p"))?;
-        let mut p = vec![0u8; HW_PARAMS_SIZE];
-        // Everything open, then ours fixed: interleaved 16-bit, the channels and rate.
-        for m in 0..3 {
-            for w in 0..8 {
-                put_u32(&mut p, MASKS_AT + m * 32 + w * 4, u32::MAX);
-            }
-        }
-        for i in PARAM_FIRST_INTERVAL..=PARAM_LAST_INTERVAL {
-            let at = INTERVALS_AT + (i - PARAM_FIRST_INTERVAL) * 12;
-            put_u32(&mut p, at, 0);
-            put_u32(&mut p, at + 4, u32::MAX);
-            put_u32(&mut p, at + 8, 0);
-        }
-        let only = |p: &mut [u8], mask: usize, bit: usize| {
-            for w in 0..8 {
-                put_u32(p, MASKS_AT + mask * 32 + w * 4, if w == bit / 32 { 1 << (bit % 32) } else { 0 });
-            }
-        };
-        only(&mut p, PARAM_ACCESS, ACCESS_RW_INTERLEAVED);
-        only(&mut p, PARAM_FORMAT, FORMAT_S16_LE);
-        only(&mut p, PARAM_SUBFORMAT, SUBFORMAT_STD);
-        let exactly = |p: &mut [u8], param: usize, v: u32| {
-            let at = INTERVALS_AT + (param - PARAM_FIRST_INTERVAL) * 12;
-            put_u32(p, at, v);
-            put_u32(p, at + 4, v);
-            put_u32(p, at + 8, 1 << 2); // integer
-        };
-        exactly(&mut p, PARAM_CHANNELS, channels);
-        exactly(&mut p, PARAM_RATE, RATE);
-        put_u32(&mut p, RMASK_AT, u32::MAX);
-        call(&f, HW_PARAMS, &mut p).map_err(|e| io::Error::new(e.kind(), format!("{id} would not take {channels} channels of 16-bit at {RATE} Hz: {e}")))?;
-        call(&f, PREPARE, &mut [])?;
+        let f = pcm(card, dev, channels, RATE).map_err(|e| io::Error::new(e.kind(), format!("{id} would not take {channels} channels of 16-bit at {RATE} Hz: {e}")))?;
         let samples = crate::tone_samples(channels, on, RATE);
         let frames = samples.len() / channels as usize;
         let mut done = 0usize;
@@ -332,5 +300,99 @@ impl Sound for Alsa {
         }
         call(&f, DRAIN, &mut [])?;
         Ok(format!("440 Hz for 1.5 s on {id}, {channels} channels at {RATE} Hz, heard on {on:?}"))
+    }
+}
+
+/// A playback device opened and set for interleaved 16-bit samples, the
+/// channels and the rate given (the tone and the stream).
+fn pcm(card: u32, dev: u32, channels: u32, rate: u32) -> io::Result<fs::File> {
+    let f = OpenOptions::new().write(true).open(format!("/dev/snd/pcmC{card}D{dev}p"))?;
+    let mut p = vec![0u8; HW_PARAMS_SIZE];
+    // Everything open, then ours fixed: interleaved 16-bit, the channels and rate.
+    for m in 0..3 {
+        for w in 0..8 {
+            put_u32(&mut p, MASKS_AT + m * 32 + w * 4, u32::MAX);
+        }
+    }
+    for i in PARAM_FIRST_INTERVAL..=PARAM_LAST_INTERVAL {
+        let at = INTERVALS_AT + (i - PARAM_FIRST_INTERVAL) * 12;
+        put_u32(&mut p, at, 0);
+        put_u32(&mut p, at + 4, u32::MAX);
+        put_u32(&mut p, at + 8, 0);
+    }
+    let only = |p: &mut [u8], mask: usize, bit: usize| {
+        for w in 0..8 {
+            put_u32(p, MASKS_AT + mask * 32 + w * 4, if w == bit / 32 { 1 << (bit % 32) } else { 0 });
+        }
+    };
+    only(&mut p, PARAM_ACCESS, ACCESS_RW_INTERLEAVED);
+    only(&mut p, PARAM_FORMAT, FORMAT_S16_LE);
+    only(&mut p, PARAM_SUBFORMAT, SUBFORMAT_STD);
+    let exactly = |p: &mut [u8], param: usize, v: u32| {
+        let at = INTERVALS_AT + (param - PARAM_FIRST_INTERVAL) * 12;
+        put_u32(p, at, v);
+        put_u32(p, at + 4, v);
+        put_u32(p, at + 8, 1 << 2); // integer
+    };
+    exactly(&mut p, PARAM_CHANNELS, channels);
+    exactly(&mut p, PARAM_RATE, rate);
+    put_u32(&mut p, RMASK_AT, u32::MAX);
+    call(&f, HW_PARAMS, &mut p)?;
+    call(&f, PREPARE, &mut [])?;
+    Ok(f)
+}
+
+/// Sound to the default device, written by frames (WRITEI_FRAMES). The
+/// device itself, with no mixing: the rate asked for, else 48 or 44.1 kHz.
+pub struct AlsaStream {
+    f: fs::File,
+    rate: u32,
+    channels: u32,
+}
+
+pub fn stream(rate: u32, channels: u32) -> io::Result<Box<dyn Stream>> {
+    let (card, dev) = Alsa::default();
+    let mut last = io::Error::other("no rate taken");
+    for (r, ch) in [(rate, channels), (48_000, channels), (44_100, channels), (rate, 2), (48_000, 2)] {
+        match pcm(card, dev, ch, r) {
+            Ok(f) => return Ok(Box::new(AlsaStream { f, rate: r, channels: ch })),
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
+impl Stream for AlsaStream {
+    fn rate(&self) -> u32 {
+        self.rate
+    }
+    fn channels(&self) -> u32 {
+        self.channels
+    }
+    fn write(&mut self, samples: &[i16]) -> io::Result<()> {
+        let ch = self.channels as usize;
+        let frames = samples.len() / ch;
+        let mut done = 0usize;
+        while done < frames {
+            // struct snd_xferi { long result; void *buf; unsigned long frames; }
+            let mut x = [0u8; 24];
+            let buf = samples[done * ch..].as_ptr() as u64;
+            x[8..16].copy_from_slice(&buf.to_ne_bytes());
+            x[16..24].copy_from_slice(&((frames - done) as u64).to_ne_bytes());
+            if let Err(e) = call(&self.f, WRITEI_FRAMES, &mut x) {
+                // An underrun (the player was slow): prepared again, and on.
+                if e.raw_os_error() == Some(32) {
+                    call(&self.f, PREPARE, &mut [])?;
+                    continue;
+                }
+                return Err(e);
+            }
+            let wrote = get_i64(&x, 0);
+            if wrote <= 0 {
+                return Err(io::Error::other("the device took nothing"));
+            }
+            done += wrote as usize;
+        }
+        Ok(())
     }
 }

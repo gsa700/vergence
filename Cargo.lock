@@ -2222,11 +2222,13 @@ name = "vergence-files"
 version = "0.1.0"
 dependencies = [
  "vergence-decode",
+ "vergence-hymie",
  "vergence-pdf",
  "vergence-protocol",
  "vergence-render",
  "vergence-scene",
  "vergence-shell",
+ "vergence-sound",
  "vergence-thumbs",
  "vergence-types",
  "vergence-ui",

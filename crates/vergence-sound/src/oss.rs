@@ -20,7 +20,7 @@ use std::{
     path::PathBuf,
 };
 
-use crate::{Output, Sound, level_of, level_percent, location_pins, pin_name};
+use crate::{Output, Sound, Stream, level_of, level_percent, location_pins, pin_name};
 
 unsafe extern "C" {
     fn sysctlbyname(name: *const std::ffi::c_char, old: *mut u8, oldlen: *mut usize, new: *const u8, newlen: usize) -> i32;
@@ -258,5 +258,47 @@ impl Sound for Oss {
         // Wait until it has been heard.
         let _ = set(&f, SNDCTL_DSP_SYNC, 0);
         Ok(format!("440 Hz for 1.5 s on {id}, {got} channels at {rate} Hz, heard on {on:?}"))
+    }
+}
+
+/// One int set on a device by an ioctl; the value the device took.
+fn set_int(f: &std::fs::File, request: std::ffi::c_ulong, value: i32) -> io::Result<i32> {
+    let mut v = value;
+    // SAFETY: these ioctls read and write one int, `v`.
+    if unsafe { ioctl(f.as_raw_fd(), request, &mut v) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(v)
+}
+
+/// Sound to the default output (/dev/dsp, which the system points at its
+/// default unit; virtual channels mix it with the others' and convert the rate).
+pub struct OssStream {
+    f: std::fs::File,
+    rate: u32,
+    channels: u32,
+}
+
+pub fn stream(rate: u32, channels: u32) -> io::Result<Box<dyn Stream>> {
+    let f = OpenOptions::new().write(true).open("/dev/dsp")?;
+    if set_int(&f, SNDCTL_DSP_SETFMT, AFMT_S16_LE)? != AFMT_S16_LE {
+        return Err(io::Error::other("the device takes no 16-bit samples"));
+    }
+    let channels = set_int(&f, SNDCTL_DSP_CHANNELS, channels as i32)?.max(1) as u32;
+    let rate = set_int(&f, SNDCTL_DSP_SPEED, rate as i32)?.max(1) as u32;
+    Ok(Box::new(OssStream { f, rate, channels }))
+}
+
+impl Stream for OssStream {
+    fn rate(&self) -> u32 {
+        self.rate
+    }
+    fn channels(&self) -> u32 {
+        self.channels
+    }
+    fn write(&mut self, samples: &[i16]) -> io::Result<()> {
+        use std::io::Write;
+        let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        self.f.write_all(&bytes)
     }
 }

@@ -58,7 +58,13 @@ enum Shows {
     Picture,
     Pages,
     Text(TextDoc),
+    /// A sound file, through Hymie's helper (listen.rs).
+    Sound(crate::listen::Listen),
 }
+
+/// The waveform's slices, and its height.
+const SLICES: u32 = 1000;
+const WAVE_H: f32 = 150.0;
 
 /// A picture decoded apart: for which file, and the picture (None: it would not decode).
 type Decoded = Arc<Mutex<Option<(PathBuf, Option<Arc<Image>>)>>>;
@@ -98,13 +104,17 @@ pub struct Peek {
     /// A thumbnail clicked: the page scroll's place to go to.
     jump: Option<f32>,
     /// What had come from the workers when last drawn: whether the picture
-    /// had, and how many pages (a wake with nothing new draws nothing).
-    had: (bool, usize),
+    /// had, how many pages, and the sound's state (a wake with nothing new
+    /// draws nothing).
+    had: (bool, usize, (bool, usize, bool, u64, bool)),
 }
 
 #[derive(Clone, Debug)]
 pub enum Msg {
     Page(usize),
+    /// Play or pause the sound; the waveform clicked at this x.
+    PlayPause,
+    Seek(f32),
 }
 
 impl Peek {
@@ -124,7 +134,7 @@ impl Peek {
             given: None,
             by_hand: false,
             jump: None,
-            had: (false, 0),
+            had: (false, 0, (false, 0, false, 0, false)),
         };
         p.follow();
         p
@@ -154,6 +164,7 @@ impl Peek {
                 self.decode(e.path.clone());
                 Shows::Picture
             }
+            Some(e) if e.kind() == Kind::Sound => Shows::Sound(crate::listen::Listen::start(e.path.clone(), SLICES, self.waker.clone())),
             Some(e) if e.kind() == Kind::Text => match read_text(&e.path) {
                 Some(text) => {
                     let options = AreaOptions { editable: false, wrap: true, line_numbers: false, current_line: false, complete: false, spell: false, ..AreaOptions::default() };
@@ -246,6 +257,7 @@ impl Peek {
                 let page_w = 720.0;
                 (page_w + STRIP_W + 3.0 * PAD, page_w * first.1 / first.0.max(1.0) + 2.0 * PAD)
             }
+            Shows::Sound(_) => (720.0, 2.0 * PAD + 160.0 + 12.0 + WAVE_H + 12.0 + 34.0),
             Shows::Text(doc) => {
                 let lines = doc.borrow().buffer().line_count() as f32;
                 let line_h = self.theme.mono_size * 1.45;
@@ -278,6 +290,73 @@ impl Peek {
             scroll(column(pages).spacing(PAD).width(Length::FILL)).name("Pages"),
         ])
         .spacing(PAD)
+        .width(Length::FILL)
+        .height(Length::FILL)
+    }
+
+    /// A sound: its cover and words, the waveform (played in the accent
+    /// color, a click plays from there), Play or Pause and the time.
+    fn sound_view(&self, l: &crate::listen::Listen, theme: &Theme) -> Element<Msg> {
+        let s = l.state.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(e) = &self.entry else { return space() };
+        let cover: Element<Msg> = match &s.cover {
+            Some(img) => fitted(img.clone()).width(Length::Fixed(160.0)).height(Length::Fixed(160.0)),
+            None => panel(files::entry_icon_sized(e, 8.0).width(Length::Fixed(150.0)).height(Length::Fixed(150.0))).width(Length::Fixed(160.0)).height(Length::Fixed(160.0)),
+        };
+        let mut words = vec![label(s.info.as_ref().and_then(|i| i.title.clone()).unwrap_or_else(|| e.name.clone())).size(17.0).weight(600).wrap().width(Length::FILL)];
+        if let Some(i) = &s.info {
+            for w in [&i.artist, &i.album].into_iter().flatten() {
+                words.push(label(w.clone()).size(13.0).wrap().width(Length::FILL));
+            }
+            let ch = match i.channels {
+                1 => "mono".to_string(),
+                2 => "stereo".to_string(),
+                n => format!("{n} channels"),
+            };
+            let bits = if i.bits > 0 { format!(" · {}-bit", i.bits) } else { String::new() };
+            words.push(label(format!("{} · {} kHz{bits} · {ch}", clock(i.seconds()), i.rate as f32 / 1000.0)).size(12.0).dim());
+        }
+        if let Some(why) = &s.error {
+            words.push(label(why.clone()).size(12.0).dim().wrap().width(Length::FILL));
+        }
+        let (frames, at) = (s.info.as_ref().map_or(0, |i| i.frames), s.at);
+        let played = if frames > 0 { (at as f64 / frames as f64) as f32 } else { 0.0 };
+        let peaks = s.peaks.clone();
+        let stereo = s.info.as_ref().is_some_and(|i| i.channels >= 2);
+        let (on, off, edge) = (theme.accent, theme.dim, theme.line);
+        let wave = drawing(move |scene, _, r: Rect, _t: &Theme| {
+            let lanes = if stereo { 2 } else { 1 };
+            let lane_h = r.h / lanes as f32;
+            for lane in 0..lanes {
+                let mid = r.y + lane_h * (lane as f32 + 0.5);
+                scene.fill(Rect::new(r.x, mid, r.w, 1.0), edge);
+                for (i, p) in peaks.iter().enumerate() {
+                    let x = r.x + r.w * i as f32 / SLICES as f32;
+                    let w = (r.w / SLICES as f32).max(1.0);
+                    let (lo, hi) = p[lane];
+                    let (top, bottom) = (mid - hi.clamp(-1.0, 1.0) * lane_h * 0.48, mid - lo.clamp(-1.0, 1.0) * lane_h * 0.48);
+                    let color = if (i as f32 / SLICES as f32) < played { on } else { off };
+                    scene.fill(Rect::new(x, top, w, (bottom - top).max(1.0)), color);
+                }
+            }
+            scene.fill(Rect::new(r.x + r.w * played - 1.0, r.y, 2.0, r.h), on);
+        })
+        .on_touch(|t| match t {
+            vergence_widgets::Touch::Press { x, .. } => Some(Msg::Seek(x)),
+            _ => None,
+        })
+        .width(Length::FILL)
+        .height(Length::Fixed(WAVE_H))
+        .name("Waveform");
+        let seconds = s.info.as_ref().map_or(0.0, |i| i.seconds());
+        let now = s.info.as_ref().map_or(0.0, |i| at as f64 / i.rate.max(1) as f64);
+        let play = button(label(if s.playing { "Pause" } else { "Play" }).size(13.0)).on_press(Msg::PlayPause).name(if s.playing { "Pause" } else { "Play" });
+        column(vec![
+            row(vec![cover, column(words).spacing(4.0).width(Length::FILL)]).spacing(PAD).width(Length::FILL),
+            wave,
+            row(vec![play, label(format!("{} / {}", clock(now), clock(seconds))).size(12.0).dim()]).spacing(PAD).align(vergence_widgets::Align::Center),
+        ])
+        .spacing(12.0)
         .width(Length::FILL)
         .height(Length::FILL)
     }
@@ -417,6 +496,7 @@ impl Program for Peek {
                     self.decode(e.path);
                 }
                 Shows::Pages => self.draw_pages(e.path),
+                Shows::Sound(_) => self.shows = Shows::Sound(crate::listen::Listen::start(e.path, SLICES, self.waker.clone())),
                 _ => {}
             }
         }
@@ -448,7 +528,15 @@ impl Program for Peek {
             window.close();
             return false;
         }
-        let now = (self.picture().is_some(), self.pages.lock().unwrap_or_else(|e| e.into_inner()).drawn.len());
+        let sound = match &self.shows {
+            Shows::Sound(l) => {
+                let s = l.state.lock().unwrap_or_else(|e| e.into_inner());
+                let rate = s.info.as_ref().map_or(1, |i| i.rate.max(1)) as u64;
+                (s.info.is_some(), s.peaks.len(), s.playing, s.at * 10 / rate, s.error.is_some())
+            }
+            _ => (false, 0, false, 0, false),
+        };
+        let now = (self.picture().is_some(), self.pages.lock().unwrap_or_else(|e| e.into_inner()).drawn.len(), sound);
         let changed = self.follow() | (now != self.had);
         self.had = now;
         let want = self.wanted();
@@ -472,7 +560,25 @@ impl Program for Peek {
     }
 
     fn update(&mut self, message: Msg, _window: &mut Window) {
-        let Msg::Page(i) = message;
+        let i = match message {
+            Msg::Page(i) => i,
+            Msg::PlayPause => {
+                if let Shows::Sound(l) = &self.shows {
+                    let playing = l.state.lock().unwrap_or_else(|e| e.into_inner()).playing;
+                    l.ask(if playing { crate::listen::Ask::Pause } else { crate::listen::Ask::Play });
+                }
+                return;
+            }
+            Msg::Seek(x) => {
+                if let Shows::Sound(l) = &self.shows {
+                    let frames = l.state.lock().unwrap_or_else(|e| e.into_inner()).info.as_ref().map_or(0, |i| i.frames);
+                    let w = (self.size.0 - 2.0 * PAD).max(1.0);
+                    l.ask(crate::listen::Ask::Seek(((x / w).clamp(0.0, 1.0) as f64 * frames as f64) as u64));
+                    l.ask(crate::listen::Ask::Play);
+                }
+                return;
+            }
+        };
         let p = self.pages.lock().unwrap_or_else(|e| e.into_inner());
         let page_w = (self.size.0 - STRIP_W - 3.0 * PAD).max(100.0);
         let y: f32 = p.sizes.iter().take(i).map(|(w, h)| page_w * h / w.max(1.0) + PAD).sum();
@@ -489,7 +595,14 @@ impl Program for Peek {
             },
             Shows::Pages => self.pages_view(),
             Shows::Text(doc) => text_area(doc),
+            Shows::Sound(l) => self.sound_view(l, theme),
         };
         panel(inner).color(theme.card).radius(0.0).padding(PAD).width(Length::FILL).height(Length::FILL)
     }
+}
+
+/// Seconds as m:ss (h:mm:ss past an hour).
+fn clock(seconds: f64) -> String {
+    let t = seconds.max(0.0) as u64;
+    if t >= 3600 { format!("{}:{:02}:{:02}", t / 3600, t / 60 % 60, t % 60) } else { format!("{}:{:02}", t / 60, t % 60) }
 }

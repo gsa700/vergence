@@ -20,7 +20,7 @@ fn main() {
             }
         };
         let i = &s.info;
-        println!("{arg}: {} Hz, {} ch, {} bit, {:.2} s; {:?} / {:?} / {:?}; cover {}", i.rate, i.channels, i.bits, i.seconds(), i.title, i.artist, i.album, i.cover.as_ref().map_or("none".into(), |(m, d)| format!("{m}, {} bytes", d.len())));
+        println!("{arg}: {} Hz, {} ch, {} bit, {:.2} s; {:?} / {:?} / {:?}; cover {}", i.rate, i.channels, i.bits, i.seconds(), i.title, i.artist, i.album, i.cover.as_ref().map_or("none".into(), |(w, h, _)| format!("{w}x{h}")));
         let mut slices = 0;
         loop {
             match s.peaks(1000) {

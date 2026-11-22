@@ -33,6 +33,9 @@ const PEAK_STEP: u64 = 1 << 20;
 /// The most frames read at once.
 const READ_MAX: u32 = 1 << 16;
 
+/// The size the cover is shrunk to (never enlarged), each side at least this.
+pub const COVER_PX: u32 = 600;
+
 /// What the helper says of a file.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Info {
@@ -44,8 +47,10 @@ pub struct Info {
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,
-    /// The cover's type and its bytes, still encoded.
-    pub cover: Option<(String, Vec<u8>)>,
+    /// The cover, decoded here in the helper (vergence-decode's decoders, so
+    /// the app never parses its bytes) and shrunk to about [`COVER_PX`]:
+    /// width, height, straight RGBA.
+    pub cover: Option<(u32, u32, Vec<u8>)>,
 }
 
 impl Info {
@@ -70,9 +75,10 @@ impl Info {
         for s in [&self.title, &self.artist, &self.album] {
             text(&mut b, s.as_deref().unwrap_or("").as_bytes());
         }
-        let (mime, data) = self.cover.as_ref().map(|(m, d)| (m.as_bytes(), d.as_slice())).unwrap_or((b"", b""));
-        text(&mut b, mime);
-        text(&mut b, data);
+        let (w, h, rgba) = self.cover.as_ref().map(|(w, h, d)| (*w, *h, d.as_slice())).unwrap_or((0, 0, b""));
+        b.extend_from_slice(&w.to_le_bytes());
+        b.extend_from_slice(&h.to_le_bytes());
+        text(&mut b, rgba);
         b
     }
 
@@ -98,7 +104,14 @@ impl Info {
         };
         let word = |v: Vec<u8>| Some(String::from_utf8_lossy(&v).into_owned()).filter(|s| !s.is_empty());
         let (title, artist, album) = (word(text()?), word(text()?), word(text()?));
-        let (mime, data) = (text()?, text()?);
+        drop(text);
+        let w = u32::from_le_bytes(take(4)?.try_into().ok()?);
+        let h = u32::from_le_bytes(take(4)?.try_into().ok()?);
+        let n = u32::from_le_bytes(take(4)?.try_into().ok()?) as usize;
+        let data = take(n)?.to_vec();
+        if !data.is_empty() && data.len() != w as usize * h as usize * 4 {
+            return None;
+        }
         Some(Info {
             rate,
             channels,
@@ -108,7 +121,7 @@ impl Info {
             title,
             artist,
             album,
-            cover: (!data.is_empty()).then(|| (String::from_utf8_lossy(&mime).into_owned(), data)),
+            cover: (!data.is_empty()).then_some((w, h, data)),
         })
     }
 }
@@ -161,7 +174,7 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write) -> std::io::Result<
                     title: tags.title,
                     artist: tags.artist,
                     album: tags.album,
-                    cover: tags.picture.map(|p| (p.mime, p.data)),
+                    cover: tags.picture.and_then(|p| vergence_decode::decode_bytes(&p.data, Some((COVER_PX, COVER_PX))).ok()).and_then(|pic| Some((pic.width, pic.height, pic.frames.into_iter().next()?.rgba))),
                 };
                 open = Some(Open { playing, drawing, peaks: Vec::new(), drawn: 0, told: 0 });
                 Ok(info.encode())
@@ -345,7 +358,7 @@ mod tests {
         let info = super::Info::decode(&info).unwrap();
         assert_eq!((info.rate, info.channels, info.frames), (44_100, 2, 66_150));
         assert_eq!(info.title.as_deref(), Some("Test Tone"));
-        assert!(info.cover.is_some_and(|(m, d)| m == "image/png" && d.starts_with(b"\x89PNG")));
+        assert!(info.cover.is_some_and(|(w, h, d)| (w, h) == (64, 64) && d.len() == 64 * 64 * 4 && d[2] > d[0] + 100 && d[3] == 255), "the blue cover, decoded");
         let (_, peaks) = super::read_frame(&mut r, 1 << 26).unwrap().unwrap();
         assert_eq!(u32::from_le_bytes(peaks[4..8].try_into().unwrap()), 100, "a short track's waveform in one piece");
         let (k, _) = super::read_frame(&mut r, 1 << 26).unwrap().unwrap();
