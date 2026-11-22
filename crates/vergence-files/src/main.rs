@@ -384,6 +384,11 @@ fn fold_mark(open: bool) -> Element<Msg> {
     .height(Length::Fixed(12.0))
 }
 
+/// The sidebar's width unless pulled, and how narrow and wide it may be.
+const SIDE_W: f32 = 184.0;
+const SIDE_MIN: f32 = 140.0;
+const SIDE_MAX: f32 = 400.0;
+
 /// What a favorite being moved in the sidebar carries (its path).
 const SIDEBAR_KIND: &str = "application/x-vergence-sidebar";
 
@@ -413,6 +418,11 @@ struct Viewer {
     /// far its list is scrolled, and the row its menu was opened on.
     side_rect: Rc<Cell<Rect>>,
     side_scroll: f32,
+    /// The sidebar's width (`[files] sidebar-width`), the divider's place as
+    /// drawn, and a pull on it: where it began (window points) and the width then.
+    side_w: f32,
+    divider_rect: Rc<Cell<Rect>>,
+    side_pull: Option<(f32, f32)>,
     side_target: Option<sidebar::Line>,
     /// Each folder's disk's free space (`df -kP`, read apart), and what was asked.
     free: Arc<Mutex<std::collections::HashMap<PathBuf, Option<u64>>>>,
@@ -547,6 +557,8 @@ enum Msg {
     SideMenu(usize),
     SideDrag(usize),
     SideFold(sidebar::Section),
+    /// The line between the sidebar and the folder pulled (its touch).
+    SideGrip(vergence_widgets::Touch),
     Click(usize),
     Sort(SortBy),
     Narrow(String),
@@ -656,6 +668,9 @@ impl Viewer {
             path_edit: None,
             side_rect: Rc::new(Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0))),
             side_scroll: 0.0,
+            side_w: vergence_ui::table_value(&desktop_now, SECTION, "sidebar-width").and_then(|v| v.trim().parse::<f32>().ok()).filter(|w| w.is_finite()).map_or(SIDE_W, |w| w.clamp(SIDE_MIN, SIDE_MAX)),
+            divider_rect: Rc::new(Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0))),
+            side_pull: None,
             side_target: None,
             free: Arc::default(),
             free_asked: RefCell::new(std::collections::HashSet::new()),
@@ -1006,8 +1021,11 @@ impl Viewer {
         }
         let rect = self.side_rect.clone();
         let place = drawing(move |_, _, r: Rect, _| rect.set(r)).width(Length::FILL).height(Length::FILL);
-        let list = panel(scroll(column(rows).width(Length::FILL)).name("Sidebar")).color(t.card).radius(8.0).padding(sidebar::PAD).width(Length::FILL).height(Length::FILL);
-        stack(vec![place, list]).width(Length::Fixed(184.0)).height(Length::FILL)
+        // On the folder's own ground, as Explorer's (Dave, 2026-11-21: "the
+        // left pane the same color as the main window"), a line between them.
+        let _ = t;
+        let list = panel(scroll(column(rows).width(Length::FILL)).name("Sidebar")).radius(0.0).padding(sidebar::PAD).width(Length::FILL).height(Length::FILL);
+        stack(vec![place, list]).width(Length::Fixed(self.side_w)).height(Length::FILL)
     }
 
     /// A double click's longest gap: the desktop's (Settings > Mouse), as
@@ -2248,7 +2266,10 @@ impl Viewer {
                 column(body).spacing(2.0).width(Length::FILL).height(Length::FILL)
             }
         };
-        panel(list).color(t.page).radius(8.0).edge(t.line, 1.0).padding(4.0).width(Length::FILL).height(Length::FILL).on_menu(Msg::GroundMenu)
+        // The Trash window's folder is a page of its own; FileView's shares
+        // its page with the sidebar (view()).
+        let p = panel(list).padding(4.0).width(Length::FILL).height(Length::FILL).on_menu(Msg::GroundMenu);
+        if self.trash_window { p.color(t.page).radius(8.0).edge(t.line, 1.0) } else { p.radius(0.0) }
     }
 
     /// A picture fitted into its place.
@@ -2477,7 +2498,24 @@ impl Program for Viewer {
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
-        let mut middle = if self.trash_window { vec![self.folder_view(t)] } else { vec![self.sidebar_view(t), self.folder_view(t)] };
+        let mut middle = if self.trash_window {
+            vec![self.folder_view(t)]
+        } else {
+            // The sidebar and the folder on one page, a line between them that
+            // is pulled to change the sidebar's width (Dave, 2026-11-21).
+            let rect = self.divider_rect.clone();
+            let divider = drawing(move |scene, _, r: Rect, t: &Theme| {
+                rect.set(r);
+                scene.fill(Rect::new(r.x + r.w / 2.0 - 0.5, r.y, 1.0, r.h), t.line);
+            })
+            .on_touch(|touch| Some(Msg::SideGrip(touch)))
+            .cursor(vergence_ui::Cursor::ColResize)
+            .width(Length::Fixed(7.0))
+            .height(Length::FILL)
+            .name("Sidebar width");
+            let edge = if t.high_contrast { t.text } else { t.line };
+            vec![panel(row(vec![self.sidebar_view(t), divider, self.folder_view(t)]).width(Length::FILL).height(Length::FILL)).color(t.page).radius(8.0).edge(edge, 1.0).width(Length::FILL).height(Length::FILL)]
+        };
         if self.pane && !self.trash_window {
             middle.push(self.pane_view(t));
         }
@@ -2548,6 +2586,24 @@ impl Program for Viewer {
             Msg::PathTyped(s) => self.path_edit = Some(s),
             Msg::PathGo => self.path_go(),
             Msg::SideGo(i) => self.side_go(i),
+            Msg::SideGrip(touch) => {
+                use vergence_widgets::Touch;
+                // In window points (the line moves as it is pulled).
+                let at = self.divider_rect.get().x;
+                match touch {
+                    Touch::Press { x, .. } => self.side_pull = Some((at + x, self.side_w)),
+                    Touch::Move { x, pressed: true, .. } => {
+                        if let Some((x0, w0)) = self.side_pull {
+                            self.side_w = (w0 + (at + x - x0)).clamp(SIDE_MIN, SIDE_MAX).round();
+                        }
+                    }
+                    Touch::Release { .. } | Touch::Leave if self.side_pull.take().is_some() => {
+                        let w = format!("{:.0}", self.side_w);
+                        self.write_key("sidebar-width", (self.side_w != SIDE_W).then_some(w.as_str()));
+                    }
+                    _ => {}
+                }
+            }
             Msg::SideFold(sec) => {
                 let mut s = self.side_setup();
                 if let Some(k) = s.folded.iter().position(|f| *f == sec) {

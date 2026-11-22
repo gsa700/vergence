@@ -58,9 +58,11 @@ impl RowSize {
     /// A row's height in points (one line of name).
     pub fn height(self) -> f32 {
         match self {
+            // Medium and Large as Finder's (Dave, 2026-11-21, beside a Finder
+            // screenshot: rows about 36 points, marks about 26 tall).
             RowSize::Small => 24.0,
-            RowSize::Medium => 30.0,
-            RowSize::Large => 38.0,
+            RowSize::Medium => 34.0,
+            RowSize::Large => 42.0,
         }
     }
 
@@ -69,8 +71,8 @@ impl RowSize {
         match self {
             RowSize::Small => 1.0,
             // A little larger since files milestone 3 (Dave: "slightly taller rows, yes").
-            RowSize::Medium => 1.3,
-            RowSize::Large => 1.6,
+            RowSize::Medium => 1.5,
+            RowSize::Large => 1.8,
         }
     }
 
@@ -78,8 +80,8 @@ impl RowSize {
     fn text(self) -> f32 {
         match self {
             RowSize::Small => 12.0,
-            RowSize::Medium => 12.5,
-            RowSize::Large => 13.5,
+            RowSize::Medium => 13.0,
+            RowSize::Large => 14.0,
         }
     }
 }
