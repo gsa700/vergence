@@ -593,4 +593,21 @@ if [ "$(uname -s)" = Linux ]; then
         esac
     done
 fi
+# The desktop's icons (vergence-files --desktop) run the program they
+# started with until they are started again: stopped here, a server that
+# keeps them running starts the new one at once (Dave, 2026-11-21: "restart
+# the desktop on install"), so the desktop and FileView never differ. Only
+# with such a server (its log says so); an older one would leave no desktop.
+if [ -z "$destdir" ] && [ -n "$user" ] && command -v pgrep >/dev/null 2>&1; then
+    home_of=$(getent passwd "$user" 2>/dev/null | cut -d: -f6)
+    [ -n "$home_of" ] || home_of=$(eval echo "~$user")
+    pids=$(pgrep -u "$user" -f '^(/usr/local/bin/)?vergence-files --desktop' 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        if grep -q 'started again if it exits' "$home_of/.local/state/vergence/server.log" 2>/dev/null; then
+            kill $pids 2>/dev/null && echo "desktop: the icons started again with the new program"
+        else
+            echo "desktop: the icons keep the old program until the next session (this session's server does not start them again)"
+        fi
+    fi
+fi
 echo "start: 'vergence' from a text console, or choose Vergence at the login screen"

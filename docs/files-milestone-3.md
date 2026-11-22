@@ -235,4 +235,16 @@ Close-Up).
   (toolbar `Icon::Eject`), besides its right click's Eject. Checked in a
   headless session on Hubble: the divider pulled; an ISO mounted, the
   button shown, pressed: unmounted and the tab gone home.
+- **The desktop and FileView, 2026-11-21:** an ejected stick still plugged
+  in (FreeBSD does not power it off) is left out of the drive lists while
+  its device node is the one ejected (~/.local/state/vergence/ejected), and
+  a disk image put away says nothing (no "Safe to remove"). The desktop's
+  icons disagreed with FileView: a process of their own on the program of
+  the session's start, and each reading the mounts on its own. Dave chose
+  the server owning the drive list (a milestone of its own, after this one)
+  and the desktop restarted on install: the server now keeps the desktop
+  running (started again when it exits, five times a minute at most, not
+  while the session exits), and tools/install.sh stops it when the running
+  server's log says it does so. Checked on kepler: killed, the desktop came
+  back; installed again, the new program came up.
 

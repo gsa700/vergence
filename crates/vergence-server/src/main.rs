@@ -228,11 +228,6 @@ pub fn no_terminal(cmd: &mut std::process::Command) {
     }
 }
 
-/// Start an app in the session: stdin from /dev/null (the server's is the console:
-/// a .NET app blocked reading it and froze, 2026-11-07), in a session of its own
-/// with no controlling terminal (VDM milestone 1, review C6: found on kepler, every
-/// app had the console as its controlling terminal and could open /dev/tty, which
-/// a lock screen must not allow), reaped when it exits.
 /// Sixteen hex digits from the system's random source (the time and the
 /// process if it cannot be read).
 fn session_id() -> String {
@@ -246,19 +241,31 @@ fn session_id() -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
+/// Start an app in the session: stdin from /dev/null (the server's is the console:
+/// a .NET app blocked reading it and froze, 2026-11-07), in a session of its own
+/// with no controlling terminal (VDM milestone 1, review C6: found on kepler, every
+/// app had the console as its controlling terminal and could open /dev/tty, which
+/// a lock screen must not allow), reaped when it exits.
 pub fn spawn(cmd: &mut std::process::Command) -> std::io::Result<u32> {
+    let child = spawn_child(cmd)?;
+    let pid = child.id();
+    let mut child = child;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(pid)
+}
+
+/// As [`spawn`], the child handed back to be waited on by the caller (the
+/// desktop's icons, started again when they exit).
+pub fn spawn_child(cmd: &mut std::process::Command) -> std::io::Result<std::process::Child> {
     // The login screen starts nothing, whatever asks (review C3).
     if greeter() {
         tracing::warn!("greeter: refused to start {:?}", cmd.get_program());
         return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "the login screen starts no program"));
     }
     no_terminal(cmd);
-    let mut child = cmd.stdin(std::process::Stdio::null()).spawn()?;
-    let pid = child.id();
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
-    Ok(pid)
+    cmd.stdin(std::process::Stdio::null()).spawn()
 }
 
 /// The first app, once Xwayland is ready: `-c <command>` only, and never on the

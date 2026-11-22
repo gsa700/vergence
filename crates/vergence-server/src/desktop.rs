@@ -10,7 +10,11 @@
 // bare desktop, New folder, Paste... with the desktop menu's own entries.
 //
 // The session starts it (session.rs, at the session's start) unless
-// desktop.toml `[desktop] icons = false` (Settings > Desktop).
+// desktop.toml `[desktop] icons = false` (Settings > Desktop), and starts it
+// again whenever it exits (Dave, 2026-11-21: "restart the desktop on
+// install": tools/install.sh stops the old program and the new one comes
+// up; a crash comes back too), up to five times a minute, never while the
+// session exits.
 //
 // Super+D (the seat's ShowDesktop): every window minimized out of the way;
 // again, the same ones back.
@@ -21,6 +25,9 @@
 use smithay::utils::{Logical, Rectangle};
 
 use crate::{Server, win::Win};
+
+/// Set when the session begins to exit (exit.rs): the desktop is not started again.
+pub static STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Whether desktop.toml asks for the desktop's icons (on unless `icons = false`).
 pub fn icons_wanted() -> bool {
@@ -90,10 +97,39 @@ impl Server {
         if !icons_wanted() {
             return tracing::info!("desktop: icons switched off ([desktop] icons = false)");
         }
-        match crate::spawn(std::process::Command::new("vergence-files").arg("--desktop")) {
-            Ok(pid) => tracing::info!("desktop: started (pid {pid})"),
-            Err(e) => tracing::warn!("desktop: vergence-files --desktop could not be started: {e}"),
-        }
+        // Kept running on a thread of its own: started, waited for, started again.
+        std::thread::spawn(|| {
+            use std::sync::atomic::Ordering;
+            use std::time::{Duration, Instant};
+            let mut starts: Vec<Instant> = Vec::new();
+            loop {
+                if STOPPING.load(Ordering::Relaxed) || !icons_wanted() {
+                    break;
+                }
+                starts.retain(|t| t.elapsed() < Duration::from_secs(60));
+                if starts.len() >= 5 {
+                    tracing::warn!("desktop: exited five times in a minute; not started again");
+                    break;
+                }
+                starts.push(Instant::now());
+                match crate::spawn_child(std::process::Command::new("vergence-files").arg("--desktop")) {
+                    Ok(mut child) => {
+                        // tools/install.sh looks for these words before it stops the desktop.
+                        tracing::info!("desktop: started (pid {}); started again if it exits", child.id());
+                        let status = child.wait();
+                        if STOPPING.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        tracing::info!("desktop: exited ({status:?}); starting it again");
+                    }
+                    Err(e) => {
+                        tracing::warn!("desktop: vergence-files --desktop could not be started: {e}");
+                        break;
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        });
     }
 
     /// A window someone works in, for Super+D and the desktop moving aside:

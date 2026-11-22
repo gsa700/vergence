@@ -31,6 +31,7 @@ impl Server {
         // What is running now is what the next session starts again.
         self.session_tick();
         self.resume.exiting = true;
+        crate::desktop::STOPPING.store(true, std::sync::atomic::Ordering::Relaxed);
         for w in &windows {
             // Our own windows are told the close is the session's (bus v33):
             // what they keep stays for the next session.
@@ -52,6 +53,7 @@ impl Server {
                 let names: Vec<String> = left.iter().map(|w| format!("“{}”", state.window_title(w).trim_end_matches(" •"))).take(3).collect();
                 tracing::info!("exit: stopped; still open: {names:?}");
                 state.resume.exiting = false;
+                crate::desktop::STOPPING.store(false, std::sync::atomic::Ordering::Relaxed);
                 // A restart or shut down waiting for the exit does not happen either.
                 state.session_dialog.after_exit = None;
                 let req = crate::notify::Request {
