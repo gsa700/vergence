@@ -69,14 +69,20 @@ impl App {
     /// option and live status, behind "Advanced" at the page's end; a click
     /// opens it, and it stays open while the app runs. `key` names it.
     pub(crate) fn advanced(&self, key: &'static str, rows: Vec<Element<Message>>) -> Element<Message> {
+        self.disclosure(key, "Advanced", rows)
+    }
+
+    /// A titled section that opens and closes (closed until opened, per page
+    /// key), as Advanced is; Sound's other outputs use it too.
+    pub(crate) fn disclosure(&self, key: &'static str, title: &str, rows: Vec<Element<Message>>) -> Element<Message> {
         let open = self.advanced.contains(key);
         let head = button(
-            row(vec![chevron(open), label("Advanced").size(12.0).dim().weight(600)]).spacing(4.0).align(Align::Center),
+            row(vec![chevron(open), label(title).size(12.0).dim().weight(600)]).spacing(4.0).align(Align::Center),
         )
         .look(ButtonLook::Plain)
         .padding(Padding::hv(2.0, 4.0))
         .on_press(Message::Advanced(key))
-        .name(if open { "Close Advanced" } else { "Open Advanced" });
+        .name(&if open { format!("Close {title}") } else { format!("Open {title}") });
         let mut parts = vec![row(vec![head, space().width(Length::FILL)]).width(Length::FILL)];
         if open {
             parts.push(self.group(None, rows));

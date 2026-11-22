@@ -44,29 +44,18 @@ impl App {
             let why = "No sound system Vergence knows was found.";
             return self.page_layout(title, about, vec![self.group(None, vec![setting(why, "", space())])]);
         };
+        // The output in use, with its controls; the others one line each under
+        // "Other outputs", closed (Dave, 2026-11-22: "kind of busy ... just
+        // show the device in use").
         let mut groups = Vec::new();
-        for o in &self.sound_outputs {
-            let id = o.id.clone();
-            // The system's name for it lives in Advanced, unless another output
-            // goes by the same name here: then it is how the two are told apart.
-            let twin = self.sound_outputs.iter().filter(|x| x.name == o.name).count() > 1;
-            let note = match (twin, o.default) {
-                (true, _) => o.detail.clone(),
-                (false, true) => "Programs that do not choose play here.".to_string(),
-                (false, false) => String::new(),
-            };
-            let chosen = if o.default {
-                label("Default").dim()
-            } else {
-                let id = id.clone();
-                button(label("Use this").size(12.0))
-                    .padding(Padding::hv(4.0, 12.0))
-                    .on_press(Message::SoundDefault(id))
-                    .name(&format!("Use {}", o.name))
-            };
-            let vol_id = id.clone();
-            let mute_id = id.clone();
-            let tone_id = id.clone();
+        let label_for = |o: &vergence_sound::Output| {
+            // The system's name lives in Advanced, unless two outputs share a
+            // name here: then it is how they are told apart.
+            if self.sound_outputs.iter().filter(|x| x.name == o.name).count() > 1 { o.detail.clone() } else { String::new() }
+        };
+        if let Some(o) = self.sound_outputs.iter().find(|o| o.default) {
+            let (vol_id, mute_id, tone_id) = (o.id.clone(), o.id.clone(), o.id.clone());
+            let twin = label_for(o);
             let volume = if o.adjustable {
                 setting(
                     "Volume",
@@ -82,24 +71,48 @@ impl App {
             groups.push(self.group(
                 Some(&o.name),
                 vec![
-                        setting(if o.default { "Sound goes here" } else { "Not the default" }, &note, chosen),
-                        volume,
-                        setting(
-                            "Mute",
-                            "",
-                            switch(o.muted, move |on| Message::SoundMute(mute_id.clone(), on))
-                                .name(&format!("Mute {}", o.name)),
-                        ),
-                        setting(
-                            "Test sound",
-                            "A short tone, quiet.",
-                            button(label("Play").size(12.0))
-                                .padding(Padding::hv(4.0, 12.0))
-                                .on_press(Message::SoundTone(tone_id))
-                                .name(&format!("Test {}", o.name)),
-                        ),
-                    ],
+                    setting(
+                        "Sound goes here",
+                        if twin.is_empty() { "Programs that do not choose play here." } else { twin.as_str() },
+                        space(),
+                    ),
+                    volume,
+                    setting(
+                        "Mute",
+                        "",
+                        switch(o.muted, move |on| Message::SoundMute(mute_id.clone(), on))
+                            .name(&format!("Mute {}", o.name)),
+                    ),
+                    setting(
+                        "Test sound",
+                        "A short tone, quiet.",
+                        button(label("Play").size(12.0))
+                            .padding(Padding::hv(4.0, 12.0))
+                            .on_press(Message::SoundTone(tone_id))
+                            .name(&format!("Test {}", o.name)),
+                    ),
+                ],
             ));
+        }
+        let others: Vec<Element<Message>> = self
+            .sound_outputs
+            .iter()
+            .filter(|o| !o.default)
+            .map(|o| {
+                let id = o.id.clone();
+                setting(
+                    &o.name,
+                    &label_for(o),
+                    button(label("Use this").size(12.0))
+                        .padding(Padding::hv(4.0, 12.0))
+                        .on_press(Message::SoundDefault(id))
+                        .name(&format!("Use {}", o.name)),
+                )
+            })
+            .collect();
+        if !others.is_empty() {
+            let title = format!("Other outputs ({})", others.len());
+            groups.push(self.disclosure("sound-others", &title, others));
         }
         if groups.is_empty() {
             groups.push(self.group(None, vec![setting("No outputs", system, space())]));
