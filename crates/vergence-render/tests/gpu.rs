@@ -102,6 +102,16 @@ fn agree(
     );
 }
 
+/// The machine's fonts, then the checkout's own (data/fonts), as an installed
+/// Vergence has them after the system's: a clean system may have no fonts at
+/// all until Vergence is installed (Void's base, 2026-11-22).
+fn fonts_with_ours() -> Fonts {
+    let mut db = FontDb::system();
+    let ours = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/fonts");
+    db.faces.extend(FontDb::scan(&[ours]).faces);
+    Fonts::new(db)
+}
+
 fn none() -> Fonts {
     Fonts::new(FontDb::default())
 }
@@ -239,7 +249,7 @@ fn a_busy_scene_agrees_with_the_reference() {
 #[test]
 fn text_agrees_with_the_reference() {
     let Some(mut gpu) = gpu() else { return };
-    let mut fonts = Fonts::system();
+    let mut fonts = fonts_with_ours();
     let Some(mono) = fonts.face("monospace", 400, false) else {
         eprintln!("skipped: no monospace font");
         return;
@@ -340,7 +350,7 @@ fn what_the_gpu_does_not_draw_yet_is_refused_not_wrong() {
 #[test]
 fn a_grid_of_cells_is_drawn_as_its_fills_and_glyphs() {
     let Some(mut gpu) = gpu() else { return };
-    let mut fonts = Fonts::system();
+    let mut fonts = fonts_with_ours();
     let Some(mono) = fonts.face("monospace", 400, false) else {
         eprintln!("skipped: no monospace font");
         return;

@@ -507,6 +507,12 @@ if [ "$(uname -s)" = FreeBSD ]; then
     echo "drives: the automounter is enabled (rc.conf autofs_enable) and running; its cache 5 s (sysctl.conf)"
 elif command -v udisksctl >/dev/null || [ -x /usr/libexec/udisks2/udisksd ] || [ -x /usr/lib/udisks2/udisksd ]; then
     echo "drives: udisks2 is installed; the session mounts drives through it"
+    # udisks2 is reached on the system bus, which a base Void does not run
+    # (the clean-system test, 2026-11-22: "udisks2: no system bus").
+    if [ -d /etc/sv/dbus ] && [ ! -e /var/service/dbus ]; then
+        ln -s /etc/sv/dbus /var/service/dbus
+        echo "drives: the system bus enabled (runit, /var/service/dbus); udisks2 is reached on it"
+    fi
     # Without logind polkit cannot see who sits at the machine and udisks2
     # refuses every mount: a rule lets the seat group mount, eject and power
     # off removable drives (docs/packaging.md). polkitd runs as a service,
@@ -523,7 +529,7 @@ elif command -v udisksctl >/dev/null || [ -x /usr/libexec/udisks2/udisksd ] || [
         fi
     fi
 else
-    echo "drives: udisks2 is not installed, so drives plugged in are not mounted (Void: xbps-install udisks2)" >&2
+    echo "drives: udisks2 is not installed, so drives plugged in are not mounted (Void: xbps-install udisks2 dbus)" >&2
 fi
 # ---- system setup: Wi-Fi (settings milestone 1, step 4) ----
 # wpa_supplicant is enabled where there is a Wi-Fi card and nothing else
@@ -626,4 +632,12 @@ if [ -z "$destdir" ] && [ -n "$user" ] && command -v pgrep >/dev/null 2>&1; then
         fi
     fi
 fi
-echo "start: 'vergence' from a text console, or choose Vergence at the login screen"
+# vdm logs through syslog; a base Void runs none, and its log is then lost.
+if [ -d /etc/sv ] && [ -d /var/service ] && ! ls /var/service | grep -q -E '^(socklog|syslog|rsyslog|metalog)'; then
+    echo "log: no syslog runs, so vdm's log is lost (Void: xbps-install socklog-void; enable socklog-unix and nanoklogd)" >&2
+fi
+if [ -f "$vdm_state/login-screen" ]; then
+    echo "start: choose Vergence at the login screen, or 'vergence' from a text console"
+else
+    echo "start: 'vergence' from a text console (for the login screen at boot: sudo tools/install.sh --vdm)"
+fi

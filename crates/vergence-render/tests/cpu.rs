@@ -431,10 +431,20 @@ fn a_font_this_machine_lacks_draws_nothing() {
     assert!(p.data.chunks_exact(4).all(|px| px == [0, 0, 0, 255]));
 }
 
-/// The machine's fonts and its monospace face.
+/// The machine's fonts, then the checkout's own (data/fonts), as an installed
+/// Vergence has them after the system's: a clean system may have no fonts at
+/// all until Vergence is installed (Void's base, 2026-11-22).
+fn fonts_with_ours() -> Fonts {
+    let mut db = FontDb::system();
+    let ours = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/fonts");
+    db.faces.extend(FontDb::scan(&[ours]).faces);
+    Fonts::new(db)
+}
+
+/// The machine's fonts (with the checkout's own) and the monospace face.
 fn mono() -> (Fonts, vergence_text::FaceId) {
-    let mut fonts = Fonts::system();
-    let face = fonts.face("monospace", 400, false).expect("a monospace font on this machine");
+    let mut fonts = fonts_with_ours();
+    let face = fonts.face("monospace", 400, false).expect("a monospace font (data/fonts has JetBrains Mono)");
     (fonts, face)
 }
 

@@ -23,15 +23,21 @@ the system's graphics stack (DRM/KMS, GBM, EGL and OpenGL ES through Mesa),
 libinput, xkbcommon and seatd (or logind). The packages, as the project's
 own machines have them:
 
-- **FreeBSD:** `pkg install pkgconf drm-kmod libdrm libinput libudev-devd
+- **FreeBSD:** `pkg install git pkgconf drm-kmod libdrm libinput libudev-devd
   libxkbcommon mesa-libs mesa-dri seatd wayland wayland-protocols`, plus
   `xwayland` for X11 programs; load the GPU's driver at boot
   (`kld_list="i915kms"` in rc.conf for Intel) and enable seatd.
-- **Void:** `xbps-install rust cargo pkg-config libinput-devel
+- **Void:** `xbps-install git rust cargo pkg-config libinput-devel
   libxkbcommon-devel libseat-devel libgbm-devel libdrm-devel
   eudev-libudev-devel wayland-devel wayland-protocols mesa-dri seatd
-  fontconfig`, plus `xorg-server-xwayland` for X11 programs and Mesa's
-  Vulkan driver for a second GPU (`mesa-vulkan-nouveau` for NVIDIA).
+  fontconfig openbsd-netcat udisks2 dbus socklog-void`, plus
+  `xorg-server-xwayland` for X11 programs and Mesa's Vulkan driver for a
+  second GPU (`mesa-vulkan-nouveau` for NVIDIA). udisks2 mounts drives and
+  needs the system bus (install.sh enables `dbus`); a base Void runs no
+  syslog, so enable socklog for vdm's log (`ln -s /etc/sv/socklog-unix
+  /etc/sv/nanoklogd /var/service/`). Checked on a fresh Void install
+  (techbench, 2026-11-22): a cold `cargo build --release` takes about a
+  minute on an i9-13900K.
 
     cargo build --release
     cargo test --workspace
@@ -45,8 +51,9 @@ replaces the binaries a running session uses.
 - **Installed:** `sudo tools/install.sh` puts the server, the apps, the
   helpers (in libexec/vergence), the session files and the login screen's
   daemon under /usr/local (`--prefix`, `--destdir` for packages,
-  `--uninstall`). Log in on a text console and run `vergence`, or choose
-  Vergence at the login screen. The server and the apps speak one exact bus
+  `--uninstall`). Log in on a text console and run `vergence`. The login
+  screen at boot is a choice: `sudo tools/install.sh --vdm` turns it on
+  (or `sudo vdm login-screen on`, from vdm's next start), `--no-vdm` off. The server and the apps speak one exact bus
   protocol version, so they are always installed together; packages must
   require each other at the same version, or be one package.
 - **From the checkout:** `tools/vergence-session` starts a development
