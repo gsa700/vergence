@@ -110,3 +110,9 @@ preview as a window of its own, with Open in...".
 - Editing in the preview (Quick Look's markup).
 - Previews from other programs' helpers.
 - AlbumWall itself moving to the Rust Hymie.
+
+## Polish, later (Dave, 2026-11-21)
+
+- **The preview window's decorations** (Dave: "We might want to change the
+  window decorations but we can look at that as a polish item later"):
+  today a dialog's slim bar with close, the file's name and "Open with".
