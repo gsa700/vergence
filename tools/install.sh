@@ -431,6 +431,11 @@ elif [ -d /etc/sv ] && [ -d /var/service ]; then
     printf '%s\n' "#!/bin/sh" "exec 2>&1" "exec $prefix/sbin/vdm" > /etc/sv/vdm/run
     printf '%s\n' "#!/bin/sh" "exec vlogger -t vdm -p auth" > /etc/sv/vdm/log/run
     chmod 755 /etc/sv/vdm/run /etc/sv/vdm/log/run
+    # runit's state in /run, as Void's packages lay it out (vsv): a package
+    # installed later cannot unpack over a real supervise folder (techbench,
+    # 2026-11-22). One runsv already made is left until it is restarted.
+    [ -e /etc/sv/vdm/supervise ] || ln -s /run/runit/supervise.vdm /etc/sv/vdm/supervise
+    [ -e /etc/sv/vdm/log/supervise ] || ln -s /run/runit/supervise.vdm-log /etc/sv/vdm/log/supervise
     # Enabled by vergence-setup (below); a changed vdm restarted here.
     if [ -e /var/service/vdm ] && [ "$vdm_do" = restart ]; then sv restart vdm >/dev/null 2>&1 || true; fi
     if [ "$vdm_do" = defer ]; then vdm_deferred "sv restart vdm"; fi
