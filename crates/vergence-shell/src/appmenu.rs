@@ -9,9 +9,11 @@
 //! 2. the app's commands and the user's (starred); Zoom in, Zoom out and
 //!    Actual size together as one Text size row, − 100% +, that leaves the
 //!    menu open (a while's size; the lasting one is in the app's settings);
-//! 3. Settings…, Keyboard shortcuts › (every command of the app under its
-//!    menu's heading with its keys, chosen from there too, a right click
-//!    adding one to the menu), About <App>, Quit <App>.
+//! 3. the app's menus as submenus, File ›, View ›, Go › and the rest
+//!    (every command with its keys, chosen from there, a right click adding
+//!    one to the top level; Dave, 2026-11-22: Reader's View, Go and Tools
+//!    were buried in Keyboard shortcuts, "should be moved up one level");
+//! 4. Settings…, About <App>, Quit <App>.
 //!
 //! An app that is not ours (no commands) gets the skeleton with a line saying
 //! its own menu holds the rest. Everything here is plain data: the server
@@ -67,7 +69,7 @@ pub enum Line {
     },
     /// A submenu, by its name.
     Sub(String),
-    /// A menu's name over its commands, in Keyboard shortcuts.
+    /// A menu's name over its commands (search results use it).
     Header(String),
     /// Text size: its three commands (smaller, as it was, larger) and what
     /// it is now ("110%", the Actual size command's label as the app sent it).
@@ -106,8 +108,6 @@ pub const SEARCH_H: i32 = 36;
 pub const SEP_H: i32 = vergence_look::MENU_SEP as i32;
 pub const NOTE_H: i32 = 40;
 pub const HEADER_H: i32 = 24;
-/// The submenu of every command, with its keys.
-pub const ALL: &str = "Keyboard shortcuts";
 /// An app with more commands than this has a search field at the top (the
 /// terminal's 14 do not need one; typing searches anyway).
 pub const SMALL: usize = 24;
@@ -268,6 +268,12 @@ impl Model {
             };
             lines.extend(self.everyday().into_iter().filter(|l| !zooming(l)));
             lines.extend(zoom);
+            // The app's menus, one level down from here.
+            let menus = self.menus();
+            if !menus.is_empty() {
+                lines.push(Line::Separator);
+                lines.extend(menus.into_iter().map(Line::Sub));
+            }
         } else {
             lines.push(Line::Note(format!("{} keeps its own settings and commands in its own menu.", self.app)));
         }
@@ -277,9 +283,6 @@ impl Model {
         }
         lines.push(Line::Separator);
         lines.push(self.skeleton(Role::Settings, Action::Settings));
-        if self.native && self.menu_commands().next().is_some() {
-            lines.push(Line::Sub(ALL.into()));
-        }
         lines.push(self.skeleton(Role::About, Action::About));
         lines.push(self.skeleton(Role::Quit, Action::Quit));
         tidy(lines)
@@ -297,7 +300,7 @@ impl Model {
         lines
     }
 
-    /// A submenu's lines: All commands (each menu under its heading) or Window.
+    /// A submenu's lines: one of the app's menus, or Window.
     pub fn sub(&self, name: &str) -> Vec<Line> {
         if let Some(given) = &self.given {
             return given
@@ -325,15 +328,10 @@ impl Model {
                 })
                 .collect();
         }
-        if name != ALL {
-            return Vec::new();
+        if self.menus().iter().any(|m| m == name) {
+            return self.menu(name);
         }
-        let mut lines = Vec::new();
-        for m in self.menus() {
-            lines.push(Line::Header(m.clone()));
-            lines.extend(self.menu(&m));
-        }
-        lines
+        Vec::new()
     }
 
     /// Search: every line that can be chosen, in every menu, whose label
@@ -894,7 +892,7 @@ mod tests {
         ]);
         assert_eq!(labels(&m.top()), ["Open (Enter)", "Open With >", "---", "Rename… (F2)"]);
         assert_eq!(labels(&m.sub("Open With")), ["Edit", "Close-Up"]);
-        assert!(m.sub("Keyboard shortcuts").is_empty());
+        assert!(m.sub("File").is_empty(), "a right-click menu's submenus are its own");
         // No search: typing does nothing; the keys walk past the faint line.
         let mut s = State::default();
         assert_eq!(s.key(&m, Key::Char('x')), Did::Nothing);
@@ -920,32 +918,24 @@ mod tests {
                 "New window (Ctrl+Shift+N)",
                 "[- 110% +]",
                 "---",
+                "File >",
+                "Edit >",
+                "View >",
+                "Tab >",
+                "Shell >",
+                "---",
                 "Settings… (Ctrl+,)",
-                "Keyboard shortcuts >",
                 "About Terminal",
                 "Quit Terminal"
             ]
         );
-        assert_eq!(
-            labels(&m.sub(ALL)),
-            [
-                "# File",
-                "New window (Ctrl+Shift+N)",
-                "New tab (Ctrl+Shift+T)",
-                "# Edit",
-                "Copy (Ctrl+C)",
-                "Paste (Ctrl+V)",
-                "# View",
-                "Zoom in (Ctrl+=)",
-                "Zoom out (Ctrl+-)",
-                "Actual size (Ctrl+0)",
-                "# Tab",
-                "Next tab (Ctrl+Page Down)",
-                "Split side by side (Ctrl+Shift+R)",
-                "# Shell",
-                "Clear"
-            ]
-        );
+        // Each of the app's menus one level down, its commands with their keys.
+        assert_eq!(labels(&m.sub("File")), ["New window (Ctrl+Shift+N)", "New tab (Ctrl+Shift+T)"]);
+        assert_eq!(labels(&m.sub("Edit")), ["Copy (Ctrl+C)", "Paste (Ctrl+V)"]);
+        assert_eq!(labels(&m.sub("View")), ["Zoom in (Ctrl+=)", "Zoom out (Ctrl+-)", "Actual size (Ctrl+0)"]);
+        assert_eq!(labels(&m.sub("Tab")), ["Next tab (Ctrl+Page Down)", "Split side by side (Ctrl+Shift+R)"]);
+        assert_eq!(labels(&m.sub("Shell")), ["Clear"]);
+        assert!(m.sub("Nowhere").is_empty());
         assert!(matches!(&big().top()[0], Line::Search), "many commands: a search field");
     }
 
@@ -974,7 +964,7 @@ mod tests {
                 "[- 110% +]"
             ]
         );
-        assert!(labels(&m.sub(ALL)).contains(&"Clear *".to_string()));
+        assert!(labels(&m.sub("Shell")).contains(&"Clear *".to_string()));
         match &m.top()[2] {
             Line::Item { pin, pinned: true, .. } => assert_eq!(pin.as_deref(), Some("Shell/Clear")),
             l => panic!("{l:?}"),
@@ -986,7 +976,7 @@ mod tests {
         let m = terminal();
         let top = m.top();
         let n = top.len();
-        assert!(matches!(&top[n - 4], Line::Item { action: Action::Command(5), pin: None, .. }));
+        assert!(matches!(&top[n - 3], Line::Item { action: Action::Command(5), pin: None, .. }));
         assert!(matches!(&top[n - 2], Line::Item { action: Action::About, .. }));
         assert!(matches!(&top[n - 1], Line::Item { action: Action::Quit, .. }));
     }
@@ -1026,13 +1016,13 @@ mod tests {
         assert_eq!(s.key(&m, Key::Down), Did::Moved);
         assert_eq!(s.top, Some(0));
         assert_eq!(s.key(&m, Key::Enter), Did::Chosen(Action::Command(3)));
-        // Down to Keyboard shortcuts: it opens; Right goes in, past its heading.
-        for _ in 0..4 {
+        // Down to File (past the Text size row and the line): it opens; Right goes in.
+        for _ in 0..3 {
             s.key(&m, Key::Down);
         }
-        assert_eq!(s.open, Some(5));
+        assert_eq!(s.open, Some(4));
         s.key(&m, Key::Right);
-        assert_eq!(s.sub, Some(1), "New window, under File");
+        assert_eq!(s.sub, Some(0), "New window, first in File");
         assert_eq!(s.key(&m, Key::Enter), Did::Chosen(Action::Command(8)));
         assert_eq!(s.key(&m, Key::Left), Did::Moved);
         assert_eq!(s.sub, None);
@@ -1057,16 +1047,16 @@ mod tests {
     }
 
     #[test]
-    fn the_pointer_chooses_and_opens_the_shortcuts_and_headings_are_not_chosen() {
+    fn the_pointer_opens_an_apps_menu_and_chooses_in_it() {
         let m = terminal();
         let mut s = State::default();
         s.hover_top(&m, Some(5));
         assert_eq!((s.top, s.open), (Some(5), Some(5)));
-        assert_eq!(labels(&s.sub_lines(&m)), labels(&m.sub(ALL)));
+        assert_eq!(labels(&s.sub_lines(&m)), labels(&m.sub("Edit")));
         s.hover_sub(&m, Some(1));
         assert_eq!(s.sub, Some(1));
         s.hover_sub(&m, Some(0));
-        assert_eq!(s.sub, None, "a heading is not chosen");
+        assert_eq!(s.sub, None, "Copy is faint: not chosen");
         s.hover_top(&m, Some(3));
         assert_eq!(s.top, Some(5), "a separator is not chosen");
     }
