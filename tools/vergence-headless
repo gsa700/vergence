@@ -73,6 +73,7 @@ EOF
     env -u WAYLAND_DISPLAY -u VERGENCE_BUS -u DBUS_SESSION_BUS_ADDRESS -u DISPLAY \
         HOME="$home" XDG_RUNTIME_DIR="$run" VERGENCE_CONTROL=1 PATH="$PATH" \
         VERGENCE_DEFAULTS="${VERGENCE_DEFAULTS:-none}" \
+        LANG="${LANG:-C.UTF-8}" \
         RUST_LOG="${RUST_LOG:-info}" \
         "$bin" --headless "$@" >"$base/server.log" 2>&1 &
     echo $! >"$pidfile"

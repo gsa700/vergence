@@ -18,8 +18,11 @@ export ROOT
 TARGET=$ROOT/target-check/release
 echo "building into target-check"
 CARGO_TARGET_DIR=$ROOT/target-check cargo build -q --release --manifest-path "$ROOT/Cargo.toml" -p vergence-ui --example testpattern || exit 2
-CARGO_TARGET_DIR=$ROOT/target-check cargo build -q --release --manifest-path "$ROOT/Cargo.toml" -p vergence-server -p vergence-harness -p vergence-edit -p vergence-reader -p vergence-closeup -p vergence-pdf -p vergence-settings -p vergence-files -p vergence-decode -p vergence-hymie -p vergence-hymie-aac || exit 2
-CARGO_TARGET_DIR=$ROOT/target-check cargo build -q --release --manifest-path "$ROOT/Cargo.toml" -p vergence-protocol --bin vbus || exit 2
+# Every program of the workspace, not a list: a headless session runs
+# programs from here first on its PATH, and one left out stays as old as its
+# last build (the terminal, two days and five bus versions behind, opened over
+# Wayland in headless sessions; 2026-11-22).
+CARGO_TARGET_DIR=$ROOT/target-check cargo build -q --release --manifest-path "$ROOT/Cargo.toml" --workspace --bins || exit 2
 PATTERN=$TARGET/examples/testpattern
 HARNESS=$TARGET/vergence-harness
 BASE=$HOME/vergence-display-suite/$(date +%Y%m%d-%H%M%S)

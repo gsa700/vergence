@@ -18,6 +18,11 @@ DEMO=/tmp/vergence-showcase
 export VERGENCE_DEFAULTS=${VERGENCE_DEFAULTS:-/usr/local/share/vergence/defaults/desktop.toml}
 [ -f "$VERGENCE_DEFAULTS" ] || VERGENCE_DEFAULTS=/usr/share/vergence/defaults/desktop.toml
 
+# The session's programs from this checkout, all of them (a headless session
+# runs programs from target-check/release first; an old one there would show).
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+CARGO_TARGET_DIR="$ROOT/target-check" cargo build -q --release --workspace --bins || exit 2
+
 # Sample files: Vergence's own documents and pictures.
 rm -rf "$DEMO"
 mkdir -p "$DEMO/Documents" "$DEMO/Pictures" "$DEMO/Music"

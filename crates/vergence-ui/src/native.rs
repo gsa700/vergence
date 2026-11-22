@@ -196,7 +196,16 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
     {
         return Ok(None);
     }
-    let Ok(mut client) = Client::connect(&app.app_id()) else { return Ok(None) };
+    // Refused or unreachable: said once on the error output (the server's log
+    // for apps it starts), then Wayland. A silent fallback hid a two-day-old
+    // terminal speaking an older bus version in headless sessions (2026-11-22).
+    let mut client = match Client::connect(&app.app_id()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{}: the native road refused ({e}); opening the window over Wayland", app.app_id());
+            return Ok(None);
+        }
+    };
     let (bar_by_server, request) = create_request(app, 1, 0, size);
     let created = client.request(|serial| {
         let mut r = request.clone();
@@ -208,8 +217,16 @@ pub(crate) fn run(app: &mut dyn App, size: (u32, u32)) -> io::Result<Option<()>>
     let token = match created {
         Ok(ServerMsg::Window(WinEvent::Created { token, .. })) => token,
         // A server without native windows says "not yet", or something else:
-        // Wayland it is.
-        _ => return Ok(None),
+        // Wayland it is, and said why.
+        other => {
+            let why = match &other {
+                Ok(ServerMsg::Error { message, .. }) => message.clone(),
+                Ok(m) => format!("{m:?}").chars().take(120).collect(),
+                Err(e) => e.to_string(),
+            };
+            eprintln!("{}: no native window ({why}); opening it over Wayland", app.app_id());
+            return Ok(None);
+        }
     };
     app.token_given(&token);
     app.opened(1);

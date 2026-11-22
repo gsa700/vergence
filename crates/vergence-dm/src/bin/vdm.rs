@@ -507,6 +507,18 @@ fn run_session(h: &pam::Handle, plan: &LoginPlan) -> c_int {
             if !has(&env, "PATH") {
                 set(&mut env, "PATH", "/usr/local/bin:/usr/bin:/bin".into());
             }
+            // The system's locale where PAM gave none: /etc/locale.conf (Void and
+            // systemd systems keep it there, and only a login shell's profile
+            // reads it, so a session from the login screen had C.UTF-8 whatever
+            // the machine said; 2026-11-22), else C.UTF-8.
+            if !has(&env, "LANG") {
+                let text = std::fs::read_to_string("/etc/locale.conf").unwrap_or_default();
+                for (k, v) in locale_conf(&text) {
+                    if !has(&env, &k) {
+                        set(&mut env, &k, v);
+                    }
+                }
+            }
             if !has(&env, "LANG") {
                 set(&mut env, "LANG", "C.UTF-8".into());
             }
@@ -1331,6 +1343,26 @@ fn put_login_wallpaper(bytes: &[u8], name: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The locale settings in /etc/locale.conf's text: LANG, LANGUAGE and the
+/// LC_* names, each `NAME=value` or `NAME="value"`, a value of letters, digits
+/// and `_.@:-` only (anything else is left out: it goes into every session's
+/// environment).
+fn locale_conf(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|l| {
+            let (k, v) = l.trim().split_once('=')?;
+            let k = k.trim();
+            let v = v.trim().trim_matches('"').trim_matches('\'');
+            let name_ok = k == "LANG"
+                || k == "LANGUAGE"
+                || (k.starts_with("LC_") && k[3..].bytes().all(|b| b.is_ascii_uppercase()));
+            let value_ok =
+                !v.is_empty() && v.len() <= 64 && v.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.@:-".contains(&b));
+            (name_ok && value_ok).then(|| (k.to_string(), v.to_string()))
+        })
+        .collect()
 }
 
 /// Tell the asking program how it ended.
@@ -2569,6 +2601,22 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// /etc/locale.conf's settings, and nothing that does not belong there.
+    #[test]
+    fn the_system_locale() {
+        let got = locale_conf(
+            "# comment\nLANG=en_US.UTF-8\nLC_COLLATE=C\nLC_TIME=\"en_GB.UTF-8\"\nPATH=/evil\nLC_bad=x\nLANG2=y\nLC_ALL=a;rm\n",
+        );
+        assert_eq!(
+            got,
+            vec![
+                ("LANG".to_string(), "en_US.UTF-8".to_string()),
+                ("LC_COLLATE".to_string(), "C".to_string()),
+                ("LC_TIME".to_string(), "en_GB.UTF-8".to_string()),
+            ]
+        );
+    }
 
     /// The login screen's picture is told by its first bytes only.
     #[test]
