@@ -118,7 +118,10 @@ if [ -n "$uninstall" ]; then
     exit 0
 fi
 
-release=$root/target/release
+# The build to install: cargo's target/release, or where a package's build put
+# it (the xbps template: target/<triple>/release).
+release=${VERGENCE_RELEASE_DIR:-$root/target/release}
+case $release in /*) ;; *) release=$root/$release ;; esac
 for p in $programs; do
     [ -x "$release/$p" ] || { echo "install.sh: $release/$p is missing; run cargo build --release first" >&2; exit 1; }
 done

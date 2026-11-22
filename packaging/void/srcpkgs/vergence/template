@@ -1,0 +1,46 @@
+# Template file for 'vergence'
+pkgname=vergence
+version=0.1.0
+revision=1
+build_style=cargo
+hostmakedepends="pkg-config"
+makedepends="libinput-devel libxkbcommon-devel libseat-devel libgbm-devel
+ libdrm-devel eudev-libudev-devel wayland-devel wayland-protocols
+ fontconfig-devel pam-devel"
+depends="seatd mesa-dri fontconfig dbus udisks2 polkit openbsd-netcat"
+short_desc="Desktop with its own display server, toolkit and applications"
+maintainer="gsa700 <298062495+gsa700@users.noreply.github.com>"
+license="Apache-2.0, GPL-2.0-or-later, OFL-1.1"
+homepage="https://github.com/gsa700/vergence"
+distfiles="https://github.com/gsa700/vergence/archive/refs/tags/v${version}.tar.gz"
+checksum=@CHECKSUM@
+
+# The login screen's account: owns nothing, logs in nowhere, may use the seat.
+system_accounts="_vdm"
+_vdm_homedir="/var/empty"
+_vdm_descr="Vergence display manager (greeter)"
+_vdm_groups="_seatd"
+
+conf_files="/etc/pam.d/vdm /etc/pam.d/vdm-unlock /etc/pam.d/vdm-elevate
+ /etc/pam.d/vdm-greeter /etc/pam.d/vdm-autologin"
+
+# The workspace's binaries, built by the cargo style; installed by the
+# project's own tools/install.sh (staged, so it touches nothing outside
+# DESTDIR), then the files a Void system needs. Nothing is enabled:
+# vergence-setup does that, run once by the administrator (INSTALL.msg).
+do_install() {
+	VERGENCE_RELEASE_DIR="target/${RUST_TARGET}/release" \
+		./tools/install.sh --prefix /usr --destdir "${DESTDIR}"
+
+	for f in vdm vdm-unlock vdm-elevate vdm-greeter vdm-autologin; do
+		vinstall "${FILESDIR}/pam.d/${f}" 644 etc/pam.d
+	done
+	vsv vdm
+	vinstall "${FILESDIR}/50-vdm" 755 etc/zzz.d/suspend
+	vinstall tools/linux/50-vergence-drives.rules 644 usr/share/polkit-1/rules.d
+	vinstall "${FILESDIR}/90-vergence-fonts.conf" 644 usr/share/fontconfig/conf.avail
+	vmkdir etc/fonts/conf.d
+	ln -s /usr/share/fontconfig/conf.avail/90-vergence-fonts.conf \
+		"${DESTDIR}/etc/fonts/conf.d/90-vergence-fonts.conf"
+	vlicense LICENSE-APACHE
+}

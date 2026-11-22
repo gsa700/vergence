@@ -1,0 +1,3 @@
+# vdm-unlock: the Vergence lock screen's password check (the vergence package)
+auth		include		system-auth
+account		include		system-auth
