@@ -31,8 +31,15 @@ preview as a window of its own, with Open in...".
      page thumbnails beside them.
    - **Text:** a fixed-width font, wrapped and scrolling, the whole file up
      to 1 MiB.
-   - **Sound:** cover art, title, artist, album and length, with
-     play/pause and a scrubber.
+   - **Sound:** cover art, title, artist, album and length over a
+     **waveform**, as GNOME's sound recorder and Audacity draw it (Dave,
+     2026-11-21). The waveform is also the scrubber: a playhead moves across
+     it, and a click seeks. Play/pause sits beside it.
+     - The helper decodes the whole track once, which takes well under a
+       second for a CD-length FLAC or MP3.
+     - It sends back only a min/max peak per slice (stereo, about 2,000
+       slices), never the samples, and the waveform fills in from left to
+       right as decoding goes.
    - **Facts:** for anything else, a large icon with the name, kind, size
      and dates. For a folder, how many items it holds.
 3. **What decodes the data.** The rule is whitepaper §6.10: a file's bytes
@@ -85,9 +92,10 @@ preview as a window of its own, with Open in...".
    vergence-decode is, decodes one file to PCM on a pipe; AAC goes through
    libexec/vergence/hymie-aac. Packaging and THIRD-PARTY-NOTICES name the
    GPL helper.
-6. **Sound in the preview:** cover art, tags, length, play/pause and the
-   scrubber, through vergence-sound. Playing stops when the preview closes
-   or moves on to another file.
+6. **Sound in the preview:** cover art, tags and length, the waveform (the
+   helper's peaks, drawn as they arrive) as the scrubber, and play/pause,
+   through vergence-sound. Playing stops when the preview closes or moves on
+   to another file.
 7. **Checks:**
    - Display-suite scenario 18: in a headless session, preview a text file,
      a picture, a PDF and a WAV, checking each window's shape and the "Open
