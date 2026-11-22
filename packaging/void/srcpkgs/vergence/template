@@ -31,6 +31,10 @@ conf_files="/etc/pam.d/vdm /etc/pam.d/vdm-unlock /etc/pam.d/vdm-elevate
 do_install() {
 	VERGENCE_RELEASE_DIR="target/${RUST_TARGET}/release" \
 		./tools/install.sh --prefix /usr --destdir "${DESTDIR}"
+	# Void has no /usr/sbin of its own (a link to bin): vdm and
+	# vergence-setup go in /usr/bin (vdm finds the server beside it).
+	mv "${DESTDIR}"/usr/sbin/* "${DESTDIR}/usr/bin/"
+	rmdir "${DESTDIR}/usr/sbin"
 
 	for f in vdm vdm-unlock vdm-elevate vdm-greeter vdm-autologin; do
 		vinstall "${FILESDIR}/pam.d/${f}" 644 etc/pam.d
