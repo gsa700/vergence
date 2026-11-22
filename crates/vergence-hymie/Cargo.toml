@@ -1,0 +1,9 @@
+[package]
+name = "vergence-hymie"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Hymie, AlbumWall's audio engine ported to Rust: WAV, FLAC, MP3, ALAC and MP4 decoded to samples, their tags and cover art"
+
+[dependencies]

@@ -2222,6 +2222,7 @@ name = "vergence-files"
 version = "0.1.0"
 dependencies = [
  "vergence-decode",
+ "vergence-pdf",
  "vergence-protocol",
  "vergence-render",
  "vergence-scene",
@@ -2256,6 +2257,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "vergence-hymie"
+version = "0.1.0"
+
+[[package]]
 name = "vergence-look"
 version = "0.1.0"
 
@@ -2264,6 +2269,7 @@ name = "vergence-media"
 version = "0.1.0"
 dependencies = [
  "vergence-dbus",
+ "vergence-protocol",
 ]
 
 [[package]]
@@ -2482,6 +2488,7 @@ dependencies = [
  "vergence-decode",
  "vergence-look",
  "vergence-media",
+ "vergence-protocol",
  "vergence-render",
  "vergence-scene",
  "vergence-shell",
