@@ -164,7 +164,7 @@ impl Peek {
                 self.decode(e.path.clone());
                 Shows::Picture
             }
-            Some(e) if e.kind() == Kind::Sound => Shows::Sound(crate::listen::Listen::start(e.path.clone(), SLICES, self.waker.clone())),
+            Some(e) if e.kind() == Kind::Sound => self.listen(e.path.clone()),
             Some(e) if e.kind() == Kind::Text => match read_text(&e.path) {
                 Some(text) => {
                     let options = AreaOptions { editable: false, wrap: true, line_numbers: false, current_line: false, complete: false, spell: false, ..AreaOptions::default() };
@@ -175,6 +175,19 @@ impl Peek {
             Some(_) => Shows::Facts,
         };
         true
+    }
+
+    /// A sound file's worker, playing at once (as Quick Look does; Dave,
+    /// 2026-11-21: "Ideally it would start playing when you open it") unless
+    /// `[files] preview-autoplay = false`. Not before the waker has come:
+    /// the worker started without it is replaced at once, and would click.
+    fn listen(&self, path: PathBuf) -> Shows {
+        let l = crate::listen::Listen::start(path, SLICES, self.waker.clone());
+        let off = vergence_ui::table_value(&crate::desktop_text().0, crate::SECTION, "preview-autoplay").as_deref() == Some("false");
+        if self.waker.is_some() && !off {
+            l.ask(crate::listen::Ask::Play);
+        }
+        Shows::Sound(l)
     }
 
     fn decode(&self, path: PathBuf) {
@@ -509,7 +522,7 @@ impl Program for Peek {
                     self.decode(e.path);
                 }
                 Shows::Pages => self.draw_pages(e.path),
-                Shows::Sound(_) => self.shows = Shows::Sound(crate::listen::Listen::start(e.path, SLICES, self.waker.clone())),
+                Shows::Sound(_) => self.shows = self.listen(e.path),
                 _ => {}
             }
         }

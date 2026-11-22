@@ -3298,6 +3298,7 @@ impl Rows for FilesRows {
                 rows: vec![
                     Row::new("view", "New windows show", "A folder as a list or as icons.", Control::Choose { choices: vec![Choice::text("A list", "list"), Choice::text("Icons", "icons")], desktop: None, app_default: 0 }),
                     Row::new("preview-pane", "Preview pane", "The chosen file at the window's right.", Control::Switch { default: false }),
+                    Row::new("preview-autoplay", "Play sounds in the preview", "Space on a sound file plays it at once.", Control::Switch { default: true }),
                     Row::new("hidden", "Hidden files", "Names that start with a dot.", Control::Switch { default: false }),
                     Row::new("row-size", "Row size", "How tall the list's rows are.", Control::Choose { choices: vec![Choice::text("Small", "small"), Choice::text("Medium", "medium"), Choice::text("Large", "large")], desktop: None, app_default: 1 }),
                     Row::new("group-by", "Group by", "The list under headings: by kind (Folders, Documents, Pictures…), by date (Today, Yesterday…), by size, or none.", Control::Choose { choices: vec![Choice::text("Kind", "kind"), Choice::text("Date", "date"), Choice::text("Size", "size"), Choice::text("None", "none")], desktop: None, app_default: 0 }),
