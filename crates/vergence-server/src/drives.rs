@@ -57,6 +57,8 @@ impl Server {
             let mut last: Vec<DriveInfo> = Vec::new();
             let mut first = true;
             loop {
+                // A drive ejected and since pulled out is forgotten (plugged in again, it shows).
+                vergence_media::drives::prune_ejected();
                 // A drive pulled out while mounted is let go of (FreeBSD keeps its mount).
                 for stale in vergence_media::drives::stale_mounts() {
                     match vergence_media::eject(&stale) {
@@ -80,6 +82,13 @@ impl Server {
         });
         if let Err(e) = started {
             return tracing::warn!("drives: can't start watching: {e}");
+        }
+        // FreeBSD: devd tells when a disk's node comes or goes; looked at at
+        // once (Dave, 2026-11-21: "a pretty long delay when inserting a drive").
+        #[cfg(target_os = "freebsd")]
+        {
+            let p = poke.clone();
+            let _ = std::thread::Builder::new().name("drives devd".into()).spawn(move || devd_disks(p));
         }
         self.drives.poke = Some(poke);
         self.drives.done = Some(tx);
@@ -154,6 +163,50 @@ impl Server {
         if let Err(e) = started {
             tracing::warn!("drives: can't start the action: {e}");
         }
+    }
+}
+
+/// FreeBSD: reads devd's pipe (as drm.rs does for monitors; each reader has
+/// every event) and pokes the drive thread when a disk's or a label's node
+/// is made or taken away.
+#[cfg(target_os = "freebsd")]
+fn devd_disks(poke: mpsc::Sender<()>) {
+    use std::io::BufRead;
+    loop {
+        if let Ok(stream) = std::os::unix::net::UnixStream::connect("/var/run/devd.pipe") {
+            for line in std::io::BufReader::new(stream).lines() {
+                let Ok(line) = line else { break };
+                if is_disk_node(&line) && poke.send(()).is_err() {
+                    return;
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_secs(5));
+    }
+}
+
+/// devd's "!system=DEVFS subsystem=CDEV type=CREATE cdev=da0s1" and the like,
+/// for disks, cards, discs, md devices and the labels the automounter uses.
+#[cfg_attr(not(target_os = "freebsd"), allow(dead_code))]
+fn is_disk_node(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix('!') else { return false };
+    if !rest.contains("system=DEVFS") || !rest.contains("subsystem=CDEV") {
+        return false;
+    }
+    rest.split_whitespace().filter_map(|w| w.strip_prefix("cdev=")).any(|c| {
+        let base: String = c.chars().take_while(|x| x.is_ascii_alphabetic()).collect();
+        matches!(base.as_str(), "da" | "cd" | "mmcsd" | "sdda" | "md") || ["msdosfs/", "iso9660/", "label/", "ext2fs/", "ntfs/", "exfat/", "ufs/"].iter().any(|d| c.starts_with(d))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn devd_disk_nodes_are_told_apart() {
+        assert!(super::is_disk_node("!system=DEVFS subsystem=CDEV type=CREATE cdev=da0s1"));
+        assert!(super::is_disk_node("!system=DEVFS subsystem=CDEV type=DESTROY cdev=msdosfs/USB"));
+        assert!(!super::is_disk_node("!system=DEVFS subsystem=CDEV type=CREATE cdev=ttyU0"));
+        assert!(!super::is_disk_node("!system=DRM subsystem=CONNECTOR type=HOTPLUG"));
     }
 }
 

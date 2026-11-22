@@ -153,6 +153,20 @@ pub fn note_ejected(path: &Path) {
     let _ = fs::write(file, text);
 }
 
+/// Forgets the drives ejected whose device is gone (pulled out): plugged
+/// in again, a drive shows (Dave, 2026-11-21: the same stick plugged in
+/// again did not show; devfs gave its new node the old one's number).
+pub fn prune_ejected() {
+    let all = ejected_now();
+    let kept: Vec<(PathBuf, u64)> = all.iter().filter(|(n, _)| device_of(n.as_os_str()).is_some()).cloned().collect();
+    if kept.len() == all.len() {
+        return;
+    }
+    let Some(file) = ejected_file() else { return };
+    let text: String = kept.iter().map(|(n, i)| format!("{}\t{i}\n", n.to_string_lossy())).collect();
+    let _ = if text.is_empty() { fs::remove_file(file) } else { fs::write(file, text) };
+}
+
 /// What the system has mounted over the network, anywhere (files
 /// milestone 1, step 10: shown under Network in the sidebar).
 pub fn network_mounts() -> Vec<PathBuf> {
