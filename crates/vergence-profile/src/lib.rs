@@ -200,7 +200,7 @@ mod tests {
         // Another of the same model is another monitor.
         assert_ne!(model_key(&hdmi), model_key(&edid(52075, None, 1)));
         // A serial string alone is enough (the ASUS VS229).
-        assert_eq!(model_key(&edid(0, Some("DCLMTF102508"), 1)).as_deref(), Some("1e6d-5b09-0-DCLMTF102508"));
+        assert_eq!(model_key(&edid(0, Some("TESTSN123456"), 1)).as_deref(), Some("1e6d-5b09-0-TESTSN123456"));
         // Neither: can't be told from its twin.
         assert_eq!(model_key(&edid(0, None, 1)), None);
         assert_eq!(model_key(&edid(0, Some("0000000"), 1)), None);

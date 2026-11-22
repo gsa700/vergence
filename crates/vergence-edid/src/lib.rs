@@ -204,8 +204,8 @@ mod tests {
         let e = Edid::parse(ASUS).unwrap();
         assert_eq!(e.manufacturer, "ACI");
         assert_eq!(e.product_code, 0x22d3);
-        assert_eq!(e.serial_number, 102508);
-        assert_eq!(e.serial_text.as_deref(), Some("DCLMTF102508"));
+        assert_eq!(e.serial_number, 123456);
+        assert_eq!(e.serial_text.as_deref(), Some("TESTSN123456"));
         assert_eq!(e.name.as_deref(), Some("ASUS VS229"));
         assert_eq!(e.version, (1, 3));
         assert_eq!(e.size_cm, (48, 27));

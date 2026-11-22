@@ -45,7 +45,7 @@ together for whoever needs them. New milestones add their entry here.
   (M910q, HD 530) is **apollo**, Fedora 45 for the systemd/logind side
   (Dave, 2026-11-20, netinst, a minimal install; he chose Debian on
   2026-11-19 and went back to Fedora the same night). Up since 2026-11-20:
-  ssh by key as `apollo` (apollo.home.arpa), Rust by rustup (`.
+  ssh by key as `apollo`, Rust by rustup (`.
   ~/.cargo/env`), build in ~/src/vergence (`tools/lab/sync.sh apollo`),
   Vergence installed under /usr/local, passwordless sudo (Dave,
   2026-11-20: /etc/sudoers.d/90-derickson-test), the VDM login screen at

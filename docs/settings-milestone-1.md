@@ -240,7 +240,7 @@ by the computer through usbmuxd before it hands out a connection (Question
   all three.
   Dave, same afternoon: joined dNET1, set back to When no cable is
   connected, pulled the cable: Wi-Fi came on by itself and joined (Hubble
-  got 10.0.1.14, the reservation for Mobilenode's Wi-Fi), the note shown
+  got the address reserved for another machine's Wi-Fi), the note shown
   once.
 - **Step 5 in, waiting on the phone: the Network page** (2026-11-14).
   vergence-net knows an iPhone's USB tethering (`Kind::Phone`: Linux by the

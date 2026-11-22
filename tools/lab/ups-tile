@@ -6,7 +6,7 @@
 # does the tile.
 #
 #   ups-tile <ups>@<host>[:port] [title] [seconds]
-#   e.g. ups-tile eaton5sc@pfsense.home.arpa "UPS (rack)" 10
+#   e.g. ups-tile myups@router.example.org "UPS (rack)" 10
 #
 # On the dock: the runtime left. Fine on mains; a warning on battery; a
 # problem when the battery is low or the server stops answering. The card
