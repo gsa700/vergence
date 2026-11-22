@@ -1,12 +1,13 @@
 # Drives milestone 1: one drive list, kept by the server
 
-Status: **answered 2026-11-21** (Dave: "yes to all three, go ahead":
+Status: **closed 2026-11-21** (Dave: "if it passes on both, close the
+milestone"). Answered the same day (Dave: "yes to all three, go ahead":
 internal file systems shown, plugged-in drives not yet mounted shown, the
-server's one "Safe to remove"); all steps in the same evening (see
-Progress), installed 2026-11-21; **Dave: "seriously broken"** with a USB
-stick and the Fedora ISO together on techbench. Open issues below. Decided (Dave, 2026-11-21): "2, and restart the desktop on
-install". The second half was done the same evening: the server keeps the
-desktop's icons running, and tools/install.sh restarts them.
+server's one "Safe to remove"); "2, and restart the desktop on install".
+Built and installed that evening; Dave's pass with a stick and the Fedora
+ISO found it "seriously broken", fixed later that night with him on
+techbench ("Worked perfectly", and after a reboot the stick showed as USB
+at once). Display suite 17 of 17 on Hubble and techbench.
 
 ## Why
 
@@ -149,12 +150,12 @@ perfectly"):
    Locations only (Dave: "A new tab should never appear unless the user
    calls it").
 
-Still open:
+Settled at the close:
 
-- **The delay when a stick is plugged in:** devd pokes a rescan (810c570);
-  Dave to say whether it is short enough.
+- **The delay when a stick is plugged in:** short (Dave: the name showed on
+  the desktop, then in FileView, then its files).
 - The automounter keeps every name it has served in /media until a reboot;
-  techbench's /media/da0s1 (from the night's debugging) shows for a moment
-  while the stick mounts. Harmless; gone at the next reboot.
-- Hubble has not been given this night's build yet; the display suite on
-  both machines before the milestone closes.
+  techbench's /media/da0s1 (from the night's debugging) went with Dave's
+  reboot, and the stick showed as USB at once.
+- Hubble given the night's build and restarted; display suite 17 of 17 on
+  both (2026-11-21, 21:37 and 21:42).
