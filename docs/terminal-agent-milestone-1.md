@@ -84,11 +84,14 @@ you", naming the tab; buttons Don't allow, Just now, For an hour.
    refusal at a password prompt, the badge in a shot; tests on Hubble,
    techbench, kepler; an independent review (it is shell access).
 
-## Questions for Dave
+## Dave's answers to the last three (2026-11-22)
 
-1. **The stop key**: Escape twice in quick succession (lean), or a click on
-   the badge, or both?
-2. **Visible pace**: a line appears over about a quarter of a second, long
-   pastes at once (lean), or always at once?
-3. **The agent's own tab**: in the window the person last used (lean), or a
-   window of its own so it never mixes with the person's tabs?
+"1 both, 2 your lean, 3 its own window." So:
+1. **The stop**: Escape twice in quick succession *and* a click on the badge,
+   either revoking that agent's grant for the tab at once.
+2. **The pace**: a typed line appears over about a quarter of a second; a
+   long paste goes in at once.
+3. **The agent's own tab opens in a window of its own**, never among the
+   person's tabs (the window titled with the agent's name).
+
+All questions answered: ready to build.
