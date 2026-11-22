@@ -12,6 +12,7 @@ const ROOT: &str = "/org/freedesktop/UDisks2";
 const FS: &str = "org.freedesktop.UDisks2.Filesystem";
 const BLOCK: &str = "org.freedesktop.UDisks2.Block";
 const DRIVE: &str = "org.freedesktop.UDisks2.Drive";
+const LOOP: &str = "org.freedesktop.UDisks2.Loop";
 /// How often a failed mount is tried again when nothing else happens.
 const RETRY: Duration = Duration::from_secs(60);
 
@@ -136,6 +137,11 @@ pub fn eject(path: &Path) -> Result<bool, String> {
     c.call(Message::method_call(DEST, obj, FS, "Unmount", &[quiet()]), super::CALL).map_err(|e| plain(&e.to_string()))?;
     // Then the drive itself is powered off, if it can be (best effort: the
     // file system is let go of already, so it is safe to pull out).
+    // A disk image's loop device is taken away (files milestone 3, step 7).
+    if lookup(ifaces, LOOP).is_some() {
+        let _ = c.call(Message::method_call(DEST, obj, LOOP, "Delete", &[quiet()]), super::CALL);
+        return Ok(true);
+    }
     if let Some(Value::Path(drive)) = lookup(ifaces, BLOCK).and_then(|b| lookup(b, "Drive"))
         && let Some((_, d)) = all.iter().find(|(p, _)| p == drive)
         && lookup(d, DRIVE).is_some_and(|d| flag(d, "CanPowerOff"))
@@ -143,6 +149,43 @@ pub fn eject(path: &Path) -> Result<bool, String> {
         let _ = c.call(Message::method_call(DEST, drive, DRIVE, "PowerOff", &[quiet()]), super::CALL);
     }
     Ok(true)
+}
+
+/// A disk image mounted (files milestone 3, step 7): a read-only loop device
+/// for it, set up by `udisksctl loop-setup`, udisks2's own tool (udisks takes
+/// the file as an open descriptor, which our client cannot hand over yet),
+/// then its file system mounted as a drive's is (noexec; udisks adds nosuid
+/// and nodev). Where it is mounted.
+pub fn mount_image(image: &Path) -> Result<std::path::PathBuf, String> {
+    let out = std::process::Command::new("udisksctl")
+        .args(["loop-setup", "--read-only", "--no-user-interaction", "-f"])
+        .arg(image)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { "udisksctl is not installed (it comes with udisks2)".to_string() } else { e.to_string() })?;
+    let said = String::from_utf8_lossy(&out.stdout);
+    // "Mapped file /x/y.iso as /dev/loop0."
+    let Some(dev) = said.split_whitespace().last().map(|d| d.trim_end_matches('.').to_string()).filter(|d| d.starts_with("/dev/loop")) else {
+        return Err(plain(String::from_utf8_lossy(&out.stderr).trim()));
+    };
+    let mut c = Client::system().map_err(|e| e.to_string())?;
+    // Its file system shows a moment after the loop device; the session's
+    // automounter may mount it first, which is as good.
+    for _ in 0..30 {
+        let all = objects(&mut c)?;
+        if let Some((obj, ifaces)) = all.iter().find(|(_, i)| lookup(i, BLOCK).and_then(|b| lookup(b, "Device")).and_then(bytes_str).as_deref() == Some(dev.as_str())) {
+            if let Some(at) = mount_points(ifaces).into_iter().next() {
+                return Ok(at.into());
+            }
+            if lookup(ifaces, FS).is_some() {
+                let r = c.call(Message::method_call(DEST, obj, FS, "Mount", &[mount_options()]), super::CALL).map_err(|e| plain(&e.to_string()))?;
+                let at = r.args().ok().and_then(|a| a.first().and_then(|v| v.as_str().map(str::to_string))).unwrap_or_default();
+                return Ok(at.into());
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Err(format!("{dev} has no file system udisks can mount"))
 }
 
 /// udisks's error, in words: "busy" is the usual one.

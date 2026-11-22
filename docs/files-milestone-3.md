@@ -199,4 +199,30 @@ Close-Up).
   restart, F2's field in its row. The full suite 16 of 16 on Hubble and
   techbench; agent-check 0 failed. With it, Dave's ask: the sidebar's names
   at 13 points (12 before), headings 11, marks 18, rows 28.
+- **Step 7, disk images: in 2026-11-21** (Dave: "in downloads I have an iso,
+  can i mount it in Fileview as we do the USB drive?"; added before the
+  milestone closes). An ISO opened (double click, Enter) or Mount Disk Image
+  on its right click is mounted read-only on a worker and opens in a tab; it
+  shows under Locations, with Eject (the File menu's, and now the right
+  click of a disk under Locations). vergence-media `mount_image`:
+  - FreeBSD: the root helper's `attach` (media-eject, setuid root, its
+    group only): an ISO 9660 image the caller owns, checked as opened
+    (owner, a regular file, "CD001" at byte 32769), attached with `mdconfig
+    -o readonly`, the path checked to lead to the same file after, mounted
+    with mount_cd9660 `ro,nosuid,noexec` at /mnt/<name> (/media is the
+    automounter's). Eject of /mnt/<name>: only an md device there; umount,
+    mdconfig -d, the folder taken away. Left: a swap and a swap back of the
+    file between the checks and mdconfig could attach another ISO 9660 image
+    the user may not read; /dev/mdN stays root:operator 0640.
+  - Linux: `udisksctl loop-setup --read-only` (udisks2's own tool: udisks
+    takes the file as a descriptor, which our D-Bus client cannot pass yet),
+    then udisks's Mount (noexec) through our client; Eject deletes the loop
+    device. The polkit rule (tools/linux/50-vergence-drives.rules) allows
+    loop-setup for the seat's group.
+  Checked: on techbench the helper attached and mounted a test ISO (made
+  with makefs -t cd9660), its file readable, then ejected it, the md device
+  gone; it refused a root-owned ISO, /etc/passwd and a link to the
+  root-owned ISO. On Hubble a test against udisks mounted the ISO at
+  /run/media/<user>/VTEST and ejected it, and FileView in a headless
+  session mounted it from Enter into a tab with VTEST under Locations.
 

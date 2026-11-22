@@ -9,7 +9,9 @@ polkit.addRule(function(action, subject) {
     var removable = [
         "org.freedesktop.udisks2.filesystem-mount",
         "org.freedesktop.udisks2.eject-media",
-        "org.freedesktop.udisks2.power-off-drive"
+        "org.freedesktop.udisks2.power-off-drive",
+        // Disk images (FileView's Mount Disk Image, files milestone 3).
+        "org.freedesktop.udisks2.loop-setup"
     ];
     if (removable.indexOf(action.id) >= 0 && subject.isInGroup("_seatd")) {
         return polkit.Result.YES;

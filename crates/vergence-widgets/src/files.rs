@@ -1188,6 +1188,16 @@ pub fn ejectable(path: &Path) -> bool {
     table.iter().any(|m| m.at == path && network_kind(&m.kind)) || disks_of(&table).iter().any(|d| d == path)
 }
 
+/// Whether an entry is a disk image FileView mounts (an ISO; files milestone 3).
+pub fn is_disk_image(e: &Entry) -> bool {
+    !e.dir && e.mime == Some("application/x-cd-image")
+}
+
+/// Mounts a disk image read-only through vergence-media: where it is mounted.
+pub fn mount_image(path: &Path) -> Result<PathBuf, String> {
+    vergence_media::mount_image(path)
+}
+
 /// Unmounts a disk or a network mount: a removable drive through
 /// vergence-media (udisks2, the automounter); sshfs and other FUSE mounts by
 /// `fusermount3 -u` / `fusermount -u` on Linux, everything else (and

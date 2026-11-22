@@ -124,6 +124,8 @@ mod cmd {
     pub const SIDE_REMOVE: u32 = 71;
     pub const SIDE_SHOW: u32 = 72;
     pub const SIDE_HIDE_RECENT: u32 = 73;
+    pub const SIDE_EJECT: u32 = 74;
+    pub const MOUNT_IMAGE: u32 = 75;
     /// Open With's applications: this, plus their place in the list.
     pub const OPEN_WITH: u32 = 1000;
     pub const MAX_OPEN_WITH: usize = 16;
@@ -439,6 +441,9 @@ struct Viewer {
     /// A click on the item already chosen alone, and when: renamed in place
     /// once the double-click time has passed with no second click.
     rename_after: Option<(PathBuf, Instant)>,
+    /// A disk image being mounted (on a worker): its name, and the answer
+    /// once it comes (where it is mounted, or why not).
+    mounting: Option<(String, Arc<Mutex<Option<Result<PathBuf, String>>>>)>,
     job: Option<Job>,
     /// Pictures' thumbnails for the icon view, made in the background
     /// (vergence-thumbs; the freedesktop cache other desktops share).
@@ -673,6 +678,7 @@ impl Viewer {
             ask: None,
             naming: None,
             rename_after: None,
+            mounting: None,
             job: None,
             thumbs,
             thumb_waker,
@@ -873,6 +879,27 @@ impl Viewer {
         }
     }
 
+    /// Mounts a disk image on a worker (files milestone 3, step 7; Dave,
+    /// 2026-11-21: "in downloads I have an iso, can i mount it in Fileview as
+    /// we do the USB drive?"); woken() opens it in a tab when it is mounted.
+    fn mount_image(&mut self, p: PathBuf) {
+        if self.mounting.is_some() {
+            return;
+        }
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let answer: Arc<Mutex<Option<Result<PathBuf, String>>>> = Arc::default();
+        let (a, waker) = (answer.clone(), self.thumb_waker.clone());
+        std::thread::spawn(move || {
+            let r = files::mount_image(&p);
+            *a.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
+            if let Some(w) = waker.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                w.wake();
+            }
+        });
+        self.notice = Some(format!("Mounting “{name}”…"));
+        self.mounting = Some((name, answer));
+    }
+
     /// Opens a file with the app chosen for its type, and puts it among the recent ones.
     fn open_file(&mut self, p: &Path) {
         if let Some(dir) = p.parent() {
@@ -901,6 +928,10 @@ impl Viewer {
                 if *sec == Section::Favorites {
                     v.push(MenuLine::Separator);
                     v.push(MenuLine::item(cmd::SIDE_REMOVE, "Remove from Sidebar", ""));
+                }
+                if *sec == Section::Locations && item.path.as_deref().is_some_and(files::ejectable) {
+                    v.push(MenuLine::Separator);
+                    v.push(MenuLine::item(cmd::SIDE_EJECT, "Eject", ""));
                 }
                 v
             }
@@ -1164,6 +1195,15 @@ impl Viewer {
             }
             self.preview = false;
             return self.go(Showing::Folder(p));
+        }
+        // A disk image opened is mounted, as a drive plugged in (step 7).
+        if let [one] = chosen.as_slice()
+            && files::is_disk_image(one)
+            && !self.trash_window
+        {
+            let p = one.path.clone();
+            self.mount_image(p);
+            return;
         }
         let paths: Vec<PathBuf> = chosen.iter().filter(|e| !e.dir).map(|e| e.path.clone()).collect();
         // Among the recent files (the sidebar's Recent), as the other apps put theirs.
@@ -1566,6 +1606,29 @@ impl Viewer {
                 }
             }
             cmd::SIDE_HIDE_RECENT => self.write_key("recent", Some("false")),
+            cmd::MOUNT_IMAGE => {
+                if let [one] = self.chosen_paths().as_slice() {
+                    self.mount_image(one.clone());
+                }
+            }
+            cmd::SIDE_EJECT => {
+                if let Some(sidebar::Line::Item(_, item)) = self.side_target.take()
+                    && let Some(p) = item.path
+                {
+                    let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    match files::eject(&p) {
+                        Ok(()) => {
+                            notify(&format!("Safe to remove “{name}”"), "It can be pulled out (or the image put away) now.");
+                            *self.ejectable.borrow_mut() = None;
+                            // Tabs showing it go home.
+                            for t in self.tabs.iter_mut().filter(|t| t.dir().is_some_and(|d| d.starts_with(&p))) {
+                                t.go(Showing::Folder(home()));
+                            }
+                        }
+                        Err(why) => self.notice = Some(format!("“{name}” could not be ejected: {why}")),
+                    }
+                }
+            }
             cmd::SETTINGS => self.open_settings(window),
             cmd::ABOUT => {
                 let about = vergence_widgets::about::About::new(APP_ID, "FileView", env!("CARGO_PKG_VERSION"), "Vergence's file manager: your folders as a list or icons, Preview on the space bar, files opened with the apps chosen for them.", self.theme());
@@ -1587,6 +1650,11 @@ impl Viewer {
         let trash = self.in_trash();
         let results = self.search.is_some() || self.front_tab().is_some_and(|t| t.showing == Showing::Recent);
         let mut lines = vec![MenuLine::item(cmd::OPEN, "Open", "Enter")];
+        // A disk image: mounted, as a drive plugged in (step 7).
+        let image = one && !trash && self.visible().iter().any(|e| Some(&e.path) == chosen.first() && files::is_disk_image(e));
+        if image {
+            lines.push(MenuLine::item(cmd::MOUNT_IMAGE, "Mount Disk Image", ""));
+        }
         // Open With: the applications for the files' type, when they share one.
         self.open_with.clear();
         let files: Vec<&PathBuf> = chosen.iter().filter(|p| !p.is_dir()).collect();
@@ -2935,6 +3003,19 @@ impl Program for Viewer {
             let mut w = Viewer::new(self.shared.clone());
             w.open_paths(&[p]);
             window.open_window(vergence_widgets::window(w));
+        }
+        // A disk image mounted: in a tab of its own; or why not.
+        let answered = self.mounting.as_ref().and_then(|(n, a)| a.lock().unwrap_or_else(|e| e.into_inner()).take().map(|r| (n.clone(), r)));
+        if let Some((name, r)) = answered {
+            self.mounting = None;
+            match r {
+                Ok(at) => {
+                    self.notice = None;
+                    self.new_tab(Showing::Folder(at));
+                }
+                Err(why) => self.notice = Some(format!("“{name}” could not be mounted: {why}")),
+            }
+            changed = true;
         }
         // A copy or move running (its ticks) or ended.
         if self.job.is_some() {
