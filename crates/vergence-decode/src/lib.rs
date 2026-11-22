@@ -298,7 +298,10 @@ pub fn own_fonts() -> Vec<Vec<u8>> {
     files.sort();
     let (mut out, mut total) = (Vec::new(), 0usize);
     for f in files {
-        let Ok(bytes) = std::fs::read(&f) else { continue };
+        // A plain file only, read no further than 4 MB (review 2026-11-22,
+        // finding 10: a FIFO or a huge file in the folder would block or bloat
+        // the helper before its limits are set).
+        let Ok(bytes) = vergence_types::read_regular(&f, 4 << 20) else { continue };
         if bytes.len() > 4 << 20 || total + bytes.len() > 16 << 20 {
             continue;
         }

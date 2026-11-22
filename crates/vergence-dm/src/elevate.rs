@@ -46,14 +46,21 @@ impl Action {
             Action::LoginScreenOff => {
                 "Stop starting this machine at the Vergence login screen (log in on a text console instead)".into()
             }
-            Action::LoginWallpaper(p) => {
-                let name = std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned());
-                format!(
-                    "Show the picture {} behind the login screen, for anyone at this machine to see",
-                    crate::proto::clean(&name.unwrap_or_else(|| p.clone()))
-                )
-            }
+            // The whole path, quoted, its middle left out past 80 characters
+            // (finding 3: the file's name alone made a lookalike free).
+            Action::LoginWallpaper(p) => format!(
+                "Show the picture \u{201c}{}\u{201d} behind the login screen, for anyone at this machine to see",
+                shortened(&crate::proto::clean(p), 80)
+            ),
             Action::LoginWallpaperDefault => "Show Vergence's own picture behind the login screen".into(),
+        }
+    }
+
+    /// Its name in the log, with the picture's path where it has one.
+    pub fn logged(&self) -> String {
+        match self {
+            Action::LoginWallpaper(p) => format!("{} {}", self.name(), crate::proto::clean(p)),
+            _ => self.name().to_string(),
         }
     }
 
@@ -71,9 +78,33 @@ impl Action {
 }
 
 /// A picture's path as a program may name it: absolute, at most 4096 bytes,
-/// no control characters (it is shown in the prompt and logged).
+/// and nothing that could change how the prompt reads (it is shown there and
+/// logged): no control characters, and none of the invisible or reordering
+/// ones (finding 3): format characters (zero-width, bidirectional embeddings,
+/// overrides and isolates, the byte order mark, interlinear marks), the line
+/// and paragraph separators, private-use characters and noncharacters.
 fn valid_path(p: &str) -> bool {
-    p.starts_with('/') && p.len() <= 4096 && !p.chars().any(char::is_control)
+    p.starts_with('/') && p.len() <= 4096 && !p.chars().any(|c| c.is_control() || deceptive(c))
+}
+
+/// A character that is invisible, reorders text or breaks lines in a prompt.
+fn deceptive(c: char) -> bool {
+    matches!(c as u32,
+        0x00AD | 0x061C | 0x115F | 0x1160 | 0x180E | 0x200B..=0x200F | 0x2028..=0x202E | 0x2060..=0x206F
+        | 0x3164 | 0xFEFF | 0xFFA0 | 0xFFF9..=0xFFFB | 0xE000..=0xF8FF | 0xFDD0..=0xFDEF | 0xF0000..)
+        || (c as u32) & 0xFFFE == 0xFFFE
+}
+
+/// Text at most `max` characters, its middle replaced by "…" past that.
+fn shortened(s: &str, max: usize) -> String {
+    let n = s.chars().count();
+    if n <= max {
+        return s.to_string();
+    }
+    let keep = (max - 1) / 2;
+    let head: String = s.chars().take(keep).collect();
+    let tail: String = s.chars().skip(n - keep).collect();
+    format!("{head}\u{2026}{tail}")
 }
 
 /// An account's name as accounts are named: letters, digits, '.', '_', '-',
@@ -209,7 +240,19 @@ mod tests {
         let long = format!("/{}", "a".repeat(5000));
         assert!(Action::parse(&w(&["login-wallpaper.set", &long])).is_err(), "too long");
         let d = Action::LoginWallpaper("/home/me/Pictures/dusk.svg".into()).describe();
-        assert!(d.contains("dusk.svg") && d.contains("anyone"), "{d}");
+        assert!(d.contains("/home/me/Pictures/dusk.svg") && d.contains("anyone"), "the whole path: {d}");
+        for bad in [
+            "/tmp/dusk.svg\u{2028}turns on autologin",
+            "/tmp/\u{202e}gvs.ksud",
+            "/tmp/a\u{200b}b.svg",
+            "/tmp/\u{feff}a.png",
+        ] {
+            assert!(Action::parse(&w(&["login-wallpaper.set", bad])).is_err(), "{bad:?}");
+        }
+        let long = format!("/home/me/{}/dusk.svg", "x".repeat(200));
+        let d = Action::LoginWallpaper(long.clone()).describe();
+        assert!(d.contains('\u{2026}') && d.contains("dusk.svg") && d.contains("/home/me/"), "{d}");
+        assert_eq!(Action::LoginWallpaper("/a b.png".into()).logged(), "login-wallpaper.set /a b.png");
     }
 
     #[test]

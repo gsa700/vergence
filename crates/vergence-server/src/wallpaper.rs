@@ -180,6 +180,12 @@ pub struct Wallpaper {
     /// wallpaper = "login"` and an administrator chose one); None: the
     /// person's own wallpaper. Its pictures are kept under "lock:<output>".
     lock_image: Option<PathBuf>,
+    /// The login picture's path and time when last read, so a new one chosen
+    /// under the same name is seen (review 2026-11-22, findings 2 and 7).
+    login_stamp: Option<(PathBuf, Option<SystemTime>)>,
+    /// The lock's own picture could not be drawn: it shows the person's own
+    /// wallpaper instead, until the picture changes (finding 6).
+    lock_failed: bool,
 }
 
 /// The lock's own pictures are kept under this and the output's name.
@@ -232,6 +238,8 @@ impl Server {
             requested: HashSet::new(),
             jobs: job_tx,
             lock_image: None,
+            login_stamp: None,
+            lock_failed: false,
             grids: HashMap::new(),
             grid_gen: 0,
         };
@@ -282,6 +290,14 @@ impl Server {
                     None,
                 );
                 w.pictures.insert(d.output, (d.w, d.h, d.look, buffer));
+            }
+            None if lock.is_some() => {
+                // The lock's picture could not be drawn: the person's own
+                // wallpaper behind the lock instead, and no grid for the tint.
+                w.pictures.remove(&d.output);
+                w.lock_failed = true;
+                self.redraw_all();
+                return;
             }
             None => {
                 // The color alone: every cell of it.
@@ -341,7 +357,7 @@ impl Server {
     ) -> Option<MemoryRenderBufferRenderElement<GlesRenderer>> {
         let id = self.monitor_id(output);
         let w = self.wallpaper.as_ref()?;
-        match w.lock_image.clone() {
+        match w.lock_image.clone().filter(|_| !w.lock_failed) {
             Some(image) => {
                 let config = WallpaperConfig { image: Some(image), ..w.config.for_monitor(&id) };
                 self.picture_element(renderer, &format!("{LOCK_KEY}{output}"), config, px, logical)
@@ -399,17 +415,20 @@ impl Wallpaper {
     fn reload_if_changed(&mut self) -> bool {
         // The newest of the person's file and the layers under it, so a
         // changed default (a package update) is seen too.
-        let mut mtime = vergence_config::modified_with(desktop_path().as_deref());
+        let mtime = vergence_config::modified_with(desktop_path().as_deref());
         // The administrator's chosen login picture counts too: the login
         // screen shows it, and the lock may (`[lock] wallpaper = "login"`).
+        // Its path and time on their own, not folded into the newest of all
+        // (finding 7: a desktop.toml dated later hid a new picture).
         let login_pick = vergence_dm::paths::login_wallpaper();
-        if let Some(t) = login_pick.as_ref().and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok()) {
-            mtime = Some(mtime.map_or(t, |m| m.max(t)));
-        }
-        if mtime == self.mtime && self.generation > 0 {
+        let login_stamp =
+            login_pick.as_ref().map(|p| (p.clone(), std::fs::metadata(p).and_then(|m| m.modified()).ok()));
+        let login_changed = login_stamp != self.login_stamp;
+        if mtime == self.mtime && !login_changed && self.generation > 0 {
             return false;
         }
         self.mtime = mtime;
+        self.login_stamp = login_stamp;
         let (config, lock_login) = match toml::from_str::<DesktopFile>(&desktop_text()) {
             Ok(f) => (f.wallpaper, f.lock.wallpaper.as_deref() == Some("login")),
             Err(e) => {
@@ -418,16 +437,25 @@ impl Wallpaper {
             }
         };
         let lock_image = if lock_login { login_pick.clone() } else { None };
-        // Drawn again when it changes, and whenever something changed while
-        // it is the login picture: a newly chosen one may have the same name.
-        let lock_changed = lock_image != self.lock_image || lock_image.is_some();
+        // Asked for again when it changes: another picture, or a new one under
+        // the same name. The old one stays on the lock until the new one is
+        // drawn (finding 6: the lock showed bare color meanwhile).
+        let lock_changed = lock_image != self.lock_image || (lock_image.is_some() && login_changed);
         if lock_changed {
-            if lock_image != self.lock_image {
-                tracing::info!("wallpaper: behind the lock {:?}", lock_image);
+            tracing::info!("wallpaper: behind the lock {:?}", lock_image);
+            if lock_image.is_none() {
+                self.pictures.retain(|k, _| !k.starts_with(LOCK_KEY));
             }
             self.lock_image = lock_image;
-            self.pictures.retain(|k, _| !k.starts_with(LOCK_KEY));
+            self.lock_failed = false;
             self.requested.retain(|(k, ..)| !k.starts_with(LOCK_KEY));
+        }
+        // The login screen: a new picture under the same name is drawn again
+        // (finding 2: a running login screen kept the old one).
+        if crate::greeter() && login_changed && self.generation > 0 {
+            self.requested.clear();
+            self.pictures.clear();
+            self.generation += 1;
         }
         // The login screen's own picture, when an administrator chose one in
         // Settings > Login (defaults milestone 1, step 8): on every screen.
@@ -436,7 +464,7 @@ impl Wallpaper {
             None => config,
         };
         if config == self.config && self.generation > 0 {
-            return lock_changed;
+            return lock_changed || (crate::greeter() && login_changed);
         }
         tracing::info!("wallpaper: {:?} {} {}", config.image, config.mode, config.color);
         self.config = config;
@@ -449,6 +477,14 @@ impl Wallpaper {
 
 /// Decoded pictures kept by the worker.
 const KEEP_SOURCES: usize = 3;
+
+/// A picture file as the worker knows it: its path, size and time.
+type SourceKey = (PathBuf, u64, Option<SystemTime>);
+
+fn source_key(path: &std::path::Path) -> SourceKey {
+    let m = std::fs::metadata(path).ok();
+    (path.to_path_buf(), m.as_ref().map_or(0, |m| m.len()), m.and_then(|m| m.modified().ok()))
+}
 /// Finished pictures kept on disk.
 const CACHE_FILES: usize = 12;
 const CACHE_MAGIC: &[u8; 8] = b"VWALL001";
@@ -514,9 +550,10 @@ fn cache_write(path: &std::path::Path, w: u32, h: u32, rgba: &[u8]) {
 }
 
 fn worker(jobs: std::sync::mpsc::Receiver<Job>, done: Sender<Done>) {
-    // The last few decoded pictures, newest first, each shrunk to `cover`.
-    // (path, shrunk, picture)
-    let mut sources: Vec<(PathBuf, bool, Source)> = Vec::new();
+    // The last few decoded pictures, newest first, each shrunk to `cover`:
+    // (path with its size and time, shrunk, picture). By size and time too,
+    // so a file replaced under the same name is decoded again.
+    let mut sources: Vec<(SourceKey, bool, Source)> = Vec::new();
     // The largest monitor drawn for so far: rasters are kept at the size that
     // fills it, no bigger.
     let mut cover = (0u32, 0u32);
@@ -543,12 +580,13 @@ fn worker(jobs: std::sync::mpsc::Receiver<Job>, done: Sender<Done>) {
         }
         // "center" shows the picture at its own pixels: never from a shrunk copy.
         let may_shrink = job.look.mode != "center";
-        let at = match sources.iter().position(|(p, shrunk, _)| *p == path && (may_shrink || !shrunk)) {
+        let key = source_key(&path);
+        let at = match sources.iter().position(|(k, shrunk, _)| *k == key && (may_shrink || !shrunk)) {
             Some(i) => Some(i),
             None => match Source::load(&path, cover, may_shrink) {
                 Some((s, shrunk)) => {
-                    sources.retain(|(p, _, _)| *p != path);
-                    sources.insert(0, (path.clone(), shrunk, s));
+                    sources.retain(|(k, _, _)| k.0 != path);
+                    sources.insert(0, (key.clone(), shrunk, s));
                     sources.truncate(KEEP_SOURCES);
                     Some(0)
                 }

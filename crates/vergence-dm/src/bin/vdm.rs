@@ -1199,7 +1199,15 @@ const LOGIN_WALLPAPER_MAX: usize = 40 * 1024 * 1024;
 /// A file's bytes, read by a child that has become `uid` (with its groups),
 /// so root reads nothing the person could not: the path is theirs to name.
 /// Only a plain file; opened without waiting (a FIFO named in its place does
-/// not hang vdm); at most LOGIN_WALLPAPER_MAX; five seconds at most.
+/// not hang vdm); at most LOGIN_WALLPAPER_MAX.
+///
+/// vdm is single-threaded and the child is the person's to signal, so nothing
+/// here may wait on it without end (review 2026-11-22, finding 1: a FUSE file
+/// that never answers, a child stopped and continued to trickle bytes, or
+/// stopped before it exits): five seconds for the whole transfer, the child
+/// killed on any ending but a clean one, and never a blocking waitpid; a
+/// child that cannot be reaped at once (stuck in the kernel) is left to the
+/// main loop's reaping of unknown children.
 fn read_as(uid: u32, gid: u32, groups: &[u32], path: &str) -> Result<Vec<u8>, String> {
     use std::io::{Read, Write};
     use std::os::unix::fs::OpenOptionsExt;
@@ -1207,7 +1215,7 @@ fn read_as(uid: u32, gid: u32, groups: &[u32], path: &str) -> Result<Vec<u8>, St
     const O_NONBLOCK: i32 = 0o4000;
     #[cfg(not(target_os = "linux"))]
     const O_NONBLOCK: i32 = 0x4;
-    let (mut ours, mut theirs) = UnixStream::pair().map_err(|e| e.to_string())?;
+    let (ours, mut theirs) = UnixStream::pair().map_err(|e| e.to_string())?;
     // SAFETY: vdm is single-threaded; the child changes ids, reads one file,
     // writes it to its end of the pair and exits.
     let pid = unsafe { fork() };
@@ -1217,6 +1225,10 @@ fn read_as(uid: u32, gid: u32, groups: &[u32], path: &str) -> Result<Vec<u8>, St
     if pid == 0 {
         drop(ours);
         reset_sigterm();
+        // None of vdm's other descriptors goes with the person's process
+        // (finding 8): only its end of the pair.
+        let all: Vec<c_int> = (3..1024).collect();
+        sys::close_fds(&all, &[theirs.as_raw_fd()]);
         let code = (|| -> Result<(), ()> {
             drop_to(uid, gid, groups).map_err(|_| ())?;
             let mut f = std::fs::OpenOptions::new().read(true).custom_flags(O_NONBLOCK).open(path).map_err(|_| ())?;
@@ -1231,26 +1243,39 @@ fn read_as(uid: u32, gid: u32, groups: &[u32], path: &str) -> Result<Vec<u8>, St
         unsafe { _exit(if code.is_ok() { 0 } else { 1 }) };
     }
     drop(theirs);
-    let _ = ours.set_read_timeout(Some(Duration::from_secs(5)));
+    let until = std::time::Instant::now() + Duration::from_secs(5);
     let mut bytes = Vec::new();
-    let read = Read::by_ref(&mut ours).take(LOGIN_WALLPAPER_MAX as u64 + 1).read_to_end(&mut bytes);
-    let mut status: c_int = 0;
-    if read.is_err() {
-        // SAFETY: our own child, stuck: ended.
+    let read = sys::Deadline { stream: &ours, until }.take(LOGIN_WALLPAPER_MAX as u64 + 1).read_to_end(&mut bytes);
+    // Reaped only if it has already ended (WNOHANG 1), for a moment at most.
+    let reap = |wait: Duration| -> Option<c_int> {
+        let end = std::time::Instant::now() + wait;
+        loop {
+            let mut status: c_int = 0;
+            // SAFETY: our own child; WNOHANG never waits.
+            if unsafe { waitpid(pid, &mut status, 1) } == pid {
+                return Some(status);
+            }
+            if std::time::Instant::now() >= end {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    let clean = read.is_ok() && bytes.len() <= LOGIN_WALLPAPER_MAX;
+    let status = if clean { reap(Duration::from_millis(500)) } else { None };
+    if status.is_none() {
+        // Not done cleanly or not ended: killed, reaped now if it can be,
+        // else by the main loop later.
+        // SAFETY: our own child.
         unsafe { kill(pid, 9) };
+        let _ = reap(Duration::from_millis(100));
     }
-    // SAFETY: our own child.
-    unsafe { waitpid(pid, &mut status, 0) };
-    if read.is_err() {
-        return Err("the picture took too long to read".into());
+    match (read, status) {
+        (Err(_), _) => Err("the picture took too long to read".into()),
+        _ if bytes.len() > LOGIN_WALLPAPER_MAX => Err("the picture is larger than 40 MB".into()),
+        (Ok(_), Some(0)) => Ok(bytes),
+        _ => Err("the picture could not be read as you (is it a file you may read?)".into()),
     }
-    if status != 0 {
-        return Err("the picture could not be read as you (is it a file you may read?)".into());
-    }
-    if bytes.len() > LOGIN_WALLPAPER_MAX {
-        return Err("the picture is larger than 40 MB".into());
-    }
-    Ok(bytes)
 }
 
 /// What kind of picture bytes are, by their first bytes only (root never
@@ -1278,19 +1303,32 @@ fn put_login_wallpaper(bytes: &[u8], name: &str) -> Result<(), String> {
     use std::io::Write;
     use std::os::unix::fs::MetadataExt;
     let dir = std::path::Path::new(paths::LOOK_DIR);
+    // Modes set outright, whatever vdm's umask (finding 4: under umask 077 the
+    // login screen could not read its picture); an existing directory must be
+    // root's and writable by no one else, or others could swap the picture.
     match std::fs::symlink_metadata(dir) {
-        Ok(m) if m.file_type().is_dir() && m.uid() == 0 => {}
-        Ok(_) => return Err(format!("{} is not root's directory", dir.display())),
-        Err(_) => std::fs::DirBuilder::new().mode(0o755).create(dir).map_err(|e| e.to_string())?,
+        Ok(m) if m.file_type().is_dir() && m.uid() == 0 && m.mode() & 0o022 == 0 => {}
+        Ok(_) => return Err(format!("{} is not root's alone; not writing there", dir.display())),
+        Err(_) => {
+            std::fs::DirBuilder::new().mode(0o755).create(dir).map_err(|e| e.to_string())?;
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+        }
     }
     let tmp = dir.join(format!(".{name}.new"));
     let _ = std::fs::remove_file(&tmp);
     let mut f =
         std::fs::OpenOptions::new().write(true).create_new(true).mode(0o644).open(&tmp).map_err(|e| e.to_string())?;
+    f.set_permissions(std::fs::Permissions::from_mode(0o644)).map_err(|e| e.to_string())?;
     f.write_all(bytes).and_then(|_| f.sync_all()).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, dir.join(name)).map_err(|e| e.to_string())?;
+    // A picture of another kind left behind would win (png first): an error,
+    // not a quiet success (finding 5).
     for other in paths::LOGIN_WALLPAPER_NAMES.iter().filter(|n| **n != name) {
-        let _ = std::fs::remove_file(dir.join(other));
+        match std::fs::remove_file(dir.join(other)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("the old {other} could not be removed: {e}")),
+        }
     }
     Ok(())
 }
@@ -1780,10 +1818,11 @@ fn main() {
                     declined.remove(&uid);
                     let e = elevations.remove(i);
                     let _ = proto::send_from_vdm(&mut server, &FromVdm::Done { ok: true, wait: 0 });
-                    let outcome = carry_out(&e.action, account(&e.name).as_ref());
+                    let asker = account(&e.name).filter(|a| a.uid == e.uid);
+                    let outcome = carry_out(&e.action, asker.as_ref());
                     log(&format!(
                         "elevation: {} by {} through {}: {}",
-                        e.action.name(),
+                        e.action.logged(),
                         e.name,
                         e.who,
                         match &outcome {
