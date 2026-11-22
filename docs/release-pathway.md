@@ -68,6 +68,17 @@ reads well; getting started depends on knowing the lab):
 
 ## 3. Going public (Dave's call)
 
+- **A digestible summary of the design** (Dave, 2026-11-22: "boil it down to a
+  more digestible summary highlighting why Vergence isn't just another Wayland
+  compositor. And how awesome it is in general"): a few pages, ahead of the
+  whitepaper, for people deciding whether to look closer. What sets it apart:
+  its own server, protocol and toolkit rather than a compositor among many;
+  windows sent as display lists the server draws at each screen's exact scale
+  (sharp text everywhere, the magnifier sharp); placement owned by the server
+  and kept per monitor setup; meaning built in, so screen readers and agents
+  act by name with permission; untrusted files parsed in confined helpers;
+  FreeBSD first; our own parts throughout. With pictures.
+
 - The repository is private (`gsa700/vergence`). Going public is Dave's
   call (CLAUDE.md).
 - Check before: the whitepaper's byline (his callsign), the ASUS test
