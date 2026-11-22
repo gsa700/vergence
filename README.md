@@ -1,5 +1,7 @@
 # Vergence
 
+![Vergence: Settings on the Wallpaper page and FileView on the same folder, over the Dusk wallpaper, with the dock below](docs/screenshots/desktop.jpg)
+
 Vergence is the movement of both eyes converging on one point so that you see
 one clear image. This project does the same for a desktop: every monitor and
 every toolkit converge on one answer, so every application is the right size,
