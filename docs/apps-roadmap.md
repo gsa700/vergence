@@ -426,3 +426,27 @@ Mac, Windows and the Pi kiosk; Avalonia on FreeBSD is not pursued.
   design; later, toolkit roads for macOS (AppKit) and Windows (Win32) would
   let it and every Vergence app run there (roughly a toolkit milestone each;
   Hymie's AudioQueue and WASAPI outputs to port with them).
+
+## The web component, after Vergence Music (Dave, 2026-11-21 night)
+
+**Decided order:** preview milestone 1, tree milestone 1, Vergence Music,
+then the web component (Dave: "drop it in after Vergence Music"). It
+refines the afternoon's direction (shared memory 01M7ZRRCQ30EM09AN5QDVXV45H:
+an embeddable native WebKit port first, Mail and the browser built on it):
+Dave, "webkit in a buildable component model. So we can include it with any
+of our apps and others could too."
+
+- Claude's lean, to settle in its plan: a **service component**, not only a
+  library: a web-view process hosts WPE WebKit; any program places a web
+  region in its window over the protocol, the server composites the web
+  process's pixels there and routes input (any language or toolkit can use
+  it; WebKit's processes apart from the app, confined; its LGPL code never
+  linked into our apps). Costs: embedded regions in the protocol, focus and
+  input methods across the boundary, scale, the page's accessibility tree
+  merged into the meaning tree.
+- To check first: WPE WebKit's state on FreeBSD; what it brings (GLib,
+  libsoup, GStreamer, its text shaping: borrowing and license asks); ad
+  blocking by WebKit content rules from uBlock's lists.
+- Music does not need it (Navidrome and LRCLIB are JSON APIs); Music needs
+  an HTTP client with TLS: Claude's lean is the system's TLS library
+  (OpenSSL in FreeBSD's base system), to decide at the start of Music.
