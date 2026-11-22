@@ -779,7 +779,14 @@ impl Server {
                 let mut at = loc;
                 // A dialog keeps its center (preview milestone 1: a preview shaped
                 // for each file it shows stays where it was over its window).
-                if self.window_style(&w).kind == crate::style::Kind::Dialog
+                let dialog = self.window_style(&w).kind == crate::style::Kind::Dialog;
+                // No bigger than 80% of the screen's work area, both sides shrunk
+                // alike, so a picture's preview keeps its proportions.
+                if dialog && let Some(area) = screen.map(|s| self.work_area(s)) {
+                    let f = (0.8 * area.size.w as f64 / size.w.max(1) as f64).min(0.8 * (area.size.h - self.bar_h(&w)) as f64 / size.h.max(1) as f64).min(1.0);
+                    size = Size::from(((size.w as f64 * f).round() as i32, (size.h as f64 * f).round() as i32));
+                }
+                if dialog
                     && let Some(g) = self.space.element_geometry(&w)
                 {
                     at.x += (g.size.w - size.w) / 2;

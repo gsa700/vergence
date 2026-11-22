@@ -1928,7 +1928,7 @@ impl<'a> Runner<'a> {
         let layout = self.bar_layout(i);
         let font = self.fonts.face("sans-serif", 400, false);
         let w = &self.windows[i];
-        let look = bar::Look { bar: vergence_look::bar_look(self.light), frosted: false, focused: w.active, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font, font_size: BAR_FONT_SIZE, titles: &[], alerts: &[], edited: &[], title, shown: 0, hover: w.bar_hover, dragged: None, tools: &[], app_icon: None, menu_open: false, root: as_root() };
+        let look = bar::Look { bar: vergence_look::bar_look(self.light), frosted: false, focused: w.active, pane: Color::rgb(0, 0, 0), pane_ink: Color::rgb(255, 255, 255), font, font_size: BAR_FONT_SIZE, titles: &[], alerts: &[], edited: &[], title, shown: 0, hover: w.bar_hover, dragged: None, tools: &[], tool_names: &[], app_icon: None, menu_open: false, root: as_root() };
         bar::draw(scene, &mut self.fonts, &layout, &look);
     }
 

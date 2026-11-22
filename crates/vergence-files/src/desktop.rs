@@ -194,6 +194,8 @@ pub struct Desktop {
     last_click: Option<(Instant, usize)>,
     mods: Modifiers,
     waker: Option<Waker>,
+    /// Space's preview (preview milestone 1), while it is open.
+    peek: Option<crate::preview::LinkRef>,
     /// Marks decoded by workers: a picture's own, a launcher's icon.
     marks: Arc<Mutex<HashMap<PathBuf, Option<Arc<Image>>>>>,
     asked: RefCell<HashSet<PathBuf>>,
@@ -225,6 +227,7 @@ impl Desktop {
             last_click: None,
             mods: Modifiers::default(),
             waker: None,
+            peek: None,
             marks: Arc::default(),
             asked: RefCell::default(),
             ask: None,
@@ -624,6 +627,33 @@ impl Desktop {
     }
 }
 
+impl Desktop {
+    fn close_peek(&mut self) {
+        if let Some(l) = self.peek.take() {
+            l.borrow_mut().close = true;
+            if let Some(w) = &self.waker {
+                w.wake();
+            }
+        }
+    }
+
+    /// The preview follows the chosen icon (the arrows move it).
+    fn sync_peek(&self) {
+        let Some(l) = &self.peek else { return };
+        let now = self.chosen.last().and_then(|p| self.entries.iter().find(|e| &e.path == p)).filter(|e| self.fixed_of(e).is_none()).cloned();
+        let mut link = l.borrow_mut();
+        if !link.open || now.is_none() || link.entry.as_ref().map(|e| &e.path) == now.as_ref().map(|e| &e.path) {
+            return;
+        }
+        link.entry = now;
+        link.serial += 1;
+        drop(link);
+        if let Some(w) = &self.waker {
+            w.wake();
+        }
+    }
+}
+
 impl Program for Desktop {
     type Message = Msg;
 
@@ -647,6 +677,7 @@ impl Program for Desktop {
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
+        self.sync_peek();
         let icons = self.view_icons(t);
         match self.strip(t) {
             Some(s) => stack(vec![icons, s]).width(Length::FILL).height(Length::FILL),
@@ -1012,11 +1043,23 @@ impl Program for Desktop {
             d.chosen = vec![d.entries[i as usize].path.clone()];
         };
         match *sym {
+            // Space: the chosen icon's preview, a window of its own, or closed.
+            0x20 if !m.ctrl && !m.alt => {
+                if self.peek.as_ref().is_some_and(|l| l.borrow().open) {
+                    self.close_peek();
+                } else if let Some(e) = at.map(|i| self.entries[i].clone()).filter(|e| self.fixed_of(e).is_none()) {
+                    let link = crate::preview::link(e);
+                    window.open_window(vergence_widgets::window(crate::preview::Peek::new(link.clone(), crate::files_theme(&self.desktop_text))));
+                    self.peek = Some(link);
+                }
+            }
             RETURN => {
+                self.close_peek();
                 if let Some(i) = at {
                     self.open(i);
                 }
             }
+            ESCAPE if self.peek.is_some() => self.close_peek(),
             ESCAPE => self.chosen.clear(),
             DELETE if !self.chosen_files().is_empty() => {
                 for p in self.chosen_files() {
@@ -1059,6 +1102,18 @@ impl Program for Desktop {
     }
 
     fn woken(&mut self, window: &mut Window) -> bool {
+        // The preview's keys (the arrows, Enter) as if pressed here; closed, let go of.
+        if let Some(l) = self.peek.clone() {
+            let keys = std::mem::take(&mut l.borrow_mut().keys);
+            for sym in keys {
+                let key = Input::Key { sym, text: None, pressed: true, repeat: false, composing: false, modifiers: Modifiers::default() };
+                self.key_first(&key, window);
+            }
+            if !l.borrow().open {
+                self.peek = None;
+            }
+        }
+        self.sync_peek();
         window.wake_after(WATCH_TIMER, WATCH_EVERY);
         self.want_marks();
         true

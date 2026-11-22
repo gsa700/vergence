@@ -31,6 +31,7 @@ mod desktop;
 mod hand;
 mod keep;
 mod ops;
+mod preview;
 mod props;
 mod search;
 mod sidebar;
@@ -41,7 +42,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime};
 
-use vergence_scene::{Color, Image, Rect};
+use vergence_scene::{Image, Rect};
 use vergence_ui::{AppCommand as C, Bar, BarStyle, BarTab, MenuLine, Modifiers, Role, TabEvent};
 use vergence_widgets::files::{self, Entry, GroupBy, Kind, ListLook, Place, RowSize, SortBy};
 use vergence_widgets::prefs::{Choice, Control, Part, Prefs, Row, Rows};
@@ -440,8 +441,8 @@ struct Viewer {
     sort: (SortBy, bool),
     /// What the field narrows the folder to.
     narrow: String,
-    /// Space's preview is open.
-    preview: bool,
+    /// Space's preview, a window of its own (preview milestone 1), while it is open.
+    peek: Option<preview::LinkRef>,
     /// The picture for the preview and the pane (decoded by a worker).
     picture: Shown,
     asked: RefCell<Option<PathBuf>>,
@@ -573,7 +574,6 @@ enum Msg {
     OpenChosen,
     OpenInCloseUp,
     DismissNotice,
-    ClosePreview,
     /// A right click on a row: its menu (the row chosen first, unless it is).
     RowMenu(usize),
     /// An edge between the list's headings pulled: the column and the touch.
@@ -690,7 +690,7 @@ impl Viewer {
             hidden,
             sort: (SortBy::Name, true),
             narrow: String::new(),
-            preview: false,
+            peek: None,
             picture: Arc::default(),
             asked: RefCell::new(None),
             notice: None,
@@ -861,7 +861,7 @@ impl Viewer {
     /// again if it changed while behind.
     fn tab_changed(&mut self) {
         self.clear_narrow();
-        self.preview = false;
+        self.close_peek();
         self.path_edit = None;
         if let Some(t) = self.front_mut() {
             // Back at the place this tab was scrolled to.
@@ -1234,7 +1234,7 @@ impl Viewer {
                 let _ = crate::start(std::process::Command::new("vergence-files").arg(&p));
                 return;
             }
-            self.preview = false;
+            self.close_peek();
             return self.go(Showing::Folder(p));
         }
         // A disk image opened is mounted, as a drive plugged in (step 7).
@@ -1463,7 +1463,7 @@ impl Viewer {
                 self.hidden = !self.hidden;
                 self.write_key("hidden", if self.hidden { Some("true") } else { None });
             }
-            cmd::PREVIEW => self.preview = !self.preview && self.cursor_entry().is_some(),
+            cmd::PREVIEW => self.toggle_peek(window),
             cmd::OPEN => self.open_chosen(),
             cmd::SELECT_ALL => {
                 let all: Vec<PathBuf> = self.visible().iter().map(|e| e.path.clone()).collect();
@@ -2380,28 +2380,44 @@ impl Viewer {
         panel(scroll(column(parts).spacing(4.0).width(Length::FILL))).color(t.card).radius(8.0).padding(10.0).width(Length::Fixed(PANE_W)).height(Length::FILL)
     }
 
-    /// Space's preview, over the folder: the file large, its facts under it.
-    fn preview_view(&self, t: &Theme) -> Option<Element<Msg>> {
-        let e = self.cursor_entry()?;
-        let mut facts = Viewer::facts(&e);
-        facts.push(
-            row(vec![
-                label("Space or Escape closes · the arrows move on · Enter opens").size(10.0).dim().width(Length::FILL),
-                button(label("Close").size(12.0)).padding(Padding::hv(3.0, 10.0)).on_press(Msg::ClosePreview).name("Close the preview"),
-            ])
-            .spacing(8.0)
-            .align(Align::Center)
-            .width(Length::FILL),
-        );
-        let card = panel(column(vec![panel(self.look_at(&e, true, t)).width(Length::FILL).height(Length::FILL), column(facts).spacing(2.0).width(Length::FILL)]).spacing(10.0).width(Length::FILL).height(Length::FILL))
-            .color(t.card)
-            .radius(12.0)
-            .edge(t.line, 1.0)
-            .padding(14.0)
-            .width(Length::FILL)
-            .height(Length::FILL);
-        let dim = Color { a: 120, ..Color::rgb(0, 0, 0) };
-        Some(panel(card).color(dim).radius(0.0).padding(Padding { top: 30.0, bottom: 30.0, left: 60.0, right: 60.0 }).width(Length::FILL).height(Length::FILL))
+    fn peek_open(&self) -> bool {
+        self.peek.as_ref().is_some_and(|l| l.borrow().open)
+    }
+
+    /// Space: the preview opened over this window for the cursor's file, or closed.
+    fn toggle_peek(&mut self, window: &mut Window) {
+        if self.peek_open() {
+            return self.close_peek();
+        }
+        let Some(e) = self.cursor_entry() else { return };
+        let link = preview::link(e);
+        window.open_window(vergence_widgets::window(preview::Peek::new(link.clone(), files_theme(&self.desktop))));
+        self.peek = Some(link);
+    }
+
+    fn close_peek(&mut self) {
+        if let Some(l) = self.peek.take() {
+            l.borrow_mut().close = true;
+            if let Some(w) = &self.waker {
+                w.wake();
+            }
+        }
+    }
+
+    /// The preview follows the cursor: its file given to it when it changed.
+    fn sync_peek(&self) {
+        let Some(l) = &self.peek else { return };
+        let now = self.cursor_entry();
+        let mut link = l.borrow_mut();
+        if !link.open || link.entry.as_ref().map(|e| &e.path) == now.as_ref().map(|e| &e.path) {
+            return;
+        }
+        link.entry = now;
+        link.serial += 1;
+        drop(link);
+        if let Some(w) = &self.waker {
+            w.wake();
+        }
     }
 }
 
@@ -2521,6 +2537,7 @@ impl Program for Viewer {
     }
 
     fn closed(&mut self) {
+        self.close_peek();
         let mut s = self.shared.borrow_mut();
         s.windows.retain(|(id, _)| Some(*id) != self.me);
         if s.last_used == self.me {
@@ -2537,6 +2554,7 @@ impl Program for Viewer {
     }
 
     fn view(&self, t: &Theme) -> Element<Msg> {
+        self.sync_peek();
         let mut middle = if self.trash_window {
             vec![self.folder_view(t)]
         } else {
@@ -2559,10 +2577,6 @@ impl Program for Viewer {
             middle.push(self.pane_view(t));
         }
         let middle: Element<Msg> = row(middle).spacing(8.0).width(Length::FILL).height(Length::FILL);
-        let middle = match self.preview.then(|| self.preview_view(t)).flatten() {
-            Some(p) => stack(vec![middle, p]).width(Length::FILL).height(Length::FILL),
-            None => middle,
-        };
         let mut all = vec![self.tool_strip(t)];
         if let Some(n) = &self.notice {
             all.push(
@@ -2738,7 +2752,6 @@ impl Program for Viewer {
                     _ => {}
                 }
             }
-            Msg::ClosePreview => self.preview = false,
             Msg::DragRow(k) => self.drag_row(k, window),
             Msg::Answer(a) => {
                 if let (Some(Ask::Clash { sources, dir, cut, .. }), Some(clash)) = (self.ask.take(), a) {
@@ -2862,19 +2875,19 @@ impl Program for Viewer {
                 self.move_cursor(if self.shown_view() == ViewKind::Icons { self.per_row() } else { 1 });
                 self.want_picture();
             }
-            LEFT if self.shown_view() == ViewKind::Icons || self.preview => {
+            LEFT if self.shown_view() == ViewKind::Icons || self.peek_open() => {
                 self.move_cursor(-1);
                 self.want_picture();
             }
-            RIGHT if self.shown_view() == ViewKind::Icons || self.preview => {
+            RIGHT if self.shown_view() == ViewKind::Icons || self.peek_open() => {
                 self.move_cursor(1);
                 self.want_picture();
             }
             RETURN => {
-                self.preview = false;
+                self.close_peek();
                 self.run(cmd::OPEN, window)
             }
-            ESCAPE if self.preview => self.preview = false,
+            ESCAPE if self.peek_open() => self.close_peek(),
             ESCAPE if typing => self.narrow.clear(),
             SPACE if !typing => self.run(cmd::PREVIEW, window),
             BACKSPACE if !typing => self.run(cmd::UP, window),
@@ -3018,6 +3031,18 @@ impl Program for Viewer {
 
     fn woken(&mut self, window: &mut Window) -> bool {
         let mut changed = false;
+        // The preview's keys (the arrows, Enter) as if pressed here; closed, let go of.
+        if let Some(l) = self.peek.clone() {
+            let keys = std::mem::take(&mut l.borrow_mut().keys);
+            for sym in keys {
+                let key = Input::Key { sym, text: None, pressed: true, repeat: false, composing: false, modifiers: Modifiers::default() };
+                changed |= self.key_first(&key, window).is_some();
+            }
+            if !l.borrow().open && self.peek.as_ref().is_some_and(|p| Rc::ptr_eq(p, &l)) {
+                self.peek = None;
+                changed = true;
+            }
+        }
         if let Some(s) = &self.search
             && (s.count() != self.search_entries.len() || s.done() != self.search_done)
         {
@@ -3189,7 +3214,7 @@ impl Program for Viewer {
                 vec![
                     C::role(cmd::CLOSE, Role::CloseWindow),
                     C::own(cmd::OPEN, "File", "Open", "Enter"),
-                    C::own(cmd::PREVIEW, "File", "Preview", "Space").checked(self.preview),
+                    C::own(cmd::PREVIEW, "File", "Preview", "Space").checked(self.peek_open()),
                     C::own(cmd::RESTORE, "File", "Put Back", "").featured(),
                     C::own(cmd::DELETE, "File", "Delete Forever…", "Delete"),
                     C::own(cmd::EMPTY_TRASH, "File", "Empty Trash…", "").featured(),
@@ -3214,7 +3239,7 @@ impl Program for Viewer {
                 C::role(cmd::NEXT_TAB, Role::NextTab),
                 C::role(cmd::PREV_TAB, Role::PreviousTab),
                 C::own(cmd::OPEN, "File", "Open", "Enter").featured(),
-                C::own(cmd::PREVIEW, "File", "Preview", "Space").checked(self.preview),
+                C::own(cmd::PREVIEW, "File", "Preview", "Space").checked(self.peek_open()),
                 C::role(cmd::SELECT_ALL, Role::SelectAll),
                 C::role(cmd::UNDO, Role::Undo),
                 C::role(cmd::CUT, Role::Cut),
