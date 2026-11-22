@@ -91,6 +91,15 @@ Apps, Keyboard and Mouse, Accessibility, Date & Time, Lock Screen, Session.
     chooses the login screen's wallpaper (default: Vergence's default);
     Lock Screen gets "Show: my wallpaper / the login screen's".
 14. **About: bling and the Hardware app** (later, not this milestone).
+15. **The wallpaper tint carries color, not brightness** (Dave, 2026-11-22:
+    "the interface takes some color from them"). Today a window's grounds
+    take 3% of the raw average under it, so dark wallpapers tint nothing
+    (Dusk's `#232849` moves the dark page `#1c1c1e` by one level) and light
+    ones only lighten dark windows (Mist: +6, gray). Proposed: the average's
+    hue and saturation, re-lit to each ground's own lightness, then mixed;
+    every wallpaper then gives a subtle cast of its color. Ours keep their
+    color moderate in the upper two thirds, where windows sit. Reaches every
+    app's look: waits for Dave's word.
 
 ## Dave's answers (2026-11-22)
 
