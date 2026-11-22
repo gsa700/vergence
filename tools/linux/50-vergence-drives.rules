@@ -13,7 +13,9 @@ polkit.addRule(function(action, subject) {
         // Disk images (FileView's Mount Disk Image, files milestone 3).
         "org.freedesktop.udisks2.loop-setup"
     ];
-    if (removable.indexOf(action.id) >= 0 && subject.isInGroup("_seatd")) {
+    // Not the login screen's own account, which is in the seat's group only
+    // to draw the login screen (packaging review 2026-11-22, M1).
+    if (removable.indexOf(action.id) >= 0 && subject.isInGroup("_seatd") && subject.user != "_vdm") {
         return polkit.Result.YES;
     }
 });

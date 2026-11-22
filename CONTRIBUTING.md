@@ -92,13 +92,22 @@ Until the project has a repository of its own, build the package yourself:
     sudo vergence-setup
 
 A machine has the package or a checkout's install (below, under
-`/usr/local`), not both: `tools/install.sh --uninstall` first.
+`/usr/local`), not both: **before** installing the package, remove a
+checkout's install with `sudo tools/install.sh --uninstall` (install.sh
+refuses to install over the package, and its uninstall removes only files it
+wrote itself). If the package then will not unpack `/etc/sv/vdm/supervise`,
+remove that folder (runit made it for the old service; vdm keeps running
+until a reboot) and install again.
 
-To remove it: `sudo rm /var/service/vdm` (the service you enabled; runit
-leaves a link to nothing otherwise), then `sudo xbps-remove vergence`. Your
+To remove it: `sudo vergence-setup --undo` (vdm disabled, which ends the
+login screen and every Vergence session; automatic login and the login screen
+at boot off; acpid's handler as it was), then `sudo xbps-remove vergence`. Your
 settings under `~/.config/vergence` stay, as does the `_vdm` account (Void
-keeps system accounts); acpid's handler keeps its one added line, harmless
-without Vergence (the original is `/etc/acpi/handler.sh.vergence-orig`).
+keeps system accounts). Members of the seat's group (`_seatd`) may mount,
+eject and power off removable drives and attach disk images (polkit's rule,
+`/usr/share/polkit-1/rules.d/50-vergence-drives.rules`; a file of the same
+name in `/etc/polkit-1/rules.d` replaces it): add only the people who sit at
+the machine.
 
 ## Run
 

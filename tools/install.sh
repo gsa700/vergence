@@ -27,7 +27,7 @@
 #   share/backgrounds/vergence/              Vergence's wallpapers (data/backgrounds, drawn by the project)
 #   share/vergence/icons/{places,kinds}/     Vergence's own icons for places and files (data/icons)
 #   share/icons/Vergence/                    the Vergence icon theme: our apps, places, kinds of files, and the pointers (drawn at install)
-#   libexec/vergence/ups-tile, vtile-demo  lab tiles on the dock from scripts (tools/lab)
+#   libexec/vergence/ups-tile, vtile-demo  lab tiles on the dock from scripts (tools/lab; not with --no-lab, as packages)
 #   libexec/vergence/vergence-choose         the Open/Save dialog the portal shows for apps not ours
 #   libexec/vergence/vergence-decode         pictures decoded apart, limited (Capsicum on FreeBSD)
 #   libexec/vergence/vergence-hymie          sound files decoded apart (Hymie), confined the same way
@@ -58,8 +58,10 @@ destdir=
 user=${SUDO_USER:-${DOAS_USER:-}}
 uninstall=
 login_screen=
+no_lab=
 while [ $# -gt 0 ]; do
     case $1 in
+        --no-lab) no_lab=1; shift ;;
         --prefix) prefix=$2; shift 2 ;;
         --destdir) destdir=$2; shift 2 ;;
         --user) user=$2; shift 2 ;;
@@ -70,6 +72,9 @@ while [ $# -gt 0 ]; do
         *) echo "install.sh: unknown argument $1" >&2; exit 2 ;;
     esac
 done
+# The person checked before anything uses the name as root (packaging
+# review, L1).
+[ -z "$user" ] || id -- "$user" >/dev/null 2>&1 || { echo "install.sh: no account $user" >&2; exit 2; }
 bin=$destdir$prefix/bin
 sessions=$destdir$prefix/share/wayland-sessions
 applications=$destdir$prefix/share/applications
@@ -94,9 +99,17 @@ if [ -n "$uninstall" ]; then
     rm -f "$sbin/vdm" "$sbin/vergence-setup"
     # vdm's PAM files and the login screen at boot (the service itself is the
     # init system's to stop: vdm will not start without its binary).
+    # Only the files install.sh itself wrote (they say "tools/install.sh"):
+    # a package's own copies of them are never removed (packaging review,
+    # 2026-11-22, H1: removing the package's PAM files locked people out).
+    ours() { [ -f "$1" ] && [ ! -L "$1" ] && grep -q 'tools/install.sh' "$1"; }
     if [ -z "$destdir" ]; then
-        rm -f /etc/pam.d/vdm /etc/pam.d/vdm-unlock /etc/pam.d/vdm-greeter /etc/pam.d/vdm-autologin /etc/pam.d/vdm-elevate \
-            /var/lib/vdm/login-screen /var/db/vdm/login-screen /var/lib/vdm/autologin /var/db/vdm/autologin
+        for f in /etc/pam.d/vdm /etc/pam.d/vdm-unlock /etc/pam.d/vdm-greeter /etc/pam.d/vdm-autologin /etc/pam.d/vdm-elevate; do
+            ours "$f" && rm -f "$f"
+        done
+        if ! command -v xbps-query >/dev/null 2>&1 || ! xbps-query vergence >/dev/null 2>&1; then
+            rm -f /var/lib/vdm/login-screen /var/db/vdm/login-screen /var/lib/vdm/autologin /var/db/vdm/autologin
+        fi
     fi
     rm -f "$sessions/vergence.desktop"
     for t in $tools; do rm -f "$applications/$t.desktop" "$icons/$t.svg"; done
@@ -107,11 +120,13 @@ if [ -n "$uninstall" ]; then
     [ -z "$destdir" ] && [ -f /etc/acpi/handler.sh.vergence-orig ] && mv -f /etc/acpi/handler.sh.vergence-orig /etc/acpi/handler.sh
     rm -f "$libexec/ups-tile" "$libexec/vtile-demo"
     rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$libexec/vergence-hymie" "$libexec/vergence-hymie-aac" "$libexec/vergence-pdf" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
-    [ -z "$destdir" ] && rm -f /etc/fonts/conf.d/90-vergence-fonts.conf /usr/local/etc/fonts/conf.d/90-vergence-fonts.conf
-    # The service files and hooks it wrote (a package brings its own; the
-    # service's link in /var/service, the person's choice, is left).
+    # The service files and hooks it wrote, never a package's (the service's
+    # link in /var/service, the person's choice, is left).
     if [ -z "$destdir" ]; then
-        rm -f /etc/zzz.d/suspend/50-vdm /etc/polkit-1/rules.d/50-vergence-drives.rules
+        for f in /etc/fonts/conf.d/90-vergence-fonts.conf /usr/local/etc/fonts/conf.d/90-vergence-fonts.conf \
+            /etc/zzz.d/suspend/50-vdm /etc/polkit-1/rules.d/50-vergence-drives.rules; do
+            ours "$f" && rm -f "$f"
+        done
         [ -f /etc/sv/vdm/run ] && grep -q "$prefix/sbin/vdm" /etc/sv/vdm/run && rm -rf /etc/sv/vdm/run /etc/sv/vdm/log
     fi
     rm -f "$fonts"/InterVariable*.ttf "$fonts"/JetBrainsMono-Variable*.ttf "$fonts"/Liberation*.ttf "$fonts"/Inter-OFL.txt "$fonts"/JetBrainsMono-OFL.txt "$fonts"/Liberation-OFL.txt
@@ -131,6 +146,12 @@ case $release in /*) ;; *) release=$root/$release ;; esac
 for p in $programs; do
     [ -x "$release/$p" ] || { echo "install.sh: $release/$p is missing; run cargo build --release first" >&2; exit 1; }
 done
+# A machine has the package or a checkout's install, not both: installing over
+# the package would rewrite its PAM files and service to point at /usr/local.
+if [ -z "$destdir" ] && command -v xbps-query >/dev/null 2>&1 && xbps-query vergence >/dev/null 2>&1; then
+    echo "install.sh: the vergence package is installed here; remove it first (sudo xbps-remove vergence) or use it" >&2
+    exit 1
+fi
 if [ -z "$destdir" ] && [ "$(id -u)" -ne 0 ]; then
     echo "install.sh: installing under $prefix needs root (sudo tools/install.sh), or --destdir DIR to stage" >&2
     exit 1
@@ -210,8 +231,10 @@ install -m 755 "$here/vctl" "$bin/vctl"
 command -v nc >/dev/null 2>&1 || echo "vctl: needs nc (Fedora: dnf install nmap-ncat; Void: xbps-install openbsd-netcat)" >&2
 # Lab tiles (dock milestone 1): a NUT UPS and a demonstration tile, scripts on vtile.
 install -d -m 755 "$libexec"
-install -m 755 "$here/lab/ups-tile" "$libexec/ups-tile"
-install -m 755 "$here/lab/vtile-demo" "$libexec/vtile-demo"
+if [ -z "$no_lab" ]; then
+    install -m 755 "$here/lab/ups-tile" "$libexec/ups-tile"
+    install -m 755 "$here/lab/vtile-demo" "$libexec/vtile-demo"
+fi
 if [ "$(uname -s)" = FreeBSD ]; then
     # The sound helper: setuid root, run only by the vergence group, a group of
     # its own (VDM review I5: the seat's group, video, will also have the
@@ -533,7 +556,6 @@ fi
 # with such a server (its log says so); an older one would leave no desktop.
 if [ -z "$destdir" ] && [ -n "$user" ] && command -v pgrep >/dev/null 2>&1; then
     home_of=$(getent passwd "$user" 2>/dev/null | cut -d: -f6)
-    [ -n "$home_of" ] || home_of=$(eval echo "~$user")
     pids=$(pgrep -u "$user" -f '^(/usr/local/bin/)?vergence-files --desktop' 2>/dev/null || true)
     if [ -n "$pids" ]; then
         if grep -q 'started again if it exits' "$home_of/.local/state/vergence/server.log" 2>/dev/null; then
@@ -546,7 +568,7 @@ fi
 # The steps that turn things on (the seat, vdm, the login screen with --vdm,
 # drives, Wi-Fi, the power key, a system log), one copy of them, in
 # vergence-setup; install.sh asks nothing, as before.
-setup_args="--yes"
-[ -n "$user" ] && setup_args="$setup_args --user $user"
-[ -n "$login_screen" ] && setup_args="$setup_args --login-screen $login_screen"
-"$sbin/vergence-setup" $setup_args
+set -- --yes
+[ -n "$user" ] && set -- "$@" --user "$user"
+[ -n "$login_screen" ] && set -- "$@" --login-screen "$login_screen"
+"$sbin/vergence-setup" "$@"

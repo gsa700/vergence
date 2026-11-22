@@ -1,7 +1,7 @@
 # Template file for 'vergence'
 pkgname=vergence
 version=0.1.0
-revision=3
+revision=4
 build_style=cargo
 hostmakedepends="pkg-config"
 makedepends="libinput-devel libxkbcommon-devel libseat-devel libgbm-devel
@@ -10,7 +10,9 @@ makedepends="libinput-devel libxkbcommon-devel libseat-devel libgbm-devel
 depends="seatd mesa-dri fontconfig dbus udisks2 polkit openbsd-netcat"
 short_desc="Desktop with its own display server, toolkit and applications"
 maintainer="gsa700 <298062495+gsa700@users.noreply.github.com>"
-license="Apache-2.0, GPL-2.0-or-later, OFL-1.1"
+# The code is Apache-2.0 OR GPL-2.0-or-later; the AAC helper GPL-2.0-or-later
+# alone (FAAD2's code); the fonts OFL-1.1; the spelling list SCOWL's own.
+license="Apache-2.0 OR GPL-2.0-or-later, GPL-2.0-or-later, OFL-1.1, custom:SCOWL"
 homepage="https://github.com/gsa700/vergence"
 distfiles="https://github.com/gsa700/vergence/archive/refs/tags/v${version}.tar.gz"
 checksum=@CHECKSUM@
@@ -22,7 +24,11 @@ _vdm_descr="Vergence display manager (greeter)"
 _vdm_groups="_seatd"
 
 conf_files="/etc/pam.d/vdm /etc/pam.d/vdm-unlock /etc/pam.d/vdm-elevate
- /etc/pam.d/vdm-greeter /etc/pam.d/vdm-autologin"
+ /etc/pam.d/vdm-greeter /etc/pam.d/vdm-autologin /etc/zzz.d/suspend/50-vdm"
+font_dirs="/usr/share/vergence/fonts"
+# The icon and pointer themes are drawn at install time by the build's own
+# vergence-harness, which a cross build cannot run (packaging review, M3).
+nocross="vergence-harness draws the icon themes during do_install"
 
 # The workspace's binaries, built by the cargo style; installed by the
 # project's own tools/install.sh (staged, so it touches nothing outside
@@ -30,7 +36,7 @@ conf_files="/etc/pam.d/vdm /etc/pam.d/vdm-unlock /etc/pam.d/vdm-elevate
 # vergence-setup does that, run once by the administrator (INSTALL says so).
 do_install() {
 	VERGENCE_RELEASE_DIR="target/${RUST_TARGET}/release" \
-		./tools/install.sh --prefix /usr --destdir "${DESTDIR}"
+		./tools/install.sh --prefix /usr --destdir "${DESTDIR}" --no-lab
 	# Void has no /usr/sbin of its own (a link to bin): vdm and
 	# vergence-setup go in /usr/bin (vdm finds the server beside it).
 	mv "${DESTDIR}"/usr/sbin/* "${DESTDIR}/usr/bin/"
@@ -47,4 +53,8 @@ do_install() {
 	ln -s /usr/share/fontconfig/conf.avail/90-vergence-fonts.conf \
 		"${DESTDIR}/etc/fonts/conf.d/90-vergence-fonts.conf"
 	vlicense LICENSE-APACHE
+	vlicense data/fonts/Inter-OFL.txt
+	vlicense data/fonts/JetBrainsMono-OFL.txt
+	vlicense data/fonts/Liberation-OFL.txt
+	vlicense data/words/SCOWL-COPYRIGHT.txt
 }
