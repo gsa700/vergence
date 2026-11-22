@@ -120,7 +120,7 @@ pub fn disks_of(table: &[Mount]) -> Vec<PathBuf> {
 
 /// The device node of a drive the automounter lists under /media by
 /// `name` (by name, or by its label), if it is there.
-fn device_of(name: &std::ffi::OsStr) -> Option<PathBuf> {
+pub(crate) fn device_of(name: &std::ffi::OsStr) -> Option<PathBuf> {
     std::iter::once(PathBuf::from("/dev").join(name)).chain(["msdosfs", "ufs", "ext2fs", "ntfs", "exfat", "iso9660", "label", "gpt"].iter().map(|d| PathBuf::from("/dev").join(d).join(name))).find(|p| p.exists())
 }
 
@@ -142,7 +142,7 @@ fn label_providers() -> Vec<(String, String)> {
 }
 
 /// `glabel status -s`'s lines, "NAME STATUS COMPONENT".
-fn parse_glabel(text: &str) -> Vec<(String, String)> {
+pub(crate) fn parse_glabel(text: &str) -> Vec<(String, String)> {
     text.lines()
         .filter_map(|l| {
             let w: Vec<&str> = l.split_whitespace().collect();
@@ -161,7 +161,7 @@ fn labels_on_images(labels: &[(String, String)]) -> Vec<String> {
 }
 
 /// The provider a device is: a label's node is the provider under it.
-fn provider_of<'a>(device: &'a str, labels: &'a [(String, String)]) -> &'a str {
+pub(crate) fn provider_of<'a>(device: &'a str, labels: &'a [(String, String)]) -> &'a str {
     let dev = device.strip_prefix("/dev/").unwrap_or(device);
     labels.iter().find(|(n, _)| n == dev).map_or(dev, |(_, c)| c.as_str())
 }

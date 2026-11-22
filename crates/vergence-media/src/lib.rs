@@ -135,7 +135,11 @@ pub fn helper_main(args: Vec<std::ffi::OsString>) -> i32 {
         (f.next().map(|m| m.replace("\\040", " ")) == Some(arg.to_string())).then(|| dev.to_string())
     });
     let Some(device) = device else {
-        // Listed but never looked into: nothing is mounted, nothing to let go of.
+        // Listed but never looked into: nothing is mounted; the drive is
+        // ejected all the same (found by its name or its label).
+        if let Some(disk) = std::path::Path::new(arg).file_name().and_then(drives::device_of).and_then(|node| disk_of(&node.to_string_lossy(), &run)) {
+            eject_disk(&disk, &table, &run);
+        }
         return 0;
     };
     // Under /mnt: only an image this attached (an md device), nothing else mounted there.
@@ -151,8 +155,47 @@ pub fn helper_main(args: Vec<std::ffi::OsString>) -> i32 {
     if let (Some(unit), true) = (md_unit, arg.starts_with(IMAGES)) {
         let _ = run("/sbin/mdconfig", &["-d", "-u", &unit]);
         let _ = std::fs::remove_dir(arg);
+        return 0;
+    }
+    // A drive: the whole disk let go of, as a Mac ejects (Dave, 2026-11-21:
+    // an ejected stick unmounted only was mounted again by the next look,
+    // and came back under its device's name).
+    if let Some(disk) = disk_of(&device, &run) {
+        eject_disk(&disk, &table, &run);
     }
     0
+}
+
+/// The removable disk a device node is on: "/dev/da0s1" and the label
+/// "/dev/msdosfs/USB" (by `glabel status`) are on "da0". Only da, cd and
+/// sdda disks (CAM's, which camcontrol ejects).
+fn disk_of(node: &str, run: &dyn Fn(&str, &[&str]) -> std::io::Result<std::process::Output>) -> Option<String> {
+    let labels = run("/sbin/glabel", &["status", "-s"]).map(|o| drives::parse_glabel(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default();
+    removable_disk(drives::provider_of(node, &labels))
+}
+
+/// "da0s1", "da0p2", "cd0" → the disk ("da0", "cd0"), if it is a removable one.
+fn removable_disk(provider: &str) -> Option<String> {
+    let kind: String = provider.chars().take_while(|c| c.is_ascii_lowercase()).collect();
+    let unit: String = provider[kind.len()..].chars().take_while(|c| c.is_ascii_digit()).collect();
+    (matches!(kind.as_str(), "da" | "cd" | "sdda") && !unit.is_empty()).then(|| format!("{kind}{unit}"))
+}
+
+/// Unmounts what else of the disk is mounted under /media (its other
+/// partitions), then ejects it: its partitions and labels leave /dev, so
+/// nothing mounts it again until it is plugged in again. A disk that will
+/// not eject stays unmounted (the server's ejected note hides it).
+fn eject_disk(disk: &str, table: &str, run: &dyn Fn(&str, &[&str]) -> std::io::Result<std::process::Output>) {
+    for l in table.lines() {
+        let mut f = l.split_whitespace();
+        let (Some(dev), Some(at)) = (f.next(), f.next()) else { continue };
+        let at = at.replace("\\040", " ");
+        let on_disk = dev.strip_prefix("/dev/").and_then(removable_disk).as_deref() == Some(disk);
+        if on_disk && helper_may_eject(&at) && at.starts_with("/media/") {
+            let _ = run("/sbin/umount", &[&at]);
+        }
+    }
+    let _ = run("/sbin/camcontrol", &["eject", disk]);
 }
 
 /// The attach: the checks, mdconfig, the mount point, mount_cd9660; the md
@@ -249,6 +292,17 @@ mod tests {
         assert_eq!(super::eject(&at), Ok(true));
         let table = std::fs::read_to_string("/proc/mounts").unwrap_or_default();
         assert!(!table.contains(&*at.to_string_lossy()), "unmounted");
+    }
+
+    #[test]
+    fn a_partition_is_on_its_removable_disk() {
+        assert_eq!(super::removable_disk("da0s1").as_deref(), Some("da0"));
+        assert_eq!(super::removable_disk("da12p3").as_deref(), Some("da12"));
+        assert_eq!(super::removable_disk("cd0").as_deref(), Some("cd0"));
+        assert_eq!(super::removable_disk("sdda0s1").as_deref(), Some("sdda0"));
+        for no in ["ada0p2", "nda0p1", "md0", "da", "msdosfs/USB", ""] {
+            assert_eq!(super::removable_disk(no), None, "{no}");
+        }
     }
 
     #[test]
