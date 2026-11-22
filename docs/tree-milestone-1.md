@@ -1,7 +1,9 @@
 # Tree milestone 1: the source tree, made approachable
 
 Status: **planned 2026-11-21** (Dave: "do the space preview fix, then the
-tree work"). Questions for Dave below. This is part 2 of
+tree work"), **answered the same night**: width 120, the quotes move to the
+docs, CLAUDE.md split, one STATUS.md (all four as Claude leaned). Starts
+after preview milestone 1. This is part 2 of
 docs/release-pathway.md, done before the first package so the source a package
 points at is the source people will read.
 
@@ -74,7 +76,7 @@ Packaging (the FreeBSD port, the xbps template), going public, and history
 rewriting all come after this, in release-pathway's order. Renaming crates
 and changing behavior are out too.
 
-## Questions for Dave
+## Questions for Dave (answered 2026-11-21: all four as leaned)
 
 1. **Line width.** Rust's default is 100. At 100, rustfmt breaks about 7,700
    lines and the code gets taller. At 120, about 4,100 lines are touched and
