@@ -326,7 +326,7 @@ impl Peek {
         let s = l.state.lock().unwrap_or_else(|e| e.into_inner());
         let Some(e) = &self.entry else { return space() };
         let cover: Element<Msg> = match &s.cover {
-            Some(img) => fitted(img.clone()).width(Length::Fixed(160.0)).height(Length::Fixed(160.0)),
+            Some(img) => fitted(img.clone()).width(Length::Fixed(160.0)).height(Length::Fixed(160.0)).name("Cover art"),
             None => panel(files::entry_icon_sized(e, 8.0).width(Length::Fixed(150.0)).height(Length::Fixed(150.0))).width(Length::Fixed(160.0)).height(Length::Fixed(160.0)),
         };
         let mut words = vec![label(s.info.as_ref().and_then(|i| i.title.clone()).unwrap_or_else(|| e.name.clone())).size(17.0).weight(600).wrap().width(Length::FILL)];
@@ -373,7 +373,7 @@ impl Peek {
         })
         .width(Length::FILL)
         .height(Length::Fixed(WAVE_H))
-        .name("Waveform");
+        .name(if s.peaks.len() >= SLICES as usize { "Waveform" } else { "Waveform (drawing)" });
         let seconds = s.info.as_ref().map_or(0.0, |i| i.seconds());
         let now = s.info.as_ref().map_or(0.0, |i| at as f64 / i.rate.max(1) as f64);
         // Play at the bottom, centered and large (Dave, 2026-11-21), the time

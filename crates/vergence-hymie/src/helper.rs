@@ -7,8 +7,9 @@
 //! On the pipes, as vergence-pdf's helper: a kind byte, a big-endian u32
 //! length, the body. Requests:
 //! - `D` the file's bytes: the answer is [`Info`] (its facts, tags, cover).
-//! - `P` slices (u32): the waveform's next piece (about a million frames
-//!   decoded each time, so no request runs long): the first slice done
+//! - `P` slices (u32), and the most frames to decode this time (u32,
+//!   optional; about a million when left out: no request runs long; a
+//!   player asks for less between pieces of sound): the first slice done
 //!   (u32), how many (u32), then each slice's four floats (min and max of
 //!   two channels); none when the waveform is whole.
 //! - `S` a frame (u64): the playing cursor put there.
@@ -204,6 +205,7 @@ pub fn serve_with(input: &mut impl Read, output: &mut impl Write, open_track: im
             b'P' => (|| {
                 let o = open.as_mut().ok_or("no file")?;
                 let slices = u32::from_le_bytes(body.get(..4).ok_or("short")?.try_into().map_err(|_| "short")?).clamp(1, 1 << 16) as usize;
+                let step = body.get(4..8).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as u64).map_or(PEAK_STEP, |s| s.clamp(4096, PEAK_STEP));
                 let frames = o.drawing.frames().max(1);
                 if o.peaks.len() != slices {
                     o.peaks = vec![[(0.0, 0.0); 2]; slices];
@@ -213,7 +215,7 @@ pub fn serve_with(input: &mut impl Read, output: &mut impl Write, open_track: im
                 }
                 let ch = o.drawing.channels() as usize;
                 let mut buf = vec![0f32; 4096 * ch];
-                let until = (o.drawn + PEAK_STEP).min(frames);
+                let until = (o.drawn + step).min(frames);
                 while o.drawn < until {
                     let n = o.drawing.read(&mut buf).map_err(|e| e.to_string())?;
                     if n == 0 {
@@ -377,7 +379,15 @@ impl Sound {
     /// The waveform's next piece for `slices` slices: (the first slice, the
     /// slices); an empty piece when the waveform is whole.
     pub fn peaks(&mut self, slices: u32) -> Result<(usize, Vec<crate::Peak>), Error> {
-        let b = self.ask(b'P', &slices.to_le_bytes())?;
+        self.peaks_step(slices, PEAK_STEP as u32)
+    }
+
+    /// As [`Sound::peaks`], decoding at most `frames` frames this time (a
+    /// player's small steps between pieces of sound).
+    pub fn peaks_step(&mut self, slices: u32, frames: u32) -> Result<(usize, Vec<crate::Peak>), Error> {
+        let mut body = slices.to_le_bytes().to_vec();
+        body.extend_from_slice(&frames.to_le_bytes());
+        let b = self.ask(b'P', &body)?;
         let first = u32::from_le_bytes(b.get(..4).ok_or_else(|| crate::damaged("short"))?.try_into().unwrap_or([0; 4])) as usize;
         let v: Vec<f32> = b.get(8..).unwrap_or(&[]).as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
         Ok((first, v.as_chunks::<4>().0.iter().map(|c| [(c[0], c[1]), (c[2], c[3])]).collect()))

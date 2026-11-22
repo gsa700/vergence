@@ -4,8 +4,9 @@
 # preview, move FileView's selection and the preview follows; a picture
 # (the suite's own shot of the screen, 16:9) opens it at its proportions; a
 # PDF's page (300 x 200 points) beside the thumbnail strip opens it wide;
-# a FLAC (Hymie's helper) opens it with its title, cover, waveform and a
-# Play button, which plays or says there is no output; Escape closes it.
+# a FLAC (Hymie's helper) opens it with its title, cover and waveform; a
+# WAV with its album's Cover.png beside it plays at once (a paced, silent
+# output), its waveform drawn whole while it plays; Escape closes it.
 scenario() {
     headless "1920x1080 531x299@60" || { check 0 "headless session"; return; }
     home=$HOME/.cache/vergence-headless/home
@@ -19,14 +20,20 @@ scenario() {
     printf 'second text file\n' > "$d/second.txt"
     printf '%%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 200]/Contents 4 0 R>>endobj\n4 0 obj<</Length 27>>stream\n0 0 1 rg 20 20 260 160 re f\nendstream endobj\ntrailer<</Root 1 0 R>>\n%%%%EOF\n' > "$d/page.pdf"
     cp "$ROOT/crates/vergence-hymie/fixtures/tone16.flac" "$d/tone.flac"
+    # Ten seconds of silence as a WAV (8 kHz mono 16-bit), its album's cover
+    # beside it as Cover.png (any case, as AlbumWall finds it).
+    { printf 'RIFF\044\161\002\000WAVEfmt \020\000\000\000\001\000\001\000\100\037\000\000\200\076\000\000\002\000\020\000data\000\161\002\000'; head -c 160000 /dev/zero; } > "$d/long.wav"
     shot MEM-1 empty >/dev/null
     cp "$SHOTS/MEM-1.png" "$d/screen.png"
-    vctl spawn "env VERGENCE_SOUND_OFF=1 PATH=$TARGET:/usr/local/bin:/usr/bin:/bin $TARGET/vergence-files $d" >/dev/null
+    vctl spawn "env VERGENCE_SOUND_OFF=pace PATH=$TARGET:/usr/local/bin:/usr/bin:/bin $TARGET/vergence-files $d" >/dev/null
     i=0; while ! vctl windows | grep -q '"vergence-files"'; do sleep 0.2; i=$((i + 1)); [ $i -gt 50 ] && break; done
     sleep 2
     w=$(vctl windows | grep '"vergence-files"' | head -1 | cut -d' ' -f1)
     # size <title>: the preview window's "width height", or nothing.
     size() { vctl windows | grep "\"$1\" \"vergence-files\"" | grep 'kind=Dialog' | sed -n 's/.*width: \([0-9]*\), height: \([0-9]*\) }).*/\1 \2/p' | head -1; }
+    # treeof <title>: the part of `vctl tree` (every native window's tree,
+    # one after another) for the window with that title.
+    treeof() { vctl tree | awk -v t="\"$1\"" '/^window / { on = index($0, t) > 0 } on'; }
     pick() { # pick <name>: a row clicked, FileView given the keyboard, Space
         n=$(vctl tree "$w" | grep -E "button \"$1\"" | grep -oE '#[0-9]+' | head -1 | tr -d '#')
         vctl act "$w" "$n" press >/dev/null; sleep 0.4
@@ -57,12 +64,19 @@ scenario() {
     s=$(size tone.flac)
     p=$(vctl windows | grep 'kind=Dialog' | grep '"vergence-files"' | head -1 | cut -d' ' -f1)
     echo "  (the preview is window $p)"
-    vctl tree "$p" > "$OUT/sound-tree.txt"
+    treeof tone.flac > "$OUT/sound-tree.txt"
     check "$(yes_if "[ -n '$s' ] && grep -q 'label \"Test Tone\"' '$OUT/sound-tree.txt' && grep -q 'Vergence' '$OUT/sound-tree.txt' && grep -q 'Waveform' '$OUT/sound-tree.txt' && grep -q 'button \"Play\"' '$OUT/sound-tree.txt'")" "a FLAC: its title and artist, the waveform and Play ($s)"
     check "$(yes_if "grep -q '0:01 · 44.1 kHz · 16-bit · stereo' '$OUT/sound-tree.txt'")" "its length, rate, depth and channels"
     shot MEM-1 sound >/dev/null
-    n=$(grep -E 'button "Play"' "$OUT/sound-tree.txt" | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-    vctl act "$p" "$n" press >/dev/null; sleep 1
-    check "$(yes_if "vctl tree '$p' | grep -q 'No sound output: sound is off'")" "Play: through vergence-sound (off for the suite, and said so)"
+    check "$(yes_if "grep -q 'Cover art' '$OUT/sound-tree.txt' && grep -q 'drawing \"Waveform\"' '$OUT/sound-tree.txt'")" "its cover from the file, its waveform whole"
+    vctl key Escape >/dev/null; sleep 1
+    cp "$d/screen.png" "$d/Cover.png"
+    pick long.wav
+    p=$(vctl windows | grep 'kind=Dialog' | grep '"vergence-files"' | head -1 | cut -d' ' -f1)
+    treeof long.wav > "$OUT/long-tree.txt"
+    check "$(yes_if "grep -q 'button \"Pause\"' '$OUT/long-tree.txt'")" "a sound plays as soon as its preview opens (paced, silent output)"
+    check "$(yes_if "grep -q 'drawing \"Waveform\"' '$OUT/long-tree.txt'")" "its waveform drawn whole while it plays"
+    check "$(yes_if "grep -q 'Cover art' '$OUT/long-tree.txt'")" "the album's Cover.png beside it as its cover"
+    shot MEM-1 playing >/dev/null
     vctl key Escape >/dev/null; sleep 1
 }

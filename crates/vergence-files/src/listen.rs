@@ -83,6 +83,16 @@ fn work(path: PathBuf, slices: u32, state: Arc<Mutex<State>>, nudge: Arc<Condvar
         s.info = Some(sound.info.clone());
     }
     wake();
+    // No picture in the file: the album's beside it (Deadwax never embeds;
+    // AlbumWall looks the same way), decoded by the picture helper.
+    if state.lock().unwrap_or_else(|e| e.into_inner()).cover.is_none()
+        && let Some(side) = path.parent().and_then(sidecar)
+        && let Ok(p) = vergence_decode::decode_file(&side, Some((vergence_hymie::helper::COVER_PX, vergence_hymie::helper::COVER_PX)))
+        && let Some(f) = p.frames.into_iter().next()
+    {
+        state.lock().unwrap_or_else(|e| e.into_inner()).cover = Some(Arc::new(Image { width: p.width, height: p.height, rgba: f.rgba }));
+        wake();
+    }
     let info = sound.info.clone();
     let mut out: Option<(Box<dyn vergence_sound::Stream>, Resample)> = None;
     let mut whole = false;
@@ -157,6 +167,17 @@ fn work(path: PathBuf, slices: u32, state: Arc<Mutex<State>>, nudge: Arc<Condvar
                 out = None;
             }
             state.lock().unwrap_or_else(|e| e.into_inner()).at += frames;
+            // The waveform goes on filling in while it plays, a small piece
+            // between pieces of sound (Dave, 2026-11-22: it stayed invisible
+            // until Pause): about three seconds' worth, decoded well inside
+            // the output's buffer.
+            if !whole {
+                match sound.peaks_step(slices, 131_072) {
+                    Ok((_, p)) if p.is_empty() => whole = true,
+                    Ok((_, p)) => state.lock().unwrap_or_else(|e| e.into_inner()).peaks.extend(p),
+                    Err(_) => whole = true,
+                }
+            }
             since_wake += frames;
             if since_wake >= info.rate as u64 / 10 {
                 since_wake = 0;
@@ -266,4 +287,12 @@ mod tests {
         let mut down = Resample::new(8000, 2, 8000, 1);
         assert_eq!(down.convert(&[1.0, 0.0]), vec![16384]);
     }
+}
+
+/// An album's cover beside its files, as AlbumWall finds it (LibraryScanner's
+/// ArtNames): the first of these names present, whatever its case.
+fn sidecar(dir: &std::path::Path) -> Option<PathBuf> {
+    const NAMES: [&str; 6] = ["cover.jpg", "cover.jpeg", "cover.png", "folder.jpg", "folder.jpeg", "front.jpg"];
+    let present: Vec<PathBuf> = std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect();
+    NAMES.iter().find_map(|n| present.iter().find(|p| p.file_name().is_some_and(|f| f.to_string_lossy().eq_ignore_ascii_case(n))).cloned())
 }

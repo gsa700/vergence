@@ -113,8 +113,12 @@ pub trait Stream: Send {
 /// `VERGENCE_SOUND_OFF=1` refuses it (the display suite presses Play
 /// without making a sound on the machine it runs on).
 pub fn stream(rate: u32, channels: u32) -> io::Result<Box<dyn Stream>> {
-    if std::env::var_os("VERGENCE_SOUND_OFF").is_some() {
-        return Err(io::Error::other("sound is off (VERGENCE_SOUND_OFF)"));
+    match std::env::var("VERGENCE_SOUND_OFF").as_deref() {
+        // Taken at the real rate and heard nowhere: the display suite plays
+        // without making a sound.
+        Ok("pace") => return Ok(Box::new(Paced { rate, channels: channels.max(1) })),
+        Ok(_) => return Err(io::Error::other("sound is off (VERGENCE_SOUND_OFF)")),
+        Err(_) => {}
     }
     #[cfg(target_os = "freebsd")]
     {
@@ -128,6 +132,26 @@ pub fn stream(rate: u32, channels: u32) -> io::Result<Box<dyn Stream>> {
     {
         let _ = (rate, channels);
         Err(io::Error::other("no sound system here"))
+    }
+}
+
+/// `VERGENCE_SOUND_OFF=pace`: a stream that takes samples at their rate and plays them nowhere.
+struct Paced {
+    rate: u32,
+    channels: u32,
+}
+
+impl Stream for Paced {
+    fn rate(&self) -> u32 {
+        self.rate
+    }
+    fn channels(&self) -> u32 {
+        self.channels
+    }
+    fn write(&mut self, samples: &[i16]) -> io::Result<()> {
+        let frames = samples.len() as f64 / self.channels as f64;
+        std::thread::sleep(std::time::Duration::from_secs_f64(frames / self.rate.max(1) as f64));
+        Ok(())
     }
 }
 
