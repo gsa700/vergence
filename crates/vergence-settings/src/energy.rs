@@ -171,7 +171,7 @@ impl App {
                 self.group(Some("How it sleeps"), vec![setting(
                     "Sleep command",
                     &detail,
-                    field(&self.sleep_cmd, Message::SleepCommand).placeholder(default_cmd).on_submit(Message::SleepCommandSubmit).width(Length::Fixed(260.0)).name("Sleep command"),
+                    field(&self.sleep_cmd, Message::SleepCommand).placeholder("Vergence does it").on_submit(Message::SleepCommandSubmit).width(Length::Fixed(260.0)).name("Sleep command"),
                 )]),
                 self.group(None, vec![setting("Apps", "Apps cannot yet ask to keep the screens on while they play or present; that comes with the session bus.", space())]),
                 self.status_line(),

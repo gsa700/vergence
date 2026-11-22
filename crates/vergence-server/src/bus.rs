@@ -424,7 +424,8 @@ impl Server {
                     // the person is told once that an agent asked, and where
                     // to turn agents on, rather than the agent failing unseen.
                     if self.bus.agents_off_told.insert(name.clone()) {
-                        let shown = if name.is_empty() { "An agent".to_string() } else { format!("\u{201c}{name}\u{201d}") };
+                        let shown =
+                            if name.is_empty() { "An agent".to_string() } else { format!("\u{201c}{name}\u{201d}") };
                         self.notify(
                             crate::notify::Origin::Server,
                             crate::notify::Request {
