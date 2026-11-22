@@ -488,7 +488,15 @@ if [ "$(uname -s)" = FreeBSD ]; then
     if mount -p | grep "[[:space:]]/media[[:space:]]*autofs" | grep -vq "^map -vergence_media"; then umount /media 2>/dev/null || true; fi
     automount >/dev/null 2>&1 || true
     automount -c >/dev/null 2>&1 || true
-    echo "drives: the automounter is enabled (rc.conf autofs_enable) and running"
+    # autofs keeps an answer that mounted nothing (a stick's folder looked
+    # into while it was out) for vfs.autofs.cache seconds, 600 by default,
+    # and `automount -c` clears only /media itself: the stick plugged in
+    # meanwhile opened empty (Dave, 2026-11-21, techbench). Five seconds.
+    sysctl vfs.autofs.cache=5 >/dev/null 2>&1 || true
+    if ! grep -q '^vfs\.autofs\.cache=' /etc/sysctl.conf 2>/dev/null; then
+        printf '# Vergence (tools/install.sh): a drive plugged in is mounted at once\nvfs.autofs.cache=5\n' >> /etc/sysctl.conf
+    fi
+    echo "drives: the automounter is enabled (rc.conf autofs_enable) and running; its cache 5 s (sysctl.conf)"
 elif command -v udisksctl >/dev/null || [ -x /usr/libexec/udisks2/udisksd ] || [ -x /usr/lib/udisks2/udisksd ]; then
     echo "drives: udisks2 is installed; the session mounts drives through it"
     # Without logind polkit cannot see who sits at the machine and udisks2

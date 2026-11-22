@@ -274,6 +274,9 @@ impl Entry {
 
 /// A folder's entries, or why it cannot be read (in plain words).
 pub fn read_folder(dir: &Path) -> Result<Vec<Entry>, String> {
+    if absent_drive(dir) {
+        return Err("The drive is not plugged in.".into());
+    }
     match fs::read_dir(dir) {
         Ok(rd) => {
             let look = !network_mounts().iter().any(|m| dir.starts_with(m));
@@ -281,6 +284,20 @@ pub fn read_folder(dir: &Path) -> Result<Vec<Entry>, String> {
         }
         Err(e) => Err(format!("This folder cannot be read: {}", plain(&e))),
     }
+}
+
+/// FreeBSD: a folder of the automounter's /media whose drive is not in the
+/// list (pulled out). Not looked into: autofs keeps an answer that mounted
+/// nothing for a while, and the drive plugged in meanwhile opened empty
+/// (Dave, 2026-11-21, techbench).
+fn absent_drive(dir: &Path) -> bool {
+    if !cfg!(target_os = "freebsd") {
+        return false;
+    }
+    let Ok(rest) = dir.strip_prefix("/media") else { return false };
+    let Some(first) = rest.components().next() else { return false };
+    let top = Path::new("/media").join(first);
+    !drive_list().iter().any(|d| Path::new(&d.path) == top)
 }
 
 /// The files opened or saved lately through the dialog, newest first, those still there.
