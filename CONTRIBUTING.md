@@ -15,9 +15,20 @@ core: where the platforms must differ, say so in the code and the docs.
 
 ## Build
 
-You need Rust (rustup's stable), a C toolchain, and the system's graphics
-stack (DRM/KMS, GBM, EGL and OpenGL ES through Mesa), libinput, xkbcommon and
-seatd (or logind).
+You need Rust (rustup's stable, or the system's package), a C toolchain, and
+the system's graphics stack (DRM/KMS, GBM, EGL and OpenGL ES through Mesa),
+libinput, xkbcommon and seatd (or logind). The packages, as the project's
+own machines have them:
+
+- **FreeBSD:** `pkg install pkgconf drm-kmod libdrm libinput libudev-devd
+  libxkbcommon mesa-libs mesa-dri seatd wayland wayland-protocols`, plus
+  `xwayland` for X11 programs; load the GPU's driver at boot
+  (`kld_list="i915kms"` in rc.conf for Intel) and enable seatd.
+- **Void:** `xbps-install rust cargo pkg-config libinput-devel
+  libxkbcommon-devel libseat-devel libgbm-devel libdrm-devel
+  eudev-libudev-devel wayland-devel wayland-protocols mesa-dri seatd
+  fontconfig`, plus `xorg-server-xwayland` for X11 programs and Mesa's
+  Vulkan driver for a second GPU (`mesa-vulkan-nouveau` for NVIDIA).
 
     cargo build --release
     cargo test --workspace
@@ -40,7 +51,15 @@ replaces the binaries a running session uses.
 - **Headless:** `tools/vergence-headless start|env|stop` runs a session with
   screens in memory, its own home and runtime directory, the real monitors
   untouched; `eval "$(tools/vergence-headless env)"` points `tools/vctl` at
-  it. This is how the display suite runs.
+  it. This is how the display suite runs. It takes the server from
+  `$VERGENCE_SERVER`, else `target-check/release`, else `target/release` in
+  the checkout, else **the installed `vergence-server`**: with another
+  `CARGO_TARGET_DIR`, set `VERGENCE_SERVER` or you test the installed one.
+  Its home and runtime directory (`~/.cache/vergence-headless`) are one per
+  user: one headless session (or suite run) at a time.
+- **`vctl` without `VCTL_SOCKET`** (the `eval` line above) finds the session
+  in your runtime directory: your real one. Mind which it is before sending
+  keys or `quit`.
 - The server's log is `~/.local/state/vergence/server.log`; settings are in
   `~/.config/vergence/desktop.toml`.
 
@@ -55,7 +74,9 @@ replaces the binaries a running session uses.
 - **The display suite**, `sh tools/display-suite/run.sh [scenario...]`: each
   scenario in tools/display-suite/NN-*.sh runs in a headless session of its
   own and checks windows, pixels and app behavior; logs and screenshots go to
-  `~/vergence-display-suite/`. Run it before pushing anything that draws.
+  `~/vergence-display-suite/`. Run it before pushing anything that draws. It
+  builds what it needs in release into the checkout's `target-check/`
+  (whatever `CARGO_TARGET_DIR` says), a few minutes the first time.
 - **The display check**, `sh tools/display-check.sh <screen> [scale...]` (or
   `--headless "<spec>"`): one-pixel seams at each scale on a running session.
 - **The agent check**, `tools/agent-check.sh`: an MCP agent against Edit,

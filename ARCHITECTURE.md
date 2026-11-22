@@ -50,7 +50,8 @@ crate is for. Paths are relative to the repository root.
  |  window space: win.rs place.rs memory.rs snap.rs style.rs focus.rs     |
  |  input: input.rs keys.rs dispatch.rs  -->  vergence-seat (decisions)   |
  |  its own parts: decor.rs (bars, from vergence-bar), shelf.rs (dock),   |
- |   launcher.rs, menu.rs, tiles.rs, notify.rs, lock.rs, greeter.rs       |
+ |   launcher.rs, appmenu.rs (the app button's menu), menu.rs (right-     |
+ |   click menus), tiles.rs, drives.rs, notify.rs, lock.rs, greeter.rs    |
  |  drawing: scenes.rs (app scenes, vergence-render), backdrop.rs (frost) |
  |   composited on the GPU (Smithay's GLES renderer, our shaders)         |
  |  output: drm.rs (DRM/KMS, GBM, EGL, libinput, libseat); winit.rs when  |
@@ -74,6 +75,10 @@ Wayland (or X11 through Xwayland). The session bus is the server itself, on
 the same socket as native windows. `vdm` is a separate root daemon. The
 helpers are short-lived processes that parse untrusted files and can do
 nothing else.
+
+The diagram names the files a newcomer meets first, not all of them: the
+server's full list of modules is the `mod` lines at the top of
+[crates/vergence-server/src/main.rs](crates/vergence-server/src/main.rs).
 
 ## The tour
 
@@ -235,7 +240,8 @@ services (notifications, the desktop portal's file chooser and settings). A
 name nobody owns gets "service unknown"; nothing is started on demand.
 
 **The control socket.** `vctl` (in [tools/vctl](tools/vctl)) drives a running
-server: screenshots, window lists, moving, typing, fake screens. It goes
+server: screenshots, window lists, moving, typing, fake screens (the full list
+of commands is the match in [crates/vergence-server/src/control.rs](crates/vergence-server/src/control.rs)). It goes
 around the security model, so it exists only when the server starts with
 `VERGENCE_CONTROL=1`. A session started from a checkout has it; an installed
 session does not.
@@ -360,7 +366,7 @@ of its entry file saying what it is for and where to start.
 |---|---|---|
 | vergence-server | The display server: screens, input, windows, the bus, the dock and everything it draws | `src/main.rs` |
 | vergence-seat | Who gets each pointer, keyboard and touch event, as plain decisions | `src/lib.rs` |
-| vergence-shell | The shell's logic with no drawing: dock geometry, applications from desktop entries, icons, snapping, named actions; `vergence-open` | `src/lib.rs` |
+| vergence-shell | The shell's logic with no drawing: dock geometry, applications from desktop entries, icons, snapping, named actions, the app menu's lines (`appmenu.rs`, opened by the server's `appmenu.rs`); `vergence-open` | `src/lib.rs` |
 | vergence-dbus | Our own D-Bus wire protocol, for the session bus's edge and a small system-bus client | `src/lib.rs` |
 | vergence-edid | EDID parser: identity, physical size, native mode | `src/lib.rs` |
 | vergence-profile | Monitor-setup keys and scales calculated from EDIDs | `src/lib.rs` |
@@ -417,7 +423,7 @@ of its entry file saying what it is for and where to start.
 | Crate | What it is | Start at |
 |---|---|---|
 | vergence-dm | VDM: the root daemon `vdm`, PAM, the unlock protocol, the password buffer | `src/lib.rs`, `src/bin/vdm.rs` |
-| vergence-media | Removable drives and disk images: udisks2 on Linux, autofs on FreeBSD | `src/lib.rs` |
+| vergence-media | Removable drives and disk images: udisks2 on Linux, autofs on FreeBSD; the drive list (`drives::scan`), which the server's `drives.rs` watches and sends on the `Drives` topic | `src/lib.rs` |
 | vergence-sound | Sound outputs, volume, playback: OSS, ALSA, the PulseAudio protocol | `src/lib.rs` |
 | vergence-net | Network interfaces and a wpa_supplicant client | `src/lib.rs` |
 | vergence-power | Batteries, mains power, GPU power state | `src/lib.rs` |

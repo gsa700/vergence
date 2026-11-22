@@ -2,7 +2,7 @@
 //! it.
 //!
 //! Files milestone 1, step 10, docs/files-milestone-1.md; drives milestone 1. Mounted so the
-//! desktop and File Viewer show it. Used by vergence-server (which mounts and lists drives for
+//! desktop and FileView show it. Used by vergence-server (which mounts and lists drives for
 //! the session) and vergence-widgets (the drives in the file list's sidebar). Uses
 //! vergence-dbus (its client, for udisks2) and vergence-protocol.
 //!
@@ -15,6 +15,7 @@
 //! freebsd.rs.
 //!
 //! Start reading: [`automount`] and [`eject`], then udisks.rs or freebsd.rs, then [`drives`]
+//! (`drives::scan`, the drive list the server sends to apps)
 //! (the mount table and disks).
 //!
 //! Rule: the setuid helper does only what [`helper_may_eject`] allows; anything else is refused.
