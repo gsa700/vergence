@@ -37,14 +37,27 @@ STATUS.md says what is built and what comes next.
 
 ## Try it
 
-Vergence has no packages yet (a FreeBSD port comes first). From the source:
+**On Void Linux (glibc)**, Vergence is one xbps package. Until it has a
+repository of its own, build it with Void's own tools:
+
+    git clone --depth 1 https://github.com/void-linux/void-packages
+    cd void-packages && ./xbps-src binary-bootstrap
+    git clone https://github.com/gsa700/vergence /tmp/vergence
+    cp -r /tmp/vergence/packaging/void/srcpkgs/vergence srcpkgs/
+    ./xbps-src pkg vergence
+    sudo xbps-install --repository=hostdir/binpkgs vergence
+    sudo vergence-setup     # once: enables seatd, vdm and the rest, asking first
+
+Then log out and back in, or reboot, and choose Vergence at the login screen.
+
+**From the source** (development, or FreeBSD, whose port comes later):
 
     cargo build --release
     sudo tools/install.sh
     vergence            # from a text console, or choose Vergence at the login screen
 
 CONTRIBUTING.md has the details: what to install first, running a session
-from the checkout or headless, and the tests.
+from the checkout or headless, the tests, and removing Vergence.
 
 ## Read on
 
