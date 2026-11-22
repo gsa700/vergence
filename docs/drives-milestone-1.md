@@ -3,7 +3,8 @@
 Status: **answered 2026-11-21** (Dave: "yes to all three, go ahead":
 internal file systems shown, plugged-in drives not yet mounted shown, the
 server's one "Safe to remove"); all steps in the same evening (see
-Progress), waiting for the install and Dave's pass. Decided (Dave, 2026-11-21): "2, and restart the desktop on
+Progress), installed 2026-11-21; **Dave: "seriously broken"** with a USB
+stick and the Fedora ISO together on techbench. Open issues below. Decided (Dave, 2026-11-21): "2, and restart the desktop on
 install". The second half was done the same evening: the server keeps the
 desktop's icons running, and tools/install.sh restarts them.
 
@@ -113,4 +114,26 @@ suite 17 of 17 on both (scenario 17 new), agent-check 0 failed.
   in FileView's Locations with an eject button; that button lets it go,
   gone from the system, the list and the sidebar. Passes on Hubble (udisks)
   and techbench (the helper).
+
+## Open (Dave's pass, 2026-11-21 evening, techbench)
+
+Fixed that evening: an ejected stick remounted by FileView looking into its
+folder, a stick pulled out while mounted kept listed (37e9baf); an ejected
+stick not showing when plugged in again, devfs having reused its node's
+number, and rescans on devd's disk events (810c570). Still open:
+
+1. **A mounted ISO brings phantom drives.** Attaching the Fedora ISO
+   (mdconfig) made label nodes for the image's own partitions,
+   /dev/iso9660/Fedora-E-dvd-x86_64-45 and /dev/msdosfs/ANACONDA; the
+   automounter lists them under /media, and drives.rs takes any label node
+   for a stick plugged in: the list showed /media/ANACONDA and
+   /media/Fedora-E-dvd-x86_64-45 (Removable, not mounted) beside
+   /mnt/Fedora-Everything-... (Image). To fix: a label whose provider is an
+   md device (glabel status, or the geom tree) is not a drive.
+2. **Ejecting the two together was "seriously broken"** (Dave ejected both,
+   then stopped: "we'll get into it later"). Not seen what went wrong; go
+   through it with him: stick and ISO mounted, eject each from FileView's
+   sidebar and from the desktop, watching `vctl drives` and the server log.
+3. **The delay when a stick is plugged in:** FreeBSD's USB probe, then the
+   automounter; devd now pokes a rescan (810c570), not yet tried by Dave.
 
