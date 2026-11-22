@@ -487,6 +487,19 @@ awkward. Known rough edges to fix as they bite: a text area's value is cut at
 512 characters in the tree (long documents can't be read through it); paths
 like "Edit > text area" don't find a window named by its document.
 
+**The terminal on the agent interface** (Dave, 2026-11-22: "the whole point
+of the socket is so the user sees what you are doing and can interact with you
+graphically: Claude this paragraph could use rewording? You need to be able to
+read it. Claude, can you dd this iso for me? Etc."). Today vergence-term
+publishes no meaning ("Terminal ... (no meaning)" in `vagent windows`), so an
+agent can neither read a terminal nor type into one, and work like writing a
+USB stick goes over ssh where Dave cannot watch it. Needed: the screen's text
+(and scrollback) readable in the tree, the 512-character cap lifted for
+documents generally, and typing into a terminal as an action. A terminal is a
+shell, so the permission must say so plainly ("Claude wants to type commands
+in Terminal"), and what the agent types shows on screen as it goes, so Dave can
+watch and stop it.
+
 **JIT app building is close** (Dave: "I think our JIT app building is almost
 writing itself with the way things are going. Modular components and a roadmap
 is all a dev or Ai would need to quickly build great apps"). The wish list's
