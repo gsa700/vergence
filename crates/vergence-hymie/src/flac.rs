@@ -108,7 +108,7 @@ fn block_size(code: u32, r: &mut BitReader) -> Result<usize, Error> {
     })
 }
 
-/// Whether a frame header starts at data[at] (sync, no reserved values, a
+/// Whether a frame header starts at `data[at]` (sync, no reserved values, a
 /// matching CRC-8), and if so its first sample and its block size: found
 /// without decoding the frames before it, for seeking.
 pub fn try_header(data: &[u8], at: usize, info: &StreamInfo) -> Option<(u64, usize)> {
@@ -155,7 +155,7 @@ pub fn try_header(data: &[u8], at: usize, info: &StreamInfo) -> Option<(u64, usi
     go(&mut r).ok().flatten()
 }
 
-/// One frame at data[start..end]: its samples into channels[c][..block],
+/// One frame at `data[start..end]`: its samples into `channels[c][..block]`,
 /// growing them when a frame is longer. Returns the frame's length in bytes
 /// and its block size. Indexed loops as in Hymie, so a fix carries over.
 #[allow(clippy::needless_range_loop)]

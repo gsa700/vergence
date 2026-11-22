@@ -26,7 +26,7 @@ const LOCK_CHOICES: [(&str, i64); 8] = [
     ("1 hour", 60),
 ];
 
-/// [lock]'s switches and minutes, with their defaults.
+/// `[lock]`'s switches and minutes, with their defaults.
 pub fn lock_settings(d: &toml::Table) -> (bool, i64, bool) {
     let t = d.get("lock").and_then(|n| n.as_table());
     let on = |k: &str| t.and_then(|t| t.get(k)).and_then(|v| v.as_bool()).unwrap_or(true);

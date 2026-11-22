@@ -1,5 +1,5 @@
 //! The Mouse, Touchpad and Touchscreen pages (Page::Mouse, Touchpad,
-//! Touchscreen; desktop.toml [mouse], [touchpad], [touch]).
+//! Touchscreen; desktop.toml `[mouse]`, `[touchpad]`, `[touch]`).
 //! The app's skeleton (the Program impl, the page list and routing, shared
 //! state and helpers) is in main.rs.
 

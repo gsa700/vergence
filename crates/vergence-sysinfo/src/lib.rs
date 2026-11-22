@@ -221,6 +221,8 @@ pub fn bytes_text(b: u64) -> String {
 
 // ---- reading, per system ----
 
+// Only Linux reads files for these (/proc, /sys); FreeBSD asks sysctl.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn read(path: impl AsRef<Path>) -> String {
     std::fs::read_to_string(path).unwrap_or_default()
 }
@@ -396,7 +398,7 @@ pub use os::{cpu, disk_io, memory, temps};
 
 /// The effective user of process `pid`, if it can be read (the terminal's
 /// red tab and the server's mark on a superuser's windows): Linux's
-/// /proc/<pid>/status (its Uid line: real, effective, saved, filesystem);
+/// `/proc/<pid>/status` (its Uid line: real, effective, saved, filesystem);
 /// elsewhere (FreeBSD) `ps -o uid=`, which prints the effective user.
 pub fn euid_of(pid: u32) -> Option<u32> {
     #[cfg(target_os = "linux")]

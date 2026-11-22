@@ -258,7 +258,7 @@ pub struct Backend {
     /// The primary GPU's buffers, for the frames of screens on other GPUs
     /// (None headless: no monitors, so no relays).
     gbm: Option<GbmDevice<DrmDeviceFd>>,
-    /// devices[0] is the primary GPU, the one that draws.
+    /// `devices[0]` is the primary GPU, the one that draws.
     devices: Vec<Device>,
     surfaces: HashMap<Key, Surface>,
     /// The seat is another console's (a VT switch away, the login screen):
@@ -729,7 +729,7 @@ fn setup_changed(
     state.rearrange_windows(anchors);
 }
 
-/// desktop.toml's [displays] changed (the settings app): work every scale out
+/// desktop.toml's `[displays]` changed (the settings app): work every scale out
 /// again and lay the screens out again; windows go with their screens.
 pub fn displays_changed(state: &mut Server) {
     let mut cfg = crate::displays::load();
@@ -1598,7 +1598,7 @@ fn memory_frame(
 /// A screen in memory beside the monitors (`vctl screen add`): `edid` its
 /// identity (a fake's, vergence_edid::fake), `px` its mode, `refresh_mhz` its
 /// rate. Laid out, scaled and remembered like a monitor, except that its
-/// setups are never saved (memory.rs). Its name, MEM-<n>.
+/// setups are never saved (memory.rs). Its name, `MEM-<n>`.
 pub fn add_memory_screen(
     state: &mut Server,
     edid: Vec<u8>,

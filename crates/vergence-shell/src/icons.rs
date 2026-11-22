@@ -160,8 +160,8 @@ pub fn find_in(data_dirs: &[PathBuf], home: Option<&Path>, theme: &str, name: &s
 
 /// One of Vergence's own icons (tools/make-icons.py): `group`
 /// "places" (home, trash, trash-full, folder, disk, usb ...) or "kinds"
-/// (text, picture, pdf ...). Installed in share/vergence/icons/<group>
-/// (install.sh); a checkout's own data/icons/<group> beside its build
+/// (text, picture, pdf ...). Installed in `share/vergence/icons/<group>`
+/// (install.sh); a checkout's own `data/icons/<group>` beside its build
 /// (target/release/../../data) for a development session.
 pub fn vergence_icon(group: &str, name: &str) -> Option<PathBuf> {
     let file = format!("{group}/{name}.svg");

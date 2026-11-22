@@ -261,7 +261,7 @@ pub enum Pick {
 }
 
 /// A value of desktop.toml's text: `key` in table `section` (as
-/// "[terminal]"), quotes and a trailing comment taken off.
+/// "`[terminal]`"), quotes and a trailing comment taken off.
 pub fn table_value(text: &str, section: &str, key: &str) -> Option<String> {
     let mut within = "";
     let mut found = None;
@@ -402,7 +402,7 @@ pub fn bar_style_setting(text: &str, section: &str, builtin: BarStyle) -> BarSty
 }
 
 /// How opaque a program's window ground is to be, from desktop.toml's text:
-/// `opacity` in the program's own table (`section`, as "[terminal]") if it
+/// `opacity` in the program's own table (`section`, as "`[terminal]`") if it
 /// is there, else `window-opacity` under `[appearance]`, the desktop's word
 /// for every program of ours, else 1. From 0.3 (less could not be read
 /// on) to 1 (nothing shows through). A program gives its

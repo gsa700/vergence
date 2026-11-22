@@ -93,7 +93,7 @@ impl Theme {
     /// "light"; anything else leaves the program's own choice,
     /// `default_dark`), accent ("#rrggbb"), contrast ("high"),
     /// reduced-motion; `opacity` in the program's `section` (as
-    /// "[settings]") or `[appearance] window-opacity`.
+    /// "`[settings]`") or `[appearance] window-opacity`.
     pub fn from_desktop(text: &str, default_dark: bool, section: &str) -> Theme {
         let (mut dark, mut accent, mut high, mut motion) = (default_dark, None, false, false);
         let mut double_click = 400;

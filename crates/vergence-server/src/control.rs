@@ -173,7 +173,7 @@ pub fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
 /// The connecting process's id, for `vctl windows` (the stress test's click
 /// tool finds its own terminal by it). Linux: SO_PEERCRED's
 /// struct ucred { pid, uid, gid }. FreeBSD: LOCAL_PEERCRED's struct xucred
-/// { u_int version; uid_t uid; short ngroups; gid_t groups[16]; union {
+/// { u_int version; uid_t uid; short ngroups; gid_t groups\[16\]; union {
 /// void *; pid_t pid; } }, the pid at byte 80 (after 76 bytes, aligned to 8).
 pub fn peer_pid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
     use std::os::fd::AsRawFd;

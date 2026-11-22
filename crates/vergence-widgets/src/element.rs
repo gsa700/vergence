@@ -97,7 +97,7 @@ pub(crate) struct Label {
     pub elide: bool,
 }
 
-/// What a [drawing](drawing) is told of the pointer or a finger, in its own
+/// What a [drawing] is told of the pointer or a finger, in its own
 /// coordinates. A press holds the drawing's attention until it is let go.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Touch {

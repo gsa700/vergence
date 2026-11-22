@@ -43,7 +43,7 @@ pub enum What {
 /// Where it goes.
 #[derive(Clone)]
 pub enum Dest {
-    /// ~/Pictures/Screenshots/<date>/.
+    /// `~/Pictures/Screenshots/<date>/`.
     Folder,
     /// A file named by the caller (vctl, tests).
     Path(PathBuf),
@@ -134,7 +134,7 @@ impl Server {
     }
 }
 
-/// Settings > Screenshots (step 8): desktop.toml [screenshots].
+/// Settings > Screenshots (step 8): desktop.toml `[screenshots]`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
     /// Super+Shift+3 takes every screen (else the one under the pointer).

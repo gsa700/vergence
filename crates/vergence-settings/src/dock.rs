@@ -1,5 +1,5 @@
 //! The Dock page (Page::Dock): its edge, screen, size, gap, opacity, hiding,
-//! the desktop's icons and the applets (desktop.toml [shelf]).
+//! the desktop's icons and the applets (desktop.toml `[shelf]`).
 //! The app's skeleton (the Program impl, the page list and routing, shared
 //! state and helpers) is in main.rs.
 

@@ -18,7 +18,7 @@ const TIMED_CHOICES: [(&str, i64); 7] = [
     ("A day", 1440),
 ];
 
-/// desktop.toml's [agents]: on, and the timed length in minutes.
+/// desktop.toml's `[agents]`: on, and the timed length in minutes.
 pub fn agents_settings(d: &toml::Table) -> (bool, i64) {
     let t = d.get("agents").and_then(|a| a.as_table());
     let on = t.and_then(|t| t.get("enabled")).and_then(|v| v.as_bool()).unwrap_or(true);

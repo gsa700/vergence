@@ -52,7 +52,7 @@ pub fn scaled_len(len: u16, factor: u32) -> u16 {
 /// One monitor's place in a setup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputSetting {
-    /// [`crate::monitor_id`] of the monitor's EDID, or "port:<connector>"
+    /// [`crate::monitor_id`] of the monitor's EDID, or "`port:<connector>`"
     /// for a monitor without an EDID.
     pub monitor: String,
     /// The monitor's name, for people reading the file. Not used to match.

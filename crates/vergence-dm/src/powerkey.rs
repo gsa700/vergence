@@ -9,7 +9,7 @@
 //!   a `systemd-inhibit` (or `elogind-inhibit`) child that ends when vdm
 //!   closes its input; the server sees the key itself (XF86PowerOff);
 //! - acpid (Void without elogind): its handler shuts down whatever is
-//!   running, so install.sh puts a test of [`FLAG`] before its shutdown,
+//!   running, so install.sh puts a test of `FLAG` before its shutdown,
 //!   and vdm makes the flag while a session is up; the server sees the key;
 //! - FreeBSD: the kernel acts on the button (`hw.acpi.power_button_state`);
 //!   vdm sets it to NONE, keeping the old state in [`kept_file`] so a vdm

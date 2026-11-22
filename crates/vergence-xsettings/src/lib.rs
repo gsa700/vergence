@@ -186,8 +186,8 @@ impl Settings {
     }
 
     /// Set a value; if it differs, bump the serial and record the change.
-    /// Returns true if anything changed. Call [`Settings::bump`] once per
-    /// batch instead when setting several values together.
+    /// Returns true if anything changed. Several values set together each
+    /// bump the serial, which is harmless: a client reads the latest.
     pub fn set(&mut self, name: &str, value: Value) -> bool {
         if self.get(name) == Some(&value) {
             return false;

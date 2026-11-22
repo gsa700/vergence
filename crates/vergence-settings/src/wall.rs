@@ -124,7 +124,7 @@ pub fn clear_own(desktop: &mut Table, id: &str) {
 }
 
 /// The primary screen among `ids` (in arrangement order): the one recorded in
-/// [displays], if it is connected, else the first.
+/// `[displays]`, if it is connected, else the first.
 pub fn primary(desktop: &Table, ids: &[String]) -> Option<String> {
     let recorded = desktop.get("displays").and_then(|d| d.get("primary")).and_then(Value::as_str);
     // The rule is vergence-profile's, which the server's shelf follows too.
@@ -132,7 +132,7 @@ pub fn primary(desktop: &Table, ids: &[String]) -> Option<String> {
 }
 
 /// Make `new` the primary instead of `old` with nothing on screen changing:
-/// `new`'s wallpaper becomes the default ([wallpaper]) and `old` keeps what it
+/// `new`'s wallpaper becomes the default (`[wallpaper]`) and `old` keeps what it
 /// showed as its own.
 pub fn make_primary(desktop: &mut Table, old: Option<(&str, &str)>, new: &str) {
     let base = shown(desktop, None);

@@ -1,7 +1,7 @@
 //! Sleep, Restart and Shut Down (VDM step 6), carried out by vdm as root for
 //! the login screen and for the people with a session at the machine. The
 //! request is one line on the power socket ("sleep", "restart",
-//! "shut-down"); the answer is one line, "ok" or "no: <why>".
+//! "shut-down"); the answer is one line, "ok" or "`no: <why>`".
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;

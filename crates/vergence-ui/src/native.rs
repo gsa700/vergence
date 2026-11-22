@@ -82,7 +82,7 @@ fn scenes_wanted() -> bool {
     *WANTED.get_or_init(|| std::env::var_os("VERGENCE_UI_PIXELS").is_none_or(|v| v != "1"))
 }
 
-/// VERGENCE_UI_TIMING=<file>: each frame's time to draw (or build and
+/// `VERGENCE_UI_TIMING=<file>`: each frame's time to draw (or build and
 /// send, when the server draws it) appended there, for comparing the two
 /// roads (display lists step 7): "window drawn-by ms".
 fn timing(window: u32, by: &str, ms: f64) {

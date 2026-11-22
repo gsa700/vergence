@@ -1,15 +1,17 @@
 //! vsound: the machine's sound outputs from the terminal (sound milestone 1,
 //! step 1), to try vergence-sound before the settings page has it.
 //!
-//!     vsound                      list the outputs
-//!     vsound volume <id> <0-100>  set an output's volume
-//!     vsound mute <id> on|off
-//!     vsound default <id>         send sound there from now on (FreeBSD: through
-//!                                 the root helper, libexec/vergence/sound-default)
-//!     vsound tone <id> [CHANNELS] [ON]
-//!                                 a test tone, 440 Hz for 1.5 s, quiet: in a
-//!                                 stream of CHANNELS channels (2), heard on those
-//!                                 in ON (1,2), e.g. `vsound tone pcm3 4 3,4`
+//! ```text
+//! vsound                      list the outputs
+//! vsound volume <id> <0-100>  set an output's volume
+//! vsound mute <id> on|off
+//! vsound default <id>         send sound there from now on (FreeBSD: through
+//!                             the root helper, libexec/vergence/sound-default)
+//! vsound tone <id> [CHANNELS] [ON]
+//!                             a test tone, 440 Hz for 1.5 s, quiet: in a
+//!                             stream of CHANNELS channels (2), heard on those
+//!                             in ON (1,2), e.g. `vsound tone pcm3 4 3,4`
+//! ```
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

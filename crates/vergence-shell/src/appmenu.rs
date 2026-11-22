@@ -13,7 +13,7 @@
 //!    (every command with its keys, chosen from there, a right click adding
 //!    one to the top level; an app's menus are one level up, not buried
 //!    in Keyboard shortcuts);
-//! 4. Settings…, About <App>, Quit <App>.
+//! 4. Settings…, About `<App>`, Quit `<App>`.
 //!
 //! An app that is not ours (no commands) gets the skeleton with a line saying
 //! its own menu holds the rest. Everything here is plain data: the server

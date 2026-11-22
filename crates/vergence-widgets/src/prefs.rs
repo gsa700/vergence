@@ -140,7 +140,7 @@ pub trait Rows: 'static {
 
 /// The window.
 pub struct Prefs {
-    /// The app's name ("Terminal") and id, its table ("[terminal]"), and
+    /// The app's name ("Terminal") and id, its table ("`[terminal]`"), and
     /// whether its look is dark under "App default".
     pub app: String,
     pub app_id: String,
@@ -605,7 +605,7 @@ pub fn desktop_path() -> Option<std::path::PathBuf> {
     Some(base.join("vergence/desktop.toml"))
 }
 
-/// desktop.toml's text with `key` in table `section` ("[terminal]") set to
+/// desktop.toml's text with `key` in table `section` ("`[terminal]`") set to
 /// `value` (as written after `= `), or taken away (None). Line by line:
 /// every other line, comments included, stays as it was; a missing table is
 /// added at the end.

@@ -147,7 +147,7 @@ fn write(f: &fs::File, c: &Control, value: i64) -> io::Result<()> {
     call(f, ELEM_WRITE, &mut v)
 }
 
-/// The cards, by number, from /proc/asound/cards (" 0 [PCH ]: HDA-Intel - HDA Intel PCH").
+/// The cards, by number, from /proc/asound/cards (`" 0 [PCH ]: HDA-Intel - HDA Intel PCH"`).
 fn cards() -> Vec<(u32, String)> {
     let text = fs::read_to_string("/proc/asound/cards").unwrap_or_default();
     text.lines().filter_map(crate::alsa_card_line).collect()

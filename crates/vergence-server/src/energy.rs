@@ -53,7 +53,7 @@ pub struct Config {
     /// [energy.battery]: None for a key left out (the same as on power).
     pub battery_screens_off: Option<Duration>,
     pub battery_sleep: Option<Duration>,
-    /// [lock] (VDM step 8): lock when the screens go off (default on), after
+    /// `[lock]` (VDM step 8): lock when the screens go off (default on), after
     /// this long with no input (zero: not on its own), before sleep (default on).
     pub lock_on_screens_off: bool,
     /// After the screens went off by their timeout, how long before the
@@ -118,7 +118,7 @@ impl Energy {
     }
 }
 
-/// [energy] from desktop.toml (missing file or table: everything off).
+/// `[energy]` from desktop.toml (missing file or table: everything off).
 pub fn load() -> Config {
     crate::wallpaper::desktop_path()
         .and_then(|p| std::fs::read_to_string(p).ok())

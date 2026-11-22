@@ -6,13 +6,13 @@
 //! (src/bin): `vsound` (the outputs from a terminal) and `sound-default` (FreeBSD's root helper).
 //!
 //! One interface, [`Sound`], and a back end per system, chosen at run time ([`open`]): OSS on
-//! FreeBSD (`oss`, step 1); ALSA on Linux without a sound server ([`alsa`], step 2); with one
+//! FreeBSD (`oss`, step 1); ALSA on Linux without a sound server (`alsa`, step 2); with one
 //! (PipeWire or PulseAudio, the platform's standard on Fedora), the PulseAudio protocol both
-//! speak ([`pulse`], our own client). Volume and mute need no privilege on either; FreeBSD's
+//! speak (`pulse`, our own client). Volume and mute need no privilege on either; FreeBSD's
 //! default output needs root: the helper `sound-default` (step 5, `oss::helper_main`).
 //!
-//! Start reading: [`Sound`] and [`open`], then the back end for your system ([`pulse`],
-//! [`alsa`] or `oss`).
+//! Start reading: [`Sound`] and [`open`], then the back end for your system (`pulse`,
+//! `alsa` or `oss`).
 //!
 //! Rule: callers see only [`Sound`] and [`Output`]; nothing outside this crate knows which back
 //! end runs.
@@ -204,7 +204,7 @@ pub fn pin_name(config: &str) -> Option<String> {
 }
 
 /// An ALSA card from a line of /proc/asound/cards
-/// (" 0 [PCH            ]: HDA-Intel - HDA Intel PCH"): its number and name.
+/// (`" 0 [PCH            ]: HDA-Intel - HDA Intel PCH"`): its number and name.
 pub fn alsa_card_line(line: &str) -> Option<(u32, String)> {
     let (num, rest) = line.trim_start().split_once(' ')?;
     let num = num.parse().ok()?;

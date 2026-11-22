@@ -428,7 +428,7 @@ mod tests {
 
 /// `vergence-harness icons <data/icons> <share/vergence/icons>`: Vergence's
 /// place and kind icons (tools/make-icons.py) copied, each with its pixels
-/// at 16, 32, 64, 128 and 256 beside it (<name>.<px>.rgba: "VRGB", width,
+/// at 16, 32, 64, 128 and 256 beside it (`<name>.<px>.rgba`: "VRGB", width,
 /// height as little-endian words, then straight RGBA), so the toolkit shows
 /// them with no SVG code of its own (vergence-widgets files.rs own_icon).
 pub fn icons(args: &[String]) -> Result<bool, Box<dyn Error>> {

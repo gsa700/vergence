@@ -55,7 +55,7 @@ pub const KEYBOARD: &str = "org.gnome.desktop.peripherals.keyboard";
 pub const WM: &str = "org.gnome.desktop.wm.preferences";
 pub const MOUSE: &str = "org.gnome.desktop.peripherals.mouse";
 pub const TOUCHPAD: &str = "org.gnome.desktop.peripherals.touchpad";
-/// Key repeat without a [keyboard] table: GNOME's defaults (500 ms, then 30 a second).
+/// Key repeat without a `[keyboard]` table: GNOME's defaults (500 ms, then 30 a second).
 pub const REPEAT_DELAY: u32 = 500;
 pub const REPEAT_RATE: u32 = 30;
 

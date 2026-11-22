@@ -81,7 +81,7 @@ impl Server {
         Ok(a.name)
     }
 
-    /// "<key>.<control>": a tile's button pressed or switch turned over, as
+    /// "`<key>.<control>`": a tile's button pressed or switch turned over, as
     /// on its card.
     fn tile_control_by_name(&mut self, rest: &str) -> Result<(), String> {
         for (index, p) in self.tiles.list.iter().enumerate() {

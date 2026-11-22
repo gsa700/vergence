@@ -61,7 +61,7 @@ const FRAME: f64 = 3.0;
 const EASE: f64 = 0.07;
 const TICK: Duration = Duration::from_millis(16);
 
-/// desktop.toml's [magnifier].
+/// desktop.toml's `[magnifier]`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Config {
     pub on: bool,
@@ -125,7 +125,7 @@ fn load_config() -> Config {
 }
 
 pub struct Zoom {
-    /// The server's own focus ring (step 8): desktop.toml [appearance]
+    /// The server's own focus ring (step 8): desktop.toml `[appearance]`
     /// focus-ring, off by default.
     pub focus_ring: bool,
     ring_ids: [Id; 4],

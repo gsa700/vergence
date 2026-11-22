@@ -27,7 +27,7 @@ fn table(d: &toml::Table) -> Option<&toml::Table> {
     d.get("clock").and_then(|n| n.as_table())
 }
 
-/// [clock] 24-hour and date, with their defaults (both on).
+/// `[clock]` 24-hour and date, with their defaults (both on).
 pub fn clock_look(d: &toml::Table) -> (bool, bool) {
     let t = table(d);
     let get = |k: &str| t.and_then(|t| t.get(k)).and_then(|v| v.as_bool()).unwrap_or(true);

@@ -269,7 +269,7 @@ impl ShelfConfig {
     }
 }
 
-/// Write the dock's place into desktop.toml's [shelf] table, the rest of the
+/// Write the dock's place into desktop.toml's `[shelf]` table, the rest of the
 /// file kept (as the settings app keeps it when it writes): the file is read,
 /// the keys set, and the whole written beside it and moved into its place,
 /// readable by its owner only.
@@ -691,7 +691,7 @@ impl Server {
         vergence_shell::column(rect(self.shelf_screen()?), &at).filter(|_| at.keep_clear).map(rectangle)
     }
 
-    /// The dock's thickness and each place's length, in points ([shelf] size).
+    /// The dock's thickness and each place's length, in points (`[shelf]` size).
     pub(crate) fn shelf_size(&self) -> i32 {
         self.shelf.config.placement().size()
     }

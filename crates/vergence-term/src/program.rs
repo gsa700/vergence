@@ -49,8 +49,8 @@ pub fn state_path() -> Option<PathBuf> {
     Some(base.join("vergence/terminal-windows"))
 }
 
-/// The windows a state file keeps: "window <token>" lines, each followed by
-/// "tab <directory>" lines; anything else is passed over (a broken file
+/// The windows a state file keeps: "`window <token>`" lines, each followed by
+/// "`tab <directory>`" lines; anything else is passed over (a broken file
 /// opens no more than it can make sense of).
 pub fn parse(text: &str) -> Vec<WindowState> {
     let mut windows: Vec<WindowState> = Vec::new();
@@ -241,7 +241,7 @@ pub fn cwd_of(pid: u32) -> Option<String> {
 }
 
 /// The command name of process `pid` ("ssh", "make"), if it can be read:
-/// Linux's /proc/<pid>/comm; elsewhere (FreeBSD) `ps -o comm=`.
+/// Linux's `/proc/<pid>/comm`; elsewhere (FreeBSD) `ps -o comm=`.
 pub fn name_of(pid: u32) -> Option<String> {
     #[cfg(target_os = "linux")]
     let name = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
@@ -263,7 +263,7 @@ use vergence_sysinfo::euid_of;
 
 /// Whether any process of process group `group` runs as the superuser (a
 /// script's group holds the sudo it runs, though the script leads it):
-/// Linux's /proc/<pid>/stat for each process's group; elsewhere (FreeBSD)
+/// Linux's `/proc/<pid>/stat` for each process's group; elsewhere (FreeBSD)
 /// one `ps` listing of every process's group and effective user.
 pub fn group_has_root(group: u32) -> bool {
     #[cfg(target_os = "linux")]

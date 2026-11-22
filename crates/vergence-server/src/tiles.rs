@@ -25,7 +25,7 @@ use vergence_shell::{Edge, Rect, tiles};
 
 use crate::{Server, decor::SceneElement};
 
-/// desktop.toml [clock]: a 24-hour clock and the date under it, both on
+/// desktop.toml `[clock]`: a 24-hour clock and the date under it, both on
 /// unless set off (the settings app's Date & Time page).
 fn clock_look() -> tiles::ClockLook {
     let text = crate::wallpaper::desktop_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
@@ -205,7 +205,7 @@ impl Server {
     }
 
     /// desktop.toml changed (settings.rs): the clock is drawn again at the
-    /// next tick, as its [clock] table now says.
+    /// next tick, as its `[clock]` table now says.
     pub fn tiles_reload(&mut self) {
         self.tiles.minute = None;
     }
@@ -359,13 +359,13 @@ impl Server {
         }
     }
 
-    /// Whether an applet is switched on (desktop.toml [shelf] applets-off).
+    /// Whether an applet is switched on (desktop.toml `[shelf]` applets-off).
     pub fn tile_visible(&self, p: &Placed) -> bool {
         !self.shelf.config.applets_off.as_ref().is_some_and(|off| off.contains(&p.tile.id))
     }
 
     /// Whether a tile stands on the dock (else it is in the drawer):
-    /// desktop.toml [shelf] tiles, and trouble coming out ([shelf]
+    /// desktop.toml `[shelf]` tiles, and trouble coming out (`[shelf]`
     /// trouble-out, on unless set off).
     pub fn tile_docked(&self, p: &Placed) -> bool {
         let c = &self.shelf.config;

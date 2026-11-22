@@ -1,6 +1,6 @@
 //! The Screens pages (Page::Overview, Page::Screen): the arrangement, each
 //! screen's scale, size of controls and main screen (desktop.toml
-//! [displays], as disp.rs edits it; resolutions are modes.rs).
+//! `[displays]`, as disp.rs edits it; resolutions are modes.rs).
 //! The app's skeleton (the Program impl, the page list and routing, shared
 //! state and helpers) is in main.rs.
 

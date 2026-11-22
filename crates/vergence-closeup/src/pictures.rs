@@ -100,7 +100,7 @@ pub fn crop(img: &Image, x: u32, y: u32, w: u32, h: u32) -> Image {
     Image { width: w, height: h, rgba: out }
 }
 
-/// Where an edited picture that is not a PNG is saved: "<name> (edited).png"
+/// Where an edited picture that is not a PNG is saved: "`<name> (edited).png`"
 /// beside it, numbered if taken.
 pub fn copy_name(file: &Path) -> PathBuf {
     let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "picture".into());

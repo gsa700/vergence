@@ -93,7 +93,7 @@ fn grants_path() -> Option<PathBuf> {
     Some(base.join("vergence/screenshot-programs"))
 }
 
-/// "allow<TAB>program<TAB>name" a line.
+/// "`allow<TAB>program<TAB>name`" a line.
 pub fn parse_grants(text: &str) -> HashMap<String, String> {
     text.lines()
         .filter_map(|l| {

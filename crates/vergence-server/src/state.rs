@@ -177,7 +177,7 @@ pub struct Server {
     /// The elevation prompt, while vdm has one asked (elevate.rs).
     pub elevate: crate::elevate::Elevate,
     /// How each output's scale was found (displays.rs), by output name, and the
-    /// [displays] settings last applied.
+    /// `[displays]` settings last applied.
     pub scale_notes: std::collections::HashMap<String, crate::displays::Scales>,
     pub displays: crate::displays::DisplaysConfig,
     /// The shelf: its settings and its picture (shelf.rs).

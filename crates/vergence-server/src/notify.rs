@@ -133,7 +133,7 @@ pub struct Notifications {
     apps: Option<HashMap<String, u64>>,
 }
 
-/// [notifications] from desktop.toml.
+/// `[notifications]` from desktop.toml.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
     pub do_not_disturb: bool,

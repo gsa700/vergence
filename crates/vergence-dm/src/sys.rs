@@ -63,7 +63,7 @@ pub fn peer_uid(stream: &UnixStream) -> Option<u32> {
 
 /// The connecting process's pid, as the kernel recorded it: Linux's struct
 /// ucred (pid first); FreeBSD's struct xucred from LOCAL_PEERCRED (SOL_LOCAL
-/// 0, option 1): cr_version, cr_uid, cr_ngroups, cr_groups[16], then a
+/// 0, option 1): cr_version, cr_uid, cr_ngroups, `cr_groups[16]`, then a
 /// pointer-sized union holding cr_pid at byte 80 (FreeBSD 13 and later).
 pub fn peer_pid(stream: &UnixStream) -> Option<u32> {
     #[cfg(target_os = "linux")]
@@ -87,7 +87,7 @@ pub fn peer_pid(stream: &UnixStream) -> Option<u32> {
 /// Whether process `pid` has a virtual terminal (a console of this machine)
 /// as its controlling terminal: so it was started by someone at the machine,
 /// not over ssh or from cron (security review 2026-11-16, finding 4). Linux:
-/// /proc/<pid>/stat's tty_nr, major 4 and minor 1 to 63; FreeBSD: ps's tt
+/// `/proc/<pid>/stat`'s tty_nr, major 4 and minor 1 to 63; FreeBSD: ps's tt
 /// column ("v0" for ttyv0).
 pub fn on_console(pid: u32) -> bool {
     #[cfg(target_os = "linux")]
@@ -259,7 +259,7 @@ pub fn no_core_files() {
 }
 
 /// No debugger of the same user may attach to this process (threat model
-/// T6, review I1): PR_SET_DUMPABLE 0 on Linux (also hides /proc/<pid>/mem
+/// T6, review I1): PR_SET_DUMPABLE 0 on Linux (also hides `/proc/<pid>/mem`
 /// from the user); on FreeBSD procctl PROC_TRACE_CTL with
 /// PROC_TRACE_CTL_DISABLE_EXEC, which lasts until this process runs another
 /// program, so the programs the server starts can still be debugged.
@@ -286,7 +286,7 @@ pub fn no_debugger() -> bool {
 
 /// This process becomes the reaper of everything it starts (review C6):
 /// whatever a session leaves behind, however it detaches, stays below it,
-/// so it can be ended with [`end_descendants`]. Linux PR_SET_CHILD_SUBREAPER
+/// so it can be ended with [`signal_descendants`]. Linux PR_SET_CHILD_SUBREAPER
 /// 36; FreeBSD procctl PROC_REAP_ACQUIRE 2. Whether it was set.
 pub fn become_reaper() -> bool {
     #[cfg(target_os = "linux")]
@@ -367,7 +367,7 @@ pub fn count_descendants() -> usize {
     }
 }
 
-/// Every process below `root`, from /proc/<pid>/stat's parent field.
+/// Every process below `root`, from `/proc/<pid>/stat`'s parent field.
 #[cfg(not(target_os = "freebsd"))]
 pub fn descendants(root: u32) -> Vec<u32> {
     let mut parent: Vec<(u32, u32)> = Vec::new();

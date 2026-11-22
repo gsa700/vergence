@@ -811,7 +811,7 @@ fn l3_idct3(x0: f32, x1: f32, x2: f32) -> [f32; 3] {
     [a1 + m1, x0 + x2, a1 - m1]
 }
 
-/// L3_imdct12: `x` read every third value (x[0], x[3], .. x[15]).
+/// L3_imdct12: `x` read every third value (`x[0]`, `x[3]`, .. `x[15]`).
 fn l3_imdct12(x: &[f32], dst: &mut [f32], overlap: &mut [f32]) {
     let co = l3_idct3(-x[0], x[6] + x[3], x[12] + x[9]);
     let mut si = l3_idct3(x[15], x[12] - x[9], x[6] - x[3]);
@@ -934,7 +934,7 @@ fn mp3d_scale_pcm(sample: f32) -> f32 {
     sample * (1.0 / 32768.0)
 }
 
-/// mp3d_synth_pair: pcm[p] and pcm[p + 16 * nch] from the history at lins[z..].
+/// mp3d_synth_pair: `pcm[p]` and `pcm[p + 16 * nch]` from the history at `lins[z..]`.
 fn mp3d_synth_pair(pcm: &mut [f32], p: usize, nch: usize, lins: &[f32], z: usize) {
     let zz = |i: usize| lins[z + i];
     let mut a = (zz(14 * 64) - zz(0)) * 29.0;

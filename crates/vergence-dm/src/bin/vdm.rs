@@ -421,7 +421,7 @@ fn login(stream: UnixStream, plan: &LoginPlan, service: &str, said: UnixStream) 
 }
 
 /// The runtime directory, where no PAM module made one (review I3): Linux
-/// /run/user/<uid>, FreeBSD /var/run/xdg/<user> (pam_xdg's), the user's and
+/// `/run/user/<uid>`, FreeBSD `/var/run/xdg/<user>` (pam_xdg's), the user's and
 /// 0700; one that is there must be the user's and not a link.
 fn runtime_dir(a: &Account) -> std::io::Result<std::path::PathBuf> {
     let dir = if cfg!(target_os = "linux") {

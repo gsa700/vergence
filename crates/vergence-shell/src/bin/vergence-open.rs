@@ -2,11 +2,13 @@
 //! their types (files milestone 1), as File Viewer and the dock do. Also
 //! says what a file is and which applications could open it.
 //!
-//!     vergence-open FILE|LINK...          open each with its default application
-//!     vergence-open --with APP FILE...    open with that application (desktop id)
-//!     vergence-open --type FILE...        print each one's type and what it is called
-//!     vergence-open --apps FILE...        print the applications that open each, best first
-//!     vergence-open --default TYPE APP    make APP the default for TYPE (Vergence's list)
+//! ```text
+//! vergence-open FILE|LINK...          open each with its default application
+//! vergence-open --with APP FILE...    open with that application (desktop id)
+//! vergence-open --type FILE...        print each one's type and what it is called
+//! vergence-open --apps FILE...        print the applications that open each, best first
+//! vergence-open --default TYPE APP    make APP the default for TYPE (Vergence's list)
+//! ```
 //!
 //! In a Vergence session the server opens them (the bus's `Open`), so the
 //! dock shows each application starting; elsewhere this starts them

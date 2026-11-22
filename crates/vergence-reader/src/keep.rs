@@ -47,8 +47,8 @@ fn path() -> Option<PathBuf> {
     Some(base.join("vergence/reader-session"))
 }
 
-/// "window <token>", "front <k>", then a line a document: "tab <path>",
-/// each followed by its place if it has one: "at <page> <within> <zoom>".
+/// "`window <token>`", "`front <k>`", then a line a document: "`tab <path>`",
+/// each followed by its place if it has one: "`at <page> <within> <zoom>`".
 pub fn text(windows: &[Snap]) -> String {
     let mut s = String::new();
     for w in windows.iter().filter(|w| !w.tabs.is_empty()) {

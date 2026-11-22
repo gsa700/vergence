@@ -30,7 +30,6 @@ vergence-seat = { path = "crates/vergence-seat" }
 vergence-bar = { path = "crates/vergence-bar" }
 vergence-net = { path = "crates/vergence-net" }
 vergence-power = { path = "crates/vergence-power" }
-vergence-calc = { path = "crates/vergence-calc" }
 vergence-spell = { path = "crates/vergence-spell" }
 vergence-types = { path = "crates/vergence-types" }
 vergence-decode = { path = "crates/vergence-decode" }

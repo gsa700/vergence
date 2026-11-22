@@ -4,7 +4,7 @@
 //! often subsets with tables missing or damaged; whatever can be read is.
 //!
 //! Untrusted: every offset is checked, composite glyphs nest at most
-//! [`MAX_COMPOSITE_DEPTH`] deep and have at most [`MAX_POINTS`] points.
+//! `MAX_COMPOSITE_DEPTH` deep and have at most `MAX_POINTS` points.
 
 use vergence_raster::Path;
 

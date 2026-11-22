@@ -62,7 +62,7 @@ fn valid_name(n: &str) -> bool {
         && n.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
 }
 
-/// The program file a process runs (Linux /proc/<pid>/exe; FreeBSD the
+/// The program file a process runs (Linux `/proc/<pid>/exe`; FreeBSD the
 /// kern.proc.pathname sysctl: CTL_KERN 1, KERN_PROC 14, KERN_PROC_PATHNAME 12).
 pub fn program_path(pid: u32) -> Option<std::path::PathBuf> {
     #[cfg(target_os = "linux")]
@@ -122,7 +122,7 @@ pub fn is_server(pid: u32) -> bool {
     program_path(pid).is_some_and(|p| installed_by_root(&p) && p.file_name().is_some_and(|n| n == "vergence-server"))
 }
 
-/// A process's parent (Linux /proc/<pid>/stat; FreeBSD ps).
+/// A process's parent (Linux `/proc/<pid>/stat`; FreeBSD ps).
 pub fn parent_of(pid: u32) -> Option<u32> {
     if cfg!(target_os = "linux") {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;

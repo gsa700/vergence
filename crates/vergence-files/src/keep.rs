@@ -40,8 +40,8 @@ fn path() -> Option<PathBuf> {
     Some(session::state_dir()?.join("files-session"))
 }
 
-/// "window <token>", "front <k>", then a line a tab: "tab <folder>" or
-/// "recent", each followed by "at <points>" when it was scrolled.
+/// "`window <token>`", "`front <k>`", then a line a tab: "`tab <folder>`" or
+/// "recent", each followed by "`at <points>`" when it was scrolled.
 pub fn text(windows: &[Snap]) -> String {
     let mut s = String::new();
     for w in windows.iter().filter(|w| !w.tabs.is_empty()) {

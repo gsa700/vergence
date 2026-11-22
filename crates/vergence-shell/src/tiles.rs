@@ -280,7 +280,7 @@ pub fn power(p: &vergence_power::Power) -> Option<Tile> {
 pub const DOCKED: [&str; 4] = ["sound", "network", "power", "clock"];
 
 /// Whether a tile stands on the dock: the user put it there (`docked`,
-/// desktop.toml [shelf] tiles, else [`DOCKED`]), or it is in trouble and
+/// desktop.toml `[shelf]` tiles, else [`DOCKED`]), or it is in trouble and
 /// tiles in trouble come out (`trouble_out`).
 pub fn on_dock(docked: Option<&[String]>, id: &str, state: TileState, trouble_out: bool) -> bool {
     let chosen = match docked {

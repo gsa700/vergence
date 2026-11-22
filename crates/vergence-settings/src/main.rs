@@ -230,7 +230,7 @@ enum Message {
     TermScheme(String),
     // Windows.
     Layout(winbar::Layout),
-    /// X11 applications (Xwayland) on or off: desktop.toml [x11] enabled.
+    /// X11 applications (Xwayland) on or off: desktop.toml `[x11]` enabled.
     X11(bool),
     /// desktop.toml `[windows]`: a word from one of the lists above, or a switch.
     WinWord(&'static str, &'static str),
@@ -443,7 +443,7 @@ struct App {
     /// The dock's gap and opacity while their sliders move (saved on release).
     dock_gap: f32,
     dock_opacity: f32,
-    /// The dock's size in points ([shelf] size), while its slider moves.
+    /// The dock's size in points (`[shelf]` size), while its slider moves.
     dock_size: f32,
     /// What can be pinned: the installed applications, by name.
     apps: Vec<vergence_shell::desktop::Entry>,

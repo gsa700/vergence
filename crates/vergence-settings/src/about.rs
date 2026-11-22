@@ -34,8 +34,8 @@ fn notices_summary() -> Vec<(String, String, String)> {
         .collect()
 }
 
-/// Where tools/install.sh put the license files: <prefix>/share/doc/vergence
-/// beside <prefix>/bin. None when running from a checkout.
+/// Where tools/install.sh put the license files: `<prefix>/share/doc/vergence`
+/// beside `<prefix>/bin`. None when running from a checkout.
 fn installed_doc_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?.parent()?.join("share/doc/vergence");

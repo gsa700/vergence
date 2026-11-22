@@ -6,7 +6,7 @@
 //! the dock. It closes half a second after the pointer leaves it, its tile
 //! and the card. Tiles move between the dock and the drawer by dragging:
 //! off the dock onto the drawer's tile (or into the open drawer), or out of
-//! the drawer onto the dock; desktop.toml [shelf] tiles keeps the choice.
+//! the drawer onto the dock; desktop.toml `[shelf]` tiles keeps the choice.
 
 use std::hash::{Hash, Hasher};
 

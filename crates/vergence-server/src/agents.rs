@@ -49,7 +49,7 @@ use crate::{Server, decor::SceneElement};
 /// How long a timed grant lasts unless Privacy > Agents says otherwise.
 pub const TIMED_MINUTES: u64 = 60;
 
-/// desktop.toml's [agents]: whether agents may ask at all (Privacy > Agents'
+/// desktop.toml's `[agents]`: whether agents may ask at all (Privacy > Agents'
 /// switch, on by default) and how long a timed grant lasts (15 minutes to
 /// a day).
 pub fn agents_settings() -> (bool, u64) {
@@ -96,7 +96,7 @@ pub fn clean_agent_name(name: &str) -> String {
     out.trim().to_string()
 }
 
-/// A grant's app key is "<app id> @ <program>" (meaning.rs agent_app_key); its id.
+/// A grant's app key is "`<app id> @ <program>`" (meaning.rs agent_app_key); its id.
 pub fn app_id_of(key: &str) -> &str {
     key.split(" @ ").next().unwrap_or(key)
 }
@@ -284,7 +284,7 @@ fn clean(s: &str) -> String {
 }
 
 /// The file's lines: agent's name, its program, app, and always, never or
-/// until <seconds>. (Lines of three fields, from before programs were
+/// until `<seconds>`. (Lines of three fields, from before programs were
 /// kept, are dropped: those agents are asked again.)
 fn parse(text: &str) -> HashMap<(Who, String), Span> {
     let mut out = HashMap::new();

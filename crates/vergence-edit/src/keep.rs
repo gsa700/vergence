@@ -40,7 +40,7 @@ pub fn dir() -> Option<PathBuf> {
     Some(base.join("vergence/edit"))
 }
 
-/// The session file's text: "window <token>", "front <k>", then a line a tab:
+/// The session file's text: "`window <token>`", "`front <k>`", then a line a tab:
 /// untitled number, caret line, caret column, the text's file ("-": none),
 /// the path (empty: none), tab-separated.
 fn render(windows: &[WindowSnap], text_files: &[Vec<Option<String>>]) -> String {

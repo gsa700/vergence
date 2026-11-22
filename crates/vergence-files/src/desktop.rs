@@ -64,7 +64,7 @@ fn places_path() -> Option<PathBuf> {
     Some(base.join("vergence/desktop-places"))
 }
 
-/// Every setup's icon cells: lines "setup<TAB>col<TAB>row<TAB>name".
+/// Every setup's icon cells: lines "`setup<TAB>col<TAB>row<TAB>name`".
 fn read_places() -> Vec<(String, i32, i32, String)> {
     let Some(p) = places_path() else { return Vec::new() };
     std::fs::read_to_string(p)

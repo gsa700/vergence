@@ -863,8 +863,8 @@ thread_local! {
 }
 
 /// One of Vergence's own icons at the smallest size drawn at install that is
-/// at least `px` (vergence-harness icons: <name>.<px>.rgba in
-/// share/vergence/icons/<group>), read once. None where it is not installed.
+/// at least `px` (vergence-harness icons: `<name>.<px>.rgba` in
+/// `share/vergence/icons/<group>`), read once. None where it is not installed.
 pub fn own_icon(group: &str, name: &str, px: u32) -> Option<std::sync::Arc<vergence_scene::Image>> {
     let size = [16u32, 32, 64, 128, 256].into_iter().find(|s| *s >= px).unwrap_or(256);
     // Another icon theme chosen in Settings: its icon, once decoded, since our
@@ -1378,7 +1378,7 @@ fn state_path() -> Option<PathBuf> {
     Some(base.join("vergence/file-dialog"))
 }
 
-/// The state file's lines: "folder <app>\t<path>" and "file\t<path>", newest files first.
+/// The state file's lines: "`folder <app>\t<path>`" and "`file\t<path>`", newest files first.
 fn state_lines() -> Vec<(String, String)> {
     let Some(p) = state_path() else { return Vec::new() };
     fs::read_to_string(p)
