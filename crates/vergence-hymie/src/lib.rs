@@ -22,12 +22,16 @@
 //! (whitepaper §6.10): this crate is that helper's library.
 
 mod flac;
+pub mod helper;
 mod md5;
 mod replaygain;
 mod tags;
 mod wav;
 
 pub use replaygain::ReplayGain;
+
+/// One waveform slice: the lowest and highest sample of two channels.
+pub type Peak = [(f32, f32); 2];
 pub use tags::{Picture, Tags};
 
 /// Why a file is not played.
@@ -146,7 +150,7 @@ pub fn flac_check(data: &[u8]) -> Result<Option<bool>, Error> {
 /// highest sample of each channel (min, max), mixed to at most two channels.
 /// `told` hears the slices done so far, as they come (a preview draws them
 /// left to right); returning false stops the work.
-pub fn peaks(track: &mut dyn Track, slices: usize, mut told: impl FnMut(&[[(f32, f32); 2]]) -> bool) -> Result<Vec<[(f32, f32); 2]>, Error> {
+pub fn peaks(track: &mut dyn Track, slices: usize, mut told: impl FnMut(&[Peak]) -> bool) -> Result<Vec<Peak>, Error> {
     let frames = track.frames();
     let ch = track.channels().max(1) as usize;
     let slices = slices.max(1);

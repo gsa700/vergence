@@ -2259,6 +2259,9 @@ dependencies = [
 [[package]]
 name = "vergence-hymie"
 version = "0.1.0"
+dependencies = [
+ "vergence-decode",
+]
 
 [[package]]
 name = "vergence-look"
