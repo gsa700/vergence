@@ -1,14 +1,17 @@
-//! One ALAC track in an MP4 (.m4a) open for playing, and any MP4's tags:
-//! Hymie's Mp4Track.cs carried over, around the codec core in alac.rs.
+//! One ALAC or AAC track in an MP4 (.m4a) open for playing, and any MP4's
+//! tags: Hymie's Mp4Track.cs carried over, around the codec cores (alac.rs
+//! here; AAC's in crates/vergence-hymie-aac, behind [`FrameDecoder`]).
 //!
 //! The MP4 is read for what playing needs and nothing else: the first audio
 //! track's sample table (where each frame is and how long), its decoder
 //! configuration (the 'alac' box's magic cookie for ALAC, the esds for AAC),
 //! its edit list, and the iTunes tags that carry the gapless information and
 //! ReplayGain. An ALAC frame is as long as its cookie says, 4096 as a rule,
-//! the last one shorter. AAC (FAAD2, GPL) will have its own crate and helper:
-//! here an AAC track is recognized and refused by name, and its tags and
-//! cover are still read for a preview.
+//! the last one shorter; an AAC frame is 1024 samples. AAC (FAAD2, GPL) has
+//! its own crate and helper: this crate holds no AAC code, and an AAC track
+//! is played only when the caller hands in a decoder ([`MakeAac`], which only
+//! the AAC helper does); otherwise it is refused with [`Error::NeedsAac`],
+//! and its tags and cover are still read for a preview.
 //!
 //! GAPLESS, AS FFMPEG DOES IT (libavformat/mov.c, n9.0.2, which is what mpv
 //! played through), so a record plays the same on either engine. An encoder
@@ -23,8 +26,12 @@
 //! With neither, nothing is dropped. The length is the track's own, the
 //! shorter of its header's and its sample table's.
 //!
-//! SEEKS ARE EXACT: an ALAC frame depends on nothing before it, so decoding
-//! starts at the frame that holds the sample.
+//! SEEKS ARE EXACT. An ALAC frame depends on nothing before it, so decoding
+//! starts at the frame that holds the sample. An AAC frame depends on the
+//! one before it only through the overlap of the transform, so decoding
+//! starts one frame before (the decoder's preroll), from nothing, and from
+//! there the samples are a straight decode's (but for PNS noise, random by
+//! design).
 //!
 //! What changed in the carrying: the whole file is in memory (no TrackBytes
 //! waiting for it to arrive); every read of a box is bounds-checked (a field
@@ -40,6 +47,65 @@
 use crate::alac::AlacDecoder;
 use crate::tags::Tags;
 use crate::{Error, ReplayGain, Track, damaged};
+
+/// A codec core that turns an MP4's frames (its samples, in MP4's words)
+/// into sound, one at a time: ALAC's here, AAC's in vergence-hymie-aac. It
+/// says nothing of how a codec works, so the MP4 reader can serve a decoder
+/// it does not contain (and whose license it does not share).
+pub trait FrameDecoder: Send {
+    fn rate(&self) -> u32;
+    fn channels(&self) -> u16;
+    /// Bits per sample as stored; 0 for a lossy codec.
+    fn bits(&self) -> u16 {
+        0
+    }
+    /// Samples (per channel) in a whole frame: 1024 for AAC.
+    fn frame_length(&self) -> usize;
+    /// Frames decoded and thrown away before a seek's own, so that the
+    /// first one kept is exact: 1 for AAC (the transform's overlap), 0 for ALAC.
+    fn preroll(&self) -> usize {
+        0
+    }
+    /// One frame's bytes into `out` (frame_length * channels floats from -1
+    /// to 1, interleaved). Returns the samples per channel written: a whole
+    /// frame as a rule, fewer in a short last frame. An `Unsupported` error
+    /// on the first frame refuses the track (what shows only inside the
+    /// frames, SBR in an AAC fill element for one); anything else is a
+    /// damaged frame, played as silence.
+    fn decode(&mut self, frame: &[u8], out: &mut [f32]) -> Result<usize, Error>;
+    /// Forgets the past (the overlap from frame to frame), for a seek.
+    fn reset(&mut self);
+}
+
+/// Makes the decoder for an MP4's AAC track from its AudioSpecificConfig
+/// (ISO 14496-3 1.6.2.1, the bytes of the esds' DecoderSpecificInfo).
+pub type MakeAac<'a> = &'a dyn Fn(&[u8]) -> Result<Box<dyn FrameDecoder>, Error>;
+
+/// ALAC behind the trait: every frame stands alone.
+struct Alac(AlacDecoder);
+
+impl FrameDecoder for Alac {
+    fn rate(&self) -> u32 {
+        self.0.sample_rate
+    }
+    fn channels(&self) -> u16 {
+        self.0.channels as u16
+    }
+    fn bits(&self) -> u16 {
+        self.0.bit_depth as u16
+    }
+    fn frame_length(&self) -> usize {
+        self.0.frame_length
+    }
+    fn decode(&mut self, frame: &[u8], out: &mut [f32]) -> Result<usize, Error> {
+        self.0.decode_frame(frame, out)
+    }
+    fn reset(&mut self) {}
+}
+
+/// The largest frame a decoder may claim (ALAC's cookie says its own; real
+/// ones are 4096): more is a crafted file asking for memory.
+const MAX_FRAME_LENGTH: usize = 1 << 20;
 
 /// How deep boxes are followed. A real file goes six or seven deep
 /// (moov/udta/meta/ilst/©nam/data, or moov/trak/mdia/minf/stbl/stsd/alac,
@@ -554,15 +620,17 @@ fn sample_table(m: &Movie, chunks: &[u64], sizes: &[u32]) -> (Vec<u64>, Vec<u32>
     (offsets, out_sizes)
 }
 
-/// One ALAC track in an MP4 open for playing.
+/// One ALAC or AAC track in an MP4 open for playing.
 pub struct Mp4Track {
     data: Vec<u8>,
-    alac: AlacDecoder,
+    codec: Box<dyn FrameDecoder>,
     rate: u32,
     channels: u16,
     gain: ReplayGain,
     /// Samples in a whole frame.
     frame_length: usize,
+    /// Frames decoded before a seek's own.
+    preroll: usize,
     /// Each frame's place in the file, and size.
     offsets: Vec<u64>,
     sizes: Vec<u32>,
@@ -582,20 +650,46 @@ pub struct Mp4Track {
 }
 
 impl Mp4Track {
+    /// An ALAC track; an AAC one is refused with [`Error::NeedsAac`] (the
+    /// tests' way in; `open` goes through `new_with`).
+    #[cfg(test)]
     pub fn new(data: Vec<u8>) -> Result<Mp4Track, Error> {
+        Mp4Track::new_with(data, &|_| Err(Error::NeedsAac))
+    }
+
+    /// An ALAC track, or an AAC one by the decoder `aac` makes.
+    pub fn new_with(data: Vec<u8>, aac: MakeAac) -> Result<Mp4Track, Error> {
         let (movie, walked) = parse(&data);
         walked?;
-        if movie.alac_cookie.is_none() && movie.asc.is_some() {
-            return Err(Error::Unsupported("AAC in an MP4 is not played yet (it comes with the AAC helper).".into()));
-        }
-        let (Some(cookie), Some(sizes), Some(chunks)) = (&movie.alac_cookie, &movie.sizes, &movie.chunk_offsets) else {
+        let (Some(sizes), Some(chunks)) = (&movie.sizes, &movie.chunk_offsets) else {
             return Err(Error::Unsupported("No AAC or ALAC track in this MP4 (another codec).".into()));
         };
-        let alac = AlacDecoder::from_cookie(cookie)?;
-        let rate = alac.sample_rate;
-        let channels = alac.channels as u16;
-        let frame_length = alac.frame_length;
+        let mut codec: Box<dyn FrameDecoder> = match (&movie.alac_cookie, &movie.asc) {
+            (Some(cookie), _) => Box::new(Alac(AlacDecoder::from_cookie(cookie)?)),
+            (None, Some(asc)) => aac(asc)?,
+            (None, None) => return Err(Error::Unsupported("No AAC or ALAC track in this MP4 (another codec).".into())),
+        };
+        let rate = codec.rate();
+        let channels = codec.channels();
+        let frame_length = codec.frame_length();
+        let preroll = codec.preroll();
+        if !(1..=MAX_FRAME_LENGTH).contains(&frame_length) || !(1..=crate::MAX_CHANNELS).contains(&channels) {
+            return Err(damaged(format!("{frame_length}-sample frames of {channels} channels: not a track.")));
+        }
         let (offsets, sizes) = sample_table(&movie, chunks, sizes);
+        let mut pcm = vec![0.0; frame_length * channels as usize];
+
+        // The first frame decoded now and forgotten (Mp4Track.cs): what shows
+        // only inside the frames (SBR in a fill element, a coupling channel)
+        // is refused here, not played as silence; a damaged frame is played
+        // as it comes.
+        if let (Some(&at), Some(&size)) = (offsets.first(), sizes.first()) {
+            let bytes = span(&data, at, at.saturating_add(size as u64));
+            if let Err(Error::Unsupported(m)) = codec.decode(bytes, &mut pcm) {
+                return Err(Error::Unsupported(m));
+            }
+            codec.reset();
+        }
 
         // The length and the cuts, in decoded samples (FFmpeg's st->duration,
         // skip_samples and first_discard_sample).
@@ -628,15 +722,16 @@ impl Mp4Track {
         let end = decoded.min(to_samples(origin.saturating_add(first_discard)));
         Ok(Mp4Track {
             gain: ReplayGain::from_tags(&movie.tags.values),
-            alac,
+            codec,
             rate,
             channels,
             frame_length,
+            preroll,
             offsets,
             sizes,
             skip,
             end,
-            pcm: vec![0.0; frame_length * channels as usize],
+            pcm,
             frame: 0,
             pcm_at: 0,
             pcm_frames: 0,
@@ -657,8 +752,8 @@ impl Mp4Track {
             return false;
         }
         let bytes = &self.data[at as usize..(at + size) as usize];
-        let frames = match self.alac.decode_frame(bytes, &mut self.pcm) {
-            Ok(n) => n,
+        let frames = match self.codec.decode(bytes, &mut self.pcm) {
+            Ok(n) => n.min(self.frame_length),
             Err(_) => {
                 // A damaged frame still takes its place in time.
                 self.pcm.fill(0.0);
@@ -681,7 +776,7 @@ impl Track for Mp4Track {
         self.channels
     }
     fn bits(&self) -> u16 {
-        self.alac.bit_depth as u16
+        self.codec.bits()
     }
     fn frames(&self) -> u64 {
         (self.end - self.skip).max(0) as u64
@@ -722,12 +817,15 @@ impl Track for Mp4Track {
     }
 
     /// Mp4Track.cs's SeekNow: decoding starts at the frame that holds the
-    /// sample (an ALAC frame needs nothing from before it).
+    /// sample (an ALAC frame needs nothing from before it), or the decoder's
+    /// preroll before it, the overlap from before forgotten (AAC).
     fn seek(&mut self, to: u64) -> Result<(), Error> {
         let target = (to.min(i64::MAX as u64 / 2) as i64).saturating_add(self.skip);
         let frame = (self.offsets.len() as i64).min(target / self.frame_length as i64).max(0) as usize;
-        self.frame = frame;
-        self.pcm_at = frame as i64 * self.frame_length as i64;
+        let from = frame.saturating_sub(self.preroll);
+        self.codec.reset();
+        self.frame = from;
+        self.pcm_at = from as i64 * self.frame_length as i64;
         self.pcm_frames = 0;
         self.pcm_offset = 0;
         self.from = self.skip.max(target);

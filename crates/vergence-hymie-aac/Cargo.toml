@@ -1,0 +1,15 @@
+[package]
+name = "vergence-hymie-aac"
+version.workspace = true
+edition.workspace = true
+# GPL only, unlike the rest of Vergence: the decoder is ported from FAAD2
+# (GPL-2.0-or-later). Nothing else links this crate; only its own helper
+# program (libexec/vergence/vergence-hymie-aac) uses it (Dave, 2026-11-21).
+license = "GPL-2.0-or-later"
+publish.workspace = true
+description = "Hymie's AAC-LC decoder (ported from FAAD2, GPL) and the confined helper that plays AAC .m4a files"
+
+[dependencies]
+# The MP4 reader, the track, the helper's protocol and its confinement:
+# dual-licensed code, which may be combined into this GPL program.
+vergence-hymie.workspace = true

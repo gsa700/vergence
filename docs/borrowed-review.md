@@ -46,8 +46,18 @@ for line in 2026-10; preview milestone 1 (2026-11-21, Dave: "let's use
 Hymie!") carried them to safe Rust, names kept for cross-reference. FLAC,
 WAV, the MP4 reader, the tags and ReplayGain are our own (Deadwax's and
 Hymie's). Review: none needed for license (CC0, Apache-2.0); a later
-rewrite only if the decoders become hard to keep. AAC (FAAD2, GPL-2.0+)
-will live apart, in its own crate and helper program.
+rewrite only if the decoders become hard to keep.
+
+**AAC: FAAD2 (GPL-2.0-or-later), apart.** `crates/vergence-hymie-aac`
+(its crate licensed GPL-2.0-or-later, `licenses/faad2-COPYING.txt`): FAAD2's
+AAC-LC path at 521d105 (code copyright Nero AG), by way of Hymie's Aac.cs,
+used only by its own confined helper program, libexec/vergence/
+vergence-hymie-aac (Dave, 2026-11-21: "separate GPL helper for AAC"). No
+other crate links it: vergence-hymie's MP4 reader takes a frame decoder
+through a license-neutral hook, and the sound client hands an AAC file to
+that helper when the main one answers that it needs it. Packages must ship
+that program under the GPL with its source. Review: an AAC decoder of our
+own would let it join the rest; nothing forces it.
 
 ### SCOWL word lists (permissive, MIT-like), as data
 

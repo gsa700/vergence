@@ -17,7 +17,7 @@ export ROOT
 TARGET=$ROOT/target-check/release
 echo "building into target-check"
 CARGO_TARGET_DIR=$ROOT/target-check cargo build -q --release --manifest-path "$ROOT/Cargo.toml" -p vergence-ui --example testpattern || exit 2
-CARGO_TARGET_DIR=$ROOT/target-check cargo build -q --release --manifest-path "$ROOT/Cargo.toml" -p vergence-server -p vergence-harness -p vergence-edit -p vergence-reader -p vergence-closeup -p vergence-pdf -p vergence-settings -p vergence-files -p vergence-decode -p vergence-hymie || exit 2
+CARGO_TARGET_DIR=$ROOT/target-check cargo build -q --release --manifest-path "$ROOT/Cargo.toml" -p vergence-server -p vergence-harness -p vergence-edit -p vergence-reader -p vergence-closeup -p vergence-pdf -p vergence-settings -p vergence-files -p vergence-decode -p vergence-hymie -p vergence-hymie-aac || exit 2
 CARGO_TARGET_DIR=$ROOT/target-check cargo build -q --release --manifest-path "$ROOT/Cargo.toml" -p vergence-protocol --bin vbus || exit 2
 PATTERN=$TARGET/examples/testpattern
 HARNESS=$TARGET/vergence-harness

@@ -20,8 +20,12 @@
 //!   the MP4 container, gapless by its edit list and iTunSMPB as FFmpeg does
 //!   it, and its iTunes tags (ilst atoms): our own.
 //! - AAC (FAAD2, GPL-2.0-or-later) lives in its own crate and helper program
-//!   (vergence-hymie-aac), so this one stays under Vergence's license. Until
-//!   then an AAC .m4a is refused by name, but its tags and cover are read.
+//!   (crates/vergence-hymie-aac, libexec/vergence/vergence-hymie-aac), so
+//!   this one stays under Vergence's license: here an AAC .m4a is refused
+//!   with [`Error::NeedsAac`] (its tags and cover are still read), and the
+//!   client ([`helper::Sound`]) hands such a file to the AAC helper. That
+//!   helper reuses this crate's MP4 reader through [`open_with`] and the
+//!   [`FrameDecoder`] trait, which say nothing of AAC's own workings.
 //!
 //! Files are parsed in a confined helper, never in an app's own process
 //! (whitepaper §6.10): this crate is that helper's library.
@@ -37,6 +41,7 @@ mod replaygain;
 mod tags;
 mod wav;
 
+pub use mp4::{FrameDecoder, MakeAac};
 pub use replaygain::ReplayGain;
 
 /// One waveform slice: the lowest and highest sample of two channels.
@@ -52,12 +57,17 @@ pub enum Error {
     Damaged(String),
     /// The file could not be read.
     Io(String),
+    /// AAC in an MP4: played by the AAC helper (vergence-hymie-aac), not by
+    /// this crate. The helper's client tells it apart (its own answer kind on
+    /// the pipe) and starts that helper instead.
+    NeedsAac,
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Unsupported(m) | Error::Damaged(m) | Error::Io(m) => f.write_str(m),
+            Error::NeedsAac => f.write_str("AAC in an MP4 is played by the AAC helper (libexec/vergence/vergence-hymie-aac)."),
         }
     }
 }
@@ -117,7 +127,7 @@ pub enum Format {
     /// MPEG audio: Layer III is played, Layers I and II are refused by name.
     Mp3,
     /// An MP4 (ftyp at byte 4, not a HEIF or AVIF picture): ALAC is played,
-    /// AAC refused by name for now, its tags read either way.
+    /// AAC only through [`open_with`] (the AAC helper), its tags read either way.
     Mp4,
 }
 
@@ -138,13 +148,21 @@ pub fn format_of(data: &[u8]) -> Option<Format> {
     None
 }
 
-/// A track from a file's bytes, the decoder chosen by them.
+/// A track from a file's bytes, the decoder chosen by them. AAC in an MP4
+/// is refused with [`Error::NeedsAac`].
 pub fn open(data: Vec<u8>) -> Result<Box<dyn Track>, Error> {
+    open_with(data, &|_| Err(Error::NeedsAac))
+}
+
+/// As [`open`], with `aac` making the decoder for an MP4's AAC track from
+/// its AudioSpecificConfig (the esds' bytes). Only the AAC helper passes
+/// one: the decoder is GPL code that this crate never contains.
+pub fn open_with(data: Vec<u8>, aac: MakeAac) -> Result<Box<dyn Track>, Error> {
     let track: Box<dyn Track> = match format_of(&data) {
         Some(Format::Wav) => Box::new(wav::WavTrack::new(data)?),
         Some(Format::Flac) => Box::new(flac::FlacTrack::new(data)?),
         Some(Format::Mp3) => Box::new(mp3::Mp3Track::new(data)?),
-        Some(Format::Mp4) => Box::new(mp4::Mp4Track::new(data)?),
+        Some(Format::Mp4) => Box::new(mp4::Mp4Track::new_with(data, aac)?),
         None => return Err(Error::Unsupported("Not a sound file Hymie plays.".into())),
     };
     if !(1..=MAX_RATE).contains(&track.rate()) || !(1..=MAX_CHANNELS).contains(&track.channels()) {

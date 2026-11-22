@@ -53,8 +53,30 @@ moov after the frames):
   short. Title "Noise".
 - aac.m4a: AAC-LC, 64 kbps, 0.5 s of FFmpeg's 440 Hz sine, mono, 44.1 kHz;
   title "AAC Tone", artist "Vergence", album "Hymie Fixtures", a 32x32 red
-  JPEG cover (covr, data type 13). Not played here (AAC comes with its own
-  helper): its tags and cover are read.
+  JPEG cover (covr, data type 13). Not played by this crate (AAC has its own
+  crate and helper, vergence-hymie-aac): its tags and cover are read here.
+
+AAC-LC with real sound, for vergence-hymie-aac's tests (they live here with
+the other sound fixtures), encoded by FFmpeg 9.0.2's own AAC encoder on
+techbench, 2026-11-21, from its aevalsrc (sines at 0.5 starting at sample 0),
+with `-aac_pns 0` (PNS noise is random by design, so a seek could not be
+compared with a straight read); intensity stereo, M/S and TNS left on. An
+edit list starting at 1024 (the encoder's priming) and as long as the
+samples given:
+
+- aac44.m4a: 1.5 s (66,150 samples), 44.1 kHz, stereo (440 Hz left, 660 Hz
+  right), 128 kbps; title "AAC Stereo", artist "Vergence", album "Hymie
+  Fixtures".
+- aac48.m4a: 1 s (48,000 samples), 48 kHz, mono, 1 kHz, 96 kbps; title "AAC
+  Mono".
+- aacburst.m4a: 1 s (48,000 samples), 48 kHz, stereo, 128 kbps: a 300 Hz
+  tone at 0.2 under bursts of aevalsrc's random() noise (0.4 left, 0.3
+  right) for 1,500 samples every 12,000: its frames use short windows, M/S,
+  intensity stereo and TNS (vergence-hymie-aac's tests count them);
+  title "AAC Bursts".
+
+FFmpeg decodes all three to the same length, and `HYMIE_AAC_REFERENCE=<folder
+of ffmpeg -f f32le decodes> cargo test -p vergence-hymie-aac` compares them.
 
 FFmpeg decodes the three ALAC files to exactly the samples they were made
 from, and so do the tests (against tone16.flac and tone24.flac, whose own

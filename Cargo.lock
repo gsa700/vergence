@@ -2266,6 +2266,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vergence-hymie-aac"
+version = "0.1.0"
+dependencies = [
+ "vergence-hymie",
+]
+
+[[package]]
 name = "vergence-look"
 version = "0.1.0"
 

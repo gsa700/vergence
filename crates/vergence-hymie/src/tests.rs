@@ -470,13 +470,15 @@ fn mp4_tags_cover_and_replaygain() {
 }
 
 #[test]
-fn aac_is_refused_for_now_but_its_tags_are_read() {
+fn aac_is_left_to_its_helper_but_its_tags_are_read() {
+    // AAC is played by vergence-hymie-aac (GPL), never by this crate.
     assert_eq!(format_of(AAC), Some(Format::Mp4));
     match open(AAC.to_vec()) {
-        Err(Error::Unsupported(m)) => assert!(m.contains("AAC") && m.contains("not played yet"), "{m}"),
+        Err(Error::NeedsAac) => {}
         Err(e) => panic!("{e:?}"),
         Ok(_) => panic!("AAC opened"),
     }
+    assert!(Error::NeedsAac.to_string().contains("vergence-hymie-aac"));
     let tags = tags(AAC);
     assert_eq!(tags.title.as_deref(), Some("AAC Tone"));
     assert_eq!(tags.artist.as_deref(), Some("Vergence"));

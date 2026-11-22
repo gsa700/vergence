@@ -14,9 +14,13 @@
 //! - `S` a frame (u64): the playing cursor put there.
 //! - `R` frames (u32): the next samples from the cursor, interleaved floats.
 //!
-//! An answer of kind 0 is the answer; kind 1 a refusal, its body why. The
-//! waveform and the playing have a track each, so drawing one never moves
-//! the other.
+//! An answer of kind 0 is the answer; kind 1 a refusal, its body why; kind 2
+//! (to `D` only) "AAC: ask the AAC helper", which [`Sound`] answers by
+//! starting libexec/vergence/vergence-hymie-aac and sending it the bytes
+//! instead. That helper is the same program over a GPL decoder (FAAD2's, in
+//! crates/vergence-hymie-aac), kept out of this dual-licensed crate: it runs
+//! [`serve_with`] with an open that plays AAC. The waveform and the playing
+//! have a track each, so drawing one never moves the other.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -149,8 +153,17 @@ fn write_frame(w: &mut impl Write, kind: u8, body: &[u8]) -> std::io::Result<()>
     w.flush()
 }
 
+/// The answer kind that says "AAC: ask the AAC helper".
+const NEEDS_AAC: u8 = 2;
+
 /// The helper's work: requests from `input`, answers to `output`, until the pipe closes.
 pub fn serve(input: &mut impl Read, output: &mut impl Write) -> std::io::Result<()> {
+    serve_with(input, output, crate::open)
+}
+
+/// As [`serve`], with `open` making each track from a file's bytes (the AAC
+/// helper's plays AAC too).
+pub fn serve_with(input: &mut impl Read, output: &mut impl Write, open_track: impl Fn(Vec<u8>) -> Result<Box<dyn Track>, Error>) -> std::io::Result<()> {
     struct Open {
         playing: Box<dyn Track>,
         drawing: Box<dyn Track>,
@@ -160,11 +173,12 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write) -> std::io::Result<
     }
     let mut open: Option<Open> = None;
     while let Some((kind, body)) = read_frame(input, crate::MAX_FILE as usize + 16)? {
+        let mut refusal = 1u8;
         let answer: Result<Vec<u8>, String> = match kind {
-            b'D' => (|| {
+            b'D' => (|| -> Result<Vec<u8>, Error> {
                 let tags = crate::tags(&body);
-                let drawing = crate::open(body.clone()).map_err(|e| e.to_string())?;
-                let playing = crate::open(body).map_err(|e| e.to_string())?;
+                let drawing = open_track(body.clone())?;
+                let playing = open_track(body)?;
                 let info = Info {
                     rate: playing.rate(),
                     channels: playing.channels(),
@@ -178,7 +192,15 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write) -> std::io::Result<
                 };
                 open = Some(Open { playing, drawing, peaks: Vec::new(), drawn: 0, told: 0 });
                 Ok(info.encode())
-            })(),
+            })()
+            .map_err(|e| {
+                // Told apart from a refusal by its own kind, so the client
+                // need not read the words.
+                if e == Error::NeedsAac {
+                    refusal = NEEDS_AAC;
+                }
+                e.to_string()
+            }),
             b'P' => (|| {
                 let o = open.as_mut().ok_or("no file")?;
                 let slices = u32::from_le_bytes(body.get(..4).ok_or("short")?.try_into().map_err(|_| "short")?).clamp(1, 1 << 16) as usize;
@@ -243,7 +265,7 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write) -> std::io::Result<
         };
         match answer {
             Ok(b) => write_frame(output, 0, &b)?,
-            Err(why) => write_frame(output, 1, why.as_bytes())?,
+            Err(why) => write_frame(output, refusal, why.as_bytes())?,
         }
     }
     Ok(())
@@ -251,9 +273,14 @@ pub fn serve(input: &mut impl Read, output: &mut impl Write) -> std::io::Result<
 
 /// The helper's whole job: confined, then serving.
 pub fn helper_main() -> std::process::ExitCode {
+    helper_main_with(crate::open)
+}
+
+/// As [`helper_main`], with `open` making each track (the AAC helper's).
+pub fn helper_main_with(open_track: impl Fn(Vec<u8>) -> Result<Box<dyn Track>, Error>) -> std::process::ExitCode {
     vergence_decode::confine(CPU_SECONDS);
     let (mut i, mut o) = (std::io::stdin().lock(), std::io::stdout().lock());
-    match serve(&mut i, &mut o) {
+    match serve_with(&mut i, &mut o, open_track) {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(_) => std::process::ExitCode::from(1),
     }
@@ -265,6 +292,19 @@ fn helper_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
     [dir.join("vergence-hymie"), dir.parent()?.join("libexec/vergence/vergence-hymie"), PathBuf::from("/usr/local/libexec/vergence/vergence-hymie")].into_iter().find(|p| p.is_file())
+}
+
+/// The AAC helper: beside the main helper that sent the file on (a
+/// checkout's target/, or the same libexec), else where the main one is
+/// looked for.
+fn aac_helper_path(main: &Path) -> Option<PathBuf> {
+    let beside = main.with_file_name("vergence-hymie-aac");
+    if beside.is_file() {
+        return Some(beside);
+    }
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    [dir.join("vergence-hymie-aac"), dir.parent()?.join("libexec/vergence/vergence-hymie-aac"), PathBuf::from("/usr/local/libexec/vergence/vergence-hymie-aac")].into_iter().find(|p| p.is_file())
 }
 
 /// A sound file open in its helper.
@@ -289,12 +329,24 @@ impl Sound {
         Sound::with_bytes(&program, crate::read_file(path)?)
     }
 
-    /// A file's bytes in the helper at `program` (tests use the one cargo built).
+    /// A file's bytes in the helper at `program` (tests use the one cargo
+    /// built). An AAC file that helper sends on goes to the AAC helper,
+    /// beside it or installed; the app never parses the file itself.
     pub fn with_bytes(program: &Path, data: Vec<u8>) -> Result<Sound, Error> {
+        match Sound::start(program, &data) {
+            Err(Error::NeedsAac) => {
+                let aac = aac_helper_path(program).ok_or_else(|| Error::Io("AAC is played by its own helper (libexec/vergence/vergence-hymie-aac), which is not installed".into()))?;
+                Sound::start(&aac, &data)
+            }
+            other => other,
+        }
+    }
+
+    fn start(program: &Path, data: &[u8]) -> Result<Sound, Error> {
         let mut child = std::process::Command::new(program).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().map_err(|e| Error::Io(e.to_string()))?;
         let (Some(to), Some(from)) = (child.stdin.take(), child.stdout.take()) else { return Err(Error::Io("no pipe".into())) };
         let mut s = Sound { child, to, from, info: Info::default() };
-        s.info = Info::decode(&s.ask(b'D', &data)?).ok_or_else(|| crate::damaged("a garbled answer"))?;
+        s.info = Info::decode(&s.ask(b'D', data)?).ok_or_else(|| crate::damaged("a garbled answer"))?;
         Ok(s)
     }
 
@@ -316,6 +368,7 @@ impl Sound {
         let _ = watchman.join();
         match result {
             Ok(Some((0, b))) => Ok(b),
+            Ok(Some((NEEDS_AAC, _))) if op == b'D' => Err(Error::NeedsAac),
             Ok(Some((_, why))) => Err(crate::damaged(String::from_utf8_lossy(&why).into_owned())),
             _ => Err(Error::Io("the sound helper stopped (a limit, or a fault in the file)".into())),
         }
@@ -365,5 +418,21 @@ mod tests {
         assert_eq!(k, 0);
         let (_, samples) = super::read_frame(&mut r, 1 << 26).unwrap().unwrap();
         assert_eq!(samples.len(), 10 * 2 * 4);
+    }
+
+    #[test]
+    fn an_aac_file_is_sent_on_to_the_aac_helper() {
+        // Answered with its own kind, which the client takes for "start the
+        // AAC helper", and nothing is left open to play.
+        let mut req = Vec::new();
+        super::write_frame(&mut req, b'D', include_bytes!("../fixtures/aac.m4a")).unwrap();
+        super::write_frame(&mut req, b'R', &10u32.to_le_bytes()).unwrap();
+        let mut out = Vec::new();
+        super::serve(&mut req.as_slice(), &mut out).unwrap();
+        let mut r = out.as_slice();
+        let (k, why) = super::read_frame(&mut r, 1 << 26).unwrap().unwrap();
+        assert_eq!(k, super::NEEDS_AAC, "{}", String::from_utf8_lossy(&why));
+        let (k, _) = super::read_frame(&mut r, 1 << 26).unwrap().unwrap();
+        assert_eq!(k, 1, "no file open");
     }
 }

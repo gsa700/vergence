@@ -28,6 +28,7 @@
 #   libexec/vergence/vergence-choose         the Open/Save dialog the portal shows for apps not ours
 #   libexec/vergence/vergence-decode         pictures decoded apart, limited (Capsicum on FreeBSD)
 #   libexec/vergence/vergence-hymie          sound files decoded apart (Hymie), confined the same way
+#   libexec/vergence/vergence-hymie-aac      AAC sound files decoded apart (GPL, FAAD2's), confined the same way
 #   libexec/vergence/vergence-pdf            PDF documents read and drawn apart, confined the same way
 #   libexec/vergence/media-eject             FreeBSD only: the root helper that unmounts a drive
 #                                            under /media (setuid root, video group)
@@ -100,7 +101,7 @@ if [ -n "$uninstall" ]; then
     # acpid's handler as it was (the power key's guard taken out).
     [ -z "$destdir" ] && [ -f /etc/acpi/handler.sh.vergence-orig ] && mv -f /etc/acpi/handler.sh.vergence-orig /etc/acpi/handler.sh
     rm -f "$libexec/ups-tile" "$libexec/vtile-demo"
-    rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$libexec/vergence-hymie" "$libexec/vergence-pdf" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
+    rm -f "$libexec/sound-default" "$libexec/vergence-choose" "$libexec/vergence-decode" "$libexec/vergence-hymie" "$libexec/vergence-hymie-aac" "$libexec/vergence-pdf" "$words/en_US.txt" "$words/SCOWL-COPYRIGHT.txt"
     [ -z "$destdir" ] && rm -f /etc/fonts/conf.d/90-vergence-fonts.conf /usr/local/etc/fonts/conf.d/90-vergence-fonts.conf
     rm -f "$fonts"/InterVariable*.ttf "$fonts"/JetBrainsMono-Variable*.ttf "$fonts"/Liberation*.ttf "$fonts"/Inter-OFL.txt "$fonts"/JetBrainsMono-OFL.txt "$fonts"/Liberation-OFL.txt
     rm -rf "$ownicons" "$cursortheme"
@@ -238,6 +239,10 @@ install -m 755 "$release/vergence-choose" "$libexec/vergence-choose"
 install -m 755 "$release/vergence-decode" "$libexec/vergence-decode"
 [ -x "$release/vergence-hymie" ] || { echo "install.sh: $release/vergence-hymie is missing; run cargo build --release first" >&2; exit 1; }
 install -m 755 "$release/vergence-hymie" "$libexec/vergence-hymie"
+# AAC in its own helper: FAAD2's code is GPL-2.0-or-later only, so it is kept out
+# of everything dual-licensed (crates/vergence-hymie-aac).
+[ -x "$release/vergence-hymie-aac" ] || { echo "install.sh: $release/vergence-hymie-aac is missing; run cargo build --release first" >&2; exit 1; }
+install -m 755 "$release/vergence-hymie-aac" "$libexec/vergence-hymie-aac"
 # PDF documents read and drawn apart, confined (PDF milestone 1, step 6).
 [ -x "$release/vergence-pdf" ] || { echo "install.sh: $release/vergence-pdf is missing; run cargo build --release first" >&2; exit 1; }
 install -m 755 "$release/vergence-pdf" "$libexec/vergence-pdf"
