@@ -37,6 +37,22 @@ FreeBSD second**.
 
 STATUS.md says what is built and what comes next.
 
+## Screenshots
+
+<table>
+<tr>
+<td><a href="docs/screenshots/overview.jpg"><img src="docs/screenshots/overview.jpg" alt="The overview, Super+Tab: every window at a glance, with a field to find one by typing"></a><br>The overview (Super+Tab): every window at a glance.</td>
+<td><a href="docs/screenshots/dark-tint.jpg"><img src="docs/screenshots/dark-tint.jpg" alt="Settings and FileView in dark style over the Tide wallpaper, taking on its teal"></a><br>Dark style: windows take on the wallpaper's color.</td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/reader.jpg"><img src="docs/screenshots/reader.jpg" alt="Reader showing the Vergence whitepaper"></a><br>Reader: PDF on its own engine, sharp at any scale.</td>
+<td><a href="docs/screenshots/preview.jpg"><img src="docs/screenshots/preview.jpg" alt="FileView's preview window showing a wallpaper"></a><br>FileView's preview: Space on any file.</td>
+</tr>
+</table>
+
+All made by `tools/lab/showcase.sh` in fresh sessions with the shipped
+defaults.
+
 ## Try it
 
 **On Void Linux (glibc)**, Vergence is one xbps package. Until it has a

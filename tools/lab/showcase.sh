@@ -1,0 +1,118 @@
+#!/bin/sh
+# Screenshots for the README and the profile page, made in fresh headless
+# sessions with Vergence's shipped defaults (no one's own settings or files):
+#
+#   tools/lab/showcase.sh [OUTDIR]        (on a box with Vergence installed)
+#
+# Each shot: a new session (state cleared, the test profile plus the shot's own
+# settings), sample files from this checkout under /tmp/vergence-showcase, the
+# windows placed, then `vctl shot`. PNGs land in OUTDIR (default
+# ~/vergence-showcase); copy them back and look at them before using them.
+set -u
+cd "$(dirname "$0")/../.." || exit 1
+ROOT=$(pwd)
+OUT=${1:-$HOME/vergence-showcase}
+mkdir -p "$OUT"
+H=$HOME/.cache/vergence-headless/home
+DEMO=/tmp/vergence-showcase
+export VERGENCE_DEFAULTS=${VERGENCE_DEFAULTS:-/usr/local/share/vergence/defaults/desktop.toml}
+[ -f "$VERGENCE_DEFAULTS" ] || VERGENCE_DEFAULTS=/usr/share/vergence/defaults/desktop.toml
+
+# Sample files: Vergence's own documents and pictures.
+rm -rf "$DEMO"
+mkdir -p "$DEMO/Documents" "$DEMO/Pictures" "$DEMO/Music"
+cp docs/Vergence-Whitepaper.pdf CONTRIBUTING.md README.md STATUS.md "$DEMO/Documents/"
+cp data/backgrounds/*.svg "$DEMO/Pictures/"
+[ -f docs/screenshots/desktop.jpg ] && cp docs/screenshots/desktop.jpg "$DEMO/Pictures/vergence-desktop.jpg"
+
+vctl() { "$ROOT/tools/vctl" "$@"; }
+# A fresh session; $1: lines added to its desktop.toml (the shot's settings).
+fresh() {
+    tools/vergence-headless stop >/dev/null 2>&1
+    rm -rf "$H/.local/state" "$H/vergence-shots" "$H/.config/vergence/desktop.toml"
+    tools/vergence-headless start --screen "2560x1440 597x336@60" >/dev/null 2>&1 || { echo "showcase: no session" >&2; exit 1; }
+    eval "$(tools/vergence-headless env)"
+    [ -n "${1:-}" ] && printf '\n%s\n' "$1" >> "$H/.config/vergence/desktop.toml"
+    sleep 3
+}
+# open <program and arguments>: started, and waited for.
+open() {
+    n=$(vctl windows | grep -c ' native ')
+    vctl spawn "$1" >/dev/null
+    i=0; while [ "$(vctl windows | grep -c ' native ')" -le "$n" ] && [ $i -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
+    sleep 1.5
+}
+# at <app id> <x> <y>: that app's (first) window moved there.
+at() {
+    i=$(vctl windows | grep "\"$1\"" | head -1 | cut -d' ' -f1)
+    [ -n "$i" ] && vctl move "$i" "$2" "$3" >/dev/null
+    sleep 0.4
+}
+front() {
+    i=$(vctl windows | grep "\"$1\"" | head -1 | cut -d' ' -f1)
+    [ -n "$i" ] && vctl focus "$i" >/dev/null
+    sleep 1
+}
+# shot <name>: the screen, saved as OUT/<name>.png.
+shot() {
+    sleep 2
+    rm -f "$H/vergence-shots/MEM-1.png"
+    vctl shot >/dev/null
+    i=0; while [ ! -s "$H/vergence-shots/MEM-1.png" ] && [ $i -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
+    sleep 1
+    cp "$H/vergence-shots/MEM-1.png" "$OUT/$1.png" && echo "showcase: $OUT/$1.png"
+}
+icons='[files]
+view = "icons"'
+
+# 1. Reader: the whitepaper, on its own PDF engine.
+fresh
+open "vergence-reader $DEMO/Documents/Vergence-Whitepaper.pdf"
+at vergence-reader 560 70
+shot reader
+
+# 2. Dark style, Tide behind: the windows take its color.
+fresh "[appearance]
+color-scheme = \"dark\"
+
+[wallpaper]
+image = \"$(dirname "$VERGENCE_DEFAULTS")/../../backgrounds/vergence/vergence-tide.svg\"
+
+$icons"
+open "vergence-settings --page appearance"
+open "vergence-files $DEMO/Pictures"
+at vergence-settings 300 130
+at vergence-files 1240 520
+front vergence-files
+shot dark-tint
+
+# 3. FileView's preview (Space), on a picture.
+fresh "$icons"
+open "vergence-files $DEMO/Pictures"
+w=$(vctl windows | grep '"vergence-files"' | head -1 | cut -d' ' -f1)
+n=$(vctl tree "$w" | grep -E 'button "vergence-ember' | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+[ -n "$n" ] && vctl act "$w" "$n" press >/dev/null
+sleep 0.4; vctl focus "$w" >/dev/null; vctl key space >/dev/null; sleep 3
+shot preview
+
+# (Edit and Terminal: left out until vergence-term stays open in a headless
+# session; it closes at once there, 2026-11-22.)
+
+# 5. The overview (Super+Tab): every window at a glance.
+fresh "$icons"
+open "vergence-reader $DEMO/Documents/Vergence-Whitepaper.pdf"
+open "vergence-files $DEMO/Pictures"
+open "vergence-edit $DEMO/Documents/README.md"
+open "vergence-settings --page wallpaper"
+open "vergence-calc"
+vctl key super+Tab >/dev/null; sleep 2
+shot overview
+
+# 6. Settings > Screens: the scale and its sharp marks.
+fresh
+open "vergence-settings --page screens"
+at vergence-settings 860 160
+shot screens
+
+tools/vergence-headless stop >/dev/null 2>&1
+rm -rf "$DEMO"
