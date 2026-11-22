@@ -1,5 +1,9 @@
 # Backup milestone 1: Vergence's own Backup, and File Viewer's right-click menu
 
+**Name: Rewind** (Dave, 2026-11-22: "Rewind is good"): the ZFS versions
+and backup part of Vergence. FileVault was the first idea (it fits FileView's
+name) but is Apple's, macOS's disk encryption and a trademark.
+
 *Drafted 2026-11-16, rewritten the same evening (Dave: "I don't want to
 set up backups to the nas, I want to work on the backup features built
 into vergence"). The apps roadmap's item 6 ("Backup, then into the file
